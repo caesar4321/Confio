@@ -6,11 +6,19 @@ from .models import (
 )
 from security.models import IdentityVerification
 from achievements.models import (
-    AchievementType, UserAchievement, UserReferral, TikTokViralShare,
-    ConfioRewardBalance, ConfioRewardTransaction, InfluencerAmbassador, AmbassadorActivity
+    AchievementType,
+    UserAchievement,
+    UserReferral,
+    TikTokViralShare,
+    ConfioRewardBalance,
+    ConfioRewardTransaction,
+    InfluencerAmbassador,
+    AmbassadorActivity,
+    ReferralRewardEvent,
 )
 InfluencerReferral = UserReferral
-from django.db.models import Sum, Q
+from django.db import transaction as db_transaction
+from django.db.models import Sum, Q, F
 from decimal import Decimal
 from .country_codes import COUNTRY_CODES
 from .phone_utils import normalize_any_phone
@@ -37,11 +45,117 @@ from .graphql_employee import (
 )
 from .referral_mutations import SetReferrer, CheckReferralStatus
 from django.conf import settings
-from security.s3_utils import generate_presigned_put, build_s3_key, public_s3_url, generate_presigned_post
+from security.s3_utils import (
+    generate_presigned_put,
+    build_s3_key,
+    public_s3_url,
+    generate_presigned_post,
+)
+from django.core.cache import cache
+import base64
+import secrets
+from blockchain.rewards_service import ConfioRewardsService
+from blockchain.algorand_client import get_algod_client
+from notifications.models import NotificationType
+from notifications.utils import create_notification
+from achievements.services.referral_rewards import get_primary_algorand_address
+from algosdk import encoding as algo_encoding, transaction as algo_transaction
+from algosdk import error as algo_error
 # Removed circular import - P2PPaymentMethodType will be referenced by string
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
+REFERRAL_CLAIM_CACHE_PREFIX = "referral-claim:"
+REFERRAL_CLAIM_SESSION_TTL = 10 * 60  # seconds
+
+
+def _referral_claim_cache_key(token: str) -> str:
+	return f"{REFERRAL_CLAIM_CACHE_PREFIX}{token}"
+
+
+def _record_referral_claim_payout(*, user, referral, event, claim_amount, tx_id):
+	with db_transaction.atomic():
+		if referral:
+			referral.reward_claimed_at = timezone.now()
+			if (
+				referral.referee_confio_awarded is None
+				or referral.referee_confio_awarded <= Decimal('0')
+			):
+				referral.referee_confio_awarded = (
+					referral.reward_referee_confio or claim_amount
+				)
+			referral.save(
+				update_fields=['reward_claimed_at', 'referee_confio_awarded', 'updated_at']
+			)
+
+		event.reward_status = 'claimed'
+		event.reward_tx_id = tx_id
+		event.error = ""
+		event.save(update_fields=['reward_status', 'reward_tx_id', 'error', 'updated_at'])
+
+		if claim_amount <= Decimal('0'):
+			return
+
+		tx_exists = ConfioRewardTransaction.objects.filter(
+			reference_type='referral_claim',
+			reference_id=str(event.id),
+		).exists()
+		if tx_exists:
+			return
+
+		balance, _ = ConfioRewardBalance.objects.get_or_create(user=user)
+		ConfioRewardBalance.objects.filter(pk=balance.pk).update(
+			total_unlocked=F('total_unlocked') + claim_amount,
+			total_earned=F('total_earned') + claim_amount,
+		)
+		balance.refresh_from_db()
+		ConfioRewardTransaction.objects.create(
+			user=user,
+			transaction_type='unlocked',
+			amount=claim_amount,
+			balance_after=balance.total_unlocked,
+			reference_type='referral_claim',
+			reference_id=str(event.id),
+			description='Reclamo de recompensas por referidos',
+		)
+
+
+def _sync_onchain_claim_if_needed(*, user, referral, event, user_address, claim_amount):
+	if not user_address:
+		return False
+
+	try:
+		service = ConfioRewardsService()
+		addr_bytes = algo_encoding.decode_address(user_address)
+		box_state = service._read_user_box(addr_bytes)
+	except Exception:
+		logger.debug(
+			"Unable to inspect on-chain referral box for %s", user_address, exc_info=True
+		)
+		return False
+
+	if not box_state:
+		return False
+
+	eligible_micro = box_state.get("eligible_amount", 0)
+	claimed_flag = box_state.get("claimed_flag", 0)
+	if eligible_micro > 0 and claimed_flag == 0:
+		return False
+
+	logger.info(
+		"[referral_claim_sync] Detected claimed state user=%s eligible_micro=%s claimed_flag=%s",
+		getattr(user, "id", None),
+		eligible_micro,
+		claimed_flag,
+	)
+	_record_referral_claim_payout(
+		user=user,
+		referral=referral,
+		event=event,
+		claim_amount=claim_amount,
+		tx_id="already-claimed",
+	)
+	return True
 
 def jwt_payload_handler(user):
 	"""Add auth_token_version to the JWT payload"""
@@ -129,6 +243,31 @@ class StatsSummaryType(graphene.ObjectType):
     protected_savings = graphene.Float()
     daily_transactions = graphene.Int()
 
+
+class ReferralRewardEventType(DjangoObjectType):
+    claimable_confio = graphene.Decimal()
+
+    class Meta:
+        model = ReferralRewardEvent
+        fields = (
+            "id",
+            "referral",
+            "user",
+            "trigger",
+            "actor_role",
+            "amount",
+            "transaction_reference",
+            "occurred_at",
+            "reward_status",
+            "referee_confio",
+            "referrer_confio",
+            "reward_tx_id",
+            "error",
+            "metadata",
+            "created_at",
+            "updated_at",
+        )
+
     def resolve_is_verified(self, info):
         try:
             from security.models import IdentityVerification
@@ -172,6 +311,25 @@ class StatsSummaryType(graphene.ObjectType):
             return iv.verified_at or iv.updated_at or iv.created_at
         except Exception:
             return None
+
+    def resolve_claimable_confio(self, info):
+        referral = getattr(self, "referral", None)
+        if not referral:
+            return self.referee_confio
+
+        user_address = get_primary_algorand_address(referral.referred_user)
+        if not user_address:
+            return referral.reward_referee_confio or self.referee_confio
+
+        try:
+            service = ConfioRewardsService()
+            amount = service.get_claimable_amount(user_address)
+            if amount is not None and amount > Decimal("0"):
+                return amount
+        except Exception:
+            pass
+
+        return referral.reward_referee_confio or self.referee_confio
 
 class EmployeePermissionsType(graphene.ObjectType):
 	"""Employee permissions object type"""
@@ -610,6 +768,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 	my_balances = graphene.Field(lambda: BalancesType, description="Current account balances for cUSD, CONFIO, CONFIO presale-locked, USDC")
 	my_confio_transactions = graphene.List(ConfioRewardTransactionType, limit=graphene.Int(), offset=graphene.Int())
 	user_tiktok_shares = graphene.List(TikTokViralShareType, status=graphene.String())
+	my_referral_rewards = graphene.List(ReferralRewardEventType, status=graphene.String())
 
 	# Real-time stats for $CONFIO info screen
 	stats_summary = graphene.Field(StatsSummaryType)
@@ -1443,6 +1602,17 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			queryset = queryset[:limit]
 			
 		return queryset
+
+	def resolve_my_referral_rewards(self, info, status=None):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return []
+		
+		qset = ReferralRewardEvent.objects.filter(user=user).order_by('-occurred_at')
+		if status:
+			qset = qset.filter(reward_status__iexact=status)
+		logger.info("[referral_rewards] user=%s status=%s count=%s", user.id, status, qset.count())
+		return qset
 	
 	def resolve_user_tiktok_shares(self, info, status=None):
 		"""Get TikTok shares for the current user"""
@@ -2898,6 +3068,184 @@ class ClaimAchievementReward(graphene.Mutation):
 			return ClaimAchievementReward(success=False, error="Error interno del servidor")
 
 
+class PrepareReferralRewardClaim(graphene.Mutation):
+	class Arguments:
+		event_id = graphene.ID(required=True)
+	
+	success = graphene.Boolean()
+	error = graphene.String()
+	claim_token = graphene.String()
+	unsigned_transaction = graphene.String()
+	group_id = graphene.String()
+	amount = graphene.Float()
+	expires_at = graphene.DateTime()
+
+	@classmethod
+	def mutate(cls, root, info, event_id):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return PrepareReferralRewardClaim(success=False, error="Necesitas iniciar sesión para reclamar.")
+
+		try:
+			event = ReferralRewardEvent.objects.select_related('referral').get(id=event_id, user=user)
+		except ReferralRewardEvent.DoesNotExist:
+			return PrepareReferralRewardClaim(success=False, error="No encontramos esa recompensa.")
+
+		if event.reward_status != 'eligible':
+			return PrepareReferralRewardClaim(success=False, error="Esta recompensa aún no está lista para reclamar.")
+
+		referral = event.referral
+		if referral and referral.reward_claimed_at:
+			return PrepareReferralRewardClaim(success=False, error="Esta recompensa ya fue reclamada.")
+
+		user_address = get_primary_algorand_address(user)
+		if not user_address:
+			return PrepareReferralRewardClaim(success=False, error="Necesitas asociar tu billetera Algorand para reclamar $CONFIO.")
+
+		referrer_address = None
+		if (
+			referral
+			and referral.referrer_user
+			and referral.reward_referrer_confio
+			and referral.reward_referrer_confio > Decimal('0')
+		):
+			referrer_address = get_primary_algorand_address(referral.referrer_user)
+
+		try:
+			service = ConfioRewardsService()
+			group = service.build_claim_group(
+				user_address=user_address,
+				referrer_address=referrer_address,
+			)
+		except Exception as exc:
+			logger.exception("Failed to build referral reward claim group: %s", exc)
+			return PrepareReferralRewardClaim(success=False, error="No pudimos preparar la transacción. Intenta de nuevo en unos minutos.")
+
+		token = secrets.token_urlsafe(32)
+		expires_at = timezone.now() + timedelta(seconds=REFERRAL_CLAIM_SESSION_TTL)
+		cache_payload = {
+			"user_id": user.id,
+			"event_id": event.id,
+			"referral_id": referral.id if referral else None,
+			"sponsor_signed": group["sponsor_signed"],
+			"user_unsigned": group["user_unsigned"],
+			"group_id": group["group_id"],
+			"reward_amount": str(event.referee_confio or Decimal('0')),
+			"user_address": user_address,
+		}
+		cache.set(_referral_claim_cache_key(token), cache_payload, REFERRAL_CLAIM_SESSION_TTL)
+
+		return PrepareReferralRewardClaim(
+			success=True,
+			error=None,
+			claim_token=token,
+			unsigned_transaction=group["user_unsigned"],
+			group_id=group["group_id"],
+			amount=float(event.referee_confio or Decimal('0')),
+			expires_at=expires_at,
+		)
+
+
+class SubmitReferralRewardClaim(graphene.Mutation):
+	class Arguments:
+		claim_token = graphene.String(required=True)
+		signed_transaction = graphene.String(required=True)
+
+	success = graphene.Boolean()
+	error = graphene.String()
+	tx_id = graphene.String()
+
+	@classmethod
+	def mutate(cls, root, info, claim_token, signed_transaction):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return SubmitReferralRewardClaim(success=False, error="Necesitas iniciar sesión para reclamar.")
+
+		cache_key = _referral_claim_cache_key(claim_token)
+		session = cache.get(cache_key)
+		if not session or session.get("user_id") != user.id:
+			return SubmitReferralRewardClaim(success=False, error="La sesión expiró. Prepárala nuevamente.")
+
+		try:
+			event = ReferralRewardEvent.objects.select_related('referral').get(id=session["event_id"], user=user)
+		except ReferralRewardEvent.DoesNotExist:
+			cache.delete(cache_key)
+			return SubmitReferralRewardClaim(success=False, error="No encontramos esa recompensa.")
+
+		referral = event.referral
+		if referral and referral.reward_claimed_at:
+			cache.delete(cache_key)
+			return SubmitReferralRewardClaim(success=False, error="Esta recompensa ya fue reclamada.")
+
+		session_user_address = session.get("user_address")
+
+		def _normalize_b64(data: str) -> str:
+			if not data:
+				raise ValueError("empty payload")
+			data = data.replace("-", "+").replace("_", "/")
+			padding = (-len(data)) % 4
+			if padding:
+				data += "=" * padding
+			return data
+
+		claim_amount = Decimal(session.get("reward_amount") or "0")
+
+		try:
+			sponsor_b64 = _normalize_b64(session["sponsor_signed"])
+			user_b64 = _normalize_b64(signed_transaction)
+			sponsor_stx = algo_encoding.msgpack_decode(sponsor_b64)
+			user_stx = algo_encoding.msgpack_decode(user_b64)
+		except Exception as exc:
+			logger.exception("Failed to decode referral claim payload: %s", exc)
+			return SubmitReferralRewardClaim(success=False, error="Firma inválida. Intenta nuevamente.")
+
+		try:
+			algod = get_algod_client()
+			tx_id = algod.send_transactions([user_stx, sponsor_stx])
+			algo_transaction.wait_for_confirmation(algod, tx_id, 6)
+		except Exception as exc:
+			logger.exception("Failed to submit referral reward claim: %s", exc)
+			if isinstance(exc, algo_error.AlgodHTTPError):
+				if _sync_onchain_claim_if_needed(
+					user=user,
+					referral=referral,
+					event=event,
+					user_address=session_user_address,
+					claim_amount=claim_amount,
+				):
+					cache.delete(cache_key)
+					return SubmitReferralRewardClaim(success=True, error=None, tx_id="already-claimed")
+			return SubmitReferralRewardClaim(success=False, error="No pudimos enviar la transacción. Intenta nuevamente.")
+
+		_record_referral_claim_payout(
+			user=user,
+			referral=referral,
+			event=event,
+			claim_amount=claim_amount,
+			tx_id=tx_id,
+		)
+
+		cache.delete(cache_key)
+
+		try:
+			create_notification(
+				user=user,
+				notification_type=NotificationType.REFERRAL_REWARD_CLAIMED,
+				title="¡Recompensa reclamada!",
+				message=f"Depositamos {claim_amount:.2f} $CONFIO en tu billetera.",
+				data={
+					"amount": f"{claim_amount:.2f}",
+					"token_type": "CONFIO",
+					"tx_id": tx_id,
+				},
+				action_url="confio://referrals/reward-claim",
+			)
+		except Exception:
+			logger.debug("Failed to send referral reward claim notification", exc_info=True)
+
+		return SubmitReferralRewardClaim(success=True, error=None, tx_id=tx_id)
+
+
 class CreateInfluencerReferral(graphene.Mutation):
 	class Arguments:
 		referrer_identifier = graphene.String(required=True)
@@ -3442,6 +3790,8 @@ class Mutation(EmployeeMutations, graphene.ObjectType):
 	# Unified referral system mutations
 	set_referrer = SetReferrer.Field()
 	check_referral_status = CheckReferralStatus.Field()
+	prepare_referral_reward_claim = PrepareReferralRewardClaim.Field()
+	submit_referral_reward_claim = SubmitReferralRewardClaim.Field()
 
 	# Trader Premium upgrade (verification level 2) — camelCase only
 	requestPremiumUpgrade = RequestPremiumUpgrade.Field()

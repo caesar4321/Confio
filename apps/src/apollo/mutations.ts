@@ -140,6 +140,30 @@ export const REFRESH_ACCOUNT_BALANCE = gql`
   }
 `;
 
+export const PREPARE_REFERRAL_REWARD_CLAIM = gql`
+  mutation PrepareReferralRewardClaim($eventId: ID!) {
+    prepareReferralRewardClaim(eventId: $eventId) {
+      success
+      error
+      claimToken
+      unsignedTransaction
+      groupId
+      amount
+      expiresAt
+    }
+  }
+`;
+
+export const SUBMIT_REFERRAL_REWARD_CLAIM = gql`
+  mutation SubmitReferralRewardClaim($claimToken: String!, $signedTransaction: String!) {
+    submitReferralRewardClaim(claimToken: $claimToken, signedTransaction: $signedTransaction) {
+      success
+      error
+      txId
+    }
+  }
+`;
+
 // SEND_TOKENS removed - all sends now go through CREATE_SEND_TRANSACTION
 
 /* Removed: use ws/convert_session */

@@ -150,6 +150,10 @@ export const NotificationScreen = () => {
         });
         return;
       }
+      if (normalizedUrl.includes('referrals/reward-claim')) {
+        navigation.navigate('ReferralRewardClaim' as never);
+        return;
+      }
       if (normalizedUrl.includes('referrals')) {
         navigation.navigate('MiProgresoViral');
         return;

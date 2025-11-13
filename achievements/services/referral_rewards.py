@@ -33,13 +33,14 @@ DEFAULT_EVENT_REWARD_CONFIG: Dict[str, Dict[str, Any]] = {
     },
     "conversion_usdc_to_cusd": {
         "threshold": Decimal("20"),
-        "referee_confio": Decimal("12"),
+        "reward_cusd": Decimal("5"),
         "referrer_confio": Decimal("3"),
         "requires_checkpoint": "top_up",
     },
     "send": {
         "referee_confio": Decimal("8"),
         "referrer_confio": Decimal("2"),
+        "notification_type": NotificationTypeChoices.REFERRAL_FIRST_TRANSACTION,
     },
     "payment": {
         "referee_confio": Decimal("10"),
@@ -271,6 +272,27 @@ def notify_referral_joined(referral: UserReferral) -> None:
         )
 
 
+def notify_reward_ready(referral: UserReferral, referee_confio: Decimal) -> None:
+    """Let the referred user know their CONFIO can be claimed."""
+    if not referral.referred_user or referee_confio <= Decimal("0"):
+        return
+
+    amount_str = f"{referee_confio:.2f}"
+    friend_name = _user_label(referral.referrer_user) if referral.referrer_user else ""
+    create_notification(
+        user=referral.referred_user,
+        notification_type=NotificationTypeChoices.REFERRAL_REWARD_READY,
+        title="Tus $CONFIO están listos",
+        message=f"Reclama {amount_str} $CONFIO del bono por referidos.",
+        data={
+            "referral_id": referral.id,
+            "amount": amount_str,
+            "friend_name": friend_name,
+        },
+        action_url="confio://referrals/reward-claim",
+    )
+
+
 def _locate_referral_for_user(user):
     referral = UserReferral.objects.filter(
         referred_user=user,
@@ -309,9 +331,9 @@ def sync_referral_reward_for_event(user, event_ctx: EventContext) -> Optional[Us
         if event_ctx.amount is None or event_ctx.amount < threshold:
             return None
 
-    referee_confio = config["referee_confio"]
+    referee_confio = config.get("referee_confio")
     referrer_confio = config.get("referrer_confio", Decimal("0"))
-    reward_cusd = config.get("reward_cusd", referee_confio)
+    reward_cusd = config.get("reward_cusd")
 
     event_defaults = {
         "actor_role": actor_role or "referee",
@@ -340,7 +362,7 @@ def sync_referral_reward_for_event(user, event_ctx: EventContext) -> Optional[Us
         if updated_fields:
             event.save(update_fields=updated_fields + ["updated_at"])
 
-    if event.reward_status == "eligible":
+    if event.reward_status in {"eligible", "claimed"}:
         return referral if referral else None
 
     if referral is None:
@@ -359,6 +381,23 @@ def sync_referral_reward_for_event(user, event_ctx: EventContext) -> Optional[Us
         return referral
 
     service = ConfioRewardsService()
+
+    if reward_cusd and (not referee_confio or referee_confio <= 0):
+        try:
+            referee_confio = service.convert_cusd_to_confio(reward_cusd)
+        except Exception as exc:
+            logger.warning(
+                "Unable to convert reward_cusd to CONFIO (reward=%s): %s",
+                reward_cusd,
+                exc,
+            )
+            referee_confio = Decimal("0")
+
+    if not reward_cusd:
+        reward_cusd = referee_confio or Decimal("0")
+
+    referee_confio = referee_confio or Decimal("0")
+
     reward_cusd_micro = to_micro(reward_cusd)
     referee_confio_micro = to_micro(referee_confio)
     referrer_confio_micro = to_micro(referrer_confio)
@@ -386,7 +425,14 @@ def sync_referral_reward_for_event(user, event_ctx: EventContext) -> Optional[Us
             referrer_address=referrer_address,
         )
     except Exception as exc:  # pylint: disable=broad-except
-        logger.error("Error syncing referral reward: %s", exc, exc_info=True)
+        logger.error(
+            "Error syncing referral reward: %s (user=%s, referral=%s, event=%s)",
+            exc,
+            getattr(user, "id", None),
+            referral.id if referral else None,
+            event_ctx.event,
+            exc_info=True,
+        )
         event.reward_status = "failed"
         event.error = str(exc)
         event.save(
@@ -396,6 +442,9 @@ def sync_referral_reward_for_event(user, event_ctx: EventContext) -> Optional[Us
                 "updated_at",
             ]
         )
+        referral.reward_error = str(exc)
+        referral.reward_last_attempt_at = timezone.now()
+        referral.save(update_fields=["reward_error", "reward_last_attempt_at"])
         return referral
 
     with transaction.atomic():
@@ -437,4 +486,5 @@ def sync_referral_reward_for_event(user, event_ctx: EventContext) -> Optional[Us
         )
 
     notify_referral_stage(referral, event_ctx)
+    notify_reward_ready(referral, referee_confio)
     return referral

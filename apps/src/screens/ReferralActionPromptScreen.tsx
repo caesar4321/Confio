@@ -13,15 +13,41 @@ export const ReferralActionPromptScreen: React.FC = () => {
 
   const stepOptions = useMemo(() => ({
     top_up: {
-      title: 'Recarga mínima recomendada',
-      steps: ['Abre Recargar', 'Elige el método preferido', 'Deposita al menos 20 (equivalente en cUSD)'],
-      requirement: 'Solo la primera recarga confirmada de tu referido activa el bono. Si ya la hizo, verás el CONFIO abonado automáticamente.',
-      ctaLabel: 'Ir a Recargar',
-      action: () => navigation.navigate('USDCDeposit', { tokenType: 'cusd' }),
+      title: 'Deposita desde Confío o exchanges',
+      steps: [
+        'Elige Recargar dentro de Confío o Depositar desde otro exchange',
+        'Si recarga en Confío, sigue las instrucciones para pagar con tarjeta o vendedores P2P',
+        'Si deposita desde Binance/Coinbase, envía cUSD a su dirección Confío',
+      ],
+      requirement:
+        'La primera recarga o depósito por al menos 20 USD desbloquea el bono. Si su país no admite tarjetas, puede transferir cUSD/USDC desde Binance, Coinbase u otro exchange hacia su dirección Confío.',
+      actions: [
+        {
+          label: 'Recargar en Confío',
+          icon: 'credit-card',
+          onPress: () =>
+            navigation.navigate('USDCDeposit', {
+              tokenType: 'cusd',
+            }),
+        },
+        {
+          label: 'Depositar USDC/cUSD',
+          icon: 'download',
+          onPress: () =>
+            navigation.navigate('USDCDeposit', {
+              tokenType: 'usdc',
+            }),
+        },
+      ],
+      ctaLabel: 'Ver opciones de depósito',
+      action: () =>
+        navigation.navigate('USDCDeposit', {
+          tokenType: 'cusd',
+        }),
     },
     send: {
       title: 'Primer envío completado',
-      steps: ['Elige un contacto o dirección Confío', 'Ingresa el monto que desea enviar', 'Confirma la operación con su PIN'],
+      steps: ['Elige un contacto o dirección Confío', 'Ingresa el monto a enviar', 'Confirma la operación'],
       requirement: 'Un solo envío completado desbloquea el bono. Después del primero no necesita repetirlo para este referido.',
       ctaLabel: 'Ir a Enviar',
       action: () => navigation.navigate('SendToFriend', { tokenType: 'cusd', friend: { name: '', avatar: '', phone: '', isOnConfio: true } }),
@@ -50,6 +76,33 @@ export const ReferralActionPromptScreen: React.FC = () => {
   }), [navigation]);
 
   const nextSteps = stepOptions[event as keyof typeof stepOptions] || stepOptions.top_up;
+
+  const renderActions = () => {
+    if (Array.isArray(nextSteps.actions) && nextSteps.actions.length > 0) {
+      return (
+        <View style={styles.actionButtons}>
+          {nextSteps.actions.map((btn) => (
+            <TouchableOpacity
+              key={btn.label}
+              style={[
+                styles.optionButton,
+                btn.icon === 'download' && styles.secondaryOptionButton,
+              ]}
+              onPress={btn.onPress}>
+              <Icon name={btn.icon} size={18} color="#fff" />
+              <Text style={styles.optionButtonText}>{btn.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      );
+    }
+    return (
+      <TouchableOpacity style={styles.primaryButton} onPress={nextSteps.action}>
+        <Text style={styles.primaryButtonText}>{nextSteps.ctaLabel}</Text>
+        <Icon name="chevron-right" size={18} color="#fff" />
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -86,10 +139,7 @@ export const ReferralActionPromptScreen: React.FC = () => {
             ))}
           </View>
 
-          <TouchableOpacity style={styles.primaryButton} onPress={nextSteps.action}>
-            <Text style={styles.primaryButtonText}>{nextSteps.ctaLabel}</Text>
-            <Icon name="chevron-right" size={18} color="#fff" />
-          </TouchableOpacity>
+          {renderActions()}
         </View>
       </ScrollView>
     </View>
@@ -142,6 +192,37 @@ const styles = StyleSheet.create({
   stepNumberWrap: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#ECFDF5', justifyContent: 'center', alignItems: 'center' },
   stepNumber: { fontWeight: '600', color: '#047857' },
   stepText: { flex: 1, fontSize: 14, color: '#374151' },
-  primaryButton: { marginTop: 24, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14, borderRadius: 14, backgroundColor: '#10B981' },
+  primaryButton: {
+    marginTop: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 14,
+    backgroundColor: '#10B981',
+  },
   primaryButtonText: { color: '#fff', fontWeight: '600', fontSize: 15 },
+  actionButtons: {
+    marginTop: 24,
+    flexDirection: 'column',
+    gap: 12,
+  },
+  optionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 14,
+    backgroundColor: '#10B981',
+  },
+  secondaryOptionButton: {
+    backgroundColor: '#0F766E',
+  },
+  optionButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 15,
+  },
 });

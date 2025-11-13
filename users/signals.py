@@ -1,3 +1,4 @@
+import logging
 from decimal import Decimal
 
 from django.db.models.signals import post_save, post_delete
@@ -13,6 +14,8 @@ from achievements.services.referral_rewards import (
     EventContext,
     sync_referral_reward_for_event,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def create_unified_transaction_from_send(send_transaction):
@@ -62,7 +65,7 @@ def create_unified_transaction_from_send(send_transaction):
         )
         return unified
     except Exception as e:
-        print(f"Error creating unified transaction from send: {e}")
+        logger.exception("Error creating unified transaction from send %s", send_transaction.id)
         return None
 
 
@@ -115,7 +118,7 @@ def create_unified_transaction_from_payment(payment_transaction):
         )
         return unified
     except Exception as e:
-        print(f"Error creating unified transaction from payment: {e}")
+        logger.exception("Error creating unified transaction from payment %s", payment_transaction.id)
         return None
 
 
@@ -216,7 +219,7 @@ def create_unified_transaction_from_p2p_trade(p2p_trade):
         
         return unified
     except Exception as e:
-        print(f"Error creating unified transaction from P2P trade: {e}")
+        logger.exception("Error creating unified transaction from P2P trade %s", p2p_trade.id)
         return None
 
 
@@ -303,8 +306,8 @@ def handle_send_transaction_save(sender, instance, created, **kwargs):
                     )
                 if instance.recipient_user_id:
                     _award_referral_pair(instance.recipient_user)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.exception("Error processing referral reward for send %s", instance.id)
 
 
 @receiver(post_save, sender=PaymentTransaction)
@@ -330,8 +333,8 @@ def handle_payment_transaction_save(sender, instance, created, **kwargs):
                             },
                         ),
                     )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.exception("Error processing referral reward for payment %s", instance.id)
 
 
 @receiver(post_save, sender=P2PTrade)
@@ -366,8 +369,8 @@ def handle_p2p_trade_save(sender, instance, created, **kwargs):
                             },
                         ),
                     )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.exception("Error processing referral reward for p2p trade %s", instance.id)
 
 
 @receiver(post_save, sender=Conversion)
@@ -392,8 +395,8 @@ def handle_conversion_save(sender, instance, created, **kwargs):
                         },
                     ),
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.exception("Error processing referral reward for conversion %s", instance.id)
 
 
 # Handle soft deletes

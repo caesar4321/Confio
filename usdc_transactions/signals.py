@@ -1,9 +1,17 @@
-from django.db.models.signals import post_save
+from decimal import Decimal
+import logging
+from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 from django.utils import timezone
 from .models import USDCDeposit, USDCWithdrawal
 from conversion.models import Conversion
 from .models_unified import UnifiedUSDCTransactionTable
+from achievements.services.referral_rewards import (
+    EventContext,
+    sync_referral_reward_for_event,
+)
+
+logger = logging.getLogger(__name__)
 
 
 def create_unified_usdc_transaction_from_deposit(deposit):
@@ -187,10 +195,57 @@ def create_unified_usdc_transaction_from_conversion(conversion):
 
 
 # Signal receivers
+@receiver(pre_save, sender=USDCDeposit)
+def cache_previous_deposit_status(sender, instance, **kwargs):
+    """Store previous status so post_save can detect transitions."""
+    if not instance.pk:
+        instance._previous_status = None  # pylint: disable=protected-access
+        return
+    try:
+        previous = sender.objects.get(pk=instance.pk)
+        instance._previous_status = previous.status  # pylint: disable=protected-access
+    except sender.DoesNotExist:
+        instance._previous_status = None  # pylint: disable=protected-access
+
+
 @receiver(post_save, sender=USDCDeposit)
 def handle_usdc_deposit_save(sender, instance, created, **kwargs):
     """Create/update unified USDC transaction when USDCDeposit is saved"""
     create_unified_usdc_transaction_from_deposit(instance)
+
+    previous_status = getattr(instance, "_previous_status", None)
+    just_completed = instance.status == 'COMPLETED' and previous_status != 'COMPLETED'
+    if (
+        just_completed
+        and instance.actor_user_id
+        and instance.amount >= Decimal("20")
+    ):
+        logger.info(
+            "Referral top_up checkpoint: user=%s deposit=%s amount=%s",
+            instance.actor_user_id,
+            instance.deposit_id,
+            instance.amount,
+        )
+        sync_referral_reward_for_event(
+            instance.actor_user,
+            EventContext(
+                event="top_up",
+                amount=Decimal(instance.amount),
+                metadata={
+                    "deposit_id": str(instance.deposit_id),
+                    "network": instance.network,
+                    "source_address": instance.source_address,
+                },
+            ),
+        )
+    else:
+        logger.debug(
+            "Deposit save skipped referral top_up (status=%s -> %s, actor_user=%s, amount=%s)",
+            previous_status,
+            instance.status,
+            instance.actor_user_id,
+            instance.amount,
+        )
 
 
 @receiver(post_save, sender=USDCWithdrawal)

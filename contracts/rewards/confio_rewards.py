@@ -8,9 +8,9 @@ users to self-claim rewards that were attested off-chain by the Django backend.
 Key ideas:
     * Eligibility is stored in boxes keyed by the claimant's address so that
       users do not need to opt into the app ahead of time.
-    * The reward amount is computed on-chain from the current presale price
-      (read from the existing presale contract) at the moment eligibility is
-      written, locking the USD-equivalent rate.
+    * The reward amount is computed on-chain from a manually configured price
+      snapshot so the backend can lock the USD-equivalent rate at the moment
+      eligibility is written.
     * Optional referrer payouts are recorded alongside the referee and can be
       claimed exactly once after the referee completes their claim.
     * Backend sponsors every write that creates a new box by attaching a
@@ -34,7 +34,7 @@ BOX_KEY_LENGTH = Int(32)          # address length
 #   16..23 : uint64 - referrer CONFIO amount (micro units)
 #   24..55 : bytes  - referrer address (32 bytes, zero if none)
 #   56..63 : uint64 - referrer claimed flag (0 = no, 1 = yes)
-#   64..71 : uint64 - presale round snapshot when eligibility was written
+#   64..71 : uint64 - manual price round snapshot when eligibility was written
 BOX_VALUE_SIZE = Int(72)
 
 AMOUNT_OFFSET = Int(0)
@@ -61,7 +61,6 @@ def confio_rewards_app() -> Expr:
     # Global keys
     ADMIN = Bytes("admin")
     CONFIO_ASA = Bytes("confio_id")
-    PRESALE_APP = Bytes("presale")
     SPONSOR = Bytes("sponsor")
     BOOTSTRAPPED = Bytes("boot")
     PAUSED = Bytes("paused")
@@ -84,19 +83,16 @@ def confio_rewards_app() -> Expr:
     def initialize() -> Expr:
         """App creation."""
         confio_id = Btoi(Txn.application_args[0])
-        presale_id = Btoi(Txn.application_args[1])
-        admin_addr = Txn.application_args[2]
-        sponsor_addr = Txn.application_args[3]
+        admin_addr = Txn.application_args[1]
+        sponsor_addr = Txn.application_args[2]
 
         return Seq(
-            Assert(Txn.application_args.length() == Int(4)),
+            Assert(Txn.application_args.length() == Int(3)),
             Assert(confio_id > Int(0)),
-            Assert(presale_id > Int(0)),
             Assert(Len(admin_addr) == Int(32)),
             Assert(Len(sponsor_addr) == Int(32)),
 
             App.globalPut(CONFIO_ASA, confio_id),
-            App.globalPut(PRESALE_APP, presale_id),
             App.globalPut(ADMIN, admin_addr),
             App.globalPut(SPONSOR, sponsor_addr),
             App.globalPut(BOOTSTRAPPED, Int(0)),
@@ -151,7 +147,6 @@ def confio_rewards_app() -> Expr:
             application_args[2] (optional): referrer reward in micro CONFIO.
             accounts[0]: user to reward.
             accounts[1] (optional): referrer payout target.
-            applications[0]: presale contract ID (must match stored global).
         """
         reward_cusd = ScratchVar(TealType.uint64)
         ref_amount = ScratchVar(TealType.uint64)
@@ -164,9 +159,6 @@ def confio_rewards_app() -> Expr:
         user_addr = ScratchVar(TealType.bytes)
         ref_addr_for_log = ScratchVar(TealType.bytes)
 
-        presale_id = App.globalGet(PRESALE_APP)
-        price_box = App.globalGetEx(presale_id, Bytes("price"))
-        round_box = App.globalGetEx(presale_id, Bytes("round"))
         vault_balance = AssetHolding.balance(
             Global.current_application_address(),
             App.globalGet(CONFIO_ASA),
@@ -622,17 +614,6 @@ def confio_rewards_app() -> Expr:
         )
 
     @Subroutine(TealType.uint64)
-    def update_presale() -> Expr:
-        """Rotate the presale app ID (admin only)."""
-        new_id = Btoi(Txn.application_args[1])
-        return Seq(
-            assert_admin(),
-            Assert(new_id > Int(0)),
-            App.globalPut(PRESALE_APP, new_id),
-            Int(1),
-        )
-
-    @Subroutine(TealType.uint64)
     def update_sponsor() -> Expr:
         """Rotate the sponsor address (admin only)."""
         new_sponsor = Txn.application_args[1]
@@ -703,7 +684,6 @@ def confio_rewards_app() -> Expr:
         [Txn.application_args[0] == Bytes("claim_referrer"), claim_referrer()],
         [Txn.application_args[0] == Bytes("withdraw"), admin_withdraw()],
         [Txn.application_args[0] == Bytes("withdraw_algo"), withdraw_algo()],
-        [Txn.application_args[0] == Bytes("set_presale"), update_presale()],
         [Txn.application_args[0] == Bytes("set_sponsor"), update_sponsor()],
         [Txn.application_args[0] == Bytes("set_price_override"), set_price_override()],
         [Txn.application_args[0] == Bytes("clear_price_override"), clear_price_override()],

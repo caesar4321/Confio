@@ -3,135 +3,128 @@
 txn ApplicationID
 int 0
 ==
-bnz main_l38
+bnz main_l36
 txn OnCompletion
 int DeleteApplication
 ==
-bnz main_l37
+bnz main_l35
 txn OnCompletion
 int UpdateApplication
 ==
-bnz main_l36
+bnz main_l34
 txn OnCompletion
 int CloseOut
 ==
-bnz main_l35
+bnz main_l33
 txn OnCompletion
 int OptIn
 ==
-bnz main_l34
+bnz main_l32
 txn NumAppArgs
 int 0
 ==
-bnz main_l33
+bnz main_l31
 txna ApplicationArgs 0
 byte "bootstrap"
 ==
-bnz main_l32
+bnz main_l30
 txna ApplicationArgs 0
 byte "mark_eligible"
 ==
-bnz main_l31
+bnz main_l29
 txna ApplicationArgs 0
 byte "claim"
 ==
-bnz main_l30
+bnz main_l28
 txna ApplicationArgs 0
 byte "claim_referrer"
 ==
-bnz main_l29
+bnz main_l27
 txna ApplicationArgs 0
 byte "withdraw"
 ==
-bnz main_l28
+bnz main_l26
 txna ApplicationArgs 0
 byte "withdraw_algo"
 ==
-bnz main_l27
-txna ApplicationArgs 0
-byte "set_presale"
-==
-bnz main_l26
+bnz main_l25
 txna ApplicationArgs 0
 byte "set_sponsor"
 ==
-bnz main_l25
+bnz main_l24
 txna ApplicationArgs 0
 byte "set_price_override"
 ==
-bnz main_l24
+bnz main_l23
 txna ApplicationArgs 0
 byte "clear_price_override"
 ==
-bnz main_l23
+bnz main_l22
 txna ApplicationArgs 0
 byte "pause"
 ==
-bnz main_l22
+bnz main_l21
 txna ApplicationArgs 0
 byte "resume"
 ==
-bnz main_l21
-int 1
 bnz main_l20
+int 1
+bnz main_l19
 err
+main_l19:
+int 0
+b main_l37
 main_l20:
-int 0
-b main_l39
+callsub resumeprogram_13
+b main_l37
 main_l21:
-callsub resumeprogram_14
-b main_l39
+callsub pauseprogram_12
+b main_l37
 main_l22:
-callsub pauseprogram_13
-b main_l39
+callsub clearpriceoverride_11
+b main_l37
 main_l23:
-callsub clearpriceoverride_12
-b main_l39
+callsub setpriceoverride_10
+b main_l37
 main_l24:
-callsub setpriceoverride_11
-b main_l39
+callsub updatesponsor_9
+b main_l37
 main_l25:
-callsub updatesponsor_10
-b main_l39
-main_l26:
-callsub updatepresale_9
-b main_l39
-main_l27:
 callsub withdrawalgo_8
-b main_l39
-main_l28:
+b main_l37
+main_l26:
 callsub adminwithdraw_7
-b main_l39
-main_l29:
+b main_l37
+main_l27:
 callsub claimreferrer_6
-b main_l39
-main_l30:
+b main_l37
+main_l28:
 callsub claimreward_5
-b main_l39
-main_l31:
+b main_l37
+main_l29:
 callsub markeligible_4
-b main_l39
-main_l32:
+b main_l37
+main_l30:
 callsub bootstrapvault_3
-b main_l39
+b main_l37
+main_l31:
+int 0
+b main_l37
+main_l32:
+int 1
+b main_l37
 main_l33:
-int 0
-b main_l39
+int 1
+b main_l37
 main_l34:
-int 1
-b main_l39
+int 0
+b main_l37
 main_l35:
-int 1
-b main_l39
+int 0
+b main_l37
 main_l36:
-int 0
-b main_l39
-main_l37:
-int 0
-b main_l39
-main_l38:
 callsub initialize_2
-main_l39:
+main_l37:
 return
 
 // box_mbr_cost
@@ -160,7 +153,7 @@ retsub
 initialize_2:
 proto 0 1
 txn NumAppArgs
-int 4
+int 3
 ==
 assert
 txna ApplicationArgs 0
@@ -169,16 +162,11 @@ int 0
 >
 assert
 txna ApplicationArgs 1
-btoi
-int 0
->
-assert
-txna ApplicationArgs 2
 len
 int 32
 ==
 assert
-txna ApplicationArgs 3
+txna ApplicationArgs 2
 len
 int 32
 ==
@@ -187,15 +175,11 @@ byte "confio_id"
 txna ApplicationArgs 0
 btoi
 app_global_put
-byte "presale"
-txna ApplicationArgs 1
-btoi
-app_global_put
 byte "admin"
-txna ApplicationArgs 2
+txna ApplicationArgs 1
 app_global_put
 byte "sponsor"
-txna ApplicationArgs 3
+txna ApplicationArgs 2
 app_global_put
 byte "boot"
 int 0
@@ -297,16 +281,21 @@ int 0
 ==
 assert
 txn NumAppArgs
-int 2
+int 3
 >=
+assert
+txna ApplicationArgs 2
+store 8
+load 8
+len
+int 32
+==
 assert
 txn NumAccounts
 int 0
 >
 assert
-txna Accounts 0
-store 9
-load 9
+load 8
 global ZeroAddress
 !=
 assert
@@ -317,26 +306,21 @@ load 0
 int 0
 >
 assert
-int 0
-store 3
-int 0
-store 4
-int 0
-store 2
-txn NumApplications
-int 0
->
-bnz markeligible_4_l11
-markeligible_4_l1:
-load 4
-int 0
+byte "manual_active"
+app_global_get
+int 1
 ==
-bnz markeligible_4_l10
-markeligible_4_l2:
+assert
+byte "manual_price"
+app_global_get
+store 2
 load 2
 int 0
 >
 assert
+byte "manual_round"
+app_global_get
+store 3
 load 0
 int 1000000
 mulw
@@ -348,18 +332,18 @@ pop
 swap
 !
 assert
-store 7
-load 7
+store 6
+load 6
 int 0
 >
 assert
 int 0
 store 1
 txn NumAppArgs
-int 3
-==
-bnz markeligible_4_l9
-markeligible_4_l3:
+int 4
+>=
+bnz markeligible_4_l7
+markeligible_4_l1:
 byte "boot"
 app_global_get
 int 1
@@ -382,37 +366,37 @@ app_global_get
 byte "claimed_sum"
 app_global_get
 -
-store 5
+store 4
 byte "ref_eligible_sum"
 app_global_get
 byte "ref_sum"
 app_global_get
 -
-store 6
+store 5
 global CurrentApplicationAddress
 byte "confio_id"
 app_global_get
 asset_holding_get AssetBalance
-store 16
-store 15
-load 16
+store 11
+store 10
+load 11
 assert
-load 15
+load 10
+load 4
 load 5
-load 6
 +
-load 7
+load 6
 +
 load 1
 +
 >=
 assert
-txna Accounts 0
+load 8
 box_get
-store 18
-store 17
-load 18
-bnz markeligible_4_l8
+store 13
+store 12
+load 13
+bnz markeligible_4_l6
 global GroupSize
 int 2
 >=
@@ -436,96 +420,96 @@ byte "sponsor"
 app_global_get
 ==
 assert
-load 9
+load 8
 int 72
 box_create
 assert
-load 9
+load 8
 int 24
 global ZeroAddress
 box_replace
-load 9
+load 8
 int 16
 int 0
 itob
 box_replace
-load 9
+load 8
 int 56
 int 1
 itob
 box_replace
-load 9
+load 8
 int 8
 int 0
 itob
 box_replace
-load 9
+load 8
 int 64
 int 0
 itob
 box_replace
-markeligible_4_l5:
-load 9
+markeligible_4_l3:
+load 8
 int 0
-load 7
+load 6
 itob
 box_replace
-load 9
+load 8
 int 8
 int 0
 itob
 box_replace
-load 9
+load 8
 int 64
 load 3
 itob
 box_replace
 global ZeroAddress
-store 10
+store 9
 load 1
 int 0
 >
-bnz markeligible_4_l7
-load 9
+bnz markeligible_4_l5
+load 8
 int 24
 global ZeroAddress
 box_replace
-load 9
+load 8
 int 16
 int 0
 itob
 box_replace
-load 9
+load 8
 int 56
 int 1
 itob
 box_replace
 global ZeroAddress
-store 10
-b markeligible_4_l14
-markeligible_4_l7:
+store 9
+b markeligible_4_l8
+markeligible_4_l5:
 txn NumAccounts
 int 1
 >
 assert
 txna Accounts 1
-load 9
+load 8
 !=
 assert
 txna Accounts 1
 global ZeroAddress
 !=
 assert
-load 9
+load 8
 int 24
 txna Accounts 1
 box_replace
-load 9
+load 8
 int 16
 load 1
 itob
 box_replace
-load 9
+load 8
 int 56
 int 0
 itob
@@ -537,90 +521,40 @@ load 1
 +
 app_global_put
 txna Accounts 1
-store 10
-b markeligible_4_l14
-markeligible_4_l8:
-load 17
-store 8
-load 8
+store 9
+b markeligible_4_l8
+markeligible_4_l6:
+load 12
+store 7
+load 7
 extract 8 8
 btoi
 int 0
 ==
 assert
-load 8
+load 7
 extract 0 8
 btoi
 int 0
 ==
 assert
-load 8
+load 7
 extract 16 8
 btoi
 int 0
 ==
 assert
-b markeligible_4_l5
-markeligible_4_l9:
-txna ApplicationArgs 2
+b markeligible_4_l3
+markeligible_4_l7:
+txna ApplicationArgs 3
 btoi
 store 1
-b markeligible_4_l3
-markeligible_4_l10:
-byte "manual_active"
-app_global_get
-int 1
-==
-assert
-byte "manual_price"
-app_global_get
-store 2
-load 2
-int 0
->
-assert
-byte "manual_round"
-app_global_get
-store 3
-b markeligible_4_l2
-markeligible_4_l11:
-txna Applications 0
-byte "presale"
-app_global_get
-==
-assert
-byte "presale"
-app_global_get
-byte "price"
-app_global_get_ex
-store 12
-store 11
-byte "presale"
-app_global_get
-byte "round"
-app_global_get_ex
-store 14
-store 13
-load 12
-load 11
-int 0
->
-&&
-bz markeligible_4_l1
-load 11
-store 2
-int 1
-store 4
-load 14
-bz markeligible_4_l1
-load 13
-store 3
 b markeligible_4_l1
-markeligible_4_l14:
+markeligible_4_l8:
 byte "eligible_sum"
 byte "eligible_sum"
 app_global_get
-load 7
+load 6
 +
 app_global_put
 byte "eligible_ct"
@@ -630,11 +564,11 @@ int 1
 +
 app_global_put
 byte "ELIGIBLE|"
-load 9
+load 8
 concat
 byte "|"
 concat
-load 7
+load 6
 itob
 concat
 byte "|"
@@ -644,7 +578,7 @@ itob
 concat
 byte "|"
 concat
-load 10
+load 9
 concat
 byte "|"
 concat
@@ -675,36 +609,36 @@ int 0
 assert
 txn Sender
 box_get
-store 20
-store 19
-load 20
+store 15
+store 14
+load 15
 assert
-load 19
-store 26
-load 26
+load 14
+store 21
+load 21
 extract 0 8
 btoi
-store 27
-load 26
+store 22
+load 21
 extract 8 8
 btoi
-store 28
-load 26
+store 23
+load 21
 extract 16 8
 btoi
-store 22
-load 26
+store 17
+load 21
 extract 56 8
 btoi
-store 23
-load 26
+store 18
+load 21
 extract 24 32
-store 21
-load 27
+store 16
+load 22
 int 0
 >
 assert
-load 28
+load 23
 int 0
 ==
 assert
@@ -712,9 +646,9 @@ txn Sender
 byte "confio_id"
 app_global_get
 asset_holding_get AssetBalance
-store 25
-store 24
-load 25
+store 20
+store 19
+load 20
 !
 bnz claimreward_5_l10
 itxn_begin
@@ -725,7 +659,7 @@ app_global_get
 itxn_field XferAsset
 txn Sender
 itxn_field AssetReceiver
-load 27
+load 22
 itxn_field AssetAmount
 int 0
 itxn_field Fee
@@ -743,7 +677,7 @@ box_replace
 byte "claimed_sum"
 byte "claimed_sum"
 app_global_get
-load 27
+load 22
 +
 app_global_put
 byte "claim_ct"
@@ -757,14 +691,14 @@ txn Sender
 concat
 byte "|"
 concat
-load 27
+load 22
 itob
 concat
 log
-load 22
+load 17
 int 0
 >
-load 23
+load 18
 int 0
 ==
 &&
@@ -772,16 +706,16 @@ bnz claimreward_5_l6
 claimreward_5_l4:
 txn Sender
 box_get
-store 32
-store 31
-load 32
-load 31
+store 27
+store 26
+load 27
+load 26
 extract 16 8
 btoi
 int 0
 ==
 &&
-load 31
+load 26
 extract 56 8
 btoi
 int 1
@@ -798,22 +732,22 @@ int 1
 >
 bz claimreward_5_l4
 txna Accounts 1
-load 21
+load 16
 ==
 bz claimreward_5_l4
 txna Accounts 1
 byte "confio_id"
 app_global_get
 asset_holding_get AssetBalance
-store 30
-store 29
+store 25
+store 24
 txna Accounts 1
 byte "confio_id"
 app_global_get
 asset_holding_get AssetBalance
-store 30
-store 29
-load 30
+store 25
+store 24
+load 25
 bz claimreward_5_l4
 itxn_begin
 int axfer
@@ -823,7 +757,7 @@ app_global_get
 itxn_field XferAsset
 txna Accounts 1
 itxn_field AssetReceiver
-load 22
+load 17
 itxn_field AssetAmount
 int 0
 itxn_field Fee
@@ -841,7 +775,7 @@ box_replace
 byte "ref_sum"
 byte "ref_sum"
 app_global_get
-load 22
+load 17
 +
 app_global_put
 byte "ref_ct"
@@ -859,7 +793,7 @@ txn Sender
 concat
 byte "|"
 concat
-load 22
+load 17
 itob
 concat
 log
@@ -912,40 +846,40 @@ int 0
 assert
 txna Accounts 0
 box_get
-store 34
-store 33
-load 34
+store 29
+store 28
+load 29
 assert
-load 33
-store 35
-load 35
+load 28
+store 30
+load 30
 extract 16 8
 btoi
-store 36
-load 35
+store 31
+load 30
 extract 56 8
 btoi
-store 37
-load 35
+store 32
+load 30
 extract 8 8
 btoi
-store 39
-load 36
+store 34
+load 31
 int 0
 >
 assert
-load 37
+load 32
 int 0
 ==
 assert
-load 39
+load 34
 int 1
 ==
 assert
-load 35
+load 30
 extract 24 32
-store 38
-load 38
+store 33
+load 33
 txn Sender
 ==
 assert
@@ -953,9 +887,9 @@ txn Sender
 byte "confio_id"
 app_global_get
 asset_holding_get AssetBalance
-store 41
-store 40
-load 41
+store 36
+store 35
+load 36
 !
 bnz claimreferrer_6_l5
 itxn_begin
@@ -966,7 +900,7 @@ app_global_get
 itxn_field XferAsset
 txn Sender
 itxn_field AssetReceiver
-load 36
+load 31
 itxn_field AssetAmount
 int 0
 itxn_field Fee
@@ -984,7 +918,7 @@ box_replace
 byte "ref_sum"
 byte "ref_sum"
 app_global_get
-load 36
+load 31
 +
 app_global_put
 byte "ref_ct"
@@ -1002,34 +936,34 @@ txna Accounts 0
 concat
 byte "|"
 concat
-load 36
+load 31
 itob
 concat
 log
 txna Accounts 0
 box_get
-store 43
-store 42
-load 43
-load 42
+store 38
+store 37
+load 38
+load 37
 extract 0 8
 btoi
 int 0
 ==
 &&
-load 42
+load 37
 extract 8 8
 btoi
 int 1
 ==
 &&
-load 42
+load 37
 extract 16 8
 btoi
 int 0
 ==
 &&
-load 42
+load 37
 extract 56 8
 btoi
 int 1
@@ -1074,8 +1008,8 @@ int 2
 assert
 txna ApplicationArgs 1
 btoi
-store 44
-load 44
+store 39
+load 39
 int 0
 >
 assert
@@ -1084,7 +1018,7 @@ int 0
 >
 bnz adminwithdraw_7_l2
 txn Sender
-store 45
+store 40
 b adminwithdraw_7_l3
 adminwithdraw_7_l2:
 txna Accounts 0
@@ -1092,7 +1026,7 @@ global ZeroAddress
 !=
 assert
 txna Accounts 0
-store 45
+store 40
 adminwithdraw_7_l3:
 itxn_begin
 int axfer
@@ -1100,9 +1034,9 @@ itxn_field TypeEnum
 byte "confio_id"
 app_global_get
 itxn_field XferAsset
-load 45
+load 40
 itxn_field AssetReceiver
-load 44
+load 39
 itxn_field AssetAmount
 int 0
 itxn_field Fee
@@ -1124,35 +1058,35 @@ global CurrentApplicationAddress
 assert
 txna Accounts 0
 balance
-store 48
+store 43
 txna Accounts 0
 min_balance
-store 49
-load 48
-load 49
+store 44
+load 43
+load 44
 >=
 assert
-load 48
-load 49
+load 43
+load 44
 -
-store 46
+store 41
 txn NumAccounts
 int 1
 >
 bnz withdrawalgo_8_l4
 txn Sender
-store 47
+store 42
 withdrawalgo_8_l2:
-load 46
+load 41
 int 0
 >
 bz withdrawalgo_8_l5
 itxn_begin
 int pay
 itxn_field TypeEnum
-load 47
+load 42
 itxn_field Receiver
-load 46
+load 41
 itxn_field Amount
 int 0
 itxn_field Fee
@@ -1164,30 +1098,14 @@ global ZeroAddress
 !=
 assert
 txna Accounts 1
-store 47
+store 42
 b withdrawalgo_8_l2
 withdrawalgo_8_l5:
 int 1
 retsub
 
-// update_presale
-updatepresale_9:
-proto 0 1
-callsub assertadmin_1
-txna ApplicationArgs 1
-btoi
-int 0
->
-assert
-byte "presale"
-txna ApplicationArgs 1
-btoi
-app_global_put
-int 1
-retsub
-
 // update_sponsor
-updatesponsor_10:
+updatesponsor_9:
 proto 0 1
 callsub assertadmin_1
 txna ApplicationArgs 1
@@ -1202,7 +1120,7 @@ int 1
 retsub
 
 // set_price_override
-setpriceoverride_11:
+setpriceoverride_10:
 proto 0 1
 callsub assertadmin_1
 txn NumAppArgs
@@ -1211,26 +1129,26 @@ int 2
 assert
 txna ApplicationArgs 1
 btoi
-store 50
-load 50
+store 45
+load 45
 int 0
 >
 assert
 int 0
-store 51
+store 46
 txn NumAppArgs
 int 3
 >=
-bz setpriceoverride_11_l2
+bz setpriceoverride_10_l2
 txna ApplicationArgs 2
 btoi
-store 51
-setpriceoverride_11_l2:
+store 46
+setpriceoverride_10_l2:
 byte "manual_price"
-load 50
+load 45
 app_global_put
 byte "manual_round"
-load 51
+load 46
 app_global_put
 byte "manual_active"
 int 1
@@ -1239,7 +1157,7 @@ int 1
 retsub
 
 // clear_price_override
-clearpriceoverride_12:
+clearpriceoverride_11:
 proto 0 1
 callsub assertadmin_1
 byte "manual_active"
@@ -1255,7 +1173,7 @@ int 1
 retsub
 
 // pause_program
-pauseprogram_13:
+pauseprogram_12:
 proto 0 1
 callsub assertadmin_1
 byte "paused"
@@ -1265,7 +1183,7 @@ int 1
 retsub
 
 // resume_program
-resumeprogram_14:
+resumeprogram_13:
 proto 0 1
 callsub assertadmin_1
 byte "paused"

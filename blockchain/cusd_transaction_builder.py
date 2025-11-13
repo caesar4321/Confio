@@ -66,7 +66,7 @@ class CUSDTransactionBuilder:
             # Transaction 0: Sponsor payment
             from algosdk.transaction import SuggestedParams, PaymentTxn
             
-            sponsor_params = SuggestedParams(
+            sponsor_params = transaction.SuggestedParams(
                 fee=min_fee,  # Sponsor pays for both transactions
                 first=params.first,
                 last=params.last,
@@ -84,7 +84,7 @@ class CUSDTransactionBuilder:
             )
             
             # Transaction 1: App opt-in (0 fee - sponsored)
-            optin_params = SuggestedParams(
+            optin_params = transaction.SuggestedParams(
                 fee=0,  # Sponsored
                 first=params.first,
                 last=params.last,
@@ -187,15 +187,30 @@ class CUSDTransactionBuilder:
             
             # Get suggested params
             params = algod_client.suggested_params()
-            
+            if isinstance(params, dict):
+                params = transaction.SuggestedParams(**params)
+
             # Ensure we have the minimum fee (1000 microAlgos)
             min_fee = getattr(params, 'min_fee', 1000) or 1000
             logger.info(f"Min fee: {min_fee}")
             
             # Get app address
             app_address = get_application_address(self.app_id)
-            
+
             logger.info(f"App address: {app_address}")
+
+            try:
+                asset_params = algod_client.asset_info(self.cusd_asset_id)["params"]
+                logger.info(
+                    "cUSD asset %s params manager=%s reserve=%s clawback=%s freeze=%s (expect clawback == app)",
+                    self.cusd_asset_id,
+                    asset_params.get("manager"),
+                    asset_params.get("reserve"),
+                    asset_params.get("clawback"),
+                    asset_params.get("freeze"),
+                )
+            except Exception as asset_exc:
+                logger.warning("Unable to fetch cUSD asset params for %s: %s", self.cusd_asset_id, asset_exc)
             
             # Check user's balance and minimum balance requirement
             account_info = algod_client.account_info(user_address)
@@ -210,7 +225,6 @@ class CUSDTransactionBuilder:
             # We'll fund them with exactly what they need so they pay net 0
             
             # Transaction 0: Sponsor payment (MUST be first per contract requirements)
-            from algosdk.transaction import SuggestedParams
             
             # TRUE SPONSORSHIP: Sponsor sends app call and pays all fees
             # Mint does 2 inner transactions, so needs (1 + 2) * min_fee = 3 * min_fee
@@ -227,7 +241,7 @@ class CUSDTransactionBuilder:
                 logger.info(f"User has sufficient balance")
 
             # Sponsor payment parameters
-            sponsor_params = SuggestedParams(
+            sponsor_params = transaction.SuggestedParams(
                 fee=sponsor_payment_fee,  # Sponsor payment pays its own fee
                 first=params.first,
                 last=params.last,
@@ -247,7 +261,7 @@ class CUSDTransactionBuilder:
             )
             
             # Transaction 1: USDC transfer from user to app (0 fee - sponsored)
-            usdc_params = SuggestedParams(
+            usdc_params = transaction.SuggestedParams(
                 fee=0,  # Sponsored by payment transaction
                 first=params.first,
                 last=params.last,
@@ -268,7 +282,7 @@ class CUSDTransactionBuilder:
             # TRUE SPONSORSHIP: Sponsor is the sender, pays the fees
             from algosdk.abi import Method, Returns
             
-            app_params = SuggestedParams(
+            app_params = transaction.SuggestedParams(
                 fee=app_call_fee,  # App call MUST fund its inner transaction budget
                 first=params.first,
                 last=params.last,

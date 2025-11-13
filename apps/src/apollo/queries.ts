@@ -2584,9 +2584,29 @@ export const GET_MY_CONFIO_TRANSACTIONS = gql`
       transactionType
       amount
       balanceAfter
-      source
       description
       createdAt
+    }
+  }
+`;
+
+export const GET_MY_REFERRAL_REWARDS = gql`
+  query GetMyReferralRewards($status: String) {
+    myReferralRewards(status: $status) {
+      id
+      trigger
+      actorRole
+      rewardStatus
+      refereeConfio
+      referrerConfio
+      claimableConfio
+      occurredAt
+      rewardTxId
+      metadata
+      referral {
+        id
+        rewardClaimedAt
+      }
     }
   }
 `;

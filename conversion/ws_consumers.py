@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from urllib.parse import parse_qs
 
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
@@ -15,6 +16,9 @@ class _DummyRequest:
 class _DummyInfo:
     def __init__(self, context):
         self.context = context
+
+
+logger = logging.getLogger(__name__)
 
 
 class ConvertSessionConsumer(AsyncJsonWebsocketConsumer):
@@ -234,6 +238,21 @@ class ConvertSessionConsumer(AsyncJsonWebsocketConsumer):
 
         from blockchain.algorand_client import get_algod_client
         algod_client = get_algod_client()
+
+        debug_rows = []
+        for idx, stx in enumerate(ordered):
+            txn = stx.transaction
+            debug_rows.append({
+                "idx": idx,
+                "type": getattr(txn, "type", None),
+                "sender": getattr(txn, "sender", None),
+                "receiver": getattr(txn, "receiver", None),
+                "asset_receiver": getattr(txn, "asset_receiver", None),
+                "amount": getattr(txn, "amt", getattr(txn, "asset_amount", None)),
+                "app_id": getattr(txn, "index", None),
+            })
+        logger.info("Conversion %s group composition: %s", conversion_id, debug_rows)
+
         txid = algod_client.send_transactions(ordered)
         ref_txid = ordered[-1].get_txid()
 

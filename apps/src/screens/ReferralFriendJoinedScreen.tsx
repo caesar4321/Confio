@@ -31,8 +31,10 @@ export const ReferralFriendJoinedScreen: React.FC = () => {
           <View style={styles.stepCard}>
             <Text style={styles.stepTitle}>¿Qué sigue?</Text>
             <View style={styles.stepRow}>
-              <Icon name="send" size={18} color="#10B981" />
-              <Text style={styles.stepText}>Ayúdale a completar una recarga o conversión de al menos US$20.</Text>
+              <Icon name="credit-card" size={18} color="#10B981" />
+              <Text style={styles.stepText}>
+                Muéstrale cómo recargar con tarjeta o depositar cUSD desde Binance/Coinbase enviándolo a su dirección Confío.
+              </Text>
             </View>
             <View style={styles.stepRow}>
               <Icon name="refresh-cw" size={18} color="#10B981" />
