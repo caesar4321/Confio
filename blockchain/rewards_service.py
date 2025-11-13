@@ -395,6 +395,7 @@ class ConfioRewardsService:
             app_args=[b"claim"],
             accounts=accounts,
             boxes=boxes,
+            foreign_assets=[self.confio_asset_id],  # Required for token transfer
         )
 
         sponsor_sp = transaction.SuggestedParams(
