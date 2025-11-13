@@ -91,7 +91,7 @@ class ReferralRewardServiceTests(TestCase):
         call_kwargs = mock_instance.mark_eligibility.call_args.kwargs
         self.assertEqual(call_kwargs["referee_confio_micro"], 8_000_000)
         self.assertEqual(call_kwargs["referrer_confio_micro"], 2_000_000)
-        notif_count = Notification.objects.filter(notification_type=NotificationTypeChoices.REFERRAL_FIRST_TRANSACTION).count()
+        notif_count = Notification.objects.filter(notification_type=NotificationTypeChoices.REFERRAL_EVENT_SEND).count()
         self.assertEqual(notif_count, 2)
 
     @patch("achievements.services.referral_rewards.ConfioRewardsService")
@@ -154,6 +154,28 @@ class ReferralRewardServiceTests(TestCase):
         self.assertEqual(event.reward_status, "eligible")
         self.assertEqual(event.referral_id, new_referral.id)
         mock_instance.mark_eligibility.assert_called_once()
+
+    @patch("achievements.services.referral_rewards.ConfioRewardsService")
+    def test_claimed_event_is_not_resynced(self, mock_service):
+        ReferralRewardEvent.objects.create(
+            referral=self.referral,
+            user=self.referred,
+            trigger="send",
+            actor_role="referee",
+            amount=Decimal("25"),
+            occurred_at=timezone.now(),
+            reward_status="claimed",
+            referee_confio=Decimal("80"),
+            referrer_confio=Decimal("20"),
+        )
+
+        result = sync_referral_reward_for_event(
+            self.referred,
+            EventContext(event="send", amount=Decimal("30")),
+        )
+
+        self.assertEqual(result, self.referral)
+        mock_service.assert_not_called()
 
     @patch("achievements.services.referral_rewards.ConfioRewardsService")
     def test_referrer_event_uses_referrer_role(self, mock_service):
