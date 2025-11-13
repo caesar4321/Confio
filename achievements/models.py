@@ -451,6 +451,7 @@ class ReferralRewardEvent(models.Model):
         ('eligible', 'Elegible'),
         ('failed', 'Fallido'),
         ('skipped', 'Omitido'),
+        ('claimed', 'Reclamado'),
     ]
 
     referral = models.ForeignKey(

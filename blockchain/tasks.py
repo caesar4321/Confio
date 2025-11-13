@@ -352,14 +352,17 @@ def scan_inbound_deposits():
             to_addr = receiver or close_to
             if not to_addr or to_addr not in addresses:
                 return
-            if sender in addresses and (not sponsor_address or sender != sponsor_address):
+            confio_sender = sender in addresses
+            sponsor_sender = sponsor_address and sender == sponsor_address
+
+            if confio_sender and not sponsor_sender:
                 # Internal transfer; treat as non-deposit for inbound notification
                 logger.info(
                     f"[IndexerScan] skip internal tx: sender={sender} to={to_addr} sponsor={sponsor_address}"
                 )
                 skipped += 1
                 return
-            elif sender in addresses and sponsor_address and sender == sponsor_address:
+            elif sponsor_sender:
                 logger.info(
                     f"[IndexerScan] sponsor deposit: sender={sender} to={to_addr}"
                 )

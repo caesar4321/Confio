@@ -349,6 +349,7 @@ export type MainStackParamList = {
   ReferralFriendJoined: { friendName?: string };
   ReferralActionPrompt: { event?: string };
   ReferralEventDetail: { event?: string; referralId?: string | number; role?: 'referee' | 'referrer'; friendName?: string };
+  ReferralRewardClaim: undefined;
   // NotificationSettings: undefined; // Hidden: Notifications mandatory
 };
 

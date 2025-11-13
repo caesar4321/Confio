@@ -1,5 +1,6 @@
 """Unified referral system mutations for Confío usernames or phone numbers."""
 import graphene
+from decimal import Decimal
 from django.db import transaction as db_transaction
 from .models import User
 from .phone_utils import normalize_any_phone
@@ -83,6 +84,22 @@ class SetReferrer(graphene.Mutation):
             if referrer_user and referrer_user.id == user.id:
                 return SetReferrer(success=False, error="No puedes ser tu propio referidor.")
 
+            # Calculate reward amounts based on current CONFIO price
+            # Both referee and referrer get $5 USD worth of CONFIO each
+            try:
+                from blockchain.rewards_service import ConfioRewardsService
+                service = ConfioRewardsService()
+                reward_per_person_cusd = Decimal('5')  # $5 USD per person
+                confio_per_person = service.convert_cusd_to_confio(reward_per_person_cusd)
+
+                # Both get the same amount (e.g., 20 CONFIO at $0.25/CONFIO)
+                referee_confio = confio_per_person.quantize(Decimal('0.01'))
+                referrer_confio = confio_per_person.quantize(Decimal('0.01'))
+            except Exception as e:
+                # Fallback to default amounts if service unavailable
+                referee_confio = Decimal('20')  # $5 at $0.25/CONFIO
+                referrer_confio = Decimal('20')  # $5 at $0.25/CONFIO
+
             # Create the referral record
             with db_transaction.atomic():
                 referral = UserReferral.objects.create(
@@ -90,15 +107,19 @@ class SetReferrer(graphene.Mutation):
                     referrer_identifier=referrer_identifier,
                     referrer_user=referrer_user,
                     status='pending',
+                    # Populate reward amounts based on current CONFIO price
+                    # so users can see what they're working toward
+                    reward_referee_confio=referee_confio,
+                    reward_referrer_confio=referrer_confio,
                     attribution_data={
                         'referral_type': 'friend',
                         'identifier_used': referrer_identifier,
                         'registered_at': timezone.now().isoformat(),
                     }
                 )
-                
-                # Note: Rewards will be given when first transaction is completed
-                # This is handled by transaction signals
+
+                # Note: Rewards will be synced to on-chain vault when first qualifying event occurs
+                # This is handled by sync_referral_reward_for_event() via signals
                 
                 return SetReferrer(
                     success=True,

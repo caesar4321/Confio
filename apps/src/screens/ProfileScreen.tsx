@@ -304,6 +304,15 @@ export const ProfileScreen = () => {
             </TouchableOpacity>
           </View>
 
+          <TouchableOpacity
+            style={styles.referralClaimButton}
+            onPress={() => navigation.navigate('ReferralRewardClaim' as never)}
+          >
+            <Icon name="unlock" size={16} color="#10b981" />
+            <Text style={styles.referralClaimText}>Ver mis recompensas en $CONFIO</Text>
+            <Icon name="chevron-right" size={16} color="#10b981" />
+          </TouchableOpacity>
+
           {needsFriendlyUsername && (
             <TouchableOpacity style={styles.referralUpdateUsername} onPress={() => navigation.navigate('UpdateUsername')}>
               <Icon name="edit-3" size={16} color="#047857" />
@@ -756,6 +765,26 @@ const styles = StyleSheet.create({
   },
   referralShareText: {
     color: '#FFFFFF',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  referralClaimButton: {
+    marginBottom: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(16,185,129,0.3)',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: '#ecfdf5',
+    gap: 8,
+  },
+  referralClaimText: {
+    flex: 1,
+    marginHorizontal: 12,
+    color: '#047857',
     fontWeight: '600',
     fontSize: 14,
   },
