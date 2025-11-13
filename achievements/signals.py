@@ -1,3 +1,4 @@
+from decimal import Decimal
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.utils import timezone
@@ -319,3 +320,49 @@ def sync_pending_reward_events(sender, instance: UserReferral, created, **kwargs
                 metadata=event.metadata,
             ),
         )
+
+    # Ensure the referred user sees a placeholder pending reward in the app.
+    def ensure_pending_event(user, role: str, stage_meta: str, reward_amount: Decimal):
+        if not user:
+            return
+        defaults = {
+            "user": user,
+            "referral": instance,
+            "trigger": "referral_pending",
+            "actor_role": role,
+            "amount": Decimal("0"),
+            "transaction_reference": "",
+            "occurred_at": instance.created_at or timezone.now(),
+            "reward_status": "pending",
+            "referee_confio": reward_amount if role == "referee" else Decimal("0"),
+            "referrer_confio": reward_amount if role == "referrer" else Decimal("0"),
+            "metadata": {"stage": stage_meta},
+        }
+        event, created_flag = ReferralRewardEvent.objects.get_or_create(
+            user=user,
+            trigger="referral_pending",
+            defaults=defaults,
+        )
+        if not created_flag:
+            needs_update = False
+            if event.referral_id != instance.id:
+                event.referral = instance
+                needs_update = True
+            if event.reward_status != "pending":
+                event.reward_status = "pending"
+                needs_update = True
+            if needs_update:
+                event.save(update_fields=["referral", "reward_status", "updated_at"])
+
+    ensure_pending_event(
+        instance.referred_user,
+        "referee",
+        "pending_first_transaction",
+        instance.reward_referee_confio or Decimal("0"),
+    )
+    ensure_pending_event(
+        instance.referrer_user,
+        "referrer",
+        "pending_referrer_bonus",
+        instance.reward_referrer_confio or Decimal("0"),
+    )

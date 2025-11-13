@@ -731,6 +731,7 @@ class UserReferralAdmin(admin.ModelAdmin):
             'pending': '#F59E0B',
             'eligible': '#10B981',
             'failed': '#EF4444',
+            'claimed': '#2563EB',
         }
         label = obj.get_reward_status_display()
         return format_html(
@@ -815,7 +816,9 @@ class ReferralRewardEventAdmin(admin.ModelAdmin):
 
     @admin.display(description="Amount", ordering='amount')
     def amount_display(self, obj):
-        return format_html('<strong>{:,.2f}</strong>', obj.amount or 0)
+        amount = obj.amount or 0
+        formatted = f"{amount:,.2f}"
+        return format_html('<strong>{}</strong>', formatted)
 
 
 @admin.register(TikTokViralShare)

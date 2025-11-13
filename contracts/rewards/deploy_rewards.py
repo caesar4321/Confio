@@ -13,7 +13,6 @@ Environment (export before running or pass inline):
     ALGORAND_ALGOD_ADDRESS
     ALGORAND_ALGOD_TOKEN    (empty string for algonode)
     ALGORAND_CONFIO_ASSET_ID
-    ALGORAND_PRESALE_APP_ID (any positive integer; manual override will be used)
     ALGORAND_SPONSOR_MNEMONIC
     ALGORAND_ADMIN_MNEMONIC (defaults to sponsor mnemonic)
 
@@ -21,7 +20,6 @@ Usage:
     ALGORAND_ALGOD_ADDRESS=https://testnet-api.algonode.cloud \\
     ALGORAND_ALGOD_TOKEN= \\
     ALGORAND_CONFIO_ASSET_ID=3198329568 \\
-    ALGORAND_PRESALE_APP_ID=99999999 \\
     ALGORAND_SPONSOR_MNEMONIC="word1 ... word25" \\
     ./myvenv/bin/python contracts/rewards/deploy_rewards.py
 """
@@ -194,7 +192,6 @@ def create_rewards_app(
     client: algod.AlgodClient,
     accounts: Accounts,
     confio_asset_id: int,
-    presale_app_id: int,
 ) -> int:
     approval_src = compile_confio_rewards()
     clear_src = "#pragma version 8\nint 1\n"
@@ -208,7 +205,6 @@ def create_rewards_app(
 
     app_args = [
         confio_asset_id.to_bytes(8, "big"),
-        presale_app_id.to_bytes(8, "big"),
         encoding.decode_address(accounts.admin_addr),
         encoding.decode_address(accounts.sponsor_addr),
     ]
@@ -385,7 +381,6 @@ def mark_user_eligible(
     accounts: Accounts,
     user_addr: str,
     reward_cusd_micro: int,
-    presale_app_id: int,
     confio_asset_id: int,
 ) -> None:
     app_address = get_application_address(app_id)
@@ -410,7 +405,6 @@ def mark_user_eligible(
     )
     admin_on_chain = app_state.get(b"admin")
     sponsor_on_chain = app_state.get(b"sponsor")
-    presale_on_chain = int(app_state.get(b"presale", presale_app_id))
     boot_flag = int(app_state.get(b"boot", 0))
     paused_flag = int(app_state.get(b"paused", 0))
 
@@ -422,7 +416,6 @@ def mark_user_eligible(
         "[probe] sponsor",
         encoding.encode_address(sponsor_on_chain) if sponsor_on_chain else "unset",
     )
-    print("[probe] presale", presale_on_chain)
     print("[probe] boot", boot_flag)
     print("[probe] paused", paused_flag)
 
@@ -437,9 +430,6 @@ def mark_user_eligible(
     if paused_flag != 0:
         raise RuntimeError("Rewards app is paused; cannot mark eligibility")
 
-    foreign_apps: List[int] = []
-    if presale_on_chain > 0:
-        foreign_apps.append(presale_on_chain)
     app_call = ApplicationNoOpTxn(
         sender=accounts.admin_addr,
         index=app_id,
@@ -447,7 +437,6 @@ def mark_user_eligible(
         app_args=app_args,
         accounts=[user_addr],
         foreign_assets=[confio_asset_id],
-        foreign_apps=foreign_apps,
         boxes=[BoxReference(0, user_key_bytes)],
     )
     if os.getenv("DEBUG_MARK_ELIGIBLE"):
@@ -475,7 +464,6 @@ def user_claim_reward(
         sp=params,
         app_args=[b"claim"],
         foreign_assets=[confio_asset_id],
-        foreign_apps=[app_id],
         boxes=[BoxReference(0, encoding.decode_address(user_addr))],
     )
     print("[debug] claim txn", txn.dictify())
@@ -492,9 +480,8 @@ def main() -> None:
     accounts = init_accounts()
 
     confio_asset_id = int(read_env("ALGORAND_CONFIO_ASSET_ID"))
-    presale_app_id = int(read_env("ALGORAND_PRESALE_APP_ID"))
 
-    app_id = create_rewards_app(client, accounts, confio_asset_id, presale_app_id)
+    app_id = create_rewards_app(client, accounts, confio_asset_id)
     app_address = get_application_address(app_id)
     print(f"[i] Application address: {app_address}")
 
@@ -510,7 +497,6 @@ def main() -> None:
         accounts,
         user_addr=user_addr,
         reward_cusd_micro=5_000_000,  # $5
-        presale_app_id=presale_app_id,
         confio_asset_id=confio_asset_id,
     )
 

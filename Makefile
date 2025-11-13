@@ -4,6 +4,7 @@
 VENV_PATH = ./myvenv
 PYTHON = $(VENV_PATH)/bin/python
 PIP = $(VENV_PATH)/bin/pip
+CONFIO_ENV ?= mainnet
 
 # Collect static files
 collectstatic:
@@ -12,7 +13,8 @@ collectstatic:
 
 # Run development server with Django Channels (ASGI)
 runserver:
-	DEBUG=True $(PYTHON) -m daphne -b 0.0.0.0 -p 8000 config.asgi:application
+	@echo "Starting runserver with CONFIO_ENV=$(CONFIO_ENV)"
+	CONFIO_ENV=$(CONFIO_ENV) DEBUG=True $(PYTHON) -m daphne -b 0.0.0.0 -p 8000 config.asgi:application
 
 # Run Daphne with HTTP/2 + TLS (dev)
 # Requires: pip install "twisted[tls,http2]" service-identity
@@ -22,16 +24,19 @@ runserver-h2:
 		echo "DEV_SSL_CERT/DEV_SSL_KEY not set. Usage: make runserver-h2 DEV_SSL_CERT=dev.crt DEV_SSL_KEY=dev.key [DEV_PORT=8443]"; \
 		exit 1; \
 	fi
-	DEBUG=True $(PYTHON) -m daphne -b 0.0.0.0 -p $${DEV_PORT:-8443} -e "ssl:port=$${DEV_PORT:-8443}:privateKey=$(DEV_SSL_KEY):certificate=$(DEV_SSL_CERT)" config.asgi:application
+	@echo "Starting runserver-h2 with CONFIO_ENV=$(CONFIO_ENV)"
+	CONFIO_ENV=$(CONFIO_ENV) DEBUG=True $(PYTHON) -m daphne -b 0.0.0.0 -p $${DEV_PORT:-8443} -e "ssl:port=$${DEV_PORT:-8443}:privateKey=$(DEV_SSL_KEY):certificate=$(DEV_SSL_CERT)" config.asgi:application
 	@echo "Daphne running with HTTP/2 + TLS on port $${DEV_PORT:-8443}"
 
 # Run Django development server with ASGI support (alternative)
 runserver-dev:
-	DEBUG=True DJANGO_SETTINGS_MODULE=config.settings $(PYTHON) -m uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --reload
+	@echo "Starting runserver-dev with CONFIO_ENV=$(CONFIO_ENV)"
+	CONFIO_ENV=$(CONFIO_ENV) DEBUG=True DJANGO_SETTINGS_MODULE=config.settings $(PYTHON) -m uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --reload
 
 # Run standard Django server (WSGI) - for comparison/fallback
 runserver-wsgi:
-	DEBUG=True $(PYTHON) manage.py runserver 0.0.0.0:8000
+	@echo "Starting runserver-wsgi with CONFIO_ENV=$(CONFIO_ENV)"
+	CONFIO_ENV=$(CONFIO_ENV) DEBUG=True $(PYTHON) manage.py runserver 0.0.0.0:8000
 
 # Run migrations
 migrate:
@@ -106,11 +111,13 @@ run:
 
 # Celery worker
 celery-worker:
-	$(VENV_PATH)/bin/celery -A config worker -l info
+	@echo "Starting celery worker with CONFIO_ENV=$(CONFIO_ENV)"
+	CONFIO_ENV=$(CONFIO_ENV) $(VENV_PATH)/bin/celery -A config worker -l info
 
 # Celery beat (scheduler)
 celery-beat:
-	$(VENV_PATH)/bin/celery -A config beat -l info
+	@echo "Starting celery beat with CONFIO_ENV=$(CONFIO_ENV)"
+	CONFIO_ENV=$(CONFIO_ENV) $(VENV_PATH)/bin/celery -A config beat -l info
 
 # Strict deploy targets
 deploy-cusd:

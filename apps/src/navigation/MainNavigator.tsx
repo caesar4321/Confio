@@ -47,6 +47,7 @@ import { ViralTemplatesScreen } from '../screens/ViralTemplatesScreen';
 import { ReferralFriendJoinedScreen } from '../screens/ReferralFriendJoinedScreen';
 import { ReferralActionPromptScreen } from '../screens/ReferralActionPromptScreen';
 import { ReferralEventDetailScreen } from '../screens/ReferralEventDetailScreen';
+import ReferralRewardClaimScreen from '../screens/ReferralRewardClaimScreen';
 // import NotificationSettingsScreen from '../screens/NotificationSettingsScreen'; // Hidden: Notifications mandatory
 
 console.log('MainNavigator: TransactionProcessingScreen imported:', !!TransactionProcessingScreen);
@@ -343,9 +344,14 @@ export const MainNavigator = () => {
         component={ReferralActionPromptScreen}
         options={{ headerShown: false }}
       />
-      <MainStack.Screen
+      <Stack.Screen
         name="ReferralEventDetail"
         component={ReferralEventDetailScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="ReferralRewardClaim"
+        component={ReferralRewardClaimScreen}
         options={{ headerShown: false }}
       />
       {/* Hidden: Notifications are mandatory for financial apps
