@@ -519,6 +519,17 @@ class ReferralRewardEvent(models.Model):
     def __str__(self):
         return f"{self.user} - {self.trigger} ({self.actor_role})"
 
+    def get_trigger_display(self):
+        """Return properly formatted trigger name for display"""
+        trigger_names = {
+            'send': 'Envío',
+            'payment': 'Pago',
+            'p2p_trade': 'Trade P2P',
+            'conversion_usdc_to_cusd': 'USDC a cUSD',
+            'top_up': 'Recarga',
+        }
+        return trigger_names.get(self.trigger, self.trigger)
+
 
 # Backwards compatibility alias for legacy imports
 InfluencerReferral = UserReferral
