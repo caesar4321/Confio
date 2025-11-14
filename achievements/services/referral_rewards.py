@@ -450,11 +450,15 @@ def sync_referral_reward_for_event(user, event_ctx: EventContext) -> Optional[Us
     with transaction.atomic():
         event.reward_status = "eligible"
         event.reward_tx_id = result.tx_id
+        event.referee_confio = referee_confio
+        event.referrer_confio = referrer_confio
         event.error = ""
         event.save(
             update_fields=[
                 "reward_status",
                 "reward_tx_id",
+                "referee_confio",
+                "referrer_confio",
                 "error",
                 "updated_at",
             ]

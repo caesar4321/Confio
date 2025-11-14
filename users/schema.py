@@ -246,6 +246,7 @@ class StatsSummaryType(graphene.ObjectType):
 
 class ReferralRewardEventType(DjangoObjectType):
     claimable_confio = graphene.Decimal()
+    trigger_display = graphene.String()
 
     class Meta:
         model = ReferralRewardEvent
@@ -267,6 +268,9 @@ class ReferralRewardEventType(DjangoObjectType):
             "created_at",
             "updated_at",
         )
+
+    def resolve_trigger_display(self, info):
+        return self.get_trigger_display()
 
     def resolve_is_verified(self, info):
         try:
