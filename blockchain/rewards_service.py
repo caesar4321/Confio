@@ -209,7 +209,7 @@ class ConfioRewardsService:
             user_addr_bytes,
         ]
 
-        accounts = []
+        accounts = [user_address]
         if referrer_confio_micro > 0 and referrer_address:
             app_args.append(referrer_confio_micro.to_bytes(8, "big"))
             accounts.append(referrer_address)
