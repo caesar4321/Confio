@@ -37,7 +37,7 @@ import { AccountSwitchOverlay } from '../components/AccountSwitchOverlay';
 import { getCountryByIso } from '../utils/countries';
 import { WalletCardSkeleton } from '../components/SkeletonLoader';
 import { useQuery, useMutation, useApolloClient } from '@apollo/client';
-import { GET_PRESALE_STATUS, GET_MY_BALANCES, GET_USER_ACCOUNTS } from '../apollo/queries';
+import { GET_PRESALE_STATUS, GET_MY_BALANCES, GET_USER_ACCOUNTS, GET_ACTIVE_PRESALE, GET_ALL_PRESALE_PHASES } from '../apollo/queries';
 import { REFRESH_ACCOUNT_BALANCE } from '../apollo/mutations';
 import { useCountry } from '../contexts/CountryContext';
 import { useCurrency } from '../hooks/useCurrency';
@@ -156,6 +156,12 @@ export const HomeScreen = () => {
   const { data: presaleStatusData } = useQuery(GET_PRESALE_STATUS, {
     fetchPolicy: 'cache-and-network',
   });
+  const { data: activePresaleData } = useQuery(GET_ACTIVE_PRESALE, {
+    fetchPolicy: 'cache-first',
+  });
+  const { data: allPresalePhasesData } = useQuery(GET_ALL_PRESALE_PHASES, {
+    fetchPolicy: 'cache-first',
+  });
   const isPresaleActive = presaleStatusData?.isPresaleActive === true;
   const isPresaleClaimsUnlocked = presaleStatusData?.isPresaleClaimsUnlocked === true;
   const [presaleDismissed, setPresaleDismissed] = useState(false);
@@ -227,6 +233,31 @@ export const HomeScreen = () => {
     [myBalancesData?.myBalances?.confioPresaleLocked]
   );
   const confioTotal = React.useMemo(() => confioLive + confioPresaleLocked, [confioLive, confioPresaleLocked]);
+  const confioPriceUsd = React.useMemo(() => {
+    const rawActive = activePresaleData?.activePresalePhase?.pricePerToken;
+    const activePrice = rawActive ? parseFloat(rawActive) : NaN;
+    if (Number.isFinite(activePrice) && activePrice > 0) {
+      return activePrice;
+    }
+    const phases = allPresalePhasesData?.allPresalePhases || [];
+    if (phases.length) {
+      const sorted = [...phases].sort(
+        (a, b) => Number(b?.phaseNumber || 0) - Number(a?.phaseNumber || 0),
+      );
+      const lastPhase = sorted.find((phase) => {
+        const status = (phase?.status || '').toLowerCase();
+        return ['active', 'completed', 'paused'].includes(status);
+      });
+      if (lastPhase?.pricePerToken) {
+        const parsed = parseFloat(lastPhase.pricePerToken);
+        if (Number.isFinite(parsed) && parsed > 0) {
+          return parsed;
+        }
+      }
+    }
+    return 0.2;
+  }, [activePresaleData, allPresalePhasesData]);
+  const confioUsdValue = React.useMemo(() => confioTotal * confioPriceUsd, [confioTotal, confioPriceUsd]);
 
   // Display helpers to avoid overstating balances (flooring instead of rounding)
   const floorToDecimals = React.useCallback((value: number, decimals: number) => {
@@ -241,9 +272,8 @@ export const HomeScreen = () => {
     return floored.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
   }, [floorToDecimals]);
   
-  // Calculate portfolio value - Only include cUSD for now
-  // CONFIO value is not determined yet
-  const totalUSDValue = cUSDBalance;
+  // Calculate portfolio value including CONFIO marked to current presale price
+  const totalUSDValue = React.useMemo(() => cUSDBalance + confioUsdValue, [cUSDBalance, confioUsdValue]);
   
   // Use real exchange rate from API only - no fallbacks
   const localExchangeRate = marketRate || 1;

@@ -175,18 +175,37 @@ class ConfioRewardsService:
 
         existing = self._read_user_box(user_addr_bytes)
         if existing and existing["eligible_amount"] > 0:
-            logger.info(
-                "Rewards entry already exists for %s (eligible=%s ref=%s); skipping rewrite",
-                user_address,
-                existing["eligible_amount"],
-                existing["ref_amount"],
+            existing_matches = (
+                existing["eligible_amount"] == referee_confio_micro
+                and existing["ref_amount"] == referrer_confio_micro
             )
-            return RewardSyncResult(
-                tx_id="already-recorded",
-                confirmed_round=existing.get("round", 0),
-                referee_confio_micro=existing["eligible_amount"],
-                referrer_confio_micro=existing["ref_amount"],
-                box_name=user_addr_bytes.hex(),
+            if referrer_confio_micro > 0:
+                existing_matches = (
+                    existing_matches
+                    and existing.get("ref_address") == referrer_address
+                )
+            if existing_matches:
+                logger.info(
+                    "Rewards entry already exists for %s (eligible=%s ref=%s); skipping rewrite",
+                    user_address,
+                    existing["eligible_amount"],
+                    existing["ref_amount"],
+                )
+                return RewardSyncResult(
+                    tx_id="already-recorded",
+                    confirmed_round=existing.get("round", 0),
+                    referee_confio_micro=existing["eligible_amount"],
+                    referrer_confio_micro=existing["ref_amount"],
+                    box_name=user_addr_bytes.hex(),
+                )
+            raise RuntimeError(
+                "Rewards box already populated for user="
+                f"{user_address} (box={user_addr_bytes.hex()}); "
+                "contract does not allow rewriting. Existing values: "
+                f"eligible={existing['eligible_amount']} ref_amount={existing['ref_amount']} "
+                f"ref_address={existing.get('ref_address')} claimed_flag={existing['claimed_flag']} "
+                f"ref_claimed_flag={existing['ref_claimed_flag']}. "
+                "Verify referral metadata and run a manual repair before retrying."
             )
 
         if referrer_confio_micro and not referrer_address:
@@ -208,6 +227,15 @@ class ConfioRewardsService:
             reward_cusd_micro.to_bytes(8, "big"),
             user_addr_bytes,
         ]
+
+        logger.info(
+            "[mark_eligibility] user=%s reward_cusd_micro=%s referee_confio_micro=%s referrer_confio_micro=%s referrer=%s",
+            user_address,
+            reward_cusd_micro,
+            referee_confio_micro,
+            referrer_confio_micro,
+            referrer_address,
+        )
 
         accounts = [user_address]
         if referrer_confio_micro > 0 and referrer_address:
@@ -322,12 +350,22 @@ class ConfioRewardsService:
         def read_uint(offset: int) -> int:
             return int.from_bytes(value[offset : offset + 8], "big")
 
+        ref_addr_bytes = value[24:56]
+        ref_address: Optional[str] = None
+        if ref_addr_bytes != bytes(32):
+            try:
+                ref_address = encoding.encode_address(ref_addr_bytes)
+            except Exception:  # pragma: no cover - defensive parsing
+                ref_address = base64.b64encode(ref_addr_bytes).decode()
+
         return {
             "eligible_amount": read_uint(0),
             "claimed_flag": read_uint(8),
             "ref_amount": read_uint(16),
             "ref_claimed_flag": read_uint(56),
             "round": read_uint(64),
+            "ref_address": ref_address,
+            "ref_address_bytes": ref_addr_bytes,
         }
 
     def get_claimable_amount(self, user_address: str) -> Optional[Decimal]:
@@ -341,6 +379,19 @@ class ConfioRewardsService:
         if not box:
             return None
         return Decimal(box["eligible_amount"]) / Decimal(1_000_000)
+
+    def has_confio_opt_in(self, user_address: str) -> bool:
+        """Return True if the address has opted into the CONFIO ASA."""
+        try:
+            self.algod.account_asset_info(user_address, self.confio_asset_id)
+            return True
+        except AlgodHTTPError as exc:  # pragma: no cover - network call
+            if getattr(exc, "code", None) == 404:
+                return False
+            raise
+        except Exception:  # pragma: no cover - network call
+            logger.exception("Failed to check CONFIO opt-in for %s", user_address)
+            raise
 
     def get_confio_price_micro_cusd(self) -> int:
         """Return the current CONFIO price in micro cUSD (falls back to settings)."""
@@ -366,11 +417,11 @@ class ConfioRewardsService:
         referrer_address: Optional[str] = None,
     ) -> dict:
         """
-        Prepare a sponsored claim group so the user can withdraw their CONFIO reward.
+        Prepare a sponsored claim group so the referee can withdraw their CONFIO reward.
 
         Group layout:
           [0] Sponsor self-payment (covers all fees)
-          [1] User ApplicationCall (claim)
+          [1] Referee ApplicationCall (claim)
         """
         params = self.algod.suggested_params()
         min_fee = getattr(params, "min_fee", 1000) or 1000
@@ -384,7 +435,7 @@ class ConfioRewardsService:
         )
 
         boxes = [transaction.BoxReference(0, encoding.decode_address(user_address))]
-        accounts: list[str] = [user_address]
+        accounts: list[str] = []
         if referrer_address:
             accounts.append(referrer_address)
 
@@ -412,9 +463,9 @@ class ConfioRewardsService:
             sp=sponsor_sp,
         )
 
-        gid = transaction.calculate_group_id([user_app_call, sponsor_fee])
-        user_app_call.group = gid
+        gid = transaction.calculate_group_id([sponsor_fee, user_app_call])
         sponsor_fee.group = gid
+        user_app_call.group = gid
 
         try:
             sponsor_signed = sponsor_fee.sign(self.sponsor_private_key)
@@ -426,4 +477,98 @@ class ConfioRewardsService:
             "group_id": base64.b64encode(gid).decode(),
             "sponsor_signed": encoding.msgpack_encode(sponsor_signed),
             "user_unsigned": encoding.msgpack_encode(user_app_call),
+        }
+
+    def build_referrer_claim_group(
+        self,
+        *,
+        referrer_address: str,
+        referee_address: str,
+    ) -> dict:
+        """
+        Prepare a sponsored claim group so the referrer can withdraw their bonus.
+
+        Group layout:
+          [0] Sponsor self-payment (covers all fees)
+          [1] Referrer ApplicationCall (claim_referrer)
+        """
+        referee_key = encoding.decode_address(referee_address)
+        box = self._read_user_box(referee_key)
+        if not box:
+            raise RuntimeError(
+                f"No rewards box found for referee={referee_address}; cannot build referrer claim"
+            )
+        if box["ref_amount"] <= 0:
+            raise RuntimeError(
+                f"No referrer reward recorded for referee={referee_address}; "
+                f"box={box}"
+            )
+        if box["ref_claimed_flag"] != 0:
+            raise RuntimeError(
+                f"Referrer reward already claimed for referee={referee_address}; box={box}"
+            )
+        if box.get("ref_address") != referrer_address:
+            raise RuntimeError(
+                "Referrer address mismatch for referee="
+                f"{referee_address}: box_referrer={box.get('ref_address')} "
+                f"request_referrer={referrer_address}"
+            )
+
+        params = self.algod.suggested_params()
+        min_fee = getattr(params, "min_fee", 1000) or 1000
+
+        user_sp = transaction.SuggestedParams(
+            fee=0,
+            first=params.first,
+            last=params.last,
+            gh=params.gh,
+            flat_fee=True,
+        )
+
+        boxes = [transaction.BoxReference(0, referee_key)]
+        accounts = [referee_address]
+        logger.info(
+            "[referral_claim] build_referrer_claim_group sender=%s referee=%s",
+            referrer_address,
+            referee_address,
+        )
+
+        ref_app_call = transaction.ApplicationNoOpTxn(
+            sender=referrer_address,
+            index=self.app_id,
+            sp=user_sp,
+            app_args=[b"claim_referrer"],
+            accounts=accounts,
+            boxes=boxes,
+            foreign_assets=[self.confio_asset_id],
+        )
+
+        sponsor_sp = transaction.SuggestedParams(
+            fee=min_fee * 3,
+            first=params.first,
+            last=params.last,
+            gh=params.gh,
+            flat_fee=True,
+        )
+        sponsor_fee = transaction.PaymentTxn(
+            sender=self.sponsor_address,
+            receiver=self.sponsor_address,
+            amt=0,
+            sp=sponsor_sp,
+        )
+
+        gid = transaction.calculate_group_id([sponsor_fee, ref_app_call])
+        sponsor_fee.group = gid
+        ref_app_call.group = gid
+
+        try:
+            sponsor_signed = sponsor_fee.sign(self.sponsor_private_key)
+        except Exception as exc:  # pragma: no cover - defensive
+            raise RuntimeError("Unable to sign sponsor transaction") from exc
+
+        return {
+            "success": True,
+            "group_id": base64.b64encode(gid).decode(),
+            "sponsor_signed": encoding.msgpack_encode(sponsor_signed),
+            "user_unsigned": encoding.msgpack_encode(ref_app_call),
         }

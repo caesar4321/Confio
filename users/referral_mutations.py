@@ -2,10 +2,11 @@
 import graphene
 from decimal import Decimal
 from django.db import transaction as db_transaction
-from .models import User
+from .models import User, Account
 from .phone_utils import normalize_any_phone
 from achievements.models import UserReferral, UserAchievement, AchievementType
 from .decorators import rate_limit, check_suspicious_activity
+from .jwt_context import get_jwt_business_context_with_validation
 from django.utils import timezone
 import re
 
@@ -28,6 +29,17 @@ class SetReferrer(graphene.Mutation):
         user = getattr(info.context, 'user', None)
         if not (user and getattr(user, 'is_authenticated', False)):
             return SetReferrer(success=False, error="Authentication required")
+        account_context = get_jwt_business_context_with_validation(info, required_permission=None)
+        if account_context and account_context.get('account_type') == 'business':
+            return SetReferrer(
+                success=False,
+                error="Los bonos de referidos solo están disponibles para cuentas personales.",
+            )
+        if not _has_personal_account(user):
+            return SetReferrer(
+                success=False,
+                error="Necesitas una cuenta personal para participar en el programa de referidos.",
+            )
         
         try:
             # Check if user already has a referral
@@ -83,6 +95,11 @@ class SetReferrer(graphene.Mutation):
 
             if referrer_user and referrer_user.id == user.id:
                 return SetReferrer(success=False, error="No puedes ser tu propio referidor.")
+            if referrer_user and not _has_personal_account(referrer_user):
+                return SetReferrer(
+                    success=False,
+                    error="Los referidores deben usar una cuenta personal.",
+                )
 
             # Calculate reward amounts based on current CONFIO price
             # Both referee and referrer get $5 USD worth of CONFIO each
@@ -156,3 +173,7 @@ class CheckReferralStatus(graphene.Mutation):
                 existing_referrer=existing.referrer_identifier
             )
         return CheckReferralStatus(can_set_referrer=True)
+def _has_personal_account(user: User) -> bool:
+    return Account.objects.filter(
+        user=user, account_type='personal', deleted_at__isnull=True
+    ).exists()

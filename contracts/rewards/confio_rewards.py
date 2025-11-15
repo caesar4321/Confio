@@ -158,6 +158,7 @@ def confio_rewards_app() -> Expr:
         existing_box_data = ScratchVar(TealType.bytes)
         user_addr = ScratchVar(TealType.bytes)
         ref_addr_for_log = ScratchVar(TealType.bytes)
+        ref_account = ScratchVar(TealType.bytes)
 
         vault_balance = AssetHolding.balance(
             Global.current_application_address(),
@@ -294,11 +295,22 @@ def confio_rewards_app() -> Expr:
             ref_addr_for_log.store(Global.zero_address()),
             If(ref_amount.load() > Int(0)).Then(
                 Seq(
+                    # Need 2 foreign accounts: Txn.accounts.length() counts only foreign accounts
+                    # accounts[0]=sender, accounts[1]=first foreign, accounts[2]=second foreign
                     Assert(Txn.accounts.length() > Int(1)),
-                    Assert(Txn.accounts[1] != user_addr.load()),
-                    Assert(Txn.accounts[1] != Global.zero_address()),
+                    ref_account.store(Global.zero_address()),
+                    If(Txn.accounts[1] == user_addr.load()).Then(
+                        ref_account.store(Txn.accounts[2])
+                    ).Else(
+                        Seq(
+                            Assert(Txn.accounts[2] == user_addr.load()),
+                            ref_account.store(Txn.accounts[1]),
+                        )
+                    ),
+                    Assert(ref_account.load() != Global.zero_address()),
+                    Assert(ref_account.load() != user_addr.load()),
                     App.box_replace(
-                        user_addr.load(), REF_ADDRESS_OFFSET, Txn.accounts[1]
+                        user_addr.load(), REF_ADDRESS_OFFSET, ref_account.load()
                     ),
                     App.box_replace(
                         user_addr.load(),
@@ -312,7 +324,7 @@ def confio_rewards_app() -> Expr:
                         TOTAL_REF_ELIGIBLE,
                         App.globalGet(TOTAL_REF_ELIGIBLE) + ref_amount.load(),
                     ),
-                    ref_addr_for_log.store(Txn.accounts[1]),
+                    ref_addr_for_log.store(ref_account.load()),
                 )
             ).Else(
                 Seq(
@@ -368,6 +380,7 @@ def confio_rewards_app() -> Expr:
         box_bytes = ScratchVar(TealType.bytes)
         eligible_amount = ScratchVar(TealType.uint64)
         claimed_flag = ScratchVar(TealType.uint64)
+        ref_payout_account = ScratchVar(TealType.bytes)
 
         return Seq(
             If(App.globalGet(PAUSED) == Int(1)).Then(
@@ -413,49 +426,63 @@ def confio_rewards_app() -> Expr:
             Log(Concat(Bytes("CLAIM|"), user_addr, Bytes("|"), Itob(eligible_amount.load()))),
             If(And(ref_amount.load() > Int(0), ref_claim_flag.load() == Int(0))).Then(
                 Seq(
-                    If(Txn.accounts.length() > Int(1)).Then(
+                    ref_payout_account.store(Global.zero_address()),
+                    If(Txn.accounts.length() > Int(0)).Then(
+                        If(Txn.accounts[0] == ref_addr.load()).Then(
+                            ref_payout_account.store(Txn.accounts[0])
+                        )
+                    ),
+                    If(
+                        And(
+                            ref_payout_account.load() == Global.zero_address(),
+                            Txn.accounts.length() > Int(1),
+                        )
+                    ).Then(
+                        If(Txn.accounts[1] == ref_addr.load()).Then(
+                            ref_payout_account.store(Txn.accounts[1])
+                        )
+                    ),
+                    If(ref_payout_account.load() != Global.zero_address()).Then(
                         Seq(
-                            If(Txn.accounts[1] == ref_addr.load()).Then(
+                            (ref_balance := AssetHolding.balance(
+                                ref_payout_account.load(), App.globalGet(CONFIO_ASA)
+                            )),
+                            ref_balance,
+                            If(ref_balance.hasValue()).Then(
                                 Seq(
-                                    (ref_balance := AssetHolding.balance(Txn.accounts[1], App.globalGet(CONFIO_ASA))),
-                                    ref_balance,
-                                    If(ref_balance.hasValue()).Then(
-                                        Seq(
-                                            InnerTxnBuilder.Begin(),
-                                            InnerTxnBuilder.SetFields({
-                                                TxnField.type_enum: TxnType.AssetTransfer,
-                                                TxnField.xfer_asset: App.globalGet(CONFIO_ASA),
-                                                TxnField.asset_receiver: Txn.accounts[1],
-                                                TxnField.asset_amount: ref_amount.load(),
-                                                TxnField.fee: Int(0),
-                                            }),
-                                            InnerTxnBuilder.Submit(),
-                                            App.box_replace(user_addr, REF_AMOUNT_OFFSET, Itob(Int(0))),
-                                            App.box_replace(user_addr, REF_CLAIMED_OFFSET, Itob(Int(1))),
-                                            App.globalPut(
-                                                TOTAL_REF_PAID,
-                                                App.globalGet(TOTAL_REF_PAID) + ref_amount.load(),
-                                            ),
-                                            App.globalPut(
-                                                REF_CLAIM_COUNT,
-                                                App.globalGet(REF_CLAIM_COUNT) + Int(1),
-                                            ),
-                                            Log(
-                                                Concat(
-                                                    Bytes("REF|"),
-                                                    Txn.accounts[1],
-                                                    Bytes("|"),
-                                                    user_addr,
-                                                    Bytes("|"),
-                                                    Itob(ref_amount.load()),
-                                                )
-                                            ),
+                                    InnerTxnBuilder.Begin(),
+                                    InnerTxnBuilder.SetFields({
+                                        TxnField.type_enum: TxnType.AssetTransfer,
+                                        TxnField.xfer_asset: App.globalGet(CONFIO_ASA),
+                                        TxnField.asset_receiver: ref_payout_account.load(),
+                                        TxnField.asset_amount: ref_amount.load(),
+                                        TxnField.fee: Int(0),
+                                    }),
+                                    InnerTxnBuilder.Submit(),
+                                    App.box_replace(user_addr, REF_AMOUNT_OFFSET, Itob(Int(0))),
+                                    App.box_replace(user_addr, REF_CLAIMED_OFFSET, Itob(Int(1))),
+                                    App.globalPut(
+                                        TOTAL_REF_PAID,
+                                        App.globalGet(TOTAL_REF_PAID) + ref_amount.load(),
+                                    ),
+                                    App.globalPut(
+                                        REF_CLAIM_COUNT,
+                                        App.globalGet(REF_CLAIM_COUNT) + Int(1),
+                                    ),
+                                    Log(
+                                        Concat(
+                                            Bytes("REF|"),
+                                            ref_payout_account.load(),
+                                            Bytes("|"),
+                                            user_addr,
+                                            Bytes("|"),
+                                            Itob(ref_amount.load()),
                                         )
                                     ),
                                 )
-                            )
+                            ),
                         )
-                    )
+                    ),
                 )
             ),
             (post_claim_box := App.box_get(user_addr)),
@@ -473,14 +500,13 @@ def confio_rewards_app() -> Expr:
 
     @Subroutine(TealType.uint64)
     def claim_referrer() -> Expr:
-        """Referrer claims their bonus after the referee has claimed."""
+        """Referrer claims their bonus (order independent from referee)."""
         referee = Txn.accounts[0]
         ref_box = App.box_get(referee)
         box_bytes = ScratchVar(TealType.bytes)
         ref_amount = ScratchVar(TealType.uint64)
         ref_claimed = ScratchVar(TealType.uint64)
         stored_addr = ScratchVar(TealType.bytes)
-        claimed_flag = ScratchVar(TealType.uint64)
         ref_asset = AssetHolding.balance(Txn.sender(), App.globalGet(CONFIO_ASA))
 
         return Seq(
@@ -497,10 +523,9 @@ def confio_rewards_app() -> Expr:
             box_bytes.store(ref_box.value()),
             ref_amount.store(Btoi(Extract(box_bytes.load(), REF_AMOUNT_OFFSET, Int(8)))),
             ref_claimed.store(Btoi(Extract(box_bytes.load(), REF_CLAIMED_OFFSET, Int(8)))),
-            claimed_flag.store(Btoi(Extract(box_bytes.load(), CLAIMED_OFFSET, Int(8)))),
             Assert(ref_amount.load() > Int(0)),
             Assert(ref_claimed.load() == Int(0)),
-            Assert(claimed_flag.load() == Int(1)),
+            # Claim order no longer enforced; claimed_flag may still be 0 if referee has not claimed yet.
 
             stored_addr.store(Extract(box_bytes.load(), REF_ADDRESS_OFFSET, Int(32))),
             Assert(stored_addr.load() == Txn.sender()),
@@ -654,6 +679,19 @@ def confio_rewards_app() -> Expr:
         )
 
     @Subroutine(TealType.uint64)
+    def delete_box() -> Expr:
+        """Admin manually deletes a user's eligibility box (for corrections)."""
+        user_addr = ScratchVar(TealType.bytes)
+        return Seq(
+            assert_admin(),
+            Assert(Txn.application_args.length() >= Int(2)),
+            user_addr.store(Txn.application_args[1]),
+            Assert(Len(user_addr.load()) == Int(32)),
+            Pop(App.box_delete(user_addr.load())),
+            Int(1),
+        )
+
+    @Subroutine(TealType.uint64)
     def pause_program() -> Expr:
         return Seq(
             assert_admin(),
@@ -687,6 +725,7 @@ def confio_rewards_app() -> Expr:
         [Txn.application_args[0] == Bytes("set_sponsor"), update_sponsor()],
         [Txn.application_args[0] == Bytes("set_price_override"), set_price_override()],
         [Txn.application_args[0] == Bytes("clear_price_override"), clear_price_override()],
+        [Txn.application_args[0] == Bytes("delete_box"), delete_box()],
         [Txn.application_args[0] == Bytes("pause"), pause_program()],
         [Txn.application_args[0] == Bytes("resume"), resume_program()],
         [Int(1), Int(0)],

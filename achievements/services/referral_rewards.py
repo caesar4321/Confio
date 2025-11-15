@@ -34,7 +34,8 @@ DEFAULT_EVENT_REWARD_CONFIG: Dict[str, Dict[str, Any]] = {
     "conversion_usdc_to_cusd": {
         "threshold": Decimal("20"),
         "reward_cusd": Decimal("5"),
-        "referrer_confio": Decimal("3"),
+        # Referrer reward mirrors the referee's CONFIO once conversion happens
+        "referrer_confio": None,
         "requires_checkpoint": "top_up",
     },
     "send": {
@@ -332,7 +333,10 @@ def sync_referral_reward_for_event(user, event_ctx: EventContext) -> Optional[Us
             return None
 
     referee_confio = config.get("referee_confio")
-    referrer_confio = config.get("referrer_confio", Decimal("0"))
+    _raw_referrer_confio = config.get("referrer_confio")
+    referrer_confio_defined = "referrer_confio" in config
+    mirror_referee_confio = referrer_confio_defined and _raw_referrer_confio is None
+    referrer_confio = _raw_referrer_confio if _raw_referrer_confio is not None else Decimal("0")
     reward_cusd = config.get("reward_cusd")
 
     event_defaults = {
@@ -397,6 +401,8 @@ def sync_referral_reward_for_event(user, event_ctx: EventContext) -> Optional[Us
         reward_cusd = referee_confio or Decimal("0")
 
     referee_confio = referee_confio or Decimal("0")
+    if mirror_referee_confio:
+        referrer_confio = referee_confio
 
     reward_cusd_micro = to_micro(reward_cusd)
     referee_confio_micro = to_micro(referee_confio)
@@ -474,6 +480,9 @@ def sync_referral_reward_for_event(user, event_ctx: EventContext) -> Optional[Us
         referral.reward_metadata.update(event_ctx.metadata or {})
         referral.reward_submitted_at = timezone.now()
         referral.reward_last_attempt_at = referral.reward_submitted_at
+        referral.referee_reward_status = "eligible"
+        if referrer_confio > Decimal("0") and referral.referrer_user:
+            referral.referrer_reward_status = "eligible"
         referral.save(
             update_fields=[
                 "reward_status",
@@ -486,8 +495,42 @@ def sync_referral_reward_for_event(user, event_ctx: EventContext) -> Optional[Us
                 "reward_metadata",
                 "reward_submitted_at",
                 "reward_last_attempt_at",
+                "referee_reward_status",
+                "referrer_reward_status",
             ]
         )
+
+        if referral.referrer_user and referrer_confio > Decimal("0"):
+            ref_event, _ = ReferralRewardEvent.objects.get_or_create(
+                user=referral.referrer_user,
+                trigger="referral_pending",
+                defaults={
+                    "actor_role": "referrer",
+                    "amount": Decimal("0"),
+                    "transaction_reference": event.transaction_reference,
+                    "occurred_at": event.occurred_at,
+                    "referral": referral,
+                },
+            )
+            metadata = ref_event.metadata or {}
+            metadata.update(event_ctx.metadata or {})
+            ref_event.metadata = metadata
+            ref_event.reward_status = "eligible"
+            ref_event.reward_tx_id = result.tx_id
+            ref_event.referee_confio = referee_confio
+            ref_event.referrer_confio = referrer_confio
+            ref_event.error = ""
+            ref_event.save(
+                update_fields=[
+                    "metadata",
+                    "reward_status",
+                    "reward_tx_id",
+                    "referee_confio",
+                    "referrer_confio",
+                    "error",
+                    "updated_at",
+                ]
+            )
 
     notify_referral_stage(referral, event_ctx)
     notify_reward_ready(referral, referee_confio)

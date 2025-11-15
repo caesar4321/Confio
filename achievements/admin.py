@@ -657,11 +657,21 @@ class UserReferralAdmin(admin.ModelAdmin):
         'total_volume_display',
         'referrer_reward_display',
         'referee_reward_display',
-        'reward_status_display',
+        'referee_chain_status_display',
+        'referrer_chain_status_display',
         'created_at',
     )
     list_display_links = ('referrer_identifier', 'referred_user')
-    list_filter = ('status', 'reward_status', 'created_at', 'first_transaction_at', 'reward_claimed_at', 'reward_submitted_at')
+    list_filter = (
+        'status',
+        'reward_status',
+        'referee_reward_status',
+        'referrer_reward_status',
+        'created_at',
+        'first_transaction_at',
+        'reward_claimed_at',
+        'reward_submitted_at',
+    )
     search_fields = (
         'referred_user__username',
         'referred_user__email',
@@ -677,20 +687,25 @@ class UserReferralAdmin(admin.ModelAdmin):
         ('Referral', {'fields': ('referred_user', 'referrer_identifier', 'referrer_user', 'status')}),
         ('Performance', {'fields': ('first_transaction_at', 'total_transaction_volume')}),
         ('Rewards', {'fields': ('referrer_confio_awarded', 'referee_confio_awarded', 'reward_claimed_at')}),
-        ('On-chain Eligibility', {
-            'fields': (
-                'reward_status',
-                'reward_event',
-                'reward_referee_confio',
-                'reward_referrer_confio',
-                'reward_tx_id',
-                'reward_box_name',
-                'reward_submitted_at',
-                'reward_last_attempt_at',
-                'reward_error',
-                'reward_metadata',
-            ),
-        }),
+        (
+            'On-chain Eligibility',
+            {
+                'fields': (
+                    'reward_status',
+                    'referee_reward_status',
+                    'referrer_reward_status',
+                    'reward_event',
+                    'reward_referee_confio',
+                    'reward_referrer_confio',
+                    'reward_tx_id',
+                    'reward_box_name',
+                    'reward_submitted_at',
+                    'reward_last_attempt_at',
+                    'reward_error',
+                    'reward_metadata',
+                ),
+            },
+        ),
         ('Attribution', {'fields': ('attribution_data',)}),
         ('Timestamps', {'fields': ('created_at', 'updated_at')}),
     )
@@ -725,19 +740,32 @@ class UserReferralAdmin(admin.ModelAdmin):
         amount = obj.referee_confio_awarded or 0
         return format_html('<span>{} CONFIO</span>', f"{amount:,.2f}")
 
-    @admin.display(description="On-chain Status", ordering='reward_status')
-    def reward_status_display(self, obj):
+    @admin.display(description="Estado Referido", ordering='referee_reward_status')
+    def referee_chain_status_display(self, obj):
         colors = {
             'pending': '#F59E0B',
             'eligible': '#10B981',
             'failed': '#EF4444',
             'claimed': '#2563EB',
         }
-        label = obj.get_reward_status_display()
         return format_html(
             '<span style="color: {}; font-weight: 600;">{}</span>',
-            colors.get(obj.reward_status, '#6B7280'),
-            label
+            colors.get(obj.referee_reward_status, '#6B7280'),
+            obj.get_referee_reward_status_display(),
+        )
+
+    @admin.display(description="Estado Referidor", ordering='referrer_reward_status')
+    def referrer_chain_status_display(self, obj):
+        colors = {
+            'pending': '#F59E0B',
+            'eligible': '#10B981',
+            'failed': '#EF4444',
+            'claimed': '#2563EB',
+        }
+        return format_html(
+            '<span style="color: {}; font-weight: 600;">{}</span>',
+            colors.get(obj.referrer_reward_status, '#6B7280'),
+            obj.get_referrer_reward_status_display(),
         )
     
     @admin.display(description="Referrer User", ordering='referrer_user__username')
