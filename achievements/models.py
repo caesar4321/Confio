@@ -391,6 +391,18 @@ class UserReferral(SoftDeleteModel):
         blank=True,
         help_text="Metadatos adicionales (ej. parámetros Algorand)"
     )
+    referee_reward_status = models.CharField(
+        max_length=20,
+        choices=REWARD_STATUS_CHOICES,
+        default='pending',
+        help_text="Estado on-chain específico para el referido",
+    )
+    referrer_reward_status = models.CharField(
+        max_length=20,
+        choices=REWARD_STATUS_CHOICES,
+        default='pending',
+        help_text="Estado on-chain específico para el referidor",
+    )
     
     class Meta:
         unique_together = [('referred_user', 'deleted_at')]

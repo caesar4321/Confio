@@ -14,6 +14,7 @@ class UnifiedTransactionTable(models.Model):
         ('payment', 'Payment'),
         ('conversion', 'Conversion'),
         ('exchange', 'P2P Exchange'),
+        ('reward', 'Reward'),
     ]
     
     STATUS_CHOICES = [
