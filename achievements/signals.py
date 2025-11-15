@@ -325,6 +325,7 @@ def sync_pending_reward_events(sender, instance: UserReferral, created, **kwargs
     def ensure_pending_event(user, role: str, stage_meta: str, reward_amount: Decimal):
         if not user:
             return
+        claimed = bool(instance.reward_claimed_at)
         defaults = {
             "user": user,
             "referral": instance,
@@ -333,7 +334,7 @@ def sync_pending_reward_events(sender, instance: UserReferral, created, **kwargs
             "amount": Decimal("0"),
             "transaction_reference": "",
             "occurred_at": instance.created_at or timezone.now(),
-            "reward_status": "pending",
+            "reward_status": "pending" if not claimed else "claimed",
             "referee_confio": reward_amount if role == "referee" else Decimal("0"),
             "referrer_confio": reward_amount if role == "referrer" else Decimal("0"),
             "metadata": {"stage": stage_meta},
@@ -343,16 +344,22 @@ def sync_pending_reward_events(sender, instance: UserReferral, created, **kwargs
             trigger="referral_pending",
             defaults=defaults,
         )
-        if not created_flag:
-            needs_update = False
-            if event.referral_id != instance.id:
-                event.referral = instance
-                needs_update = True
-            if event.reward_status != "pending":
-                event.reward_status = "pending"
-                needs_update = True
-            if needs_update:
-                event.save(update_fields=["referral", "reward_status", "updated_at"])
+        if created_flag:
+            if claimed and event.reward_status != "claimed":
+                event.reward_status = "claimed"
+                event.save(update_fields=["reward_status", "updated_at"])
+            return
+
+        needs_update = False
+        if event.referral_id != instance.id:
+            event.referral = instance
+            needs_update = True
+        desired_status = "claimed" if claimed else "pending"
+        if event.reward_status != desired_status:
+            event.reward_status = desired_status
+            needs_update = True
+        if needs_update:
+            event.save(update_fields=["referral", "reward_status", "updated_at"])
 
     ensure_pending_event(
         instance.referred_user,
