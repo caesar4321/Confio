@@ -17,6 +17,7 @@ export interface TransactionFilters {
     payment: boolean;
     exchange: boolean;
     conversion: boolean;
+    reward: boolean;
   };
   currencies: {
     cUSD: boolean;
@@ -67,6 +68,7 @@ export const TransactionFilterModal = ({
         payment: true,
         exchange: true,
         conversion: true,
+        reward: true,
       },
       currencies: {
         cUSD: true,
@@ -222,6 +224,18 @@ export const TransactionFilterModal = ({
                   <Icon name="repeat" size={16} color={filters.types.conversion ? theme.primary : '#6B7280'} />
                   <Text style={[styles.filterChipText, filters.types.conversion && { color: theme.primary }]}>
                     Conversión
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.filterChip,
+                    filters.types.reward && { backgroundColor: '#FBBF24' + '20', borderColor: '#FBBF24' }
+                  ]}
+                  onPress={() => toggleType('reward')}
+                >
+                  <Icon name="gift" size={16} color={filters.types.reward ? '#F59E0B' : '#6B7280'} />
+                  <Text style={[styles.filterChipText, filters.types.reward && { color: '#F59E0B' }]}>
+                    Recompensa
                   </Text>
                 </TouchableOpacity>
               </View>

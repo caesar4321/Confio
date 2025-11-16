@@ -700,20 +700,80 @@ export class SecureDeterministicWalletService {
    */
   private decodeTxn(bytes: Uint8Array): any {
     const algosdk = require('algosdk');
-    
+
     console.log(`[SecureDeterministicWallet] Decoding transaction of ${bytes.length} bytes`);
     console.log(`[SecureDeterministicWallet] First 10 bytes: ${Array.from(bytes.slice(0, 10)).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' ')}`);
-    
+
     try {
+      // First decode as raw msgpack to see ALL fields
+      console.log(`[SecureDeterministicWallet] Raw msgpack decode:`);
+      const raw = algosdk.decodeObj(bytes);
+      console.log(`[SecureDeterministicWallet] Raw fields:`, JSON.stringify(Object.keys(raw), null, 2));
+      if (raw.apaa) console.log(`[SecureDeterministicWallet] Raw apaa (app args):`, raw.apaa);
+      if (raw.apat) console.log(`[SecureDeterministicWallet] Raw apat (app accounts):`, raw.apat);
+      if (raw.apbx) console.log(`[SecureDeterministicWallet] Raw apbx (boxes):`, raw.apbx);
+      if (raw.snd) {
+        const sndAddr = algosdk.encodeAddress(raw.snd);
+        console.log(`[SecureDeterministicWallet] Raw snd (sender):`, sndAddr);
+      }
+
       // Use algosdk's decodeUnsignedTransaction which returns a proper Transaction instance
       // This handles all the field mapping correctly
       const txn = algosdk.decodeUnsignedTransaction(bytes);
-      
+
+      // WORKAROUND: algosdk.decodeUnsignedTransaction doesn't properly decode boxes
+      // So we manually copy them from the raw msgpack if they're missing
+      if ((!txn.boxes || txn.boxes.length === 0) && raw.apbx && raw.apbx.length > 0) {
+        console.log(`[SecureDeterministicWallet] WORKAROUND: Manually copying boxes from raw msgpack`);
+        txn.boxes = raw.apbx.map((box: any) => ({
+          appIndex: box.i || 0,
+          name: box.n
+        }));
+        console.log(`[SecureDeterministicWallet] Copied ${txn.boxes.length} box references`);
+      }
+
+      // WORKAROUND: algosdk.decodeUnsignedTransaction doesn't set sender properly
+      if (!txn.from && raw.snd) {
+        const senderAddr = algosdk.encodeAddress(raw.snd);
+        console.log(`[SecureDeterministicWallet] WORKAROUND: Setting sender from raw msgpack: ${senderAddr}`);
+        txn.from = algosdk.decodeAddress(senderAddr);
+      }
+
+      // WORKAROUND: Copy app accounts if missing
+      if ((!txn.appAccounts || txn.appAccounts.length === 0) && raw.apat && raw.apat.length > 0) {
+        console.log(`[SecureDeterministicWallet] WORKAROUND: Manually copying app accounts from raw msgpack`);
+        txn.appAccounts = raw.apat.map((addr: Uint8Array) => algosdk.decodeAddress(algosdk.encodeAddress(addr)));
+      }
+
+      // Log the transaction details
+      console.log(`[SecureDeterministicWallet] Decoded transaction type: ${txn.type}`);
+      console.log(`[SecureDeterministicWallet] Sender: ${txn.from?.toString()}`);
+      console.log(`[SecureDeterministicWallet] All txn properties:`, Object.keys(txn));
+      if (txn.appAccounts && txn.appAccounts.length > 0) {
+        console.log(`[SecureDeterministicWallet] App Accounts: ${txn.appAccounts.map((a: any) => a.toString()).join(', ')}`);
+      }
+      if (txn.boxes && txn.boxes.length > 0) {
+        console.log(`[SecureDeterministicWallet] Boxes: ${txn.boxes.length} references`);
+        txn.boxes.forEach((box: any, i: number) => {
+          const boxName = box.name;
+          console.log(`[SecureDeterministicWallet]   Box ${i}: app=${box.appIndex}, name_hex=${Buffer.from(boxName).toString('hex')}`);
+          // Try to decode as address
+          try {
+            const boxAddr = algosdk.encodeAddress(boxName);
+            console.log(`[SecureDeterministicWallet]   Box ${i}: as address=${boxAddr}`);
+          } catch (e) {
+            console.log(`[SecureDeterministicWallet]   Box ${i}: length=${boxName.length} (not an address)`);
+          }
+        });
+      } else {
+        console.log(`[SecureDeterministicWallet] NO BOXES in decoded transaction!`);
+      }
+
       // Verify it has the signTxn method
       if (typeof txn.signTxn !== 'function') {
         throw new Error('Decoded transaction does not have signTxn method');
       }
-      
+
       return txn;
     } catch (error) {
       console.error('[SecureDeterministicWallet] Failed to decode transaction:', error);
@@ -769,14 +829,92 @@ export class SecureDeterministicWalletService {
         txn = txnOrBytes;
       }
       
-      // Ensure we have a signable transaction
-      if (typeof txn?.signTxn !== 'function') {
-        throw new Error('Transaction object does not have signTxn method');
+      // IMPORTANT: For sponsored transactions (txnOrBytes instanceof Uint8Array),
+      // we CANNOT decode and re-encode because algosdk's decode/encode doesn't
+      // preserve all fields correctly (especially boxes). Instead, we must sign
+      // the raw bytes directly using the low-level signing approach.
+
+      console.log('[SecureDeterministicWallet] About to sign transaction');
+      console.log('[SecureDeterministicWallet] Transaction type:', txn.type);
+      console.log('[SecureDeterministicWallet] Boxes before signing:', txn.boxes?.length || 0);
+      if (txn.boxes && txn.boxes.length > 0) {
+        txn.boxes.forEach((box: any, i: number) => {
+          console.log(`[SecureDeterministicWallet]   Box ${i}:`, box);
+        });
       }
-      
-      // Sign transaction
-      const signedTxn = txn.signTxn(sk);
-      return signedTxn;
+
+      const algosdk = require('algosdk');
+
+      if (txnOrBytes instanceof Uint8Array) {
+        // For sponsored transactions: sign the raw bytes directly without decode/re-encode
+        console.log('[SecureDeterministicWallet] Signing raw msgpack bytes (sponsored transaction)');
+
+        // Build the "TX" prefix that Algorand uses
+        const TX_PREFIX = new Uint8Array(Buffer.from('TX'));
+
+        // Concatenate prefix + transaction bytes
+        const toBeSigned = new Uint8Array(TX_PREFIX.length + txnOrBytes.length);
+        toBeSigned.set(TX_PREFIX);
+        toBeSigned.set(txnOrBytes, TX_PREFIX.length);
+
+        // Sign with nacl
+        const signature = nacl.sign.detached(toBeSigned, sk);
+
+        // CRITICAL: We must NOT decode/re-encode the transaction!
+        // The issue is that msgpack encoding is not deterministic - encoding the same
+        // data can produce different bytes, and algosdk's encode/decode is changing
+        // the box references!
+        //
+        // The correct approach: Build SignedTxn msgpack MANUALLY by concatenating:
+        // 1. A msgpack map header for 2 items
+        // 2. Key "sig" + signature bytes
+        // 3. Key "txn" + ORIGINAL transaction bytes (not re-encoded!)
+
+        // Let's manually build the msgpack structure
+        // SignedTxn = Map { "sig": <64 bytes>, "txn": <original msgpack bytes> }
+
+        // Msgpack format:
+        // - fixmap with 2 items: 0x82
+        // - key "sig" (3 chars): 0xa3 + "sig"
+        // - value: bin 32 header (0xc4 0x20) + 64 bytes of signature (actually it's bin8 with 0xc4 0x40)
+        // - key "txn" (3 chars): 0xa3 + "txn"
+        // - value: the original transaction bytes AS-IS
+
+        const result: number[] = [];
+
+        // Map with 2 items
+        result.push(0x82);
+
+        // Key "sig" (fixstr 3)
+        result.push(0xa3);
+        result.push(...Buffer.from('sig'));
+
+        // Signature value (bin8 format for 64 bytes)
+        result.push(0xc4);  // bin 8
+        result.push(64);    // length = 64
+        result.push(...signature);
+
+        // Key "txn" (fixstr 3)
+        result.push(0xa3);
+        result.push(...Buffer.from('txn'));
+
+        // Transaction value: the ORIGINAL bytes without any modification
+        result.push(...txnOrBytes);
+
+        const signedTxn = new Uint8Array(result);
+
+        console.log('[SecureDeterministicWallet] Raw transaction signed successfully');
+        console.log('[SecureDeterministicWallet] Signed txn length:', signedTxn.length);
+        console.log('[SecureDeterministicWallet] Original txn length:', txnOrBytes.length);
+        console.log('[SecureDeterministicWallet] Signature length:', signature.length);
+        return signedTxn;
+      } else {
+        // For regular Transaction objects: use the normal signing method
+        console.log('[SecureDeterministicWallet] Signing Transaction object (regular transaction)');
+        const signedTxn = txn.signTxn(sk);
+        console.log('[SecureDeterministicWallet] Transaction signed successfully');
+        return signedTxn;
+      }
     } catch (error: any) {
       const msg = String(error?.message || error);
       if (msg.includes('No active wallet scope')) {

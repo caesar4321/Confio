@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView, Clipboard, Image, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView, Clipboard, Image, ActivityIndicator, Share } from 'react-native';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
@@ -366,6 +366,21 @@ const DepositScreen = () => {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+
+  const handleShare = useCallback(async () => {
+    if (!depositAddress) {
+      return;
+    }
+    try {
+      const message = `Esta es mi dirección ${config.name} en Confío:\n${depositAddress}`;
+      await Share.share({
+        title: `Dirección ${config.name}`,
+        message,
+      });
+    } catch (error) {
+      console.error('[DepositScreen] Error al compartir dirección:', error);
+    }
+  }, [depositAddress, config.name]);
 
   // Move styles inside the component to use insets
 const styles = StyleSheet.create({
@@ -746,7 +761,7 @@ const styles = StyleSheet.create({
             </View>
           </View>
           
-          <TouchableOpacity style={[styles.shareButton, { backgroundColor: config.color }]}>
+          <TouchableOpacity style={[styles.shareButton, { backgroundColor: config.color }]} onPress={handleShare}>
             <Text style={styles.shareButtonText}>Compartir dirección</Text>
           </TouchableOpacity>
         </View>
