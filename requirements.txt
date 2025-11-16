@@ -27,3 +27,4 @@ python-decouple==3.8
 whitenoise==6.9.0
 django-graphql-jwt
 py-algorand-sdk==2.7.0
+pyteal==0.27.0
