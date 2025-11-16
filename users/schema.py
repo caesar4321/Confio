@@ -23,6 +23,7 @@ from decimal import Decimal
 from .country_codes import COUNTRY_CODES
 from .phone_utils import normalize_any_phone
 from .phone_utils import normalize_phone
+from .review_numbers import is_review_test_phone_key
 from graphql_jwt.utils import jwt_encode, jwt_decode
 from graphql_jwt.shortcuts import create_refresh_token
 from datetime import datetime, timedelta
@@ -1807,15 +1808,25 @@ class UpdatePhoneNumber(graphene.Mutation):
 		if not iso_country_code:
 			return UpdatePhoneNumber(success=False, error="Invalid country code")
 
-			# Update user's phone number and canonical phone key
-			try:
-				user.phone_country = iso_country_code  # Store ISO code
-				user.phone_number = phone_number
-				user.phone_key = normalize_phone(phone_number, country_code)
-				user.save()
-				return UpdatePhoneNumber(success=True, error=None)
-			except Exception as e:
-				return UpdatePhoneNumber(success=False, error=str(e))
+		# Update user's phone number and canonical phone key
+		try:
+			phone_key = normalize_phone(phone_number, country_code)
+			allow_duplicates = is_review_test_phone_key(phone_key)
+			if not allow_duplicates:
+				duplicate_exists = User.objects.filter(
+					phone_key=phone_key,
+					deleted_at__isnull=True
+				).exclude(id=user.id).exists()
+				if duplicate_exists:
+					return UpdatePhoneNumber(success=False, error="Este número ya está registrado en Confío. Inicia sesión o recupera tu cuenta.")
+
+			user.phone_country = iso_country_code  # Store ISO code
+			user.phone_number = phone_number
+			user.phone_key = phone_key
+			user.save()
+			return UpdatePhoneNumber(success=True, error=None)
+		except Exception as e:
+			return UpdatePhoneNumber(success=False, error=str(e))
 
 class UpdateUsername(graphene.Mutation):
 	class Arguments:
