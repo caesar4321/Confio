@@ -15,14 +15,22 @@ const FriendlyRoadmap = () => {
     {
       quarter: 'Q4 2025',
       title: t('Lanzamiento en Venezuela', 'Launch in Venezuela', '베네수엘라 출시'),
-      description: t('Apertura oficial para usuarios en Venezuela con P2P Exchange completo', 'Official opening for users in Venezuela with complete P2P Exchange', '베네수엘라 사용자를 위한 완전한 P2P 거래소와 함께 공식 오픈'),
+      description: t(
+        'Apertura oficial para usuarios en Venezuela con P2P Exchange completo, retrasado por el rechazo de entrada del fundador Julián en Venezuela. Pivotando el primer mercado principal hacia Argentina.',
+        'Official opening for users in Venezuela with the complete P2P Exchange, delayed because founder Julian was denied entry into Venezuela. Pivoting the first principal market toward Argentina.',
+        '베네수엘라 사용자를 위한 전체 P2P 거래소 공식 출시는 창업자 줄리안의 베네수엘라 입국 거부로 지연되었습니다. 첫 번째 핵심 시장을 아르헨티나로 전환하고 있습니다.'
+      ),
       icon: '🇻🇪',
       status: 'active'
     },
     {
       quarter: 'Q1 2026',
-      title: t('Crecimiento y Primera Preventa', 'Growth and First Presale', '성장과 첫 사전 판매'),
-      description: t('Expansión en Venezuela y primera preventa exclusiva de $CONFIO', 'Expansion in Venezuela and first exclusive $CONFIO presale', '베네수엘라 확장 및 첫 $CONFIO 독점 사전 판매'),
+      title: t('Alianzas Onramp, integraciones automáticas y primera preventa', 'Onramp partnerships, automatic integrations, and first presale', '온램프 파트너십, 자동 통합 및 첫 사전 판매'),
+      description: t(
+        'Integración con socios Onramp para que los usuarios recarguen dólares automáticamente desde sus bancos o apps fintech favoritas, junto a la primera preventa oficial de $CONFIO.',
+        'Partnering and integrating with Onramps so users can top up dollar balances automatically from their favorite banks or fintech apps, plus the first official $CONFIO presale.',
+        '사용자가 선호하는 은행이나 핀테크 앱에서 자동으로 달러 잔액을 충전할 수 있도록 온램프 파트너와 통합하고, 첫 공식 $CONFIO 사전 판매를 진행합니다.'
+      ),
       icon: '🚀',
       status: 'upcoming'
     },

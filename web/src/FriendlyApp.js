@@ -7,7 +7,6 @@ import { LanguageProvider } from './contexts/LanguageContext';
 // Friendly Fintech Components
 import LanguageSwitcher from './Components/LandingPage/LanguageSwitcher';
 import FriendlyHeroSection from './Components/LandingPage/FriendlyHeroSection';
-import FriendlyBetaProgram from './Components/LandingPage/FriendlyBetaProgram';
 import FriendlyFeatures from './Components/LandingPage/FriendlyFeatures';
 import FriendlyHowItWorks from './Components/LandingPage/FriendlyHowItWorks';
 import FriendlyAssets from './Components/LandingPage/FriendlyAssets';
@@ -65,7 +64,6 @@ function FriendlyApp() {
                 <LanguageSwitcher />
                 <main>
                   <FriendlyHeroSection />
-                  <FriendlyBetaProgram />
                   <FriendlyFeatures />
                   <FriendlyHowItWorks />
                   <FriendlyAssets />
