@@ -1,5 +1,3 @@
-/Users/julian/Confio/myvenv/lib/python3.10/site-packages/pyteal/pragma/pragma.py:2: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
-  import pkg_resources
 #pragma version 8
 txn ApplicationID
 int 0

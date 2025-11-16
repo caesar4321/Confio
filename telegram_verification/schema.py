@@ -14,8 +14,12 @@ from django.db import IntegrityError
 from users.phone_utils import normalize_phone
 from users.models import Account
 from blockchain.invite_send_mutations import ClaimInviteForPhone
-from users.review_numbers import is_review_test_phone_key
+from users.review_numbers import (
+    get_review_test_code_for_phone,
+    is_review_test_phone_key,
+)
 import time
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +110,27 @@ class InitiateTelegramVerification(graphene.Mutation):
         
         logger.info('Initiating Telegram verification for phone number: %s', formatted_phone)
         logger.info('Using Telegram Gateway Token: %s...', TELEGRAM_GATEWAY_TOKEN[:10] if TELEGRAM_GATEWAY_TOKEN else 'None')
+
+        # Reviewer bypass: create a local verification record without calling Telegram API
+        review_code = get_review_test_code_for_phone(formatted_phone)
+        if review_code:
+            logger.info('Review test phone detected; skipping Telegram API call')
+            # Clean up prior pending verifications for this phone
+            TelegramVerification.objects.filter(
+                user=user,
+                phone_number=formatted_phone,
+                is_verified=False,
+                expires_at__gt=timezone.now()
+            ).delete()
+            request_id = f"review-{uuid.uuid4()}"
+            TelegramVerification.objects.create(
+                user=user,
+                phone_number=formatted_phone,
+                request_id=request_id,
+                expires_at=timezone.now() + timedelta(seconds=ttl)
+            )
+            logger.info('Stored local Telegram verification request for review testing (request_id=%s)', request_id)
+            return InitiateTelegramVerification(success=True, error=None)
         
         # Rate limiting: Check if user has made a request recently or is in flood wait
         rate_limit_key = f"telegram_verification_rate_limit:{user.id}:{formatted_phone}"
@@ -251,6 +276,71 @@ class VerifyTelegramCode(graphene.Mutation):
                 phone_number=formatted_phone,
                 is_verified=False
             ).exclude(id=verification.id).delete()
+
+            def finalize_success():
+                try:
+                    user.phone_number = phone_number  # Store without country code
+                    user.phone_country = country_code  # Store ISO country code
+                    user.save()
+                    verification.is_verified = True
+                    verification.save(update_fields=['is_verified'])
+
+                    # Auto-claim any existing invitation for this phone (best-effort)
+                    try:
+                        res = None
+                        acct = Account.objects.filter(user=user, account_type='personal', account_index=0, deleted_at__isnull=True).first()
+                        recipient_addr = getattr(acct, 'algorand_address', None)
+                        if recipient_addr:
+                            # Resolve the latest PhoneInvite for this canonical phone and claim by invitation_id
+                            try:
+                                from send.models import PhoneInvite
+                                pk = normalize_phone(phone_number, country_code)
+                                inv = PhoneInvite.objects.filter(
+                                    phone_key=pk,
+                                    status='pending',
+                                    deleted_at__isnull=True
+                                ).order_by('-created_at').first()
+                                if inv:
+                                    res = ClaimInviteForPhone.mutate(None, info, recipient_address=recipient_addr, invitation_id=inv.invitation_id)
+                                else:
+                                    logger.info('Auto-claim skipped: no pending PhoneInvite found for phone_key=%s', pk)
+                            except Exception:
+                                logger.info('Auto-claim skipped due to DB lookup failure; will not attempt fallback claim')
+                            if res is not None:
+                                ok = getattr(res, 'success', False)
+                                err = getattr(res, 'error', None)
+                                logger.info('Auto-claim invite result: success=%s error=%s', ok, err)
+                        else:
+                            logger.info('Auto-claim skipped: no personal account address found')
+                    except Exception as ce:
+                        logger.exception('Auto-claim invite failed: %s', ce)
+
+                    return VerifyTelegramCode(success=True, error=None)
+                except IntegrityError as e:
+                    logger.exception('Phone save failed due to uniqueness: %s', e)
+                    return VerifyTelegramCode(success=False, error="Este número ya está registrado en Confío. Inicia sesión o recupera tu cuenta.")
+                except Exception as e:
+                    logger.exception('Unexpected error saving phone: %s', e)
+                    return VerifyTelegramCode(success=False, error="Ocurrió un error al guardar tu número. Inténtalo de nuevo.")
+
+            # Reviewer bypass: match configured static code without calling Telegram
+            review_code = get_review_test_code_for_phone(formatted_phone)
+            if review_code:
+                logger.info('Review test phone detected during Telegram verification')
+                if code != review_code:
+                    return VerifyTelegramCode(success=False, error="Código de verificación inválido. Por favor verifica el código e inténtalo nuevamente.")
+                phone_key = normalize_phone(phone_number, country_code)
+                allow_duplicates = is_review_test_phone_key(phone_key)
+                if not allow_duplicates:
+                    from users.models import User as UserModel
+                    duplicate_exists = UserModel.objects.filter(
+                        phone_key=phone_key,
+                        deleted_at__isnull=True
+                    ).exclude(id=user.id).exists()
+                    if duplicate_exists:
+                        logger.error('Phone already in use by another account: %s', phone_key)
+                        return VerifyTelegramCode(success=False, error="Este número ya está registrado en Confío. Inicia sesión o recupera tu cuenta.")
+                return finalize_success()
             
             TELEGRAM_GATEWAY_TOKEN = settings.TELEGRAM_API_TOKEN
             
@@ -338,52 +428,7 @@ class VerifyTelegramCode(graphene.Mutation):
                             logger.error('Phone already in use by another account: %s', phone_key)
                             return VerifyTelegramCode(success=False, error="Este número ya está registrado en Confío. Inicia sesión o recupera tu cuenta.")
 
-                    # Update user's phone number and country code
-                    try:
-                        user.phone_number = phone_number  # Store without country code
-                        user.phone_country = country_code  # Store ISO country code
-                        user.save()
-                        # Mark verification consumed only after successful save
-                        verification.is_verified = True
-                        verification.save(update_fields=['is_verified'])
-
-                        # Auto-claim any existing invitation for this phone (best-effort)
-                        try:
-                            res = None
-                            acct = Account.objects.filter(user=user, account_type='personal', account_index=0, deleted_at__isnull=True).first()
-                            recipient_addr = getattr(acct, 'algorand_address', None)
-                            if recipient_addr:
-                                # Resolve the latest PhoneInvite for this canonical phone and claim by invitation_id
-                                try:
-                                    from send.models import PhoneInvite
-                                    pk = normalize_phone(phone_number, country_code)
-                                    inv = PhoneInvite.objects.filter(
-                                        phone_key=pk,
-                                        status='pending',
-                                        deleted_at__isnull=True
-                                    ).order_by('-created_at').first()
-                                    if inv:
-                                        res = ClaimInviteForPhone.mutate(None, info, recipient_address=recipient_addr, invitation_id=inv.invitation_id)
-                                    else:
-                                        logger.info('Auto-claim skipped: no pending PhoneInvite found for phone_key=%s', pk)
-                                except Exception:
-                                    logger.info('Auto-claim skipped due to DB lookup failure; will not attempt fallback claim')
-                                if res is not None:
-                                    ok = getattr(res, 'success', False)
-                                    err = getattr(res, 'error', None)
-                                    logger.info('Auto-claim invite result: success=%s error=%s', ok, err)
-                            else:
-                                logger.info('Auto-claim skipped: no personal account address found')
-                        except Exception as ce:
-                            logger.exception('Auto-claim invite failed: %s', ce)
-
-                        return VerifyTelegramCode(success=True, error=None)
-                    except IntegrityError as e:
-                        logger.exception('Phone save failed due to uniqueness: %s', e)
-                        return VerifyTelegramCode(success=False, error="Este número ya está registrado en Confío. Inicia sesión o recupera tu cuenta.")
-                    except Exception as e:
-                        logger.exception('Unexpected error saving phone: %s', e)
-                        return VerifyTelegramCode(success=False, error="Ocurrió un error al guardar tu número. Inténtalo de nuevo.")
+                    return finalize_success()
                 elif status == 'code_invalid':
                     logger.info('Code verification failed: invalid code')
                     return VerifyTelegramCode(success=False, error="Código de verificación inválido. Por favor verifica el código e inténtalo nuevamente.")

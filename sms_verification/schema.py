@@ -15,7 +15,10 @@ from users.country_codes import COUNTRY_CODES
 from users.phone_utils import normalize_phone
 from users.models import Account
 from blockchain.invite_send_mutations import ClaimInviteForPhone
-from users.review_numbers import is_review_test_phone_key
+from users.review_numbers import (
+    is_review_test_phone_key,
+    review_test_pairs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -109,29 +112,19 @@ class InitiateSMSVerification(graphene.Mutation):
         try:
             # Store review test number bypass (no external SMS)
             try:
-                if getattr(settings, 'REVIEW_TEST_ENABLED', False):
-                    pairs = []
-                    tp1 = getattr(settings, 'REVIEW_TEST_PHONE_E164', None)
-                    tc1 = getattr(settings, 'REVIEW_TEST_CODE', None)
-                    if tp1 and tc1:
-                        pairs.append((tp1, tc1))
-                    tp2 = getattr(settings, 'REVIEW_TEST_PHONE_E164_2', None)
-                    tc2 = getattr(settings, 'REVIEW_TEST_CODE_2', None)
-                    if tp2 and tc2:
-                        pairs.append((tp2, tc2))
-                    for p, c in pairs:
-                        if phone_e164 == p:
-                            # Clean old unverified
-                            SMSVerification.objects.filter(user=user, phone_number=phone_e164, is_verified=False).delete()
-                            code_hash = _hmac_code(phone_e164, c)
-                            SMSVerification.objects.create(
-                                user=user,
-                                phone_number=phone_e164,
-                                code_hash=code_hash,
-                                expires_at=timezone.now() + timedelta(seconds=ttl_sec),
-                            )
-                            logger.info("Review test phone used; created local verification without sending SMS")
-                            return InitiateSMSVerification(success=True, error=None)
+                for p, c in review_test_pairs():
+                    if phone_e164 == p:
+                        # Clean old unverified
+                        SMSVerification.objects.filter(user=user, phone_number=phone_e164, is_verified=False).delete()
+                        code_hash = _hmac_code(phone_e164, c)
+                        SMSVerification.objects.create(
+                            user=user,
+                            phone_number=phone_e164,
+                            code_hash=code_hash,
+                            expires_at=timezone.now() + timedelta(seconds=ttl_sec),
+                        )
+                        logger.info("Review test phone used; created local verification without sending SMS")
+                        return InitiateSMSVerification(success=True, error=None)
             except Exception:
                 # Never fail the flow due to review bypass logic
                 pass
@@ -193,73 +186,63 @@ class VerifySMSCode(graphene.Mutation):
 
         # Store review test number bypass
         try:
-            if getattr(settings, 'REVIEW_TEST_ENABLED', False):
-                pairs = []
-                tp1 = getattr(settings, 'REVIEW_TEST_PHONE_E164', None)
-                tc1 = getattr(settings, 'REVIEW_TEST_CODE', None)
-                if tp1 and tc1:
-                    pairs.append((tp1, tc1))
-                tp2 = getattr(settings, 'REVIEW_TEST_PHONE_E164_2', None)
-                tc2 = getattr(settings, 'REVIEW_TEST_CODE_2', None)
-                if tp2 and tc2:
-                    pairs.append((tp2, tc2))
-                for p, c in pairs:
-                    if phone_e164 == p:
-                        if code != c:
-                            return VerifySMSCode(success=False, error="Invalid verification code")
-                        # Mark verified and update user phone as in the normal success path
+            for p, c in review_test_pairs():
+                if phone_e164 == p:
+                    if code != c:
+                        return VerifySMSCode(success=False, error="Invalid verification code")
+                    # Mark verified and update user phone as in the normal success path
+                    try:
+                        phone_key = normalize_phone(phone_number, country_code)
+                        allow_duplicates = is_review_test_phone_key(phone_key)
+                        if not allow_duplicates:
+                            from users.models import User as UserModel
+                            duplicate_exists = UserModel.objects.filter(
+                                phone_key=phone_key,
+                                deleted_at__isnull=True
+                            ).exclude(id=user.id).exists()
+                            if duplicate_exists:
+                                return VerifySMSCode(success=False, error="Este número ya está registrado en Confío. Inicia sesión o recupera tu cuenta.")
+
+                        user.phone_number = phone_number
+                        user.phone_country = country_code
+                        user.save()
+
+                        # Upsert local verification record
+                        v = SMSVerification.objects.filter(
+                            user=user, phone_number=phone_e164, is_verified=False
+                        ).order_by('-created_at').first()
+                        if v:
+                            v.is_verified = True
+                            v.save(update_fields=['is_verified'])
+                        else:
+                            SMSVerification.objects.create(
+                                user=user,
+                                phone_number=phone_e164,
+                                code_hash=_hmac_code(phone_e164, c),
+                                expires_at=timezone.now() + timedelta(seconds=getattr(settings, 'SMS_CODE_TTL_SECONDS', 600)),
+                                is_verified=True,
+                            )
+
+                        # Best-effort auto-claim invite
                         try:
-                            phone_key = normalize_phone(phone_number, country_code)
-                            allow_duplicates = is_review_test_phone_key(phone_key)
-                            if not allow_duplicates:
-                                from users.models import User as UserModel
-                                duplicate_exists = UserModel.objects.filter(
-                                    phone_key=phone_key,
+                            acct = Account.objects.filter(user=user, account_type='personal', account_index=0, deleted_at__isnull=True).first()
+                            recipient_addr = getattr(acct, 'algorand_address', None)
+                            if recipient_addr:
+                                from send.models import PhoneInvite
+                                pk = normalize_phone(phone_number, country_code)
+                                inv = PhoneInvite.objects.filter(
+                                    phone_key=pk,
+                                    status='pending',
                                     deleted_at__isnull=True
-                                ).exclude(id=user.id).exists()
-                                if duplicate_exists:
-                                    return VerifySMSCode(success=False, error="Este número ya está registrado en Confío. Inicia sesión o recupera tu cuenta.")
+                                ).order_by('-created_at').first()
+                                if inv:
+                                    ClaimInviteForPhone.mutate(None, info, recipient_address=recipient_addr, invitation_id=inv.invitation_id)
+                        except Exception as ce:
+                            logger.exception('Auto-claim invite failed (review bypass): %s', ce)
 
-                            user.phone_number = phone_number
-                            user.phone_country = country_code
-                            user.save()
-
-                            # Upsert local verification record
-                            v = SMSVerification.objects.filter(
-                                user=user, phone_number=phone_e164, is_verified=False
-                            ).order_by('-created_at').first()
-                            if v:
-                                v.is_verified = True
-                                v.save(update_fields=['is_verified'])
-                            else:
-                                SMSVerification.objects.create(
-                                    user=user,
-                                    phone_number=phone_e164,
-                                    code_hash=_hmac_code(phone_e164, c),
-                                    expires_at=timezone.now() + timedelta(seconds=getattr(settings, 'SMS_CODE_TTL_SECONDS', 600)),
-                                    is_verified=True,
-                                )
-
-                            # Best-effort auto-claim invite
-                            try:
-                                acct = Account.objects.filter(user=user, account_type='personal', account_index=0, deleted_at__isnull=True).first()
-                                recipient_addr = getattr(acct, 'algorand_address', None)
-                                if recipient_addr:
-                                    from send.models import PhoneInvite
-                                    pk = normalize_phone(phone_number, country_code)
-                                    inv = PhoneInvite.objects.filter(
-                                        phone_key=pk,
-                                        status='pending',
-                                        deleted_at__isnull=True
-                                    ).order_by('-created_at').first()
-                                    if inv:
-                                        ClaimInviteForPhone.mutate(None, info, recipient_address=recipient_addr, invitation_id=inv.invitation_id)
-                            except Exception as ce:
-                                logger.exception('Auto-claim invite failed (review bypass): %s', ce)
-
-                            return VerifySMSCode(success=True, error=None)
-                        except IntegrityError:
-                            return VerifySMSCode(success=False, error="Este número ya está registrado en Confío. Inicia sesión o recupera tu cuenta.")
+                        return VerifySMSCode(success=True, error=None)
+                    except IntegrityError:
+                        return VerifySMSCode(success=False, error="Este número ya está registrado en Confío. Inicia sesión o recupera tu cuenta.")
         except Exception:
             # Ignore bypass errors and continue with normal flow
             pass
