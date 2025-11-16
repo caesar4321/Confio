@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
@@ -35,26 +35,39 @@ export const ConfioTokenomicsScreen = () => {
     formatNumber(num, countryCode, { minimumFractionDigits: 0, maximumFractionDigits: 0, ...options });
 
   const totalSupply = 1000000000; // 1 billion
-  const founderTokens = 950000000; // 95% - Majority control
-  const presaleTokens = 50000000;  // 5% - Community investment opportunity
+
+  const rewardsTokens = 7_400_000;
+  const presaleTokens = 74_000_000;
+  const reserveTokens = totalSupply - rewardsTokens - presaleTokens;
 
   const tokenomicsData = [
     {
-      category: 'Fundador y Equipo',
-      percentage: '95%',
-      amount: formatWithLocale(founderTokens),
-      description: 'Mayoría absoluta del fundador, como cualquier startup exitosa',
+      category: 'Fundador y equipo',
+      tokens: reserveTokens,
+      percentage: `${((reserveTokens / totalSupply) * 100).toFixed(2)}%`,
+      description:
+        'Custodia del fundador para cubrir nómina, regulaciones, licencias y expansión. Se libera linealmente durante 36 meses después del listado en exchange.',
       color: colors.secondary,
-      icon: 'user'
+      icon: 'shield',
     },
     {
-      category: 'Preventa Comunitaria',
-      percentage: '5%',
-      amount: formatWithLocale(presaleTokens),
-      description: 'Oportunidad de inversión para la comunidad, no para VCs',
+      category: 'Preventas por fases',
+      tokens: presaleTokens,
+      percentage: '7.4%',
+      description:
+        'Tres microfases fundacionales ($0.20 / $0.25 / $0.30) y dos fases de expansión ($0.50 / $1.00). Cada etapa tiene metas claras y ancla el precio dentro de la comunidad.',
       color: colors.primary,
-      icon: 'users'
-    }
+      icon: 'users',
+    },
+    {
+      category: 'Recompensas en uso',
+      tokens: rewardsTokens,
+      percentage: '0.74%',
+      description:
+        '7,400,000 CONFIO bloqueados en el contrato de recompensas para referidos y transacciones diarias. Se liberan solo si la gente usa la app.',
+      color: colors.accent,
+      icon: 'gift',
+    },
   ];
 
   const comparisonData = [
@@ -141,18 +154,24 @@ export const ConfioTokenomicsScreen = () => {
           {tokenomicsData.map((item, index) => (
             <View key={index} style={styles.distributionCard}>
               <View style={styles.distributionHeader}>
-                <View style={styles.distributionInfo}>
-                  <Icon name={item.icon as any} size={24} color={item.color} />
-                  <View style={styles.distributionText}>
-                    <Text style={styles.distributionCategory}>{item.category}</Text>
-                    <Text style={styles.distributionDescription}>{item.description}</Text>
-                  </View>
+                <Icon name={item.icon as any} size={28} color={item.color} />
+                <View style={styles.distributionText}>
+                  <Text style={styles.distributionCategory}>{item.category}</Text>
+                  <Text style={styles.distributionDescription}>{item.description}</Text>
                 </View>
-                <View style={styles.distributionStats}>
+              </View>
+              <View style={styles.distributionStats}>
+                <View style={styles.statBlock}>
+                  <Text style={styles.statLabel}>Porcentaje</Text>
                   <Text style={[styles.distributionPercentage, { color: item.color }]}>
                     {item.percentage}
                   </Text>
-                  <Text style={styles.distributionAmount}>{item.amount} monedas</Text>
+                </View>
+                <View style={styles.statBlock}>
+                  <Text style={styles.statLabel}>Tokens</Text>
+                  <Text style={styles.distributionAmount}>
+                    {formatWithLocale(item.tokens)} CONFIO
+                  </Text>
                 </View>
               </View>
             </View>
@@ -212,13 +231,25 @@ export const ConfioTokenomicsScreen = () => {
           <Text style={styles.sectionTitle}>Distribución Justa y Transparente</Text>
           <View style={styles.futureCard}>
             <Icon name="shield" size={24} color={colors.accent} />
-            <Text style={styles.futureTitle}>Como Cualquier Startup Exitosa</Text>
-            <Text style={styles.futureDescription}>
-              El fundador mantiene el 95% (como Apple, Facebook, etc. en sus inicios), 
-              mientras que el 5% se ofrece a la comunidad en condiciones que normalmente 
-              solo tienen los VCs. Una oportunidad única para invertir en el futuro 
-              financiero de Latinoamérica.
-            </Text>
+          <Text style={styles.futureTitle}>Resumen rápido</Text>
+          <Text style={styles.futureDescription}>
+            - Suministro total: {formatWithLocale(totalSupply)} CONFIO.{'\n'}
+            - Preventas con vesting: los tokens se liberan tras la fase 3/listado.{'\n'}
+            - Fundador bloqueado por 36 meses después del listado en exchange.{'\n'}
+            - 7.4M CONFIO reservados para recompensas diarias en contrato auditado.{'\n'}
+            - Sin VCs. Todo está documentado y visible.
+          </Text>
+            <TouchableOpacity
+              style={styles.linkButton}
+              onPress={() =>
+                Linking.openURL(
+                  'https://medium.com/confio4world/tokenomics-oficial-de-conf%C3%ADo-versi%C3%B3n-2025-comunidad-latam-152815f9bcc9',
+                )
+              }
+            >
+              <Text style={styles.linkButtonText}>Ver tokenomics detallado</Text>
+              <Icon name="external-link" size={16} color="#fff" style={{ marginLeft: 6 }} />
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -341,17 +372,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 8,
     elevation: 2,
+    marginBottom: 12,
   },
   distributionHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-  },
-  distributionInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-    marginRight: 16,
   },
   distributionText: {
     marginLeft: 12,
@@ -369,16 +394,31 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   distributionStats: {
-    alignItems: 'flex-end',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 16,
+    borderTopWidth: 1,
+    borderColor: '#E5E7EB',
+    paddingTop: 12,
   },
-  distributionPercentage: {
-    fontSize: 24,
-    fontWeight: 'bold',
+  statBlock: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  statLabel: {
+    fontSize: 12,
+    color: '#94A3B8',
+    textTransform: 'uppercase',
     marginBottom: 4,
   },
+  distributionPercentage: {
+    fontSize: 22,
+    fontWeight: 'bold',
+  },
   distributionAmount: {
-    fontSize: 12,
-    color: '#6B7280',
+    fontSize: 18,
+    fontWeight: '600',
+    color: colors.dark,
   },
   philosophySection: {
     paddingHorizontal: 20,
@@ -475,6 +515,21 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     textAlign: 'center',
     lineHeight: 22,
+  },
+  linkButton: {
+    marginTop: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.secondary,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 14,
+  },
+  linkButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
   bottomPadding: {
     height: 40,

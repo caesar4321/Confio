@@ -11,7 +11,6 @@ import FriendlyFeatures from './Components/LandingPage/FriendlyFeatures';
 import FriendlyHowItWorks from './Components/LandingPage/FriendlyHowItWorks';
 import FriendlyAssets from './Components/LandingPage/FriendlyAssets';
 import FriendlyRoadmap from './Components/LandingPage/FriendlyRoadmap';
-import FriendlyP2P from './Components/LandingPage/FriendlyP2P';
 import FriendlyFeeStructure from './Components/LandingPage/FriendlyFeeStructure';
 import FriendlyTestimonials from './Components/LandingPage/FriendlyTestimonials';
 import FriendlyFounder from './Components/LandingPage/FriendlyFounder';
@@ -68,7 +67,6 @@ function FriendlyApp() {
                   <FriendlyHowItWorks />
                   <FriendlyAssets />
                   <FriendlyRoadmap />
-                  <FriendlyP2P />
                   <FriendlyFeeStructure />
                   <FriendlyTestimonials />
                   <FriendlyFounder />

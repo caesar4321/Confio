@@ -53,9 +53,11 @@ export const ConfioPresaleParticipateScreen = () => {
   // Get presale data from query
   const presale = data?.activePresalePhase;
   const presalePrice = presale ? parseFloat(presale.pricePerToken) : 0.25;
-  const minAmount = presale ? parseFloat(presale.minPurchase) : 10;
+  const uiMinPurchase = 10;
+  const serverMin = presale ? parseFloat(presale.minPurchase) : uiMinPurchase;
+  const minAmount = serverMin || uiMinPurchase;
   const maxAmount = presale ? parseFloat(presale.maxPurchase) : 1000;
-  
+
   const presaleData = {
     raised: presale ? parseFloat(presale.totalRaised) : 0,
     goal: presale ? parseFloat(presale.goalAmount) : 1000000,

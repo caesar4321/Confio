@@ -21,8 +21,8 @@ def validate_username(username):
         return False, "El nombre de usuario debe tener al menos 3 caracteres"
     
     # Check maximum length
-    if len(username) > 30:
-        return False, "El nombre de usuario no puede tener más de 30 caracteres"
+    if len(username) > 20:
+        return False, "El nombre de usuario no puede tener más de 20 caracteres"
     
     # Check format (only letters, numbers, and underscores)
     if not re.match(r'^[a-zA-Z0-9_]+$', username):
