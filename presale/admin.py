@@ -984,6 +984,7 @@ class PresalePurchaseAdmin(admin.ModelAdmin):
 
 @admin.register(PresaleStats)
 class PresaleStatsAdmin(admin.ModelAdmin):
+    change_list_template = 'admin/presale/presalestats/deprecated_change_list.html'
     list_display = [
         'phase',
         'formatted_raised',
