@@ -20,10 +20,26 @@ const FriendlyAssets = () => {
       symbol: '$cUSD',
       color: '#34d399',
       details: [
-        { label: t('¿Qué es?', 'What is it?', '무엇인가요?'), value: t('Dólar digital estable', 'Stable digital dollar', '안정적인 디지털 달러') },
+        { label: t('¿Qué es?', 'What is it?', '무엇인가요?'), value: t('Stablecoin 1:1 respaldada por USDC.', '1:1 stablecoin backed by USDC.', 'USDC로 1:1 담보된 스테이블코인입니다.') },
         { label: t('Respaldado por', 'Backed by', '지원'), value: '100% USDC' },
-        { label: t('Uso principal', 'Main use', '주요 용도'), value: t('Envíos, pagos, ahorro', 'Transfers, payments, savings', '송금, 결제, 저축') },
-        { label: t('Valor', 'Value', '가치'), value: t('Estable (1:1 con USDC)', 'Stable (1:1 with USDC)', '안정적 (USDC와 1:1)') }
+        { label: t('Uso principal', 'Main use', '주요 용도'), value: t('Medio de pago y ahorro dentro del ecosistema Confío.', 'Payment and savings rail inside the Confío ecosystem.', 'Confío 생태계에서 결제 및 저축 수단으로 사용됩니다.') },
+        { label: t('Valor', 'Value', '가치'), value: t('Estable (1:1 con USDC)', 'Stable (1:1 with USDC)', '안정적 (USDC와 1:1)') },
+        { 
+          label: t('ID del Activo', 'Asset ID', '자산 ID'), 
+          value: (
+            <a href="https://explorer.perawallet.app/asset/3198259450/" target="_blank" rel="noopener noreferrer" className={styles.detailLink}>
+              3198259450
+            </a>
+          ) 
+        },
+        { 
+          label: t('Explorador', 'Explorer', '탐색기'), 
+          value: (
+            <a href="https://explorer.perawallet.app/asset/3198259450/" target="_blank" rel="noopener noreferrer" className={styles.detailLink}>
+              {t('Ver en Pera Explorer', 'View on Pera Explorer', 'Pera Explorer에서 보기')}
+            </a>
+          ) 
+        }
       ],
       highlight: {
         icon: '🛡',
@@ -36,10 +52,26 @@ const FriendlyAssets = () => {
       symbol: '$CONFIO',
       color: '#8b5cf6',
       details: [
-        { label: t('¿Qué es?', 'What is it?', '무엇인가요?'), value: t('Token de la comunidad', 'Community token', '커뮤니티 토큰') },
-        { label: t('Respaldado por', 'Backed by', '지원'), value: t('Confianza, utilidad, futuro', 'Trust, utility, future', '신뢰, 유용성, 미래') },
-        { label: t('Uso principal', 'Main use', '주요 용도'), value: t('Recompensas, misiones, beneficios', 'Rewards, missions, benefits', '보상, 미션, 혜택') },
-        { label: t('Valor', 'Value', '가치'), value: t('Variable', 'Variable', '변동') }
+        { label: t('¿Qué es?', 'What is it?', '무엇인가요?'), value: t('Token de gobernanza, recompensas y preventa.', 'Governance, rewards and presale token.', '거버넌스, 리워드 및 프리세일 토큰입니다.') },
+        { label: t('Respaldado por', 'Backed by', '지원'), value: t('Confianza y participación de la comunidad Confío.', 'Trust and participation from the Confío community.', 'Confío 커뮤니티의 신뢰와 참여.') },
+        { label: t('Uso principal', 'Main use', '주요 용도'), value: t('Refleja la participación y beneficios dentro de Confío.', 'Reflects engagement and benefits inside Confío.', 'Confío 내 참여와 혜택을 반영합니다.') },
+        { label: t('Valor', 'Value', '가치'), value: t('Variable', 'Variable', '변동') },
+        { 
+          label: t('ID del Activo', 'Asset ID', '자산 ID'), 
+          value: (
+            <a href="https://explorer.perawallet.app/asset/3198568509/" target="_blank" rel="noopener noreferrer" className={styles.detailLink}>
+              3198568509
+            </a>
+          ) 
+        },
+        { 
+          label: t('Explorador', 'Explorer', '탐색기'), 
+          value: (
+            <a href="https://explorer.perawallet.app/asset/3198568509/" target="_blank" rel="noopener noreferrer" className={styles.detailLink}>
+              {t('Ver en Pera Explorer', 'View on Pera Explorer', 'Pera Explorer에서 보기')}
+            </a>
+          ) 
+        }
       ],
       highlight: {
         icon: '💡',
@@ -110,9 +142,21 @@ const FriendlyAssets = () => {
             <span className={styles.documentIcon}>📄</span>
             <span>Whitepaper</span>
           </a>
+          <a href="https://medium.com/confio4world/tokenomics-oficial-de-confío-versión-2025-comunidad-latam-152815f9bcc9" target="_blank" rel="noopener noreferrer" className={styles.documentLink}>
+            <span className={styles.documentIcon}>📘</span>
+            <span>{t('Tokenomics 2025 (ES)', 'Tokenomics 2025 (ES)', '토크노믹스 2025 (ES)')}</span>
+          </a>
+          <a href="https://medium.com/confio4world/confío-official-tokenomics-2025-english-edition-421a310a18fb" target="_blank" rel="noopener noreferrer" className={styles.documentLink}>
+            <span className={styles.documentIcon}>📗</span>
+            <span>{t('Tokenomics 2025 (EN)', 'Tokenomics 2025 (EN)', '토크노믹스 2025 (EN)')}</span>
+          </a>
           <a href="https://docs.google.com/presentation/d/1wRK7VE90fOZT8rqx2My61GKYJt7SPtum9ZMO2F1CK1Q/edit?usp=sharing" target="_blank" rel="noopener noreferrer" className={styles.documentLink}>
             <span className={styles.documentIcon}>📊</span>
             <span>Pitchdeck</span>
+          </a>
+          <a href="https://docs.google.com/presentation/d/1usRBC1eONOszQ-fJ871R-Z6grFDUTf1MpHt3DRHMSkE/edit?usp=sharing" target="_blank" rel="noopener noreferrer" className={styles.documentLink}>
+            <span className={styles.documentIcon}>🇦🇷</span>
+            <span>{t('Pitchdeck Argentina-first', 'Argentina-first Pitchdeck', '아르헨티나 우선 피치덱')}</span>
           </a>
           <a href="https://github.com/caesar4321/Confio" target="_blank" rel="noopener noreferrer" className={styles.documentLink}>
             <span className={styles.documentIcon}>💻</span>

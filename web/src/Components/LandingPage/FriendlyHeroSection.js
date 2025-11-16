@@ -4,9 +4,6 @@ import styles from '../../styles/FriendlyHeroSection.module.css';
 import confioLogo from '../../images/CONFIO.png';
 import confioAppMockup from '../../images/ConfioApp.png';
 import cUSDLogo from '../../images/cUSD.png';
-// Fallback to existing asset to avoid missing file during build
-// Resolve badge from public folder so we don't depend on importable asset
-const pioneroBadge = process.env.PUBLIC_URL + '/images/PioneroBeta.png';
 import { useLanguage } from '../../contexts/LanguageContext';
 
 const FriendlyHeroSection = () => {
@@ -53,16 +50,6 @@ const FriendlyHeroSection = () => {
         <div className={styles.heroContent}>
           {/* Left side - Content */}
           <div className={styles.contentSide}>
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6 }}
-              className={styles.trustBadge}
-            >
-              <img src={pioneroBadge} alt="Pionero Beta" className={styles.pioneroBadge} />
-              <span>{t('Sé de los primeros 10,000 beta testers y gana tu insignia Pionero Beta!', 'Be among the first 10,000 beta testers and earn your Pioneer Beta badge!', '첫 10,000명의 베타 테스터가 되어 파이오니어 베타 배지를 획득하세요!')}</span>
-            </motion.div>
-
             <motion.h1
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -148,7 +135,7 @@ const FriendlyHeroSection = () => {
                 <div className={styles.avatar}>👩</div>
                 <div className={styles.avatar}>👨</div>
                 <div className={styles.avatar}>👩</div>
-                <div className={styles.avatarMore}>+420</div>
+                <div className={styles.avatarMore}>+6000</div>
               </div>
               <div className={styles.testimonialText}>
                 <p>
