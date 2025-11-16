@@ -12,10 +12,11 @@ from .models_employee import BusinessEmployee, EmployeeInvitation
 
 @admin.register(User)
 class UserAdmin(admin.ModelAdmin):
-    list_display = ('username', 'email', 'firebase_uid', 'phone_display', 'phone_key', 'verification_status_display', 'accounts_count', 'employment_status', 'is_staff', 'created_at')
-    list_filter = ('is_staff', 'is_superuser', 'phone_country', 'created_at')
+    list_display = ('username', 'email', 'firebase_uid', 'phone_display', 'phone_key', 'verification_status_display', 'accounts_count', 'employment_status', 'soft_delete_status', 'is_staff', 'created_at')
+    list_filter = ('is_staff', 'is_superuser', 'phone_country', 'created_at', 'deleted_at')
     search_fields = ('username', 'email', 'firebase_uid', 'first_name', 'last_name')
     readonly_fields = ('firebase_uid', 'auth_token_version', 'created_at', 'updated_at')
+    actions = ('soft_delete_selected',)
     
     fieldsets = (
         ('Basic Information', {
@@ -80,6 +81,39 @@ class UserAdmin(admin.ModelAdmin):
             return format_html('<a href="{}">{}</a>', url, '<br>'.join(businesses))
         return "-"
     employment_status.short_description = "Employed At"
+
+    def soft_delete_status(self, obj):
+        if obj.deleted_at:
+            return format_html('<span style="color: red;">Deleted<br><small>{}</small></span>', timezone.localtime(obj.deleted_at).strftime('%Y-%m-%d %H:%M'))
+        return format_html('<span style="color: green;">Active</span>')
+    soft_delete_status.short_description = "Status"
+    soft_delete_status.admin_order_field = 'deleted_at'
+
+    def get_queryset(self, request):
+        qs = self.model.all_objects.get_queryset()
+        ordering = self.get_ordering(request)
+        if ordering:
+            qs = qs.order_by(*ordering)
+        return qs
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        # Prevent irreversible hard deletes from the admin list view
+        actions.pop('delete_selected', None)
+        return actions
+
+    def soft_delete_selected(self, request, queryset):
+        """Soft delete the selected users instead of hard deleting"""
+        deleted = 0
+        for user in queryset:
+            if not user.deleted_at:
+                user.soft_delete()
+                deleted += 1
+        if deleted:
+            self.message_user(request, f"Soft-deleted {deleted} user(s).", level=messages.SUCCESS)
+        else:
+            self.message_user(request, "No users were soft-deleted (they may already be deleted).", level=messages.INFO)
+    soft_delete_selected.short_description = "Soft delete selected users"
 
 @admin.register(Account)
 class AccountAdmin(admin.ModelAdmin):

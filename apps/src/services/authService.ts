@@ -41,6 +41,13 @@ type CustomJwtPayload = {
 };
 
 
+export class AccountDeactivatedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AccountDeactivatedError';
+  }
+}
+
 
 export class AuthService {
   private static instance: AuthService;
@@ -239,7 +246,12 @@ export class AuthService {
       perfLog('Backend authenticated');
 
       if (!authData || !authData.success) {
-        throw new Error(authData?.error || 'Backend authentication failed');
+        const backendError = authData?.error || 'Backend authentication failed';
+        const normalizedError = backendError.toLowerCase();
+        if (normalizedError.includes('desactivada') || normalizedError.includes('deleted')) {
+          throw new AccountDeactivatedError(backendError);
+        }
+        throw new Error(backendError);
       }
       
       // Store Django JWT tokens for authenticated requests using Keychain (store BEFORE any further GraphQL)
@@ -476,7 +488,12 @@ export class AuthService {
       });
       
       if (!authData || !authData.success) {
-        throw new Error(authData?.error || 'Backend authentication failed');
+        const backendError = authData?.error || 'Backend authentication failed';
+        const normalizedError = backendError.toLowerCase();
+        if (normalizedError.includes('desactivada') || normalizedError.includes('deleted')) {
+          throw new AccountDeactivatedError(backendError);
+        }
+        throw new Error(backendError);
       }
       
       // Store Django JWT tokens immediately so subsequent GraphQL is authenticated

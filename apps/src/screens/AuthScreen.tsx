@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, Animated, Dimensions, Easing, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Animated, Dimensions, Easing, ActivityIndicator, Alert } from 'react-native';
 import LoadingOverlay from '../components/LoadingOverlay';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { appleAuth } from '@invertase/react-native-apple-authentication';
-import authService from '../services/authService';
+import authService, { AccountDeactivatedError } from '../services/authService';
 import GoogleLogo from '../assets/svg/GoogleLogo.svg';
 import AppleLogo from '../assets/svg/AppleLogo.svg';
 import { useNavigation } from '@react-navigation/native';
@@ -85,6 +85,12 @@ export const AuthScreen = () => {
       await handleSuccessfulLogin(result.walletData?.isPhoneVerified || false);
     } catch (error) {
       console.error('Google Sign-In failed:', error);
+      if (error instanceof AccountDeactivatedError) {
+        Alert.alert('Cuenta desactivada', error.message);
+      } else {
+        const fallbackMessage = (error as Error)?.message || 'No pudimos iniciar sesión. Intenta nuevamente en unos minutos.';
+        Alert.alert('Error al iniciar sesión', fallbackMessage);
+      }
       setIsLoading(false);
     }
   };
@@ -114,6 +120,12 @@ export const AuthScreen = () => {
       await handleSuccessfulLogin(result.walletData?.isPhoneVerified || false);
     } catch (error) {
       console.error('Apple Sign-In Error:', error);
+      if (error instanceof AccountDeactivatedError) {
+        Alert.alert('Cuenta desactivada', error.message);
+      } else {
+        const fallbackMessage = (error as Error)?.message || 'No pudimos iniciar sesión. Intenta nuevamente en unos minutos.';
+        Alert.alert('Error al iniciar sesión', fallbackMessage);
+      }
       setIsLoading(false);
     }
   };
