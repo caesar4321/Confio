@@ -29,34 +29,82 @@ class AlgorandClient:
         self.indexer_address = settings.ALGORAND_INDEXER_ADDRESS
         self.indexer_token = getattr(settings, 'ALGORAND_INDEXER_TOKEN', '')
         
+        # Optional fallback (reuse dryrun endpoint if configured, otherwise Algonode public endpoint)
+        self.fallback_algod_address = (
+            settings.ALGORAND_DRYRUN_ALGOD_ADDRESS
+            or 'https://mainnet-api.algonode.cloud'
+        )
+        self.fallback_algod_token = getattr(settings, 'ALGORAND_DRYRUN_ALGOD_TOKEN', '') or ''
+
         # Initialize clients
         self._algod_client = None
         self._indexer_client = None
+        self._using_fallback_algod = False
+        self._using_fallback_indexer = False
         
         # Asset IDs for tokens - single source of truth from settings
         self.USDC_ASSET_ID = settings.ALGORAND_USDC_ASSET_ID
         self.CUSD_ASSET_ID = settings.ALGORAND_CUSD_ASSET_ID
         self.CONFIO_ASSET_ID = settings.ALGORAND_CONFIO_ASSET_ID
     
+    def _build_algod_client(self):
+        """Instantiate an algod client, falling back if the primary endpoint needs an API key."""
+        ua = {'User-Agent': 'confio-backend/algosdk'}
+        address = self.algod_address
+        token = self.algod_token or ''
+
+        if 'nodely' in (address or '').lower():
+            headers = dict(ua)
+            if token:
+                headers['X-API-Key'] = token
+                self._using_fallback_algod = False
+                return algod.AlgodClient('', address, headers=headers)
+
+            if self.fallback_algod_address:
+                logger.warning(
+                    "Algod endpoint %s requires ALGORAND_ALGOD_TOKEN but none is configured. "
+                    "Falling back to %s for read operations.",
+                    address,
+                    self.fallback_algod_address,
+                )
+                self._using_fallback_algod = True
+                return algod.AlgodClient(
+                    self.fallback_algod_token or '',
+                    self.fallback_algod_address,
+                    headers=ua,
+                )
+
+            logger.error(
+                "Algod endpoint %s requires an API key but ALGORAND_ALGOD_TOKEN is empty. "
+                "Requests will continue to fail with HTTP 403 until a token or fallback is configured.",
+                address,
+            )
+            self._using_fallback_algod = False
+            return algod.AlgodClient('', address, headers=ua)
+
+        self._using_fallback_algod = False
+        return algod.AlgodClient(token, address, headers=ua)
+
+    def _build_indexer_client(self):
+        """Instantiate an indexer client with optional API key support."""
+        ua = {'User-Agent': 'confio-backend/algosdk'}
+        address = self.indexer_address
+        token = self.indexer_token or ''
+
+        if 'nodely' in (address or '').lower():
+            headers = dict(ua)
+            if token:
+                headers['X-API-Key'] = token
+            self._using_fallback_indexer = False
+            return indexer.IndexerClient('', address, headers=headers)
+
+        self._using_fallback_indexer = False
+        return indexer.IndexerClient(token, address, headers=ua)
+
     async def __aenter__(self):
         """Async context manager entry"""
-        # Add a friendly User-Agent; pass token separately per SDK signature
-        ua = {'User-Agent': 'confio-backend/algosdk'}
-        # Nodely uses X-API-Key; do NOT send an empty header on free tier
-        if 'nodely' in (self.algod_address or '').lower():
-            headers = dict(ua)
-            if self.algod_token:
-                headers['X-API-Key'] = self.algod_token
-            self._algod_client = algod.AlgodClient('', self.algod_address, headers=headers)
-        else:
-            self._algod_client = algod.AlgodClient(self.algod_token or '', self.algod_address, headers=ua)
-        if 'nodely' in (self.indexer_address or '').lower():
-            headers = dict(ua)
-            if self.indexer_token:
-                headers['X-API-Key'] = self.indexer_token
-            self._indexer_client = indexer.IndexerClient('', self.indexer_address, headers=headers)
-        else:
-            self._indexer_client = indexer.IndexerClient(self.indexer_token or '', self.indexer_address, headers=ua)
+        self._algod_client = self._build_algod_client()
+        self._indexer_client = self._build_indexer_client()
         return self
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -68,28 +116,14 @@ class AlgorandClient:
     def algod(self) -> algod.AlgodClient:
         """Get the algod client instance"""
         if not self._algod_client:
-            ua = {'User-Agent': 'confio-backend/algosdk'}
-            if 'nodely' in (self.algod_address or '').lower():
-                headers = dict(ua)
-                if self.algod_token:
-                    headers['X-API-Key'] = self.algod_token
-                self._algod_client = algod.AlgodClient('', self.algod_address, headers=headers)
-            else:
-                self._algod_client = algod.AlgodClient(self.algod_token or '', self.algod_address, headers=ua)
+            self._algod_client = self._build_algod_client()
         return self._algod_client
     
     @property
     def indexer(self) -> indexer.IndexerClient:
         """Get the indexer client instance"""
         if not self._indexer_client:
-            ua = {'User-Agent': 'confio-backend/algosdk'}
-            if 'nodely' in (self.indexer_address or '').lower():
-                headers = dict(ua)
-                if self.indexer_token:
-                    headers['X-API-Key'] = self.indexer_token
-                self._indexer_client = indexer.IndexerClient('', self.indexer_address, headers=headers)
-            else:
-                self._indexer_client = indexer.IndexerClient(self.indexer_token or '', self.indexer_address, headers=ua)
+            self._indexer_client = self._build_indexer_client()
         return self._indexer_client
     
     # ===== Balance Operations =====
