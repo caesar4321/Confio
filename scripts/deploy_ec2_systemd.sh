@@ -106,7 +106,7 @@ if [[ -f "$APP_DIR/.env" ]]; then sudo cp "$APP_DIR/.env" /tmp/.env.confio.bak.$
 
 # Remove old app code to avoid stale migrations/files lingering
 sudo find "$APP_DIR" -mindepth 1 -maxdepth 1 \
-  \( -name venv -o -name myvenv -o -name media -o -name staticfiles -o -name ".env" \) -prune -o -exec rm -rf {} +
+  \( -name venv -o -name myvenv -o -name media -o -name staticfiles -o -name ".env" -o -name ".git" \) -prune -o -exec rm -rf {} +
 
 # Restore .env if we preserved it
 if [[ -f /tmp/.env.confio.bak.$$ ]]; then sudo mv /tmp/.env.confio.bak.$$ "$APP_DIR/.env"; fi
