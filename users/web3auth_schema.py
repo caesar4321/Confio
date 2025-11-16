@@ -8,6 +8,8 @@ import logging
 import secrets
 from datetime import datetime
 from .models import Account, WalletPepper, WalletDerivationPepper
+from .utils_username import generate_compliant_username
+from .validators import validate_username
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -116,9 +118,14 @@ class Web3AuthLoginMutation(graphene.Mutation):
                     'email': email or f'{firebase_uid}@confio.placeholder',
                     'first_name': first_name,
                     'last_name': last_name,
-                    'username': email or f'user_{firebase_uid[:8]}',
+                    'username': generate_compliant_username(email or firebase_uid),
                 }
             )
+            if not created:
+                is_valid, _ = validate_username(user.username or "")
+                if not is_valid:
+                    user.username = generate_compliant_username(email or firebase_uid, exclude_user_id=user.id)
+                    user.save(update_fields=['username'])
             
             # Update user info and last_login
             if not created:

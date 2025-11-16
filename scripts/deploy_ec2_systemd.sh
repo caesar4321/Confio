@@ -112,6 +112,12 @@ if [[ -f /tmp/.env.confio.bak.$$ ]]; then sudo mv /tmp/.env.confio.bak.$$ "$APP_
 # Extract new package
 sudo tar -xzf /tmp/confio-deploy.tar.gz -C "$APP_DIR"
 
+# Ensure nginx/daphne can traverse app dir and expected myvenv symlink exists
+sudo chmod 755 "$APP_DIR"
+if [[ -d "$APP_DIR/venv" ]]; then
+  sudo ln -sfn "$APP_DIR/venv" "$APP_DIR/myvenv"
+fi
+
 echo "==> Python venv and requirements"
 if ! command -v python3 >/dev/null 2>&1; then
   echo "python3 not found; installing"
