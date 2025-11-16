@@ -1226,6 +1226,12 @@ enum UsersUnifiedTransactionTableTransactionTypeChoices {
 
   """P2P Exchange"""
   EXCHANGE
+
+  """Reward"""
+  REWARD
+
+  """Presale Purchase"""
+  PRESALE
 }
 
 """An enumeration."""
