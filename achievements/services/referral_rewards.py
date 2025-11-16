@@ -499,6 +499,43 @@ def sync_referral_reward_for_event(user, event_ctx: EventContext) -> Optional[Us
             ]
         )
 
+        # Ensure the referred user has an actionable reward event even if the sync
+        # was triggered from the referrer's context.
+        if referral.referred_user and event.user_id != referral.referred_user_id:
+            referee_event, _ = ReferralRewardEvent.objects.get_or_create(
+                user=referral.referred_user,
+                trigger=event_ctx.event,
+                defaults={
+                    "actor_role": "referee",
+                    "amount": event_ctx.amount or Decimal("0"),
+                    "transaction_reference": (event_ctx.metadata or {}).get(
+                        "transaction_hash", ""
+                    ),
+                    "occurred_at": event.occurred_at,
+                    "metadata": event_ctx.metadata or {},
+                    "referral": referral,
+                },
+            )
+            metadata = referee_event.metadata or {}
+            metadata.update(event_ctx.metadata or {})
+            referee_event.metadata = metadata
+            referee_event.reward_status = "eligible"
+            referee_event.reward_tx_id = result.tx_id
+            referee_event.referee_confio = referee_confio
+            referee_event.referrer_confio = referrer_confio
+            referee_event.error = ""
+            referee_event.save(
+                update_fields=[
+                    "metadata",
+                    "reward_status",
+                    "reward_tx_id",
+                    "referee_confio",
+                    "referrer_confio",
+                    "error",
+                    "updated_at",
+                ]
+            )
+
         if referral.referrer_user and referrer_confio > Decimal("0"):
             ref_event, _ = ReferralRewardEvent.objects.get_or_create(
                 user=referral.referrer_user,
