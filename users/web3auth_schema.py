@@ -94,6 +94,20 @@ class Web3AuthLoginMutation(graphene.Mutation):
             # Initialize variables that need to be available for return statement
             opt_in_transactions = []
             assets_to_opt_in = []
+
+            # Check for soft-deleted accounts before attempting login or recreation
+            existing_any_state = User.all_objects.filter(firebase_uid=firebase_uid).first()
+            if existing_any_state and existing_any_state.deleted_at:
+                logger.warning("Login blocked for soft-deleted user %s", firebase_uid)
+                return cls(
+                    success=False,
+                error="Tu cuenta fue desactivada por nuestro equipo. Contáctanos si crees que es un error.",
+                    access_token=None,
+                    refresh_token=None,
+                    user=None,
+                    needs_opt_in=[],
+                    opt_in_transactions=[]
+                )
             
             # Find or create user based on Firebase UID
             user, created = User.objects.get_or_create(
