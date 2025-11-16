@@ -127,6 +127,15 @@
   text-align: right;
 }
 
+.detailLink {
+  color: #2563eb;
+  text-decoration: none;
+}
+
+.detailLink:hover {
+  text-decoration: underline;
+}
+
 .assetHighlight {
   display: flex;
   align-items: flex-start;
