@@ -1,4 +1,5 @@
 from decimal import Decimal
+from django.conf import settings
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.utils import timezone
@@ -27,12 +28,16 @@ import logging
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
+ACHIEVEMENTS_ENABLED = getattr(settings, "ACHIEVEMENTS_ENABLED", False)
 
 
 def send_achievement_notification(user_achievement):
     """
     Send push notification when an achievement is earned
     """
+    if not ACHIEVEMENTS_ENABLED:
+        # Achievement program is deprecated; skip legacy notifications
+        return
     try:
         # Create notification for achievement earned
         notification = create_notification(
@@ -62,6 +67,8 @@ def handle_achievement_earned(sender, instance, created, **kwargs):
     """
     Handle when a user achievement is created or updated
     """
+    if not ACHIEVEMENTS_ENABLED:
+        return
     # Only send notification when achievement is newly earned
     if instance.status == 'earned' and created:
         send_achievement_notification(instance)
@@ -74,6 +81,8 @@ def create_welcome_achievement(sender, instance, created, **kwargs):
     Only for the first 10,000 users
     Now with device fingerprint fraud prevention
     """
+    if not ACHIEVEMENTS_ENABLED:
+        return
     if created:
         try:
             # Get device fingerprint and IP from the current request context
@@ -183,6 +192,15 @@ def handle_p2p_trade_achievements(sender, instance, created, **kwargs):
         users_to_check.append(instance.seller_user)
     
     for user in users_to_check:
+        # Always update referral progression
+        try:
+            _award_referral_pair(user)
+        except AchievementType.DoesNotExist:
+            pass
+
+        if not ACHIEVEMENTS_ENABLED:
+            continue
+
         try:
             # Check for "Primera Compra P2P" achievement
             primera_compra = AchievementType.objects.get(slug='primera_compra')
@@ -197,9 +215,6 @@ def handle_p2p_trade_achievements(sender, instance, created, **kwargs):
                     status='earned',
                     earned_at=timezone.now()
                 )
-                
-                # Check referral and award both sides if applicable
-                _award_referral_pair(user)
             
             # Check for "10 Intercambios" achievement (only COMPLETED trades with personal accounts)
             trades_count = P2PTrade.objects.filter(
@@ -256,7 +271,7 @@ def _award_referral_pair(user):
             referral.save(update_fields=['status', 'first_transaction_at'])
 
         # Award INVITER achievement
-        if referral.referrer_user:
+        if ACHIEVEMENTS_ENABLED and referral.referrer_user:
             try:
                 successful_referral = AchievementType.objects.get(slug='successful_referral')
                 if not UserAchievement.objects.filter(
@@ -273,20 +288,21 @@ def _award_referral_pair(user):
                 pass
 
         # Award INVITEE achievement
-        try:
-            invited_ach = AchievementType.objects.get(slug='llegaste_por_influencer')
-            if not UserAchievement.objects.filter(
-                user=user,
-                achievement_type=invited_ach
-            ).exists():
-                UserAchievement.objects.create(
+        if ACHIEVEMENTS_ENABLED:
+            try:
+                invited_ach = AchievementType.objects.get(slug='llegaste_por_influencer')
+                if not UserAchievement.objects.filter(
                     user=user,
-                    achievement_type=invited_ach,
-                    status='earned',
-                    earned_at=timezone.now()
-                )
-        except AchievementType.DoesNotExist:
-            pass
+                    achievement_type=invited_ach
+                ).exists():
+                    UserAchievement.objects.create(
+                        user=user,
+                        achievement_type=invited_ach,
+                        status='earned',
+                        earned_at=timezone.now()
+                    )
+            except AchievementType.DoesNotExist:
+                pass
 
     except AchievementType.DoesNotExist:
         pass
@@ -325,7 +341,20 @@ def sync_pending_reward_events(sender, instance: UserReferral, created, **kwargs
     def ensure_pending_event(user, role: str, stage_meta: str, reward_amount: Decimal):
         if not user:
             return
-        claimed = bool(instance.reward_claimed_at)
+        if role == "referee":
+            role_status = (instance.referee_reward_status or "pending").lower()
+        elif role == "referrer":
+            role_status = (instance.referrer_reward_status or "pending").lower()
+        else:
+            role_status = "pending"
+
+        if role_status not in {"pending", "eligible", "claimed", "failed", "skipped"}:
+            role_status = "pending"
+
+        placeholder_status = role_status
+        if role == "referee" and role_status == "eligible":
+            placeholder_status = "pending"
+
         defaults = {
             "user": user,
             "referral": instance,
@@ -334,7 +363,7 @@ def sync_pending_reward_events(sender, instance: UserReferral, created, **kwargs
             "amount": Decimal("0"),
             "transaction_reference": "",
             "occurred_at": instance.created_at or timezone.now(),
-            "reward_status": "pending" if not claimed else "claimed",
+            "reward_status": placeholder_status,
             "referee_confio": reward_amount if role == "referee" else Decimal("0"),
             "referrer_confio": reward_amount if role == "referrer" else Decimal("0"),
             "metadata": {"stage": stage_meta},
@@ -345,8 +374,8 @@ def sync_pending_reward_events(sender, instance: UserReferral, created, **kwargs
             defaults=defaults,
         )
         if created_flag:
-            if claimed and event.reward_status != "claimed":
-                event.reward_status = "claimed"
+            if event.reward_status != role_status:
+                event.reward_status = role_status
                 event.save(update_fields=["reward_status", "updated_at"])
             return
 
@@ -354,9 +383,8 @@ def sync_pending_reward_events(sender, instance: UserReferral, created, **kwargs
         if event.referral_id != instance.id:
             event.referral = instance
             needs_update = True
-        desired_status = "claimed" if claimed else "pending"
-        if event.reward_status != desired_status:
-            event.reward_status = desired_status
+        if event.reward_status != placeholder_status:
+            event.reward_status = placeholder_status
             needs_update = True
         if needs_update:
             event.save(update_fields=["referral", "reward_status", "updated_at"])

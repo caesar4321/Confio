@@ -537,7 +537,7 @@ class ConfioRewardsService:
             sender=referrer_address,
             index=self.app_id,
             sp=user_sp,
-            app_args=[b"claim_referrer"],
+            app_args=[b"claim_referrer", referee_key],
             accounts=accounts,
             boxes=boxes,
             foreign_assets=[self.confio_asset_id],

@@ -127,7 +127,7 @@ const computeConfioFee = (amountLike: string | number | undefined): number => {
 export const TransactionDetailScreen = () => {
   const navigation = useNavigation<TransactionDetailScreenNavigationProp>();
   const route = useRoute<TransactionDetailScreenRouteProp>();
-  // const insets = useSafeAreaInsets();
+  const insets = useSafeAreaInsets();
   const [copied, setCopied] = useState('');
   const [showBlockchainDetails, setShowBlockchainDetails] = useState(false);
 
@@ -156,7 +156,7 @@ export const TransactionDetailScreen = () => {
       flex: 1,
     },
     header: {
-      paddingTop: 8,
+      paddingTop: 0,
       paddingHorizontal: 20,
       paddingBottom: 30,
       backgroundColor: colors.primary,
@@ -1616,6 +1616,47 @@ export const TransactionDetailScreen = () => {
     recipientContactInfo
   });
 
+  const resolveConversionTokens = (tx?: any) => {
+    const typeHint =
+      tx?.conversion_type ||
+      tx?.conversionType ||
+      normalizedTransactionData?.conversion_type ||
+      normalizedTransactionData?.conversionType ||
+      transactionData?.conversion_type ||
+      transactionData?.conversionType;
+    const fallbackFrom =
+      typeHint === 'usdc_to_cusd' ? 'USDC' :
+      typeHint === 'cusd_to_usdc' ? 'cUSD' :
+      undefined;
+    const fallbackTo =
+      typeHint === 'usdc_to_cusd' ? 'cUSD' :
+      typeHint === 'cusd_to_usdc' ? 'USDC' :
+      undefined;
+    const fromToken =
+      tx?.conversionFromCurrency ||
+      tx?.conversion_from_currency ||
+      tx?.conversionFromToken ||
+      tx?.from_token ||
+      tx?.fromToken ||
+      fallbackFrom ||
+      tx?.currency;
+    const toToken =
+      tx?.conversionToCurrency ||
+      tx?.conversion_to_currency ||
+      tx?.conversionToToken ||
+      tx?.to_token ||
+      tx?.toToken ||
+      fallbackTo ||
+      tx?.secondaryCurrency ||
+      fallbackFrom ||
+      tx?.currency;
+    return { from: fromToken, to: toToken };
+  };
+
+  const { from: conversionFromCurrency, to: conversionToCurrency } = resolveConversionTokens(currentTx);
+  const conversionFromCurrencyLabel = ((conversionFromCurrency ?? currentTx?.currency) || '').toString().trim();
+  const conversionToCurrencyLabel = ((conversionToCurrency ?? currentTx?.secondaryCurrency) || '').toString().trim();
+
   const handleCopy = (text: string, type: string) => {
     Clipboard.setString(text);
     Alert.alert('Copiado', 'Dirección copiada al portapapeles');
@@ -1679,8 +1720,10 @@ export const TransactionDetailScreen = () => {
         return 'Enviado';
       case 'exchange':
         return `Intercambio ${tx.from} → ${tx.to}`;
-      case 'conversion':
-        return tx.formattedTitle || `Conversión ${tx.currency || 'USDC'} → ${tx.secondaryCurrency || 'cUSD'}`;
+      case 'conversion': {
+        const tokens = resolveConversionTokens(tx);
+        return tx.formattedTitle || `Conversión ${tokens.from || tx.currency || 'USDC'} → ${tokens.to || tx.secondaryCurrency || 'cUSD'}`;
+      }
       case 'payment':
         // Check if it's a received payment (positive amount) or sent payment (negative amount)
         return tx.amount.startsWith('+') 
@@ -1711,6 +1754,8 @@ export const TransactionDetailScreen = () => {
 
   const statusColors = getStatusColor(currentTx.status);
 
+  const headerPaddingTop = Math.max(insets.top, 12);
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
@@ -1718,7 +1763,7 @@ export const TransactionDetailScreen = () => {
       {/* Entire screen scrollable */}
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: headerPaddingTop }]}>
           <View style={styles.headerTop}>
             <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerButton}>
               <Icon name="arrow-left" size={24} color="#fff" />
@@ -1859,7 +1904,7 @@ export const TransactionDetailScreen = () => {
                 <View style={styles.exchangeInfo}>
                   <View style={styles.exchangeIcons}>
                     <View style={[styles.exchangeIcon, { backgroundColor: '#fff' }]}>
-                      {(currentTx.currency || '').trim().toUpperCase() === 'USDC' ? (
+                      {conversionFromCurrencyLabel.toUpperCase() === 'USDC' ? (
                         <Image source={USDCLogo} style={{ width: 24, height: 24, resizeMode: 'contain' }} />
                       ) : (
                         <Image source={cUSDLogo} style={{ width: 24, height: 24, resizeMode: 'contain' }} />
@@ -1867,7 +1912,7 @@ export const TransactionDetailScreen = () => {
                     </View>
                     <Icon name="arrow-right" size={16} color="#6b7280" style={styles.exchangeArrow} />
                     <View style={[styles.exchangeIcon, { backgroundColor: '#fff' }]}>
-                      {(currentTx.secondaryCurrency || '').trim().toUpperCase() === 'USDC' ? (
+                      {conversionToCurrencyLabel.toUpperCase() === 'USDC' ? (
                         <Image source={USDCLogo} style={{ width: 24, height: 24, resizeMode: 'contain' }} />
                       ) : (
                         <Image source={cUSDLogo} style={{ width: 24, height: 24, resizeMode: 'contain' }} />
@@ -1883,8 +1928,8 @@ export const TransactionDetailScreen = () => {
                           const isOneToOne = parseFloat(rate) === 1 || rate === '1' || rate === '1.000000';
                           
                           // For USDC conversions with 1:1 rate
-                          if (((currentTx.currency || '').toUpperCase() === 'USDC' || (currentTx.secondaryCurrency || '').toUpperCase() === 'USDC') && isOneToOne) {
-                            return `1 ${currentTx.currency} = 1 ${currentTx.secondaryCurrency}`;
+                          if ((conversionFromCurrencyLabel.toUpperCase() === 'USDC' || conversionToCurrencyLabel.toUpperCase() === 'USDC') && isOneToOne) {
+                            return `1 ${conversionFromCurrencyLabel || currentTx.currency} = 1 ${conversionToCurrencyLabel || currentTx.secondaryCurrency}`;
                           }
                           
                           // If rate already contains '=', use as is
@@ -1894,7 +1939,7 @@ export const TransactionDetailScreen = () => {
                           
                           // Format rate without decimals if it's a whole number
                           const formattedRate = isOneToOne ? '1' : rate;
-                          return `1 ${currentTx.currency} = ${formattedRate} ${currentTx.secondaryCurrency}`;
+                          return `1 ${conversionFromCurrencyLabel || currentTx.currency} = ${formattedRate} ${conversionToCurrencyLabel || currentTx.secondaryCurrency}`;
                         })()
                       }
                     </Text>

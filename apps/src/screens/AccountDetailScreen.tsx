@@ -71,7 +71,7 @@ type AccountDetailScreenRouteProp = RouteProp<MainStackParamList, 'AccountDetail
 
 interface Transaction {
   id?: string;
-  type: 'received' | 'sent' | 'exchange' | 'payment' | 'conversion';
+  type: 'received' | 'sent' | 'exchange' | 'payment' | 'conversion' | 'reward';
   from?: string;
   to?: string;
   fromPhone?: string;
@@ -94,6 +94,7 @@ interface Transaction {
   senderType?: string;
   secondaryCurrency?: string;
   p2pTradeId?: string;
+  isRewardPayout?: boolean;
 }
 
 // Set Spanish locale for moment
@@ -171,6 +172,7 @@ export const AccountDetailScreen = () => {
       payment: true,
       exchange: true,
       conversion: true,
+      reward: true,
     },
     currencies: {
       cUSD: true,
@@ -439,16 +441,20 @@ export const AccountDetailScreen = () => {
     if (allTransactions.length > 0) {
       allTransactions.forEach((tx: any) => {
         // Determine transaction type based on both transactionType and direction
-        let type: 'sent' | 'received' | 'payment' | 'conversion' | 'exchange' = 'sent';
-        if (tx.transactionType.toLowerCase() === 'payment') {
+        let type: 'sent' | 'received' | 'payment' | 'conversion' | 'exchange' | 'reward' = 'sent';
+        const normalizedTxType = (tx.transactionType || '').toLowerCase();
+        if (normalizedTxType === 'payment') {
           type = 'payment';
-        } else if (tx.transactionType.toLowerCase() === 'conversion') {
+        } else if (normalizedTxType === 'conversion') {
           type = 'conversion';
-        } else if (tx.transactionType.toLowerCase() === 'exchange') {
+        } else if (normalizedTxType === 'exchange') {
           type = 'exchange';
+        } else if (normalizedTxType === 'reward') {
+          type = 'reward';
         } else {
           type = tx.direction === 'sent' ? 'sent' : 'received';
         }
+        const isReward = type === 'reward';
         
         // Fix invitation detection: 
         // 1. If we have a counterpartyUser, it's not an invitation
@@ -500,6 +506,8 @@ export const AccountDetailScreen = () => {
         // For conversions, prepare default values
         let conversionAmount = tx.amount; // Use raw amount, will be formatted below
         let conversionType: string | undefined;
+        let conversionFromToken: string | undefined;
+        let conversionToToken: string | undefined;
         
         if (isConversion) {
           console.log('[Conversion Raw Data]', {
@@ -533,6 +541,13 @@ export const AccountDetailScreen = () => {
             }
           }
           console.log('[Conversion Type Result]', { txId: tx.id, conversionType });
+          if (conversionType === 'usdc_to_cusd') {
+            conversionFromToken = 'USDC';
+            conversionToToken = 'cUSD';
+          } else if (conversionType === 'cusd_to_usdc') {
+            conversionFromToken = 'cUSD';
+            conversionToToken = 'USDC';
+          }
           
           // For cUSD account view, always show cUSD amount with proper sign
           if (conversionType === 'usdc_to_cusd') {
@@ -562,7 +577,8 @@ export const AccountDetailScreen = () => {
         }
         
         // Check if this is an external deposit
-        const isExternalDeposit = type === 'received' && tx.senderType?.toLowerCase() === 'external';
+        const isExternalDeposit = !isReward && type === 'received' && tx.senderType?.toLowerCase() === 'external';
+        const rewardDescription = isReward ? (tx.displayDescription || tx.description || 'Recompensa por referidos') : undefined;
         
         // Debug external deposits
         if (type === 'received' && tx.senderType) {
@@ -583,6 +599,9 @@ export const AccountDetailScreen = () => {
         if (isConversion) {
           fromDisplay = conversionType === 'usdc_to_cusd' ? 'USDC' : conversionType === 'cusd_to_usdc' ? 'cUSD' : undefined;
           toDisplay = conversionType === 'usdc_to_cusd' ? 'cUSD' : conversionType === 'cusd_to_usdc' ? 'USDC' : undefined;
+        } else if (isReward) {
+          fromDisplay = tx.senderDisplayName || tx.displayCounterparty || 'Confío Rewards';
+          toDisplay = tx.counterpartyDisplayName || 'Tú';
         } else if (type === 'exchange') {
           // For P2P exchanges, from is the seller, to is the buyer
           if (tx.direction === 'sent') {
@@ -625,8 +644,17 @@ export const AccountDetailScreen = () => {
           currency: isConversion 
             ? (conversionType === 'usdc_to_cusd' ? 'cUSD' : conversionType === 'cusd_to_usdc' ? 'USDC' : undefined) 
             : (((tx.tokenType || '').toUpperCase() === 'CUSD') ? 'cUSD' : (tx.tokenType || '')),
-          secondaryCurrency: isConversion ? (conversionType === 'usdc_to_cusd' ? 'cUSD' : conversionType === 'cusd_to_usdc' ? 'USDC' : undefined) : undefined,
-          conversionType: conversionType || tx.conversionType,
+          secondaryCurrency: isConversion ? (conversionToToken || (conversionType === 'usdc_to_cusd' ? 'cUSD' : conversionType === 'cusd_to_usdc' ? 'USDC' : undefined)) : undefined,
+          conversionType: isConversion ? (conversionType || tx.conversionType) : undefined,
+          conversion_type: isConversion ? (conversionType || tx.conversionType) : undefined,
+          conversionFromToken: isConversion ? (conversionFromToken || tx.fromToken || tx.from_token) : undefined,
+          conversionToToken: isConversion ? (conversionToToken || tx.toToken || tx.to_token) : undefined,
+          conversionFromCurrency: isConversion ? (conversionFromToken || tx.fromToken || tx.from_token) : undefined,
+          conversionToCurrency: isConversion ? (conversionToToken || tx.toToken || tx.to_token) : undefined,
+          fromToken: isConversion ? (conversionFromToken || tx.fromToken || tx.from_token) : undefined,
+          toToken: isConversion ? (conversionToToken || tx.toToken || tx.to_token) : undefined,
+          from_token: isConversion ? (conversionFromToken || tx.from_token || tx.fromToken) : undefined,
+          to_token: isConversion ? (conversionToToken || tx.to_token || tx.toToken) : undefined,
           date: tx.createdAt, // Keep full timestamp for proper sorting
           time: new Date(tx.createdAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
           status: mappedStatus,
@@ -641,9 +669,9 @@ export const AccountDetailScreen = () => {
           senderType: tx.senderType,
           // Helps UI decide if this was a Confío friend vs external
           hasCounterpartyUser: Boolean(tx.counterpartyUser && tx.counterpartyUser.id),
-          description: isConversion ? tx.description : undefined,
-          conversionType: isConversion ? conversionType : undefined,
-          p2pTradeId: type === 'exchange' ? tx.p2pTradeId : undefined
+          description: isConversion ? tx.description : rewardDescription,
+          p2pTradeId: type === 'exchange' ? tx.p2pTradeId : undefined,
+          isRewardPayout: isReward,
         };
         
         // Debug final transaction for external deposits
@@ -715,6 +743,8 @@ export const AccountDetailScreen = () => {
         return transaction.amount.startsWith('+') 
           ? `Pago recibido de ${transaction.from || 'Unknown'}` 
           : `Pago a ${transaction.to || 'Unknown'}`;
+      case 'reward':
+        return transaction.description || 'Recompensa Confío';
       default:
         return 'Transacción';
     }
@@ -732,6 +762,8 @@ export const AccountDetailScreen = () => {
         return <Icon name="repeat" size={20} color="#34D399" />;
       case 'payment':
         return <Icon name="shopping-bag" size={20} color="#8B5CF6" />;
+      case 'reward':
+        return <Icon name="gift" size={20} color="#F59E0B" />;
       default:
         return <Icon name="arrow-up" size={20} color="#6B7280" />;
     }
@@ -920,6 +952,7 @@ export const AccountDetailScreen = () => {
     // Format the date properly
     const formattedDate = moment(transaction.date).format('DD/MM/YYYY');
     const formattedTime = transaction.time;
+    const isRewardTransaction = transaction.type === 'reward' || transaction.isRewardPayout;
     
     // Determine if counterparty is an external wallet (no phone + address present + no user)
     const isExternalSent = transaction.type === 'sent' && !transaction.toPhone && transaction.recipientAddress && !(transaction as any).hasCounterpartyUser;
@@ -927,10 +960,12 @@ export const AccountDetailScreen = () => {
       transaction.isExternalDeposit || (!transaction.fromPhone && transaction.senderAddress && !(transaction as any).hasCounterpartyUser)
     );
     // Get contact name for sender or recipient, falling back to "Billetera externa" for external wallets
-    const phoneToCheck = transaction.type === 'received' ? transaction.fromPhone : transaction.toPhone;
-    const fallbackName = transaction.type === 'received' 
-      ? (isExternalReceived ? 'Billetera externa' : transaction.from)
-      : (isExternalSent ? 'Billetera externa' : transaction.to);
+    const phoneToCheck = isRewardTransaction ? undefined : (transaction.type === 'received' ? transaction.fromPhone : transaction.toPhone);
+    const fallbackName = isRewardTransaction
+      ? (transaction.from || 'Confío Rewards')
+      : transaction.type === 'received' 
+        ? (isExternalReceived ? 'Billetera externa' : transaction.from)
+        : (isExternalSent ? 'Billetera externa' : transaction.to);
     const contactInfo = useContactNameSync(phoneToCheck, fallbackName);
     
     // Create enhanced transaction title with contact name
@@ -974,6 +1009,9 @@ export const AccountDetailScreen = () => {
             baseTitle = `Pago a ${transaction.to || contactInfo.displayName}`;
           }
           break;
+        case 'reward':
+          baseTitle = transaction.description || 'Recompensa por referidos';
+          break;
         default:
           baseTitle = 'Transacción';
       }
@@ -987,8 +1025,8 @@ export const AccountDetailScreen = () => {
         transactionType: transaction.type,
         transactionData: {
           type: transaction.type,
-          from: transaction.type === 'received' 
-            ? contactInfo.displayName
+          from: (transaction.type === 'received' || transaction.type === 'reward')
+            ? (transaction.from || contactInfo.displayName)
             : (transaction.type === 'payment' && transaction.amount.startsWith('+'))
             ? transaction.from
             : transaction.from,
@@ -1005,7 +1043,7 @@ export const AccountDetailScreen = () => {
           timestamp: transaction.date,
           status: transaction.status,
           hash: transaction.hash,
-          fromAddress: transaction.type === 'received' ? transaction.senderAddress : undefined,
+          fromAddress: (transaction.type === 'received' || transaction.type === 'reward') ? transaction.senderAddress : undefined,
           toAddress: transaction.type === 'sent' ? transaction.recipientAddress : undefined,
           fromPhone: transaction.fromPhone,
           toPhone: transaction.toPhone,
@@ -1070,6 +1108,11 @@ export const AccountDetailScreen = () => {
           {transaction.isExternalDeposit && (
             <Text style={styles.externalWalletNote}>
               <Icon name="download" size={12} color="#10B981" /> Depósito externo
+            </Text>
+          )}
+          {isRewardTransaction && (
+            <Text style={styles.rewardNote}>
+              <Icon name="gift" size={12} color="#F59E0B" /> Recompensa por referidos
             </Text>
           )}
         </View>
@@ -2476,6 +2519,12 @@ const styles = StyleSheet.create({
     color: '#1E40AF',
     marginTop: 2,
     fontWeight: '500',
+  },
+  rewardNote: {
+    fontSize: 12,
+    color: '#B45309',
+    marginTop: 2,
+    fontWeight: '600',
   },
   transactionAmount: {
     alignItems: 'flex-end',

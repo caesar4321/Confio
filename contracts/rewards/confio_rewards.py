@@ -501,8 +501,9 @@ def confio_rewards_app() -> Expr:
     @Subroutine(TealType.uint64)
     def claim_referrer() -> Expr:
         """Referrer claims their bonus (order independent from referee)."""
-        referee = Txn.accounts[0]
-        ref_box = App.box_get(referee)
+        referee_key = ScratchVar(TealType.bytes)
+        candidate_key = ScratchVar(TealType.bytes)
+        ref_box = App.box_get(referee_key.load())
         box_bytes = ScratchVar(TealType.bytes)
         ref_amount = ScratchVar(TealType.uint64)
         ref_claimed = ScratchVar(TealType.uint64)
@@ -510,7 +511,12 @@ def confio_rewards_app() -> Expr:
         ref_asset = AssetHolding.balance(Txn.sender(), App.globalGet(CONFIO_ASA))
 
         return Seq(
-            Assert(Txn.accounts.length() > Int(0)),
+            Assert(
+                Or(
+                    Txn.accounts.length() > Int(0),
+                    Txn.application_args.length() > Int(1),
+                )
+            ),
             If(App.globalGet(PAUSED) == Int(1)).Then(
                 Seq(Log(Bytes("ERR|PAUSED")), Reject())
             ),
@@ -518,6 +524,23 @@ def confio_rewards_app() -> Expr:
                 Assert(Txn.fee() >= Global.min_txn_fee() * Int(2))
             ),
             Assert(App.globalGet(PAUSED) == Int(0)),
+            candidate_key.store(Global.zero_address()),
+            If(Txn.accounts.length() > Int(0)).Then(
+                candidate_key.store(Txn.accounts[0])
+            ),
+            If(
+                Or(
+                    Txn.accounts.length() == Int(0),
+                    candidate_key.load() == Txn.sender(),
+                )
+            ).Then(
+                Seq(
+                    Assert(Txn.application_args.length() > Int(1)),
+                    Assert(Len(Txn.application_args[1]) == BOX_KEY_LENGTH),
+                    candidate_key.store(Txn.application_args[1]),
+                )
+            ),
+            referee_key.store(candidate_key.load()),
             ref_box,
             Assert(ref_box.hasValue()),
             box_bytes.store(ref_box.value()),
@@ -548,12 +571,12 @@ def confio_rewards_app() -> Expr:
             }),
             InnerTxnBuilder.Submit(),
 
-            App.box_replace(referee, REF_AMOUNT_OFFSET, Itob(Int(0))),
-            App.box_replace(referee, REF_CLAIMED_OFFSET, Itob(Int(1))),
+            App.box_replace(referee_key.load(), REF_AMOUNT_OFFSET, Itob(Int(0))),
+            App.box_replace(referee_key.load(), REF_CLAIMED_OFFSET, Itob(Int(1))),
             App.globalPut(TOTAL_REF_PAID, App.globalGet(TOTAL_REF_PAID) + ref_amount.load()),
             App.globalPut(REF_CLAIM_COUNT, App.globalGet(REF_CLAIM_COUNT) + Int(1)),
-            Log(Concat(Bytes("REF|"), Txn.sender(), Bytes("|"), referee, Bytes("|"), Itob(ref_amount.load()))),
-            (post_ref_box := App.box_get(referee)),
+            Log(Concat(Bytes("REF|"), Txn.sender(), Bytes("|"), referee_key.load(), Bytes("|"), Itob(ref_amount.load()))),
+            (post_ref_box := App.box_get(referee_key.load())),
             If(
                 And(
                     post_ref_box.hasValue(),
@@ -563,7 +586,7 @@ def confio_rewards_app() -> Expr:
                     Btoi(Extract(post_ref_box.value(), REF_CLAIMED_OFFSET, Int(8))) == Int(1),
                 )
             ).Then(
-                Pop(App.box_delete(referee))
+                Pop(App.box_delete(referee_key.load()))
             ),
             Int(1),
         )

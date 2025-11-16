@@ -90,6 +90,13 @@ def _record_referral_claim_payout(*, user, referral, event, claim_amount, tx_id)
 					)
 				referral.referee_reward_status = 'claimed'
 			elif actor_role == 'referrer':
+				if (
+					referral.referrer_confio_awarded is None
+					or referral.referrer_confio_awarded <= Decimal('0')
+				):
+					referral.referrer_confio_awarded = (
+						referral.reward_referrer_confio or claim_amount
+					)
 				referral.referrer_reward_status = 'claimed'
 			if (
 				referral.referee_reward_status == 'claimed'
@@ -102,6 +109,7 @@ def _record_referral_claim_payout(*, user, referral, event, claim_amount, tx_id)
 					'reward_referee_confio',
 					'reward_status',
 					'referee_confio_awarded',
+					'referrer_confio_awarded',
 					'referee_reward_status',
 					'referrer_reward_status',
 					'updated_at',
@@ -115,7 +123,7 @@ def _record_referral_claim_payout(*, user, referral, event, claim_amount, tx_id)
 
 		placeholder_filters = {
 			"trigger": "referral_pending",
-			"reward_status__iexact": "pending",
+			"reward_status__in": ["pending", "eligible"],
 		}
 		if referral:
 			placeholder_filters["referral"] = referral
@@ -130,9 +138,16 @@ def _record_referral_claim_payout(*, user, referral, event, claim_amount, tx_id)
 		if claim_amount <= Decimal('0'):
 			return
 
+		ref_key_parts = [str(event.id)]
+		if referral:
+			ref_key_parts.append(str(referral.id))
+		if user:
+			ref_key_parts.append(str(user.id))
+		reference_key = ":".join(ref_key_parts)
+
 		tx_exists = ConfioRewardTransaction.objects.filter(
 			reference_type='referral_claim',
-			reference_id=str(event.id),
+			reference_id=reference_key,
 		).exists()
 		if tx_exists:
 			return
@@ -149,12 +164,12 @@ def _record_referral_claim_payout(*, user, referral, event, claim_amount, tx_id)
 			amount=claim_amount,
 			balance_after=balance.total_unlocked,
 			reference_type='referral_claim',
-			reference_id=str(event.id),
+			reference_id=reference_key,
 			description='Reclamo de recompensas por referidos',
 		)
 
 		user_address = get_primary_algorand_address(user)
-		reward_identifier = f"referral_claim:{event.id}:{user.id}"
+		reward_identifier = f"referral_claim:{reference_key}"
 		amount_str = format(claim_amount.normalize(), 'f')
 		if '.' in amount_str:
 			amount_str = amount_str.rstrip('0').rstrip('.')
@@ -3238,8 +3253,13 @@ class PrepareReferralRewardClaim(graphene.Mutation):
 			return PrepareReferralRewardClaim(success=False, error="Esta recompensa aún no está lista para reclamar.")
 
 		referral = event.referral
-		if referral and referral.reward_claimed_at:
-			return PrepareReferralRewardClaim(success=False, error="Esta recompensa ya fue reclamada.")
+		# For two-sided referrals, check if this specific actor already claimed their portion
+		actor_role = (event.actor_role or '').lower()
+		if referral:
+			if actor_role == 'referrer' and referral.referrer_confio_awarded and referral.referrer_confio_awarded > Decimal('0'):
+				return PrepareReferralRewardClaim(success=False, error="Esta recompensa ya fue reclamada.")
+			elif actor_role != 'referrer' and referral.referee_confio_awarded and referral.referee_confio_awarded > Decimal('0'):
+				return PrepareReferralRewardClaim(success=False, error="Esta recompensa ya fue reclamada.")
 
 		user_address = get_primary_algorand_address(user)
 		if not user_address:
@@ -3285,6 +3305,12 @@ class PrepareReferralRewardClaim(graphene.Mutation):
 					return opt_in_error
 				claim_kind = 'referrer'
 				box_address = referee_address
+				logger.info(
+					"[referral_claim] PREPARE referrer claim user=%s referee=%s box_address=%s",
+					user.id,
+					referee_address,
+					box_address,
+				)
 				expected_referrer_confio = (
 					referral.reward_referrer_confio
 					or event.referrer_confio
@@ -3456,12 +3482,26 @@ class SubmitReferralRewardClaim(graphene.Mutation):
 			return SubmitReferralRewardClaim(success=False, error="No encontramos esa recompensa.")
 
 		referral = event.referral
-		if referral and referral.reward_claimed_at:
-			cache.delete(cache_key)
-			return SubmitReferralRewardClaim(success=False, error="Esta recompensa ya fue reclamada.")
+		# For two-sided referrals, check if this specific actor already claimed their portion
+		actor_role = (event.actor_role or '').lower()
+		if referral:
+			if actor_role == 'referrer' and referral.referrer_confio_awarded and referral.referrer_confio_awarded > Decimal('0'):
+				cache.delete(cache_key)
+				return SubmitReferralRewardClaim(success=False, error="Esta recompensa ya fue reclamada.")
+			elif actor_role != 'referrer' and referral.referee_confio_awarded and referral.referee_confio_awarded > Decimal('0'):
+				cache.delete(cache_key)
+				return SubmitReferralRewardClaim(success=False, error="Esta recompensa ya fue reclamada.")
 
 		session_user_address = session.get("user_address")
 		box_address = session.get("box_address") or session_user_address
+
+		logger.info(
+			"[referral_claim] SUBMIT user=%s actor_role=%s session_user_address=%s box_address=%s",
+			user.id,
+			(event.actor_role or '').lower(),
+			session_user_address,
+			box_address,
+		)
 
 		def _normalize_b64(data: str) -> str:
 			if not data:
@@ -3477,13 +3517,18 @@ class SubmitReferralRewardClaim(graphene.Mutation):
 		try:
 			sponsor_b64 = _normalize_b64(session["sponsor_signed"])
 			user_b64 = _normalize_b64(signed_transaction)
-			sponsor_stx = algo_encoding.msgpack_decode(sponsor_b64)
-			user_stx = algo_encoding.msgpack_decode(user_b64)
+
+			# Preserve the raw bytes for submission, but also keep SignedTransaction objects
+			# so we can safely call send_transactions without corrupting box references.
+			sponsor_stx_bytes = base64.b64decode(sponsor_b64)
+			user_stx_bytes = base64.b64decode(user_b64)
+			sponsor_stx_obj = algo_encoding.msgpack_decode(sponsor_b64)
+			user_stx_obj = algo_encoding.msgpack_decode(user_b64)
 		except Exception as exc:
 			logger.exception("Failed to decode referral claim payload: %s", exc)
 			return SubmitReferralRewardClaim(success=False, error="Firma inválida. Intenta nuevamente.")
 
-		tx_sender = getattr(getattr(user_stx, "transaction", None), "sender", None)
+		tx_sender = getattr(getattr(user_stx_obj, "transaction", None), "sender", None)
 		if session_user_address and tx_sender and tx_sender != session_user_address:
 			logger.warning(
 				"[referral_claim] mismatched sender user=%s expected=%s got=%s",
@@ -3498,7 +3543,9 @@ class SubmitReferralRewardClaim(graphene.Mutation):
 
 		try:
 			algod = get_algod_client()
-			tx_id = algod.send_transactions([sponsor_stx, user_stx])
+			# Send the transactions as SignedTransaction objects; the SDK handles grouping
+			# without mutating boxes because we decode once using the canonical encoder.
+			tx_id = algod.send_transactions([sponsor_stx_obj, user_stx_obj])
 			algo_transaction.wait_for_confirmation(algod, tx_id, 6)
 		except Exception as exc:
 			logger.exception("Failed to submit referral reward claim: %s", exc)
