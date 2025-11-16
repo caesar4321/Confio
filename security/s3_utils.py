@@ -49,7 +49,7 @@ def generate_presigned_put(
     # Build client with optional explicit credentials
     # Ensure we sign against the correct regional endpoint to avoid
     # IllegalLocationConstraintException when the bucket is in a non-default region
-    region = settings.AWS_S3_REGION or 'us-east-1'
+    region = settings.AWS_S3_REGION or 'eu-central-2'
     endpoint = f"https://s3.{region}.amazonaws.com" if region != 'us-east-1' else "https://s3.amazonaws.com"
 
     params = {
@@ -102,7 +102,7 @@ def generate_presigned_put(
 
 def public_s3_url(key: str, bucket: Optional[str] = None) -> str:
     """Return a direct HTTPS URL for the object (assuming public or signed retrieval elsewhere)."""
-    region = settings.AWS_S3_REGION or 'us-east-1'
+    region = settings.AWS_S3_REGION or 'eu-central-2'
     bucket = _resolve_bucket(bucket)
     if region == 'us-east-1':
         return f"https://{bucket}.s3.amazonaws.com/{key}"
@@ -116,7 +116,7 @@ def generate_presigned_get(*, key: str, expires_in_seconds: int = 300, bucket: O
     """
     _ensure_bucket(bucket)
 
-    region = settings.AWS_S3_REGION or 'us-east-1'
+    region = settings.AWS_S3_REGION or 'eu-central-2'
     endpoint = f"https://s3.{region}.amazonaws.com" if region != 'us-east-1' else "https://s3.amazonaws.com"
     params = {
         'region_name': region,
@@ -178,7 +178,7 @@ def generate_presigned_post(
     """
     _ensure_bucket(bucket)
 
-    region = settings.AWS_S3_REGION or 'us-east-1'
+    region = settings.AWS_S3_REGION or 'eu-central-2'
     endpoint = f"https://s3.{region}.amazonaws.com" if region != 'us-east-1' else "https://s3.amazonaws.com"
     params = {
         'region_name': region,
@@ -227,7 +227,7 @@ def generate_presigned_post(
 def head_object(*, key: str, bucket: Optional[str] = None) -> Dict[str, any]:
     """Return HEAD metadata for an S3 object (ContentLength, ContentType, ETag, Metadata)."""
     _ensure_bucket(bucket)
-    region = settings.AWS_S3_REGION or 'us-east-1'
+    region = settings.AWS_S3_REGION or 'eu-central-2'
     endpoint = f"https://s3.{region}.amazonaws.com" if region != 'us-east-1' else "https://s3.amazonaws.com"
     params = {
         'region_name': region,

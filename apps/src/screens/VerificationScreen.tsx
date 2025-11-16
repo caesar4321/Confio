@@ -48,6 +48,8 @@ interface VerificationLevel {
   required?: string;
 }
 
+type UploadStepType = 'front' | 'back' | 'selfie' | 'payout' | 'business' | 'review';
+
 const VerificationScreen = () => {
   const navigation = useNavigation<RootStackNavigationProp>();
   const [currentLevel, setCurrentLevel] = useState<number>(0);
@@ -144,7 +146,7 @@ const VerificationScreen = () => {
       });
       const res = data?.submitIdentityVerificationS3;
       if (!res?.success) throw new Error(res?.error || 'No se pudo enviar la verificación');
-      setUploadStep(5);
+      setUploadStep(totalSteps);
     } catch (e: any) {
       console.error('[Verification] Submit failed:', e?.message || e);
     }
@@ -224,6 +226,25 @@ const VerificationScreen = () => {
   const isPersonalVerified = Boolean(meData?.me?.isIdentityVerified || verificationStatus === 'verified');
   const { activeAccount } = useAccountManager();
   const isBusinessAccount = (activeAccount?.type || '').toLowerCase() === 'business';
+  const userPhoneCountryIso = (meData?.me?.phoneCountry || '').trim().toUpperCase();
+  const requiresPayoutProof = userPhoneCountryIso === 'VE';
+  const stepSequence = React.useMemo<UploadStepType[]>(() => {
+    const steps: UploadStepType[] = ['front', 'back', 'selfie'];
+    if (requiresPayoutProof) steps.push('payout');
+    if (isBusinessAccount) steps.push('business');
+    steps.push('review');
+    return steps;
+  }, [requiresPayoutProof, isBusinessAccount]);
+  const totalSteps = stepSequence.length;
+  const currentStep = stepSequence[Math.min(uploadStep, totalSteps) - 1] || stepSequence[0];
+  React.useEffect(() => {
+    if (uploadStep > totalSteps) {
+      setUploadStep(totalSteps);
+    }
+  }, [uploadStep, totalSteps]);
+  const goToNextStep = React.useCallback(() => {
+    setUploadStep((prev) => Math.min(prev + 1, totalSteps));
+  }, [totalSteps]);
   // Fetch accounts to determine business verification status when in business context
   const { data: accountsData } = useQuery(GET_USER_ACCOUNTS, { fetchPolicy: 'cache-and-network' });
   const { isBusinessVerified, businessVerificationStatus } = React.useMemo(() => {
@@ -368,7 +389,7 @@ const VerificationScreen = () => {
   };
 
   const renderUploadFlow = () => {
-    if (uploadStep === 1) {
+    if (currentStep === 'front') {
       return (
         <View style={styles.uploadContainer}>
           <View style={styles.uploadHeader}>
@@ -379,7 +400,7 @@ const VerificationScreen = () => {
             <Text style={styles.uploadSubtitle}>
               Toma una foto del documento con la cámara de la app. No se aceptan imágenes desde la galería.
             </Text>
-            <Text style={styles.stepCounter}>Paso {uploadStep} de {isBusinessAccount ? 6 : 5}</Text>
+            <Text style={styles.stepCounter}>Paso {uploadStep} de {totalSteps}</Text>
           </View>
 
           <View style={styles.infoBox}>
@@ -409,7 +430,7 @@ const VerificationScreen = () => {
             </TouchableOpacity>
             <TouchableOpacity 
               style={[styles.primaryButton, { backgroundColor: frontImageUri ? colors.primary : '#D1D5DB' }]}
-              onPress={() => frontImageUri ? setUploadStep(2) : console.warn('[Verification] Debes tomar foto del documento para continuar')}
+              onPress={() => frontImageUri ? goToNextStep() : console.warn('[Verification] Debes tomar foto del documento para continuar')}
               disabled={!frontImageUri}
             >
               <Text style={styles.primaryButtonText}>Continuar</Text>
@@ -419,7 +440,7 @@ const VerificationScreen = () => {
       );
     }
 
-    if (uploadStep === 2) {
+    if (currentStep === 'back') {
       return (
         <View style={styles.uploadContainer}>
           <View style={styles.uploadHeader}>
@@ -430,7 +451,7 @@ const VerificationScreen = () => {
             <Text style={styles.uploadSubtitle}>
               Toma una foto clara del reverso del documento. Evita reflejos.
             </Text>
-            <Text style={styles.stepCounter}>Paso {uploadStep} de {isBusinessAccount ? 6 : 5}</Text>
+            <Text style={styles.stepCounter}>Paso {uploadStep} de {totalSteps}</Text>
           </View>
 
           <View style={styles.warningBox}>
@@ -452,7 +473,7 @@ const VerificationScreen = () => {
           <View style={styles.buttonRow}>
             <TouchableOpacity 
               style={[styles.primaryButton, { backgroundColor: backImageUri ? colors.primary : '#D1D5DB' }]}
-              onPress={() => backImageUri ? setUploadStep(3) : console.warn('[Verification] Debes tomar el reverso para continuar')}
+              onPress={() => backImageUri ? goToNextStep() : console.warn('[Verification] Debes tomar el reverso para continuar')}
               disabled={!backImageUri}
             >
               <Text style={styles.primaryButtonText}>Continuar</Text>
@@ -462,7 +483,7 @@ const VerificationScreen = () => {
       );
     }
 
-    if (uploadStep === 3) {
+    if (currentStep === 'selfie') {
       return (
         <View style={styles.uploadContainer}>
           <View style={styles.uploadHeader}>
@@ -473,7 +494,7 @@ const VerificationScreen = () => {
             <Text style={styles.uploadSubtitle}>
               Asegúrate que tu rostro sea visible, bien iluminado y sin obstrucciones.
             </Text>
-            <Text style={styles.stepCounter}>Paso {uploadStep} de {isBusinessAccount ? 6 : 5}</Text>
+            <Text style={styles.stepCounter}>Paso {uploadStep} de {totalSteps}</Text>
           </View>
           <TouchableOpacity style={styles.cameraPreview} onPress={() => openCamera('selfie')}>
             <Icon name="camera" size={48} color="#9CA3AF" />
@@ -484,7 +505,7 @@ const VerificationScreen = () => {
 
           <TouchableOpacity 
             style={[styles.primaryButton, { backgroundColor: (selfieImageUri ? colors.primary : '#D1D5DB') }]}
-            onPress={() => selfieImageUri ? setUploadStep(4) : console.warn('[Verification] Debes tomar tu selfie para continuar')}
+            onPress={() => selfieImageUri ? goToNextStep() : console.warn('[Verification] Debes tomar tu selfie para continuar')}
             disabled={!selfieImageUri}
           >
             <Text style={styles.primaryButtonText}>Continuar</Text>
@@ -493,8 +514,8 @@ const VerificationScreen = () => {
       );
     }
 
-    // New step 4: Upload payout method proof (screenshot)
-    if (uploadStep === 4) {
+    // Upload payout method proof (screenshot) — Venezuela only
+    if (currentStep === 'payout') {
       return (
         <View style={styles.uploadContainer}>
           <View style={styles.uploadHeader}>
@@ -505,7 +526,7 @@ const VerificationScreen = () => {
             <Text style={styles.uploadSubtitle}>
               Ingresa el nombre del método y sube una captura que muestre tu nombre. Puedes elegir una imagen de la galería o tomar una foto.
             </Text>
-            <Text style={styles.stepCounter}>Paso {uploadStep} de {isBusinessAccount ? 6 : 5}</Text>
+            <Text style={styles.stepCounter}>Paso {uploadStep} de {totalSteps}</Text>
           </View>
 
           <View style={styles.infoBox}>
@@ -563,7 +584,7 @@ const VerificationScreen = () => {
               style={[styles.primaryButton, { backgroundColor: (payoutProofUri && (payoutLabel || '').trim() && isValidDobStrict(verifiedDob)) ? colors.primary : '#D1D5DB' }]}
               onPress={() => {
                 if (payoutProofUri && (payoutLabel || '').trim() && isValidDobStrict(verifiedDob)) {
-                  setUploadStep(5);
+                  goToNextStep();
                 } else {
                   Alert.alert('Campos incompletos', 'Debes ingresar una fecha de nacimiento válida (AAAA-MM-DD), el nombre del método y subir el comprobante.');
                 }
@@ -578,7 +599,7 @@ const VerificationScreen = () => {
     }
 
     // Step 5 (business only): Business certificate
-    if (isBusinessAccount && uploadStep === 5) {
+    if (currentStep === 'business') {
       return (
         <View style={styles.uploadContainer}>
           <View style={styles.uploadHeader}>
@@ -589,7 +610,7 @@ const VerificationScreen = () => {
             <Text style={styles.uploadSubtitle}>
               Toma una foto del certificado de tu negocio. Solo se permite la cámara.
             </Text>
-            <Text style={styles.stepCounter}>Paso {uploadStep} de {isBusinessAccount ? 6 : 5}</Text>
+            <Text style={styles.stepCounter}>Paso {uploadStep} de {totalSteps}</Text>
           </View>
           <TouchableOpacity style={styles.cameraPreview} onPress={() => openCamera('business')}>
             <Icon name="camera" size={48} color="#9CA3AF" />
@@ -598,7 +619,7 @@ const VerificationScreen = () => {
           <View style={styles.buttonRow}>
             <TouchableOpacity 
               style={[styles.primaryButton, { backgroundColor: businessCertUri ? colors.primary : '#D1D5DB' }]}
-              onPress={() => businessCertUri ? setUploadStep(6) : console.warn('[Verification] Debes tomar la foto del certificado')}
+              onPress={() => businessCertUri ? goToNextStep() : console.warn('[Verification] Debes tomar la foto del certificado')}
               disabled={!businessCertUri}
             >
               <Text style={styles.primaryButtonText}>Continuar</Text>
@@ -609,7 +630,12 @@ const VerificationScreen = () => {
     }
 
     // Final review (step 5 for personal, step 6 for business)
-    if ((!isBusinessAccount && uploadStep === 5) || (isBusinessAccount && uploadStep === 6)) {
+    if (currentStep === 'review') {
+      const dobValid = isValidDobStrict(verifiedDob);
+      const trimmedPayoutLabel = (payoutLabel || '').trim();
+      const payoutSectionComplete = !requiresPayoutProof || (payoutProofUri && !!trimmedPayoutLabel && dobValid);
+      const businessSectionComplete = !isBusinessAccount || !!businessCertUri;
+      const reviewReady = !!(frontImageUri && backImageUri && selfieImageUri && payoutSectionComplete && businessSectionComplete && dobValid);
       return (
         <View style={styles.uploadContainer}>
           <View style={styles.uploadHeader}>
@@ -618,24 +644,44 @@ const VerificationScreen = () => {
             </View>
             <Text style={styles.uploadTitle}>Revisión final</Text>
             <Text style={styles.uploadSubtitle}>Verifica que todas las fotos se vean claras y legibles.</Text>
-            <Text style={styles.stepCounter}>Paso {uploadStep} de {isBusinessAccount ? 6 : 5}</Text>
+            <Text style={styles.stepCounter}>Paso {uploadStep} de {totalSteps}</Text>
           </View>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center', marginBottom: 16 }}>
             {!!frontImageUri && <Image source={{ uri: frontImageUri }} style={{ width: 120, height: 120 }} />}
             {!!backImageUri && <Image source={{ uri: backImageUri }} style={{ width: 120, height: 120 }} />}
             {!!selfieImageUri && <Image source={{ uri: selfieImageUri }} style={{ width: 120, height: 120 }} />}
-            {!!payoutProofUri && <Image source={{ uri: payoutProofUri }} style={{ width: 120, height: 120 }} />}
+            {requiresPayoutProof && !!payoutProofUri && <Image source={{ uri: payoutProofUri }} style={{ width: 120, height: 120 }} />}
             {isBusinessAccount && !!businessCertUri && <Image source={{ uri: businessCertUri }} style={{ width: 120, height: 120 }} />}
           </View>
-          {/* Review details: DOB and payout method */}
-          <View style={{ backgroundColor: '#F9FAFB', borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 8, padding: 12, marginBottom: 16 }}>
-            <Text style={{ fontSize: 14, color: '#111827', fontWeight: '600', marginBottom: 8 }}>Detalles</Text>
-            <Text style={{ fontSize: 14, color: '#374151', marginBottom: 4 }}>Fecha de nacimiento: {verifiedDob}</Text>
-            <Text style={{ fontSize: 14, color: '#374151' }}>Método de pago: {payoutLabel}</Text>
+          {/* Review details: DOB (always required) and payout summary (VE only) */}
+          <View style={{ backgroundColor: '#F9FAFB', borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 8, padding: 12, marginBottom: 16, width: '100%' }}>
+            <Text style={{ fontSize: 14, color: '#111827', fontWeight: '600', marginBottom: 8 }}>Datos requeridos</Text>
+            <Text style={{ fontSize: 14, color: '#374151', marginBottom: 6 }}>Fecha de nacimiento (AAAA-MM-DD)</Text>
+            <TextInput
+              placeholder="AAAA-MM-DD"
+              keyboardType="number-pad"
+              autoCapitalize="none"
+              value={verifiedDob}
+              onChangeText={(t) => setVerifiedDob(formatDob(t))}
+              maxLength={10}
+              style={{ borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 8, padding: 10, marginBottom: requiresPayoutProof ? 8 : 0 }}
+            />
+            {!dobValid && !!verifiedDob && (
+              <Text style={{ color: '#B91C1C', fontSize: 12, marginBottom: requiresPayoutProof ? 8 : 0 }}>
+                Ingresa una fecha válida en formato AAAA-MM-DD.
+              </Text>
+            )}
+            {requiresPayoutProof ? (
+              <Text style={{ fontSize: 14, color: '#374151' }}>Método de pago: {trimmedPayoutLabel || 'Sin nombre'}</Text>
+            ) : (
+              <Text style={{ fontSize: 13, color: '#6B7280', marginTop: 6 }}>
+                Asegúrate de ingresar tu fecha real tal como aparece en tu documento.
+              </Text>
+            )}
           </View>
           <TouchableOpacity 
-            style={[styles.primaryButton, { backgroundColor: (frontImageUri && backImageUri && selfieImageUri && payoutProofUri && (!isBusinessAccount || businessCertUri) && (payoutLabel || '').trim() && isValidDob(verifiedDob) ? colors.primary : '#D1D5DB') }]}
-            disabled={!(frontImageUri && backImageUri && selfieImageUri && payoutProofUri && (!isBusinessAccount || businessCertUri) && (payoutLabel || '').trim() && isValidDob(verifiedDob))}
+            style={[styles.primaryButton, { backgroundColor: reviewReady ? colors.primary : '#D1D5DB' }]}
+            disabled={!reviewReady}
             onPress={async () => {
               try {
                 setIsSubmitting(true);
@@ -654,7 +700,10 @@ const VerificationScreen = () => {
                 const fKey = await uploadOne('front', frontImageUri!);
                 const bKey = await uploadOne('back', backImageUri!);
                 const sKey = await uploadOne('selfie', selfieImageUri!);
-                const pKey = await uploadOne('payout', payoutProofUri!);
+                let pKey: string | null = null;
+                if (requiresPayoutProof && payoutProofUri) {
+                  pKey = await uploadOne('payout', payoutProofUri);
+                }
                 setFrontKey(fKey); setBackKey(bKey); setSelfieKey(sKey); setPayoutKey(pKey);
                 // Business cert upload
                 let bizKey: string | null = null;
@@ -669,7 +718,18 @@ const VerificationScreen = () => {
                   await uploadFileToPresignedForm(upload.url, fieldsObj, businessCertUri!, filename, contentType);
                   bizKey = upload.key as string;
                 }
-                const { data: submitData } = await submitIdentityVerificationS3({ variables: { frontKey: fKey, selfieKey: sKey, backKey: bKey, payoutMethodLabel: (payoutLabel || null), payoutProofKey: pKey, verifiedDateOfBirth: verifiedDob, businessKey: bizKey } });
+                const dobForSubmit = (verifiedDob && isValidDobStrict(verifiedDob)) ? verifiedDob : null;
+                const { data: submitData } = await submitIdentityVerificationS3({
+                  variables: {
+                    frontKey: fKey,
+                    selfieKey: sKey,
+                    backKey: bKey,
+                    payoutMethodLabel: requiresPayoutProof ? (payoutLabel || null) : null,
+                    payoutProofKey: pKey,
+                    verifiedDateOfBirth: dobForSubmit || null,
+                    businessKey: bizKey
+                  }
+                });
                 if (!submitData?.submitIdentityVerificationS3?.success) {
                   throw new Error(submitData?.submitIdentityVerificationS3?.error || 'Error al enviar verificación');
                 }
@@ -782,22 +842,22 @@ const VerificationScreen = () => {
               <TouchableOpacity onPress={() => {
                 if (previewPurpose === 'front') {
                   setFrontImageUri(previewUri!);
-                  if (uploadStep === 1) setUploadStep(2);
+                  if (currentStep === 'front') goToNextStep();
                 }
                 if (previewPurpose === 'back') {
                   setBackImageUri(previewUri!);
-                  if (uploadStep === 2) setUploadStep(3);
+                  if (currentStep === 'back') goToNextStep();
                 }
                 if (previewPurpose === 'selfie') {
                   setSelfieImageUri(previewUri!);
-                  if (uploadStep === 3) setUploadStep(4);
+                  if (currentStep === 'selfie') goToNextStep();
                 }
                 if (previewPurpose === 'payout') {
                   setPayoutProofUri(previewUri!);
                 }
                 if (previewPurpose === 'business') {
                   setBusinessCertUri(previewUri!);
-                  if (isBusinessAccount && uploadStep === 5) setUploadStep(6);
+                  if (currentStep === 'business') goToNextStep();
                 }
                 setPreviewUri(null);
               }} style={[styles.primaryButton, { backgroundColor: colors.primary }]}>
