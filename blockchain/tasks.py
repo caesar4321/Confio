@@ -9,6 +9,7 @@ import logging
 from functools import wraps
 
 from users.models import Account
+from users.models_unified import UnifiedTransactionTable
 from .models import Balance
 from django.conf import settings
 from .algorand_client import AlgorandClient
@@ -951,6 +952,55 @@ def scan_outbound_confirmations(max_batch: int = 50):
                         )
                     except Exception as ne:
                         logger.warning(f"Notification error for PresalePurchase {p.id}: {ne}")
+
+                    # Record unified transaction for transaction history
+                    try:
+                        presale_identifier = f"presale_purchase:{p.id}"
+                        user_display = p.user.get_full_name() or p.user.username or p.user.email or 'Tú'
+                        amount_str = format(p.confio_amount.normalize(), 'f')
+                        sender_display = "Confío Preventa"
+                        vault_address = getattr(settings, 'ALGORAND_PRESALE_VAULT_ADDRESS', '') or 'ConfioPresaleVault'
+                        user_address = p.from_address or ''
+                        description = f"Compra de preventa Fase {getattr(p.phase, 'phase_number', '')}".strip()
+                        if getattr(settings, 'PRESALE_TOKENS_LOCKED', True):
+                            description = f"{description} (bloqueado)"
+
+                        UnifiedTransactionTable.objects.update_or_create(
+                            transaction_type='presale',
+                            payment_reference_id=presale_identifier,
+                            defaults={
+                                'amount': amount_str,
+                                'token_type': 'CONFIO',
+                                'status': 'CONFIRMED',
+                                'transaction_hash': p.transaction_hash or '',
+                                'error_message': '',
+                                'sender_user': None,
+                                'sender_business': None,
+                                'sender_type': 'external',
+                                'sender_display_name': sender_display,
+                                'sender_phone': '',
+                                'sender_address': vault_address,
+                                'counterparty_user': p.user,
+                                'counterparty_business': None,
+                                'counterparty_type': 'user',
+                                'counterparty_display_name': user_display,
+                                'counterparty_phone': '',
+                                'counterparty_address': user_address,
+                                'description': description,
+                                'invoice_id': None,
+                                'payment_reference_id': presale_identifier,
+                                'payment_transaction_id': None,
+                                'from_address': vault_address,
+                                'to_address': user_address,
+                                'is_invitation': False,
+                                'invitation_claimed': False,
+                                'invitation_reverted': False,
+                                'invitation_expires_at': None,
+                                'transaction_date': p.completed_at or dj_tz.now(),
+                            },
+                        )
+                    except Exception as ue:
+                        logger.warning(f\"Failed to record unified presale transaction for {p.id}: {ue}\")
 
                     # Mark balances stale for quick refresh
                     try:

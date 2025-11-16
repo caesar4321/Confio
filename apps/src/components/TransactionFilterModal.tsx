@@ -18,6 +18,7 @@ export interface TransactionFilters {
     exchange: boolean;
     conversion: boolean;
     reward: boolean;
+    presale: boolean;
   };
   currencies: {
     cUSD: boolean;
@@ -69,6 +70,7 @@ export const TransactionFilterModal = ({
         exchange: true,
         conversion: true,
         reward: true,
+        presale: true,
       },
       currencies: {
         cUSD: true,
@@ -236,6 +238,18 @@ export const TransactionFilterModal = ({
                   <Icon name="gift" size={16} color={filters.types.reward ? '#F59E0B' : '#6B7280'} />
                   <Text style={[styles.filterChipText, filters.types.reward && { color: '#F59E0B' }]}>
                     Recompensa
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.filterChip,
+                    filters.types.presale && { backgroundColor: '#6366F1' + '20', borderColor: '#6366F1' }
+                  ]}
+                  onPress={() => toggleType('presale')}
+                >
+                  <Icon name="lock" size={16} color={filters.types.presale ? '#6366F1' : '#6B7280'} />
+                  <Text style={[styles.filterChipText, filters.types.presale && { color: '#6366F1' }]}>
+                    Preventa
                   </Text>
                 </TouchableOpacity>
               </View>

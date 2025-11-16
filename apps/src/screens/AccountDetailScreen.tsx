@@ -71,7 +71,7 @@ type AccountDetailScreenRouteProp = RouteProp<MainStackParamList, 'AccountDetail
 
 interface Transaction {
   id?: string;
-  type: 'received' | 'sent' | 'exchange' | 'payment' | 'conversion' | 'reward';
+  type: 'received' | 'sent' | 'exchange' | 'payment' | 'conversion' | 'reward' | 'presale';
   from?: string;
   to?: string;
   fromPhone?: string;
@@ -173,6 +173,7 @@ export const AccountDetailScreen = () => {
       exchange: true,
       conversion: true,
       reward: true,
+      presale: true,
     },
     currencies: {
       cUSD: true,
@@ -441,7 +442,7 @@ export const AccountDetailScreen = () => {
     if (allTransactions.length > 0) {
       allTransactions.forEach((tx: any) => {
         // Determine transaction type based on both transactionType and direction
-        let type: 'sent' | 'received' | 'payment' | 'conversion' | 'exchange' | 'reward' = 'sent';
+        let type: 'sent' | 'received' | 'payment' | 'conversion' | 'exchange' | 'reward' | 'presale' = 'sent';
         const normalizedTxType = (tx.transactionType || '').toLowerCase();
         if (normalizedTxType === 'payment') {
           type = 'payment';
@@ -451,10 +452,13 @@ export const AccountDetailScreen = () => {
           type = 'exchange';
         } else if (normalizedTxType === 'reward') {
           type = 'reward';
+        } else if (normalizedTxType === 'presale') {
+          type = 'presale';
         } else {
           type = tx.direction === 'sent' ? 'sent' : 'received';
         }
         const isReward = type === 'reward';
+        const isPresale = type === 'presale';
         
         // Fix invitation detection: 
         // 1. If we have a counterpartyUser, it's not an invitation
@@ -579,6 +583,7 @@ export const AccountDetailScreen = () => {
         // Check if this is an external deposit
         const isExternalDeposit = !isReward && type === 'received' && tx.senderType?.toLowerCase() === 'external';
         const rewardDescription = isReward ? (tx.displayDescription || tx.description || 'Recompensa por referidos') : undefined;
+        const presaleDescription = isPresale ? (tx.displayDescription || tx.description || 'Compra de preventa $CONFIO') : undefined;
         
         // Debug external deposits
         if (type === 'received' && tx.senderType) {
@@ -632,6 +637,8 @@ export const AccountDetailScreen = () => {
         const fromPhoneKey = (tx.senderUser && (tx.senderUser as any).phoneKey) || tx.senderPhone || (tx as any).fromPhone;
         const toPhoneKey = (tx.counterpartyUser && (tx.counterpartyUser as any).phoneKey) || tx.counterpartyPhone || (tx as any).toPhone;
 
+        const finalDescription = isConversion ? tx.description : isReward ? rewardDescription : isPresale ? presaleDescription : tx.description;
+
         const finalTransaction = {
           id: tx.id,
           type,
@@ -669,7 +676,7 @@ export const AccountDetailScreen = () => {
           senderType: tx.senderType,
           // Helps UI decide if this was a Confío friend vs external
           hasCounterpartyUser: Boolean(tx.counterpartyUser && tx.counterpartyUser.id),
-          description: isConversion ? tx.description : rewardDescription,
+          description: finalDescription,
           p2pTradeId: type === 'exchange' ? tx.p2pTradeId : undefined,
           isRewardPayout: isReward,
         };
@@ -745,6 +752,8 @@ export const AccountDetailScreen = () => {
           : `Pago a ${transaction.to || 'Unknown'}`;
       case 'reward':
         return transaction.description || 'Recompensa Confío';
+      case 'presale':
+        return transaction.description || 'Compra preventa $CONFIO';
       default:
         return 'Transacción';
     }
@@ -764,6 +773,8 @@ export const AccountDetailScreen = () => {
         return <Icon name="shopping-bag" size={20} color="#8B5CF6" />;
       case 'reward':
         return <Icon name="gift" size={20} color="#F59E0B" />;
+      case 'presale':
+        return <Icon name="lock" size={20} color="#6366F1" />;
       default:
         return <Icon name="arrow-up" size={20} color="#6B7280" />;
     }
@@ -953,6 +964,7 @@ export const AccountDetailScreen = () => {
     const formattedDate = moment(transaction.date).format('DD/MM/YYYY');
     const formattedTime = transaction.time;
     const isRewardTransaction = transaction.type === 'reward' || transaction.isRewardPayout;
+    const isPresaleTransaction = transaction.type === 'presale';
     
     // Determine if counterparty is an external wallet (no phone + address present + no user)
     const isExternalSent = transaction.type === 'sent' && !transaction.toPhone && transaction.recipientAddress && !(transaction as any).hasCounterpartyUser;
@@ -960,10 +972,12 @@ export const AccountDetailScreen = () => {
       transaction.isExternalDeposit || (!transaction.fromPhone && transaction.senderAddress && !(transaction as any).hasCounterpartyUser)
     );
     // Get contact name for sender or recipient, falling back to "Billetera externa" for external wallets
-    const phoneToCheck = isRewardTransaction ? undefined : (transaction.type === 'received' ? transaction.fromPhone : transaction.toPhone);
+    const phoneToCheck = (isRewardTransaction || isPresaleTransaction) ? undefined : (transaction.type === 'received' ? transaction.fromPhone : transaction.toPhone);
     const fallbackName = isRewardTransaction
       ? (transaction.from || 'Confío Rewards')
-      : transaction.type === 'received' 
+      : isPresaleTransaction
+        ? (transaction.from || 'Confío Preventa')
+        : transaction.type === 'received' 
         ? (isExternalReceived ? 'Billetera externa' : transaction.from)
         : (isExternalSent ? 'Billetera externa' : transaction.to);
     const contactInfo = useContactNameSync(phoneToCheck, fallbackName);
@@ -1113,6 +1127,11 @@ export const AccountDetailScreen = () => {
           {isRewardTransaction && (
             <Text style={styles.rewardNote}>
               <Icon name="gift" size={12} color="#F59E0B" /> Recompensa por referidos
+            </Text>
+          )}
+          {isPresaleTransaction && (
+            <Text style={styles.presaleNote}>
+              <Icon name="lock" size={12} color="#6366F1" /> Preventa $CONFIO (bloqueado)
             </Text>
           )}
         </View>
@@ -2523,6 +2542,12 @@ const styles = StyleSheet.create({
   rewardNote: {
     fontSize: 12,
     color: '#B45309',
+    marginTop: 2,
+    fontWeight: '600',
+  },
+  presaleNote: {
+    fontSize: 12,
+    color: '#4F46E5',
     marginTop: 2,
     fontWeight: '600',
   },

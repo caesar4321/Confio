@@ -15,6 +15,7 @@ class UnifiedTransactionTable(models.Model):
         ('conversion', 'Conversion'),
         ('exchange', 'P2P Exchange'),
         ('reward', 'Reward'),
+        ('presale', 'Presale Purchase'),
     ]
     
     STATUS_CHOICES = [
