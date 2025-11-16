@@ -7,6 +7,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from achievements.models import ReferralRewardEvent, UserReferral
+from achievements.signals import sync_pending_reward_events
 from achievements.services.referral_rewards import (
     EventContext,
     sync_referral_reward_for_event,
@@ -67,11 +68,12 @@ class ReferralRewardServiceTests(TestCase):
     @patch("achievements.services.referral_rewards.ConfioRewardsService")
     def test_send_event_triggers_reward(self, mock_service):
         mock_instance = mock_service.return_value
+        mock_instance.convert_cusd_to_confio.return_value = Decimal("20")
         mock_instance.mark_eligibility.return_value = RewardSyncResult(
             tx_id="TEST-TX",
             confirmed_round=123,
-            referee_confio_micro=8_000_000,
-            referrer_confio_micro=2_000_000,
+            referee_confio_micro=20_000_000,
+            referrer_confio_micro=20_000_000,
             box_name="deadbeef",
         )
 
@@ -89,8 +91,9 @@ class ReferralRewardServiceTests(TestCase):
         self.assertEqual(event.reward_tx_id, "TEST-TX")
         mock_instance.mark_eligibility.assert_called_once()
         call_kwargs = mock_instance.mark_eligibility.call_args.kwargs
-        self.assertEqual(call_kwargs["referee_confio_micro"], 8_000_000)
-        self.assertEqual(call_kwargs["referrer_confio_micro"], 2_000_000)
+        self.assertEqual(call_kwargs["reward_cusd_micro"], 5_000_000)
+        self.assertEqual(call_kwargs["referee_confio_micro"], 20_000_000)
+        self.assertEqual(call_kwargs["referrer_confio_micro"], 20_000_000)
         notif_count = Notification.objects.filter(notification_type=NotificationTypeChoices.REFERRAL_EVENT_SEND).count()
         self.assertEqual(notif_count, 2)
 
@@ -130,11 +133,12 @@ class ReferralRewardServiceTests(TestCase):
 
         # Configure service for when referral is recreated
         mock_instance = mock_service.return_value
+        mock_instance.convert_cusd_to_confio.return_value = Decimal("20")
         mock_instance.mark_eligibility.return_value = RewardSyncResult(
             tx_id="PENDING-TO-ELIGIBLE",
             confirmed_round=456,
-            referee_confio_micro=8_000_000,
-            referrer_confio_micro=2_000_000,
+            referee_confio_micro=20_000_000,
+            referrer_confio_micro=20_000_000,
             box_name="beefdead",
         )
 
@@ -165,7 +169,7 @@ class ReferralRewardServiceTests(TestCase):
             amount=Decimal("25"),
             occurred_at=timezone.now(),
             reward_status="claimed",
-            referee_confio=Decimal("80"),
+            referee_confio=Decimal("20"),
             referrer_confio=Decimal("20"),
         )
 
@@ -180,11 +184,12 @@ class ReferralRewardServiceTests(TestCase):
     @patch("achievements.services.referral_rewards.ConfioRewardsService")
     def test_referrer_event_uses_referrer_role(self, mock_service):
         mock_instance = mock_service.return_value
+        mock_instance.convert_cusd_to_confio.return_value = Decimal("20")
         mock_instance.mark_eligibility.return_value = RewardSyncResult(
             tx_id="REFERRER-TX",
             confirmed_round=321,
-            referee_confio_micro=12_000_000,
-            referrer_confio_micro=3_000_000,
+            referee_confio_micro=20_000_000,
+            referrer_confio_micro=20_000_000,
             box_name="cafebabe",
         )
 
@@ -201,6 +206,7 @@ class ReferralRewardServiceTests(TestCase):
     @patch("achievements.services.referral_rewards.ConfioRewardsService")
     def test_service_failure_marks_event_failed(self, mock_service):
         mock_instance = mock_service.return_value
+        mock_instance.convert_cusd_to_confio.return_value = Decimal("20")
         mock_instance.mark_eligibility.side_effect = RuntimeError("algorand error")
 
         sync_referral_reward_for_event(
@@ -217,11 +223,12 @@ class ReferralRewardServiceTests(TestCase):
     @patch("achievements.services.referral_rewards.ConfioRewardsService")
     def test_duplicate_trigger_does_not_repeat_sync(self, mock_service):
         mock_instance = mock_service.return_value
+        mock_instance.convert_cusd_to_confio.return_value = Decimal("20")
         mock_instance.mark_eligibility.return_value = RewardSyncResult(
             tx_id="UNIQUE-TX",
             confirmed_round=789,
-            referee_confio_micro=8_000_000,
-            referrer_confio_micro=2_000_000,
+            referee_confio_micro=20_000_000,
+            referrer_confio_micro=20_000_000,
             box_name="1234abcd",
         )
 
@@ -238,6 +245,42 @@ class ReferralRewardServiceTests(TestCase):
         event = ReferralRewardEvent.objects.get(user=self.referred, trigger="send")
         self.assertEqual(event.amount, Decimal("25"))
         self.assertEqual(event.reward_tx_id, "UNIQUE-TX")
+
+    @patch("achievements.services.referral_rewards.ConfioRewardsService")
+    def test_referrer_event_remains_eligible_after_referee_claim(self, mock_service):
+        mock_instance = mock_service.return_value
+        mock_instance.convert_cusd_to_confio.return_value = Decimal("20")
+        mock_instance.mark_eligibility.return_value = RewardSyncResult(
+            tx_id="REF-ELIGIBLE",
+            confirmed_round=111,
+            referee_confio_micro=20_000_000,
+            referrer_confio_micro=20_000_000,
+            box_name="feedface",
+        )
+
+        sync_referral_reward_for_event(
+            self.referred,
+            EventContext(event="send", amount=Decimal("25")),
+        )
+
+        referrer_event = ReferralRewardEvent.objects.get(
+            user=self.referrer,
+            trigger="referral_pending",
+            actor_role="referrer",
+        )
+        self.assertEqual(referrer_event.reward_status, "eligible")
+
+        # Simulate referee claiming first while referrer is still pending
+        self.referral.refresh_from_db()
+        self.referral.reward_claimed_at = timezone.now()
+        self.referral.referee_reward_status = "claimed"
+        self.referral.save(update_fields=["reward_claimed_at", "referee_reward_status"])
+
+        # Re-run placeholder sync to mimic signal behavior
+        sync_pending_reward_events(UserReferral, self.referral, False)
+
+        referrer_event.refresh_from_db()
+        self.assertEqual(referrer_event.reward_status, "eligible")
 
     def test_friend_joined_notifications_created(self):
         new_referral = UserReferral.objects.create(

@@ -51,7 +51,7 @@ type FriendDetailScreenRouteProp = RouteProp<MainStackParamList, 'FriendDetail'>
 
 interface Transaction {
   id: string;
-  type: 'sent' | 'received' | 'payment' | 'exchange';
+  type: 'sent' | 'received' | 'payment' | 'exchange' | 'reward';
   from?: string;
   to?: string;
   amount: string;
@@ -134,6 +134,7 @@ export function FriendDetailScreen() {
       payment: true,
       exchange: true,
       conversion: true,
+      reward: true,
     },
     currencies: {
       cUSD: true,
@@ -218,9 +219,14 @@ export function FriendDetailScreen() {
         id: tx.id,
         type: transactionType === 'exchange' ? 'exchange' : 
               transactionType === 'payment' ? 'payment' :
+              transactionType === 'reward' ? 'reward' :
               isCurrentUserSender ? 'sent' : 'received',
-        from: isCurrentUserSender ? undefined : friend.name,
-        to: isCurrentUserSender ? friend.name : undefined,
+        from: transactionType === 'reward'
+          ? (tx.senderDisplayName || 'Confío Rewards')
+          : isCurrentUserSender ? undefined : friend.name,
+        to: transactionType === 'reward'
+          ? (friend.name || 'Tú')
+          : isCurrentUserSender ? friend.name : undefined,
         amount: tx.displayAmount || tx.amount,
         currency: uiCurrency,
         date: new Date(tx.createdAt).toISOString().split('T')[0],
@@ -332,7 +338,7 @@ export function FriendDetailScreen() {
     
     // Check if any filter is non-default
     const defaultFilters: TransactionFilters = {
-      types: { sent: true, received: true, payment: true, exchange: true, conversion: true },
+      types: { sent: true, received: true, payment: true, exchange: true, conversion: true, reward: true },
       currencies: { cUSD: true, CONFIO: true, USDC: true },
       status: { completed: true, pending: true },
       timeRange: 'all',
@@ -352,6 +358,8 @@ export function FriendDetailScreen() {
         return `Pago a ${transaction.to}`;
       case 'exchange':
         return 'Intercambio P2P';
+      case 'reward':
+        return transaction.description || 'Recompensa Confío';
       default:
         return 'Transacción';
     }

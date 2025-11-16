@@ -27,8 +27,6 @@ DEFAULT_EVENT_REWARD_CONFIG: Dict[str, Dict[str, Any]] = {
     #   reward_cusd: cUSD notion used for vault accounting (Decimal, optional)
     "top_up": {
         "threshold": Decimal("20"),
-        "referee_confio": Decimal("15"),
-        "referrer_confio": Decimal("5"),
         "records_checkpoint": "conversion_usdc_to_cusd",
     },
     "conversion_usdc_to_cusd": {
@@ -39,17 +37,18 @@ DEFAULT_EVENT_REWARD_CONFIG: Dict[str, Dict[str, Any]] = {
         "requires_checkpoint": "top_up",
     },
     "send": {
-        "referee_confio": Decimal("8"),
-        "referrer_confio": Decimal("2"),
+        "reward_cusd": Decimal("5"),
+        # Mirror referee allocation for referrer so both earn the same $ value
+        "referrer_confio": None,
         "notification_type": NotificationTypeChoices.REFERRAL_FIRST_TRANSACTION,
     },
     "payment": {
-        "referee_confio": Decimal("10"),
-        "referrer_confio": Decimal("3"),
+        "reward_cusd": Decimal("5"),
+        "referrer_confio": None,
     },
     "p2p_trade": {
-        "referee_confio": Decimal("12"),
-        "referrer_confio": Decimal("4"),
+        "reward_cusd": Decimal("5"),
+        "referrer_confio": None,
     },
 }
 
