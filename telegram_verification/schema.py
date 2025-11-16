@@ -14,6 +14,7 @@ from django.db import IntegrityError
 from users.phone_utils import normalize_phone
 from users.models import Account
 from blockchain.invite_send_mutations import ClaimInviteForPhone
+from users.review_numbers import is_review_test_phone_key
 import time
 
 logger = logging.getLogger(__name__)
@@ -326,14 +327,16 @@ class VerifyTelegramCode(graphene.Mutation):
                     # Before changing user phone, check for duplicates using canonical key
                     user = info.context.user
                     phone_key = normalize_phone(phone_number, country_code)
-                    from users.models import User as UserModel
-                    duplicate_exists = UserModel.objects.filter(
-                        phone_key=phone_key,
-                        deleted_at__isnull=True
-                    ).exclude(id=user.id).exists()
-                    if duplicate_exists:
-                        logger.error('Phone already in use by another account: %s', phone_key)
-                        return VerifyTelegramCode(success=False, error="Este número ya está registrado en Confío. Inicia sesión o recupera tu cuenta.")
+                    allow_duplicates = is_review_test_phone_key(phone_key)
+                    if not allow_duplicates:
+                        from users.models import User as UserModel
+                        duplicate_exists = UserModel.objects.filter(
+                            phone_key=phone_key,
+                            deleted_at__isnull=True
+                        ).exclude(id=user.id).exists()
+                        if duplicate_exists:
+                            logger.error('Phone already in use by another account: %s', phone_key)
+                            return VerifyTelegramCode(success=False, error="Este número ya está registrado en Confío. Inicia sesión o recupera tu cuenta.")
 
                     # Update user's phone number and country code
                     try:

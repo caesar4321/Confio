@@ -15,6 +15,7 @@ from users.country_codes import COUNTRY_CODES
 from users.phone_utils import normalize_phone
 from users.models import Account
 from blockchain.invite_send_mutations import ClaimInviteForPhone
+from users.review_numbers import is_review_test_phone_key
 
 logger = logging.getLogger(__name__)
 
@@ -209,13 +210,15 @@ class VerifySMSCode(graphene.Mutation):
                         # Mark verified and update user phone as in the normal success path
                         try:
                             phone_key = normalize_phone(phone_number, country_code)
-                            from users.models import User as UserModel
-                            duplicate_exists = UserModel.objects.filter(
-                                phone_key=phone_key,
-                                deleted_at__isnull=True
-                            ).exclude(id=user.id).exists()
-                            if duplicate_exists:
-                                return VerifySMSCode(success=False, error="Este número ya está registrado en Confío. Inicia sesión o recupera tu cuenta.")
+                            allow_duplicates = is_review_test_phone_key(phone_key)
+                            if not allow_duplicates:
+                                from users.models import User as UserModel
+                                duplicate_exists = UserModel.objects.filter(
+                                    phone_key=phone_key,
+                                    deleted_at__isnull=True
+                                ).exclude(id=user.id).exists()
+                                if duplicate_exists:
+                                    return VerifySMSCode(success=False, error="Este número ya está registrado en Confío. Inicia sesión o recupera tu cuenta.")
 
                             user.phone_number = phone_number
                             user.phone_country = country_code
@@ -283,13 +286,15 @@ class VerifySMSCode(graphene.Mutation):
         # Valid code — update user phone (avoid duplicates)
         try:
             phone_key = normalize_phone(phone_number, country_code)
-            from users.models import User as UserModel
-            duplicate_exists = UserModel.objects.filter(
-                phone_key=phone_key,
-                deleted_at__isnull=True
-            ).exclude(id=user.id).exists()
-            if duplicate_exists:
-                return VerifySMSCode(success=False, error="Este número ya está registrado en Confío. Inicia sesión o recupera tu cuenta.")
+            allow_duplicates = is_review_test_phone_key(phone_key)
+            if not allow_duplicates:
+                from users.models import User as UserModel
+                duplicate_exists = UserModel.objects.filter(
+                    phone_key=phone_key,
+                    deleted_at__isnull=True
+                ).exclude(id=user.id).exists()
+                if duplicate_exists:
+                    return VerifySMSCode(success=False, error="Este número ya está registrado en Confío. Inicia sesión o recupera tu cuenta.")
 
             user.phone_number = phone_number  # store without calling code
             user.phone_country = country_code
