@@ -2059,6 +2059,24 @@ class SubmitIdentityVerificationS3(graphene.Mutation):
             if business_key:
                 from security.s3_utils import public_s3_url as _public
                 risk['business_cert_url'] = _public(business_key)
+            # Determine whether payout proof is required based on phone country
+            phone_country = (getattr(user, 'phone_country', '') or '').upper()
+            payout_label_raw = (kwargs.get('payout_method_label') or '').strip()
+            payout_label_value = payout_label_raw or None
+            payout_proof_key = kwargs.get('payout_proof_key')
+            payout_required = phone_country == 'VE'
+            if payout_required and not payout_proof_key:
+                return SubmitIdentityVerificationS3(
+                    success=False,
+                    error="Debes subir el comprobante del método de pago para usuarios de Venezuela.",
+                    verification=None
+                )
+            if payout_required and not payout_label_value:
+                return SubmitIdentityVerificationS3(
+                    success=False,
+                    error="Indica el nombre del método de pago para usuarios de Venezuela.",
+                    verification=None
+                )
 
             verification = IdentityVerification.objects.create(
                 user=user,
@@ -2079,8 +2097,8 @@ class SubmitIdentityVerificationS3(graphene.Mutation):
                 document_front_url=public_s3_url(kwargs['front_key']),
                 document_back_url=public_s3_url(kwargs['back_key']) if kwargs.get('back_key') else None,
                 selfie_url=public_s3_url(kwargs['selfie_key']),
-                payout_method_label=kwargs.get('payout_method_label'),
-                payout_proof_url=public_s3_url(kwargs['payout_proof_key']) if kwargs.get('payout_proof_key') else None,
+                payout_method_label=payout_label_value if (payout_required or payout_label_value) else None,
+                payout_proof_url=public_s3_url(payout_proof_key) if payout_proof_key else None,
                 risk_factors=risk or {},
             )
             return SubmitIdentityVerificationS3(success=True, error=None, verification=verification)
