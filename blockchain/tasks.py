@@ -1000,7 +1000,7 @@ def scan_outbound_confirmations(max_batch: int = 50):
                             },
                         )
                     except Exception as ue:
-                        logger.warning(f\"Failed to record unified presale transaction for {p.id}: {ue}\")
+                        logger.warning(f"Failed to record unified presale transaction for {p.id}: {ue}")
 
                     # Mark balances stale for quick refresh
                     try:
