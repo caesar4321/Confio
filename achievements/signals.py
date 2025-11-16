@@ -351,16 +351,24 @@ def sync_pending_reward_events(sender, instance: UserReferral, created, **kwargs
         if role_status not in {"pending", "eligible", "claimed", "failed", "skipped"}:
             role_status = "pending"
 
-        # Once the referral stage transitions away from pending, remove the placeholder
-        if role_status != "pending":
-            ReferralRewardEvent.objects.filter(
-                user=user,
-                trigger="referral_pending",
-                referral=instance,
-            ).delete()
-            return
+        placeholder_status = role_status
 
-        placeholder_status = "pending"
+        if role_status != "pending":
+            # Only remove the placeholder once the concrete reward event exists.
+            real_event_exists = ReferralRewardEvent.objects.filter(
+                user=user,
+                referral=instance,
+                actor_role=role,
+                trigger__in=DEFAULT_EVENT_REWARD_CONFIG.keys(),
+            ).exists()
+            if real_event_exists:
+                ReferralRewardEvent.objects.filter(
+                    user=user,
+                    trigger="referral_pending",
+                    referral=instance,
+                ).delete()
+                return
+            placeholder_status = "pending"
 
         defaults = {
             "user": user,
