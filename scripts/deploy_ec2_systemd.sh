@@ -91,6 +91,8 @@ set -euo pipefail
 set -x
 
 APP_DIR="${APP_DIR:-/opt/confio}"
+VENV_DIR="$APP_DIR/myvenv"
+LEGACY_VENV="$APP_DIR/venv"
 
 echo "==> Ensure base directories"
 sudo mkdir -p "$APP_DIR"
@@ -104,7 +106,7 @@ if [[ -f "$APP_DIR/.env" ]]; then sudo cp "$APP_DIR/.env" /tmp/.env.confio.bak.$
 
 # Remove old app code to avoid stale migrations/files lingering
 sudo find "$APP_DIR" -mindepth 1 -maxdepth 1 \
-  \( -name venv -o -name media -o -name staticfiles -o -name ".env" \) -prune -o -exec rm -rf {} +
+  \( -name venv -o -name myvenv -o -name media -o -name staticfiles -o -name ".env" \) -prune -o -exec rm -rf {} +
 
 # Restore .env if we preserved it
 if [[ -f /tmp/.env.confio.bak.$$ ]]; then sudo mv /tmp/.env.confio.bak.$$ "$APP_DIR/.env"; fi
@@ -112,10 +114,18 @@ if [[ -f /tmp/.env.confio.bak.$$ ]]; then sudo mv /tmp/.env.confio.bak.$$ "$APP_
 # Extract new package
 sudo tar -xzf /tmp/confio-deploy.tar.gz -C "$APP_DIR"
 
-# Ensure nginx/daphne can traverse app dir and expected myvenv symlink exists
+# Ensure nginx/daphne can traverse app dir and roll legacy venv -> myvenv
 sudo chmod 755 "$APP_DIR"
-if [[ -d "$APP_DIR/venv" ]]; then
-  sudo ln -sfn "$APP_DIR/venv" "$APP_DIR/myvenv"
+if [[ -d "$LEGACY_VENV" && ! -e "$VENV_DIR" ]]; then
+  sudo mv "$LEGACY_VENV" "$VENV_DIR"
+elif [[ -L "$VENV_DIR" ]]; then
+  TARGET="$(readlink -f "$VENV_DIR" || true)"
+  if [[ "$TARGET" == "$LEGACY_VENV" ]]; then
+    sudo rm -f "$VENV_DIR"
+    sudo mv "$LEGACY_VENV" "$VENV_DIR"
+  fi
+elif [[ -d "$LEGACY_VENV" && -d "$VENV_DIR" && "$LEGACY_VENV" != "$VENV_DIR" ]]; then
+  sudo rm -rf "$LEGACY_VENV"
 fi
 
 echo "==> Python venv and requirements"
@@ -131,11 +141,11 @@ if ! command -v python3 >/dev/null 2>&1; then
     echo "No supported package manager found (apt/yum/dnf). Aborting."; exit 1
   fi
 fi
-if [[ ! -d "$APP_DIR/venv" ]]; then
-  sudo python3 -m venv "$APP_DIR/venv"
+if [[ ! -d "$VENV_DIR" ]]; then
+  sudo python3 -m venv "$VENV_DIR"
 fi
-sudo "$APP_DIR/venv/bin/pip" install --upgrade pip wheel
-sudo "$APP_DIR/venv/bin/pip" install -r "$APP_DIR/requirements.txt"
+sudo "$VENV_DIR/bin/pip" install --upgrade pip wheel
+sudo "$VENV_DIR/bin/pip" install -r "$APP_DIR/requirements.txt"
 
 echo "==> Create env file if missing (defaults to RDS Postgres)"
 if [[ ! -f "$APP_DIR/.env" ]]; then
@@ -163,8 +173,8 @@ EOF
 fi
 
 echo "==> Django migrate + collectstatic"
-sudo "$APP_DIR/venv/bin/python" "$APP_DIR/manage.py" migrate --noinput || true
-sudo "$APP_DIR/venv/bin/python" "$APP_DIR/manage.py" collectstatic --noinput || true
+sudo "$VENV_DIR/bin/python" "$APP_DIR/manage.py" migrate --noinput || true
+sudo "$VENV_DIR/bin/python" "$APP_DIR/manage.py" collectstatic --noinput || true
 
 echo "==> Install systemd units"
 if [[ -f "$APP_DIR/config/systemd/daphne.service" ]]; then
