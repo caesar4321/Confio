@@ -57,30 +57,13 @@ class AlgorandClient:
             headers = dict(ua)
             if token:
                 headers['X-API-Key'] = token
-                self._using_fallback_algod = False
-                return algod.AlgodClient('', address, headers=headers)
-
-            if self.fallback_algod_address:
-                logger.warning(
-                    "Algod endpoint %s requires ALGORAND_ALGOD_TOKEN but none is configured. "
-                    "Falling back to %s for read operations.",
+            else:
+                logger.info(
+                    "ALGORAND_ALGOD_TOKEN not set; continuing to use %s without X-API-Key header",
                     address,
-                    self.fallback_algod_address,
                 )
-                self._using_fallback_algod = True
-                return algod.AlgodClient(
-                    self.fallback_algod_token or '',
-                    self.fallback_algod_address,
-                    headers=ua,
-                )
-
-            logger.error(
-                "Algod endpoint %s requires an API key but ALGORAND_ALGOD_TOKEN is empty. "
-                "Requests will continue to fail with HTTP 403 until a token or fallback is configured.",
-                address,
-            )
             self._using_fallback_algod = False
-            return algod.AlgodClient('', address, headers=ua)
+            return algod.AlgodClient('', address, headers=headers)
 
         self._using_fallback_algod = False
         return algod.AlgodClient(token, address, headers=ua)
