@@ -23,7 +23,7 @@ export const DiscoverScreen = () => {
         title: 'Recarga dólares digitales',
         description: 'Compra dólares estables en minutos con métodos locales.',
         icon: 'dollar-sign',
-        action: () => navigation.navigate('BottomTabs' as never, { screen: 'Exchange' } as never),
+        action: () => navigation.navigate('USDCDeposit' as never, { tokenType: 'usdc' } as never),
       },
       {
         key: 'invite',

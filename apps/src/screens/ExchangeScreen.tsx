@@ -4168,7 +4168,7 @@ const styles = StyleSheet.create({
   },
   buyButton: {
     flex: 1,
-    backgroundColor: colors.primary,
+    backgroundColor: colors.accent,
     paddingVertical: 8,
     borderRadius: 8,
     alignItems: 'center',
@@ -4472,7 +4472,7 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   continueButton: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.accent,
     padding: 12,
     borderRadius: 8,
     alignItems: 'center',

@@ -6,7 +6,7 @@ from django.utils import timezone
 from decimal import Decimal
 from graphql import GraphQLError
 
-from .models import PresalePhase, PresalePurchase, PresaleStats, UserPresaleLimit, PresaleSettings
+from .models import PresalePhase, PresalePurchase, PresaleStats, UserPresaleLimit, PresaleSettings, PresaleWaitlist
 from users.models import Account
 
 
@@ -174,15 +174,15 @@ class PresaleQueries(graphene.ObjectType):
 
 class PurchasePresaleTokens(graphene.Mutation):
     """Mutation to purchase CONFIO tokens during presale"""
-    
+
     class Arguments:
         cusd_amount = graphene.Decimal(required=True)
         phase_number = graphene.Int(required=False)
-    
+
     success = graphene.Boolean()
     message = graphene.String()
     purchase = graphene.Field(PresalePurchaseType)
-    
+
     @login_required
     def mutate(self, info, cusd_amount, phase_number=None):
         # The presale purchase flow is implemented over WebSocket for a fully
@@ -191,6 +191,40 @@ class PurchasePresaleTokens(graphene.Mutation):
         raise GraphQLError("Use WebSocket /ws/presale_session for presale purchases (prepare + submit)")
 
 
+class JoinPresaleWaitlist(graphene.Mutation):
+    """Mutation to join the presale waitlist"""
+
+    class Arguments:
+        pass
+
+    success = graphene.Boolean()
+    message = graphene.String()
+    already_joined = graphene.Boolean()
+
+    @login_required
+    def mutate(self, info):
+        user = info.context.user
+
+        # Check if user already joined
+        existing = PresaleWaitlist.objects.filter(user=user).first()
+        if existing:
+            return JoinPresaleWaitlist(
+                success=True,
+                message="Ya estás en la lista de espera. Te notificaremos cuando la preventa esté disponible.",
+                already_joined=True
+            )
+
+        # Create new waitlist entry
+        PresaleWaitlist.objects.create(user=user)
+
+        return JoinPresaleWaitlist(
+            success=True,
+            message="¡Te has unido a la lista de espera! Te notificaremos cuando la preventa esté disponible.",
+            already_joined=False
+        )
+
+
 class PresaleMutations(graphene.ObjectType):
     """Mutations for presale operations"""
     purchase_presale_tokens = PurchasePresaleTokens.Field()
+    join_presale_waitlist = JoinPresaleWaitlist.Field()

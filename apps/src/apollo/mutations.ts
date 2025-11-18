@@ -773,3 +773,13 @@ export const COMPLETE_BUSINESS_OPT_IN = gql`
     }
   }
 `;
+
+export const JOIN_PRESALE_WAITLIST = gql`
+  mutation JoinPresaleWaitlist {
+    joinPresaleWaitlist {
+      success
+      message
+      alreadyJoined
+    }
+  }
+`;

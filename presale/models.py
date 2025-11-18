@@ -290,14 +290,48 @@ class UserPresaleLimit(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     phase = models.ForeignKey(PresalePhase, on_delete=models.CASCADE)
     total_purchased = models.DecimalField(
-        max_digits=10, 
+        max_digits=10,
         decimal_places=2,
         default=Decimal('0')
     )
     last_purchase_at = models.DateTimeField(null=True, blank=True)
-    
+
     class Meta:
         unique_together = ['user', 'phase']
-        
+
     def __str__(self):
         return f"{self.user.username} - Phase {self.phase.phase_number}: {self.total_purchased} cUSD"
+
+
+class PresaleWaitlist(models.Model):
+    """Track users who want to be notified about presale availability"""
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='presale_waitlist_entries'
+    )
+    notified = models.BooleanField(
+        default=False,
+        help_text="Whether user has been notified about presale availability"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    notified_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user']),
+            models.Index(fields=['notified']),
+            models.Index(fields=['-created_at']),
+        ]
+        verbose_name = "Presale Waitlist Entry"
+        verbose_name_plural = "Presale Waitlist Entries"
+
+    def __str__(self):
+        return f"{self.user.username} - Joined {self.created_at.strftime('%Y-%m-%d')}"
+
+    def mark_as_notified(self):
+        """Mark this entry as notified"""
+        self.notified = True
+        self.notified_at = timezone.now()
+        self.save()

@@ -7,7 +7,7 @@ from django.urls import reverse
 from django.db.models import Sum, Count
 from decimal import Decimal
 
-from .models import PresalePhase, PresalePurchase, PresaleStats, UserPresaleLimit, PresaleSettings
+from .models import PresalePhase, PresalePurchase, PresaleStats, UserPresaleLimit, PresaleSettings, PresaleWaitlist
 
 
 @admin.register(PresalePhase)
@@ -1154,3 +1154,56 @@ class PresaleSettingsAdmin(admin.ModelAdmin):
         except Exception as e:
             self.message_user(request, f'Failed to unlock claims: {e}', level='error')
     unlock_claims_and_finish_presale.short_description = 'Finish presale and unlock user claims (on-chain + DB)'
+
+
+@admin.register(PresaleWaitlist)
+class PresaleWaitlistAdmin(admin.ModelAdmin):
+    list_display = [
+        'user_link',
+        'created_at',
+        'notified',
+        'notified_at',
+    ]
+    list_filter = ['notified', 'created_at']
+    search_fields = ['user__username', 'user__email', 'user__phone_number']
+    readonly_fields = ['user', 'created_at', 'notified_at']
+    date_hierarchy = 'created_at'
+
+    fieldsets = (
+        ('Waitlist Entry', {
+            'fields': ('user', 'created_at')
+        }),
+        ('Notification Status', {
+            'fields': ('notified', 'notified_at')
+        })
+    )
+
+    def user_link(self, obj):
+        url = reverse('admin:users_user_change', args=[obj.user.id])
+        return format_html('<a href="{}">{}</a>', url, obj.user.username)
+    user_link.short_description = 'User'
+
+    def has_add_permission(self, request):
+        # Users join via the app, not admin
+        return False
+
+    actions = ['mark_as_notified', 'send_notification']
+
+    def mark_as_notified(self, request, queryset):
+        updated = 0
+        for entry in queryset.filter(notified=False):
+            entry.mark_as_notified()
+            updated += 1
+        self.message_user(request, f"{updated} waitlist entry/entries marked as notified.")
+    mark_as_notified.short_description = "Mark as notified"
+
+    def send_notification(self, request, queryset):
+        # TODO: Implement push notification sending
+        # For now, just mark as notified
+        updated = 0
+        for entry in queryset.filter(notified=False):
+            # In the future, send actual push notification here
+            entry.mark_as_notified()
+            updated += 1
+        self.message_user(request, f"Notifications sent to {updated} user(s).")
+    send_notification.short_description = "Send presale notification"
