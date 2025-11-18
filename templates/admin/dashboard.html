@@ -372,6 +372,34 @@
     </div>
     {% endif %}
 
+    <!-- Presale Waitlist Metrics -->
+    <h3 class="section-title" style="font-size: 18px; margin-top: 30px;">📋 Presale Waitlist</h3>
+    <div class="metrics-grid">
+        <div class="metric-card">
+            <div class="metric-label">Total Waitlist</div>
+            <div class="metric-value">{{ presale_waitlist_total|intcomma }}</div>
+            <div class="metric-change">Users interested in presale</div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">Unnotified</div>
+            <div class="metric-value" style="color: #f59e0b;">{{ presale_waitlist_unnotified|intcomma }}</div>
+            <div class="metric-change">Ready to notify</div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">Notified</div>
+            <div class="metric-value" style="color: #10b981;">{{ presale_waitlist_notified|intcomma }}</div>
+            <div class="metric-change">Already informed</div>
+        </div>
+    </div>
+
+    <div class="quick-actions">
+        <a href="/admin/presale/presalewaitlist/" class="action-button">
+            Manage Waitlist
+        </a>
+    </div>
+
     <!-- $CONFIO Reward Security -->
     {% if fraud_stats %}
     <h2 class="section-title">🔍 $CONFIO Reward Security</h2>
