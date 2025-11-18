@@ -1026,6 +1026,9 @@ export const AccountDetailScreen = () => {
         case 'reward':
           baseTitle = transaction.description || 'Recompensa por referidos';
           break;
+        case 'presale':
+          baseTitle = transaction.description || 'Compra preventa $CONFIO';
+          break;
         default:
           baseTitle = 'Transacción';
       }
@@ -1131,7 +1134,7 @@ export const AccountDetailScreen = () => {
           )}
           {isPresaleTransaction && (
             <Text style={styles.presaleNote}>
-              <Icon name="lock" size={12} color="#6366F1" /> Preventa $CONFIO (bloqueado)
+              <Icon name="lock" size={12} color="#6366F1" /> (bloqueado)
             </Text>
           )}
         </View>

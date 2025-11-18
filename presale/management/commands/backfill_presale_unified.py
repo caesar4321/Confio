@@ -49,8 +49,6 @@ class Command(BaseCommand):
             user_display = user.get_full_name() or user.username or user.email or "Tú"
             amount_str = format(purchase.confio_amount.normalize(), "f")
             description = f"Compra de preventa Fase {getattr(purchase.phase, 'phase_number', '')}".strip()
-            if getattr(settings, "PRESALE_TOKENS_LOCKED", True):
-                description = f"{description} (bloqueado)"
 
             defaults = {
                 "amount": amount_str,
