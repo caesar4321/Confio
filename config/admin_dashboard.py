@@ -903,13 +903,14 @@ confio_admin_site.register(USDCDeposit, USDCDepositAdmin)
 confio_admin_site.register(USDCWithdrawal, USDCWithdrawalAdmin)
 
 # Presale models
-from presale.models import PresalePhase, PresalePurchase, PresaleStats, UserPresaleLimit, PresaleSettings
-from presale.admin import PresalePhaseAdmin, PresalePurchaseAdmin, PresaleStatsAdmin, UserPresaleLimitAdmin, PresaleSettingsAdmin
+from presale.models import PresalePhase, PresalePurchase, PresaleStats, UserPresaleLimit, PresaleSettings, PresaleWaitlist
+from presale.admin import PresalePhaseAdmin, PresalePurchaseAdmin, PresaleStatsAdmin, UserPresaleLimitAdmin, PresaleSettingsAdmin, PresaleWaitlistAdmin
 confio_admin_site.register(PresaleSettings, PresaleSettingsAdmin)
 confio_admin_site.register(PresalePhase, PresalePhaseAdmin)
 confio_admin_site.register(PresalePurchase, PresalePurchaseAdmin)
 confio_admin_site.register(PresaleStats, PresaleStatsAdmin)
 confio_admin_site.register(UserPresaleLimit, UserPresaleLimitAdmin)
+confio_admin_site.register(PresaleWaitlist, PresaleWaitlistAdmin)
 
 # Notification models
 from notifications.models import Notification, NotificationPreference, FCMDeviceToken
