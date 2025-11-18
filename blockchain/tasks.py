@@ -962,8 +962,6 @@ def scan_outbound_confirmations(max_batch: int = 50):
                         vault_address = getattr(settings, 'ALGORAND_PRESALE_VAULT_ADDRESS', '') or 'ConfioPresaleVault'
                         user_address = p.from_address or ''
                         description = f"Compra de preventa Fase {getattr(p.phase, 'phase_number', '')}".strip()
-                        if getattr(settings, 'PRESALE_TOKENS_LOCKED', True):
-                            description = f"{description} (bloqueado)"
 
                         UnifiedTransactionTable.objects.update_or_create(
                             transaction_type='presale',
