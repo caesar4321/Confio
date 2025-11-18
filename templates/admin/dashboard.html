@@ -324,17 +324,27 @@
     {% endif %}
     
     <!-- Presale Status -->
-    <h2 class="section-title">🚀 CONFIO Token Presale TEST</h2>
-    <p>Presale Active: {{ presale_active|default:"NOT SET" }}</p>
+    <h2 class="section-title">🚀 CONFIO Token Presale</h2>
+    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px;">
+        <span style="font-weight: 600;">Global Presale Switch:</span>
+        {% if presale_global_enabled %}
+        <span style="background: #10b981; color: white; padding: 4px 12px; border-radius: 6px; font-weight: 600;">✓ ENABLED</span>
+        {% else %}
+        <span style="background: #6b7280; color: white; padding: 4px 12px; border-radius: 6px; font-weight: 600;">○ DISABLED</span>
+        {% endif %}
+        <a href="/admin/presale/presalesettings/" style="margin-left: auto; color: #3b82f6; text-decoration: none; font-size: 14px;">⚙️ Settings</a>
+    </div>
+
     {% if presale_active %}
-    <h2 class="section-title">🚀 CONFIO Token Presale - Phase {{ presale_phase }}: {{ presale_name }}</h2>
+    <!-- Active Presale Phase -->
+    <h3 style="font-size: 20px; color: #1f2937; margin-bottom: 16px;">📊 Active Phase {{ presale_phase }}: {{ presale_name }}</h3>
     <div class="metrics-grid">
         <div class="metric-card">
             <div class="metric-label">Total Raised</div>
             <div class="metric-value">${{ presale_raised|floatformat:2|intcomma }}</div>
             <div class="metric-change">Goal: ${{ presale_goal|floatformat:0|intcomma }}</div>
         </div>
-        
+
         <div class="metric-card">
             <div class="metric-label">Progress</div>
             <div class="metric-value">{{ presale_progress|floatformat:1 }}%</div>
@@ -344,21 +354,72 @@
                 </div>
             </div>
         </div>
-        
+
         <div class="metric-card">
             <div class="metric-label">Participants</div>
             <div class="metric-value">{{ presale_participants|intcomma }}</div>
             <div class="metric-change">Unique buyers</div>
         </div>
-        
+
         <div class="metric-card">
             <div class="metric-label">Price per Token</div>
             <div class="metric-value">${{ presale_price }}</div>
             <div class="metric-change">CONFIO/cUSD</div>
         </div>
     </div>
-    
-    <div class="quick-actions">
+    {% else %}
+    <div class="alert" style="background: #fef3c7; color: #92400e; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
+        <strong>⚠️ No Active Presale</strong>
+        {% if not presale_global_enabled %}
+        - Global switch is disabled. Enable it in <a href="/admin/presale/presalesettings/">Settings</a> and activate a phase.
+        {% else %}
+        - <a href="/admin/presale/presalephase/">Activate a presale phase</a>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- All Presale Phases Summary -->
+    {% if all_presale_phases %}
+    <h3 style="font-size: 18px; color: #1f2937; margin: 24px 0 12px;">All Presale Phases</h3>
+    <div style="background: white; border-radius: 8px; overflow: hidden; border: 1px solid #e5e7eb;">
+        <table style="width: 100%; border-collapse: collapse;">
+            <thead style="background: #f9fafb;">
+                <tr>
+                    <th style="padding: 12px; text-align: left; font-weight: 600; color: #6b7280; font-size: 13px;">Phase</th>
+                    <th style="padding: 12px; text-align: left; font-weight: 600; color: #6b7280; font-size: 13px;">Name</th>
+                    <th style="padding: 12px; text-align: left; font-weight: 600; color: #6b7280; font-size: 13px;">Status</th>
+                    <th style="padding: 12px; text-align: right; font-weight: 600; color: #6b7280; font-size: 13px;">Raised</th>
+                    <th style="padding: 12px; text-align: right; font-weight: 600; color: #6b7280; font-size: 13px;">Participants</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for phase in all_presale_phases %}
+                <tr style="border-top: 1px solid #e5e7eb;">
+                    <td style="padding: 12px;">Phase {{ phase.phase_number }}</td>
+                    <td style="padding: 12px; font-weight: 500;">{{ phase.name }}</td>
+                    <td style="padding: 12px;">
+                        {% if phase.status == 'active' %}
+                        <span style="background: #10b981; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">ACTIVE</span>
+                        {% elif phase.status == 'completed' %}
+                        <span style="background: #3b82f6; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">COMPLETED</span>
+                        {% elif phase.status == 'paused' %}
+                        <span style="background: #f59e0b; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">PAUSED</span>
+                        {% elif phase.status == 'upcoming' %}
+                        <span style="background: #8b5cf6; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">UPCOMING</span>
+                        {% else %}
+                        <span style="background: #6b7280; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">{{ phase.status|upper }}</span>
+                        {% endif %}
+                    </td>
+                    <td style="padding: 12px; text-align: right;">${{ phase.total_raised|floatformat:2|intcomma }}</td>
+                    <td style="padding: 12px; text-align: right;">{{ phase.total_participants|intcomma }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <div class="quick-actions" style="margin-top: 20px;">
         <a href="/admin/presale/presalephase/" class="action-button">
             Manage Presale Phases
         </a>
@@ -366,11 +427,6 @@
             View All Purchases
         </a>
     </div>
-    {% else %}
-    <div class="alert" style="background: #fef3c7; color: #92400e; padding: 16px; border-radius: 8px; margin-bottom: 30px;">
-        <strong>⚠️ No Active Presale</strong> - <a href="/admin/presale/presalephase/">Activate a presale phase</a>
-    </div>
-    {% endif %}
 
     <!-- Presale Waitlist Metrics -->
     <h3 class="section-title" style="font-size: 18px; margin-top: 30px;">📋 Presale Waitlist</h3>
