@@ -1631,8 +1631,7 @@ export const AccountDetailScreen = () => {
               <TouchableOpacity
                 style={styles.actionButton}
                 onPress={() => {
-                  // @ts-ignore - Navigation type mismatch, but should work at runtime
-                  navigation.navigate('BottomTabs', { screen: 'Exchange' });
+                  navigation.navigate('USDCDeposit', { tokenType: 'usdc' });
                 }}
               >
                 <View style={{
@@ -1644,9 +1643,9 @@ export const AccountDetailScreen = () => {
                   alignItems: 'center',
                   marginBottom: 8,
                 }}>
-                  <Icon name="refresh-cw" size={22} color="#ffffff" />
+                  <Icon name="dollar-sign" size={22} color="#ffffff" />
                 </View>
-                <Text style={styles.actionButtonText}>Intercambio</Text>
+                <Text style={styles.actionButtonText}>Recargar</Text>
               </TouchableOpacity>
             )}
           </View>

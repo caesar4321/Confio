@@ -669,7 +669,7 @@ export const HomeScreen = () => {
       label: 'Recargar',
       icon: 'dollar-sign',
       color: '#3b82f6',
-      route: () => navigation.navigate('BottomTabs', { screen: 'Exchange' }),
+      route: () => navigation.navigate('USDCDeposit', { tokenType: 'usdc' }),
     },
   ];
   
