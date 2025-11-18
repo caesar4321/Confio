@@ -386,15 +386,20 @@ class ConfioAdminSite(admin.AdminSite):
         # Presale metrics
         from presale.models import PresalePhase, PresalePurchase, PresaleSettings, PresaleWaitlist
         presale_settings = PresaleSettings.get_settings()
-        active_presale = PresalePhase.objects.filter(status='active').first() if presale_settings.is_presale_active else None
-        print(f"DEBUG: Presale enabled: {presale_settings.is_presale_active}, Active presale: {active_presale}")  # Debug line
 
         # Waitlist metrics (always show, even when presale is inactive)
         context['presale_waitlist_total'] = PresaleWaitlist.objects.count()
         context['presale_waitlist_unnotified'] = PresaleWaitlist.objects.filter(notified=False).count()
         context['presale_waitlist_notified'] = PresaleWaitlist.objects.filter(notified=True).count()
 
-        if active_presale and presale_settings.is_presale_active:
+        # Get all presale phases to show their status
+        context['presale_global_enabled'] = presale_settings.is_presale_active
+        context['all_presale_phases'] = PresalePhase.objects.all().order_by('-phase_number')
+
+        # Active presale (only when global switch is on AND phase is active)
+        active_presale = PresalePhase.objects.filter(status='active').first() if presale_settings.is_presale_active else None
+
+        if active_presale:
             context['presale_active'] = True
             context['presale_phase'] = active_presale.phase_number
             context['presale_name'] = active_presale.name
