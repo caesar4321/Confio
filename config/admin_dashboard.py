@@ -384,10 +384,16 @@ class ConfioAdminSite(admin.AdminSite):
         context['recent_verifications'] = recent_verifs
         
         # Presale metrics
-        from presale.models import PresalePhase, PresalePurchase, PresaleSettings
+        from presale.models import PresalePhase, PresalePurchase, PresaleSettings, PresaleWaitlist
         presale_settings = PresaleSettings.get_settings()
         active_presale = PresalePhase.objects.filter(status='active').first() if presale_settings.is_presale_active else None
         print(f"DEBUG: Presale enabled: {presale_settings.is_presale_active}, Active presale: {active_presale}")  # Debug line
+
+        # Waitlist metrics (always show, even when presale is inactive)
+        context['presale_waitlist_total'] = PresaleWaitlist.objects.count()
+        context['presale_waitlist_unnotified'] = PresaleWaitlist.objects.filter(notified=False).count()
+        context['presale_waitlist_notified'] = PresaleWaitlist.objects.filter(notified=True).count()
+
         if active_presale and presale_settings.is_presale_active:
             context['presale_active'] = True
             context['presale_phase'] = active_presale.phase_number
@@ -397,7 +403,7 @@ class ConfioAdminSite(admin.AdminSite):
             context['presale_progress'] = active_presale.progress_percentage
             context['presale_participants'] = active_presale.total_participants
             context['presale_price'] = active_presale.price_per_token
-            
+
             # Recent purchases
             context['recent_presale_purchases'] = PresalePurchase.objects.filter(
                 phase=active_presale,
