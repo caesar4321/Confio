@@ -85,6 +85,7 @@ class NotificationTypeEnum(graphene.Enum):
 
     # Presale
     PRESALE_PURCHASE_CONFIRMED = 'PRESALE_PURCHASE_CONFIRMED'
+    PRESALE_AVAILABLE = 'PRESALE_AVAILABLE'
 
 
 class NotificationType(DjangoObjectType):
