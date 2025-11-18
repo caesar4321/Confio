@@ -7,7 +7,7 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
 import CONFIOLogo from '../assets/png/CONFIO.png';
-import { useQuery } from '@apollo/client';
+import { useQuery, useApolloClient, gql } from '@apollo/client';
 import { GET_ALL_PRESALE_PHASES, GET_ACTIVE_PRESALE, GET_PRESALE_STATUS, GET_MY_PRESALE_ONCHAIN_INFO } from '../apollo/queries';
 import { PresaleWsSession } from '../services/presaleWs';
 import algorandService from '../services/algorandService';
@@ -34,7 +34,8 @@ type ConfioPresaleScreenNavigationProp = NativeStackNavigationProp<MainStackPara
 export const ConfioPresaleScreen = () => {
   const navigation = useNavigation<ConfioPresaleScreenNavigationProp>();
   const { selectedCountry } = useCountry();
-  
+  const apollo = useApolloClient();
+
   // Fetch presale phases from server
   const { data, loading, error } = useQuery(GET_ALL_PRESALE_PHASES, {
     fetchPolicy: 'cache-and-network',
@@ -87,12 +88,41 @@ export const ConfioPresaleScreen = () => {
     }
   };
 
-  const handleJoinWaitlist = () => {
-    Alert.alert(
-      'Lista de Espera',
-      'Te notificaremos cuando la preventa esté disponible. ¡Mantente atento!',
-      [{ text: 'Entendido', style: 'default' }]
-    );
+  const handleJoinWaitlist = async () => {
+    try {
+      const { data } = await apollo.mutate({
+        mutation: gql`
+          mutation JoinPresaleWaitlist {
+            joinPresaleWaitlist {
+              success
+              message
+              alreadyJoined
+            }
+          }
+        `,
+      });
+
+      if (data?.joinPresaleWaitlist?.success) {
+        Alert.alert(
+          'Lista de Espera',
+          data.joinPresaleWaitlist.message,
+          [{ text: 'Entendido', style: 'default' }]
+        );
+      } else {
+        Alert.alert(
+          'Error',
+          'No se pudo unir a la lista de espera. Por favor intenta nuevamente.',
+          [{ text: 'OK', style: 'default' }]
+        );
+      }
+    } catch (error) {
+      console.error('Error joining waitlist:', error);
+      Alert.alert(
+        'Error',
+        'No se pudo unir a la lista de espera. Por favor intenta nuevamente.',
+        [{ text: 'OK', style: 'default' }]
+      );
+    }
   };
 
   const handleClaim = async () => {
