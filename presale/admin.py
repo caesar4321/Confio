@@ -1198,12 +1198,58 @@ class PresaleWaitlistAdmin(admin.ModelAdmin):
     mark_as_notified.short_description = "Mark as notified"
 
     def send_notification(self, request, queryset):
-        # TODO: Implement push notification sending
-        # For now, just mark as notified
-        updated = 0
-        for entry in queryset.filter(notified=False):
-            # In the future, send actual push notification here
-            entry.mark_as_notified()
-            updated += 1
-        self.message_user(request, f"Notifications sent to {updated} user(s).")
-    send_notification.short_description = "Send presale notification"
+        """Send push notifications to all users in the waitlist (ignores selection, sends to all unnotified)"""
+        from notifications.models import Notification, NotificationType
+        from notifications.fcm_service import send_push_notification
+
+        # Get ALL unnotified waitlist entries (ignore queryset selection)
+        all_unnotified = PresaleWaitlist.objects.filter(notified=False).select_related('user')
+
+        if not all_unnotified.exists():
+            self.message_user(request, "No users to notify - all waitlist users have already been notified.", level='warning')
+            return
+
+        total_users = all_unnotified.count()
+        success_count = 0
+        error_count = 0
+
+        # Process in batches to avoid memory issues
+        batch_size = 100
+        for i in range(0, total_users, batch_size):
+            batch = all_unnotified[i:i + batch_size]
+
+            for entry in batch:
+                try:
+                    # Create notification record
+                    notification = Notification.objects.create(
+                        user=entry.user,
+                        notification_type=NotificationType.PRESALE_AVAILABLE,
+                        title='¡La preventa de $CONFIO ya está disponible!',
+                        message='La preventa que estabas esperando ya comenzó. ¡No te pierdas esta oportunidad de adquirir tokens $CONFIO!',
+                        data={
+                            'action': 'open_presale',
+                            'screen': 'ConfioPresale'
+                        }
+                    )
+
+                    # Send push notification
+                    result = send_push_notification(notification)
+
+                    # Mark as notified
+                    entry.mark_as_notified()
+                    success_count += 1
+
+                except Exception as e:
+                    error_count += 1
+                    self.logger.error(f"Failed to send notification to user {entry.user.id}: {e}")
+
+        if error_count > 0:
+            self.message_user(
+                request,
+                f"Notifications sent to {success_count} user(s). {error_count} failed.",
+                level='warning'
+            )
+        else:
+            self.message_user(request, f"Successfully sent notifications to {success_count} user(s).")
+
+    send_notification.short_description = "Send presale notifications to ALL unnotified waitlist users"

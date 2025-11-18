@@ -77,6 +77,7 @@ class NotificationType(models.TextChoices):
     
     # Presale
     PRESALE_PURCHASE_CONFIRMED = 'PRESALE_PURCHASE_CONFIRMED', 'Presale Purchase Confirmed'
+    PRESALE_AVAILABLE = 'PRESALE_AVAILABLE', 'Presale Available'
 
 
 class Notification(models.Model):
