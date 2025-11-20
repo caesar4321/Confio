@@ -4,7 +4,7 @@ export interface Env {
   APPLE_APP_ID: string;
   ANDROID_PACKAGE_ID: string;
   IOS_BUNDLE_ID: string;
-  TESTFLIGHT_URL: string;
+  APP_STORE_URL: string;
   PLAY_STORE_URL: string;
   LANDING_PAGE_URL: string;
   ADMIN_USERNAME: string;
@@ -181,8 +181,8 @@ function getRedirectUrl(platform: string, linkData: LinkData, env: Env): string 
   
   switch (platform) {
     case 'ios':
-      // Always send iOS users to TestFlight during beta
-      return `${env.TESTFLIGHT_URL}?referrer=${encodedPayload}`;
+      // Send iOS users to App Store
+      return `${env.APP_STORE_URL}?referrer=${encodedPayload}`;
       
     case 'android':
       // Android Play Store with referrer parameter
