@@ -224,6 +224,10 @@ export const HomeScreen = () => {
     parseFloat(myBalancesData?.myBalances?.cusd || '0'), 
     [myBalancesData?.myBalances?.cusd]
   );
+  const usdcBalance = React.useMemo(() => 
+    parseFloat(myBalancesData?.myBalances?.usdc || '0'), 
+    [myBalancesData?.myBalances?.usdc]
+  );
   const confioLive = React.useMemo(() => 
     parseFloat(myBalancesData?.myBalances?.confio || '0'), 
     [myBalancesData?.myBalances?.confio]
@@ -273,7 +277,10 @@ export const HomeScreen = () => {
   }, [floorToDecimals]);
   
   // Calculate portfolio value including CONFIO marked to current presale price
-  const totalUSDValue = React.useMemo(() => cUSDBalance + confioUsdValue, [cUSDBalance, confioUsdValue]);
+  const totalUSDValue = React.useMemo(
+    () => cUSDBalance + usdcBalance + confioUsdValue, 
+    [cUSDBalance, usdcBalance, confioUsdValue]
+  );
   
   // Use real exchange rate from API only - no fallbacks
   const localExchangeRate = marketRate || 1;
