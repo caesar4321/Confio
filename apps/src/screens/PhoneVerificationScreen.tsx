@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -44,14 +44,16 @@ const PhoneVerificationScreen = () => {
   const [currentScreen, setCurrentScreen] = useState<'phone' | 'method' | 'code'>('phone');
   const phoneInputRef = useRef<TextInput>(null);
   const codeInputRefs = Array.from({ length: 6 }, () => useRef<TextInput>(null));
-  const [code, setCode] = useState('');
-  const [step, setStep] = useState<'input' | 'code'>('input');
+  const [isRequestingCode, setIsRequestingCode] = useState(false);
+  const [codeRequestCooldown, setCodeRequestCooldown] = useState(0);
 
   const [initiateTelegramVerification, { loading: loadingInitiate }] = useMutation(INITIATE_TELEGRAM_VERIFICATION);
   const [verifyTelegramCode, { loading: loadingVerify }] = useMutation(VERIFY_TELEGRAM_CODE);
   const [updatePhoneNumber] = useMutation(UPDATE_PHONE_NUMBER);
   const [initiateSmsVerification] = useMutation(INITIATE_SMS_VERIFICATION);
   const [verifySmsCode] = useMutation(VERIFY_SMS_CODE);
+
+  const CODE_REQUEST_COOLDOWN_SECONDS = 30;
 
   // Colors from the design
   const colors = {
@@ -63,6 +65,31 @@ const PhoneVerificationScreen = () => {
     grayBorder: '#E5E7EB',
     grayText: '#6B7280',
     buttonDisabled: '#CDEFE5',
+  };
+
+  useEffect(() => {
+    if (codeRequestCooldown === 0) return;
+
+    const timer = setInterval(() => {
+      setCodeRequestCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [codeRequestCooldown]);
+
+  const startCooldown = () => setCodeRequestCooldown(CODE_REQUEST_COOLDOWN_SECONDS);
+
+  const withCodeRequestGuard = async (action: () => Promise<boolean>) => {
+    if (isRequestingCode || codeRequestCooldown > 0) return;
+    setIsRequestingCode(true);
+    try {
+      const shouldCooldown = await action();
+      if (shouldCooldown) {
+        startCooldown();
+      }
+    } finally {
+      setIsRequestingCode(false);
+    }
   };
 
   const handleBack = () => {
@@ -88,31 +115,35 @@ const PhoneVerificationScreen = () => {
   };
 
   const handleSendTelegramCode = async () => {
-    try {
-      const countryCode = selectedCountry?.[2] || 'VE'; // ISO country code (e.g., 'VE' for Venezuela)
-      // Format phone number: remove any spaces, dashes, or other separators
-      const cleanPhoneNumber = phoneNumber.replace(/[\s-]/g, '');
-      console.log('Sending verification with:', { phoneNumber: cleanPhoneNumber, countryCode });
-      
-      const { data } = await initiateTelegramVerification({ 
-        variables: { 
-          phoneNumber: cleanPhoneNumber,
-          countryCode
-        } 
-      });
-      
-      console.log('Verification response:', data);
-      
-      if (data.initiateTelegramVerification.success) {
-        setStep('code');
-        setCurrentScreen('code');
-      } else {
-        Alert.alert('Error', data.initiateTelegramVerification.error || 'Failed to send code');
+    await withCodeRequestGuard(async () => {
+      try {
+        const countryCode = selectedCountry?.[2] || 'VE'; // ISO country code (e.g., 'VE' for Venezuela)
+        // Format phone number: remove any spaces, dashes, or other separators
+        const cleanPhoneNumber = phoneNumber.replace(/[\s-]/g, '');
+        console.log('Sending verification with:', { phoneNumber: cleanPhoneNumber, countryCode });
+        
+        const { data } = await initiateTelegramVerification({ 
+          variables: { 
+            phoneNumber: cleanPhoneNumber,
+            countryCode
+          } 
+        });
+        
+        console.log('Verification response:', data);
+        
+        if (data.initiateTelegramVerification.success) {
+          setCurrentScreen('code');
+          return true;
+        } else {
+          Alert.alert('Error', data.initiateTelegramVerification.error || 'Failed to send code');
+          return false;
+        }
+      } catch (e) {
+        console.error('Error sending verification:', e);
+        Alert.alert('Error', 'Network error');
+        return false;
       }
-    } catch (e) {
-      console.error('Error sending verification:', e);
-      Alert.alert('Error', 'Network error');
-    }
+    });
   };
 
   const handleVerifyCode = async () => {
@@ -233,22 +264,36 @@ const PhoneVerificationScreen = () => {
   };
 
   const handleSendSmsCode = async () => {
-    try {
-      const countryCode = selectedCountry?.[2] || 'VE';
-      const cleanPhoneNumber = phoneNumber.replace(/[\s-]/g, '');
-      const { data } = await initiateSmsVerification({
-        variables: {
-          phoneNumber: cleanPhoneNumber,
-          countryCode,
-        },
-      });
-      if (data?.initiateSmsVerification?.success) {
-        setCurrentScreen('code');
-      } else {
-        Alert.alert('Error', data?.initiateSmsVerification?.error || 'Failed to send SMS');
+    await withCodeRequestGuard(async () => {
+      try {
+        const countryCode = selectedCountry?.[2] || 'VE';
+        const cleanPhoneNumber = phoneNumber.replace(/[\s-]/g, '');
+        const { data } = await initiateSmsVerification({
+          variables: {
+            phoneNumber: cleanPhoneNumber,
+            countryCode,
+          },
+        });
+        if (data?.initiateSmsVerification?.success) {
+          setCurrentScreen('code');
+          return true;
+        } else {
+          Alert.alert('Error', data?.initiateSmsVerification?.error || 'Failed to send SMS');
+          return false;
+        }
+      } catch (e) {
+        Alert.alert('Error', 'Network error');
+        return false;
       }
-    } catch (e) {
-      Alert.alert('Error', 'Network error');
+    });
+  };
+
+  const handleResendCode = async () => {
+    if (!verificationMethod) return;
+    if (verificationMethod === 'sms') {
+      await handleSendSmsCode();
+    } else {
+      await handleSendTelegramCode();
     }
   };
 
@@ -339,6 +384,12 @@ const PhoneVerificationScreen = () => {
   };
 
   const renderVerificationMethodScreen = () => {
+    const codeRequestBlocked = isRequestingCode || codeRequestCooldown > 0;
+    const methodCtaText = isRequestingCode
+      ? 'Enviando...'
+      : codeRequestCooldown > 0
+        ? `Reintentar en ${codeRequestCooldown}s`
+        : 'Enviar código';
     const isProfileUpdateFlow = !!userProfile;
     const title = isProfileUpdateFlow ? 'Verifica tu nuevo número' : 'Verifica tu número';
     const subtitle = isProfileUpdateFlow 
@@ -362,8 +413,9 @@ const PhoneVerificationScreen = () => {
 
       <View style={styles.methodContainer}>
         <TouchableOpacity
-          style={styles.methodCard}
+          style={[styles.methodCard, codeRequestBlocked && styles.methodCardDisabled]}
           activeOpacity={0.85}
+          disabled={codeRequestBlocked}
           onPress={() => {
             setVerificationMethod('telegram');
             handleSendTelegramCode();
@@ -376,7 +428,9 @@ const PhoneVerificationScreen = () => {
             <Text style={styles.methodTitle}>Verificación vía Telegram</Text>
             <Text style={styles.methodDescription}>Enviaremos un código a tu cuenta de Telegram</Text>
             <View style={styles.methodButtonRow}>
-              <Text style={styles.methodButtonText}>Enviar código</Text>
+              <Text style={[styles.methodButtonText, codeRequestBlocked && styles.methodButtonTextDisabled]}>
+                {methodCtaText}
+              </Text>
               <Feather name="arrow-right" size={16} color={colors.confioGreen} />
             </View>
           </View>
@@ -384,7 +438,8 @@ const PhoneVerificationScreen = () => {
       </View>
 
       <TouchableOpacity
-        style={styles.smsButton}
+        style={[styles.smsButton, codeRequestBlocked && styles.disabledLink]}
+        disabled={codeRequestBlocked}
         onPress={async () => {
           setVerificationMethod('sms');
           await handleSendSmsCode();
@@ -393,6 +448,9 @@ const PhoneVerificationScreen = () => {
         <Text style={styles.smsButtonText}>Recibir a través de SMS</Text>
         <Feather name="arrow-right" size={16} color="#6B7280" />
       </TouchableOpacity>
+      {codeRequestCooldown > 0 && (
+        <Text style={styles.cooldownHelper}>Puedes volver a solicitar el código en {codeRequestCooldown}s</Text>
+      )}
     </View>
     );
   };
@@ -451,9 +509,15 @@ const PhoneVerificationScreen = () => {
         <Text style={styles.continueButtonText}>Verificar</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity style={styles.resendButton}>
+      <TouchableOpacity
+        style={[styles.resendButton, (isRequestingCode || codeRequestCooldown > 0) && styles.disabledLink]}
+        onPress={handleResendCode}
+        disabled={isRequestingCode || codeRequestCooldown > 0}
+      >
         <Text style={styles.resendButtonText}>¿No recibiste el código? </Text>
-        <Text style={[styles.resendButtonText, { color: colors.confioGreen }]}>Reenviar código</Text>
+        <Text style={[styles.resendButtonText, { color: colors.confioGreen }]}>
+          {codeRequestCooldown > 0 ? `Reenviar en ${codeRequestCooldown}s` : 'Reenviar código'}
+        </Text>
       </TouchableOpacity>
     </View>
     );
@@ -638,6 +702,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
   },
+  methodCardDisabled: {
+    opacity: 0.6,
+  },
   methodIconContainer: {
     backgroundColor: '#72D9BC',
     width: 40,
@@ -670,6 +737,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     marginRight: 4,
+  },
+  methodButtonTextDisabled: {
+    color: '#9CA3AF',
   },
   smsButton: {
     flexDirection: 'row',
@@ -704,6 +774,11 @@ const styles = StyleSheet.create({
   },
   resendButtonText: {
     fontSize: 14,
+    color: '#6B7280',
+  },
+  cooldownHelper: {
+    marginTop: 12,
+    textAlign: 'center',
     color: '#6B7280',
   },
   modalContainer: {
@@ -742,6 +817,9 @@ const styles = StyleSheet.create({
   },
   safeArea: {
     flex: 1,
+  },
+  disabledLink: {
+    opacity: 0.5,
   },
 });
 

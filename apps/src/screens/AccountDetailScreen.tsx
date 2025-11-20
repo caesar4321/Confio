@@ -307,6 +307,38 @@ export const AccountDetailScreen = () => {
     balanceHidden: "•••••••",
     description: "Para usuarios avanzados - depósito directo vía Algorand Blockchain"
   } : null;
+
+  // Pulse the convert CTA when USDC is available so users move it into cUSD
+  const convertPulseAnim = useRef(new Animated.Value(1)).current;
+  const hasUsdcToConvert = shouldFetchUSDC && usdcBalance > 0.0001;
+
+  useEffect(() => {
+    let loop: Animated.CompositeAnimation | null = null;
+    if (hasUsdcToConvert) {
+      loop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(convertPulseAnim, {
+            toValue: 1.08,
+            duration: 650,
+            useNativeDriver: true,
+          }),
+          Animated.timing(convertPulseAnim, {
+            toValue: 1,
+            duration: 400,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      loop.start();
+    } else {
+      convertPulseAnim.stopAnimation(() => {
+        convertPulseAnim.setValue(1);
+      });
+    }
+    return () => {
+      loop?.stop();
+    };
+  }, [hasUsdcToConvert, convertPulseAnim]);
   
   // JWT-context-aware transactions query
   const queryVariables = {
@@ -1794,23 +1826,25 @@ export const AccountDetailScreen = () => {
                   </View>
                 </TouchableOpacity>
                 
-                <TouchableOpacity
-                  style={[styles.usdcActionButton, styles.usdcSecondaryButton]}
-                  onPress={() => {
-                    console.log('Convert button pressed - navigating to USDCConversion screen');
-                    navigation.navigate('USDCConversion');
-                  }}
-                >
-                  <Icon name="refresh-cw" size={16} color="#fff" style={styles.actionIcon} />
-                  <View style={styles.actionTextContainer}>
-                    <Text style={[styles.usdcActionButtonText, { color: '#ffffff' }]}>
-                      Convertir
-                    </Text>
-                    <Text style={[styles.usdcActionSubtext, { color: 'rgba(255,255,255,0.8)' }]}>
-                      USDC ↔ cUSD
-                    </Text>
-                  </View>
-                </TouchableOpacity>
+                <Animated.View style={hasUsdcToConvert ? [{ transform: [{ scale: convertPulseAnim }] }] : undefined}>
+                  <TouchableOpacity
+                    style={[styles.usdcActionButton, styles.usdcSecondaryButton]}
+                    onPress={() => {
+                      console.log('Convert button pressed - navigating to USDCConversion screen');
+                      navigation.navigate('USDCConversion');
+                    }}
+                  >
+                    <Icon name="refresh-cw" size={16} color="#fff" style={styles.actionIcon} />
+                    <View style={styles.actionTextContainer}>
+                      <Text style={[styles.usdcActionButtonText, { color: '#ffffff' }]}>
+                        Convertir
+                      </Text>
+                      <Text style={[styles.usdcActionSubtext, { color: 'rgba(255,255,255,0.8)' }]}>
+                        USDC ↔ cUSD
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                </Animated.View>
                 
                 <TouchableOpacity
                   style={styles.usdcMoreButton}
