@@ -111,7 +111,7 @@ const FriendlyHeroSection = () => {
                 />
               </a>
               <a
-                href="https://apps.apple.com/app/confio/id6473710976"
+                href="https://apps.apple.com/app/id6472662314"
                 target="_blank"
                 rel="noopener noreferrer"
                 className={styles.storeButton}
