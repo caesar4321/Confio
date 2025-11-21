@@ -171,7 +171,7 @@ export const SendToFriendScreen = () => {
       setShowError(true);
       return;
     }
-    
+
     setIsProcessing(true);
     navLock.current = true;
     

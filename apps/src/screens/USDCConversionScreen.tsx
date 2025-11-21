@@ -28,6 +28,7 @@ import algorandService from '../services/algorandService';
 import { secureDeterministicWallet } from '../services/secureDeterministicWallet';
 import { oauthStorage } from '../services/oauthStorageService';
 import { cusdAppOptInService } from '../services/cusdAppOptInService';
+import { biometricAuthService } from '../services/biometricAuthService';
 
 // GraphQL mutation for USDC opt-in (reused from DepositScreen)
 const OPT_IN_TO_USDC = gql`
@@ -266,6 +267,14 @@ export const USDCConversionScreen = () => {
 
     if (!activeAccount?.algorandAddress) {
       Alert.alert('Cuenta no configurada', 'Tu cuenta necesita estar configurada con Algorand para realizar conversiones. Por favor, contacta soporte.', [{ text: 'OK' }]);
+      return;
+    }
+
+    const bioOk = await biometricAuthService.authenticate(
+      'Autoriza esta conversión (operación crítica)'
+    );
+    if (!bioOk) {
+      Alert.alert('Se requiere biometría', 'Confirma con Face ID / Touch ID o huella para convertir.', [{ text: 'OK' }]);
       return;
     }
 

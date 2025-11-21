@@ -182,7 +182,7 @@ export const SendWithAddressScreen = () => {
       setShowError(true);
       return;
     }
-    
+
     setIsProcessing(true);
     navLock.current = true;
     

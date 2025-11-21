@@ -97,48 +97,13 @@ const ChargeScreen = () => {
         const hasSubmittedTxn = Array.isArray(currentInvoice.paymentTransactions) && currentInvoice.paymentTransactions.some(
           (pt: any) => pt?.status === 'SUBMITTED' || pt?.status === 'PENDING_BLOCKCHAIN'
         );
-        if (hasSubmittedTxn && !hasNavigatedToSuccess) {
-          console.log('ChargeScreen: Payment submitted — navigating optimistically to BusinessPaymentSuccess');
-          setPaymentStatus('submitted');
-          setHasNavigatedToSuccess(true);
-
-          // Find the first submitted/pending txn for details
-          const firstTxn = (currentInvoice.paymentTransactions || []).find(
-            (pt: any) => pt?.status === 'SUBMITTED' || pt?.status === 'PENDING_BLOCKCHAIN'
-          );
-
-          // Navigate immediately with available data
-          (navigation as any).navigate('BusinessPaymentSuccess', {
-            paymentData: {
-              id: currentInvoice.id,
-              paymentTransactionId: firstTxn?.paymentTransactionId || currentInvoice.invoiceId,
-              invoiceId: currentInvoice.invoiceId,
-              amount: currentInvoice.amount,
-              tokenType: currentInvoice.tokenType,
-              description: currentInvoice.description,
-              // Use payer info from the submitted transaction for proper display
-              payerUser: firstTxn?.payerUser || currentInvoice.paidByUser || {
-                id: '',
-                username: 'Cliente',
-                firstName: undefined,
-                lastName: undefined
-              },
-              payerAccount: firstTxn?.payerAccount,
-              // Do not include raw blockchain address for privacy
-              payerAddress: '',
-              merchantUser: {
-                id: activeAccount?.id || '',
-                username: activeAccount?.name || 'Tu Negocio',
-                firstName: undefined,
-                lastName: undefined
-              },
-              merchantAccount: currentInvoice.merchantAccount,
-              merchantAddress: activeAccount?.algorandAddress || '',
-              status: 'SUBMITTED',
-              // Leave hash empty until confirmed; UI will still show status
-              transactionHash: firstTxn?.transactionHash || '',
-              createdAt: new Date().toISOString()
+        if (hasSubmittedTxn) {
+          setPaymentStatus((prev) => {
+            if (prev === 'submitted' || prev === 'paid') {
+              return prev;
             }
+            console.log('ChargeScreen: Payment submitted — waiting for confirmation (stay on Charge screen)');
+            return 'submitted';
           });
         }
 
