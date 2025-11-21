@@ -88,6 +88,8 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   const [accountContextTick, setAccountContextTick] = useState(0);
   const apolloClient = useApolloClient();
   const lastInactiveAtRef = useRef<number | null>(null);
+  const lastBiometricSuccessRef = useRef<number>(0);
+  const bootstrapAuthRanRef = useRef<boolean>(false);
 
   // Reset auth gate on mount so cold starts don't inherit a stale ready state
   useEffect(() => {
@@ -124,7 +126,12 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     if (navigationRef.current) {
       console.log('Navigation is ready, checking auth state...');
       setIsNavigationReady(true);
-      checkAuthState();
+      if (!bootstrapAuthRanRef.current) {
+        bootstrapAuthRanRef.current = true;
+        checkAuthState();
+      } else {
+        console.log('Auth bootstrap already executed; skipping duplicate checkAuthState');
+      }
     }
   }, [navigationRef.current]);
 
@@ -330,12 +337,28 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
 
   // Refresh on resume to ensure valid access token before UI queries
   useEffect(() => {
+    let isAuthenticating = false;
+    let lastAuthAttempt = 0;
+    const BIOMETRIC_DEBOUNCE_MS = 2000; // Prevent multiple prompts within 2 seconds
+    let appStateCycle = 0; // Tracks background/foreground cycles to avoid double prompts per resume
+    let lastPromptedCycle = -1;
+
     const sub = AppState.addEventListener('change', async (state) => {
       if (state === 'background' || state === 'inactive') {
         lastInactiveAtRef.current = Date.now();
+        appStateCycle += 1;
       }
 
       if (state === 'active') {
+        const currentCycle = appStateCycle;
+        if (lastPromptedCycle === currentCycle) {
+          return; // Already prompted for this resume cycle
+        }
+        const sinceLastBiometric = Date.now() - lastBiometricSuccessRef.current;
+        if (sinceLastBiometric < 5000) {
+          lastPromptedCycle = currentCycle; // Mark this cycle as satisfied
+          return;
+        }
         try {
           const creds = await Keychain.getGenericPassword({
             service: AUTH_KEYCHAIN_SERVICE,
@@ -371,10 +394,22 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           // Require biometric on resume if user was away for a bit
           const lastInactive = lastInactiveAtRef.current;
           const awayMs = lastInactive ? Date.now() - lastInactive : 0;
-          if (isAuthenticated && awayMs > 3000) {
+          const timeSinceLastAuth = Date.now() - lastAuthAttempt;
+
+          // Only prompt if authenticated, was away > 10s, not currently authenticating, and debounce passed
+          if (isAuthenticated && awayMs > 10000 && !isAuthenticating && timeSinceLastAuth > BIOMETRIC_DEBOUNCE_MS) {
             const supported = await biometricAuthService.isSupported();
-            if (supported) {
+            const enabled = await biometricAuthService.isEnabled();
+
+            if (supported && enabled) {
+              isAuthenticating = true;
+              lastAuthAttempt = Date.now();
+              lastPromptedCycle = currentCycle;
+
+              console.log('[AuthContext] Requesting biometric unlock after', Math.round(awayMs / 1000), 'seconds away');
               const ok = await biometricAuthService.authenticate('Desbloquea Confío');
+              isAuthenticating = false;
+
               if (!ok) {
                 Alert.alert(
                   'Confirma con biometría',
@@ -385,31 +420,42 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
                 navigateToScreen('Auth');
                 return;
               }
+              if (ok) {
+                lastBiometricSuccessRef.current = Date.now();
+              }
             }
           }
         } catch (e) {
+          isAuthenticating = false;
           console.error('[AuthContext] Refresh-on-resume failed:', e);
         }
       }
     });
     return () => sub.remove();
-  }, [apolloClient]);
+  }, [apolloClient, isAuthenticated]);
 
   // Enforce biometric enrollment on supported devices; returns if enrollment is ready
-  const enforceBiometricEnrollment = async (): Promise<{ ok: boolean; alreadyEnabled: boolean }> => {
+  const enforceBiometricEnrollment = async (options?: { skipRevalidate?: boolean }): Promise<{ ok: boolean; alreadyEnabled: boolean; didAuthenticate: boolean }> => {
+    const skipRevalidate = options?.skipRevalidate === true;
     try {
       const supported = await biometricAuthService.isSupported();
-      if (!supported) return { ok: true, alreadyEnabled: true };
+      if (!supported) return { ok: true, alreadyEnabled: true, didAuthenticate: false };
 
       const alreadyEnabled = await biometricAuthService.isEnabled();
       if (alreadyEnabled) {
+        if (skipRevalidate) {
+          return { ok: true, alreadyEnabled: true, didAuthenticate: false };
+        }
         // Re-validate in case biometrics were disabled in device settings
         const stillValid = await biometricAuthService.authenticate(
           'Valida tu biometría para continuar',
           true,
           true
         );
-        if (stillValid) return { ok: true, alreadyEnabled: true };
+        if (stillValid) {
+          lastBiometricSuccessRef.current = Date.now();
+          return { ok: true, alreadyEnabled: true, didAuthenticate: true };
+        }
         await biometricAuthService.disable();
       }
 
@@ -419,16 +465,18 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           'Activa tu biometría',
           'Necesitamos Face ID / Touch ID o huella para proteger tus operaciones críticas (envíos, pagos, retiros).'
         );
-        return { ok: false, alreadyEnabled: false };
+        return { ok: false, alreadyEnabled: false, didAuthenticate: false };
       }
-      return { ok: true, alreadyEnabled: false };
+      // enable() already performed a biometric prompt, so avoid prompting again
+      lastBiometricSuccessRef.current = Date.now();
+      return { ok: true, alreadyEnabled: false, didAuthenticate: true };
     } catch (error) {
       console.error('[AuthContext] Failed to enforce biometric enrollment:', error);
       Alert.alert(
         'Activa tu biometría',
         'No pudimos activar la biometría. Inténtalo nuevamente.'
       );
-      return { ok: false, alreadyEnabled: false };
+      return { ok: false, alreadyEnabled: false, didAuthenticate: false };
     }
   };
 
@@ -520,17 +568,20 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       return false;
     }
 
-    // Final confirmation to ensure user actually passed the prompt
-    const authOk = await biometricAuthService.authenticate(
-      'Confirma tu biometría para continuar',
-      true,
-      true
-    );
+    // If enrollment flow already performed a successful prompt, avoid asking again here
+    const authOk = biometricResult.didAuthenticate
+      ? true
+      : await biometricAuthService.authenticate(
+          'Confirma tu biometría para continuar',
+          true,
+          true
+        );
     if (!authOk) {
       Alert.alert('Biometría requerida', 'Confirma con Face ID / Touch ID o huella para continuar.');
       return false;
     }
 
+    lastBiometricSuccessRef.current = Date.now();
     await completeAuthenticatedEntry(source);
     return true;
   };
@@ -678,7 +729,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
             }
 
             // Require biometric enrollment first, then unlock on app start when session exists
-            const enrollmentResult = await enforceBiometricEnrollment();
+            const enrollmentResult = await enforceBiometricEnrollment({ skipRevalidate: true });
             if (!enrollmentResult.ok) {
               setIsAuthenticated(false);
               navigateToScreen('Auth');
@@ -686,9 +737,9 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
               return;
             }
 
-            const biometricOk = enrollmentResult.alreadyEnabled
-              ? await biometricAuthService.authenticate('Desbloquea Confío')
-              : true; // enrollment triggered its own prompt
+            const biometricOk = enrollmentResult.didAuthenticate
+              ? true
+              : await biometricAuthService.authenticate('Desbloquea Confío');
             if (!biometricOk) {
               Alert.alert(
                 'Confirma con biometría',
@@ -699,6 +750,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
               setIsLoading(false);
               return;
             }
+            lastBiometricSuccessRef.current = Date.now();
 
             // Mark authenticated and go to Main immediately to avoid splash hanging
             setIsAuthenticated(true);

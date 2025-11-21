@@ -7,6 +7,11 @@ const BIOMETRIC_PREFS_USERNAME = 'biometric_pref';
 
 class BiometricAuthService {
   private cachedSupported: boolean | null = null;
+  private isAuthenticating: boolean = false;
+  private lastAuthenticationTime: number = 0;
+  private readonly DEBOUNCE_MS = 1500; // Prevent multiple prompts within 1.5 seconds
+  private lastSuccessTime: number = 0;
+  private readonly SUCCESS_COOLDOWN_MS = 10000; // Skip new prompts for 10s after a success
 
   /**
    * Invalidate the cached biometric support status to force a fresh check.
@@ -135,13 +140,38 @@ class BiometricAuthService {
    * Require biometric authentication. Returns true when passed or not enabled.
    */
   async authenticate(reason?: string, forcePrompt = false, failIfUnsupported = false): Promise<boolean> {
+    // Debounce: prevent multiple simultaneous authentication prompts
+    const now = Date.now();
+    const timeSinceLastAuth = now - this.lastAuthenticationTime;
+    const timeSinceLastSuccess = now - this.lastSuccessTime;
+
+    if (this.isAuthenticating) {
+      console.log('[BiometricAuthService] Authentication already in progress, skipping duplicate prompt');
+      return false;
+    }
+
+    if (this.lastSuccessTime > 0 && timeSinceLastSuccess < this.SUCCESS_COOLDOWN_MS) {
+      console.log('[BiometricAuthService] Recent successful biometric (< cooldown), skipping new prompt');
+      return true;
+    }
+
+    if (!forcePrompt && timeSinceLastAuth < this.DEBOUNCE_MS) {
+      console.log('[BiometricAuthService] Authentication requested too soon after last attempt, skipping (debounce)');
+      return true; // Return true to avoid blocking the flow
+    }
+
     const enabled = await this.isEnabled();
     if (!forcePrompt && !enabled) return true;
-    
+
     const supported = await this.isSupported();
     if (!supported) return failIfUnsupported ? false : true;
 
     try {
+      this.isAuthenticating = true;
+      this.lastAuthenticationTime = Date.now();
+
+      console.log('[BiometricAuthService] Prompting for biometric authentication:', reason);
+
       const authResult = await Keychain.getGenericPassword({
         service: BIOMETRIC_SECRET_SERVICE,
         authenticationPrompt: {
@@ -158,12 +188,17 @@ class BiometricAuthService {
       const success = !!authResult && authResult.username === BIOMETRIC_SECRET_USERNAME;
       if (!success) {
         console.warn('[BiometricAuthService] Biometric auth failed or was cancelled');
+      } else {
+        this.lastSuccessTime = Date.now();
+        console.log('[BiometricAuthService] Biometric authentication successful');
       }
       return success;
     } catch (error: any) {
       // Do not allow device passcode fallback; fail closed
       console.warn('[BiometricAuthService] Biometric auth error:', error?.message || error);
       return false;
+    } finally {
+      this.isAuthenticating = false;
     }
   }
 }
