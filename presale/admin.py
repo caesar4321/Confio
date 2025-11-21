@@ -10,8 +10,22 @@ from decimal import Decimal
 from .models import PresalePhase, PresalePurchase, PresaleStats, UserPresaleLimit, PresaleSettings, PresaleWaitlist
 
 
+class PresalePhaseAdminForm(forms.ModelForm):
+    """Ensure all presale status choices (including Coming Soon) are available in admin."""
+
+    class Meta:
+        model = PresalePhase
+        fields = '__all__'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['status'].label = 'Presale Stage'
+        self.fields['status'].choices = PresalePhase.PHASE_STATUS_CHOICES
+
+
 @admin.register(PresalePhase)
 class PresalePhaseAdmin(admin.ModelAdmin):
+    form = PresalePhaseAdminForm
     list_display = [
         'phase_number', 
         'name', 
@@ -140,6 +154,8 @@ class PresalePhaseAdmin(admin.ModelAdmin):
     progress_display.short_description = 'Progress %'
     
     actions = [
+        'mark_coming_soon',
+        'mark_upcoming',
         'activate_phase',
         'pause_phase',
         'complete_phase',
@@ -149,6 +165,16 @@ class PresalePhaseAdmin(admin.ModelAdmin):
         'withdraw_unsold_confio',
         'fund_app_with_confio',
     ]
+    
+    def mark_coming_soon(self, request, queryset):
+        updated = queryset.update(status='coming_soon')
+        self.message_user(request, f"{updated} phase(s) marked as Coming Soon.")
+    mark_coming_soon.short_description = "Set selected phases to Coming Soon"
+
+    def mark_upcoming(self, request, queryset):
+        updated = queryset.update(status='upcoming')
+        self.message_user(request, f"{updated} phase(s) marked as Upcoming.")
+    mark_upcoming.short_description = "Set selected phases to Upcoming"
     
     def activate_phase(self, request, queryset):
         updated = queryset.update(status='active')

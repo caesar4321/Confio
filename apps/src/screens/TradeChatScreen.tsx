@@ -36,6 +36,7 @@ import { useAccountManager } from '../hooks/useAccountManager';
 import { useAccount } from '../contexts/AccountContext';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
+import { biometricAuthService } from '../services/biometricAuthService';
 
 type TradeChatRouteProp = RouteProp<MainStackParamList, 'TradeChat'>;
 type TradeChatNavigationProp = NativeStackNavigationProp<MainStackParamList, 'TradeChat'>;
@@ -1723,6 +1724,14 @@ export const TradeChatScreen: React.FC = () => {
   const confirmMarkAsPaid = async () => {
     setShowConfirmPaidModal(false);
     try {
+      const bioOk = await biometricAuthService.authenticate(
+        'Autoriza marcar como pagado (operación crítica)'
+      );
+      if (!bioOk) {
+        Alert.alert('Se requiere biometría', 'Confirma con Face ID / Touch ID o huella para continuar.', [{ text: 'OK' }]);
+        return;
+      }
+
       await withBusy('Marcando como pagado…', async () => {
         // Ensure on-chain accept before marking as paid (sponsor-only)
         try {
@@ -1794,6 +1803,14 @@ export const TradeChatScreen: React.FC = () => {
   
   const confirmReleaseFunds = async () => {
     try {
+      const bioOk = await biometricAuthService.authenticate(
+        'Autoriza liberar fondos (operación crítica)'
+      );
+      if (!bioOk) {
+        Alert.alert('Se requiere biometría', 'Confirma con Face ID / Touch ID o huella para continuar.', [{ text: 'OK' }]);
+        return;
+      }
+
       await withBusy('Liberando fondos…', async () => {
         // First confirm payment received on-chain (sponsored AppCall)
         try {

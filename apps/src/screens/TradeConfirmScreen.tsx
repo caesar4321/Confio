@@ -22,6 +22,7 @@ import { CREATE_P2P_TRADE, GET_USER_BANK_ACCOUNTS, GET_MY_P2P_TRADES } from '../
 import { useCurrency } from '../hooks/useCurrency';
 import { useAccount } from '../contexts/AccountContext';
 import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
+import { biometricAuthService } from '../services/biometricAuthService';
 
 type TradeConfirmRouteProp = RouteProp<MainStackParamList, 'TradeConfirm'>;
 type TradeConfirmNavigationProp = NativeStackNavigationProp<MainStackParamList, 'TradeConfirm'>;
@@ -133,6 +134,14 @@ export const TradeConfirmScreen: React.FC = () => {
     const cryptoAmount = parseFloat(amount);
     if (isNaN(cryptoAmount) || cryptoAmount <= 0) {
       Alert.alert('Error', 'Por favor ingresa un monto válido');
+      return;
+    }
+
+    const bioOk = await biometricAuthService.authenticate(
+      'Autoriza esta operación de intercambio'
+    );
+    if (!bioOk) {
+      Alert.alert('Se requiere biometría', 'Confirma con Face ID / Touch ID o huella para continuar.', [{ text: 'OK' }]);
       return;
     }
     

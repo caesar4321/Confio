@@ -1,14 +1,15 @@
-import React, { createContext, useContext, useState, useEffect, RefObject } from 'react';
+import React, { createContext, useContext, useState, useEffect, RefObject, useRef } from 'react';
+import { Alert, AppState } from 'react-native';
 import { AuthService } from '../services/authService';
 import { NavigationContainerRef } from '@react-navigation/native';
 import { RootStackParamList } from '../types/navigation';
 import { useApolloClient, gql } from '@apollo/client';
 import * as Keychain from 'react-native-keychain';
 import { jwtDecode } from 'jwt-decode';
-import { AppState } from 'react-native';
 import { AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME } from '../apollo/client';
 import { GET_ME, GET_BUSINESS_PROFILE } from '../apollo/queries';
 import { pushNotificationService } from '../services/pushNotificationService';
+import { biometricAuthService } from '../services/biometricAuthService';
 
 // Simple auth readiness gate to coordinate token-dependent queries
 let __authReady = false;
@@ -61,6 +62,7 @@ interface AuthContextType {
   checkLocalAuthState: () => Promise<boolean>;
   handleSuccessfulLogin: (isPhoneVerified: boolean) => Promise<void>;
   completePhoneVerification: () => Promise<void>;
+  completeBiometricAndEnter: () => Promise<boolean>;
   profileData: ProfileData | null;
   isProfileLoading: boolean;
   refreshProfile: (accountType?: 'personal' | 'business', businessId?: string) => Promise<void>;
@@ -85,6 +87,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   const [isProfileLoading, setIsProfileLoading] = useState(false);
   const [accountContextTick, setAccountContextTick] = useState(0);
   const apolloClient = useApolloClient();
+  const lastInactiveAtRef = useRef<number | null>(null);
 
   // Reset auth gate on mount so cold starts don't inherit a stale ready state
   useEffect(() => {
@@ -328,6 +331,10 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   // Refresh on resume to ensure valid access token before UI queries
   useEffect(() => {
     const sub = AppState.addEventListener('change', async (state) => {
+      if (state === 'background' || state === 'inactive') {
+        lastInactiveAtRef.current = Date.now();
+      }
+
       if (state === 'active') {
         try {
           const creds = await Keychain.getGenericPassword({
@@ -341,11 +348,11 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           if (!at || !rt) return;
           const decoded: any = jwtDecode(at);
           const now = Math.floor(Date.now() / 1000);
-          if ((decoded?.exp ?? 0) <= now + 30) {
-            const { data } = await apolloClient.mutate({
-              mutation: REFRESH_TOKEN,
-              variables: { refreshToken: rt },
-              context: { skipAuth: true },
+            if ((decoded?.exp ?? 0) <= now + 30) {
+              const { data } = await apolloClient.mutate({
+                mutation: REFRESH_TOKEN,
+                variables: { refreshToken: rt },
+                context: { skipAuth: true },
             });
             const newAccess = data?.refreshToken?.token;
             if (newAccess) {
@@ -360,6 +367,26 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
               );
             }
           }
+
+          // Require biometric on resume if user was away for a bit
+          const lastInactive = lastInactiveAtRef.current;
+          const awayMs = lastInactive ? Date.now() - lastInactive : 0;
+          if (isAuthenticated && awayMs > 3000) {
+            const supported = await biometricAuthService.isSupported();
+            if (supported) {
+              const ok = await biometricAuthService.authenticate('Desbloquea Confío');
+              if (!ok) {
+                Alert.alert(
+                  'Confirma con biometría',
+                  'Usa Face ID / Touch ID o huella para continuar.'
+                );
+                setIsAuthenticated(false);
+                setProfileData(null);
+                navigateToScreen('Auth');
+                return;
+              }
+            }
+          }
         } catch (e) {
           console.error('[AuthContext] Refresh-on-resume failed:', e);
         }
@@ -368,83 +395,166 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     return () => sub.remove();
   }, [apolloClient]);
 
+  // Enforce biometric enrollment on supported devices; returns if enrollment is ready
+  const enforceBiometricEnrollment = async (): Promise<{ ok: boolean; alreadyEnabled: boolean }> => {
+    try {
+      const supported = await biometricAuthService.isSupported();
+      if (!supported) return { ok: true, alreadyEnabled: true };
+
+      const alreadyEnabled = await biometricAuthService.isEnabled();
+      if (alreadyEnabled) {
+        // Re-validate in case biometrics were disabled in device settings
+        const stillValid = await biometricAuthService.authenticate(
+          'Valida tu biometría para continuar',
+          true,
+          true
+        );
+        if (stillValid) return { ok: true, alreadyEnabled: true };
+        await biometricAuthService.disable();
+      }
+
+      const enabledNow = await biometricAuthService.enable();
+      if (!enabledNow) {
+        Alert.alert(
+          'Activa tu biometría',
+          'Necesitamos Face ID / Touch ID o huella para proteger tus operaciones críticas (envíos, pagos, retiros).'
+        );
+        return { ok: false, alreadyEnabled: false };
+      }
+      return { ok: true, alreadyEnabled: false };
+    } catch (error) {
+      console.error('[AuthContext] Failed to enforce biometric enrollment:', error);
+      Alert.alert(
+        'Activa tu biometría',
+        'No pudimos activar la biometría. Inténtalo nuevamente.'
+      );
+      return { ok: false, alreadyEnabled: false };
+    }
+  };
+
+  // Shared post-auth steps after biometrics are satisfied
+  const completeAuthenticatedEntry = async (source: 'login' | 'phoneVerification' | 'resume') => {
+    setIsAuthenticated(true);
+    await refreshProfile('personal');
+    
+    // Ensure FCM token is registered for the user
+    console.log('[AuthContext] Registering FCM token after auth...');
+    try {
+      const { default: messagingService } = await import('../services/messagingService');
+      await messagingService.ensureTokenRegisteredForCurrentUser();
+    } catch (fcmError) {
+      console.error('[AuthContext] Failed to register FCM token:', fcmError);
+      // Don't block navigation if FCM registration fails
+    }
+    
+    // Handle auto opt-in after successful auth
+    try {
+      console.log('[AuthContext] Checking for required asset opt-ins...');
+      
+      // Check if user needs opt-ins
+      const GENERATE_OPT_IN_TRANSACTIONS = gql`
+        mutation GenerateOptInTransactions {
+          generateOptInTransactions {
+            success
+            error
+            transactions
+          }
+        }
+      `;
+      
+      const { data } = await apolloClient.mutate({
+        mutation: GENERATE_OPT_IN_TRANSACTIONS
+      });
+      
+      const mutationResult = data?.generateOptInTransactions;
+      if (mutationResult?.success && mutationResult?.transactions) {
+        // Parse transactions payload defensively; GraphQL JSONString may already be an array in some environments
+        let transactions: any = mutationResult.transactions;
+        if (typeof transactions === 'string') {
+          try {
+            transactions = JSON.parse(transactions);
+          } catch (parseError) {
+            console.error('[AuthContext] Failed to parse opt-in transactions payload:', parseError);
+            transactions = null;
+          }
+        }
+
+        if (Array.isArray(transactions) && transactions.length > 0) {
+          console.log('[AuthContext] Opt-in transactions needed, processing...');
+          const { default: algorandService } = await import('../services/algorandService');
+          const optInSuccess = await algorandService.processSponsoredOptIn(transactions);
+          
+          if (optInSuccess) {
+            console.log('[AuthContext] Auto opt-in completed successfully');
+          } else {
+            console.error('[AuthContext] Auto opt-in failed');
+          }
+        } else {
+          console.log('[AuthContext] No opt-in transactions returned; user likely already opted in');
+        }
+      } else if (mutationResult?.success) {
+        console.log('[AuthContext] User already opted into all required assets');
+      } else {
+        console.error('[AuthContext] Failed to generate opt-in transactions:', mutationResult?.error);
+      }
+      
+    } catch (optInError) {
+      console.error('[AuthContext] Error during auto opt-in:', optInError);
+      // Don't block login if opt-in fails
+    }
+
+    try { signalAuthReady(); } catch {}
+    prefetchUserAccounts(`post-${source}`);
+    navigateToScreen('Main');
+  };
+
+  const completeBiometricAndEnter = async (source: 'login' | 'phoneVerification' = 'login'): Promise<boolean> => {
+    const supported = await biometricAuthService.isSupported();
+    if (!supported) {
+      Alert.alert('Biometría no disponible', 'Este dispositivo no tiene biometría disponible para proteger tu cuenta.');
+      return false;
+    }
+
+    const biometricResult = await enforceBiometricEnrollment();
+    if (!biometricResult.ok) {
+      return false;
+    }
+
+    // Final confirmation to ensure user actually passed the prompt
+    const authOk = await biometricAuthService.authenticate(
+      'Confirma tu biometría para continuar',
+      true,
+      true
+    );
+    if (!authOk) {
+      Alert.alert('Biometría requerida', 'Confirma con Face ID / Touch ID o huella para continuar.');
+      return false;
+    }
+
+    await completeAuthenticatedEntry(source);
+    return true;
+  };
+
   const handleSuccessfulLogin = async (isPhoneVerified: boolean) => {
     try {
       console.log('Handling successful login...');
       if (isPhoneVerified) {
         console.log('User has verified phone number');
-        setIsAuthenticated(true);
-        await refreshProfile('personal'); // Refresh personal profile after successful login
-        
-        // Ensure FCM token is registered for the new user
-        console.log('[AuthContext] Registering FCM token for logged in user...');
-        try {
-          const { default: messagingService } = await import('../services/messagingService');
-          await messagingService.ensureTokenRegisteredForCurrentUser();
-        } catch (fcmError) {
-          console.error('[AuthContext] Failed to register FCM token:', fcmError);
-          // Don't block login if FCM registration fails
-        }
-        
-        // Handle auto opt-in after successful login
-        try {
-          console.log('[AuthContext] Checking for required asset opt-ins...');
-          
-          // Check if user needs opt-ins
-          const GENERATE_OPT_IN_TRANSACTIONS = gql`
-            mutation GenerateOptInTransactions {
-              generateOptInTransactions {
-                success
-                error
-                transactions
-              }
-            }
-          `;
-          
-          const { data } = await apolloClient.mutate({
-            mutation: GENERATE_OPT_IN_TRANSACTIONS
+        // Route to biometric setup screen; completion will trigger the remaining flow
+        if (isNavigationReady && navigationRef.current) {
+          navigationRef.current.reset({
+            index: 0,
+            routes: [
+              {
+                name: 'Auth',
+                params: {
+                  screen: 'BiometricSetup',
+                  params: { origin: 'login' as const },
+                },
+              },
+            ],
           });
-          
-          const mutationResult = data?.generateOptInTransactions;
-          if (mutationResult?.success && mutationResult?.transactions) {
-            // Parse transactions payload defensively; GraphQL JSONString may already be an array in some environments
-            let transactions: any = mutationResult.transactions;
-            if (typeof transactions === 'string') {
-              try {
-                transactions = JSON.parse(transactions);
-              } catch (parseError) {
-                console.error('[AuthContext] Failed to parse opt-in transactions payload:', parseError);
-                transactions = null;
-              }
-            }
-
-            if (Array.isArray(transactions) && transactions.length > 0) {
-              console.log('[AuthContext] Opt-in transactions needed, processing...');
-              const { default: algorandService } = await import('../services/algorandService');
-              const optInSuccess = await algorandService.processSponsoredOptIn(transactions);
-              
-              if (optInSuccess) {
-                console.log('[AuthContext] Auto opt-in completed successfully');
-              } else {
-                console.error('[AuthContext] Auto opt-in failed');
-              }
-            } else {
-              console.log('[AuthContext] No opt-in transactions returned; user likely already opted in');
-            }
-          } else if (mutationResult?.success) {
-            console.log('[AuthContext] User already opted into all required assets');
-          } else {
-            console.error('[AuthContext] Failed to generate opt-in transactions:', mutationResult?.error);
-          }
-          
-        } catch (optInError) {
-          console.error('[AuthContext] Error during auto opt-in:', optInError);
-          // Don't block login if opt-in fails
         }
-
-        try { signalAuthReady(); } catch {}
-        prefetchUserAccounts('post-login');
-        navigateToScreen('Main');
       } else {
         console.log('User needs phone verification');
         // Don't set isAuthenticated to true yet - keep user in Auth flow
@@ -567,6 +677,29 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
               console.error('Failed to sync token to business context before navigation:', syncErr);
             }
 
+            // Require biometric enrollment first, then unlock on app start when session exists
+            const enrollmentResult = await enforceBiometricEnrollment();
+            if (!enrollmentResult.ok) {
+              setIsAuthenticated(false);
+              navigateToScreen('Auth');
+              setIsLoading(false);
+              return;
+            }
+
+            const biometricOk = enrollmentResult.alreadyEnabled
+              ? await biometricAuthService.authenticate('Desbloquea Confío')
+              : true; // enrollment triggered its own prompt
+            if (!biometricOk) {
+              Alert.alert(
+                'Confirma con biometría',
+                'Usa Face ID / Touch ID o huella para continuar de forma segura.'
+              );
+              setIsAuthenticated(false);
+              navigateToScreen('Auth');
+              setIsLoading(false);
+              return;
+            }
+
             // Mark authenticated and go to Main immediately to avoid splash hanging
             setIsAuthenticated(true);
             // Do NOT signal authReady here on cold resume; signal after token is aligned to stored context
@@ -649,25 +782,21 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   const completePhoneVerification = async () => {
     try {
       console.log('Completing phone verification...');
-      
-      // With Web3Auth, phone verification completion should be handled by the backend
-      // We just need to set the authentication state and navigate to Main
-      setIsAuthenticated(true);
-      await refreshProfile('personal');
-      
-      // Ensure FCM token is registered after phone verification
-      console.log('[AuthContext] Registering FCM token after phone verification...');
-      try {
-        const { default: messagingService } = await import('../services/messagingService');
-        await messagingService.ensureTokenRegisteredForCurrentUser();
-      } catch (fcmError) {
-        console.error('[AuthContext] Failed to register FCM token:', fcmError);
-        // Don't block navigation if FCM registration fails
+      // After phone verification, send user to biometric setup flow
+      if (isNavigationReady && navigationRef.current) {
+        navigationRef.current.reset({
+          index: 0,
+          routes: [
+            {
+              name: 'Auth',
+              params: {
+                screen: 'BiometricSetup',
+                params: { origin: 'phoneVerification' as const },
+              },
+            },
+          ],
+        });
       }
-      
-      try { signalAuthReady(); } catch {}
-      prefetchUserAccounts('post-phone-verification');
-      navigateToScreen('Main');
     } catch (error) {
       console.error('Error completing phone verification:', error);
     }
@@ -681,6 +810,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       checkLocalAuthState, 
       handleSuccessfulLogin, 
       completePhoneVerification,
+      completeBiometricAndEnter,
       profileData, 
       isProfileLoading, 
       refreshProfile,

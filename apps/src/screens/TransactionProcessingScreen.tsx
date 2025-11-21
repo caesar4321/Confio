@@ -13,6 +13,7 @@ import { inviteSendService } from '../services/inviteSendService';
 import * as nacl from 'tweetnacl';
 import * as msgpack from 'algorand-msgpack';
 import { Buffer } from 'buffer';
+import { biometricAuthService } from '../services/biometricAuthService';
 
 const colors = {
   primary: '#34D399', // emerald-400
@@ -68,6 +69,7 @@ export const TransactionProcessingScreen = () => {
   const [isComplete, setIsComplete] = useState(false);
   const [transactionSuccess, setTransactionSuccess] = useState(false);
   const [transactionError, setTransactionError] = useState<string | null>(null);
+  const [bioChecked, setBioChecked] = useState(false);
   const [pulseAnim] = useState(new Animated.Value(1));
   const [bounceAnims] = useState([
     new Animated.Value(0),
@@ -165,10 +167,42 @@ export const TransactionProcessingScreen = () => {
         [{ text: 'OK', onPress: () => navigation.goBack() }]
       );
     }
-  }, [isComplete, transactionSuccess, transactionError]);
+  }, [isComplete, transactionSuccess, transactionError, navigation]);
 
   // Process transaction when screen loads
   useEffect(() => {
+    (async () => {
+      if (bioChecked) return;
+      const ok = await biometricAuthService.authenticate(
+        'Autoriza esta operación crítica (envío/pago)'
+      );
+      if (!ok) {
+        Alert.alert(
+          'Se requiere biometría',
+          'Confirma con Face ID / Touch ID o huella para continuar.',
+          [{ text: 'OK', onPress: () => navigation.goBack() }]
+        );
+        return;
+      }
+      setBioChecked(true);
+    })();
+  }, [bioChecked, navigation]);
+
+  useEffect(() => {
+    if (!bioChecked) return;
+    // Watchdog: fail fast if processing stalls
+    const watchdog = setTimeout(() => {
+      if (isComplete) return;
+      console.warn('TransactionProcessingScreen: Watchdog triggered, aborting transaction');
+      setTransactionError('La transacción tardó demasiado. Revisa tu conexión e inténtalo de nuevo.');
+      setIsComplete(true);
+    }, 20000);
+
+    return () => clearTimeout(watchdog);
+  }, [bioChecked, isComplete]);
+
+  useEffect(() => {
+    if (!bioChecked) return;
     console.log('TransactionProcessingScreen: useEffect triggered, hasProcessedRef.current:', hasProcessedRef.current);
     console.log('TransactionProcessingScreen: transactionData:', transactionData);
     console.log('TransactionProcessingScreen: Generated idempotencyKey:', idempotencyKey);
@@ -271,11 +305,20 @@ export const TransactionProcessingScreen = () => {
       }
     };
 
-    const processAlgorandSponsoredSend = async () => {
-      try {
-        // Prefer WebSocket prepare/submit for lower latency
-        setCurrentStep(1);
-        console.log('TransactionProcessingScreen: Creating Algorand sponsored transaction (WS-first)...');
+  const processAlgorandSponsoredSend = async () => {
+    try {
+      const withTimeout = async <T,>(promise: Promise<T>, ms: number, label: string): Promise<T> => {
+        return await Promise.race([
+          promise,
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error(`timeout:${label}`)), ms)
+          )
+        ]);
+      };
+
+      // Prefer WebSocket prepare/submit for lower latency
+      setCurrentStep(1);
+      console.log('TransactionProcessingScreen: Creating Algorand sponsored transaction (WS-first)...');
 
         // Build variables based on what recipient info we have
         const variables: any = {
@@ -329,20 +372,23 @@ export const TransactionProcessingScreen = () => {
           if (!(userTransaction && sponsorTransaction)) {
             const { SendWsSession } = await import('../services/sendWs');
             const session = new SendWsSession();
-            await session.open();
-            const pack = await session.prepare({
-              amount: variables.amount,
-              assetType: variables.assetType,
-              note: variables.note,
-              recipientAddress: variables.recipientAddress,
-              recipientUserId: variables.recipientUserId,
-              recipientPhone: variables.recipientPhone,
-            });
-            const txs = pack?.transactions || [];
-            sponsorTransaction = txs.find((t: any) => t.index === 0)?.transaction || null;
-            userTransaction = txs.find((t: any) => t.index === 1)?.transaction || null;
-            session.close();
-            console.log('TransactionProcessingScreen: WS prepare OK');
+            try {
+              await withTimeout(session.open(), 8000, 'ws_open');
+              const pack = await withTimeout(session.prepare({
+                amount: variables.amount,
+                assetType: variables.assetType,
+                note: variables.note,
+                recipientAddress: variables.recipientAddress,
+                recipientUserId: variables.recipientUserId,
+                recipientPhone: variables.recipientPhone,
+              }), 10000, 'ws_prepare');
+              const txs = pack?.transactions || [];
+              sponsorTransaction = txs.find((t: any) => t.index === 0)?.transaction || null;
+              userTransaction = txs.find((t: any) => t.index === 1)?.transaction || null;
+              console.log('TransactionProcessingScreen: WS prepare OK');
+            } finally {
+              try { session.close(); } catch {}
+            }
           }
         } catch (wsErr) {
           console.error('TransactionProcessingScreen: WS prepare failed:', wsErr);
@@ -393,7 +439,11 @@ export const TransactionProcessingScreen = () => {
         let confirmedRound: number | undefined;
         try {
           const { submitSendViaWs } = await import('../services/sendWs');
-          const submitRes = await submitSendViaWs(signedUserTxnB64, sponsorTransaction!);
+          const submitRes = await withTimeout(
+            submitSendViaWs(signedUserTxnB64, sponsorTransaction!),
+            12000,
+            'ws_submit'
+          );
           if (!submitRes || !(submitRes.transactionId || submitRes.transaction_id)) {
             throw new Error('submit_failed');
           }
@@ -494,7 +544,7 @@ export const TransactionProcessingScreen = () => {
     };
 
     initializeProcessing();
-  }, []); // Empty dependency array - only run once on mount
+  }, [bioChecked]); // Run after biometric check completes
 
   // Pulse animation for current step
   useEffect(() => {

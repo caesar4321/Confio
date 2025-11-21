@@ -16,6 +16,7 @@ import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 // GraphQL not used in WS-only flow
 import { colors } from '../config/theme';
 // Removed GET_INVOICES and AccountManager in WS-only flow
+import { biometricAuthService } from '../services/biometricAuthService';
 
 type PaymentProcessingRouteProp = RouteProp<{
   PaymentProcessing: {
@@ -45,6 +46,7 @@ export const PaymentProcessingScreen = () => {
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [paymentResponse, setPaymentResponse] = useState<any>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [bioChecked, setBioChecked] = useState(false);
   
   const hasProcessedRef = useRef(false);
   const ranRef = useRef(false);
@@ -114,6 +116,24 @@ export const PaymentProcessingScreen = () => {
     }
   ];
 
+  // Require biometric before processing critical payment
+  useEffect(() => {
+    (async () => {
+      if (bioChecked) return;
+      const ok = await biometricAuthService.authenticate(
+        'Autoriza esta operación crítica (pago)'
+      );
+      setBioChecked(true);
+      if (!ok) {
+        Alert.alert(
+          'Se requiere biometría',
+          'Confirma con Face ID / Touch ID o huella para continuar.',
+          [{ text: 'OK', onPress: () => navigation.goBack() }]
+        );
+      }
+    })();
+  }, [bioChecked, navigation]);
+
   // Start spinning animation
   useEffect(() => {
     // reset value for fresh loop
@@ -177,11 +197,12 @@ export const PaymentProcessingScreen = () => {
       transactionData
     });
     
-    if (!isValid || !transactionData.invoiceId || isProcessing || hasProcessedRef.current) {
+    if (!isValid || !transactionData.invoiceId || isProcessing || hasProcessedRef.current || !bioChecked) {
       console.log('PaymentProcessingScreen: Returning early from useEffect', {
         reason: !isValid ? 'not valid' : 
                 !transactionData.invoiceId ? 'no invoiceId' : 
                 isProcessing ? 'already processing' : 
+                !bioChecked ? 'biometric not confirmed' :
                 'already processed'
       });
       return;
@@ -657,7 +678,7 @@ export const PaymentProcessingScreen = () => {
     };
 
     processPaymentWsOnly();
-  }, [isValid, transactionData.invoiceId]);
+  }, [isValid, transactionData.invoiceId, bioChecked]);
 
 
 

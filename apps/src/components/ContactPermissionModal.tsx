@@ -127,9 +127,9 @@ export const ContactPermissionModal: React.FC<ContactPermissionModalProps> = ({
                   <Text style={styles.stepNumberText}>1</Text>
                 </View>
                 <View style={styles.stepContent}>
-                  <Text style={styles.stepTitle}>Sincronización local</Text>
+                  <Text style={styles.stepTitle}>Solo subimos números</Text>
                   <Text style={styles.stepDescription}>
-                    Tus contactos se leen y procesan únicamente en tu dispositivo
+                    Con tu permiso, enviamos únicamente los números de teléfono a nuestros servidores para verificar quién usa Confío. No subimos nombres ni otros datos.
                   </Text>
                 </View>
               </View>
@@ -139,9 +139,9 @@ export const ContactPermissionModal: React.FC<ContactPermissionModalProps> = ({
                   <Text style={styles.stepNumberText}>2</Text>
                 </View>
                 <View style={styles.stepContent}>
-                  <Text style={styles.stepTitle}>Almacenamiento seguro</Text>
+                  <Text style={styles.stepTitle}>Procesamiento seguro</Text>
                   <Text style={styles.stepDescription}>
-                    Los datos se guardan encriptados en el almacenamiento seguro de tu teléfono
+                    Los números se transmiten de forma segura y solo se usan para comprobar coincidencias; nombres y demás datos nunca salen de tu teléfono.
                   </Text>
                 </View>
               </View>
@@ -153,8 +153,7 @@ export const ContactPermissionModal: React.FC<ContactPermissionModalProps> = ({
                 <View style={styles.stepContent}>
                   <Text style={styles.stepTitle}>Coincidencia</Text>
                   <Text style={styles.stepDescription}>
-                    Con tu consentimiento, subimos únicamente los números de tus contactos para comprobar quién usa
-                    Confío y mostrar nombres en tus transacciones. Nunca subimos nombres ni otra información.
+                    Con las coincidencias, te mostramos quién ya usa Confío y completamos los nombres en tus operaciones. Nombres y otros datos no se comparten ni almacenan en servidores.
                   </Text>
                 </View>
               </View>
