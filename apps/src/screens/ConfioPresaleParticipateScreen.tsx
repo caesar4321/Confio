@@ -15,6 +15,7 @@ import { PresaleWsSession } from '../services/presaleWs';
 import { LoadingOverlay } from '../components/LoadingOverlay';
 import { secureDeterministicWallet } from '../services/secureDeterministicWallet';
 import algorandService from '../services/algorandService';
+import { biometricAuthService } from '../services/biometricAuthService';
 
 const colors = {
   primary: '#34d399',
@@ -138,6 +139,16 @@ export const ConfioPresaleParticipateScreen = () => {
 
   const executeSwap = async () => {
     try {
+      const bioOk = await biometricAuthService.authenticate(
+        'Autoriza esta compra de preventa (operación crítica)',
+        false,
+        false
+      );
+      if (!bioOk) {
+        Alert.alert('Se requiere biometría', 'Confirma con Face ID / Touch ID o huella para continuar.', [{ text: 'OK' }]);
+        return;
+      }
+
       setBusy(true);
       const session = new PresaleWsSession();
       await session.open();

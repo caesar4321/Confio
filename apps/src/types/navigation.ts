@@ -6,6 +6,7 @@ export type AuthStackParamList = {
   PhoneVerification: undefined;
   Registration: undefined;
   LegalDocument: { docType: 'terms' | 'privacy' | 'deletion' };
+  BiometricSetup: { origin?: 'login' | 'phoneVerification' } | undefined;
 };
 
 // Bottom Tab Navigator - Main app tabs

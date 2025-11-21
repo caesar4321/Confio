@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, Linking, Image, Share, Alert, Clipboard } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, Linking, Image, Share, Alert, Clipboard, AppState, AppStateStatus } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useAuth } from '../contexts/AuthContext';
 import { useAccount } from '../contexts/AccountContext';
@@ -10,6 +10,7 @@ import { getCountryByIso } from '../utils/countries';
 import { usePushNotificationPrompt } from '../hooks/usePushNotificationPrompt';
 import { PushNotificationModal } from '../components/PushNotificationModal';
 import { ReferralInputModal } from '../components/ReferralInputModal';
+import { biometricAuthService } from '../services/biometricAuthService';
 
 // Utility function to format phone number with country code
 const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string => {
@@ -60,6 +61,13 @@ export const ProfileScreen = () => {
     return false;
   }, [rawUsername]);
   const [showReferralModal, setShowReferralModal] = React.useState(false);
+  const [biometricAvailable, setBiometricAvailable] = React.useState(false);
+  const [biometricEnabled, setBiometricEnabled] = React.useState(false);
+  const [biometricLoading, setBiometricLoading] = React.useState(true);
+  const [biometricActionLoading, setBiometricActionLoading] = React.useState(false);
+  const [biometricError, setBiometricError] = React.useState<string | null>(null);
+  const appState = React.useRef(AppState.currentState);
+
   const referralShareMessage = React.useMemo(() => {
     const safeUsername = username || '@tuUsuario';
     return [
@@ -121,17 +129,103 @@ export const ProfileScreen = () => {
     });
   }, [activeAccount, accountsLoading]);
 
+  // Helper function to check biometric support
+  const checkBiometricSupport = React.useCallback(async () => {
+    try {
+      console.log('[ProfileScreen] Checking biometric support...');
+      biometricAuthService.invalidateCache();
+      const supported = await biometricAuthService.isSupported();
+      console.log('[ProfileScreen] Biometric supported:', supported);
+      setBiometricAvailable(supported);
+      if (supported) {
+        const enabled = await biometricAuthService.isEnabled();
+        setBiometricEnabled(enabled);
+      } else {
+        setBiometricEnabled(false);
+      }
+      setBiometricError(null);
+    } catch (error) {
+      console.error('[Profile] Failed to load biometric status:', error);
+      setBiometricError('No se pudo validar la biometría del dispositivo.');
+    } finally {
+      setBiometricLoading(false);
+    }
+  }, []);
+
+  // Load biometric capability + preference on mount
+  React.useEffect(() => {
+    let alive = true;
+    (async () => {
+      if (alive) {
+        await checkBiometricSupport();
+      }
+    })();
+    return () => { alive = false; };
+  }, [checkBiometricSupport]);
+
+  // Listen for app state changes (e.g., returning from Settings)
+  React.useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
+      console.log('[ProfileScreen] AppState changed:', appState.current, '->', nextAppState);
+
+      // App has come to the foreground
+      if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
+        console.log('[ProfileScreen] App returned to foreground, re-checking biometrics');
+        setBiometricLoading(true);
+        checkBiometricSupport();
+      }
+
+      appState.current = nextAppState;
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [checkBiometricSupport]);
+
+  const handleBiometricUpdate = React.useCallback(async () => {
+    if (biometricLoading || biometricActionLoading) return;
+    setBiometricError(null);
+    setBiometricActionLoading(true);
+    try {
+      if (!biometricAvailable) {
+        setBiometricError('Este dispositivo no soporta biometría.');
+        return;
+      }
+
+      // Always end with biometría activa; if ya está, re-registra por seguridad
+      if (biometricEnabled) {
+        await biometricAuthService.disable();
+      }
+      const enabled = await biometricAuthService.enable();
+      setBiometricEnabled(enabled);
+      if (!enabled) {
+        setBiometricError('No pudimos activar la biometría. Inténtalo nuevamente.');
+      }
+    } catch (error) {
+      console.error('[Profile] Failed to update biometrics:', error);
+      setBiometricError('Ocurrió un problema al actualizar la biometría.');
+    } finally {
+      setBiometricActionLoading(false);
+      setBiometricLoading(false);
+    }
+  }, [biometricAvailable, biometricEnabled, biometricActionLoading, biometricLoading]);
+
   // Force refresh when screen comes into focus to ensure latest state
   useFocusEffect(
     React.useCallback(() => {
-      console.log('ProfileScreen - Screen focused, refreshing accounts');
+      console.log('ProfileScreen - Screen focused, refreshing accounts and biometric status');
       refreshAccounts();
-      
+
+      // Re-check biometric availability when screen comes into focus
+      setBiometricLoading(true);
+      checkBiometricSupport();
+
       // Reset the check flag when screen loses focus
       return () => {
         setHasCheckedThisFocus(false);
       };
-    }, [refreshAccounts])
+    }, [refreshAccounts, checkBiometricSupport])
   );
   
   // Separate effect for push notification check to avoid infinite loop
@@ -427,6 +521,43 @@ export const ProfileScreen = () => {
         </View>
       </View>
 
+      {/* Security Card */}
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <View style={styles.cardTitleRow}>
+            <Icon name="shield" size={20} color="#6B7280" />
+            <Text style={styles.cardTitle}>Seguridad</Text>
+          </View>
+        </View>
+        <View style={styles.cardOptions}>
+          <TouchableOpacity
+            style={[
+              styles.cardOption,
+              (!biometricAvailable || biometricLoading || biometricActionLoading) && styles.cardOptionDisabled
+            ]}
+            onPress={handleBiometricUpdate}
+            disabled={!biometricAvailable || biometricLoading || biometricActionLoading}
+          >
+            <Icon name="smartphone" size={18} color={biometricAvailable ? "#10B981" : "#9CA3AF"} />
+            <View style={styles.biometricTextContainer}>
+              <Text style={styles.biometricTitle}>Biometría</Text>
+              {biometricLoading ? (
+                <Text style={styles.biometricStatusText}>Verificando...</Text>
+              ) : !biometricAvailable ? (
+                <Text style={styles.biometricStatusUnavailable}>No disponible</Text>
+              ) : biometricEnabled ? (
+                <Text style={styles.biometricStatusActive}>Activa</Text>
+              ) : (
+                <Text style={styles.biometricStatusText}>Toca para activar</Text>
+              )}
+            </View>
+            {biometricAvailable && !biometricLoading && (
+              <Icon name="chevron-right" size={16} color="#9CA3AF" />
+            )}
+          </TouchableOpacity>
+        </View>
+      </View>
+
       {/* Community Card */}
       <View style={styles.card}>
         <View style={styles.cardHeader}>
@@ -660,6 +791,34 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#9CA3AF',
     marginRight: 8,
+  },
+  cardOptionDisabled: {
+    opacity: 0.5,
+  },
+  biometricTextContainer: {
+    flex: 1,
+    marginLeft: 12,
+    flexDirection: 'column',
+  },
+  biometricTitle: {
+    fontSize: 15,
+    color: '#374151',
+  },
+  biometricStatusText: {
+    fontSize: 13,
+    color: '#6B7280',
+    marginTop: 4,
+  },
+  biometricStatusActive: {
+    fontSize: 13,
+    color: '#10B981',
+    marginTop: 4,
+    fontWeight: '500',
+  },
+  biometricStatusUnavailable: {
+    fontSize: 13,
+    color: '#EF4444',
+    marginTop: 4,
   },
   referralCard: {
     backgroundColor: '#FFFFFF',
