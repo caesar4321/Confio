@@ -707,38 +707,39 @@ class InfluencerReferralType(DjangoObjectType):
 	def resolve_influencer_user(self, info):
 		return getattr(self, 'referrer_user', None)
 
-	def _lookup_reward_event_id(self, user, role=None):
-		"""Helper to fetch latest relevant reward event id for a user/role"""
-		if not user:
-			return None
-		try:
-			qs = ReferralRewardEvent.objects.filter(
-				referral_id=self.id,
-				user=user,
-			)
-			if role:
-				qs = qs.filter(actor_role=role)
-			event = (
-				qs.filter(reward_status__in=['eligible', 'pending'])
-				.order_by('-occurred_at')
-				.first()
-				or qs.order_by('-occurred_at').first()
-			)
-			return str(event.id) if event else None
-		except Exception:
-			return None
-
 	def resolve_viewer_reward_event_id(self, info):
 		user = getattr(info.context, 'user', None)
 		if not (user and getattr(user, 'is_authenticated', False)):
 			return None
-		return self._lookup_reward_event_id(user=user)
+		return _resolve_reward_event_id(self, user=user)
 
 	def resolve_referrer_reward_event_id(self, info):
-		return self._lookup_reward_event_id(getattr(self, 'referrer_user', None), role='referrer')
+		return _resolve_reward_event_id(self, getattr(self, 'referrer_user', None), role='referrer')
 
 	def resolve_referee_reward_event_id(self, info):
-		return self._lookup_reward_event_id(getattr(self, 'referred_user', None), role='referee')
+		return _resolve_reward_event_id(self, getattr(self, 'referred_user', None), role='referee')
+
+
+def _resolve_reward_event_id(referral_obj, user, role=None):
+	"""Fetch latest relevant reward event id for a referral/user/role"""
+	if not user or not getattr(referral_obj, 'id', None):
+		return None
+	try:
+		qs = ReferralRewardEvent.objects.filter(
+			referral_id=referral_obj.id,
+			user=user,
+		)
+		if role:
+			qs = qs.filter(actor_role=role)
+		event = (
+			qs.filter(reward_status__in=['eligible', 'pending'])
+			.order_by('-occurred_at')
+			.first()
+			or qs.order_by('-occurred_at').first()
+		)
+		return str(event.id) if event else None
+	except Exception:
+		return None
 
 
 class TikTokViralShareType(DjangoObjectType):
