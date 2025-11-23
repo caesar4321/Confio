@@ -660,3 +660,16 @@ class PaymentTransactionBuilder:
         net_amount = gross_amount - fee_amount
         
         return net_amount, fee_amount
+
+    def calculate_gross_for_net(self, net_amount: int) -> Tuple[int, int]:
+        """
+        Calculate gross amount and fee required to deliver a target net amount after 0.9% fee.
+        Uses ceil division so the recipient always receives at least the requested net.
+        """
+        fee_bps = 90  # 0.9% = 90 basis points
+        basis_points = 10000
+        # gross = ceil(net * bp / (bp - fee_bps))
+        numerator = net_amount * basis_points + (basis_points - fee_bps - 1)
+        gross_amount = numerator // (basis_points - fee_bps)
+        fee_amount = gross_amount - net_amount
+        return gross_amount, fee_amount

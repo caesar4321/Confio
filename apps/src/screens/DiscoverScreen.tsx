@@ -4,6 +4,9 @@ import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import { NavigationProp } from '@react-navigation/native';
 import { MainStackParamList } from '../types/navigation';
+import { useQuery } from '@apollo/client';
+import { GET_PENDING_PAYROLL_ITEMS } from '../apollo/queries';
+import { useAccount } from '../contexts/AccountContext';
 
 type MenuItem = {
   key: string;
@@ -15,6 +18,16 @@ type MenuItem = {
 
 export const DiscoverScreen = () => {
   const navigation = useNavigation<NavigationProp<MainStackParamList>>();
+  const { activeAccount } = useAccount();
+  const isPersonalAccount = (activeAccount?.type || '').toLowerCase() === 'personal';
+  const isBusinessAccount = (activeAccount?.type || '').toLowerCase() === 'business';
+  const isEmployeeDelegate = !!activeAccount?.isEmployee;
+
+  const { data: pendingPayrollData } = useQuery(GET_PENDING_PAYROLL_ITEMS, {
+    skip: !activeAccount,
+    fetchPolicy: 'cache-and-network',
+  });
+  const pendingPayrollCount = pendingPayrollData?.pendingPayrollItems?.length || 0;
 
   const MENU_ITEMS: MenuItem[] = useMemo(
     () => [
@@ -45,10 +58,16 @@ export const DiscoverScreen = () => {
         description: 'Transfiere USDC desde Binance, Coinbase u otros exchanges compatibles.',
         icon: 'download-cloud',
         action: () => navigation.navigate('USDCDeposit' as never, { tokenType: 'usdc' } as never),
-
+      },
+      {
+        key: 'payroll-manage',
+        title: 'Gestionar nómina y asignar delegados',
+        description: 'Configura delegados y destinatarios de nómina.',
+        icon: 'briefcase',
+        action: () => navigation.navigate(isBusinessAccount ? ('PayrollSettings' as never) : ('CreateBusiness' as never)),
       },
     ],
-    [navigation]
+    [navigation, isBusinessAccount]
   );
 
   return (
@@ -64,6 +83,22 @@ export const DiscoverScreen = () => {
       </View>
 
       <Text style={styles.sectionLabel}>Tus próximos pasos</Text>
+      {(isBusinessAccount || isEmployeeDelegate || isPersonalAccount) && pendingPayrollCount > 0 && (
+        <TouchableOpacity
+          style={styles.payrollCard}
+          onPress={() => navigation.navigate('PayrollPending' as never)}
+          activeOpacity={0.9}
+        >
+          <View style={styles.payrollIconWrap}>
+            <Icon name="alert-triangle" size={20} color="#fff" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.payrollTitle}>Nómina pendiente</Text>
+            <Text style={styles.payrollSubtitle}>Tienes {pendingPayrollCount} pagos para firmar</Text>
+          </View>
+          <Icon name="chevron-right" size={18} color="#9CA3AF" />
+        </TouchableOpacity>
+      )}
       <View style={styles.grid}>
         {MENU_ITEMS.map((item) => (
           <TouchableOpacity
@@ -166,6 +201,34 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginLeft: 12,
+  },
+  payrollCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EEF2FF',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  payrollIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: '#8B5CF6',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  payrollTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  payrollSubtitle: {
+    fontSize: 12,
+    color: '#6B7280',
   },
 });
 

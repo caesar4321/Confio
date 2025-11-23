@@ -188,13 +188,54 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
             task.cancel()
         self._idle_task = asyncio.create_task(self._idle_close())
 
+    def _get_active_account(self):
+        """
+        Resolve the currently active account from the JWT context on the WebSocket scope.
+        Falls back to the primary personal account if the requested context is missing.
+        """
+        from users.models import Account
+
+        user = self.scope.get("user")
+        ctx = self.scope.get("account_context") or {}
+        try:
+            account_type = str(ctx.get("account_type") or "personal").lower()
+        except Exception:
+            account_type = "personal"
+        try:
+            account_index = int(ctx.get("account_index") or 0)
+        except Exception:
+            account_index = 0
+
+        account = Account.objects.filter(
+            user=user,
+            account_type=account_type,
+            account_index=account_index,
+            deleted_at__isnull=True,
+        ).first()
+
+        if not account and account_type != "personal":
+            account = Account.objects.filter(
+                user=user, account_type="personal", deleted_at__isnull=True
+            ).first()
+
+        # Lightweight log for debugging which account context is being used
+        try:
+            logging.getLogger(__name__).info(
+                f"[PRESALE][WS] account_context type={account_type} index={account_index} resolved={getattr(account, 'algorand_address', None)}"
+            )
+        except Exception:
+            pass
+
+        return account
+
     @database_sync_to_async
     def _prepare(self, amount):
         from decimal import Decimal
         from django.utils import timezone
         from presale.models import PresalePhase, PresalePurchase, UserPresaleLimit, PresaleSettings
-        from users.models import Account
         from blockchain.presale_transaction_builder import PresaleTransactionBuilder
+        from blockchain.algorand_account_manager import AlgorandAccountManager
+        from algosdk.v2client import algod as _algod
 
         user = self.scope.get("user")
 
@@ -224,12 +265,35 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
             return {"success": False, "error": "exceeds_user_limit"}
 
         # Resolve user's Algorand address
-        account = Account.objects.filter(user=user, account_type='personal', deleted_at__isnull=True).first()
+        account = self._get_active_account()
         if not account or not account.algorand_address or len(account.algorand_address) != 58:
             return {"success": False, "error": "no_algorand_address"}
 
         # Compute CONFIO amount (phase pricing uses cUSD per token)
         confio_amount = (cusd_amount / phase.price_per_token).quantize(Decimal('0.000001'))
+        cusd_base = int(cusd_amount * 10**6)
+
+        # Guard-rail: ensure the active account has enough cUSD before we even build the group
+        try:
+            algod_client = _algod.AlgodClient(AlgorandAccountManager.ALGOD_TOKEN, AlgorandAccountManager.ALGOD_ADDRESS)
+            acct = algod_client.account_info(account.algorand_address)
+            assets = acct.get('assets') or []
+            cusd_balance = 0
+            for a in assets:
+                if int(a.get('asset-id') or 0) == int(getattr(AlgorandAccountManager, 'CUSD_ASSET_ID', 0) or 0):
+                    cusd_balance = int(a.get('amount') or 0)
+                    break
+            if cusd_balance < cusd_base:
+                try:
+                    logging.getLogger(__name__).warning(
+                        f"[PRESALE][WS][PREPARE] insufficient cUSD bal={cusd_balance} need={cusd_base} addr={account.algorand_address}"
+                    )
+                except Exception:
+                    pass
+                return {"success": False, "error": "insufficient_cusd_balance", "balance": cusd_balance, "needed": cusd_base}
+        except Exception:
+            # If balance check fails, fall through to let caller handle downstream errors
+            pass
 
         # Create purchase record (pending blockchain)
         purchase = PresalePurchase.objects.create(
@@ -244,7 +308,6 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
 
         # Build sponsored transaction group
         builder = PresaleTransactionBuilder()
-        cusd_base = int(cusd_amount * 10**6)
         tx_pack = builder.build_buy_group(account.algorand_address, cusd_base)
         # Persist server-signed sponsor txns alongside purchase for reliable submit
         try:
@@ -334,7 +397,7 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
         import logging as _log
 
         user = self.scope.get("user")
-        account = Account.objects.filter(user=user, account_type='personal', deleted_at__isnull=True).first()
+        account = self._get_active_account()
         if not account or not account.algorand_address or len(account.algorand_address) != 58:
             return {"success": False, "error": "no_algorand_address"}
 
@@ -421,7 +484,7 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
             return {"success": False, "error": "claims_locked"}
 
         user = self.scope.get("user")
-        account = Account.objects.filter(user=user, account_type='personal', deleted_at__isnull=True).first()
+        account = self._get_active_account()
         if not account or not account.algorand_address or len(account.algorand_address) != 58:
             return {"success": False, "error": "no_algorand_address"}
 

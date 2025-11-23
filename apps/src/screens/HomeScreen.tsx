@@ -43,6 +43,7 @@ import { useCountry } from '../contexts/CountryContext';
 import { useCurrency } from '../hooks/useCurrency';
 import { useSelectedCountryRate } from '../hooks/useExchangeRate';
 import { inviteSendService } from '../services/inviteSendService';
+import { GET_PENDING_PAYROLL_ITEMS } from '../apollo/queries';
 
 const AUTH_KEYCHAIN_SERVICE = 'com.confio.auth';
 const AUTH_KEYCHAIN_USERNAME = 'auth_tokens';
@@ -162,9 +163,20 @@ export const HomeScreen = () => {
   const { data: allPresalePhasesData } = useQuery(GET_ALL_PRESALE_PHASES, {
     fetchPolicy: 'cache-first',
   });
+  const isBusinessAccount = (activeAccount?.type || '').toLowerCase() === 'business';
+  const isPersonalAccount = (activeAccount?.type || '').toLowerCase() === 'personal';
+  const isEmployeeDelegate = !!activeAccount?.isEmployee;
+  const { data: pendingPayrollData } = useQuery(GET_PENDING_PAYROLL_ITEMS, {
+    skip: !activeAccount,
+    fetchPolicy: 'cache-and-network',
+  });
+  const pendingPayrollCount = (isBusinessAccount || isPersonalAccount || isEmployeeDelegate)
+    ? (pendingPayrollData?.pendingPayrollItems?.length || 0)
+    : 0;
   const isPresaleActive = presaleStatusData?.isPresaleActive === true;
   const isPresaleClaimsUnlocked = presaleStatusData?.isPresaleClaimsUnlocked === true;
   const [presaleDismissed, setPresaleDismissed] = useState(false);
+  const showPayrollCard = isBusinessAccount || isEmployeeDelegate || (isPersonalAccount && pendingPayrollCount > 0);
   
   // Refetch balances when active account changes
   useEffect(() => {
@@ -1083,6 +1095,29 @@ export const HomeScreen = () => {
           </Animated.View>
         </Animated.View>
         
+
+        {/* Payroll quick action */}
+        {showPayrollCard && (
+          <TouchableOpacity
+            style={[styles.payrollCard, { marginHorizontal: 16, marginBottom: 12 }]}
+            onPress={() => navigation.navigate('PayrollPending' as never)}
+            activeOpacity={0.9}
+          >
+            <View style={styles.payrollIconWrap}>
+              <Icon name="briefcase" size={20} color="#fff" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.payrollTitle}>Pagos de nómina</Text>
+              <Text style={styles.payrollSubtitle}>
+                {pendingPayrollCount > 0
+                  ? `Tienes ${pendingPayrollCount} pagos para firmar`
+                  : 'Revisa y ejecuta tus pagos de nómina'}
+              </Text>
+            </View>
+            <Icon name="chevron-right" size={18} color="#9CA3AF" />
+          </TouchableOpacity>
+        )}
+
         {/* CONFIO Presale Banner - Show claims unlocked (green) or presale active (purple) */}
         {isPresaleClaimsUnlocked && !presaleDismissed && (
           <Animated.View 
@@ -1551,6 +1586,32 @@ const styles = StyleSheet.create({
     color: '#111827',
     marginRight: 8,
   },
+  payrollCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EEF2FF',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  payrollIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 14,
+    backgroundColor: '#8B5CF6',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  payrollTitle: { fontSize: 15, fontWeight: '700', color: '#111827' },
+  payrollSubtitle: { fontSize: 13, color: '#6b7280', marginTop: 2 },
   // Loading state
   loadingText: {
     color: '#fff',
