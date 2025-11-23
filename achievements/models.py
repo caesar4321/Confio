@@ -282,6 +282,8 @@ class UserReferral(SoftDeleteModel):
         ('pending', 'Pendiente'),
         ('eligible', 'Elegible'),
         ('failed', 'Fallido'),
+        ('skipped', 'Omitido'),
+        ('claimed', 'Reclamado'),
     ]
     
     referred_user = models.ForeignKey(

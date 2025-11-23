@@ -7,12 +7,11 @@ Builds unsigned Algorand transactions for the payroll escrow contract:
 """
 
 from typing import Dict, Optional
-from algosdk import transaction, encoding
+from algosdk import transaction, encoding, logic
 from algosdk.transaction import SuggestedParams
 from algosdk.abi import Method, AddressType, UintType, StringType, ArrayDynamicType
 from algosdk.v2client import algod
 from django.conf import settings
-from algosdk.future import transaction as future_txn
 
 
 class PayrollTransactionBuilder:
@@ -106,12 +105,12 @@ class PayrollTransactionBuilder:
         sp.flat_fee = True
         sp.fee = max(sp.min_fee, sp.fee)
 
-        app_addr = encoding.decode_address(future_txn.logic.get_application_address(self.payroll_app_id))
+        app_addr = encoding.decode_address(logic.get_application_address(self.payroll_app_id))
 
         axfer = transaction.AssetTransferTxn(
             sender=business_account,
             sp=sp,
-            receiver=future_txn.logic.get_application_address(self.payroll_app_id),
+            receiver=logic.get_application_address(self.payroll_app_id),
             amt=amount_base,
             index=self.payroll_asset_id,
             note=note,
