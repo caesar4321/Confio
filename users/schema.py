@@ -707,17 +707,17 @@ class InfluencerReferralType(DjangoObjectType):
 	def resolve_influencer_user(self, info):
 		return getattr(self, 'referrer_user', None)
 
-	def _get_reward_event_id(self, user, role=None):
+	def _lookup_reward_event_id(self, user, role=None):
+		"""Helper to fetch latest relevant reward event id for a user/role"""
 		if not user:
 			return None
 		try:
 			qs = ReferralRewardEvent.objects.filter(
-				referral=self,
+				referral_id=self.id,
 				user=user,
 			)
 			if role:
 				qs = qs.filter(actor_role=role)
-			# Prefer eligible or pending events; fall back to latest
 			event = (
 				qs.filter(reward_status__in=['eligible', 'pending'])
 				.order_by('-occurred_at')
@@ -732,13 +732,13 @@ class InfluencerReferralType(DjangoObjectType):
 		user = getattr(info.context, 'user', None)
 		if not (user and getattr(user, 'is_authenticated', False)):
 			return None
-		return self._get_reward_event_id(user=user)
+		return self._lookup_reward_event_id(user=user)
 
 	def resolve_referrer_reward_event_id(self, info):
-		return self._get_reward_event_id(getattr(self, 'referrer_user', None), role='referrer')
+		return self._lookup_reward_event_id(getattr(self, 'referrer_user', None), role='referrer')
 
 	def resolve_referee_reward_event_id(self, info):
-		return self._get_reward_event_id(getattr(self, 'referred_user', None), role='referee')
+		return self._lookup_reward_event_id(getattr(self, 'referred_user', None), role='referee')
 
 
 class TikTokViralShareType(DjangoObjectType):
