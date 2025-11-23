@@ -88,6 +88,22 @@ class AbusePreventionService:
     @classmethod
     def check_device_limit(cls, device_fingerprint: str, user_id: int) -> bool:
         """Check if device has too many associated accounts"""
+        if not device_fingerprint:
+            return True
+
+        # First, consult persistent device usage to catch lifetime device sharing
+        try:
+            from security.models import DeviceFingerprint
+            threshold = cls.SUSPICIOUS_THRESHOLDS['duplicate_devices']
+            device = DeviceFingerprint.objects.filter(
+                fingerprint=device_fingerprint
+            ).only('total_users').first()
+            if device and device.total_users > threshold['max_count']:
+                return False
+        except Exception:
+            # If DB lookup fails, fall back to cache-only behavior
+            logger.warning("Device limit DB lookup failed", exc_info=True)
+
         cache_key = f"device_accounts:{device_fingerprint}"
         
         # Get current accounts for this device
@@ -170,10 +186,16 @@ class AbusePreventionService:
     def check_suspicious_patterns(cls, user, action: str, metadata: Dict) -> List[str]:
         """Check for various suspicious patterns and return list of flags"""
         flags = []
-        
-        # Check device limits
-        if 'device_fingerprint' in metadata:
-            if not cls.check_device_limit(metadata['device_fingerprint'], user.id):
+
+        # Check device limits (prefer stored device fingerprint if none provided)
+        device_fingerprint = metadata.get('device_fingerprint')
+        if not device_fingerprint:
+            device_fingerprint = cls.get_latest_device_fingerprint_for_user(user)
+            if device_fingerprint:
+                metadata['device_fingerprint'] = device_fingerprint
+
+        if device_fingerprint:
+            if not cls.check_device_limit(device_fingerprint, user.id):
                 flags.append('multiple_accounts_per_device')
         
         # Check referral velocity
@@ -214,6 +236,23 @@ class AbusePreventionService:
             cache.set(cache_key, hourly_total + metadata['transaction_amount'], 3600)
         
         return flags
+
+    @classmethod
+    def get_latest_device_fingerprint_for_user(cls, user) -> Optional[str]:
+        """Fetch the most recently used device fingerprint hash for a user"""
+        try:
+            from security.models import UserDevice
+            user_device = (
+                UserDevice.objects.filter(user=user)
+                .select_related('device')
+                .order_by('-last_used', '-first_used')
+                .first()
+            )
+            if user_device and user_device.device:
+                return user_device.device.fingerprint
+        except Exception:
+            logger.warning("Could not fetch latest device fingerprint for user %s", getattr(user, 'id', None), exc_info=True)
+        return None
     
     @classmethod
     def log_suspicious_activity(cls, user, action: str, flags: List[str], metadata: Dict):
@@ -347,4 +386,3 @@ class AbusePreventionService:
             score += 10
         
         return min(100, score)
-
