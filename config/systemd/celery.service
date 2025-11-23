@@ -8,7 +8,7 @@ Type=simple
 User=nginx
 WorkingDirectory=/opt/confio
 Environment=DJANGO_SETTINGS_MODULE=config.settings
-EnvironmentFile=/opt/confio/.env
+EnvironmentFile=/opt/confio/.env.mainnet
 ExecStart=/opt/confio/myvenv/bin/celery -A config worker --loglevel=INFO --concurrency=1 --prefetch-multiplier=1
 Restart=always
 RestartSec=5

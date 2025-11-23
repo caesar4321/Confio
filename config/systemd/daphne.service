@@ -8,7 +8,7 @@ Type=simple
 User=nginx
 WorkingDirectory=/opt/confio
 Environment=DJANGO_SETTINGS_MODULE=config.settings
-EnvironmentFile=/opt/confio/.env
+EnvironmentFile=/opt/confio/.env.mainnet
 ExecStart=/opt/confio/myvenv/bin/python -m daphne -b 127.0.0.1 -p 8000 config.asgi:application
 Restart=always
 RestartSec=3
