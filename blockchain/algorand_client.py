@@ -47,19 +47,11 @@ class AlgorandClient:
         self.CUSD_ASSET_ID = settings.ALGORAND_CUSD_ASSET_ID
         self.CONFIO_ASSET_ID = settings.ALGORAND_CONFIO_ASSET_ID
     
-    def _build_algod_client(self, use_fallback=False):
-        """Instantiate an algod client, optionally using fallback endpoint."""
+    def _build_algod_client(self):
+        """Instantiate an algod client, falling back if the primary endpoint needs an API key."""
         ua = {'User-Agent': 'confio-backend/algosdk'}
-
-        if use_fallback:
-            address = self.fallback_algod_address
-            token = self.fallback_algod_token or ''
-            self._using_fallback_algod = True
-            logger.warning("Using fallback algod endpoint: %s", address)
-        else:
-            address = self.algod_address
-            token = self.algod_token or ''
-            self._using_fallback_algod = False
+        address = self.algod_address
+        token = self.algod_token or ''
 
         if 'nodely' in (address or '').lower():
             headers = dict(ua)
@@ -70,8 +62,10 @@ class AlgorandClient:
                     "ALGORAND_ALGOD_TOKEN not set; continuing to use %s without X-API-Key header",
                     address,
                 )
+            self._using_fallback_algod = False
             return algod.AlgodClient('', address, headers=headers)
 
+        self._using_fallback_algod = False
         return algod.AlgodClient(token, address, headers=ua)
 
     def _build_indexer_client(self):
@@ -107,57 +101,6 @@ class AlgorandClient:
         if not self._algod_client:
             self._algod_client = self._build_algod_client()
         return self._algod_client
-
-    def _call_with_fallback(self, func, *args, **kwargs):
-        """
-        Call an algod function with automatic fallback on 403 errors.
-
-        Args:
-            func: The algod client method to call
-            *args, **kwargs: Arguments to pass to the function
-
-        Returns:
-            The result from the function call
-
-        Raises:
-            The exception if both primary and fallback fail
-        """
-        from algosdk.error import AlgodHTTPError
-
-        try:
-            # Try primary endpoint first
-            return func(*args, **kwargs)
-        except AlgodHTTPError as e:
-            # Check if it's a 403 error
-            if '403' in str(e) or 'Forbidden' in str(e):
-                if not self._using_fallback_algod:
-                    logger.warning(
-                        "Primary algod endpoint returned 403, switching to fallback endpoint %s",
-                        self.fallback_algod_address
-                    )
-                    # Switch to fallback client
-                    self._algod_client = self._build_algod_client(use_fallback=True)
-                    # Retry with fallback
-                    try:
-                        return func(*args, **kwargs)
-                    except Exception as fallback_error:
-                        logger.error(
-                            "Fallback endpoint also failed: %s. Switching back to primary.",
-                            fallback_error
-                        )
-                        # Switch back to primary for next request
-                        self._algod_client = self._build_algod_client(use_fallback=False)
-                        raise
-                else:
-                    # Already using fallback, can't retry
-                    logger.error("Fallback endpoint returned 403, cannot retry")
-                    raise
-            else:
-                # Not a 403 error, re-raise
-                raise
-        except Exception:
-            # Non-HTTP errors, re-raise
-            raise
     
     @property
     def indexer(self) -> indexer.IndexerClient:
@@ -192,7 +135,7 @@ class AlgorandClient:
         
         try:
             # Get account information
-            account_info = self._call_with_fallback(self.algod.account_info, address)
+            account_info = self.algod.account_info(address)
             
             if asset_id is None:
                 # Get ALGO balance (in microAlgos)
@@ -204,7 +147,7 @@ class AlgorandClient:
                 for asset in assets:
                     if asset['asset-id'] == asset_id:
                         # Get asset info to determine decimals
-                        asset_info = self._call_with_fallback(self.algod.asset_info, asset_id)
+                        asset_info = self.algod.asset_info(asset_id)
                         decimals = asset_info['params'].get('decimals', 0)
                         balance = asset['amount'] / (10 ** decimals)
                         balances[str(asset_id)] = Decimal(str(balance))
@@ -263,7 +206,7 @@ class AlgorandClient:
         Keys: 'CUSD', 'CONFIO', 'USDC', 'CONFIO_PRESALE'
         """
         try:
-            info = self._call_with_fallback(self.algod.account_info, address)
+            info = self.algod.account_info(address)
         except Exception as e:
             logger.error("[snapshot] failed to fetch account_info for %s: %s", address, e)
             return {k: Decimal('0') for k in ['CUSD', 'CONFIO', 'USDC', 'CONFIO_PRESALE']}
@@ -314,7 +257,7 @@ class AlgorandClient:
             if cached is not None:
                 return cached
         try:
-            account_info = self._call_with_fallback(self.algod.account_info, address)
+            account_info = self.algod.account_info(address)
             local = decode_local_state(account_info, int(app_id))
             user_confio = int(local.get('user_confio', 0) or 0)
             claimed = int(local.get('claimed', 0) or 0)
@@ -357,8 +300,8 @@ class AlgorandClient:
         """
         try:
             # Get suggested params
-            params = self._call_with_fallback(self.algod.suggested_params)
-
+            params = self.algod.suggested_params()
+            
             if asset_id is None:
                 # ALGO transfer
                 amount_microalgos = int(amount * 1_000_000)
@@ -372,7 +315,7 @@ class AlgorandClient:
             else:
                 # ASA transfer
                 # Get asset info to determine decimals
-                asset_info = self._call_with_fallback(self.algod.asset_info, asset_id)
+                asset_info = self.algod.asset_info(asset_id)
                 decimals = asset_info['params'].get('decimals', 0)
                 amount_units = int(amount * (10 ** decimals))
                 
@@ -418,8 +361,8 @@ class AlgorandClient:
         """
         try:
             # Get suggested params
-            params = self._call_with_fallback(self.algod.suggested_params)
-
+            params = self.algod.suggested_params()
+            
             txn_list = []
             
             # Build each transaction
@@ -613,8 +556,8 @@ class AlgorandClient:
             Transaction ID
         """
         try:
-            params = self._call_with_fallback(self.algod.suggested_params)
-
+            params = self.algod.suggested_params()
+            
             # Create opt-in transaction (0 amount transfer to self)
             txn = AssetTransferTxn(
                 sender=address,
@@ -644,16 +587,16 @@ class AlgorandClient:
     async def health_check(self) -> bool:
         """Check if Algorand node is accessible"""
         try:
-            status = self._call_with_fallback(self.algod.status)
+            status = self.algod.status()
             return bool(status)
         except Exception as e:
             logger.error(f"Health check failed: {e}")
             return False
-
+    
     async def get_asset_info(self, asset_id: int) -> Dict[str, Any]:
         """Get information about an asset"""
         try:
-            return self._call_with_fallback(self.algod.asset_info, asset_id)
+            return self.algod.asset_info(asset_id)
         except Exception as e:
             logger.error(f"Error getting asset info: {e}")
             return None
@@ -661,86 +604,20 @@ class AlgorandClient:
 
 # ===== Convenience Functions =====
 
-def call_algod_with_fallback(func, *args, **kwargs):
-    """
-    Global wrapper to call algod functions with automatic fallback on 403 errors.
-    Can be used with any algod client instance.
-
-    Args:
-        func: The algod client method to call (e.g., algod_client.account_info)
-        *args, **kwargs: Arguments to pass to the function
-
-    Returns:
-        The result from the function call
-
-    Raises:
-        The exception if both primary and fallback fail
-
-    Example:
-        algod_client = get_algod_client()
-        account_info = call_algod_with_fallback(algod_client.account_info, address)
-    """
-    from algosdk.error import AlgodHTTPError
-
-    try:
-        # Try the call
-        return func(*args, **kwargs)
-    except AlgodHTTPError as e:
-        # Check if it's a 403 error
-        if '403' in str(e) or 'Forbidden' in str(e):
-            logger.warning(
-                "Algod call returned 403, retrying with fallback endpoint: %s",
-                e
-            )
-            # Get fallback client
-            fallback_client = get_algod_client(use_fallback=True)
-
-            # Determine which method to call on fallback client
-            method_name = func.__name__
-            fallback_func = getattr(fallback_client, method_name)
-
-            # Retry with fallback
-            try:
-                return fallback_func(*args, **kwargs)
-            except Exception as fallback_error:
-                logger.error(
-                    "Fallback algod endpoint also failed: %s",
-                    fallback_error
-                )
-                raise
-        else:
-            # Not a 403 error, re-raise
-            raise
-    except Exception:
-        # Non-HTTP errors, re-raise
-        raise
-
-
-def get_algod_client(use_fallback=False):
+def get_algod_client():
     """
     Get a properly configured algod client for Nodely/Algonode
     This function handles authentication headers correctly for different providers.
-
-    Args:
-        use_fallback: If True, use the fallback endpoint instead of primary
-
+    
     Usage:
         algod_client = get_algod_client()
         status = algod_client.status()
-
-        # Or with fallback:
-        fallback_client = get_algod_client(use_fallback=True)
     """
     from django.conf import settings
-
-    if use_fallback:
-        algod_address = getattr(settings, 'ALGORAND_DRYRUN_ALGOD_ADDRESS', 'https://mainnet-api.algonode.cloud')
-        algod_token = getattr(settings, 'ALGORAND_DRYRUN_ALGOD_TOKEN', '')
-        logger.info("Using fallback algod endpoint: %s", algod_address)
-    else:
-        algod_address = settings.ALGORAND_ALGOD_ADDRESS
-        algod_token = getattr(settings, 'ALGORAND_ALGOD_TOKEN', '')
-
+    
+    algod_address = settings.ALGORAND_ALGOD_ADDRESS
+    algod_token = getattr(settings, 'ALGORAND_ALGOD_TOKEN', '')
+    
     ua = {'User-Agent': 'confio-backend/algosdk'}
     if 'nodely' in (algod_address or '').lower():
         headers = dict(ua)
