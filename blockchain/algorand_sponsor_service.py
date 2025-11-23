@@ -21,9 +21,6 @@ import time
 
 logger = logging.getLogger(__name__)
 
-# Import fallback wrapper for 403 error handling
-from blockchain.algorand_client import call_algod_with_fallback
-
 
 class AlgorandSponsorService:
     """
@@ -170,7 +167,7 @@ class AlgorandSponsorService:
                 }
             
             # Create payment transaction
-            params = call_algod_with_fallback(self.algod.suggested_params)
+            params = self.algod.suggested_params()
             funding_txn = PaymentTxn(
                 sender=self.sponsor_address,
                 sp=params,
@@ -238,7 +235,7 @@ class AlgorandSponsorService:
             cached_balance = cache.get(self.SPONSOR_BALANCE_KEY)
             if cached_balance is None:
                 # Get fresh balance from blockchain
-                account_info = call_algod_with_fallback(self.algod.account_info, self.sponsor_address)
+                account_info = self.algod.account_info(self.sponsor_address)
                 balance = Decimal(str(account_info['amount'] / 1_000_000))  # Convert to ALGO
                 cache.set(self.SPONSOR_BALANCE_KEY, balance, timeout=60)
             else:
@@ -317,7 +314,7 @@ class AlgorandSponsorService:
                 }
             
             # Get suggested params
-            params = call_algod_with_fallback(self.algod.suggested_params)
+            params = self.algod.suggested_params()
             
             # Decode user's signed transaction if provided
             if user_signed_txn:
@@ -654,7 +651,7 @@ class AlgorandSponsorService:
                 }
             
             # Get suggested params
-            params = call_algod_with_fallback(self.algod.suggested_params)
+            params = self.algod.suggested_params()
             
             # Create opt-in transaction (0 amount transfer to self) with 0 fee
             opt_in_txn = AssetTransferTxn(
@@ -733,7 +730,7 @@ class AlgorandSponsorService:
         try:
             # Check if already opted in
             try:
-                account_info = call_algod_with_fallback(self.algod.account_info, user_address)
+                account_info = self.algod.account_info(user_address)
                 assets = account_info.get('assets', [])
                 
                 if any(asset['asset-id'] == asset_id for asset in assets):
@@ -803,7 +800,7 @@ class AlgorandSponsorService:
                 }
             
             # Get suggested params
-            params = call_algod_with_fallback(self.algod.suggested_params)
+            params = self.algod.suggested_params()
             
             # Create user transaction with 0 fee
             if asset_id is None:
@@ -819,7 +816,7 @@ class AlgorandSponsorService:
             else:
                 # ASA transfer
                 # Get asset info to determine decimals
-                asset_info = call_algod_with_fallback(self.algod.asset_info, asset_id)
+                asset_info = self.algod.asset_info(asset_id)
                 decimals = asset_info['params'].get('decimals', 0)
                 amount_units = int(amount * (10 ** decimals))
                 
@@ -922,7 +919,7 @@ class AlgorandSponsorService:
                 }
             
             # Get suggested params
-            params = call_algod_with_fallback(self.algod.suggested_params)
+            params = self.algod.suggested_params()
             
             # Create user transaction with 0 fee
             if asset_id is None:
@@ -938,7 +935,7 @@ class AlgorandSponsorService:
             else:
                 # ASA transfer
                 # Get asset info to determine decimals
-                asset_info = call_algod_with_fallback(self.algod.asset_info, asset_id)
+                asset_info = self.algod.asset_info(asset_id)
                 decimals = asset_info['params'].get('decimals', 0)
                 amount_units = int(amount * (10 ** decimals))
                 
@@ -1047,7 +1044,7 @@ class AlgorandSponsorService:
         """
         try:
             # Get current network parameters
-            params = call_algod_with_fallback(self.algod.suggested_params)
+            params = self.algod.suggested_params()
             
             # Base fees by transaction type
             tx_count = {
