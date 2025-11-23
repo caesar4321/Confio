@@ -697,6 +697,8 @@ class InfluencerReferralType(DjangoObjectType):
 		fields = ('id', 'referred_user', 'referrer_identifier', 'referrer_user', 'status',
 				 'first_transaction_at', 'total_transaction_volume', 'referrer_confio_awarded',
 				 'referee_confio_awarded', 'reward_claimed_at', 'attribution_data',
+				 'reward_referee_confio', 'reward_referrer_confio',
+				 'referee_reward_status', 'referrer_reward_status',
 				 'created_at', 'updated_at')
 
 	def resolve_influencer_user(self, info):
@@ -908,6 +910,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 	
 	# Contact sync queries
 	check_users_by_phones = graphene.List(UserByPhoneType, phone_numbers=graphene.List(graphene.String, required=True))
+	check_users_by_usernames = graphene.List(UserByPhoneType, usernames=graphene.List(graphene.String, required=True))
 	
 	# Achievement system queries
 	achievement_types = graphene.List(AchievementTypeType, category=graphene.String())
@@ -928,6 +931,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 	my_confio_transactions = graphene.List(ConfioRewardTransactionType, limit=graphene.Int(), offset=graphene.Int())
 	user_tiktok_shares = graphene.List(TikTokViralShareType, status=graphene.String())
 	my_referral_rewards = graphene.List(ReferralRewardEventType, status=graphene.String())
+	my_referrals = graphene.List(InfluencerReferralType, status=graphene.String())
 
 	# Real-time stats for $CONFIO info screen
 	stats_summary = graphene.Field(StatsSummaryType)
@@ -1568,6 +1572,43 @@ class Query(EmployeeQueries, graphene.ObjectType):
 				))
 		
 		return results
+
+	def resolve_check_users_by_usernames(self, info, usernames):
+		"""Check which usernames belong to Confío users"""
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return []
+
+		results = []
+		for raw in usernames:
+			username = (raw or '').lstrip('@')
+			if not username:
+				continue
+			found_user = User.objects.filter(username__iexact=username).first()
+			if found_user:
+				active_account = found_user.accounts.filter(account_type='personal', account_index=0).first()
+				results.append(UserByPhoneType(
+					phone_number=found_user.phone_number,
+					user_id=found_user.id,
+					username=found_user.username,
+					first_name=found_user.first_name,
+					last_name=found_user.last_name,
+					is_on_confio=True,
+					active_account_id=active_account.id if active_account else None,
+					active_account_algorand_address=active_account.algorand_address if active_account else None
+				))
+			else:
+				results.append(UserByPhoneType(
+					phone_number=None,
+					user_id=None,
+					username=username,
+					first_name=None,
+					last_name=None,
+					is_on_confio=False,
+					active_account_id=None,
+					active_account_algorand_address=None
+				))
+		return results
 	
 	# Achievement system resolvers
 	def resolve_achievement_types(self, info, category=None):
@@ -1766,11 +1807,35 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		user = getattr(info.context, 'user', None)
 		if not (user and getattr(user, 'is_authenticated', False)):
 			return []
-		
+
 		qset = ReferralRewardEvent.objects.filter(user=user).order_by('-occurred_at')
 		if status:
 			qset = qset.filter(reward_status__iexact=status)
 		logger.info("[referral_rewards] user=%s status=%s count=%s", user.id, status, qset.count())
+		return qset
+
+	def resolve_my_referrals(self, info, status=None):
+		"""Get referrals from current user's perspective (both as referee and referrer)."""
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return []
+
+		# Get referrals where user is either the referrer or the referee
+		from django.db.models import Q
+		qset = InfluencerReferral.objects.filter(
+			Q(referrer_user=user) | Q(referred_user=user)
+		).select_related('referred_user', 'referrer_user').order_by('-created_at')
+
+		# Filter by reward status if provided
+		if status:
+			status_lower = status.lower()
+			# Filter based on the user's role in the referral
+			qset = qset.filter(
+				Q(referrer_user=user, referrer_reward_status__iexact=status_lower) |
+				Q(referred_user=user, referee_reward_status__iexact=status_lower)
+			)
+
+		logger.info("[my_referrals] user=%s status=%s count=%s", user.id, status, qset.count())
 		return qset
 	
 	def resolve_user_tiktok_shares(self, info, status=None):

@@ -36,37 +36,51 @@ export const ConfioTokenomicsScreen = () => {
 
   const totalSupply = 1000000000; // 1 billion
 
-  const rewardsTokens = 7_400_000;
-  const presaleTokens = 74_000_000;
-  const reserveTokens = totalSupply - rewardsTokens - presaleTokens;
+  const presaleTokens = 74_000_000; // 7.40%
+  const rewardsTokens = 7_400_000; // 0.74%
+  const culturalTokens = 15_000_000; // 1.50%
+  const coBuilderTokens = 10_000_000; // 1.00%
+  const founderTokens = 893_600_000; // 89.36%
+  const founderAndTeamTokens = founderTokens + coBuilderTokens; // 90.36%
+
+  const pct = (tokens: number) => `${((tokens / totalSupply) * 100).toFixed(2)}%`;
 
   const tokenomicsData = [
     {
       category: 'Fundador y equipo',
-      tokens: reserveTokens,
-      percentage: `${((reserveTokens / totalSupply) * 100).toFixed(2)}%`,
+      tokens: founderAndTeamTokens,
+      percentage: pct(founderAndTeamTokens),
       description:
-        'Custodia del fundador para cubrir nómina, regulaciones, licencias y expansión. Se libera linealmente durante 36 meses después del listado en exchange.',
+        'Reserva del fundador (como en cualquier startup que inicia con 100%) para operar y escalar: nómina, expansión y cumplimiento. Bloqueo total hasta fase 3/listado; luego se libera mes a mes durante 36 meses. Incluye el 1% destinado al equipo clave, que se libera por partes iguales durante 24 meses tras el listado.',
       color: colors.secondary,
       icon: 'shield',
     },
     {
       category: 'Preventas por fases',
       tokens: presaleTokens,
-      percentage: '7.4%',
+      percentage: pct(presaleTokens),
       description:
-        'Tres microfases fundacionales ($0.20 / $0.25 / $0.30) y dos fases de expansión ($0.50 / $1.00). Cada etapa tiene metas claras y ancla el precio dentro de la comunidad.',
+        'Tres microfases fundacionales ($0.20 / $0.25 / $0.30) y dos fases de expansión ($0.50 / $1.00). Se emiten 74M CONFIO (~$61M meta) y se liberan 100% al cerrar la fase 3 y listar.',
       color: colors.primary,
       icon: 'users',
     },
     {
       category: 'Recompensas en uso',
       tokens: rewardsTokens,
-      percentage: '0.74%',
+      percentage: pct(rewardsTokens),
       description:
-        '7,400,000 CONFIO bloqueados en el contrato de recompensas para referidos y transacciones diarias. Se liberan solo si la gente usa la app.',
+        '0.74% (7.4M CONFIO) para “Invita y gana”. Pago inmediato on-chain en la primera transacción real ($5 + $5). El monto de tokens se calcula al precio de la fase vigente.',
       color: colors.accent,
       icon: 'gift',
+    },
+    {
+      category: 'Invitación cultural',
+      tokens: culturalTokens,
+      percentage: pct(culturalTokens),
+      description:
+        '1.5% (hasta 2.5% opcional) para agradecer apoyos reales 2023–2026. Bloqueo total hasta el final de fase 3 y el listado; luego 50% inmediato y 50% liberado de forma gradual en 3 meses.',
+      color: '#f59e0b',
+      icon: 'heart',
     },
   ];
 
@@ -234,10 +248,11 @@ export const ConfioTokenomicsScreen = () => {
           <Text style={styles.futureTitle}>Resumen rápido</Text>
           <Text style={styles.futureDescription}>
             - Suministro total: {formatWithLocale(totalSupply)} CONFIO.{'\n'}
-            - Preventas con vesting: los tokens se liberan tras la fase 3/listado.{'\n'}
-            - Fundador bloqueado por 36 meses después del listado en exchange.{'\n'}
-            - 7.4M CONFIO reservados para recompensas diarias en contrato auditado.{'\n'}
-            - Sin VCs. Todo está documentado y visible.
+            - Preventa: 74M CONFIO (7.4%) en 5 fases ($0.20–$1.00), desbloqueo total al cerrar fase 3 y listar.{'\n'}
+            - Fundador y equipo: 90.36% como reserva típica de fundador para operar y expandir. Bloqueo total hasta fase 3/listado; luego se libera mes a mes durante 36 meses. Incluye 1% para equipo clave que se libera en partes iguales durante 24 meses tras listado.{'\n'}
+            - Cultura LATAM: 1.5% de agradecimiento. Bloqueo total hasta fase 3/listado; luego 50% inmediato y 50% liberado gradualmente en 3 meses.{'\n'}
+            - Recompensas: 7.4M CONFIO on-chain en la primera transacción real, calculadas al precio de la fase vigente.{'\n'}
+            - Sin VCs ni pools ocultos. Todo está documentado y visible.
           </Text>
             <TouchableOpacity
               style={styles.linkButton}

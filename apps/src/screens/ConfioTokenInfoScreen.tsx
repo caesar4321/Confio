@@ -75,25 +75,10 @@ export const ConfioTokenInfoScreen = () => {
       content: 'Imagina cuando millones en Venezuela, Argentina, Bolivia y toda Latinoamérica puedan construir su vida sin miedo a la inflación. Tu participación temprana será recompensada cuando el ecosistema crezca.',
     },
     {
-      title: 'Beneficios para Early Adopters',
-      icon: 'star',
-      bullets: [
-        'Acceso prioritario a nuevas funciones',
-        'Poder de voto en decisiones de la plataforma',
-        'Recompensas adicionales por referir amigos',
-        'Acceso a productos financieros exclusivos',
-        'Participación en preventas exclusivas de $CONFIO',
-      ],
-    },
-    {
       title: 'Cómo Ganar Más $CONFIO',
       icon: 'gift',
       bullets: [
-        'Completa logros y misiones',
-        'Invita amigos con tu código',
-        'Realiza intercambios P2P',
-        'Verifica tu identidad',
-        'Comparte tus logros en redes sociales',
+        'Invita amigos con tu código y gana el equivalente a US$5 en $CONFIO por cada referido elegible',
       ],
     },
   ];
@@ -186,37 +171,44 @@ export const ConfioTokenInfoScreen = () => {
         {/* Timeline */}
         <View style={styles.timelineSection}>
           <Text style={styles.timelineTitle}>Roadmap 2025-2026</Text>
-          <View style={styles.timeline}>
-            <View style={styles.timelineItem}>
-              <View style={[styles.timelineDot, styles.timelineDotActive]} />
-              <View style={styles.timelineContent}>
-                <Text style={styles.timelineDate}>Q4 2025</Text>
-                <Text style={styles.timelineText}>Lanzamiento en Venezuela</Text>
-              </View>
+        <View style={styles.timeline}>
+          <View style={styles.timelineItem}>
+            <View style={[styles.timelineDot, styles.timelineDotActive]} />
+            <View style={styles.timelineContent}>
+              <Text style={styles.timelineDate}>Q4 2025 · 🇻🇪</Text>
+              <Text style={styles.timelineText}>Lanzamiento en Venezuela: P2P completo. Fundador pivotó el primer mercado principal hacia Argentina tras rechazo de entrada en Venezuela.</Text>
             </View>
-            <View style={styles.timelineItem}>
-              <View style={styles.timelineDot} />
-              <View style={styles.timelineContent}>
-                <Text style={styles.timelineDate}>Q1 2026</Text>
-                <Text style={styles.timelineText}>Crecimiento en Venezuela y primera preventa de $CONFIO</Text>
-              </View>
+          </View>
+          <View style={styles.timelineItem}>
+            <View style={styles.timelineDot} />
+            <View style={styles.timelineContent}>
+              <Text style={styles.timelineDate}>Q1 2026 · 🚀</Text>
+              <Text style={styles.timelineText}>Alianzas Onramp, recargas automáticas y primera preventa oficial de $CONFIO.</Text>
             </View>
-            <View style={styles.timelineItem}>
-              <View style={styles.timelineDot} />
-              <View style={styles.timelineContent}>
-                <Text style={styles.timelineDate}>Q2 2026</Text>
-                <Text style={styles.timelineText}>Lanzamiento en Argentina</Text>
-              </View>
+          </View>
+          <View style={styles.timelineItem}>
+            <View style={styles.timelineDot} />
+            <View style={styles.timelineContent}>
+              <Text style={styles.timelineDate}>Q2 2026 · 🇦🇷</Text>
+              <Text style={styles.timelineText}>Lanzamiento en Argentina con métodos de pago locales.</Text>
             </View>
-            <View style={styles.timelineItem}>
-              <View style={styles.timelineDot} />
-              <View style={styles.timelineContent}>
-                <Text style={styles.timelineDate}>Q3 2026</Text>
-                <Text style={styles.timelineText}>Crecimiento en Argentina y segunda preventa de $CONFIO</Text>
-              </View>
+          </View>
+          <View style={styles.timelineItem}>
+            <View style={styles.timelineDot} />
+            <View style={styles.timelineContent}>
+              <Text style={styles.timelineDate}>Q3 2026 · 💎</Text>
+              <Text style={styles.timelineText}>Segunda preventa de $CONFIO durante el crecimiento en Argentina.</Text>
+            </View>
+          </View>
+          <View style={styles.timelineItem}>
+            <View style={styles.timelineDot} />
+            <View style={styles.timelineContent}>
+              <Text style={styles.timelineDate}>Q4 2026 · 🇧🇴</Text>
+              <Text style={styles.timelineText}>Expansión a Bolivia y consolidación regional.</Text>
             </View>
           </View>
         </View>
+      </View>
 
         {/* CTA */}
         <View style={styles.ctaSection}>

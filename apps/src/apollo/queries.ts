@@ -58,10 +58,120 @@ export const GET_BUSINESS_KYC_STATUS = gql`
   }
 `;
 
+// Payroll recipients for current business (no permissions)
+export const GET_PAYROLL_RECIPIENTS = gql`
+  query GetPayrollRecipients {
+    payrollRecipients {
+      id
+      displayName
+      recipientUser {
+        id
+        firstName
+        lastName
+        username
+      }
+      recipientAccount {
+        id
+      }
+      isEmployee
+      employeeRole
+      employeeEffectivePermissions
+    }
+  }
+`;
+
+export const GET_PAYROLL_RUNS = gql`
+  query GetPayrollRuns {
+    payrollRuns {
+      id
+      runId
+      status
+      scheduledAt
+      createdAt
+      tokenType
+      items {
+        id
+        itemId
+        status
+        netAmount
+        recipientAccount { id }
+      }
+    }
+  }
+`;
+
+// Payroll: pending items for delegate (personal account)
+export const GET_PENDING_PAYROLL_ITEMS = gql`
+  query GetPendingPayrollItems {
+    pendingPayrollItems {
+      id
+      itemId
+      netAmount
+      grossAmount
+      feeAmount
+      status
+      run {
+        id
+        runId
+        business {
+          id
+          name
+        }
+        tokenType
+      }
+      recipientUser {
+        id
+        firstName
+        lastName
+      }
+      recipientAccount {
+        id
+      }
+    }
+  }
+`;
+
+export const GET_PAYROLL_VAULT_BALANCE = gql`
+  query GetPayrollVaultBalance {
+    payrollVaultBalance
+  }
+`;
+
+export const CREATE_PAYROLL_RUN = gql`
+  mutation CreatePayrollRun($items: [PayrollItemInput!]!, $tokenType: String, $periodSeconds: Int, $capAmount: String, $scheduledAt: String) {
+    createPayrollRun(items: $items, tokenType: $tokenType, periodSeconds: $periodSeconds, capAmount: $capAmount, scheduledAt: $scheduledAt) {
+      success
+      errors
+      run {
+        id
+        runId
+        status
+        tokenType
+        grossTotal
+        netTotal
+        feeTotal
+      }
+    }
+  }
+`;
+
 // Check users by phone numbers
 export const CHECK_USERS_BY_PHONES = gql`
   query CheckUsersByPhones($phoneNumbers: [String!]!) {
     checkUsersByPhones(phoneNumbers: $phoneNumbers) {
+      phoneNumber
+      userId
+      username
+      isOnConfio
+      activeAccountId
+      activeAccountAlgorandAddress
+    }
+  }
+`;
+
+export const CHECK_USERS_BY_USERNAMES = gql`
+  query CheckUsersByUsernames($usernames: [String!]!) {
+    checkUsersByUsernames(usernames: $usernames) {
       phoneNumber
       userId
       username
@@ -2423,6 +2533,8 @@ export const GET_CURRENT_BUSINESS_INVITATIONS = gql`
       role
       status
       employeeName
+      displayInvitee
+      employeeUsername
       employeePhone
       employeePhoneCountry
       createdAt
@@ -2606,7 +2718,45 @@ export const GET_MY_REFERRAL_REWARDS = gql`
       referral {
         id
         rewardClaimedAt
+        referredUser {
+          id
+          username
+          phoneKey
+          firstName
+          lastName
+        }
       }
+    }
+  }
+`;
+
+export const GET_MY_REFERRALS = gql`
+  query GetMyReferrals($status: String) {
+    myReferrals(status: $status) {
+      id
+      referredUser {
+        id
+        username
+        phoneKey
+        firstName
+        lastName
+      }
+      referrerUser {
+        id
+        username
+        phoneKey
+        firstName
+        lastName
+      }
+      referrerIdentifier
+      status
+      firstTransactionAt
+      rewardRefereeConfio
+      rewardReferrerConfio
+      refereeRewardStatus
+      referrerRewardStatus
+      rewardClaimedAt
+      createdAt
     }
   }
 `;

@@ -13,7 +13,7 @@ import { InviteEmployeeModal } from '../components/InviteEmployeeModal';
 import { useContactNames } from '../hooks/useContactName';
 import { useApolloClient, useMutation, gql, useQuery } from '@apollo/client';
 import { useAccount } from '../contexts/AccountContext';
-import { INVITE_EMPLOYEE, GET_CURRENT_BUSINESS_EMPLOYEES, GET_CURRENT_BUSINESS_INVITATIONS, CANCEL_INVITATION } from '../apollo/queries';
+import { INVITE_EMPLOYEE, GET_CURRENT_BUSINESS_EMPLOYEES, GET_CURRENT_BUSINESS_INVITATIONS, CANCEL_INVITATION, GET_PENDING_PAYROLL_ITEMS } from '../apollo/queries';
 import { getCountryByIso } from '../utils/countries';
 
 // Utility function to format phone number with country code
@@ -234,7 +234,7 @@ export const ContactsScreen = () => {
   
   // Import useAccount to check account type
   const { activeAccount, user } = useAccount();
-  
+
   // Check if this is a business account or confirmed personal account
   const isBusinessAccount = activeAccount?.type === 'business';
   const isPersonalAccount = activeAccount?.type === 'personal';
@@ -311,7 +311,14 @@ export const ContactsScreen = () => {
       console.error('Error fetching current business invitations:', error);
     }
   });
-  
+
+  // Pending payroll items for delegates (personal account context)
+  const { data: pendingPayrollData } = useQuery(GET_PENDING_PAYROLL_ITEMS, {
+    skip: !isPersonalAccount,
+    fetchPolicy: 'cache-and-network',
+  });
+  const pendingPayrollCount = isPersonalAccount ? (pendingPayrollData?.pendingPayrollItems?.length || 0) : 0;
+
   const [inviteEmployee] = useMutation(INVITE_EMPLOYEE);
   const [cancelInvitation] = useMutation(CANCEL_INVITATION);
   
@@ -1061,8 +1068,8 @@ export const ContactsScreen = () => {
       // Format pending invitations
       const invitationContacts = invitations.map(invitation => ({
         id: `invitation-${invitation.id}`,
-        name: invitation.employeeName || 'Invitación pendiente',
-        phone: formatPhoneNumber(invitation.employeePhone, invitation.employeePhoneCountry),
+        name: invitation.displayInvitee || invitation.employeeUsername || invitation.employeeName || 'Invitación pendiente',
+        phone: invitation.employeePhone ? formatPhoneNumber(invitation.employeePhone, invitation.employeePhoneCountry) : '',
         avatar: '?',
         role: invitation.role,
         isInvitation: true,
@@ -1216,9 +1223,30 @@ export const ContactsScreen = () => {
   }, [handleFriendPressCallback, handleSendToFriendCallback, handleInviteFriendCallback, handleEmployeePress, handleEmployeeActions, handleCancelInvitation]);
 
   // Create a stable header component that won't cause re-renders
-  const ListHeaderComponent = useMemo(() => {
-    const HeaderContent = () => (
-      <>
+const ListHeaderComponent = useMemo(() => {
+  const HeaderContent = () => (
+    <>
+
+      {/* Pending payroll banner for delegates on personal accounts */}
+      {isPersonalAccount && pendingPayrollCount > 0 && (
+        <TouchableOpacity
+          style={styles.payrollBanner}
+          onPress={() => {
+            navigation.navigate('PayrollPending' as any);
+          }}
+        >
+          <View style={styles.payrollBannerIcon}>
+            <Icon name="briefcase" size={18} color="#fff" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.payrollBannerTitle}>Nómina pendiente</Text>
+            <Text style={styles.payrollBannerSubtitle}>
+              Tienes {pendingPayrollCount} pagos para firmar
+            </Text>
+          </View>
+          <Icon name="chevron-right" size={18} color="#9CA3AF" />
+        </TouchableOpacity>
+      )}
 
       {/* Send/Receive Options */}
       <View style={styles.actionSection}>
@@ -1237,6 +1265,24 @@ export const ContactsScreen = () => {
               <View style={styles.actionTextContainer}>
                 <Text style={styles.actionButtonTitle}>Añadir empleado</Text>
                 <Text style={styles.actionButtonSubtitle}>Gestiona tu equipo de trabajo</Text>
+              </View>
+            </View>
+            <Icon name="chevron-right" size={20} color="#9ca3af" />
+          </TouchableOpacity>
+        )}
+
+        {isBusinessAccount && !activeAccount?.isEmployee && (
+          <TouchableOpacity 
+            style={styles.addEmployeeActionButton}
+            onPress={() => navigation.navigate('PayrollSettings' as any)}
+          >
+            <View style={styles.actionButtonContent}>
+              <View style={[styles.actionIconContainer, { backgroundColor: '#8B5CF6' }]}>
+                <Icon name="settings" size={20} color="#fff" />
+              </View>
+              <View style={styles.actionTextContainer}>
+                <Text style={styles.actionButtonTitle}>Configurar nómina</Text>
+                <Text style={styles.actionButtonSubtitle}>Delegados y permisos de pago</Text>
               </View>
             </View>
             <Icon name="chevron-right" size={20} color="#9ca3af" />
@@ -1654,6 +1700,34 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
+  },
+  payrollBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EEF2FF',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  payrollBannerIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#8B5CF6',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  payrollBannerTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  payrollBannerSubtitle: {
+    fontSize: 12,
+    color: '#6B7280',
   },
   searchSection: {
     paddingHorizontal: 16,

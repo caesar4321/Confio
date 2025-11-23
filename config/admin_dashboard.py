@@ -791,6 +791,8 @@ from p2p_exchange.admin import (
 from payments.admin import PaymentTransactionAdmin, InvoiceAdmin
 from send.admin import SendTransactionAdmin, PhoneInviteAdmin
 from conversion.admin import ConversionAdmin
+from payroll.admin import PayrollRunAdmin, PayrollItemAdmin, PayrollRecipientAdmin
+from payroll.models import PayrollRun, PayrollItem, PayrollRecipient
 
 # Register with custom admin site
 confio_admin_site.register(Group)
@@ -813,6 +815,11 @@ confio_admin_site.register(Bank, BankAdmin)
 confio_admin_site.register(BankInfo, BankInfoAdmin)
 confio_admin_site.register(WalletPepper, WalletPepperAdmin)
 confio_admin_site.register(WalletDerivationPepper, WalletDerivationPepperAdmin)
+
+# Payroll
+confio_admin_site.register(PayrollRun, PayrollRunAdmin)
+confio_admin_site.register(PayrollItem, PayrollItemAdmin)
+confio_admin_site.register(PayrollRecipient, PayrollRecipientAdmin)
 
 # Employee models
 from users.models_employee import BusinessEmployee, EmployeeInvitation

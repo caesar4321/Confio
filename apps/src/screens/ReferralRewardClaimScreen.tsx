@@ -4,7 +4,7 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
+  FlatList,
   TouchableOpacity,
   ActivityIndicator,
   Alert,
@@ -16,7 +16,7 @@ import { useQuery, useMutation } from '@apollo/client';
 import { Buffer } from 'buffer';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { GET_MY_REFERRAL_REWARDS } from '../apollo/queries';
+import { GET_MY_REFERRALS } from '../apollo/queries';
 import {
   PREPARE_REFERRAL_REWARD_CLAIM,
   SUBMIT_REFERRAL_REWARD_CLAIM,
@@ -33,78 +33,87 @@ const colors = {
   border: 'rgba(15,23,42,0.08)',
 };
 
-type RewardEvent = {
+type UserInfo = {
   id: string;
-  trigger: string;
-  actorRole: string;
-  rewardStatus: string;
-  refereeConfio: number;
-  referrerConfio?: number;
-  claimableConfio?: number | string | null;
-  occurredAt: string;
-  referral?: {
-    id: string;
-    rewardClaimedAt?: string | null;
-  } | null;
-  metadata?: Record<string, any> | null;
+  username?: string | null;
+  phoneKey?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+};
+
+type Referral = {
+  id: string;
+  referredUser: UserInfo;
+  referrerUser?: UserInfo | null;
+  referrerIdentifier: string;
+  status: string;
+  firstTransactionAt?: string | null;
+  rewardRefereeConfio: number;
+  rewardReferrerConfio: number;
+  refereeRewardStatus: string;
+  referrerRewardStatus: string;
+  rewardClaimedAt?: string | null;
+  createdAt: string;
 };
 
 export const ReferralRewardClaimScreen: React.FC = () => {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const { data, loading, error, refetch } = useQuery(GET_MY_REFERRAL_REWARDS, {
+  const { data, loading, error, refetch } = useQuery(GET_MY_REFERRALS, {
     fetchPolicy: 'cache-and-network',
   });
   const [prepareClaim] = useMutation(PREPARE_REFERRAL_REWARD_CLAIM);
   const [submitClaim] = useMutation(SUBMIT_REFERRAL_REWARD_CLAIM);
   const [busyId, setBusyId] = React.useState<string | null>(null);
 
-  const rewards: RewardEvent[] = data?.myReferralRewards || [];
-  const claimable = rewards.filter(
-    (event) => (event.rewardStatus || '').toLowerCase() === 'eligible',
-  );
-  const pendingRewards = rewards.filter(
-    (event) => (event.rewardStatus || '').toLowerCase() === 'pending',
-  );
-  const stageEventMap = React.useMemo<Record<string, string>>(
-    () => ({
-      pending_first_transaction: 'top_up',
-      pending_referrer_bonus: 'top_up',
-      referral_pending: 'top_up',
-    }),
-    [],
-  );
+  const referrals: Referral[] = data?.myReferrals || [];
 
+  // Filter referrals by status based on current user's role
+  const claimable = referrals.filter((ref) => {
+    const status = ref.referrerRewardStatus || ref.refereeRewardStatus;
+    return status?.toLowerCase() === 'eligible';
+  });
+
+  const pendingReferrals = referrals.filter((ref) => {
+    const status = ref.referrerRewardStatus || ref.refereeRewardStatus;
+    return status?.toLowerCase() === 'pending';
+  });
   const toNumber = (value: number | string | null | undefined) =>
     Number(value ?? 0);
 
-  const extractAmount = (event: RewardEvent) => {
-    const claimable = toNumber((event as any).claimableConfio);
-    if (claimable > 0) {
-      return claimable;
+  // Get the reward amount for a referral based on current user's role
+  const getReferralAmount = (referral: Referral): number => {
+    // Assume the referral is for the current user as referrer if referrerRewardStatus is set
+    if (referral.referrerRewardStatus?.toLowerCase() !== 'pending') {
+      return toNumber(referral.rewardReferrerConfio);
     }
-    const isReferrer = (event.actorRole || '').toLowerCase() === 'referrer';
-    const fallback = isReferrer ? event.referrerConfio : event.refereeConfio;
-    return toNumber(fallback);
+    return toNumber(referral.rewardRefereeConfio);
   };
 
   const totalClaimable = claimable.reduce(
-    (sum, event) => sum + extractAmount(event),
+    (sum, ref) => sum + getReferralAmount(ref),
     0,
   );
 
-  const normalizeRole = (role?: string | null) =>
-    (role || '').toLowerCase() === 'referee' ? 'Referido' : 'Invitador';
+  const getUserDisplayName = (user?: UserInfo | null): string => {
+    if (!user) return 'Usuario';
+    return (
+      user.username ||
+      user.phoneKey ||
+      `${user.firstName || ''} ${user.lastName || ''}`.trim() ||
+      'Usuario'
+    );
+  };
 
   const handleBack = React.useCallback(() => {
     navigation.goBack();
   }, [navigation]);
 
   const handlePendingPress = React.useCallback(
-    (event: RewardEvent) => {
-      const stage = String(event.metadata?.stage || '').toLowerCase();
-      const nextEvent = stageEventMap[stage] || 'top_up';
-      if ((event.actorRole || '').toLowerCase() === 'referee') {
+    (referral: Referral) => {
+      const isPending = referral.refereeRewardStatus?.toLowerCase() === 'pending';
+      const nextEvent = 'top_up';
+      if (isPending) {
         navigation.navigate(
           'ReferralActionPrompt' as never,
           {
@@ -120,17 +129,202 @@ export const ReferralRewardClaimScreen: React.FC = () => {
         );
       }
     },
-    [navigation, stageEventMap],
+    [navigation],
+  );
+
+  type ListSection =
+    | { type: 'summary'; totalClaimable: number }
+    | { type: 'empty' }
+    | { type: 'claimableHeader' }
+    | { type: 'claimable'; referral: Referral }
+    | { type: 'pendingHeader' }
+    | { type: 'pending'; referral: Referral };
+
+  const listData = React.useMemo<ListSection[]>(() => {
+    const sections: ListSection[] = [];
+    sections.push({ type: 'summary', totalClaimable });
+
+    if (claimable.length === 0 && pendingReferrals.length === 0) {
+      sections.push({ type: 'empty' });
+      return sections;
+    }
+
+    if (claimable.length > 0) {
+      claimable.forEach((referral) => {
+        sections.push({ type: 'claimable', referral });
+      });
+    }
+
+    if (pendingReferrals.length > 0) {
+      sections.push({ type: 'pendingHeader' });
+      pendingReferrals.forEach((referral) => {
+        sections.push({ type: 'pending', referral });
+      });
+    }
+
+    return sections;
+  }, [claimable, pendingReferrals, totalClaimable]);
+
+
+  const keyExtractor = React.useCallback((item: ListSection, index: number) => {
+    if (item.type === 'claimable' || item.type === 'pending') {
+      return `${item.type}-${item.referral.id}`;
+    }
+    return `${item.type}-${index}`;
+  }, []);
+
+  const renderListItem = React.useCallback(
+    ({ item }: { item: ListSection }) => {
+      if (item.type === 'summary') {
+        return (
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>Listo para reclamar</Text>
+            <Text style={styles.summaryValue}>
+              {item.totalClaimable.toFixed(2)} $CONFIO
+            </Text>
+            <Text style={styles.summarySubtext}>
+              Estas recompensas fueron confirmadas on-chain y ya puedes
+              reclamarlas. Firmaremos una transacción para que las recibas en tu
+              billetera Confío.
+            </Text>
+          </View>
+        );
+      }
+
+      if (item.type === 'empty') {
+        return (
+          <View style={styles.emptyState}>
+            <Icon name="gift" size={32} color={colors.textMuted} />
+            <Text style={styles.emptyTitle}>Sin recompensas pendientes</Text>
+            <Text style={styles.emptySubtitle}>
+              Si completaste una misión, asegúrate de iniciar sesión con la
+              cuenta que ganó el bono o inténtalo más tarde.
+            </Text>
+          </View>
+        );
+      }
+
+      if (item.type === 'pendingHeader') {
+        return (
+          <View style={styles.pendingSection}>
+            <Text style={styles.pendingTitle}>Bonos en progreso</Text>
+            <Text style={styles.pendingSubtitle}>
+              Completa tu primera transacción para desbloquear estos bonos.
+            </Text>
+          </View>
+        );
+      }
+
+      if (item.type === 'claimable') {
+        const referral = item.referral;
+        const amount = getReferralAmount(referral);
+        const isReferrer = referral.referrerRewardStatus?.toLowerCase() === 'eligible';
+        const otherUser = isReferrer ? referral.referredUser : referral.referrerUser;
+
+        return (
+          <View key={referral.id} style={styles.rewardCard}>
+            <View style={styles.rewardHeader}>
+              <View>
+                <Text style={styles.rewardTitle}>
+                  {amount.toFixed(2)} $CONFIO
+                </Text>
+                <Text style={styles.rewardSubtitle}>
+                  {isReferrer ? 'Invitaste a' : 'Te invitó'}{' '}
+                  {getUserDisplayName(otherUser)}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={[
+                  styles.claimButton,
+                  busyId === referral.id && styles.claimButtonDisabled,
+                ]}
+                disabled={busyId === referral.id}
+                onPress={() => handleClaim(referral)}>
+                {busyId === referral.id ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <>
+                    <Icon name="unlock" size={16} color="#fff" />
+                    <Text style={styles.claimButtonText}>Reclamar</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.rewardMeta}>
+              Rol: {isReferrer ? 'Invitador' : 'Referido'}
+            </Text>
+            <Text style={styles.rewardMeta}>
+              Fecha: {new Date(referral.createdAt).toLocaleString()}
+            </Text>
+          </View>
+        );
+      }
+
+      if (item.type === 'pending') {
+        const referral = item.referral;
+        const isReferrer = referral.referrerRewardStatus?.toLowerCase() === 'pending';
+        const amount = getReferralAmount(referral);
+        const otherUser = isReferrer ? referral.referredUser : referral.referrerUser;
+        const otherUserDisplay = getUserDisplayName(otherUser);
+
+        const requirementText = isReferrer
+          ? `Ayuda a ${otherUserDisplay} a completar su primera transacción válida para liberar el bono para ambos.`
+          : 'Completa tu primera transacción válida para desbloquear el bono.';
+
+        return (
+          <TouchableOpacity
+            key={`pending-${referral.id}`}
+            style={[styles.rewardCard, styles.pendingCard]}
+            activeOpacity={0.85}
+            onPress={() => handlePendingPress(referral)}>
+            <View style={styles.rewardHeader}>
+              <View>
+                <Text style={styles.rewardTitle}>
+                  {amount.toFixed(2)} $CONFIO
+                </Text>
+                <Text style={styles.rewardSubtitle}>
+                  {isReferrer ? 'Invitaste a' : 'Te invitó'}{' '}
+                  {otherUserDisplay}
+                </Text>
+              </View>
+              <View style={styles.pendingBadge}>
+                <Icon name="clock" size={14} color={colors.accent} />
+                <Text style={styles.pendingBadgeText}>Pendiente</Text>
+              </View>
+            </View>
+            <Text style={styles.rewardMeta}>
+              Rol: {isReferrer ? 'Invitador' : 'Referido'}
+            </Text>
+            {isReferrer && (
+              <Text style={styles.rewardMeta}>
+                Invitado: {otherUserDisplay}
+              </Text>
+            )}
+            <Text style={styles.rewardMeta}>{requirementText}</Text>
+            <Text style={styles.rewardMeta}>
+              Registrado: {new Date(referral.createdAt).toLocaleString()}
+            </Text>
+            <View style={styles.pendingHint}>
+              <Text style={styles.pendingHintText}>Ver guía</Text>
+              <Icon name="chevron-right" size={16} color={colors.accent} />
+            </View>
+          </TouchableOpacity>
+        );
+      }
+
+      return null;
+    },
+    [busyId, getReferralAmount, getUserDisplayName, handleClaim, handlePendingPress],
   );
 
   const handleClaim = React.useCallback(
-    async (event: RewardEvent) => {
+    async (referral: Referral) => {
       if (busyId) return;
-      setBusyId(event.id);
+      setBusyId(referral.id);
 
       try {
         const prepareRes = await prepareClaim({
-          variables: { eventId: event.id },
+          variables: { eventId: referral.id },
         });
         const payload = prepareRes.data?.prepareReferralRewardClaim;
         if (!payload?.success) {
@@ -202,121 +396,17 @@ export const ReferralRewardClaimScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
       ) : (
-        <ScrollView
+        <FlatList
+          data={listData}
+          renderItem={renderListItem}
+          keyExtractor={keyExtractor}
           style={styles.scroll}
-          contentContainerStyle={{ padding: 20, paddingBottom: 32 }}>
-          <View style={styles.summaryCard}>
-            <Text style={styles.summaryLabel}>Listo para reclamar</Text>
-            <Text style={styles.summaryValue}>
-              {totalClaimable.toFixed(2)} $CONFIO
-            </Text>
-            <Text style={styles.summarySubtext}>
-              Estas recompensas fueron confirmadas on-chain y ya puedes
-              reclamarlas. Firmaremos una transacción para que las recibas en tu
-              billetera Confío.
-            </Text>
-          </View>
-
-          {claimable.length === 0 && pendingRewards.length === 0 && (
-            <View style={styles.emptyState}>
-              <Icon name="gift" size={32} color={colors.textMuted} />
-              <Text style={styles.emptyTitle}>Sin recompensas pendientes</Text>
-              <Text style={styles.emptySubtitle}>
-                Si completaste una misión, asegúrate de iniciar sesión con la
-                cuenta que ganó el bono o inténtalo más tarde.
-              </Text>
-            </View>
-          )}
-
-          {claimable.length > 0 &&
-            claimable.map((event) => (
-              <View key={event.id} style={styles.rewardCard}>
-                <View style={styles.rewardHeader}>
-                  <View>
-                    <Text style={styles.rewardTitle}>
-                      {extractAmount(event).toFixed(2)} $CONFIO
-                    </Text>
-                    <Text style={styles.rewardSubtitle}>
-                      Evento: {event.trigger.replace(/_/g, ' ')}
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    style={[
-                      styles.claimButton,
-                      busyId === event.id && styles.claimButtonDisabled,
-                    ]}
-                    disabled={busyId === event.id}
-                    onPress={() => handleClaim(event)}>
-                    {busyId === event.id ? (
-                      <ActivityIndicator color="#fff" size="small" />
-                    ) : (
-                      <>
-                        <Icon name="unlock" size={16} color="#fff" />
-                        <Text style={styles.claimButtonText}>Reclamar</Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
-                </View>
-                <Text style={styles.rewardMeta}>
-                  Rol: {normalizeRole(event.actorRole)}
-                </Text>
-                <Text style={styles.rewardMeta}>
-                  Fecha: {new Date(event.occurredAt).toLocaleString()}
-                </Text>
-              </View>
-            ))}
-
-          {rewards.some(
-            (event) => (event.rewardStatus || '').toLowerCase() === 'pending',
-          ) && (
-            <View style={styles.pendingSection}>
-              <Text style={styles.pendingTitle}>Bonos en progreso</Text>
-              <Text style={styles.pendingSubtitle}>
-                Completa tu primera transacción para desbloquear estos bonos.
-              </Text>
-            </View>
-          )}
-
-          {pendingRewards.map((event) => {
-            const isReferee = (event.actorRole || '').toLowerCase() === 'referee';
-            const requirementText = isReferee
-              ? 'Completa tu primera transacción válida para desbloquear el bono.'
-              : 'Ayuda a tu invitado a completar su primera transacción válida para liberar el bono para ambos.';
-            return (
-              <TouchableOpacity
-                key={`pending-${event.id}`}
-                style={[styles.rewardCard, styles.pendingCard]}
-                activeOpacity={0.85}
-                onPress={() => handlePendingPress(event)}>
-                <View style={styles.rewardHeader}>
-                  <View>
-                    <Text style={styles.rewardTitle}>
-                      {extractAmount(event).toFixed(2)} $CONFIO
-                    </Text>
-                    <Text style={styles.rewardSubtitle}>
-                      Evento: {event.trigger.replace(/_/g, ' ')}
-                    </Text>
-                  </View>
-                  <View style={styles.pendingBadge}>
-                    <Icon name="clock" size={14} color={colors.accent} />
-                    <Text style={styles.pendingBadgeText}>Pendiente</Text>
-                  </View>
-                </View>
-                <Text style={styles.rewardMeta}>
-                  Rol: {normalizeRole(event.actorRole)}
-                </Text>
-                <Text style={styles.rewardMeta}>{requirementText}</Text>
-                <Text style={styles.rewardMeta}>
-                  Registrado: {new Date(event.occurredAt).toLocaleString()}
-                </Text>
-                <View style={styles.pendingHint}>
-                  <Text style={styles.pendingHintText}>Ver guía</Text>
-                  <Icon name="chevron-right" size={16} color={colors.accent} />
-                </View>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
+          contentContainerStyle={{ padding: 20, paddingBottom: 32 }}
+          initialNumToRender={50}
+          maxToRenderPerBatch={20}
+          windowSize={10}
+          removeClippedSubviews={false}
+        />
       )}
     </SafeAreaView>
   );

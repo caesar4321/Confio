@@ -10,10 +10,9 @@ import { formatNumber } from '../utils/numberFormatting';
 import { useCountry } from '../contexts/CountryContext';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import { useQuery } from '@apollo/client';
-import { GET_ACTIVE_PRESALE } from '../apollo/queries';
+import { GET_ACTIVE_PRESALE, GET_MY_BALANCES } from '../apollo/queries';
 import { PresaleWsSession } from '../services/presaleWs';
 import { LoadingOverlay } from '../components/LoadingOverlay';
-import { secureDeterministicWallet } from '../services/secureDeterministicWallet';
 import algorandService from '../services/algorandService';
 import { biometricAuthService } from '../services/biometricAuthService';
 
@@ -48,6 +47,9 @@ export const ConfioPresaleParticipateScreen = () => {
   const { data, loading, error, refetch } = useQuery(GET_ACTIVE_PRESALE, {
     fetchPolicy: 'cache-and-network',
   });
+  const { data: balancesData, loading: balancesLoading } = useQuery(GET_MY_BALANCES, {
+    fetchPolicy: 'cache-and-network',
+  });
 
   const [busy, setBusy] = useState(false);
 
@@ -58,6 +60,10 @@ export const ConfioPresaleParticipateScreen = () => {
   const serverMin = presale ? parseFloat(presale.minPurchase) : uiMinPurchase;
   const minAmount = serverMin || uiMinPurchase;
   const maxAmount = presale ? parseFloat(presale.maxPurchase) : 1000;
+  const availableCusd = React.useMemo(
+    () => parseFloat(balancesData?.myBalances?.cusd || '0'),
+    [balancesData?.myBalances?.cusd]
+  );
 
   const presaleData = {
     raised: presale ? parseFloat(presale.totalRaised) : 0,
@@ -75,6 +81,7 @@ export const ConfioPresaleParticipateScreen = () => {
   const parsedAmount = parseFloat(amount) || 0;
   const tokensReceived = calculateTokens(parsedAmount);
   const isValidAmount = parsedAmount >= minAmount && parsedAmount <= maxAmount;
+  const exceedsBalance = !balancesLoading && parsedAmount > availableCusd;
 
   // Ensure user is opted into the presale app (explicit opt-in on enter and before swap)
   const ensureOptedIn = async (session?: any) => {
@@ -86,30 +93,8 @@ export const ConfioPresaleParticipateScreen = () => {
       if (txns.length === 0) return true; // already opted in
       const user = txns.find((t: any) => t?.index === 1 && !t?.signed);
       if (!user) return true; // nothing to sign
-      // Initialize deterministic wallet scope and sign (same pattern as USDC opt-in)
-      try {
-        const { oauthStorage } = await import('../services/oauthStorageService');
-        const oauth = await oauthStorage.getOAuthSubject();
-        if (oauth?.subject && oauth?.provider) {
-          const provider: 'google' | 'apple' = oauth.provider === 'apple' ? 'apple' : 'google';
-          const { GOOGLE_CLIENT_IDS } = await import('../config/env');
-          const GOOGLE_WEB_CLIENT_ID = GOOGLE_CLIENT_IDS.production.web;
-          const iss = provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
-          const aud = provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
-          // Bring active account context if available later
-          await secureDeterministicWallet.createOrRestoreWallet(
-            iss,
-            oauth.subject,
-            aud,
-            provider,
-            'personal',
-            0,
-            undefined
-          );
-        }
-      } catch {}
       const userTxnBytes = Buffer.from(user.transaction, 'base64');
-      const signed = await secureDeterministicWallet.signTransaction(userTxnBytes);
+      const signed = await algorandService.signTransactionBytes(userTxnBytes);
       const userSignedB64 = Buffer.from(signed).toString('base64');
       await s.optinSubmit(userSignedB64, pack.sponsor_transactions || []);
       return true;
@@ -228,6 +213,10 @@ export const ConfioPresaleParticipateScreen = () => {
   const handleSwap = async () => {
     if (!isValidAmount) {
       Alert.alert('Error', `Monto debe estar entre ${minAmount} y ${formatWithLocale(maxAmount)} cUSD`);
+      return;
+    }
+    if (exceedsBalance) {
+      Alert.alert('Saldo insuficiente', 'No tienes suficiente cUSD para esta compra.');
       return;
     }
 
@@ -402,7 +391,7 @@ export const ConfioPresaleParticipateScreen = () => {
                 <Text style={styles.inputSuffix}>cUSD</Text>
               </View>
               <Text style={styles.inputHelper}>
-                Mínimo: {minAmount} cUSD • Máximo: {formatWithLocale(maxAmount)} cUSD
+                Saldo: {formatWithLocale(availableCusd)} cUSD • Mínimo: {minAmount} cUSD • Máximo: {formatWithLocale(maxAmount)} cUSD
               </Text>
             </View>
 
@@ -423,6 +412,11 @@ export const ConfioPresaleParticipateScreen = () => {
                     Monto debe estar entre {minAmount} y {formatWithLocale(maxAmount)} cUSD
                   </Text>
                 )}
+                {exceedsBalance && (
+                  <Text style={styles.errorText}>
+                    Saldo insuficiente: tienes {formatWithLocale(availableCusd)} cUSD.
+                  </Text>
+                )}
               </View>
             )}
           </View>
@@ -433,10 +427,10 @@ export const ConfioPresaleParticipateScreen = () => {
           <TouchableOpacity 
             style={[
               styles.swapButton,
-              (!isValidAmount || parsedAmount === 0) && styles.swapButtonDisabled
+              (!isValidAmount || parsedAmount === 0 || exceedsBalance) && styles.swapButtonDisabled
             ]}
             onPress={handleSwap}
-            disabled={!isValidAmount || parsedAmount === 0 || busy}
+            disabled={!isValidAmount || parsedAmount === 0 || exceedsBalance || busy}
           >
             {busy ? null : (
               <>
