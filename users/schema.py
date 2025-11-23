@@ -691,6 +691,9 @@ class UserAchievementType(DjangoObjectType):
 
 class InfluencerReferralType(DjangoObjectType):
 	influencer_user = graphene.Field(lambda: UserType)
+	viewer_reward_event_id = graphene.ID()
+	referrer_reward_event_id = graphene.ID()
+	referee_reward_event_id = graphene.ID()
 
 	class Meta:
 		model = InfluencerReferral
@@ -703,6 +706,39 @@ class InfluencerReferralType(DjangoObjectType):
 
 	def resolve_influencer_user(self, info):
 		return getattr(self, 'referrer_user', None)
+
+	def _get_reward_event_id(self, user, role=None):
+		if not user:
+			return None
+		try:
+			qs = ReferralRewardEvent.objects.filter(
+				referral=self,
+				user=user,
+			)
+			if role:
+				qs = qs.filter(actor_role=role)
+			# Prefer eligible or pending events; fall back to latest
+			event = (
+				qs.filter(reward_status__in=['eligible', 'pending'])
+				.order_by('-occurred_at')
+				.first()
+				or qs.order_by('-occurred_at').first()
+			)
+			return str(event.id) if event else None
+		except Exception:
+			return None
+
+	def resolve_viewer_reward_event_id(self, info):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return None
+		return self._get_reward_event_id(user=user)
+
+	def resolve_referrer_reward_event_id(self, info):
+		return self._get_reward_event_id(getattr(self, 'referrer_user', None), role='referrer')
+
+	def resolve_referee_reward_event_id(self, info):
+		return self._get_reward_event_id(getattr(self, 'referred_user', None), role='referee')
 
 
 class TikTokViralShareType(DjangoObjectType):

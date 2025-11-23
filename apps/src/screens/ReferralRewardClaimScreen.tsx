@@ -22,6 +22,7 @@ import {
   SUBMIT_REFERRAL_REWARD_CLAIM,
 } from '../apollo/mutations';
 import algorandService from '../services/algorandService';
+import { useAuth } from '../contexts/AuthContext';
 
 const colors = {
   background: '#FFFFFF',
@@ -53,11 +54,14 @@ type Referral = {
   refereeRewardStatus: string;
   referrerRewardStatus: string;
   rewardClaimedAt?: string | null;
+  viewerRewardEventId?: string | null;
   createdAt: string;
 };
 
 export const ReferralRewardClaimScreen: React.FC = () => {
   const navigation = useNavigation();
+  const { userProfile } = useAuth();
+  const currentUserId = userProfile?.id ? String(userProfile.id) : null;
   const insets = useSafeAreaInsets();
   const { data, loading, error, refetch } = useQuery(GET_MY_REFERRALS, {
     fetchPolicy: 'cache-and-network',
@@ -68,14 +72,40 @@ export const ReferralRewardClaimScreen: React.FC = () => {
 
   const referrals: Referral[] = data?.myReferrals || [];
 
+  // Determine viewer role for each referral
+  const getViewerRole = React.useCallback(
+    (referral: Referral): 'referrer' | 'referee' => {
+      const referrerId = referral.referrerUser?.id
+        ? String(referral.referrerUser.id)
+        : null;
+      const refereeId = referral.referredUser?.id
+        ? String(referral.referredUser.id)
+        : null;
+
+      if (currentUserId && referrerId === currentUserId) {
+        return 'referrer';
+      }
+      if (currentUserId && refereeId === currentUserId) {
+        return 'referee';
+      }
+      // Fallback to referrer when unknown to avoid showing "Te invitó" incorrectly
+      return 'referrer';
+    },
+    [currentUserId],
+  );
+
   // Filter referrals by status based on current user's role
   const claimable = referrals.filter((ref) => {
-    const status = ref.referrerRewardStatus || ref.refereeRewardStatus;
+    const role = getViewerRole(ref);
+    const status =
+      role === 'referrer' ? ref.referrerRewardStatus : ref.refereeRewardStatus;
     return status?.toLowerCase() === 'eligible';
   });
 
   const pendingReferrals = referrals.filter((ref) => {
-    const status = ref.referrerRewardStatus || ref.refereeRewardStatus;
+    const role = getViewerRole(ref);
+    const status =
+      role === 'referrer' ? ref.referrerRewardStatus : ref.refereeRewardStatus;
     return status?.toLowerCase() === 'pending';
   });
   const toNumber = (value: number | string | null | undefined) =>
@@ -83,11 +113,10 @@ export const ReferralRewardClaimScreen: React.FC = () => {
 
   // Get the reward amount for a referral based on current user's role
   const getReferralAmount = (referral: Referral): number => {
-    // Assume the referral is for the current user as referrer if referrerRewardStatus is set
-    if (referral.referrerRewardStatus?.toLowerCase() !== 'pending') {
-      return toNumber(referral.rewardReferrerConfio);
-    }
-    return toNumber(referral.rewardRefereeConfio);
+    const role = getViewerRole(referral);
+    return role === 'referrer'
+      ? toNumber(referral.rewardReferrerConfio)
+      : toNumber(referral.rewardRefereeConfio);
   };
 
   const totalClaimable = claimable.reduce(
@@ -111,7 +140,12 @@ export const ReferralRewardClaimScreen: React.FC = () => {
 
   const handlePendingPress = React.useCallback(
     (referral: Referral) => {
-      const isPending = referral.refereeRewardStatus?.toLowerCase() === 'pending';
+      const role = getViewerRole(referral);
+      const viewerStatus =
+        role === 'referrer'
+          ? referral.referrerRewardStatus
+          : referral.refereeRewardStatus;
+      const isPending = viewerStatus?.toLowerCase() === 'pending';
       const nextEvent = 'top_up';
       if (isPending) {
         navigation.navigate(
@@ -129,7 +163,7 @@ export const ReferralRewardClaimScreen: React.FC = () => {
         );
       }
     },
-    [navigation],
+    [getViewerRole, navigation],
   );
 
   type ListSection =
@@ -218,7 +252,7 @@ export const ReferralRewardClaimScreen: React.FC = () => {
       if (item.type === 'claimable') {
         const referral = item.referral;
         const amount = getReferralAmount(referral);
-        const isReferrer = referral.referrerRewardStatus?.toLowerCase() === 'eligible';
+        const isReferrer = getViewerRole(referral) === 'referrer';
         const otherUser = isReferrer ? referral.referredUser : referral.referrerUser;
 
         return (
@@ -262,7 +296,7 @@ export const ReferralRewardClaimScreen: React.FC = () => {
 
       if (item.type === 'pending') {
         const referral = item.referral;
-        const isReferrer = referral.referrerRewardStatus?.toLowerCase() === 'pending';
+        const isReferrer = getViewerRole(referral) === 'referrer';
         const amount = getReferralAmount(referral);
         const otherUser = isReferrer ? referral.referredUser : referral.referrerUser;
         const otherUserDisplay = getUserDisplayName(otherUser);
@@ -314,7 +348,7 @@ export const ReferralRewardClaimScreen: React.FC = () => {
 
       return null;
     },
-    [busyId, getReferralAmount, getUserDisplayName, handleClaim, handlePendingPress],
+    [busyId, getReferralAmount, getUserDisplayName, handleClaim, handlePendingPress, getViewerRole],
   );
 
   const handleClaim = React.useCallback(
@@ -323,8 +357,12 @@ export const ReferralRewardClaimScreen: React.FC = () => {
       setBusyId(referral.id);
 
       try {
+        const eventId = referral.viewerRewardEventId || null;
+        if (!eventId) {
+          throw new Error('No pudimos encontrar la recompensa para este rol.');
+        }
         const prepareRes = await prepareClaim({
-          variables: { eventId: referral.id },
+          variables: { eventId },
         });
         const payload = prepareRes.data?.prepareReferralRewardClaim;
         if (!payload?.success) {

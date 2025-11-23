@@ -2755,6 +2755,7 @@ export const GET_MY_REFERRALS = gql`
       rewardReferrerConfio
       refereeRewardStatus
       referrerRewardStatus
+      viewerRewardEventId
       rewardClaimedAt
       createdAt
     }
