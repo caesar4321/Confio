@@ -166,60 +166,18 @@ class SecurityMiddleware:
             logger.error(f"Error checking IP reputation: {e}")
     
     def track_user_session(self, request, ip_address: Optional[IPAddress]):
-        """Track user session and device"""
+        """Track user session (device fingerprinting handled in authentication mutation)"""
         if not hasattr(request, 'session') or not request.session.session_key:
             return
-        
-        # Get device fingerprint
-        fingerprint_data = self.extract_device_fingerprint(request)
-        fingerprint_hash = calculate_device_fingerprint(fingerprint_data)
-        
-        # Get or create device fingerprint
-        device, device_created = DeviceFingerprint.objects.get_or_create(
-            fingerprint=fingerprint_hash,
-            defaults={
-                'device_details': fingerprint_data,
-                'first_seen': timezone.now(),
-                'last_seen': timezone.now()
-            }
-        )
-        
-        if not device_created:
-            device.last_seen = timezone.now()
-            device.save(update_fields=['last_seen'])
-        
-        # Get or create user-device relationship
-        user_device, ud_created = UserDevice.objects.get_or_create(
-            user=request.user,
-            device=device,
-            defaults={
-                'first_used': timezone.now(),
-                'last_used': timezone.now(),
-                'total_sessions': 1
-            }
-        )
-        
-        if not ud_created:
-            user_device.last_used = timezone.now()
-            user_device.total_sessions += 1
-            user_device.save(update_fields=['last_used', 'total_sessions'])
-        
-        # Update device total users count
-        if device_created or ud_created:
-            device.total_users = device.users.count()
-            device.save(update_fields=['total_users'])
-        
-        # Check for suspicious device usage
-        self.check_device_suspicious_activity(device, request.user)
-        
-        # Get or create session
+
+        # Get or create session (without device fingerprint - handled in web3AuthLogin)
         session, session_created = UserSession.objects.get_or_create(
             session_key=request.session.session_key,
             defaults={
                 'user': request.user,
                 'started_at': timezone.now(),
                 'last_activity': timezone.now(),
-                'device_fingerprint': fingerprint_hash,
+                'device_fingerprint': '',  # Empty - device tracking done in authentication
                 'user_agent': request.META.get('HTTP_USER_AGENT', ''),
                 'device_type': self.get_device_type(request),
                 'os_name': self.get_os_name(request),
@@ -227,171 +185,17 @@ class SecurityMiddleware:
                 'ip_address': ip_address
             }
         )
-        
+
         if not session_created:
             session.last_activity = timezone.now()
             session.save(update_fields=['last_activity'])
-        
+
         # Check for suspicious session patterns
         self.check_session_suspicious_patterns(session, request)
-        
+
         # Store session in request for later use
         request.security_session = session
-        request.security_device = device
-        request.security_user_device = user_device
     
-    def extract_device_fingerprint(self, request) -> Dict:
-        """Extract device fingerprint data from request"""
-        # Try to get enhanced fingerprint from React Native app
-        enhanced_fingerprint = self.get_enhanced_fingerprint(request)
-        if enhanced_fingerprint:
-            return enhanced_fingerprint
-        
-        # Fallback to basic fingerprint data
-        return {
-            'user_agent': request.META.get('HTTP_USER_AGENT', ''),
-            'accept_language': request.META.get('HTTP_ACCEPT_LANGUAGE', ''),
-            'accept_encoding': request.META.get('HTTP_ACCEPT_ENCODING', ''),
-            'accept': request.META.get('HTTP_ACCEPT', ''),
-            'dnt': request.META.get('HTTP_DNT', ''),
-            # Add client-side fingerprint data if available
-            'screen_resolution': request.POST.get('screen_resolution', ''),
-            'timezone': request.POST.get('timezone', ''),
-            'plugins': request.POST.get('plugins', ''),
-            'canvas_hash': request.POST.get('canvas_hash', ''),
-            'webgl_hash': request.POST.get('webgl_hash', ''),
-            'audio_hash': request.POST.get('audio_hash', ''),
-            'source': 'basic_extraction'
-        }
-    
-    def get_enhanced_fingerprint(self, request) -> Dict:
-        """Extract enhanced fingerprint from React Native app"""
-        try:
-            # Check for fingerprint in POST data (GraphQL variables)
-            fingerprint_json = None
-            
-            # Try to get from GraphQL variables
-            if hasattr(request, 'body') and request.body:
-                import json
-                try:
-                    body = json.loads(request.body.decode('utf-8'))
-                    variables = body.get('variables', {})
-                    
-                    # Check for deviceFingerprint in variables
-                    if 'deviceFingerprint' in variables:
-                        fingerprint_json = variables['deviceFingerprint']
-                    
-                    # Check for fingerprint data in input
-                    input_data = variables.get('input', {})
-                    if 'deviceFingerprint' in input_data:
-                        fingerprint_json = input_data['deviceFingerprint']
-                        
-                except (json.JSONDecodeError, UnicodeDecodeError):
-                    pass
-            
-            # Try to get from HTTP headers (alternative method)
-            if not fingerprint_json:
-                fingerprint_json = request.META.get('HTTP_X_DEVICE_FINGERPRINT')
-            
-            # Try to get from POST parameters
-            if not fingerprint_json:
-                fingerprint_json = request.POST.get('device_fingerprint')
-            
-            if fingerprint_json:
-                if isinstance(fingerprint_json, str):
-                    import json
-                    fingerprint_data = json.loads(fingerprint_json)
-                else:
-                    fingerprint_data = fingerprint_json
-                
-                # Validate and enhance the fingerprint data
-                enhanced_data = self.process_enhanced_fingerprint(fingerprint_data)
-                enhanced_data['source'] = 'react_native_app'
-                return enhanced_data
-                
-        except Exception as e:
-            logger.error(f"Error extracting enhanced fingerprint: {e}")
-        
-        return None
-    
-    def process_enhanced_fingerprint(self, fingerprint_data: Dict) -> Dict:
-        """Process and validate enhanced fingerprint data from React Native"""
-        processed = {
-            'fingerprint_version': fingerprint_data.get('fingerprintVersion', '1.0'),
-            'timestamp': fingerprint_data.get('timestamp'),
-            'is_fallback': fingerprint_data.get('isFallback', False)
-        }
-        
-        # Extract device information
-        device_info = fingerprint_data.get('deviceInfo', {})
-        processed.update({
-            'platform': device_info.get('platform', 'unknown'),
-            'platform_version': device_info.get('platformVersion', 'unknown'),
-            'is_testing': device_info.get('isTesting', False),
-            'is_tv': device_info.get('isTV', False)
-        })
-        
-        # Extract system information
-        system_info = fingerprint_data.get('systemInfo', {})
-        processed.update({
-            'system_name': system_info.get('systemName', ''),
-            'system_version': system_info.get('systemVersion', ''),
-            'model': system_info.get('model', 'unknown'),
-            'brand': system_info.get('brand', 'unknown'),
-            'manufacturer': system_info.get('manufacturer', 'unknown')
-        })
-        
-        # Extract screen information
-        screen_info = fingerprint_data.get('screenInfo', {})
-        processed.update({
-            'screen_width': screen_info.get('screenWidth', 0),
-            'screen_height': screen_info.get('screenHeight', 0),
-            'pixel_ratio': screen_info.get('pixelRatio', 1),
-            'font_scale': screen_info.get('fontScale', 1),
-            'density_category': screen_info.get('densityCategory', 'unknown'),
-            'aspect_ratio': screen_info.get('aspectRatio', 0)
-        })
-        
-        # Extract locale information
-        locale_info = fingerprint_data.get('localeInfo', {})
-        processed.update({
-            'timezone': locale_info.get('timezone', 'unknown'),
-            'locale': locale_info.get('locale', 'unknown'),
-            'country': locale_info.get('country', 'unknown'),
-            'language': locale_info.get('language', 'unknown'),
-            'timezone_offset': locale_info.get('timezoneOffset', 0),
-            'currency': locale_info.get('currency', 'unknown')
-        })
-        
-        # Extract hardware information
-        hardware_info = fingerprint_data.get('hardwareInfo', {})
-        processed.update({
-            'hardware_class': hardware_info.get('hardwareClass', 'unknown'),
-            'screen_size': hardware_info.get('screenSize', 'unknown'),
-            'estimated_memory': hardware_info.get('estimatedMemory', 'unknown'),
-            'screen_pixel_count': hardware_info.get('screenPixelCount', 0)
-        })
-        
-        # Extract React Native information
-        rn_info = fingerprint_data.get('rnInfo', {})
-        processed.update({
-            'hermes_enabled': rn_info.get('hermes', False),
-            'is_debug': rn_info.get('__DEV__', False),
-            'available_modules': rn_info.get('availableModules', {})
-        })
-        
-        # Extract behavioral information
-        behavioral_info = fingerprint_data.get('behavioralInfo', {})
-        processed.update({
-            'app_launch_count': behavioral_info.get('appLaunchCount', 0),
-            'first_install_time': behavioral_info.get('firstInstallTime'),
-            'session_pattern_count': len(behavioral_info.get('sessionPattern', []))
-        })
-        
-        # Extract persistent ID
-        processed['persistent_device_id'] = fingerprint_data.get('persistentId', 'unknown')
-        
-        return processed
     
     def get_device_type(self, request) -> str:
         """Determine device type from user agent"""
@@ -428,32 +232,6 @@ class SecurityMiddleware:
         user_agent = parse(ua_string)
         return f"{user_agent.browser.family} {user_agent.browser.version_string}".strip()
     
-    def check_device_suspicious_activity(self, device: DeviceFingerprint, user):
-        """Check for suspicious device usage patterns"""
-        # Check if too many users on same device
-        if device.total_users > 5:
-            device.risk_score = min(device.risk_score + 20, 100)
-            device.save(update_fields=['risk_score'])
-            
-            # Create suspicious activity record
-            from .models import SuspiciousActivity
-            try:
-                SuspiciousActivity.objects.get_or_create(
-                    user=user,
-                    activity_type='multiple_accounts',
-                    defaults={
-                    'detection_data': {
-                        'device_fingerprint': device.fingerprint,
-                        'total_users': device.total_users,
-                        'device_id': device.id
-                    },
-                    'severity_score': min(device.total_users, 10),
-                    'status': 'pending'
-                }
-            )
-            except Exception as e:
-                logger.warning(f"Could not create suspicious activity record: {e}")
-                # Don't fail the request if security tracking fails
     
     def check_session_suspicious_patterns(self, session: UserSession, request):
         """Check for suspicious session patterns"""

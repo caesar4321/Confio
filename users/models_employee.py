@@ -306,6 +306,13 @@ class EmployeeInvitation(SoftDeleteModel):
         blank=True,
         help_text="Name of the invited employee (optional)"
     )
+
+    employee_username = models.CharField(
+        max_length=150,
+        blank=True,
+        null=True,
+        help_text="Confío username of the invited employee (if invited by username)"
+    )
     
     role = models.CharField(
         max_length=20,

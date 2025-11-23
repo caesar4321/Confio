@@ -43,39 +43,50 @@ const RoleDropdown: React.FC<RoleDropdownProps> = ({ value, options, onSelect, p
   const selectedOption = options.find(opt => opt.value === value);
   
   return (
-    <View>
+    <>
       <TouchableOpacity
         style={styles.dropdownButton}
-        onPress={() => setIsOpen(!isOpen)}
+        onPress={() => setIsOpen(true)}
+        activeOpacity={0.9}
       >
         <Text style={styles.dropdownButtonText}>
           {selectedOption?.label || placeholder}
         </Text>
-        <Icon name={isOpen ? "chevron-up" : "chevron-down"} size={20} color="#6b7280" />
+        <Icon name="chevron-down" size={18} color="#6b7280" />
       </TouchableOpacity>
-      
-      {isOpen && (
-        <View style={styles.dropdownList}>
-          {options.map((option) => (
-            <TouchableOpacity
-              key={option.value}
-              style={styles.dropdownItem}
-              onPress={() => {
-                onSelect(option.value);
-                setIsOpen(false);
-              }}
-            >
-              <Text style={[
-                styles.dropdownItemText,
-                value === option.value && styles.dropdownItemTextSelected
-              ]}>
-                {option.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
+
+      <Modal
+        transparent
+        visible={isOpen}
+        animationType="fade"
+        onRequestClose={() => setIsOpen(false)}
+      >
+        <TouchableOpacity style={styles.dropdownModalOverlay} activeOpacity={1} onPress={() => setIsOpen(false)} />
+        <View style={styles.dropdownModalCard}>
+          {options.map((option) => {
+            const isSelected = value === option.value;
+            return (
+              <TouchableOpacity
+                key={option.value}
+                style={[styles.dropdownModalItem, isSelected && styles.dropdownModalItemSelected]}
+                onPress={() => {
+                  onSelect(option.value);
+                  setIsOpen(false);
+                }}
+                activeOpacity={0.9}
+              >
+                <Text style={[
+                  styles.dropdownItemText,
+                  isSelected && styles.dropdownItemTextSelected
+                ]}>
+                  {option.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
-      )}
-    </View>
+      </Modal>
+    </>
   );
 };
 
@@ -85,7 +96,9 @@ export const InviteEmployeeModal: React.FC<InviteEmployeeModalProps> = ({
   onSuccess,
 }) => {
   const { activeAccount } = useAccount();
+  const [mode, setMode] = useState<'phone' | 'username'>('phone');
   const [phoneNumber, setPhoneNumber] = useState('');
+  const [employeeUsername, setEmployeeUsername] = useState('');
   const [employeeName, setEmployeeName] = useState('');
   const [role, setRole] = useState('cashier');
   const [message, setMessage] = useState('');
@@ -130,23 +143,33 @@ export const InviteEmployeeModal: React.FC<InviteEmployeeModalProps> = ({
   );
   
   const handleInvite = async () => {
-    if (!phoneNumber) {
-      Alert.alert('Error', 'Por favor ingresa el número de teléfono del empleado');
-      return;
+    const isUsernameMode = mode === 'username';
+    if (isUsernameMode) {
+      if (!employeeUsername.trim()) {
+        Alert.alert('Error', 'Ingresa el @usuario de Confío del empleado');
+        return;
+      }
+    } else {
+      if (!phoneNumber) {
+        Alert.alert('Error', 'Por favor ingresa el número de teléfono del empleado');
+        return;
+      }
     }
     
     try {
-      const { data } = await inviteEmployee({
-        variables: {
-          input: {
-            employeePhone: phoneNumber,
-            employeePhoneCountry: selectedCountry?.[2] || 'VE',
-            employeeName,
-            role,
-            message,
-          },
-        },
-      });
+      const input: any = {
+        employeeName,
+        role,
+        message,
+      };
+      if (isUsernameMode) {
+        input.employeeUsername = employeeUsername.trim().replace(/^@/, '');
+      } else {
+        input.employeePhone = phoneNumber;
+        input.employeePhoneCountry = selectedCountry?.[2] || 'VE';
+      }
+
+      const { data } = await inviteEmployee({ variables: { input } });
       
       if (data?.inviteEmployee?.success) {
         Alert.alert(
@@ -185,36 +208,72 @@ export const InviteEmployeeModal: React.FC<InviteEmployeeModalProps> = ({
           </View>
           
           <ScrollView style={styles.form}>
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>País</Text>
+            <View style={styles.modeToggle}>
               <TouchableOpacity
-                style={styles.countrySelector}
-                onPress={() => setShowCountryPicker(true)}
+                style={[styles.modeButton, mode === 'username' && styles.modeButtonActive]}
+                onPress={() => setMode('username')}
               >
-                <View style={styles.countrySelectorContent}>
-                  <Text style={styles.flag}>{selectedCountry?.[3] || '🌍'}</Text>
-                  <Text style={styles.countryNameSelector}>{selectedCountry?.[0] || 'Seleccionar país'}</Text>
-                </View>
-                <Icon name="chevron-down" size={20} color="#6b7280" />
+                <Text style={[styles.modeButtonText, mode === 'username' && styles.modeButtonTextActive]}>@usuario de Confío</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modeButton, mode === 'phone' && styles.modeButtonActive]}
+                onPress={() => setMode('phone')}
+              >
+                <Text style={[styles.modeButtonText, mode === 'phone' && styles.modeButtonTextActive]}>Número de teléfono</Text>
               </TouchableOpacity>
             </View>
-            
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Número de teléfono</Text>
-              <View style={styles.phoneInputContainer}>
-                <View style={styles.phoneCodeContainer}>
-                  <Text style={styles.phoneCode}>{selectedCountry?.[1] || '+58'}</Text>
+
+            {mode === 'username' ? (
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>@usuario</Text>
+                <View style={styles.atInputContainer}>
+                  <Text style={styles.atPrefix}>@</Text>
+                  <TextInput
+                    style={styles.atInput}
+                    placeholder="confio_usuario"
+                    placeholderTextColor="#adb5bd"
+                    value={employeeUsername.replace(/^@/, '')}
+                    onChangeText={(text) => setEmployeeUsername(text.replace(/^@/, ''))}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
                 </View>
-                <TextInput
-                  style={styles.phoneInput}
-                  placeholder="412 1234567"
-                  placeholderTextColor="#adb5bd"
-                  value={phoneNumber}
-                  onChangeText={setPhoneNumber}
-                  keyboardType="phone-pad"
-                />
+                <Text style={styles.helperText}>Invita a alguien que ya usa Confío usando su @usuario.</Text>
               </View>
-            </View>
+            ) : (
+              <>
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>País</Text>
+                  <TouchableOpacity
+                    style={styles.countrySelector}
+                    onPress={() => setShowCountryPicker(true)}
+                  >
+                    <View style={styles.countrySelectorContent}>
+                      <Text style={styles.flag}>{selectedCountry?.[3] || '🌍'}</Text>
+                      <Text style={styles.countryNameSelector}>{selectedCountry?.[0] || 'Seleccionar país'}</Text>
+                    </View>
+                    <Icon name="chevron-down" size={20} color="#6b7280" />
+                  </TouchableOpacity>
+                </View>
+                
+                <View style={styles.inputGroup}>
+                  <Text style={styles.label}>Número de teléfono</Text>
+                  <View style={styles.phoneInputContainer}>
+                    <View style={styles.phoneCodeContainer}>
+                      <Text style={styles.phoneCode}>{selectedCountry?.[1] || '+58'}</Text>
+                    </View>
+                    <TextInput
+                      style={styles.phoneInput}
+                      placeholder="412 1234567"
+                      placeholderTextColor="#adb5bd"
+                      value={phoneNumber}
+                      onChangeText={setPhoneNumber}
+                      keyboardType="phone-pad"
+                    />
+                  </View>
+                </View>
+              </>
+            )}
             
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Nombre (opcional)</Text>
@@ -363,6 +422,32 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingBottom: 24,
   },
+  modeToggle: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 20,
+  },
+  modeButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: '#e9ecef',
+    backgroundColor: '#f8f9fa',
+    alignItems: 'center',
+  },
+  modeButtonActive: {
+    backgroundColor: '#f5f3ff',
+    borderColor: '#c4b5fd',
+  },
+  modeButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  modeButtonTextActive: {
+    color: '#6d28d9',
+  },
   inputGroup: {
     marginBottom: 24,
   },
@@ -444,6 +529,33 @@ const styles = StyleSheet.create({
     color: '#1a1a1a',
     fontWeight: '500',
   },
+  helperText: {
+    marginTop: 8,
+    fontSize: 12,
+    color: '#6b7280',
+  },
+  atInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
+    borderWidth: 1.5,
+    borderColor: '#e9ecef',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  atPrefix: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#6d28d9',
+  },
+  atInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#1a1a1a',
+    fontWeight: '500',
+  },
   dropdownButton: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -455,35 +567,54 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 14,
   },
+  dropdownWrapper: {
+    position: 'relative',
+    zIndex: 1,
+  },
+  dropdownWrapperOpen: {
+    zIndex: 20,
+  },
   dropdownButtonText: {
     fontSize: 16,
     color: '#1a1a1a',
     fontWeight: '500',
   },
+  dropdownItemSelected: {
+    backgroundColor: '#f5f3ff',
+  },
   dropdownList: {
-    position: 'absolute',
-    top: '100%',
-    left: 0,
-    right: 0,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    marginTop: 6,
-    zIndex: 1000,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
-    borderWidth: 1,
-    borderColor: '#e9ecef',
-    overflow: 'hidden',
   },
   dropdownItem: {
     paddingHorizontal: 16,
     paddingVertical: 14,
+  },
+  dropdownModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+  },
+  dropdownModalCard: {
+    position: 'absolute',
+    alignSelf: 'center',
+    width: '90%',
+    maxWidth: 360,
+    bottom: 80,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 10,
+  },
+  dropdownModalItem: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  dropdownModalItemSelected: {
+    backgroundColor: '#f5f3ff',
   },
   dropdownItemText: {
     fontSize: 16,
@@ -493,6 +624,12 @@ const styles = StyleSheet.create({
   dropdownItemTextSelected: {
     color: '#10b981',
     fontWeight: '600',
+  },
+  helperText: {
+    marginTop: 6,
+    color: '#6b7280',
+    fontSize: 12,
+    lineHeight: 18,
   },
   permissionsInfo: {
     flexDirection: 'row',

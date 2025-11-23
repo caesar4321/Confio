@@ -9,11 +9,15 @@ from payments.models import PaymentTransaction
 from p2p_exchange.models import P2PTrade
 from conversion.models import Conversion
 from .models_unified import UnifiedTransactionTable
+from payroll.models import PayrollRecipient
+from users.models_employee import BusinessEmployee
+from users.models import Account
 from achievements.signals import _award_referral_pair
 from achievements.services.referral_rewards import (
     EventContext,
     sync_referral_reward_for_event,
 )
+from django.db import transaction
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +133,6 @@ def create_unified_transaction_from_p2p_trade(p2p_trade):
         # Delete if exists and status changed
         UnifiedTransactionTable.objects.filter(p2p_trade=p2p_trade).delete()
         return None
-    
     try:
         # Get offer details
         offer = p2p_trade.offer

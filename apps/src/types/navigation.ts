@@ -13,6 +13,7 @@ export type AuthStackParamList = {
 export type BottomTabParamList = {
   Home: undefined;
   Contacts: undefined;
+  Employees: undefined;
   Scan: { mode?: 'cobrar' | 'pagar' };
   Charge: undefined;
   Exchange: { 
@@ -171,6 +172,30 @@ export type MainStackParamList = {
     isActive: boolean;
     employeeData: any; // Full employee object from GraphQL
   };
+  EmployeeEdit: {
+    employeeId: string;
+    employeeData?: any;
+    name?: string;
+    phone?: string;
+    role?: string;
+    isActive?: boolean;
+  };
+  PayeeDetail: {
+    recipientId: string;
+    displayName?: string;
+    username?: string;
+    accountId: string;
+    onDeleted?: () => void;
+    employeeRole?: string;
+    employeePermissions?: any;
+  };
+  PayrollHistory: {
+    accountId: string;
+    displayName?: string;
+    username?: string;
+  };
+  PayrollRunsHistory: undefined;
+  PayrollRun: undefined;
   TransactionDetail: {
     transactionType: 'received' | 'sent' | 'exchange' | 'payment' | 'deposit' | 'withdrawal' | 'conversion';
     transactionData?: any; // You can make this more specific based on your data structure
@@ -351,6 +376,8 @@ export type MainStackParamList = {
   ReferralActionPrompt: { event?: string };
   ReferralEventDetail: { event?: string; referralId?: string | number; role?: 'referee' | 'referrer'; friendName?: string };
   ReferralRewardClaim: undefined;
+  PayrollPending: undefined;
+  PayrollSettings: undefined;
   // NotificationSettings: undefined; // Hidden: Notifications mandatory
 };
 

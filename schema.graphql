@@ -2763,6 +2763,7 @@ type Query {
   userBankAccounts: [BankInfoType]
   bankInfo(id: ID!): BankInfoType
   checkUsersByPhones(phoneNumbers: [String]!): [UserByPhoneType]
+  checkUsersByUsernames(usernames: [String]!): [UserByPhoneType]
   achievementTypes(category: String): [AchievementTypeType]
   userAchievements(status: String): [UserAchievementType]
   achievementLeaderboard(achievementSlug: String): [UserAchievementType]
@@ -3058,13 +3059,15 @@ type EmployeeInvitationType {
   invitationCode: String!
 
   """Phone number of the invited employee"""
-  employeePhone: String!
+  employeePhone: String
 
   """ISO country code for the phone number"""
-  employeePhoneCountry: String!
+  employeePhoneCountry: String
 
   """Name of the invited employee (optional)"""
   employeeName: String!
+  employeeUsername: String
+  displayInvitee: String
   role: UsersEmployeeInvitationRoleChoices!
   invitedBy: Web3AuthUserType
   status: UsersEmployeeInvitationStatusChoices!
@@ -4494,8 +4497,9 @@ type InviteEmployee {
 }
 
 input InviteEmployeeInput {
-  employeePhone: String!
-  employeePhoneCountry: String!
+  employeePhone: String
+  employeePhoneCountry: String
+  employeeUsername: String
   employeeName: String
   role: String = "cashier"
   customPermissions: JSONString

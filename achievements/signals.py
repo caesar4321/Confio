@@ -386,6 +386,7 @@ def sync_pending_reward_events(sender, instance: UserReferral, created, **kwargs
         event, created_flag = ReferralRewardEvent.objects.get_or_create(
             user=user,
             trigger="referral_pending",
+            referral=instance,
             defaults=defaults,
         )
         if created_flag:

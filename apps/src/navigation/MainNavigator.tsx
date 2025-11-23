@@ -21,6 +21,11 @@ import { SendWithAddressScreen } from '../screens/SendWithAddressScreen';
 import { SendToFriendScreen } from '../screens/SendToFriendScreen';
 import { FriendDetailScreen } from '../screens/FriendDetailScreen';
 import { EmployeeDetailScreen } from '../screens/EmployeeDetailScreen';
+import { EmployeeEditScreen } from '../screens/EmployeeEditScreen';
+import { PayeeDetailScreen } from '../screens/PayeeDetailScreen';
+import PayrollHistoryScreen from '../screens/PayrollHistoryScreen';
+import PayrollRunsHistoryScreen from '../screens/PayrollRunsHistoryScreen';
+import PayrollRunScreen from '../screens/PayrollRunScreen';
 import { TransactionDetailScreen } from '../screens/TransactionDetailScreen';
 import { TransactionProcessingScreen } from '../screens/TransactionProcessingScreen';
 import { TransactionSuccessScreen } from '../screens/TransactionSuccessScreen';
@@ -48,6 +53,8 @@ import { ReferralFriendJoinedScreen } from '../screens/ReferralFriendJoinedScree
 import { ReferralActionPromptScreen } from '../screens/ReferralActionPromptScreen';
 import { ReferralEventDetailScreen } from '../screens/ReferralEventDetailScreen';
 import ReferralRewardClaimScreen from '../screens/ReferralRewardClaimScreen';
+import PayrollPendingScreen from '../screens/PayrollPendingScreen';
+import PayrollSettingsScreen from '../screens/PayrollSettingsScreen';
 // import NotificationSettingsScreen from '../screens/NotificationSettingsScreen'; // Hidden: Notifications mandatory
 
 console.log('MainNavigator: TransactionProcessingScreen imported:', !!TransactionProcessingScreen);
@@ -213,6 +220,31 @@ export const MainNavigator = () => {
         options={{ headerShown: false }}
       />
       <Stack.Screen
+        name="EmployeeEdit"
+        component={EmployeeEditScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="PayeeDetail"
+        component={PayeeDetailScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="PayrollHistory"
+        component={PayrollHistoryScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="PayrollRunsHistory"
+        component={PayrollRunsHistoryScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="PayrollRun"
+        component={PayrollRunScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
         name="TransactionDetail"
         component={TransactionDetailScreen}
         options={{ headerShown: false }}
@@ -352,6 +384,16 @@ export const MainNavigator = () => {
       <Stack.Screen
         name="ReferralRewardClaim"
         component={ReferralRewardClaimScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="PayrollPending"
+        component={PayrollPendingScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="PayrollSettings"
+        component={PayrollSettingsScreen}
         options={{ headerShown: false }}
       />
       {/* Hidden: Notifications are mandatory for financial apps

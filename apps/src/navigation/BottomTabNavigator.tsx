@@ -7,6 +7,7 @@ import { NavigationProp } from '@react-navigation/native';
 import { MainStackParamList, BottomTabParamList, RootStackParamList } from '../types/navigation';
 import { HomeScreen } from '../screens/HomeScreen';
 import { ContactsScreen } from '../screens/ContactsScreen';
+import EmployeesScreen from '../screens/EmployeesScreen';
 import ScanTab from '../screens/ScanTab';
 import { ChargeScreen } from '../screens/ChargeScreen';
 import { ExchangeScreen } from '../screens/ExchangeScreen';
@@ -64,21 +65,6 @@ export const BottomTabNavigator = () => {
       currentAccountAvatar={currentAccountAvatar}
     />
   ), [navigation, profileMenu.openProfileMenu, handleNotificationPress, unreadNotifications, currentAccountAvatar]);
-
-  const ContactsHeader = useCallback(() => (
-    <Header
-      navigation={navigation}
-      isHomeScreen={false}
-      title="Contactos"
-      onProfilePress={undefined}
-      onNotificationPress={undefined}
-      backgroundColor="#fff"
-      showBackButton={false}
-      isLight={false}
-      unreadNotifications={0}
-      currentAccountAvatar="U"
-    />
-  ), [navigation]);
 
   // Dynamic scan header that updates based on account type
   const ScanHeader = useCallback(() => {
@@ -159,6 +145,26 @@ export const BottomTabNavigator = () => {
   // Check if account is business (using normalized type)
   const isBusinessAccount = accountType === 'business';
 
+  const contactsTitle = useMemo(
+    () => (isBusinessAccount ? 'Empleados' : 'Contactos'),
+    [isBusinessAccount]
+  );
+
+  const ContactsHeader = useCallback(() => (
+    <Header
+      navigation={navigation}
+      isHomeScreen={false}
+      title={contactsTitle}
+      onProfilePress={undefined}
+      onNotificationPress={undefined}
+      backgroundColor="#fff"
+      showBackButton={false}
+      isLight={false}
+      unreadNotifications={0}
+      currentAccountAvatar="U"
+    />
+  ), [navigation, contactsTitle]);
+
   // Memoize tab options to ensure they update when activeAccount changes
   const scanTabOptions = useMemo(() => ({
     header: () => <ScanHeader />,
@@ -231,15 +237,27 @@ export const BottomTabNavigator = () => {
             tabBarIcon: ({ color, size }: any) => <Icon name="home" size={size} color={color} />
           }}
         />
-        <Tabs.Screen 
-          name="Contacts" 
-          component={ContactsScreen}
-          options={{
-            header: () => <ContactsHeader />,
-            tabBarLabel: 'Contactos',
-            tabBarIcon: ({ color, size }: any) => <Icon name="users" size={size} color={color} />
-          }}
-        />
+        {isBusinessAccount ? (
+          <Tabs.Screen 
+            name="Employees" 
+            component={EmployeesScreen}
+            options={{
+              header: () => <ContactsHeader />, // reuse header style
+              tabBarLabel: 'Empleados',
+              tabBarIcon: ({ color, size }: any) => <Icon name="users" size={size} color={color} />
+            }}
+          />
+        ) : (
+          <Tabs.Screen 
+            name="Contacts" 
+            component={ContactsScreen}
+            options={{
+              header: () => <ContactsHeader />,
+              tabBarLabel: 'Contactos',
+              tabBarIcon: ({ color, size }: any) => <Icon name="users" size={size} color={color} />
+            }}
+          />
+        )}
         {!isBusinessAccount && (
           <Tabs.Screen 
             name="Scan" 

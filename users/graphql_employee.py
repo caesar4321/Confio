@@ -1,13 +1,25 @@
 import graphene
 from graphene_django import DjangoObjectType
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Q, Case, When, IntegerField
 from django.utils import timezone
 from datetime import timedelta
 from .models_employee import BusinessEmployee, EmployeeInvitation, EmployeeActivityLog
 from .models import Business, User, Account
 from .jwt_context import require_business_context, get_jwt_business_context_with_validation
 from .phone_utils import normalize_phone
+
+
+def _mask_phone(phone_value: str):
+    """Return a masked phone string to avoid leaking full numbers."""
+    if not phone_value:
+        return None
+    digits = ''.join(ch for ch in phone_value if ch.isdigit())
+    if not digits:
+        return None
+    if len(digits) <= 4:
+        return '*' * len(digits)
+    return '*' * (len(digits) - 4) + digits[-4:]
 
 
 def get_account_from_context(context, user=None):
@@ -106,6 +118,11 @@ class EmployerBusinessType(graphene.ObjectType):
 class EmployeeInvitationType(DjangoObjectType):
     """GraphQL type for employee invitations"""
     
+    # Override to allow nullable username/phone per invite method
+    employee_username = graphene.String()
+    employee_phone = graphene.String()
+    employee_phone_country = graphene.String()
+    display_invitee = graphene.String()
     is_expired = graphene.Boolean()
     permissions = graphene.JSONString()
     
@@ -113,10 +130,33 @@ class EmployeeInvitationType(DjangoObjectType):
         model = EmployeeInvitation
         fields = [
             'id', 'business', 'invitation_code', 'employee_phone',
-            'employee_phone_country', 'employee_name', 'role',
+            'employee_phone_country', 'employee_name', 'employee_username', 'role',
             'status', 'expires_at', 'invited_by', 'accepted_by',
             'accepted_at', 'message', 'created_at'
         ]
+
+    def resolve_employee_phone(self, info):
+        # If invited by username, do not expose phone; otherwise return full phone
+        if getattr(self, 'employee_username', None):
+            return None
+        return self.employee_phone
+
+    def resolve_employee_phone_country(self, info):
+        if getattr(self, 'employee_username', None):
+            return None
+        return self.employee_phone_country
+
+    def resolve_employee_username(self, info):
+        username = getattr(self, 'employee_username', None)
+        if username:
+            return f"@{username}"
+        return None
+
+    def resolve_display_invitee(self, info):
+        username = getattr(self, 'employee_username', None)
+        if username:
+            return f"@{username}"
+        return self.employee_phone
     
     def resolve_is_expired(self, info):
         return self.is_expired
@@ -270,7 +310,7 @@ class UpdateBusinessEmployee(graphene.Mutation):
             
             # Prevent business owner from deactivating themselves
             if employee.user == user and input.is_active is False:
-                return cls(success=False, errors=["Business owners cannot deactivate themselves. Transfer ownership first if needed."])
+                return cls(success=False, errors=["Los dueños no pueden desactivarse a sí mismos. Transfiere la propiedad primero."])
             
             # Update fields
             with transaction.atomic():
@@ -333,7 +373,7 @@ class RemoveBusinessEmployee(graphene.Mutation):
             
             # Prevent business owner from removing themselves
             if employee.user == user:
-                return cls(success=False, errors=["Business owners cannot remove themselves. Transfer ownership first if needed."])
+                return cls(success=False, errors=["Los dueños no pueden removerse a sí mismos. Transfiere la propiedad primero."])
             
             # Soft delete
             with transaction.atomic():
@@ -350,8 +390,9 @@ class RemoveBusinessEmployee(graphene.Mutation):
 
 
 class InviteEmployeeInput(graphene.InputObjectType):
-    employee_phone = graphene.String(required=True)
-    employee_phone_country = graphene.String(required=True)
+    employee_phone = graphene.String()
+    employee_phone_country = graphene.String()
+    employee_username = graphene.String()
     employee_name = graphene.String()
     role = graphene.String(default_value='cashier')
     custom_permissions = graphene.JSONString()
@@ -386,17 +427,46 @@ class InviteEmployee(graphene.Mutation):
                 deleted_at__isnull=True
             )
             
-            # Check if trying to invite themselves
-            if (user.phone_number == input.employee_phone and 
-                user.phone_country == input.employee_phone_country):
-                return cls(success=False, errors=["You cannot invite yourself as an employee. You are already the owner."])
-            
-            # Compute canonical phone key
-            phone_key = normalize_phone(input.employee_phone, input.employee_phone_country)
+            # Determine target via username or phone
+            target_user = None
+            target_phone = None
+            target_phone_country = None
+            target_phone_key = None
+            target_name = (input.employee_name or '').strip()
+            target_username = ''
+
+            username_input = (input.employee_username or '').strip()
+            if username_input:
+                lookup_username = username_input.lstrip('@')
+                target_user = User.objects.filter(username__iexact=lookup_username).first()
+                if not target_user:
+                    return cls(success=False, errors=["No encontramos este usuario. Verifica el @usuario."])
+                if not target_user.phone_number or not target_user.phone_country:
+                    return cls(success=False, errors=["El usuario debe tener un teléfono verificado para recibir la invitación."])
+                target_phone = target_user.phone_number
+                target_phone_country = target_user.phone_country
+                target_phone_key = target_user.phone_key or normalize_phone(target_phone, target_phone_country)
+                target_username = lookup_username
+                if not target_name:
+                    target_name = target_user.get_full_name() or target_user.username
+            else:
+                # Phone-based invite requires phone info
+                if not input.employee_phone or not input.employee_phone_country:
+                    return cls(success=False, errors=["Ingresa un número de teléfono o un @usuario de Confío."])
+                target_phone = input.employee_phone
+                target_phone_country = input.employee_phone_country
+                target_phone_key = normalize_phone(target_phone, target_phone_country)
+                target_username = ''
+
+            # Check if trying to invite themselves (by phone or username)
+            if target_user and target_user == user:
+                return cls(success=False, errors=["No puedes invitarte a ti mismo como empleado. Ya eres el dueño."])
+            if not target_user and user.phone_key and target_phone_key == user.phone_key:
+                return cls(success=False, errors=["No puedes invitarte a ti mismo como empleado. Ya eres el dueño."])
 
             # Check if user already exists with this phone number (normalized)
-            existing_user = User.objects.filter(
-                phone_key=phone_key
+            existing_user = target_user or User.objects.filter(
+                phone_key=target_phone_key
             ).first()
             
             if existing_user:
@@ -416,7 +486,7 @@ class InviteEmployee(graphene.Mutation):
             # Check for pending invitations
             pending_invitation = EmployeeInvitation.objects.filter(
                 business=business,
-                employee_phone_key=phone_key,
+                employee_phone_key=target_phone_key,
                 status='pending'
             ).first()
             
@@ -426,10 +496,11 @@ class InviteEmployee(graphene.Mutation):
             # Create invitation
             invitation = EmployeeInvitation.objects.create(
                 business=business,
-                employee_phone=input.employee_phone,
-                employee_phone_country=input.employee_phone_country,
-                employee_phone_key=phone_key,
-                employee_name=input.employee_name or '',
+                employee_phone=target_phone,
+                employee_phone_country=target_phone_country,
+                employee_phone_key=target_phone_key,
+                employee_name=target_name or '',
+                employee_username=target_username or '',
                 role=input.role,
                 permissions=input.custom_permissions or {},  # Default to empty dict if None
                 invited_by=user,
@@ -503,9 +574,18 @@ class CancelInvitation(graphene.Mutation):
             account = get_account_from_context(info.context, user)
             if not account or account.business != invitation.business:
                 return cls(success=False, errors=["You don't have permission to cancel this invitation"])
-            
+
+            # Make cancellation idempotent for already-cancelled invites
+            if invitation.status == 'cancelled':
+                return cls(success=True)
+            # Disallow cancel if already accepted/expired; return friendly error
+            if invitation.status == 'accepted':
+                return cls(success=False, errors=["This invitation has already been accepted"])
+            if invitation.status == 'expired':
+                return cls(success=False, errors=["This invitation has already expired"])
+
             invitation.cancel()
-            
+
             return cls(success=True)
             
         except EmployeeInvitation.DoesNotExist:
@@ -651,13 +731,21 @@ class EmployeeQueries(graphene.ObjectType):
         user = info.context.user
         if not user.is_authenticated:
             return []
-        
+
+        # Match on canonical phone_key to handle formatting differences; fall back to raw fields
+        phone_key = user.phone_key
+        if not phone_key and user.phone_number:
+            phone_key = normalize_phone(user.phone_number, user.phone_country)
+        if not phone_key:
+            return []
+
         return EmployeeInvitation.objects.filter(
-            employee_phone=user.phone_number,
-            employee_phone_country=user.phone_country,
             status='pending',
             expires_at__gt=timezone.now(),
             deleted_at__isnull=True
+        ).filter(
+            Q(employee_phone_key=phone_key) |
+            Q(employee_phone=user.phone_number, employee_phone_country=user.phone_country)
         ).select_related('business', 'invited_by')
     
     def resolve_employee_activity_logs(self, info, business_id, employee_id=None, action=None, limit=100):
@@ -719,9 +807,14 @@ class EmployeeQueries(graphene.ObjectType):
             queryset = BusinessEmployee.objects.filter(
                 business=business,
                 deleted_at__isnull=True
-            ).exclude(
-                user=user  # Exclude the business owner from the employees list
-            ).select_related('user').order_by('id')  # Consistent ordering for pagination
+            ).select_related('user').order_by(
+                Case(
+                    When(role='owner', then=0),
+                    default=1,
+                    output_field=IntegerField()
+                ),
+                'id'
+            )  # Owner first, then by id for pagination
             
             if not include_inactive:
                 queryset = queryset.filter(is_active=True)
