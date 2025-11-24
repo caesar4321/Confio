@@ -519,8 +519,8 @@ class ReferralRewardEvent(models.Model):
         verbose_name_plural = "Referral Reward Events"
         constraints = [
             models.UniqueConstraint(
-                fields=['user', 'trigger'],
-                name='unique_first_reward_event_per_trigger'
+                fields=['user', 'trigger', 'referral'],
+                name='unique_reward_event_per_trigger_and_referral'
             )
         ]
         indexes = [
