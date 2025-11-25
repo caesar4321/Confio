@@ -10,19 +10,23 @@ BLOCKCHAIN_CELERY_BEAT_SCHEDULE = {
         'task': 'blockchain.tasks.update_address_cache',
         'schedule': 60.0,  # Every minute
     },
-    
-    # Refresh stale balances every 5 minutes
-    'refresh-stale-balances': {
-        'task': 'blockchain.tasks.refresh_stale_balances',
-        'schedule': 300.0,  # Every 5 minutes
-    },
-    
-    # Full balance reconciliation every hour
-    'reconcile-all-balances': {
-        'task': 'blockchain.tasks.reconcile_all_balances',
-        'schedule': crontab(minute=0),  # Every hour at :00
-    },
-    
+
+    # DISABLED: Refresh stale balances every 5 minutes
+    # REASON: Redundant - on-demand balance fetching already refreshes stale balances when users open app
+    # SAVINGS: ~7,200 API calls/day eliminated
+    # 'refresh-stale-balances': {
+    #     'task': 'blockchain.tasks.refresh_stale_balances',
+    #     'schedule': 300.0,  # Every 5 minutes
+    # },
+
+    # DISABLED: Full balance reconciliation every hour
+    # REASON: Redundant - on-demand fetching has 5-minute stale threshold built-in
+    # SAVINGS: ~54,480 API calls/day eliminated (after optimization)
+    # 'reconcile-all-balances': {
+    #     'task': 'blockchain.tasks.reconcile_all_balances',
+    #     'schedule': crontab(minute=0),  # Every hour at :00
+    # },
+
     # Removed cleanup of old Sui events (no event storage)
     
     # Indexer inbound deposit scan (USDC, cUSD, CONFIO)
