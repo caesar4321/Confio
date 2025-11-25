@@ -1,7 +1,7 @@
 from celery import shared_task
 from django.core.cache import cache
 from django.db import transaction, connection
-from django.db.models import Q
+from django.db.models import Q, F
 from django.utils import timezone
 from datetime import timedelta
 from decimal import Decimal
@@ -168,31 +168,61 @@ def reconcile_all_balances():
 @ensure_db_connection_closed
 def refresh_stale_balances():
     """
-    Refresh balances marked as stale
+    Refresh balances marked as stale using efficient batch fetching
     Run this more frequently (e.g., every 5 minutes)
+
+    Optimizations:
+    - Groups stale balances by account to fetch all tokens in one API call
+    - Uses get_balances_snapshot to minimize API requests
+    - Adds rate limiting to avoid triggering 403 errors from Algorand API
     """
+    import time
     from .balance_service import BalanceService
-    
+
+    # Get stale balances and group by account to batch fetch
     stale_balances = Balance.objects.filter(
         is_stale=True,
         account__deleted_at__isnull=True
     ).select_related('account')[:100]  # Batch limit
-    
-    refreshed = 0
+
+    # Group by account to minimize API calls
+    accounts_to_refresh = {}
     for balance in stale_balances:
+        account_id = balance.account.id
+        if account_id not in accounts_to_refresh:
+            accounts_to_refresh[account_id] = {
+                'account': balance.account,
+                'tokens': []
+            }
+        accounts_to_refresh[account_id]['tokens'].append(balance.token)
+
+    refreshed = 0
+    failed_accounts = []
+
+    for account_id, data in accounts_to_refresh.items():
+        account = data['account']
         try:
-            BalanceService.get_balance(
-                balance.account,
-                balance.token,
-                force_refresh=True
-            )
-            refreshed += 1
+            # Fetch ALL balances for this account in one API call
+            BalanceService.get_all_balances(account, force_refresh=True)
+            refreshed += len(data['tokens'])
+
+            # Rate limiting: sleep 0.2 seconds between accounts to avoid 403
+            time.sleep(0.2)
+
         except Exception as e:
-            logger.error(f"Failed to refresh balance {balance}: {e}")
-            balance.sync_attempts += 1
-            balance.save(update_fields=['sync_attempts'])
-    
-    logger.info(f"Refreshed {refreshed} stale balances")
+            logger.error(f"Failed to refresh balances for account {account.id}: {e}")
+            failed_accounts.append(account_id)
+
+            # Mark all stale balances for this account as failed
+            Balance.objects.filter(
+                account=account,
+                is_stale=True
+            ).update(sync_attempts=F('sync_attempts') + 1)
+
+    logger.info(f"Refreshed {refreshed} stale balances across {len(accounts_to_refresh) - len(failed_accounts)}/{len(accounts_to_refresh)} accounts")
+    if failed_accounts:
+        logger.warning(f"Failed to refresh {len(failed_accounts)} accounts: {failed_accounts[:10]}")
+
     return refreshed
 
 
