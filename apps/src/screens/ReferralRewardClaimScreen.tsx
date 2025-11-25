@@ -23,6 +23,7 @@ import {
 } from '../apollo/mutations';
 import algorandService from '../services/algorandService';
 import { useAuth } from '../contexts/AuthContext';
+import LoadingOverlay from '../components/LoadingOverlay';
 
 const colors = {
   background: '#FFFFFF',
@@ -69,6 +70,7 @@ export const ReferralRewardClaimScreen: React.FC = () => {
   const [prepareClaim] = useMutation(PREPARE_REFERRAL_REWARD_CLAIM);
   const [submitClaim] = useMutation(SUBMIT_REFERRAL_REWARD_CLAIM);
   const [busyId, setBusyId] = React.useState<string | null>(null);
+  const [loadingMessage, setLoadingMessage] = React.useState<string>('');
 
   const referrals: Referral[] = data?.myReferrals || [];
 
@@ -361,6 +363,7 @@ export const ReferralRewardClaimScreen: React.FC = () => {
         if (!eventId) {
           throw new Error('No pudimos encontrar la recompensa para este rol.');
         }
+        setLoadingMessage('Preparando el reclamo...');
         const prepareRes = await prepareClaim({
           variables: { eventId },
         });
@@ -371,12 +374,14 @@ export const ReferralRewardClaimScreen: React.FC = () => {
 
         const unsigned = payload.unsignedTransaction;
         const token = payload.claimToken;
+        setLoadingMessage('Firmando transacción...');
         const unsignedBytes = Buffer.from(unsigned, 'base64');
         const signedBytes = await algorandService.signTransactionBytes(
           Uint8Array.from(unsignedBytes),
         );
         const signedB64 = Buffer.from(signedBytes).toString('base64');
 
+        setLoadingMessage('Enviando transacción...');
         const submitRes = await submitClaim({
           variables: {
             claimToken: token,
@@ -397,6 +402,7 @@ export const ReferralRewardClaimScreen: React.FC = () => {
           err?.message || 'Ocurrió un error al reclamar la recompensa.';
         Alert.alert('Ups', message);
       } finally {
+        setLoadingMessage('');
         setBusyId(null);
       }
     },
@@ -407,6 +413,7 @@ export const ReferralRewardClaimScreen: React.FC = () => {
 
   return (
     <SafeAreaView style={styles.container}>
+      <LoadingOverlay visible={!!loadingMessage} message={loadingMessage} />
       <View style={[styles.header, { paddingTop: headerPaddingTop }]}>
         <TouchableOpacity onPress={handleBack} style={styles.backButton}>
           <Icon name="arrow-left" size={22} color={colors.textPrimary} />
