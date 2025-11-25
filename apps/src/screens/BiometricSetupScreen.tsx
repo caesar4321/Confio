@@ -1,5 +1,5 @@
 import React, { useCallback, useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Linking, Platform, Alert, AppState, AppStateStatus } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Linking, Platform, Alert, AppState, AppStateStatus, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { RouteProp, useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
@@ -104,153 +104,155 @@ export const BiometricSetupScreen = () => {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={handleBack} disabled={isProcessing} style={styles.backButton}>
-          <Icon name="arrow-left" size={22} color="#111827" />
-        </TouchableOpacity>
-        <Text style={styles.title}>Activa tu biometría</Text>
-        <View style={{ width: 22 }} />
-      </View>
-
-      <View style={styles.card}>
-        <View style={styles.iconBadge}>
-          <Icon name="shield" size={28} color="#10B981" />
-        </View>
-        <Text style={styles.heading}>Protege tus operaciones sensibles</Text>
-        <Text style={styles.body}>
-          Usaremos Face ID / Touch ID o huella para desbloquear Confío y confirmar envíos, pagos y otros movimientos críticos.
-          Tus datos biométricos nunca salen del dispositivo: iOS/Android solo nos indica si la coincidencia fue exitosa.
-        </Text>
-
-        <View style={styles.list}>
-          <View style={styles.listItem}>
-            <Icon name="check" size={16} color="#10B981" />
-            <Text style={styles.listText}>Evita accesos no autorizados si el teléfono cae en otras manos.</Text>
-          </View>
-          <View style={styles.listItem}>
-            <Icon name="check" size={16} color="#10B981" />
-            <Text style={styles.listText}>Confirma cada envío o pago con tu rostro o huella.</Text>
-          </View>
-          <View style={styles.listItem}>
-            <Icon name="check" size={16} color="#10B981" />
-            <Text style={styles.listText}>Configuras solo una vez; seguimos usando el sistema seguro del dispositivo.</Text>
-          </View>
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={handleBack} disabled={isProcessing} style={styles.backButton}>
+            <Icon name="arrow-left" size={22} color="#111827" />
+          </TouchableOpacity>
+          <Text style={styles.title}>Activa tu biometría</Text>
+          <View style={{ width: 22 }} />
         </View>
 
-        {supportedHint && (
-          <Text style={styles.hint}>{supportedHint}</Text>
-        )}
-        {!supportedHint && (
-          <Text style={styles.hint}>
-            Si aún no tienes Face ID / Touch ID o huella configurada, actívalo en los ajustes del dispositivo y vuelve a intentar.
+        <View style={styles.card}>
+          <View style={styles.iconBadge}>
+            <Icon name="shield" size={28} color="#10B981" />
+          </View>
+          <Text style={styles.heading}>Protege tus operaciones sensibles</Text>
+          <Text style={styles.body}>
+            Usaremos Face ID / Touch ID o huella para desbloquear Confío y confirmar envíos, pagos y otros movimientos críticos.
+            Tus datos biométricos nunca salen del dispositivo: iOS/Android solo nos indica si la coincidencia fue exitosa.
           </Text>
-        )}
 
-        {error && (
-          <View style={styles.errorBox}>
-            <Icon name="alert-triangle" size={16} color="#EF4444" />
-            <Text style={styles.errorText}>{error}</Text>
+          <View style={styles.list}>
+            <View style={styles.listItem}>
+              <Icon name="check" size={16} color="#10B981" />
+              <Text style={styles.listText}>Evita accesos no autorizados si el teléfono cae en otras manos.</Text>
+            </View>
+            <View style={styles.listItem}>
+              <Icon name="check" size={16} color="#10B981" />
+              <Text style={styles.listText}>Confirma cada envío o pago con tu rostro o huella.</Text>
+            </View>
+            <View style={styles.listItem}>
+              <Icon name="check" size={16} color="#10B981" />
+              <Text style={styles.listText}>Configuras solo una vez; seguimos usando el sistema seguro del dispositivo.</Text>
+            </View>
           </View>
-        )}
 
-        <TouchableOpacity
-          style={[styles.primaryButton, isProcessing && styles.primaryButtonDisabled]}
-          onPress={handleActivate}
-          disabled={isProcessing}
-        >
-          {isProcessing ? (
-            <ActivityIndicator color="#ffffff" />
-          ) : (
-            <Text style={styles.primaryButtonText}>Activar ahora</Text>
+          {supportedHint && (
+            <Text style={styles.hint}>{supportedHint}</Text>
           )}
-        </TouchableOpacity>
-        <Text style={styles.caption}>Necesario para mantener segura tu cuenta y tus transacciones.</Text>
-        {showSettingsButton && (
-          <TouchableOpacity
-            style={styles.settingsButton}
-            onPress={async () => {
-              if (Platform.OS === 'android') {
-                // Show instructions first for Android
-                Alert.alert(
-                  'Configurar biometría',
-                  'Para activar la biometría en tu dispositivo:\n\n1. Ve a Ajustes del dispositivo\n2. Busca "Seguridad" o "Bloqueo de pantalla"\n3. Toca "Huella digital" o "Face Unlock"\n4. Configura tu biometría\n5. Vuelve a Confío\n\nLa app detectará automáticamente que activaste la biometría.',
-                  [
-                    { text: 'Cancelar', style: 'cancel' },
-                    {
-                      text: 'Abrir ajustes',
-                      onPress: async () => {
-                        try {
-                          // Try using sendIntent for Android to open specific settings
-                          if (Linking.sendIntent) {
-                            try {
-                              // Try biometric enrollment first (Android 10+)
-                              await Linking.sendIntent('android.settings.BIOMETRIC_ENROLL');
-                              console.log('[BiometricSetup] Opened biometric enrollment settings');
-                              return;
-                            } catch (e) {
-                              console.log('[BiometricSetup] BIOMETRIC_ENROLL not available, trying security settings');
+          {!supportedHint && (
+            <Text style={styles.hint}>
+              Si aún no tienes Face ID / Touch ID o huella configurada, actívalo en los ajustes del dispositivo y vuelve a intentar.
+            </Text>
+          )}
 
+          {error && (
+            <View style={styles.errorBox}>
+              <Icon name="alert-triangle" size={16} color="#EF4444" />
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          )}
+
+          <TouchableOpacity
+            style={[styles.primaryButton, isProcessing && styles.primaryButtonDisabled]}
+            onPress={handleActivate}
+            disabled={isProcessing}
+          >
+            {isProcessing ? (
+              <ActivityIndicator color="#ffffff" />
+            ) : (
+              <Text style={styles.primaryButtonText}>Activar ahora</Text>
+            )}
+          </TouchableOpacity>
+          <Text style={styles.caption}>Necesario para mantener segura tu cuenta y tus transacciones.</Text>
+          {showSettingsButton && (
+            <TouchableOpacity
+              style={styles.settingsButton}
+              onPress={async () => {
+                if (Platform.OS === 'android') {
+                  // Show instructions first for Android
+                  Alert.alert(
+                    'Configurar biometría',
+                    'Para activar la biometría en tu dispositivo:\n\n1. Ve a Ajustes del dispositivo\n2. Busca "Seguridad" o "Bloqueo de pantalla"\n3. Toca "Huella digital" o "Face Unlock"\n4. Configura tu biometría\n5. Vuelve a Confío\n\nLa app detectará automáticamente que activaste la biometría.',
+                    [
+                      { text: 'Cancelar', style: 'cancel' },
+                      {
+                        text: 'Abrir ajustes',
+                        onPress: async () => {
+                          try {
+                            // Try using sendIntent for Android to open specific settings
+                            if (Linking.sendIntent) {
                               try {
-                                // Fallback to security settings
-                                await Linking.sendIntent('android.settings.SECURITY_SETTINGS');
-                                console.log('[BiometricSetup] Opened security settings');
+                                // Try biometric enrollment first (Android 10+)
+                                await Linking.sendIntent('android.settings.BIOMETRIC_ENROLL');
+                                console.log('[BiometricSetup] Opened biometric enrollment settings');
                                 return;
-                              } catch (e2) {
-                                console.log('[BiometricSetup] SECURITY_SETTINGS not available, trying general settings');
+                              } catch (e) {
+                                console.log('[BiometricSetup] BIOMETRIC_ENROLL not available, trying security settings');
 
                                 try {
-                                  // Fallback to general settings
-                                  await Linking.sendIntent('android.settings.SETTINGS');
-                                  console.log('[BiometricSetup] Opened general settings');
+                                  // Fallback to security settings
+                                  await Linking.sendIntent('android.settings.SECURITY_SETTINGS');
+                                  console.log('[BiometricSetup] Opened security settings');
                                   return;
-                                } catch (e3) {
-                                  console.log('[BiometricSetup] All sendIntent attempts failed');
+                                } catch (e2) {
+                                  console.log('[BiometricSetup] SECURITY_SETTINGS not available, trying general settings');
+
+                                  try {
+                                    // Fallback to general settings
+                                    await Linking.sendIntent('android.settings.SETTINGS');
+                                    console.log('[BiometricSetup] Opened general settings');
+                                    return;
+                                  } catch (e3) {
+                                    console.log('[BiometricSetup] All sendIntent attempts failed');
+                                  }
                                 }
                               }
                             }
-                          }
 
-                          // Final fallback: open app settings
-                          console.log('[BiometricSetup] Using Linking.openSettings fallback');
-                          await Linking.openSettings();
-                        } catch (e) {
-                          console.error('[BiometricSetup] Failed to open any settings:', e);
-                          Alert.alert(
-                            'No se pudo abrir ajustes',
-                            'Por favor abre manualmente los Ajustes del dispositivo > Seguridad > Biometría'
-                          );
+                            // Final fallback: open app settings
+                            console.log('[BiometricSetup] Using Linking.openSettings fallback');
+                            await Linking.openSettings();
+                          } catch (e) {
+                            console.error('[BiometricSetup] Failed to open any settings:', e);
+                            Alert.alert(
+                              'No se pudo abrir ajustes',
+                              'Por favor abre manualmente los Ajustes del dispositivo > Seguridad > Biometría'
+                            );
+                          }
                         }
                       }
-                    }
-                  ]
-                );
-              } else {
-                // iOS - show instructions then open settings
-                Alert.alert(
-                  'Configurar Face ID / Touch ID',
-                  'Para activar la biometría en tu iPhone:\n\n1. Ve a Ajustes\n2. Busca "Face ID y código" o "Touch ID y código"\n3. Configura tu biometría\n4. Vuelve a Confío\n\nLa app detectará automáticamente que activaste la biometría.',
-                  [
-                    { text: 'Cancelar', style: 'cancel' },
-                    {
-                      text: 'Abrir ajustes',
-                      onPress: async () => {
-                        try {
-                          // iOS can only open app settings, not specific system settings
-                          await Linking.openSettings();
-                        } catch (e) {
-                          console.error('[BiometricSetup] Failed to open settings:', e);
+                    ]
+                  );
+                } else {
+                  // iOS - show instructions then open settings
+                  Alert.alert(
+                    'Configurar Face ID / Touch ID',
+                    'Para activar la biometría en tu iPhone:\n\n1. Ve a Ajustes\n2. Busca "Face ID y código" o "Touch ID y código"\n3. Configura tu biometría\n4. Vuelve a Confío\n\nLa app detectará automáticamente que activaste la biometría.',
+                    [
+                      { text: 'Cancelar', style: 'cancel' },
+                      {
+                        text: 'Abrir ajustes',
+                        onPress: async () => {
+                          try {
+                            // iOS can only open app settings, not specific system settings
+                            await Linking.openSettings();
+                          } catch (e) {
+                            console.error('[BiometricSetup] Failed to open settings:', e);
+                          }
                         }
                       }
-                    }
-                  ]
-                );
-              }
-            }}
-          >
-            <Text style={styles.settingsButtonText}>Abrir ajustes biometría</Text>
-          </TouchableOpacity>
-        )}
-      </View>
+                    ]
+                  );
+                }
+              }}
+            >
+              <Text style={styles.settingsButtonText}>Abrir ajustes biometría</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </ScrollView>
     </SafeAreaView>
   );
 };
@@ -259,6 +261,10 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F9FAFB',
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingBottom: 24,
   },
   header: {
     flexDirection: 'row',

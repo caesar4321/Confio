@@ -72,8 +72,8 @@ android {
         applicationId "com.Confio.Confio"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 17
-        versionName "1.1"
+        versionCode 18
+        versionName "1.2"
         buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", rootProject.ext.newArchEnabled.toString()
         if (rootProject.ext.newArchEnabled) {
             buildConfigField "boolean", "IS_TURBOMODULE_ENABLED", "true"
