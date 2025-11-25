@@ -198,43 +198,52 @@ class BalanceService:
     @classmethod
     def reconcile_user_balances(cls, account: Account) -> Dict[str, bool]:
         """
-        Reconcile all balances for a user with blockchain
+        Reconcile all balances for a user with blockchain using efficient batch fetching
         Returns dict of token -> success status
         """
         results = {}
-        
-        for token in ['CUSD', 'CONFIO', 'USDC', 'CONFIO_PRESALE']:
-            try:
-                # Get blockchain balance
-                blockchain_data = cls._fetch_from_blockchain(account, token)
-                blockchain_amount = blockchain_data['amount']
-                
-                # Get cached balance
-                balance = cls._get_cached_balance(account, token)
-                
-                if balance:
-                    # Check for discrepancy
-                    discrepancy = abs(balance.amount - blockchain_amount)
-                    if discrepancy > Decimal('0.000001'):  # Tiny threshold for rounding
-                        logger.warning(
-                            f"Balance discrepancy for {account} {token}: "
-                            f"DB={balance.amount}, Chain={blockchain_amount}"
-                        )
-                        # Correct the balance
-                        balance.amount = blockchain_amount
-                        balance.is_stale = False
-                        balance.last_blockchain_check = timezone.now()
-                        balance.save()
-                else:
-                    # Create new balance record
-                    cls._update_balance_cache(account, token, blockchain_amount)
-                
-                results[token] = True
-                
-            except Exception as e:
-                logger.error(f"Failed to reconcile {token} for {account}: {e}")
+
+        try:
+            # Fetch ALL balances in one API call using get_balances_snapshot
+            blockchain_balances = cls._fetch_all_from_blockchain(account)
+
+            # Process each token
+            for token in ['CUSD', 'CONFIO', 'USDC', 'CONFIO_PRESALE']:
+                try:
+                    blockchain_amount = blockchain_balances.get(token, Decimal('0'))
+
+                    # Get cached balance
+                    balance = cls._get_cached_balance(account, token)
+
+                    if balance:
+                        # Check for discrepancy
+                        discrepancy = abs(balance.amount - blockchain_amount)
+                        if discrepancy > Decimal('0.000001'):  # Tiny threshold for rounding
+                            logger.warning(
+                                f"Balance discrepancy for {account} {token}: "
+                                f"DB={balance.amount}, Chain={blockchain_amount}"
+                            )
+                            # Correct the balance
+                            balance.amount = blockchain_amount
+                            balance.is_stale = False
+                            balance.last_blockchain_check = timezone.now()
+                            balance.save()
+                    else:
+                        # Create new balance record
+                        cls._update_balance_cache(account, token, blockchain_amount)
+
+                    results[token] = True
+
+                except Exception as e:
+                    logger.error(f"Failed to reconcile {token} for {account}: {e}")
+                    results[token] = False
+
+        except Exception as e:
+            logger.error(f"Failed to fetch blockchain balances for {account}: {e}")
+            # Mark all as failed
+            for token in ['CUSD', 'CONFIO', 'USDC', 'CONFIO_PRESALE']:
                 results[token] = False
-        
+
         return results
     
     @classmethod
