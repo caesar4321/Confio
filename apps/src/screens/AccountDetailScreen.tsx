@@ -761,7 +761,7 @@ export const AccountDetailScreen = () => {
       case 'sent':
         return `Enviado a ${transaction.to}`;
       case 'exchange':
-        return `Intercambio ${transaction.from} → ${transaction.to}`;
+        return `Conversión ${transaction.from} → ${transaction.to}`;
       case 'conversion':
         // Use conversionType field first, fallback to description parsing
         if (transaction.conversionType === 'usdc_to_cusd') {
@@ -1025,7 +1025,7 @@ export const AccountDetailScreen = () => {
           baseTitle = `Enviado a ${contactInfo.displayName}`;
           break;
         case 'exchange':
-          baseTitle = `Intercambio ${transaction.from} → ${transaction.to}`;
+          baseTitle = `Conversión ${transaction.from} → ${transaction.to}`;
           break;
         case 'conversion':
           // Use short title for conversions based on conversion type
@@ -1329,7 +1329,7 @@ export const AccountDetailScreen = () => {
           >
             <View style={styles.exchangeModalHeader}>
               <Text style={styles.exchangeModalTitle}>
-                Intercambio {conversionDirection === 'usdc_to_cusd' ? 'USDC → cUSD' : 'cUSD → USDC'}
+                Conversión {conversionDirection === 'usdc_to_cusd' ? 'USDC → cUSD' : 'cUSD → USDC'}
               </Text>
               <TouchableOpacity onPress={() => setShowExchangeModal(false)}>
                 <Icon name="x" size={24} color="#6b7280" />
@@ -1795,7 +1795,7 @@ export const AccountDetailScreen = () => {
                   <View style={styles.usdcTextContainer}>
                     <Text style={styles.usdcName}>{usdcAccount.name}</Text>
                     <Text style={styles.usdcDescription}>
-                      Intercambia entre USDC y cUSD
+                      Convierte entre USDC y cUSD
                     </Text>
                   </View>
                 </View>

@@ -1197,9 +1197,9 @@ const styles = StyleSheet.create({
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Confirmar Intercambio</Text>
+            <Text style={styles.modalTitle}>Confirmar conversión</Text>
             <Text style={styles.modalText}>
-              ¿Estás seguro que deseas intercambiar {confirmAmount} cUSD por USDC?
+              ¿Estás seguro que deseas convertir {confirmAmount} cUSD a USDC?
             </Text>
             <View style={styles.modalActions}>
               <TouchableOpacity 

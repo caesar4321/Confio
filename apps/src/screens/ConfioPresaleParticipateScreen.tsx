@@ -221,8 +221,8 @@ export const ConfioPresaleParticipateScreen = () => {
     }
 
     Alert.alert(
-      'Confirmar Intercambio',
-      `¿Intercambiar ${amount} cUSD por ${formatWithLocale(tokensReceived, { minimumFractionDigits: 2 })} $CONFIO?`,
+      'Confirmar conversión',
+      `¿Convertir ${amount} cUSD a ${formatWithLocale(tokensReceived, { minimumFractionDigits: 2 })} $CONFIO?`,
       [
         {
           text: 'Cancelar',
@@ -243,7 +243,7 @@ export const ConfioPresaleParticipateScreen = () => {
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
             <Icon name="arrow-left" size={24} color="#fff" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Intercambiar por $CONFIO</Text>
+          <Text style={styles.headerTitle}>Convertir a $CONFIO</Text>
           <View style={styles.headerSpacer} />
         </View>
         <View style={styles.loadingContainer}>
@@ -261,7 +261,7 @@ export const ConfioPresaleParticipateScreen = () => {
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
             <Icon name="arrow-left" size={24} color="#fff" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Intercambiar por $CONFIO</Text>
+          <Text style={styles.headerTitle}>Convertir a $CONFIO</Text>
           <View style={styles.headerSpacer} />
         </View>
         <View style={styles.errorContainer}>
@@ -287,7 +287,7 @@ export const ConfioPresaleParticipateScreen = () => {
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Icon name="arrow-left" size={24} color="#fff" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Intercambiar por $CONFIO</Text>
+        <Text style={styles.headerTitle}>Convertir a $CONFIO</Text>
         <View style={styles.headerSpacer} />
       </View>
 
@@ -320,7 +320,7 @@ export const ConfioPresaleParticipateScreen = () => {
             <Text style={styles.statusDescription}>
               {hasExceededGoal 
                 ? `La comunidad ha superado todas las expectativas. La Fase ${presale?.phaseNumber || 1} continúa disponible por tiempo limitado.`
-                : `¡La Fase ${presale?.phaseNumber || 1} está activa! Puedes intercambiar cUSD por $CONFIO al precio más bajo de la historia. Oferta limitada mientras tengamos monedas disponibles.`
+                : `¡La Fase ${presale?.phaseNumber || 1} está activa! Puedes convertir cUSD a $CONFIO al precio más bajo de la historia. Oferta limitada mientras tengamos monedas disponibles.`
               }
             </Text>
             <View style={styles.progressContainer}>
@@ -374,7 +374,7 @@ export const ConfioPresaleParticipateScreen = () => {
 
         {/* Swap Interface */}
         <View style={styles.swapSection}>
-          <Text style={styles.sectionTitle}>Intercambiar cUSD por $CONFIO</Text>
+          <Text style={styles.sectionTitle}>Convertir cUSD a $CONFIO</Text>
           
           <View style={styles.swapCard}>
             <View style={styles.inputContainer}>
@@ -435,7 +435,7 @@ export const ConfioPresaleParticipateScreen = () => {
             {busy ? null : (
               <>
                 <Icon name="refresh-cw" size={20} color="#fff" />
-                <Text style={styles.swapButtonText}>Intercambiar Ahora</Text>
+                <Text style={styles.swapButtonText}>Convertir Ahora</Text>
               </>
             )}
           </TouchableOpacity>

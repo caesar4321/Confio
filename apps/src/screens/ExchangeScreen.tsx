@@ -1384,7 +1384,7 @@ export const ExchangeScreen = () => {
     if (action === 'trade' && !checkPaymentMethodAvailability(offer)) {
       Alert.alert(
         'Configura tu método de pago',
-        'Para intercambiar con esta oferta, primero debes configurar un método de pago compatible.',
+        'Para convertir con esta oferta, primero debes configurar un método de pago compatible.',
         [
           { text: 'Cancelar', style: 'cancel' },
           { 
@@ -3264,7 +3264,7 @@ export const ExchangeScreen = () => {
             <EmptyState
               icon="plus-circle"
               title="No tienes ofertas activas"
-              subtitle="Crea ofertas para que otros traders puedan intercambiar contigo."
+              subtitle="Crea ofertas para que otros traders puedan convertir contigo."
               actionLabel="Crear Oferta"
               onAction={() => navigation.navigate('CreateOffer')}
               tips={[

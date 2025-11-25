@@ -594,7 +594,7 @@ export const TraderProfileScreen: React.FC = () => {
                           if (!checkPaymentMethodAvailability(offer)) {
                             Alert.alert(
                               'Configura tu método de pago',
-                              'Para intercambiar con esta oferta, primero debes configurar un método de pago compatible.',
+                              'Para convertir con esta oferta, primero debes configurar un método de pago compatible.',
                               [
                                 { text: 'Cancelar', style: 'cancel' },
                                 { 
