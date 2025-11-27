@@ -360,8 +360,7 @@ def claim_invitation(
     recipient: abi.Address
 ):
     """
-    Admin claims invitation on behalf of verified user
-    Called after user verification through Django backend
+    Recipient self-claims invitation; backend should guide user
     """
     sender = ScratchVar(TealType.bytes)
     amount = ScratchVar(TealType.uint64)
@@ -408,7 +407,7 @@ def claim_invitation(
         # Verify conditions
         Assert(
             And(
-                Txn.sender() == app.state.admin,
+                Txn.sender() == recipient.get(),  # Require recipient to self-claim
                 app.state.is_paused == Int(0),
                 is_claimed.load() == Bytes("base16", "00"),  # Not claimed
                 is_reclaimed.load() == Bytes("base16", "00"),  # Not reclaimed
@@ -754,6 +753,7 @@ def set_admin(new_admin: abi.Address):
     """Admin rotation for operational flexibility"""
     return Seq(
         Assert(Txn.sender() == app.state.admin),
+        Assert(Txn.rekey_to() == Global.zero_address()),
         Assert(new_admin.get() != Global.zero_address()),
         app.state.admin.set(new_admin.get()),
         Approve()
