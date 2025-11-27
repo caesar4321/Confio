@@ -97,6 +97,8 @@ def invite_pool_contract():
         return Seq([
             # Pool must be opted in
             Assert(App.globalGet(pool_opted_in) == Int(1)),
+            # Prevent rekey/close on caller
+            Assert(Txn.rekey_to() == Global.zero_address()),
             
             # Must be in group with asset transfers
             Assert(Global.group_size() >= Int(2)),

@@ -596,12 +596,27 @@ def confio_rewards_app() -> Expr:
         """Admin withdraws CONFIO from the vault."""
         amount = ScratchVar(TealType.uint64)
         destination = ScratchVar(TealType.bytes)
+        outstanding = ScratchVar(TealType.uint64)
+        outstanding_ref = ScratchVar(TealType.uint64)
+        vault_balance = ScratchVar(TealType.uint64)
+        vault_min = ScratchVar(TealType.uint64)
 
         return Seq(
             assert_admin(),
             Assert(Txn.application_args.length() >= Int(2)),
             amount.store(Btoi(Txn.application_args[1])),
             Assert(amount.load() > Int(0)),
+            outstanding.store(App.globalGet(TOTAL_ELIGIBLE) - App.globalGet(TOTAL_CLAIMED)),
+            outstanding_ref.store(App.globalGet(TOTAL_REF_ELIGIBLE) - App.globalGet(TOTAL_REF_PAID)),
+            (vault_balance := AssetHolding.balance(Global.current_application_address(), App.globalGet(CONFIO_ASA))),
+            Assert(vault_balance.hasValue()),
+            vault_min.store(MinBalance(Global.current_application_address())),
+            # Ensure withdrawal does not violate obligations or min balance
+            Assert(
+                vault_balance.value() >= vault_min.load() +
+                outstanding.load() + outstanding_ref.load() +
+                amount.load()
+            ),
             If(Txn.accounts.length() > Int(0)).Then(
                 Seq(
                     Assert(Txn.accounts[0] != Global.zero_address()),

@@ -1,4 +1,5 @@
 import graphene
+import json
 from graphene_django import DjangoObjectType
 from django.db import transaction
 from django.db.models import Q, Case, When, IntegerField
@@ -20,6 +21,27 @@ def _mask_phone(phone_value: str):
     if len(digits) <= 4:
         return '*' * len(digits)
     return '*' * (len(digits) - 4) + digits[-4:]
+
+
+def _sanitize_permissions(raw):
+    """Limit custom permissions to known keys with boolean values."""
+    if not raw:
+        return {}
+    try:
+        if isinstance(raw, str):
+            raw = json.loads(raw)
+    except Exception:
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    allowed = set()
+    for perms in BusinessEmployee.DEFAULT_PERMISSIONS.values():
+        allowed.update(perms.keys())
+    sanitized = {}
+    for k, v in raw.items():
+        if k in allowed:
+            sanitized[k] = bool(v)
+    return sanitized
 
 
 def get_account_from_context(context, user=None):
@@ -249,12 +271,13 @@ class AddBusinessEmployee(graphene.Mutation):
             
             # Create employee record
             with transaction.atomic():
+                perms = _sanitize_permissions(input.custom_permissions)
                 employee = BusinessEmployee.objects.create(
                     business=business,
                     user=employee_user,
                     role=input.role or 'cashier',
                     hired_by=user,
-                    permissions=input.custom_permissions or {},
+                    permissions=perms,
                     notes=input.notes or ''
                 )
                 
@@ -317,7 +340,7 @@ class UpdateBusinessEmployee(graphene.Mutation):
                 if input.role is not None:
                     employee.role = input.role
                 if input.custom_permissions is not None:
-                    employee.permissions = input.custom_permissions
+                    employee.permissions = _sanitize_permissions(input.custom_permissions)
                 if input.shift_start_time is not None:
                     employee.shift_start_time = input.shift_start_time if input.shift_start_time else None
                 if input.shift_end_time is not None:
@@ -494,6 +517,7 @@ class InviteEmployee(graphene.Mutation):
                 return cls(success=False, errors=["An invitation is already pending for this phone number"])
             
             # Create invitation
+            perms = _sanitize_permissions(input.custom_permissions)
             invitation = EmployeeInvitation.objects.create(
                 business=business,
                 employee_phone=target_phone,
@@ -502,7 +526,7 @@ class InviteEmployee(graphene.Mutation):
                 employee_name=target_name or '',
                 employee_username=target_username or '',
                 role=input.role,
-                permissions=input.custom_permissions or {},  # Default to empty dict if None
+                permissions=perms,  # Default to filtered dict
                 invited_by=user,
                 expires_at=timezone.now() + timedelta(days=input.expires_in_days),
                 message=input.message or ''

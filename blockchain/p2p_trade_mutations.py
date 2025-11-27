@@ -350,24 +350,53 @@ class SubmitP2PCreateTrade(graphene.Mutation):
                 return cls(success=False, error='Server missing ALGORAND_SPONSOR_MNEMONIC')
             sk = mnemonic.to_private_key(sponsor_mn)
 
-            parsed = []
-            for s in sponsor_transactions:
-                parsed.append(json.loads(s) if isinstance(s, str) else s)
-            signed_by_idx: dict[int, transaction.SignedTransaction] = {}
-            app_call_txn_dict = None
+            # Rebuild the expected sponsor transactions server-side to avoid blind signing
+            seller_addr_from_user = None
             try:
                 seller_addr_from_user = algo_encoding.encode_address(axfer_dict['txn'].get('snd')) if axfer_dict.get('txn', {}).get('snd') else None
             except Exception:
-                seller_addr_from_user = None
-            for e in parsed:
-                b = base64.b64decode(e.get('txn'))
+                pass
+
+            # Derive asset/token and amount from the signed AXFER to drive the builder
+            asset_id = axfer_dict['txn'].get('xaid')
+            amount_u = axfer_dict['txn'].get('aamt')
+            if not asset_id or not amount_u:
+                return cls(success=False, error='AXFER missing asset or amount')
+            token_type = None
+            try:
+                if int(asset_id) == int(getattr(settings, 'ALGORAND_CUSD_ASSET_ID', 0)):
+                    token_type = 'CUSD'
+                elif int(asset_id) == int(getattr(settings, 'ALGORAND_CONFIO_ASSET_ID', 0)):
+                    token_type = 'CONFIO'
+            except Exception:
+                pass
+            if not token_type:
+                return cls(success=False, error=f'Unsupported asset_id {asset_id} for trade')
+
+            # Rebuild sponsor txns deterministically
+            builder = P2PTradeTransactionBuilder()
+            res = builder.build_create_trade(seller_addr_from_user, token_type, int(amount_u), trade_id)
+            if not res.success:
+                return cls(success=False, error=res.error or 'Failed to rebuild sponsor transactions')
+            expected = {int(e.get('index')): e.get('txn') for e in (res.sponsor_transactions or [])}
+
+            # Ensure provided sponsor payloads match server-built canonical ones
+            try:
+                provided = {int((json.loads(s) if isinstance(s, str) else s).get('index')): (json.loads(s) if isinstance(s, str) else s).get('txn') for s in sponsor_transactions or []}
+            except Exception:
+                provided = {}
+            if not expected or expected != provided:
+                return cls(success=False, error='Sponsor transactions mismatch – please re-run prepare and retry')
+
+            signed_by_idx: dict[int, transaction.SignedTransaction] = {}
+            app_call_txn_dict = None
+            for idx, txn_b64 in expected.items():
+                b = base64.b64decode(txn_b64)
                 unpacked = msgpack.unpackb(b, raw=False)
-                # Unsigned txns encode fields at top-level, not under 'txn'
                 txn_core = unpacked if isinstance(unpacked, dict) and 'type' in unpacked else (unpacked or {}).get('txn', {})
                 tx = transaction.Transaction.undictify(unpacked)
-                # Do not inject accounts at submit-time; allow on-chain validation to fail if absent.
                 stx = tx.sign(sk)
-                signed_by_idx[int(e.get('index'))] = stx
+                signed_by_idx[idx] = stx
                 try:
                     ttype = (txn_core or {}).get('type')
                     if ttype == 'appl' and app_call_txn_dict is None:
@@ -682,19 +711,32 @@ class MarkP2PTradePaid(graphene.Mutation):
         except Exception as e:
             return cls(success=False, error=f'Invalid signed AppCall: {e}')
 
-        # Sign sponsor payment and submit pair
+        # Rebuild sponsor txn deterministically to avoid blind signing
         try:
             sponsor_mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
             if not sponsor_mn:
                 return cls(success=False, error='Server missing ALGORAND_SPONSOR_MNEMONIC')
             sk = mnemonic.to_private_key(sponsor_mn)
 
-            parsed = []
-            for s in sponsor_transactions:
-                parsed.append(json.loads(s) if isinstance(s, str) else s)
-            if not parsed:
-                return cls(success=False, error='Missing sponsor transaction')
-            b = base64.b64decode(parsed[0].get('txn'))
+            builder = P2PTradeTransactionBuilder()
+            # Derive buyer address from signed AppCall sender
+            buyer_addr = algo_encoding.encode_address(user_dict['txn'].get('snd')) if user_dict.get('txn', {}).get('snd') else None
+            res = builder.build_mark_paid(buyer_addr, trade_id, payment_ref)
+            if not res.success:
+                return cls(success=False, error=res.error)
+            expected = res.sponsor_transactions or []
+            if not expected or len(expected) != 1:
+                return cls(success=False, error='Unexpected sponsor transaction set')
+
+            # Require client payload to match canonical sponsor txn
+            try:
+                provided = [json.loads(s) if isinstance(s, str) else s for s in sponsor_transactions or []]
+            except Exception:
+                provided = []
+            if not provided or provided[0].get('txn') != expected[0].get('txn') or int(provided[0].get('index')) != int(expected[0].get('index')):
+                return cls(success=False, error='Sponsor transaction mismatch; please re-run prepare')
+
+            b = base64.b64decode(expected[0].get('txn'))
             tx = transaction.Transaction.undictify(msgpack.unpackb(b, raw=False))
             stx0 = tx.sign(sk)
             user_stx = transaction.SignedTransaction.undictify(user_dict)
@@ -760,19 +802,30 @@ class ConfirmP2PTradeReceived(graphene.Mutation):
         except Exception as e:
             return cls(success=False, error=f'Invalid signed AppCall: {e}')
 
-        # Sign sponsor payment and submit pair
+        # Rebuild sponsor txn deterministically to avoid blind signing
         try:
             sponsor_mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
             if not sponsor_mn:
                 return cls(success=False, error='Server missing ALGORAND_SPONSOR_MNEMONIC')
             sk = mnemonic.to_private_key(sponsor_mn)
 
-            parsed = []
-            for s in sponsor_transactions:
-                parsed.append(json.loads(s) if isinstance(s, str) else s)
-            if not parsed:
-                return cls(success=False, error='Missing sponsor transaction')
-            b = base64.b64decode(parsed[0].get('txn'))
+            builder = P2PTradeTransactionBuilder()
+            seller_addr = algo_encoding.encode_address(user_dict['txn'].get('snd')) if user_dict.get('txn', {}).get('snd') else None
+            res = builder.build_confirm_received(seller_addr, trade_id)
+            if not res.success:
+                return cls(success=False, error=res.error)
+            expected = res.sponsor_transactions or []
+            if not expected or len(expected) != 1:
+                return cls(success=False, error='Unexpected sponsor transaction set')
+
+            try:
+                provided = [json.loads(s) if isinstance(s, str) else s for s in sponsor_transactions or []]
+            except Exception:
+                provided = []
+            if not provided or provided[0].get('txn') != expected[0].get('txn') or int(provided[0].get('index')) != int(expected[0].get('index')):
+                return cls(success=False, error='Sponsor transaction mismatch; please re-run prepare')
+
+            b = base64.b64decode(expected[0].get('txn'))
             tx = transaction.Transaction.undictify(msgpack.unpackb(b, raw=False))
             stx0 = tx.sign(sk)
             user_stx = transaction.SignedTransaction.undictify(user_dict)
@@ -894,10 +947,23 @@ class SubmitP2pAcceptTrade(graphene.Mutation):
                 return cls(success=False, error='Server missing ALGORAND_SPONSOR_MNEMONIC')
             sk = mnemonic.to_private_key(sponsor_mn)
 
-            parsed = [json.loads(s) if isinstance(s, str) else s for s in sponsor_transactions or []]
-            if not parsed:
-                return cls(success=False, error='Missing sponsor transaction')
-            b = base64.b64decode(parsed[0].get('txn'))
+            buyer_addr = algo_encoding.encode_address(user_dict['txn'].get('snd')) if user_dict.get('txn', {}).get('snd') else None
+            builder = P2PTradeTransactionBuilder()
+            res = builder.build_accept_trade(buyer_addr, trade_id)
+            if not res.success:
+                return cls(success=False, error=res.error)
+            expected = res.sponsor_transactions or []
+            if not expected or len(expected) != 1:
+                return cls(success=False, error='Unexpected sponsor transaction set')
+
+            try:
+                provided = [json.loads(s) if isinstance(s, str) else s for s in sponsor_transactions or []]
+            except Exception:
+                provided = []
+            if not provided or provided[0].get('txn') != expected[0].get('txn') or int(provided[0].get('index')) != int(expected[0].get('index')):
+                return cls(success=False, error='Sponsor transaction mismatch; please re-run prepare')
+
+            b = base64.b64decode(expected[0].get('txn'))
             stx0 = transaction.Transaction.undictify(msgpack.unpackb(b, raw=False)).sign(sk)
             user_stx = transaction.SignedTransaction.undictify(user_dict)
 
@@ -1225,12 +1291,23 @@ class CancelP2PTrade(graphene.Mutation):
                 return cls(success=False, error='Server missing ALGORAND_SPONSOR_MNEMONIC')
             sk = mnemonic.to_private_key(sponsor_mn)
 
-            parsed = []
-            for s in sponsor_transactions:
-                parsed.append(json.loads(s) if isinstance(s, str) else s)
-            if not parsed:
-                return cls(success=False, error='Missing sponsor transaction')
-            b = base64.b64decode(parsed[0].get('txn'))
+            builder = P2PTradeTransactionBuilder()
+            caller_addr = algo_encoding.encode_address(user_dict['txn'].get('snd')) if user_dict.get('txn', {}).get('snd') else None
+            res = builder.build_cancel_trade(caller_addr, trade_id)
+            if not res.success:
+                return cls(success=False, error=res.error)
+            expected = res.sponsor_transactions or []
+            if not expected or len(expected) != 1:
+                return cls(success=False, error='Unexpected sponsor transaction set')
+
+            try:
+                provided = [json.loads(s) if isinstance(s, str) else s for s in sponsor_transactions or []]
+            except Exception:
+                provided = []
+            if not provided or provided[0].get('txn') != expected[0].get('txn') or int(provided[0].get('index')) != int(expected[0].get('index')):
+                return cls(success=False, error='Sponsor transaction mismatch; please re-run prepare')
+
+            b = base64.b64decode(expected[0].get('txn'))
             tx = transaction.Transaction.undictify(msgpack.unpackb(b, raw=False))
             stx0 = tx.sign(sk)
             user_stx = transaction.SignedTransaction.undictify(user_dict)
@@ -1373,10 +1450,23 @@ class SubmitP2POpenDispute(graphene.Mutation):
                 return cls(success=False, error='Server missing ALGORAND_SPONSOR_MNEMONIC')
             sk = mnemonic.to_private_key(sponsor_mn)
 
-            parsed = [json.loads(s) if isinstance(s, str) else s for s in (sponsor_transactions or [])]
-            if not parsed:
-                return cls(success=False, error='Missing sponsor transaction')
-            b = base64.b64decode(parsed[0].get('txn'))
+            builder = P2PTradeTransactionBuilder()
+            opener_addr = algo_encoding.encode_address(user_dict['txn'].get('snd')) if user_dict.get('txn', {}).get('snd') else None
+            res = builder.build_open_dispute(opener_addr, trade_id, reason or '')
+            if not res.success:
+                return cls(success=False, error=res.error)
+            expected = res.sponsor_transactions or []
+            if not expected or len(expected) != 1:
+                return cls(success=False, error='Unexpected sponsor transaction set')
+
+            try:
+                provided = [json.loads(s) if isinstance(s, str) else s for s in (sponsor_transactions or [])]
+            except Exception:
+                provided = []
+            if not provided or provided[0].get('txn') != expected[0].get('txn') or int(provided[0].get('index')) != int(expected[0].get('index')):
+                return cls(success=False, error='Sponsor transaction mismatch; please re-run prepare')
+
+            b = base64.b64decode(expected[0].get('txn'))
             tx = transaction.Transaction.undictify(msgpack.unpackb(b, raw=False))
             stx0 = tx.sign(sk)
             user_stx = transaction.SignedTransaction.undictify(user_dict)
@@ -1567,6 +1657,17 @@ class SubmitP2PResolveDispute(graphene.Mutation):
             user_dict = msgpack.unpackb(user_signed, raw=False)
             if user_dict.get('txn', {}).get('type') != 'appl':
                 return cls(success=False, error='Signed transaction is not an AppCall')
+            # Extract admin sender and winner address from txn accounts
+            admin_addr = algo_encoding.encode_address(user_dict['txn'].get('snd')) if user_dict.get('txn', {}).get('snd') else None
+            winner_addr = None
+            try:
+                apat = user_dict.get('txn', {}).get('apat') or []
+                if len(apat) >= 2:
+                    winner_addr = algo_encoding.encode_address(apat[1])
+            except Exception:
+                winner_addr = None
+            if not admin_addr or not winner_addr:
+                return cls(success=False, error='Cannot determine admin or winner address from signed transaction')
         except Exception as e:
             return cls(success=False, error=f'Invalid signed AppCall: {e}')
 
@@ -1576,10 +1677,22 @@ class SubmitP2PResolveDispute(graphene.Mutation):
                 return cls(success=False, error='Server missing ALGORAND_SPONSOR_MNEMONIC')
             sk = mnemonic.to_private_key(sponsor_mn)
 
-            parsed = [json.loads(s) if isinstance(s, str) else s for s in (sponsor_transactions or [])]
-            if not parsed:
-                return cls(success=False, error='Missing sponsor transaction')
-            b = base64.b64decode(parsed[0].get('txn'))
+            builder = P2PTradeTransactionBuilder()
+            res = builder.build_resolve_dispute(admin_addr, trade_id, winner_addr)
+            if not res.success:
+                return cls(success=False, error=res.error)
+            expected = res.sponsor_transactions or []
+            if not expected or len(expected) != 1:
+                return cls(success=False, error='Unexpected sponsor transaction set')
+
+            try:
+                provided = [json.loads(s) if isinstance(s, str) else s for s in (sponsor_transactions or [])]
+            except Exception:
+                provided = []
+            if not provided or provided[0].get('txn') != expected[0].get('txn') or int(provided[0].get('index')) != int(expected[0].get('index')):
+                return cls(success=False, error='Sponsor transaction mismatch; please re-run prepare')
+
+            b = base64.b64decode(expected[0].get('txn'))
             tx = transaction.Transaction.undictify(msgpack.unpackb(b, raw=False))
             stx0 = tx.sign(sk)
             user_stx = transaction.SignedTransaction.undictify(user_dict)

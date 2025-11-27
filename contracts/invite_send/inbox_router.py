@@ -32,26 +32,29 @@ def inbox_router_production():
     expiry_days = Bytes("expiry")
     gc_reward_bp = Bytes("gc_reward")
     
-    # Box storage layout (total: 56 bytes, reduced from 64)
-    # Key: claim_code (32 bytes hash)
+    # Box storage layout (total: 88 bytes)
+    # Key: claim_code (32 bytes secret)
     # Value structure:
     #   sender_address: 32 bytes
     #   cusd_amount: 8 bytes
     #   expiry_time: 8 bytes
+    #   recipient_address: 32 bytes (intended recipient; zero-address if unknown)
     #   metadata_hash: 8 bytes
-    BOX_SIZE = Int(56)
+    BOX_SIZE = Int(88)
     
     # Box field offsets
     SENDER_OFFSET = Int(0)
     AMOUNT_OFFSET = Int(32)
     EXPIRY_OFFSET = Int(40)
-    METADATA_OFFSET = Int(48)
+    RECIPIENT_OFFSET = Int(48)
+    METADATA_OFFSET = Int(80)
     
     # Initialize router
     @Subroutine(TealType.uint64)
     def initialize():
         return Seq([
             # cUSD asset ID and sponsor passed as arguments
+            Assert(Txn.sender() == Global.creator_address()),
             Assert(Txn.application_args.length() == Int(2)),
             App.globalPut(cusd_asset_id, Btoi(Txn.application_args[0])),
             App.globalPut(sponsor_address, Txn.application_args[1]),
@@ -104,8 +107,9 @@ def inbox_router_production():
     # Send invite (sponsor-funded)
     @Subroutine(TealType.uint64)
     def send_invite():
-        claim_code = Txn.application_args[1]  # 32-byte hash
+        claim_code = Txn.application_args[1]  # 32-byte secret
         metadata_hash = Txn.application_args[2]  # 8-byte hash
+        intended_recipient = Txn.accounts[1] if Txn.accounts.length() > Int(1) else Global.zero_address()
         key_len = Len(claim_code)
         invite_box_mbr = box_mbr_cost(key_len, BOX_SIZE)
         
@@ -141,9 +145,10 @@ def inbox_router_production():
             # Store invite data
             App.box_replace(claim_code, SENDER_OFFSET, Gtxn[1].sender()),  # Original sender
             App.box_replace(claim_code, AMOUNT_OFFSET, Itob(amount)),
-            App.box_replace(claim_code, EXPIRY_OFFSET, 
+            App.box_replace(claim_code, EXPIRY_OFFSET,
                 Itob(Global.latest_timestamp() + App.globalGet(expiry_days) * Int(86400))
             ),
+            App.box_replace(claim_code, RECIPIENT_OFFSET, intended_recipient),
             App.box_replace(claim_code, METADATA_OFFSET, metadata_hash),
             
             # Update statistics
@@ -161,6 +166,11 @@ def inbox_router_production():
         invite_box_mbr = box_mbr_cost(key_len, BOX_SIZE)
         
         return Seq([
+            # Prevent rekey/close hijack on the app call itself
+            Assert(Txn.rekey_to() == Global.zero_address()),
+            Assert(Txn.close_remainder_to() == Global.zero_address()),
+            Assert(Txn.asset_close_to() == Global.zero_address()),
+
             # Box must exist
             (box_data := App.box_get(claim_code)),
             Assert(box_data[0]),
@@ -170,9 +180,16 @@ def inbox_router_production():
             (sender := Extract(stored_data, SENDER_OFFSET, Int(32))),
             (amount := Btoi(Extract(stored_data, AMOUNT_OFFSET, Int(8)))),
             (expiry := Btoi(Extract(stored_data, EXPIRY_OFFSET, Int(8)))),
+            (intended_recipient := Extract(stored_data, RECIPIENT_OFFSET, Int(32))),
             
             # Check not expired
             Assert(Global.latest_timestamp() <= expiry),
+
+            # If an intended recipient was provided, enforce it
+            Assert(Or(
+                intended_recipient == Global.zero_address(),
+                Txn.sender() == intended_recipient
+            )),
             
             # Check recipient is opted into cUSD
             (recipient_balance := AssetHolding.balance(Txn.sender(), App.globalGet(cusd_asset_id))),
@@ -182,7 +199,8 @@ def inbox_router_production():
             # G0: Payment from sponsor (fee bump)
             # G1: This app call
             Assert(Global.group_size() == Int(2)),
-            Assert(Gtxn[0].sender() == App.globalGet(sponsor_address)),
+            (fee_payer := Gtxn[0].sender()),
+            Assert(fee_payer == App.globalGet(sponsor_address)),
             
             # Transfer cUSD to recipient
             InnerTxnBuilder.Begin(),
@@ -244,7 +262,8 @@ def inbox_router_production():
             # G0: Payment from sponsor (fee bump)
             # G1: This app call
             Assert(Global.group_size() == Int(2)),
-            Assert(Gtxn[0].sender() == App.globalGet(sponsor_address)),
+            (fee_payer := Gtxn[0].sender()),
+            Assert(fee_payer == App.globalGet(sponsor_address)),
             
             # Return cUSD to original sender
             InnerTxnBuilder.Begin(),
@@ -274,10 +293,10 @@ def inbox_router_production():
                         TxnField.amount: gc_reward,
                         TxnField.fee: Int(0)
                     }),
-                    InnerTxnBuilder.Submit(),
-                    
-                    # Refund remainder to sponsor
-                    InnerTxnBuilder.Begin(),
+                InnerTxnBuilder.Submit(),
+                
+                # Refund remainder to sponsor
+                InnerTxnBuilder.Begin(),
                     InnerTxnBuilder.SetFields({
                         TxnField.type_enum: TxnType.Payment,
                         TxnField.receiver: App.globalGet(sponsor_address),
@@ -295,8 +314,8 @@ def inbox_router_production():
                         TxnField.amount: invite_box_mbr,
                         TxnField.fee: Int(0)
                     }),
-                    InnerTxnBuilder.Submit()
-                ])
+                InnerTxnBuilder.Submit()
+            ])
             ),
             
             # Update statistics
@@ -332,8 +351,12 @@ def compile_inbox_router_production():
     return compileTeal(program, Mode.Application, version=8)
 
 def generate_claim_code(phone_or_email: str, salt: str = "") -> bytes:
-    """Generate a 32-byte claim code from phone/email"""
-    return hashlib.sha256(f"{phone_or_email}{salt}".encode()).digest()
+    """
+    Generate a 32-byte claim code.
+    Uses cryptographically secure randomness to avoid predictable hashes of phone/email.
+    """
+    import secrets
+    return secrets.token_bytes(32)
 
 if __name__ == "__main__":
     print(compile_inbox_router_production())

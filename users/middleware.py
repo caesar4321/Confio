@@ -26,19 +26,19 @@ class AuthTokenVersionMiddleware:
         if request.path.startswith('/admin/') or request.path.startswith('/static/') or request.path.startswith('/media/'):
             return self.get_response(request)
 
-        # Skip authentication for refreshToken mutation and legal document query
+        # Skip authentication only for explicitly whitelisted operations (strict)
         if request.path == '/graphql/' and request.method == 'POST':
             try:
                 import json
                 body = request.body.decode('utf-8')
                 data = json.loads(body)
-                query = str(data.get('query', ''))
-                if 'refreshToken' in query or 'legalDocument' in query:
-                    logger.info("Skipping auth for refreshToken mutation or legal document query")
+                op_name = str(data.get('operationName') or '').strip()
+                if op_name in ('refreshToken', 'legalDocument'):
+                    logger.info("Skipping auth for whitelisted public operation: %s", op_name)
                     request.user = AnonymousUser()
                     return self.get_response(request)
             except Exception as e:
-                logger.error(f"Error checking for refreshToken mutation or legal document query: {e}")
+                logger.error(f"Error checking for public GraphQL operation: {e}")
 
         # For all other requests, proceed with normal authentication
         logger.info("=== AuthTokenVersionMiddleware ===")

@@ -240,12 +240,8 @@ class ProductionTransaction:
         In production, this would use proper cryptographic signing
         For zkLogin, this would interface with the zkLogin service
         """
-        # TODO: Implement actual signing
-        # This is a placeholder
-        import hashlib
-        tx_hash = hashlib.sha256(base64.b64decode(tx_bytes)).hexdigest()
-        mock_signature = f"sig_{signature_scheme}_{tx_hash[:32]}"
-        return base64.b64encode(mock_signature.encode()).decode()
+        # Fail closed instead of producing mock signatures
+        raise NotImplementedError("sign_transaction must use a real cryptographic signer; placeholder disabled for safety")
     
     @staticmethod
     async def submit_transaction(

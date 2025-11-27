@@ -62,7 +62,8 @@ class BalanceService:
                 logger.info(f"Force refresh: cleared balance cache for {account.id}:{token}")
             
             # Update database with fresh data
-            balance = cls._update_balance_cache(account, token, blockchain_data['amount'], skip_cache=force_refresh)
+            # Always refresh the cache after a force refresh so subsequent calls get the new value
+            balance = cls._update_balance_cache(account, token, blockchain_data['amount'], skip_cache=False)
             
             return {
                 'amount': balance.amount,

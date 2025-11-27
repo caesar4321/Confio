@@ -271,6 +271,9 @@ class SubmitInviteForPhone(graphene.Mutation):
         if not user.is_authenticated:
             return cls(success=False, error='Not authenticated')
 
+        # Safety: on-chain claim now requires the recipient to self-claim; disable server-mediated claim path
+        return cls(success=False, error='Claim must be performed directly by the recipient wallet')
+
         algod_client = get_algod_client()
 
         # Base64 decode tolerant of urlsafe and missing padding
@@ -326,6 +329,12 @@ class SubmitInviteForPhone(graphene.Mutation):
                 return cls(success=False, error='Server missing ALGORAND_SPONSOR_MNEMONIC')
             sk = mnemonic.to_private_key(sponsor_mn)
 
+            # Strictly validate sponsor txns against expected pattern to avoid blind signing
+            builder = InviteSendTransactionBuilder()
+            expected_mbr = builder._box_mbr_cost(len(invitation_id.encode()), len((message or '').encode()))
+            expected_addr = builder.sponsor_address
+            expected_rcv = builder.app_address
+
             # Debug app global sponsor address
             try:
                 app_id = getattr(settings, 'ALGORAND_INVITE_SEND_APP_ID')
@@ -369,12 +378,30 @@ class SubmitInviteForPhone(graphene.Mutation):
                 pass
 
             signed_by_index: dict[int, transaction.SignedTransaction] = {}
+            sponsor_amounts = []
             for entry in parsed:
                 b = _b64.b64decode(entry.get('txn'))
                 tx_d = msgpack.unpackb(b, raw=False)
+                # Validate before signing
+                if tx_d.get('type') != 'pay':
+                    return cls(success=False, error='Unexpected sponsor txn type (only payment allowed)')
+                if tx_d.get('snd') != algo_encoding.decode_address(expected_addr):
+                    return cls(success=False, error='Sponsor txn sender mismatch')
+                if tx_d.get('rcv') != algo_encoding.decode_address(expected_rcv):
+                    return cls(success=False, error='Sponsor txn receiver mismatch')
+                if tx_d.get('rekey'):
+                    return cls(success=False, error='Sponsor txn must not rekey')
+                if tx_d.get('close'):
+                    return cls(success=False, error='Sponsor txn must not close out')
+                amt = tx_d.get('amt')
+                sponsor_amounts.append(int(amt or 0))
                 tx = transaction.Transaction.undictify(tx_d)
                 stx = tx.sign(sk)
                 signed_by_index[int(entry.get('index'))] = stx
+
+            # Expect exactly two sponsor payments: 0-fee bump and MBR funding
+            if sorted(sponsor_amounts) != sorted([0, expected_mbr]):
+                return cls(success=False, error='Sponsor txn amounts do not match expected pattern (0 and MBR)')
 
             # Determine user txn index as the missing slot
             all_idx = set(signed_by_index.keys())
