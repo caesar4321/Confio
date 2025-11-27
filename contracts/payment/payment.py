@@ -295,10 +295,7 @@ def pay_with_cusd(
         # No inner transactions needed - payments go directly!
         # Just update statistics
         
-        # Update fee balance (fees are now sent directly to fee_recipient, not held)
-        app.state.cusd_fees_balance.set(app.state.cusd_fees_balance.get() + fee_amount.load()),
-        
-        # Update statistics
+        # Do not track fees as a balance (fees go directly to fee_recipient)
         app.state.total_cusd_volume.set(app.state.total_cusd_volume.get() + total_amount.load()),
         app.state.total_cusd_fees_collected.set(app.state.total_cusd_fees_collected.get() + fee_amount.load()),
         
@@ -418,10 +415,7 @@ def pay_with_confio(
         # No inner transactions needed - payments go directly!
         # Just update statistics
         
-        # Update fee balance (fees are now sent directly to fee_recipient, not held)
-        app.state.confio_fees_balance.set(app.state.confio_fees_balance.get() + fee_amount.load()),
-        
-        # Update statistics
+        # Do not track fees as a balance (fees go directly to fee_recipient)
         app.state.total_confio_volume.set(app.state.total_confio_volume.get() + total_amount.load()),
         app.state.total_confio_fees_collected.set(app.state.total_confio_fees_collected.get() + fee_amount.load()),
         Log(Bytes("PWC:END")),
@@ -434,7 +428,8 @@ def pay_with_confio(
 def withdraw_fees():
     """
     Admin withdraws collected fees to fee recipient
-    Only withdraws tracked fee amounts, not entire balance
+    Only withdraws tracked fee amounts, not entire balance.
+    Fees flow directly to recipient; this is effectively a no-op reset.
     """
     req_inners = ScratchVar(TealType.uint64)
     
@@ -455,53 +450,16 @@ def withdraw_fees():
             If(app.state.cusd_fees_balance.get() > Int(0), Int(1), Int(0)) +
             If(app.state.confio_fees_balance.get() > Int(0), Int(1), Int(0))
         ),
-        # Fee must cover: base + dynamic number of inner transfers
+        # Fee must cover: base + dynamic number of inner transfers (likely zero)
         Assert(Txn.fee() >= Global.min_txn_fee() * (Int(1) + req_inners.load())),
         
         # Check actual balances match tracked amounts (clearer failures)
         (cusd_bal := AssetHolding.balance(Global.current_application_address(), app.state.cusd_asset_id)),
         (confio_bal := AssetHolding.balance(Global.current_application_address(), app.state.confio_asset_id)),
         
-        If(app.state.cusd_fees_balance.get() > Int(0),
-           Assert(And(cusd_bal.hasValue(), cusd_bal.value() >= app.state.cusd_fees_balance.get()))
-        ),
-        If(app.state.confio_fees_balance.get() > Int(0),
-           Assert(And(confio_bal.hasValue(), confio_bal.value() >= app.state.confio_fees_balance.get()))
-        ),
-        
-        # Withdraw only tracked Confío Dollar fees
-        If(
-            app.state.cusd_fees_balance.get() > Int(0),
-            Seq(
-                InnerTxnBuilder.Begin(),
-                InnerTxnBuilder.SetFields({
-                    TxnField.type_enum: TxnType.AssetTransfer,
-                    TxnField.xfer_asset: app.state.cusd_asset_id,
-                    TxnField.asset_receiver: app.state.fee_recipient,
-                    TxnField.asset_amount: app.state.cusd_fees_balance.get(),
-                    TxnField.fee: Int(0)
-                }),
-                InnerTxnBuilder.Submit(),
-                app.state.cusd_fees_balance.set(Int(0))
-            )
-        ),
-        
-        # Withdraw only tracked CONFIO fees
-        If(
-            app.state.confio_fees_balance.get() > Int(0),
-            Seq(
-                InnerTxnBuilder.Begin(),
-                InnerTxnBuilder.SetFields({
-                    TxnField.type_enum: TxnType.AssetTransfer,
-                    TxnField.xfer_asset: app.state.confio_asset_id,
-                    TxnField.asset_receiver: app.state.fee_recipient,
-                    TxnField.asset_amount: app.state.confio_fees_balance.get(),
-                    TxnField.fee: Int(0)
-                }),
-                InnerTxnBuilder.Submit(),
-                app.state.confio_fees_balance.set(Int(0))
-            )
-        ),
+        # Clear tracked balances (should be zero already)
+        app.state.cusd_fees_balance.set(Int(0)),
+        app.state.confio_fees_balance.set(Int(0)),
         
         Approve()
     )
@@ -531,7 +489,10 @@ def set_sponsor(sponsor: abi.Address):
     """Admin sets or updates the sponsor address for sponsored transactions"""
     return Seq(
         Assert(Txn.sender() == app.state.admin),
+        # Require contract to be paused before changing sponsor to avoid in-flight surprises
+        Assert(app.state.is_paused == Int(1)),
         Assert(Txn.rekey_to() == Global.zero_address()),
+        Assert(sponsor.get() != Global.zero_address()),
         app.state.sponsor_address.set(sponsor.get()),
         Approve()
     )
