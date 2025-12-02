@@ -91,36 +91,63 @@ const COUNTRY_TO_CURRENCY: { [key: string]: string } = {
 
 // Currency symbols
 const CURRENCY_SYMBOLS: { [key: string]: string } = {
+  // Americas
   'USD': '$',
-  'VES': 'Bs.',
+  'CAD': 'C$',
+  'MXN': '$',
+  'BRL': 'R$',
   'ARS': '$',
   'COP': '$',
   'PEN': 'S/',
   'CLP': '$',
+  'VES': 'Bs.',
   'BOB': 'Bs.',
   'UYU': '$U',
   'PYG': '₲',
-  'BRL': 'R$',
-  'MXN': '$',
+  'DOP': 'RD$',
+
+  // Europe
   'EUR': '€',
   'GBP': '£',
-  'CAD': 'C$',
+  'CHF': 'Fr',
+  'NOK': 'kr',
+  'SEK': 'kr',
+  'DKK': 'kr',
+  'PLN': 'zł',
+  'CZK': 'Kč',
+  'RON': 'lei',
+  'BGN': 'лв',
+  'TRY': '₺',
+  'UAH': '₴',
+
+  // Asia Pacific
   'JPY': '¥',
   'CNY': '¥',
   'KRW': '₩',
   'INR': '₹',
   'SGD': 'S$',
   'AUD': 'A$',
-  'CHF': 'CHF',
+  'NZD': 'NZ$',
+  'HKD': 'HK$',
+  'TWD': 'NT$',
   'THB': '฿',
   'PHP': '₱',
   'MYR': 'RM',
   'IDR': 'Rp',
   'VND': '₫',
-  'TRY': '₺',
-  'ZAR': 'R',
+  'BDT': '৳',
+
+  // Middle East & Africa
   'AED': 'د.إ',
   'SAR': '﷼',
+  'ILS': '₪',
+  'BHD': '.د.ب',
+  'OMR': 'ر.ع.',
+  'ZAR': 'R',
+  'NGN': '₦',
+  'KES': 'KSh',
+  'GHS': '₵',
+  'BWP': 'P',
 };
 
 export type Country = [string, string, string, string]; // [name, phone_code, iso_code, flag]

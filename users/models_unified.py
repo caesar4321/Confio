@@ -12,6 +12,7 @@ class UnifiedTransactionTable(models.Model):
     TRANSACTION_TYPES = [
         ('send', 'Send/Receive'),
         ('payment', 'Payment'),
+        ('payroll', 'Payroll'),
         ('conversion', 'Conversion'),
         ('exchange', 'P2P Exchange'),
         ('reward', 'Reward'),
@@ -72,6 +73,13 @@ class UnifiedTransactionTable(models.Model):
     )
     p2p_trade = models.OneToOneField(
         'p2p_exchange.P2PTrade',
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name='unified_transaction'
+    )
+    payroll_item = models.OneToOneField(
+        'payroll.PayrollItem',
         null=True,
         blank=True,
         on_delete=models.CASCADE,
@@ -164,12 +172,13 @@ class UnifiedTransactionTable(models.Model):
         """
         Determine if this transaction is incoming or outgoing for a given address
         """
-        if self.from_address == address:
-            return 'sent'
-        elif self.to_address == address:
-            return 'received'
-        else:
+        if not address:
             return 'unknown'
+        if self.from_address and self.from_address == address:
+            return 'sent'
+        if self.to_address and self.to_address == address:
+            return 'received'
+        return 'unknown'
             
     def get_display_info_for_address(self, address):
         """

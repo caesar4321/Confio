@@ -26,6 +26,14 @@ project.afterEvaluate {
 // 4) any other scripts (fonts, etc)
 apply from: file("fonts.gradle")
 
+// Proactively clear stale native build artifacts for VisionCamera so CMake regenerates cleanly
+def visionCameraCxxDir = file("$jsRoot/node_modules/react-native-vision-camera/android/.cxx")
+def appCxxDir = file("$projectDir/.cxx")
+tasks.register("cleanVisionCameraCxx", Delete) {
+    delete visionCameraCxxDir, appCxxDir
+}
+tasks.named("preBuild").configure { dependsOn("cleanVisionCameraCxx") }
+
 /**
  * Set this to true to Run Proguard on Release builds to minify the Java bytecode.
  */
@@ -72,8 +80,8 @@ android {
         applicationId "com.Confio.Confio"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 18
-        versionName "1.2"
+        versionCode 19
+        versionName "1.2.1"
         buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", rootProject.ext.newArchEnabled.toString()
         if (rootProject.ext.newArchEnabled) {
             buildConfigField "boolean", "IS_TURBOMODULE_ENABLED", "true"

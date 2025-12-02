@@ -1,0 +1,97 @@
+{
+    "name": "PayrollEscrow",
+    "methods": [
+        {
+            "name": "create",
+            "args": [],
+            "returns": {
+                "type": "void"
+            }
+        },
+        {
+            "name": "setup_asset",
+            "args": [
+                {
+                    "type": "uint64",
+                    "name": "asset_id"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Admin sets payroll asset and opts the app into it."
+        },
+        {
+            "name": "set_fee_recipient",
+            "args": [
+                {
+                    "type": "address",
+                    "name": "addr"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            }
+        },
+        {
+            "name": "set_business_delegates",
+            "args": [
+                {
+                    "type": "address",
+                    "name": "business_account"
+                },
+                {
+                    "type": "address[]",
+                    "name": "add"
+                },
+                {
+                    "type": "address[]",
+                    "name": "remove"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Manage delegates for a business. Admin or that business account."
+        },
+        {
+            "name": "fund_business",
+            "args": [
+                {
+                    "type": "address",
+                    "name": "business_account"
+                },
+                {
+                    "type": "uint64",
+                    "name": "amount"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Increase business vault by amount. Expected group: [axfer business->app, app call]"
+        },
+        {
+            "name": "payout",
+            "args": [
+                {
+                    "type": "address",
+                    "name": "recipient"
+                },
+                {
+                    "type": "uint64",
+                    "name": "net_amount"
+                },
+                {
+                    "type": "string",
+                    "name": "payroll_item_id"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            }
+        }
+    ],
+    "networks": {},
+    "desc": "Confio payroll escrow per-business vault"
+}

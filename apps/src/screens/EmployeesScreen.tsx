@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, memo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, Platform, Modal, Image, RefreshControl, ActivityIndicator, SectionList, Alert, Linking } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
 import { useAccount } from '../contexts/AccountContext';
 import { useApolloClient, useMutation, useQuery, gql } from '@apollo/client';
-import { INVITE_EMPLOYEE, GET_CURRENT_BUSINESS_EMPLOYEES, GET_CURRENT_BUSINESS_INVITATIONS, CANCEL_INVITATION, GET_PAYROLL_RECIPIENTS } from '../apollo/queries';
+import { INVITE_EMPLOYEE, GET_CURRENT_BUSINESS_EMPLOYEES, GET_CURRENT_BUSINESS_INVITATIONS, CANCEL_INVITATION } from '../apollo/queries';
 import { InviteEmployeeModal } from '../components/InviteEmployeeModal';
 import { getCountryByIso } from '../utils/countries';
 
@@ -84,14 +84,14 @@ export const EmployeesScreen = () => {
   const { data: employeesData, loading: employeesLoading, error: employeesError, refetch: refetchEmployees, fetchMore } = useQuery(GET_CURRENT_BUSINESS_EMPLOYEES, {
     variables: { includeInactive: false, first: 50 },
     skip: !isBusinessAccount,
-    fetchPolicy: 'cache-and-network'
+    fetchPolicy: 'cache-and-network',
+    context: {
+      // Force unique cache key per business to prevent cross-business contamination
+      businessId: activeAccount?.business?.id || activeAccount?.id
+    }
   });
   const { data: invitationsData, loading: invitationsLoading, refetch: refetchInvitations } = useQuery(GET_CURRENT_BUSINESS_INVITATIONS, {
     variables: { status: 'pending' },
-    skip: !isBusinessAccount,
-    fetchPolicy: 'cache-and-network'
-  });
-  const { data: payrollRecipientsData } = useQuery(GET_PAYROLL_RECIPIENTS, {
     skip: !isBusinessAccount,
     fetchPolicy: 'cache-and-network'
   });
@@ -99,7 +99,24 @@ export const EmployeesScreen = () => {
 
   const employees = useMemo(() => employeesData?.currentBusinessEmployees || [], [employeesData]);
   const invitations = useMemo(() => invitationsData?.currentBusinessInvitations || [], [invitationsData]);
-  const payrollRecipients = useMemo(() => payrollRecipientsData?.payrollRecipients || [], [payrollRecipientsData]);
+
+  // Refetch when screen gains focus or account changes to prevent stale cache
+  useFocusEffect(
+    useCallback(() => {
+      if (isBusinessAccount) {
+        refetchEmployees();
+        refetchInvitations();
+      }
+    }, [isBusinessAccount, refetchEmployees, refetchInvitations])
+  );
+
+  // Also refetch when active account changes
+  useEffect(() => {
+    if (isBusinessAccount) {
+      refetchEmployees();
+      refetchInvitations();
+    }
+  }, [activeAccount?.id, refetchEmployees, refetchInvitations, isBusinessAccount]);
 
   const filteredEmployees = useMemo(() => {
     if (!searchTerm) return employees;
@@ -149,7 +166,7 @@ export const EmployeesScreen = () => {
         </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.heroTitle}>Empleados</Text>
-          <Text style={styles.heroSubtitle}>Administra tu equipo y permisos de nómina.</Text>
+          <Text style={styles.heroSubtitle}>Agrega tu equipo y conéctalos con la nómina.</Text>
         </View>
       </View>
 
@@ -165,16 +182,16 @@ export const EmployeesScreen = () => {
           <Icon name="chevron-right" size={18} color="#9ca3af" />
         </TouchableOpacity>
 
-        <TouchableOpacity 
+        <TouchableOpacity
           style={[styles.actionButton, { borderColor: '#ebe9fe', backgroundColor: '#f5f3ff' }]}
-          onPress={() => navigation.navigate('PayrollSettings' as any)}
+          onPress={() => navigation.navigate('PayrollHome' as never)}
         >
           <View style={[styles.actionIconContainer, { backgroundColor: '#8B5CF6' }]}>
-            <Icon name="settings" size={18} color="#fff" />
+            <Icon name="dollar-sign" size={18} color="#fff" />
           </View>
           <View style={styles.actionTextContainer}>
-            <Text style={styles.actionButtonTitle}>Configurar nómina</Text>
-            <Text style={styles.actionButtonSubtitle}>Delegados y permisos de pago</Text>
+            <Text style={styles.actionButtonTitle}>Nómina</Text>
+            <Text style={styles.actionButtonSubtitle}>Paga a tu equipo automáticamente</Text>
           </View>
           <Icon name="chevron-right" size={18} color="#9ca3af" />
         </TouchableOpacity>
@@ -201,9 +218,6 @@ export const EmployeesScreen = () => {
           value={searchTerm}
           onChangeText={setSearchTerm}
         />
-        <TouchableOpacity style={styles.searchRefresh} onPress={() => { refetchEmployees(); refetchInvitations(); }}>
-          <Icon name="refresh-cw" size={20} color="#6b7280" />
-        </TouchableOpacity>
       </View>
 
       <SectionList
@@ -311,16 +325,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e5e7eb',
   },
-  searchRefresh: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: '#f9fafb',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-  },
   actionRow: { gap: 10 },
   actionButton: {
     flexDirection: 'row',
@@ -412,25 +416,6 @@ const styles = StyleSheet.create({
     color: '#111827',
   },
   inviteSubtitle: {
-    fontSize: 12,
-    color: '#6b7280',
-  },
-  payrollCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    backgroundColor: '#f9fafb',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    marginBottom: 8,
-  },
-  payrollName: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#111827',
-  },
-  payrollAddress: {
     fontSize: 12,
     color: '#6b7280',
   },

@@ -36,7 +36,7 @@ export const DiscoverScreen = () => {
         title: 'Recarga dólares digitales',
         description: 'Compra dólares estables en minutos con métodos locales.',
         icon: 'dollar-sign',
-        action: () => navigation.navigate('USDCDeposit' as never, { tokenType: 'usdc' } as never),
+        action: () => navigation.navigate('TopUp' as never),
       },
       {
         key: 'invite',
@@ -64,7 +64,7 @@ export const DiscoverScreen = () => {
         title: 'Gestionar nómina y asignar delegados',
         description: 'Configura delegados y destinatarios de nómina.',
         icon: 'briefcase',
-        action: () => navigation.navigate(isBusinessAccount ? ('PayrollSettings' as never) : ('CreateBusiness' as never)),
+        action: () => navigation.navigate(isBusinessAccount ? ('PayrollHome' as never) : ('CreateBusiness' as never)),
       },
     ],
     [navigation, isBusinessAccount]

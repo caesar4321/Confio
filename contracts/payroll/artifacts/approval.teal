@@ -1,0 +1,532 @@
+#pragma version 8
+intcblock 0 1 2 4 10000
+bytecblock 0x706179726f6c6c5f6173736574 0x 0x61646d696e 0x6665655f726563697069656e74 0x5641554c54
+txna ApplicationArgs 0
+pushbytes 0x4c5c61ba // "create()void"
+==
+bnz main_l12
+txna ApplicationArgs 0
+pushbytes 0x6cd18062 // "setup_asset(uint64)void"
+==
+bnz main_l11
+txna ApplicationArgs 0
+pushbytes 0xb53ca258 // "set_fee_recipient(address)void"
+==
+bnz main_l10
+txna ApplicationArgs 0
+pushbytes 0xd87a0509 // "set_business_delegates(address,address[],address[])void"
+==
+bnz main_l9
+txna ApplicationArgs 0
+pushbytes 0x2e43f35a // "fund_business(address,uint64)void"
+==
+bnz main_l8
+txna ApplicationArgs 0
+pushbytes 0x8eee0579 // "payout(address,uint64,string)void"
+==
+bnz main_l7
+err
+main_l7:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub payoutcaster_11
+intc_1 // 1
+return
+main_l8:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub fundbusinesscaster_10
+intc_1 // 1
+return
+main_l9:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub setbusinessdelegatescaster_9
+intc_1 // 1
+return
+main_l10:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub setfeerecipientcaster_8
+intc_1 // 1
+return
+main_l11:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub setupassetcaster_7
+intc_1 // 1
+return
+main_l12:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+==
+&&
+assert
+callsub createcaster_6
+intc_1 // 1
+return
+
+// create
+create_0:
+proto 0 0
+bytec_2 // "admin"
+txn Sender
+app_global_put
+bytec_3 // "fee_recipient"
+txn Sender
+app_global_put
+intc_1 // 1
+return
+
+// setup_asset
+setupasset_1:
+proto 1 0
+txn Sender
+bytec_2 // "admin"
+app_global_get
+==
+assert
+bytec_0 // "payroll_asset"
+app_global_get
+intc_0 // 0
+==
+assert
+frame_dig -1
+intc_0 // 0
+>
+assert
+txn Fee
+global MinTxnFee
+intc_2 // 2
+*
+>=
+assert
+bytec_0 // "payroll_asset"
+frame_dig -1
+app_global_put
+itxn_begin
+intc_3 // axfer
+itxn_field TypeEnum
+frame_dig -1
+itxn_field XferAsset
+global CurrentApplicationAddress
+itxn_field AssetReceiver
+intc_0 // 0
+itxn_field AssetAmount
+intc_0 // 0
+itxn_field Fee
+itxn_submit
+intc_1 // 1
+return
+
+// set_fee_recipient
+setfeerecipient_2:
+proto 1 0
+txn Sender
+bytec_2 // "admin"
+app_global_get
+==
+assert
+txn RekeyTo
+global ZeroAddress
+==
+assert
+bytec_3 // "fee_recipient"
+frame_dig -1
+app_global_put
+intc_1 // 1
+return
+
+// set_business_delegates
+setbusinessdelegates_3:
+proto 3 0
+intc_0 // 0
+bytec_1 // ""
+intc_0 // 0
+dup
+bytec_1 // ""
+intc_0 // 0
+frame_dig -3
+store 1
+txn Sender
+bytec_2 // "admin"
+app_global_get
+==
+txn Sender
+load 1
+==
+||
+assert
+intc_0 // 0
+store 0
+setbusinessdelegates_3_l1:
+load 0
+frame_dig -2
+intc_0 // 0
+extract_uint16
+frame_bury 0
+frame_dig 0
+<
+bnz setbusinessdelegates_3_l5
+intc_0 // 0
+store 0
+setbusinessdelegates_3_l3:
+load 0
+frame_dig -1
+intc_0 // 0
+extract_uint16
+frame_bury 3
+frame_dig 3
+<
+bz setbusinessdelegates_3_l6
+frame_dig -1
+pushint 32 // 32
+load 0
+*
+intc_2 // 2
++
+pushint 32 // 32
+extract3
+frame_bury 4
+frame_dig 4
+store 2
+load 1
+load 2
+concat
+box_del
+store 3
+load 0
+intc_1 // 1
++
+store 0
+b setbusinessdelegates_3_l3
+setbusinessdelegates_3_l5:
+frame_dig -2
+pushint 32 // 32
+load 0
+*
+intc_2 // 2
++
+pushint 32 // 32
+extract3
+frame_bury 1
+frame_dig 1
+store 2
+load 1
+load 2
+concat
+intc_1 // 1
+itob
+box_put
+load 0
+intc_1 // 1
++
+store 0
+b setbusinessdelegates_3_l1
+setbusinessdelegates_3_l6:
+intc_1 // 1
+return
+
+// fund_business
+fundbusiness_4:
+proto 2 0
+bytec_0 // "payroll_asset"
+app_global_get
+intc_0 // 0
+!=
+assert
+global GroupSize
+intc_2 // 2
+==
+assert
+txn GroupIndex
+intc_1 // 1
+==
+assert
+gtxn 0 TypeEnum
+intc_3 // axfer
+==
+assert
+gtxn 0 XferAsset
+bytec_0 // "payroll_asset"
+app_global_get
+==
+assert
+gtxn 0 AssetReceiver
+global CurrentApplicationAddress
+==
+assert
+gtxn 0 AssetAmount
+frame_dig -1
+==
+assert
+gtxn 0 Sender
+frame_dig -2
+==
+assert
+bytec 4 // "VAULT"
+frame_dig -2
+concat
+store 4
+load 4
+box_get
+store 9
+store 8
+load 9
+store 5
+load 8
+store 7
+load 5
+bnz fundbusiness_4_l2
+intc_0 // 0
+b fundbusiness_4_l3
+fundbusiness_4_l2:
+load 7
+btoi
+fundbusiness_4_l3:
+store 6
+load 6
+frame_dig -1
++
+store 6
+load 4
+load 6
+itob
+box_put
+intc_1 // 1
+return
+
+// payout
+payout_5:
+proto 3 0
+bytec_0 // "payroll_asset"
+app_global_get
+intc_0 // 0
+!=
+assert
+pushbytes 0x69735f706175736564 // "is_paused"
+app_global_get
+intc_0 // 0
+==
+assert
+txn NumAccounts
+intc_1 // 1
+>=
+assert
+txna Accounts 0
+store 13
+load 13
+txn Sender
+concat
+box_get
+store 19
+store 18
+load 19
+assert
+global LatestTimestamp
+store 12
+frame_dig -2
+intc 4 // 10000
+*
+intc 4 // 10000
+pushint 90 // 90
+-
+intc_1 // 1
+-
++
+intc 4 // 10000
+pushint 90 // 90
+-
+/
+store 10
+load 10
+frame_dig -2
+-
+store 11
+bytec 4 // "VAULT"
+load 13
+concat
+store 16
+load 16
+box_get
+store 21
+store 20
+load 21
+assert
+load 20
+btoi
+store 17
+load 17
+load 10
+>=
+assert
+load 17
+load 10
+-
+store 17
+load 16
+load 17
+itob
+box_put
+frame_dig -3
+store 14
+itxn_begin
+intc_3 // axfer
+itxn_field TypeEnum
+bytec_0 // "payroll_asset"
+app_global_get
+itxn_field XferAsset
+load 14
+itxn_field AssetReceiver
+frame_dig -2
+itxn_field AssetAmount
+intc_0 // 0
+itxn_field Fee
+itxn_submit
+itxn_begin
+intc_3 // axfer
+itxn_field TypeEnum
+bytec_0 // "payroll_asset"
+app_global_get
+itxn_field XferAsset
+bytec_3 // "fee_recipient"
+app_global_get
+itxn_field AssetReceiver
+load 11
+itxn_field AssetAmount
+intc_0 // 0
+itxn_field Fee
+itxn_submit
+load 14
+frame_dig -2
+itob
+concat
+load 11
+itob
+concat
+load 10
+itob
+concat
+txn Sender
+concat
+load 12
+itob
+concat
+store 15
+frame_dig -1
+extract 2 0
+load 15
+box_put
+intc_1 // 1
+return
+
+// create_caster
+createcaster_6:
+proto 0 0
+callsub create_0
+retsub
+
+// setup_asset_caster
+setupassetcaster_7:
+proto 0 0
+intc_0 // 0
+txna ApplicationArgs 1
+btoi
+frame_bury 0
+frame_dig 0
+callsub setupasset_1
+retsub
+
+// set_fee_recipient_caster
+setfeerecipientcaster_8:
+proto 0 0
+bytec_1 // ""
+txna ApplicationArgs 1
+frame_bury 0
+frame_dig 0
+callsub setfeerecipient_2
+retsub
+
+// set_business_delegates_caster
+setbusinessdelegatescaster_9:
+proto 0 0
+bytec_1 // ""
+dupn 2
+txna ApplicationArgs 1
+frame_bury 0
+txna ApplicationArgs 2
+frame_bury 1
+txna ApplicationArgs 3
+frame_bury 2
+frame_dig 0
+frame_dig 1
+frame_dig 2
+callsub setbusinessdelegates_3
+retsub
+
+// fund_business_caster
+fundbusinesscaster_10:
+proto 0 0
+bytec_1 // ""
+intc_0 // 0
+txna ApplicationArgs 1
+frame_bury 0
+txna ApplicationArgs 2
+btoi
+frame_bury 1
+frame_dig 0
+frame_dig 1
+callsub fundbusiness_4
+retsub
+
+// payout_caster
+payoutcaster_11:
+proto 0 0
+bytec_1 // ""
+intc_0 // 0
+bytec_1 // ""
+txna ApplicationArgs 1
+frame_bury 0
+txna ApplicationArgs 2
+btoi
+frame_bury 1
+txna ApplicationArgs 3
+frame_bury 2
+frame_dig 0
+frame_dig 1
+frame_dig 2
+callsub payout_5
+retsub

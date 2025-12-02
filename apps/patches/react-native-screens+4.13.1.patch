@@ -1,19 +1,17 @@
 diff --git a/node_modules/react-native-screens/ios/RNSScreenStackHeaderConfig.mm b/node_modules/react-native-screens/ios/RNSScreenStackHeaderConfig.mm
-index 1234567..8901234 100644
+index 18667648..017c290e 100644
 --- a/node_modules/react-native-screens/ios/RNSScreenStackHeaderConfig.mm
 +++ b/node_modules/react-native-screens/ios/RNSScreenStackHeaderConfig.mm
-@@ -150,6 +150,14 @@ @implementation RNSScreenStackHeaderConfig {
- 
- @synthesize translucent = _translucent;
+@@ -150,6 +150,12 @@ - (UIView *)reactSuperview
+ }
+ RNS_IGNORE_SUPER_CALL_END
  
 +- (void)setColor:(UIColor *)color
 +{
-+  // This is a workaround for React Native 0.79.x compatibility
-+  // The color property should not be set on this view
-+  // Instead, it should be handled through backgroundColor
++  // RN 0.79 compatibility: forward header color to backgroundColor to avoid invalid setter
 +  [super setBackgroundColor:color];
 +}
 +
- - (instancetype)initWithFrame:(CGRect)frame
+ - (void)removeFromSuperview
  {
-   if (self = [super initWithFrame:frame]) {
+   [super removeFromSuperview];

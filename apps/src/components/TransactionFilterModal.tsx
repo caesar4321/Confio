@@ -19,6 +19,7 @@ export interface TransactionFilters {
     conversion: boolean;
     reward: boolean;
     presale: boolean;
+    payroll: boolean;
   };
   currencies: {
     cUSD: boolean;
@@ -71,6 +72,7 @@ export const TransactionFilterModal = ({
         conversion: true,
         reward: true,
         presale: true,
+        payroll: true,
       },
       currencies: {
         cUSD: true,
@@ -150,8 +152,8 @@ export const TransactionFilterModal = ({
       onRequestClose={onClose}
     >
       <View style={styles.modalOverlay}>
-        <TouchableOpacity 
-          style={styles.modalBackdrop} 
+        <TouchableOpacity
+          style={styles.modalBackdrop}
           activeOpacity={1}
           onPress={onClose}
         />
@@ -252,6 +254,18 @@ export const TransactionFilterModal = ({
                     Preventa
                   </Text>
                 </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.filterChip,
+                    filters.types.payroll && { backgroundColor: '#059669' + '20', borderColor: '#059669' }
+                  ]}
+                  onPress={() => toggleType('payroll')}
+                >
+                  <Icon name="briefcase" size={16} color={filters.types.payroll ? '#059669' : '#6B7280'} />
+                  <Text style={[styles.filterChipText, filters.types.payroll && { color: '#059669' }]}>
+                    Nómina
+                  </Text>
+                </TouchableOpacity>
               </View>
             </View>
 
@@ -341,15 +355,15 @@ export const TransactionFilterModal = ({
                     key={option.value}
                     style={[
                       styles.filterChip,
-                      filters.timeRange === option.value && { 
-                        backgroundColor: theme.primary + '20', 
-                        borderColor: theme.primary 
+                      filters.timeRange === option.value && {
+                        backgroundColor: theme.primary + '20',
+                        borderColor: theme.primary
                       }
                     ]}
                     onPress={() => setTimeRange(option.value as TransactionFilters['timeRange'])}
                   >
                     <Text style={[
-                      styles.filterChipText, 
+                      styles.filterChipText,
                       filters.timeRange === option.value && { color: theme.primary }
                     ]}>
                       {option.label}
@@ -361,13 +375,13 @@ export const TransactionFilterModal = ({
           </ScrollView>
 
           <View style={styles.modalFooter}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.resetButton}
               onPress={handleReset}
             >
               <Text style={styles.resetButtonText}>Restablecer</Text>
             </TouchableOpacity>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[styles.applyButton, { backgroundColor: theme.primary }]}
               onPress={handleApply}
             >

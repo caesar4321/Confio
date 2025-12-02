@@ -334,7 +334,7 @@ export const SendToFriendScreen = () => {
               <Text style={styles.valueHighlightText}>
                 💡 <Text style={styles.bold}>Confío: 0% comisión</Text>{'\n'}
                 vs. remesadoras tradicionales <Text style={styles.bold}>(5%-20%)</Text>{'\n'}
-                Apoyamos a los venezolanos 🇻🇪 con transferencias gratuitas
+                Apoyamos a los argentinos 🇦🇷 con transferencias gratuitas
               </Text>
             </View>
           </View>

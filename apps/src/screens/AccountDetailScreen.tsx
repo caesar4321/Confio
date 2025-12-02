@@ -42,6 +42,7 @@ import { useAccount } from '../contexts/AccountContext';
 import * as Keychain from 'react-native-keychain';
 import { useContactNameSync } from '../hooks/useContactName';
 import { TransactionFilterModal, TransactionFilters } from '../components/TransactionFilterModal';
+import { useAuth } from '../contexts/AuthContext';
 
 // Color palette
 const colors = {
@@ -71,7 +72,7 @@ type AccountDetailScreenRouteProp = RouteProp<MainStackParamList, 'AccountDetail
 
 interface Transaction {
   id?: string;
-  type: 'received' | 'sent' | 'exchange' | 'payment' | 'conversion' | 'reward' | 'presale';
+  type: 'received' | 'sent' | 'exchange' | 'payment' | 'conversion' | 'reward' | 'presale' | 'payroll';
   from?: string;
   to?: string;
   fromPhone?: string;
@@ -112,7 +113,8 @@ export const AccountDetailScreen = () => {
   const route = useRoute<AccountDetailScreenRouteProp>();
   const { formatNumber, formatCurrency } = useNumberFormat();
   const { activeAccount } = useAccount();
-  
+  const { isAuthenticated, isLoading: authLoading, accountContextTick } = useAuth();
+
   // Helpers to avoid overstating balances
   const floorToDecimals = useCallback((value: number, decimals: number) => {
     if (!isFinite(value)) return 0;
@@ -131,21 +133,21 @@ export const AccountDetailScreen = () => {
     if (v < 0.01) return '< 0.01';
     return formatFixedFloor(v, 2);
   }, [formatFixedFloor]);
-  
+
   // Helper function to format transaction amounts to 2 decimal places
   const formatTransactionAmount = (amount: string): string => {
     // Remove any sign (+/-) temporarily
     const sign = amount.startsWith('-') ? '-' : amount.startsWith('+') ? '+' : '';
     const numericAmount = amount.replace(/^[+-]/, '');
-    
+
     // Parse and format to 2 decimal places
     const parsedAmount = parseFloat(numericAmount);
     const formattedAmount = parsedAmount.toFixed(2);
-    
+
     // Return with sign
     return sign + formattedAmount;
   };
-  
+
   // Check if employee has permission to view balance
   const canViewBalance = !activeAccount?.isEmployee || activeAccount?.employeePermissions?.viewBalance;
   const [showBalance, setShowBalance] = useState(canViewBalance);
@@ -174,11 +176,12 @@ export const AccountDetailScreen = () => {
       conversion: true,
       reward: true,
       presale: true,
+      payroll: true,
     },
     currencies: {
       cUSD: true,
       CONFIO: true,
-      ...(activeAccount?.isEmployee ? {} : { USDC: true }),
+      USDC: !activeAccount?.isEmployee,
     },
     status: {
       completed: true,
@@ -190,7 +193,8 @@ export const AccountDetailScreen = () => {
       max: '',
     },
   });
-  
+  const canQueryTransactions = isAuthenticated && !authLoading;
+
   // Save balance visibility preference for this account type
   const saveBalanceVisibility = async (isVisible: boolean) => {
     try {
@@ -212,7 +216,7 @@ export const AccountDetailScreen = () => {
       // Use account type in the service name for proper isolation
       const service = `${PREFERENCES_KEYCHAIN_SERVICE}.${route.params.accountType}`;
       const result = await Keychain.getInternetCredentials(service);
-      
+
       if (result && result.password) {
         setShowBalance(result.password === 'true');
       }
@@ -228,7 +232,7 @@ export const AccountDetailScreen = () => {
     setShowBalance(newVisibility);
     saveBalanceVisibility(newVisibility);
   }, [showBalance, saveBalanceVisibility]);
-  
+
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const searchAnim = useRef(new Animated.Value(0)).current;
@@ -239,7 +243,7 @@ export const AccountDetailScreen = () => {
   const { data: balancesData, refetch: refetchBalances, loading: balancesLoading } = useQuery(GET_MY_BALANCES, {
     fetchPolicy: 'no-cache',
   });
-  
+
   // Use real-time balance if available, otherwise fallback to route params
   const confioLive = React.useMemo(() => parseFloat(balancesData?.myBalances?.confio || '0'), [balancesData?.myBalances?.confio]);
   const confioLocked = React.useMemo(() => (isConfio ? parseFloat(balancesData?.myBalances?.confioPresaleLocked || '0') : 0), [balancesData?.myBalances?.confioPresaleLocked, isConfio]);
@@ -254,7 +258,7 @@ export const AccountDetailScreen = () => {
     if (!isFinite(v)) return route.params.accountBalance;
     return v.toFixed(2);
   }, [isCusd, cusdLive, confioLive, confioLocked, route.params.accountBalance]);
-  
+
   // Account data from navigation params
   const accountAddress = route.params.accountAddress || '';
   const account = {
@@ -267,11 +271,11 @@ export const AccountDetailScreen = () => {
     address: accountAddress,
     addressShort: accountAddress ? `${accountAddress.slice(0, 6)}...${accountAddress.slice(-6)}` : '',
     exchangeRate: "1 USDC = 1 cUSD",
-    description: route.params.accountType === 'cusd' 
+    description: route.params.accountType === 'cusd'
       ? "Moneda estable respaldada 1:1 por dólares estadounidenses (USD)"
-              : "Moneda de gobernanza de Confío"
+      : "Moneda de gobernanza de Confío"
   };
-  
+
   // Debug logging
   console.log('AccountDetailScreen - Account info:', {
     activeAccountType: activeAccount?.type,
@@ -294,8 +298,8 @@ export const AccountDetailScreen = () => {
   });
 
   // Parse USDC balance
-  const usdcBalance = React.useMemo(() => 
-    parseFloat(usdcBalanceData?.accountBalance || '0'), 
+  const usdcBalance = React.useMemo(() =>
+    parseFloat(usdcBalanceData?.accountBalance || '0'),
     [usdcBalanceData?.accountBalance]
   );
 
@@ -339,21 +343,24 @@ export const AccountDetailScreen = () => {
       loop?.stop();
     };
   }, [hasUsdcToConvert, convertPulseAnim]);
-  
+
   // JWT-context-aware transactions query
   const queryVariables = {
     limit: transactionLimit,
     offset: 0, // Always start with offset 0 for initial query
-    tokenTypes: route.params.accountType === 'cusd' ? 
-      (activeAccount?.isEmployee ? ['CUSD'] : ['CUSD', 'USDC']) : 
-      ['CONFIO']
+    tokenTypes: route.params.accountType === 'cusd'
+      ? (activeAccount?.isEmployee ? ['CUSD'] : ['CUSD', 'USDC'])
+      : ['CONFIO']
   };
-  
+
   console.log('AccountDetailScreen - JWT GraphQL query variables:', queryVariables);
-  
+
   const { data: unifiedTransactionsData, loading: unifiedLoading, error: unifiedError, refetch: refetchUnified, fetchMore } = useQuery(GET_CURRENT_ACCOUNT_TRANSACTIONS, {
     variables: queryVariables,
-    skip: false, // Enable unified transactions
+    skip: !canQueryTransactions || !activeAccount, // Wait for auth/account context
+    fetchPolicy: 'network-only',
+    nextFetchPolicy: 'cache-first',
+    notifyOnNetworkStatusChange: true,
     onCompleted: (data) => {
       console.log('AccountDetailScreen - JWT context query completed:', {
         hasData: !!data,
@@ -364,11 +371,11 @@ export const AccountDetailScreen = () => {
       console.error('AccountDetailScreen - Unified query error:', error);
     }
   });
-  
+
   if (unifiedError) {
     console.error('AccountDetailScreen - Query error details:', unifiedError);
   }
-  
+
   // Check if presale is globally active
   const { data: presaleStatusData } = useQuery(GET_PRESALE_STATUS, {
     fetchPolicy: 'cache-and-network',
@@ -377,7 +384,7 @@ export const AccountDetailScreen = () => {
 
   // Refresh balance mutation for force-refreshing from blockchain
   const [refreshBalanceMutation] = useMutation(REFRESH_ACCOUNT_BALANCE);
-  
+
   // Conversion mutations
   // const [convertUsdcToCusd] = useMutation(CONVERT_USDC_TO_CUSD); // Removed - handled in USDCConversion screen
   // const [convertCusdToUsdc] = useMutation(CONVERT_CUSD_TO_USDC); // Removed - handled in USDCConversion screen
@@ -390,20 +397,50 @@ export const AccountDetailScreen = () => {
       useNativeDriver: true,
     }).start();
   }, [fadeAnim]);
-  
+
   // Load balance visibility preference on mount
   useEffect(() => {
     loadBalanceVisibility();
   }, [route.params.accountType]);
-  
+
+  // Ensure transactions refresh once auth/account context is ready (after app resume/login)
+  useEffect(() => {
+    if (!canQueryTransactions || !activeAccount) return;
+
+    const tokenTypes = route.params.accountType === 'cusd'
+      ? (activeAccount?.isEmployee ? ['CUSD'] : ['CUSD', 'USDC'])
+      : ['CONFIO'];
+
+    setTransactionLimit(20);
+    setTransactionOffset(0);
+    setHasReachedEnd(false);
+    setAllTransactions([]);
+
+    refetchUnified({
+      limit: 20,
+      offset: 0,
+      tokenTypes,
+    });
+    refetchBalances();
+    if (shouldFetchUSDC) {
+      refetchUSDC();
+    }
+  }, [accountContextTick, canQueryTransactions, route.params.accountType, activeAccount?.isEmployee, refetchUnified, refetchBalances, shouldFetchUSDC, refetchUSDC]);
+
   // Refetch transactions when active account changes
   useEffect(() => {
-    if (activeAccount) {
+    if (activeAccount && canQueryTransactions) {
       console.log('AccountDetailScreen - Active account changed, refetching transactions');
-      refetchUnified();
+      refetchUnified({
+        limit: transactionLimit,
+        offset: 0,
+        tokenTypes: route.params.accountType === 'cusd'
+          ? (activeAccount?.isEmployee ? ['CUSD'] : ['CUSD', 'USDC'])
+          : ['CONFIO']
+      });
     }
-  }, [activeAccount?.id, activeAccount?.type, activeAccount?.index]);
-  
+  }, [activeAccount?.id, activeAccount?.type, activeAccount?.index, canQueryTransactions]);
+
   // Search animation
   useEffect(() => {
     Animated.timing(searchAnim, {
@@ -412,7 +449,7 @@ export const AccountDetailScreen = () => {
       useNativeDriver: true,
     }).start();
   }, [showSearch, searchAnim]);
-  
+
   // Listen for refresh trigger from navigation params
   useEffect(() => {
     // @ts-ignore - route params type
@@ -421,22 +458,26 @@ export const AccountDetailScreen = () => {
       onRefresh();
     }
   }, [route.params, onRefresh]);
-  
+
   // Pull to refresh handler
   const onRefresh = useCallback(async () => {
+    if (!canQueryTransactions) {
+      return;
+    }
+
     setRefreshing(true);
     if (Platform.OS === 'ios') {
       Vibration.vibrate(10);
     }
-    
+
     try {
       // First force refresh from blockchain
       const { data: refreshData } = await refreshBalanceMutation();
-      
+
       if (refreshData?.refreshAccountBalance?.success) {
         console.log('AccountDetailScreen - Balances refreshed from blockchain:', refreshData.refreshAccountBalance.balances);
       }
-      
+
       // Then refresh balance, USDC (if applicable), and transactions
       const promises = [
         refetchBalances(),
@@ -445,8 +486,8 @@ export const AccountDetailScreen = () => {
           accountIndex: activeAccount?.index || 0,
           limit: 20,
           offset: 0,
-          tokenTypes: route.params.accountType === 'cusd' ? 
-            (activeAccount?.isEmployee ? ['CUSD'] : ['CUSD', 'USDC']) : 
+          tokenTypes: route.params.accountType === 'cusd' ?
+            (activeAccount?.isEmployee ? ['CUSD'] : ['CUSD', 'USDC']) :
             ['CONFIO']
         })
       ];
@@ -454,7 +495,7 @@ export const AccountDetailScreen = () => {
       if (shouldFetchUSDC) {
         promises.push(refetchUSDC());
       }
-      
+
       const [_, { data }] = await Promise.all(promises);
       setAllTransactions(data?.currentAccountTransactions || []);
       setTransactionLimit(20);
@@ -465,16 +506,19 @@ export const AccountDetailScreen = () => {
     } finally {
       setRefreshing(false);
     }
-  }, [refetchUnified, refetchBalances, activeAccount, route.params.accountType]);
+  }, [refetchUnified, refetchBalances, activeAccount, route.params.accountType, canQueryTransactions, shouldFetchUSDC, refetchUSDC]);
 
   // NEW: Transform unified transactions into the format expected by the UI
   const formatUnifiedTransactions = () => {
     const formattedTransactions: Transaction[] = [];
+    const sourceTransactions = allTransactions.length > 0
+      ? allTransactions
+      : (unifiedTransactionsData?.currentAccountTransactions || []);
 
-    if (allTransactions.length > 0) {
-      allTransactions.forEach((tx: any) => {
+    if (sourceTransactions.length > 0) {
+      sourceTransactions.forEach((tx: any) => {
         // Determine transaction type based on both transactionType and direction
-        let type: 'sent' | 'received' | 'payment' | 'conversion' | 'exchange' | 'reward' | 'presale' = 'sent';
+        let type: 'sent' | 'received' | 'payment' | 'conversion' | 'exchange' | 'reward' | 'presale' | 'payroll' = 'sent';
         const normalizedTxType = (tx.transactionType || '').toLowerCase();
         if (normalizedTxType === 'payment') {
           type = 'payment';
@@ -486,12 +530,21 @@ export const AccountDetailScreen = () => {
           type = 'reward';
         } else if (normalizedTxType === 'presale') {
           type = 'presale';
+        } else if (normalizedTxType === 'payroll') {
+          type = 'payroll';
+          console.log('[Transaction Type Detection]', {
+            txId: tx.id,
+            normalizedTxType,
+            rawTxType: tx.transactionType,
+            detectedType: type,
+            direction: tx.direction
+          });
         } else {
           type = tx.direction === 'sent' ? 'sent' : 'received';
         }
         const isReward = type === 'reward';
         const isPresale = type === 'presale';
-        
+
         // Fix invitation detection: 
         // 1. If we have a counterpartyUser, it's not an invitation
         // 2. If it's marked as invitation but has no phone (external wallet), it's not a real invitation
@@ -506,7 +559,7 @@ export const AccountDetailScreen = () => {
           console.log('[AccountDetail] Not an invitation - external wallet send (no phone)');
           isActualInvitation = false;
         }
-        
+
         // Debug logging
         console.log('[AccountDetail] Transaction:', {
           id: tx.id,
@@ -521,7 +574,7 @@ export const AccountDetailScreen = () => {
           counterpartyAddress: tx.counterpartyAddress,
           counterpartyUser: tx.counterpartyUser
         });
-        
+
         // For proper contact name lookup, we need to pass the phone numbers
         // The displayCounterparty is the DB name, but we want local contact names
         // Debug payment transaction
@@ -535,16 +588,16 @@ export const AccountDetailScreen = () => {
             shouldSetTo: (type === 'payment' && tx.direction === 'sent')
           });
         }
-        
+
         // Handle conversion transactions
         const isConversion = type === 'conversion';
-        
+
         // For conversions, prepare default values
         let conversionAmount = tx.amount; // Use raw amount, will be formatted below
         let conversionType: string | undefined;
         let conversionFromToken: string | undefined;
         let conversionToToken: string | undefined;
-        
+
         if (isConversion) {
           console.log('[Conversion Raw Data]', {
             id: tx.id,
@@ -557,10 +610,10 @@ export const AccountDetailScreen = () => {
             displayAmount: tx.displayAmount,
             tokenType: tx.tokenType
           });
-          
+
           // Parse conversion type from description if server fields not available
           conversionType = tx.conversionType;
-          console.log('[Conversion Type Detection]', { 
+          console.log('[Conversion Type Detection]', {
             txId: tx.id,
             txConversionType: tx.conversionType,
             description: tx.description,
@@ -584,7 +637,7 @@ export const AccountDetailScreen = () => {
             conversionFromToken = 'cUSD';
             conversionToToken = 'USDC';
           }
-          
+
           // For cUSD account view, always show cUSD amount with proper sign
           if (conversionType === 'usdc_to_cusd') {
             // USDC to cUSD: gaining cUSD (+)
@@ -611,12 +664,12 @@ export const AccountDetailScreen = () => {
             }
           }
         }
-        
+
         // Check if this is an external deposit
         const isExternalDeposit = !isReward && type === 'received' && tx.senderType?.toLowerCase() === 'external';
         const rewardDescription = isReward ? (tx.displayDescription || tx.description || 'Recompensa por referidos') : undefined;
         const presaleDescription = isPresale ? (tx.displayDescription || tx.description || 'Compra de preventa $CONFIO') : undefined;
-        
+
         // Debug external deposits
         if (type === 'received' && tx.senderType) {
           console.log('[External Deposit Debug]', {
@@ -628,11 +681,11 @@ export const AccountDetailScreen = () => {
             senderAddress: tx.senderAddress,
           });
         }
-        
+
         // Format the from field - truncate address if it's an external deposit
         let fromDisplay = undefined;
         let toDisplay = undefined;
-        
+
         if (isConversion) {
           fromDisplay = conversionType === 'usdc_to_cusd' ? 'USDC' : conversionType === 'cusd_to_usdc' ? 'cUSD' : undefined;
           toDisplay = conversionType === 'usdc_to_cusd' ? 'cUSD' : conversionType === 'cusd_to_usdc' ? 'USDC' : undefined;
@@ -658,12 +711,50 @@ export const AccountDetailScreen = () => {
           }
         } else if ((type === 'payment' && tx.direction === 'sent') || (type === 'sent')) {
           toDisplay = tx.displayCounterparty;
+        } else if (type === 'payroll') {
+          if (tx.direction === 'received') {
+            fromDisplay = tx.senderDisplayName || tx.displayCounterparty;
+          } else {
+            toDisplay = tx.counterpartyDisplayName || tx.displayCounterparty;
+          }
+          console.log('[Payroll Transaction]', {
+            type,
+            direction: tx.direction,
+            senderDisplayName: tx.senderDisplayName,
+            counterpartyDisplayName: tx.counterpartyDisplayName,
+            displayCounterparty: tx.displayCounterparty,
+            fromDisplay,
+            toDisplay
+          });
         }
-        
+
+        // Ensure display amount has a sign for proper direction (helps payroll visibility)
+        let signedDisplayAmount = tx.displayAmount;
+        if (!signedDisplayAmount) {
+          const base = tx.amount ?? '0';
+          const sign = tx.direction === 'sent' ? '-' : '+';
+          signedDisplayAmount = `${sign}${base}`;
+        } else if (!(signedDisplayAmount.startsWith('+') || signedDisplayAmount.startsWith('-'))) {
+          const sign = tx.direction === 'sent' ? '-' : '+';
+          signedDisplayAmount = `${sign}${signedDisplayAmount}`;
+        }
+
         // Map backend status to UI status labels
         const rawStatus = (tx.status || '').toUpperCase();
-        const mappedStatus: 'completed' | 'pending' | 'failed' =
-          rawStatus === 'CONFIRMED' ? 'completed' : rawStatus === 'FAILED' ? 'failed' : 'pending';
+        const mappedStatus: 'completed' | 'pending' | 'failed' = (() => {
+          switch (rawStatus) {
+            case 'CONFIRMED':
+              return 'completed';
+            case 'FAILED':
+              return 'failed';
+            case 'SUBMITTED':
+            case 'PENDING':
+            case 'PROCESSING':
+              return 'pending';
+            default:
+              return 'pending';
+          }
+        })();
 
         // Derive phone keys from nested users when available
         const fromPhoneKey = (tx.senderUser && (tx.senderUser as any).phoneKey) || tx.senderPhone || (tx as any).fromPhone;
@@ -671,18 +762,39 @@ export const AccountDetailScreen = () => {
 
         const finalDescription = isConversion ? tx.description : isReward ? rewardDescription : isPresale ? presaleDescription : tx.description;
 
+        const payrollBusinessName = (() => {
+          if (type !== 'payroll') return undefined;
+          // For payroll, the business is the sender; use sender display/name as business name
+          return (
+            tx.senderBusiness?.name ||
+            fromDisplay ||
+            tx.senderDisplayName ||
+            tx.counterpartyDisplayName ||
+            tx.displayCounterparty ||
+            'Empresa'
+          );
+        })();
+
         const finalTransaction = {
           id: tx.id,
           type,
+          direction: tx.direction,
           from: fromDisplay,
           to: toDisplay,
           fromPhone: isConversion ? undefined : (tx.direction === 'received' ? fromPhoneKey : undefined),
           toPhone: isConversion ? undefined : (tx.direction === 'sent' ? toPhoneKey : undefined),
-          amount: isConversion ? conversionAmount : tx.displayAmount,
+          amount: isConversion ? conversionAmount : signedDisplayAmount,
           // For conversions, show the currency of the amount displayed: the destination token for '+' and source for '-'
-          currency: isConversion 
-            ? (conversionType === 'usdc_to_cusd' ? 'cUSD' : conversionType === 'cusd_to_usdc' ? 'USDC' : undefined) 
-            : (((tx.tokenType || '').toUpperCase() === 'CUSD') ? 'cUSD' : (tx.tokenType || '')),
+          currency: isConversion
+            ? (conversionType === 'usdc_to_cusd' ? 'cUSD' : conversionType === 'cusd_to_usdc' ? 'USDC' : undefined)
+            : (() => {
+              const normalizedToken = (tx.tokenType || '').toUpperCase();
+              const isCusdToken = normalizedToken === 'CUSD' || normalizedToken.includes('CONFIO DOLLAR') || normalizedToken.includes('CUSD ');
+              if (type === 'payroll' || isCusdToken) {
+                return 'cUSD';
+              }
+              return tx.tokenType || route.params.accountSymbol || '';
+            })(),
           secondaryCurrency: isConversion ? (conversionToToken || (conversionType === 'usdc_to_cusd' ? 'cUSD' : conversionType === 'cusd_to_usdc' ? 'USDC' : undefined)) : undefined,
           conversionType: isConversion ? (conversionType || tx.conversionType) : undefined,
           conversion_type: isConversion ? (conversionType || tx.conversionType) : undefined,
@@ -711,8 +823,14 @@ export const AccountDetailScreen = () => {
           description: finalDescription,
           p2pTradeId: type === 'exchange' ? tx.p2pTradeId : undefined,
           isRewardPayout: isReward,
+          counterpartyUser: tx.counterpartyUser,
+          recipientUser: tx.counterpartyUser,
+          senderUser: tx.senderUser,
+          counterpartyDisplayName: tx.counterpartyDisplayName,
+          senderDisplayName: tx.senderDisplayName,
+          businessName: payrollBusinessName,
         };
-        
+
         // Debug final transaction for external deposits
         if (isExternalDeposit) {
           console.log('[External Deposit Final]', {
@@ -721,22 +839,21 @@ export const AccountDetailScreen = () => {
             senderType: finalTransaction.senderType,
           });
         }
-        
+
         // Debug conversion amounts
         if (isConversion) {
-          console.log('[Conversion Final]', {
-            id: tx.id,
-            amount: finalTransaction.amount,
-            currency: finalTransaction.currency,
-            conversionType: finalTransaction.conversionType,
-            description: finalTransaction.description
-          });
+          // console.log('[Conversion Final]', { ... });
         }
-        
+
+        // Debug payroll final transaction
+        if (type === 'payroll') {
+          // console.log('[Payroll Final Transaction]', { ... });
+        }
+
         formattedTransactions.push(finalTransaction);
       });
     }
-    
+
     // Don't sort here - rely on server ordering which is more accurate
     return formattedTransactions;
   };
@@ -744,6 +861,13 @@ export const AccountDetailScreen = () => {
 
   // Helper functions for transaction display
   const getTransactionTitle = (transaction: Transaction) => {
+    console.log('[getTransactionTitle]', {
+      id: transaction.id,
+      type: transaction.type,
+      from: transaction.from,
+      to: transaction.to
+    });
+
     // Debug payment transactions
     if (transaction.type === 'payment') {
       console.log('Getting title for payment transaction:', {
@@ -754,8 +878,8 @@ export const AccountDetailScreen = () => {
         startsWithPlus: transaction.amount.startsWith('+')
       });
     }
-    
-    switch(transaction.type) {
+
+    switch (transaction.type) {
       case 'received':
         return `Recibido de ${transaction.from}`;
       case 'sent':
@@ -779,20 +903,24 @@ export const AccountDetailScreen = () => {
         return 'Conversión';
       case 'payment':
         // If amount is positive, it's a payment received
-        return transaction.amount.startsWith('+') 
-          ? `Pago recibido de ${transaction.from || 'Unknown'}` 
+        return transaction.amount.startsWith('+')
+          ? `Pago recibido de ${transaction.from || 'Unknown'}`
           : `Pago a ${transaction.to || 'Unknown'}`;
       case 'reward':
         return transaction.description || 'Recompensa Confío';
       case 'presale':
         return transaction.description || 'Compra preventa $CONFIO';
+      case 'payroll':
+        return transaction.amount.startsWith('+')
+          ? `Nómina recibida de ${transaction.from || 'Empresa'}`
+          : `Pago de nómina a ${transaction.to || 'Empleado'}`;
       default:
         return 'Transacción';
     }
   };
 
   const getTransactionIcon = (transaction: Transaction) => {
-    switch(transaction.type) {
+    switch (transaction.type) {
       case 'received':
         return <Icon name="arrow-down" size={20} color="#10B981" />;
       case 'sent':
@@ -807,6 +935,8 @@ export const AccountDetailScreen = () => {
         return <Icon name="gift" size={20} color="#F59E0B" />;
       case 'presale':
         return <Icon name="lock" size={20} color="#6366F1" />;
+      case 'payroll':
+        return <Icon name="briefcase" size={20} color="#059669" />;
       default:
         return <Icon name="arrow-up" size={20} color="#6B7280" />;
     }
@@ -814,7 +944,7 @@ export const AccountDetailScreen = () => {
 
   // Use unified transactions if available, fallback to legacy format
   const transactions = formatUnifiedTransactions();
-  
+
   // Debug which data source is being used
   console.log('AccountDetailScreen - Transaction source:', {
     usingUnified: !!unifiedTransactionsData,
@@ -826,7 +956,7 @@ export const AccountDetailScreen = () => {
     firstTransaction: transactions[0],
     rawData: unifiedTransactionsData?.currentAccountTransactions?.slice(0, 2)
   });
-  
+
   // Debug the actual transaction object
   if (transactions.length > 0 && transactions[0].type === 'payment') {
     console.log('First payment transaction details:', {
@@ -836,11 +966,11 @@ export const AccountDetailScreen = () => {
       amount: transactions[0].amount
     });
   }
-  
+
   // Filter transactions based on search query and filters
   const filteredTransactions = useMemo(() => {
     let filtered = transactions;
-    
+
     // Apply search query filter
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
@@ -852,33 +982,33 @@ export const AccountDetailScreen = () => {
         const date = moment(tx.date).format('DD/MM/YYYY').toLowerCase();
         const fromPhone = (tx.fromPhone || '').toLowerCase();
         const toPhone = (tx.toPhone || '').toLowerCase();
-        
-        return title.includes(query) || 
-               amount.includes(query) ||
-               currency.includes(query) ||
-               hash.includes(query) ||
-               date.includes(query) ||
-               fromPhone.includes(query) ||
-               toPhone.includes(query);
+
+        return title.includes(query) ||
+          amount.includes(query) ||
+          currency.includes(query) ||
+          hash.includes(query) ||
+          date.includes(query) ||
+          fromPhone.includes(query) ||
+          toPhone.includes(query);
       });
     }
-    
+
     // Apply type filters
     filtered = filtered.filter(tx => {
       return transactionFilters.types[tx.type];
     });
-    
+
     // Apply currency filters
     filtered = filtered.filter(tx => {
       const currency = tx.currency === 'cUSD' ? 'cUSD' : tx.currency;
       return transactionFilters.currencies[currency as keyof typeof transactionFilters.currencies] ?? true;
     });
-    
+
     // Apply status filters
     filtered = filtered.filter(tx => {
       return transactionFilters.status[tx.status];
     });
-    
+
     // Apply time range filter
     if (transactionFilters.timeRange !== 'all') {
       const now = moment();
@@ -898,7 +1028,7 @@ export const AccountDetailScreen = () => {
         }
       });
     }
-    
+
     // Apply amount range filter
     if (transactionFilters.amountRange.min || transactionFilters.amountRange.max) {
       filtered = filtered.filter(tx => {
@@ -908,10 +1038,10 @@ export const AccountDetailScreen = () => {
         return amount >= min && amount <= max;
       });
     }
-    
+
     return filtered;
   }, [
-    transactions, 
+    transactions,
     debouncedSearchQuery,
     transactionFilters.types,
     transactionFilters.currencies,
@@ -920,16 +1050,16 @@ export const AccountDetailScreen = () => {
     transactionFilters.amountRange.min,
     transactionFilters.amountRange.max
   ]);
-  
+
   // Group transactions by date
   const groupedTransactions = useMemo((): TransactionSection[] => {
     const groups: { [key: string]: Transaction[] } = {};
-    
+
     filteredTransactions.forEach(tx => {
       const date = moment(tx.date);
       let groupKey: string;
       let groupTitle: string;
-      
+
       if (date.isSame(moment(), 'day')) {
         groupKey = 'today';
         groupTitle = 'Hoy';
@@ -946,13 +1076,13 @@ export const AccountDetailScreen = () => {
         groupKey = date.format('YYYY-MM');
         groupTitle = date.format('MMMM YYYY');
       }
-      
+
       if (!groups[groupKey]) {
         groups[groupKey] = [];
       }
       groups[groupKey].push(tx);
     });
-    
+
     // Convert to sections array and sort by date
     return Object.entries(groups)
       .sort(([keyA], [keyB]) => {
@@ -966,30 +1096,26 @@ export const AccountDetailScreen = () => {
       })
       .map(([key, txs]) => ({
         title: key === 'today' ? 'Hoy' :
-               key === 'yesterday' ? 'Ayer' :
-               key === 'this_week' ? 'Esta semana' :
-               moment(txs[0].date).format(key.includes('-') ? 'D [de] MMMM' : 'MMMM YYYY'),
+          key === 'yesterday' ? 'Ayer' :
+            key === 'this_week' ? 'Esta semana' :
+              moment(txs[0].date).format(key.includes('-') ? 'D [de] MMMM' : 'MMMM YYYY'),
         data: txs,
       }));
   }, [filteredTransactions]);
-  
+
   // Set initial transactions when data loads
   React.useEffect(() => {
     const currentTransactions = unifiedTransactionsData?.currentAccountTransactions || [];
-    
-    // Only set initial transactions if we're not loading more (i.e., this is the initial load or refresh)
-    if (!loadingMore && currentTransactions.length > 0) {
-      console.log('Setting initial transactions:', currentTransactions.length);
-      setAllTransactions(currentTransactions);
-      
-      // If we have fewer transactions than the limit, we've reached the end
-      if (currentTransactions.length < transactionLimit) {
-        setHasReachedEnd(true);
-      } else {
-        setHasReachedEnd(false);
-      }
+
+    if (loadingMore || !canQueryTransactions) return;
+
+    console.log('Setting transactions from unified query:', currentTransactions.length);
+    setAllTransactions(currentTransactions);
+
+    if (!unifiedLoading) {
+      setHasReachedEnd(currentTransactions.length < transactionLimit);
     }
-  }, [unifiedTransactionsData, transactionLimit, loadingMore]);
+  }, [unifiedTransactionsData, transactionLimit, loadingMore, unifiedLoading, canQueryTransactions]);
 
   const TransactionItem = memo(({ transaction }: { transaction: Transaction }) => {
     // Format the date properly
@@ -997,7 +1123,7 @@ export const AccountDetailScreen = () => {
     const formattedTime = transaction.time;
     const isRewardTransaction = transaction.type === 'reward' || transaction.isRewardPayout;
     const isPresaleTransaction = transaction.type === 'presale';
-    
+
     // Determine if counterparty is an external wallet (no phone + address present + no user)
     const isExternalSent = transaction.type === 'sent' && !transaction.toPhone && transaction.recipientAddress && !(transaction as any).hasCounterpartyUser;
     const isExternalReceived = transaction.type === 'received' && (
@@ -1009,15 +1135,15 @@ export const AccountDetailScreen = () => {
       ? (transaction.from || 'Confío Rewards')
       : isPresaleTransaction
         ? (transaction.from || 'Confío Preventa')
-        : transaction.type === 'received' 
-        ? (isExternalReceived ? 'Billetera externa' : transaction.from)
-        : (isExternalSent ? 'Billetera externa' : transaction.to);
+        : transaction.type === 'received'
+          ? (isExternalReceived ? 'Billetera externa' : transaction.from)
+          : (isExternalSent ? 'Billetera externa' : transaction.to);
     const contactInfo = useContactNameSync(phoneToCheck, fallbackName);
-    
+
     // Create enhanced transaction title with contact name
     const getEnhancedTransactionTitle = () => {
       let baseTitle = '';
-      switch(transaction.type) {
+      switch (transaction.type) {
         case 'received':
           baseTitle = `Recibido de ${contactInfo.displayName}`;
           break;
@@ -1061,14 +1187,21 @@ export const AccountDetailScreen = () => {
         case 'presale':
           baseTitle = transaction.description || 'Compra preventa $CONFIO';
           break;
+        case 'payroll':
+          if (transaction.amount.startsWith('+')) {
+            baseTitle = `Nómina recibida de ${transaction.from || 'Empresa'}`;
+          } else {
+            baseTitle = `Pago de nómina a ${transaction.to || 'Empleado'}`;
+          }
+          break;
         default:
           baseTitle = 'Transacción';
       }
       return baseTitle;
     };
-    
+
     const navigation = useNavigation();
-    
+
     const handlePress = () => {
       const params = {
         transactionType: transaction.type,
@@ -1077,13 +1210,13 @@ export const AccountDetailScreen = () => {
           from: (transaction.type === 'received' || transaction.type === 'reward')
             ? (transaction.from || contactInfo.displayName)
             : (transaction.type === 'payment' && transaction.amount.startsWith('+'))
-            ? transaction.from
-            : transaction.from,
-          to: transaction.type === 'sent' 
+              ? transaction.from
+              : transaction.from,
+          to: transaction.type === 'sent'
             ? contactInfo.displayName
             : (transaction.type === 'payment' && transaction.amount.startsWith('-'))
-            ? transaction.to
-            : transaction.to,
+              ? transaction.to
+              : transaction.to,
           amount: transaction.amount,
           currency: transaction.currency,
           secondaryCurrency: transaction.secondaryCurrency,
@@ -1097,15 +1230,15 @@ export const AccountDetailScreen = () => {
           fromPhone: transaction.fromPhone,
           toPhone: transaction.toPhone,
           note: undefined,
-          avatar: transaction.from ? transaction.from.charAt(0) : 
-                 transaction.to ? transaction.to.charAt(0) : undefined,
+          avatar: transaction.from ? transaction.from.charAt(0) :
+            transaction.to ? transaction.to.charAt(0) : undefined,
           location: transaction.type === 'payment' ? 'Av. Libertador, Caracas' : undefined,
           merchantId: transaction.type === 'payment' ? 'SUP001' : undefined,
-          exchangeRate: transaction.type === 'exchange' ? '1 USDC = 1 cUSD' : 
-                        transaction.type === 'conversion' ? '1' : undefined,
+          exchangeRate: transaction.type === 'exchange' ? '1 USDC = 1 cUSD' :
+            transaction.type === 'conversion' ? '1' : undefined,
           conversionType: transaction.conversionType,
           formattedTitle: transaction.type === 'conversion' && transaction.conversionType === 'usdc_to_cusd' ? 'USDC → cUSD' :
-                          transaction.type === 'conversion' && transaction.conversionType === 'cusd_to_usdc' ? 'cUSD → USDC' : undefined,
+            transaction.type === 'conversion' && transaction.conversionType === 'cusd_to_usdc' ? 'cUSD → USDC' : undefined,
           isInvitedFriend: transaction.isInvitation || false, // true means friend is NOT on Confío
           invitationClaimed: transaction.invitationClaimed || false,
           invitationReverted: transaction.invitationReverted || false,
@@ -1116,17 +1249,58 @@ export const AccountDetailScreen = () => {
       if (transaction.type === 'exchange' && transaction.p2pTradeId) {
         // Navigate to ActiveTrade screen for P2P trades
         // @ts-ignore - Navigation type mismatch, but works at runtime
-        navigation.navigate('ActiveTrade', { 
-          trade: { 
-            id: transaction.p2pTradeId 
-          } 
+        navigation.navigate('ActiveTrade', {
+          trade: {
+            id: transaction.p2pTradeId
+          }
+        });
+      } else if (transaction.type === 'payroll') {
+        // Navigate to PayrollReceipt screen for payroll transactions
+        // For payroll, employee sees 'received' direction, business sees 'sent'
+        const txAny = transaction as any;
+        const isEmployeeView = txAny.direction === 'received';
+
+        // Extract counterparty user data (recipient for sent, sender for received)
+        const counterpartyUser = txAny.counterpartyUser || txAny.recipientUser || txAny.senderUser;
+        const counterpartyFirstName = counterpartyUser?.firstName || txAny.recipientUser?.firstName || txAny.senderUser?.firstName || '';
+        const counterpartyLastName = counterpartyUser?.lastName || txAny.recipientUser?.lastName || txAny.senderUser?.lastName || '';
+        const counterpartyFullName = `${counterpartyFirstName} ${counterpartyLastName}`.trim();
+        const counterpartyUsername = counterpartyUser?.username || txAny.recipientUser?.username || txAny.senderUser?.username || '';
+        const counterpartyPhone = counterpartyUser?.phoneKey || txAny.recipientPhone || txAny.counterpartyPhone || txAny.toPhone || '';
+
+        // Employee name on receipt should come from the counterparty (the payee) when available
+        const employeeDisplayName = counterpartyFullName
+          || txAny.counterpartyDisplayName
+          || txAny.displayCounterparty
+          || transaction.to
+          || txAny.toName
+          || txAny.displayToName
+          || counterpartyUsername
+          || 'Empleado';
+
+        const businessDisplayName = isEmployeeView
+          ? (transaction.from || txAny.senderDisplayName || txAny.displayCounterparty || 'Empresa')
+          : 'Tu Empresa';
+
+        // @ts-ignore - Navigation type mismatch, but works at runtime
+        navigation.navigate('PayrollReceipt', {
+          transaction: {
+            ...transaction,
+            employeeName: employeeDisplayName,
+            employeeUsername: counterpartyUsername || transaction.toUsername || txAny.recipientUsername || txAny.counterpartyUsername || '',
+            employeePhone: counterpartyPhone || transaction.toPhone || txAny.recipientPhone || txAny.counterpartyPhone || '',
+            businessName: businessDisplayName,
+            payrollRunId: transaction.payrollRunId || transaction.runId || '',
+            direction: txAny.direction,
+            counterpartyUser: counterpartyUser, // Pass the full object for debugging
+          }
         });
       } else {
         // @ts-ignore - Navigation type mismatch, but works at runtime
         navigation.navigate('TransactionDetail', params);
       }
     };
-    
+
     return (
       <TouchableOpacity style={[styles.transactionItem, transaction.isInvitation && styles.invitedTransactionItem]} onPress={handlePress}>
         <View style={styles.transactionIconContainer}>
@@ -1143,8 +1317,8 @@ export const AccountDetailScreen = () => {
           {transaction.isInvitation && transaction.type === 'sent' && (
             <Text style={styles.invitationNote}>
               {transaction.invitationClaimed ? '✅ Invitación reclamada' :
-               transaction.invitationReverted ? '❌ Expiró - Fondos devueltos' :
-               '⚠️ Tu amigo tiene 7 días para reclamar • Avísale ya'}
+                transaction.invitationReverted ? '❌ Expiró - Fondos devueltos' :
+                  '⚠️ Tu amigo tiene 7 días para reclamar • Avísale ya'}
             </Text>
           )}
           {/* Show external wallet indicator for sends to addresses without phone */}
@@ -1296,7 +1470,7 @@ export const AccountDetailScreen = () => {
     // @ts-ignore - Navigation type mismatch, but should work at runtime
     navigation.navigate('BottomTabs', { screen: 'Contacts' });
   }, [navigation]);
-  
+
   const hasActiveFilters = useCallback(() => {
     const allTypesSelected = Object.values(transactionFilters.types).every(v => v);
     const allCurrenciesSelected = Object.values(transactionFilters.currencies).every(v => v);
@@ -1419,21 +1593,25 @@ export const AccountDetailScreen = () => {
       console.log('loadMoreTransactions - Skipping:', { loadingMore, hasReachedEnd, hasFetchMore: !!fetchMore });
       return;
     }
-    
+    if (!canQueryTransactions || !activeAccount) {
+      console.log('loadMoreTransactions - blocked, auth/account context not ready');
+      return;
+    }
+
     console.log('loadMoreTransactions - Current state:', {
       allTransactionsLength: allTransactions.length,
       hasReachedEnd,
       loadingMore
     });
-    
+
     setLoadingMore(true);
-    
+
     try {
       // Calculate new offset
       const newOffset = allTransactions.length;
-      
+
       console.log('loadMoreTransactions - Fetching with offset:', newOffset);
-      
+
       // Fetch more transactions with the new offset
       const { data } = await fetchMore({
         variables: {
@@ -1441,8 +1619,8 @@ export const AccountDetailScreen = () => {
           accountIndex: activeAccount?.index || 0,
           limit: transactionLimit,
           offset: newOffset,
-          tokenTypes: route.params.accountType === 'cusd' ? 
-            (activeAccount?.isEmployee ? ['CUSD'] : ['CUSD', 'USDC']) : 
+          tokenTypes: route.params.accountType === 'cusd' ?
+            (activeAccount?.isEmployee ? ['CUSD'] : ['CUSD', 'USDC']) :
             ['CONFIO']
         },
         updateQuery: (prev, { fetchMoreResult }) => {
@@ -1451,28 +1629,28 @@ export const AccountDetailScreen = () => {
             newTransactionsCount: fetchMoreResult?.currentAccountTransactions?.length || 0,
             prevCount: prev?.currentAccountTransactions?.length || 0
           });
-          
+
           if (!fetchMoreResult) return prev;
-          
+
           if (fetchMoreResult.currentAccountTransactions.length === 0) {
             setHasReachedEnd(true);
             return prev;
           }
-          
+
           // Append new transactions to allTransactions state
           const newTransactions = fetchMoreResult.currentAccountTransactions;
-          
+
           // Check if we've reached the end
           if (newTransactions.length < transactionLimit) {
             console.log('Reached end - got fewer transactions than limit:', newTransactions.length, '<', transactionLimit);
             setHasReachedEnd(true);
           }
-          
+
           setAllTransactions(prevTxs => {
             console.log('Appending transactions:', prevTxs.length, '+', newTransactions.length);
             return [...prevTxs, ...newTransactions];
           });
-          
+
           // Return updated query result for Apollo cache
           return {
             ...prev,
@@ -1500,19 +1678,19 @@ export const AccountDetailScreen = () => {
       {/* Balance Section */}
       <View style={[styles.balanceSection, { backgroundColor: account.color }]}>
         <View style={styles.balanceIconContainer}>
-          <Image 
-            source={route.params.accountType === 'cusd' ? cUSDLogo : CONFIOLogo} 
-            style={styles.balanceLogo} 
+          <Image
+            source={route.params.accountType === 'cusd' ? cUSDLogo : CONFIOLogo}
+            style={styles.balanceLogo}
           />
         </View>
 
         <View style={styles.balanceRow}>
           <Text style={styles.balanceText}>
-            {!canViewBalance 
-              ? account.balanceHidden 
-              : (showBalance 
-                  ? `$${formatBalanceDisplay(account.balance)}` 
-                  : account.balanceHidden)}
+            {!canViewBalance
+              ? account.balanceHidden
+              : (showBalance
+                ? `$${formatBalanceDisplay(account.balance)}`
+                : account.balanceHidden)}
           </Text>
           {canViewBalance && (
             <TouchableOpacity onPress={toggleBalanceVisibility}>
@@ -1576,23 +1754,23 @@ export const AccountDetailScreen = () => {
               Eres parte de {activeAccount?.business?.name}
             </Text>
             <Text style={styles.employeeMessageText}>
-              Como {activeAccount?.employeeRole === 'cashier' ? 'cajero' : 
-                    activeAccount?.employeeRole === 'manager' ? 'gerente' : 
-                    activeAccount?.employeeRole === 'admin' ? 'administrador' : 'miembro del equipo'}, {(() => {
-                const perms = [];
-                if (activeAccount?.employeePermissions?.acceptPayments) perms.push('recibir pagos');
-                if (activeAccount?.employeePermissions?.viewTransactions) perms.push('ver el historial de transacciones');
-                
-                if (perms.length === 0) return 'estás aquí para ayudar al éxito del negocio';
-                if (perms.length === 1) return `puedes ${perms[0]} para ayudar a nuestros clientes`;
-                return `puedes ${perms.join(' y ')} para contribuir al crecimiento del negocio`;
-              })()}.
+              Como {activeAccount?.employeeRole === 'cashier' ? 'cajero' :
+                activeAccount?.employeeRole === 'manager' ? 'gerente' :
+                  activeAccount?.employeeRole === 'admin' ? 'administrador' : 'miembro del equipo'}, {(() => {
+                    const perms = [];
+                    if (activeAccount?.employeePermissions?.acceptPayments) perms.push('recibir pagos');
+                    if (activeAccount?.employeePermissions?.viewTransactions) perms.push('ver el historial de transacciones');
+
+                    if (perms.length === 0) return 'estás aquí para ayudar al éxito del negocio';
+                    if (perms.length === 1) return `puedes ${perms[0]} para ayudar a nuestros clientes`;
+                    return `puedes ${perms.join(' y ')} para contribuir al crecimiento del negocio`;
+                  })()}.
             </Text>
           </View>
         ) : (
           <View style={styles.actionButtons}>
             {(!activeAccount?.isEmployee || activeAccount?.employeePermissions?.sendFunds) && (
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.actionButton}
                 onPress={handleSend}
               >
@@ -1612,12 +1790,12 @@ export const AccountDetailScreen = () => {
             )}
 
             {(!activeAccount?.isEmployee || activeAccount?.employeePermissions?.acceptPayments) && (
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.actionButton}
                 onPress={() => {
                   // Navigate to USDCDeposit screen with proper token type
-                  navigation.navigate('USDCDeposit', { 
-                    tokenType: route.params.accountType === 'cusd' ? 'cusd' : 'confio' 
+                  navigation.navigate('USDCDeposit', {
+                    tokenType: route.params.accountType === 'cusd' ? 'cusd' : 'confio'
                   });
                 }}
               >
@@ -1637,13 +1815,13 @@ export const AccountDetailScreen = () => {
             )}
 
             {(!activeAccount?.isEmployee || activeAccount?.employeePermissions?.acceptPayments) && (
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.actionButton}
                 onPress={() => {
                   // @ts-ignore - Navigation type mismatch, but should work at runtime
                   const isBusinessAccount = activeAccount?.type?.toLowerCase() === 'business';
-                  navigation.navigate('BottomTabs', { 
-                    screen: isBusinessAccount ? 'Charge' : 'Scan' 
+                  navigation.navigate('BottomTabs', {
+                    screen: isBusinessAccount ? 'Charge' : 'Scan'
                   });
                 }}
               >
@@ -1666,7 +1844,7 @@ export const AccountDetailScreen = () => {
               <TouchableOpacity
                 style={styles.actionButton}
                 onPress={() => {
-                  navigation.navigate('USDCDeposit', { tokenType: 'usdc' });
+                  navigation.navigate('TopUp');
                 }}
               >
                 <View style={{
@@ -1709,7 +1887,7 @@ export const AccountDetailScreen = () => {
               </View>
             );
           }
-          
+
           return (
             <View style={styles.emptyTransactionsContainer}>
               <Icon name={searchQuery ? "search" : "inbox"} size={48} color="#e5e7eb" />
@@ -1717,12 +1895,12 @@ export const AccountDetailScreen = () => {
                 {searchQuery ? "No se encontraron transacciones" : "No hay transacciones aún"}
               </Text>
               <Text style={styles.emptyTransactionsSubtext}>
-                {searchQuery 
-                  ? "Intenta con otros términos de búsqueda" 
+                {searchQuery
+                  ? "Intenta con otros términos de búsqueda"
                   : "Tus transacciones aparecerán aquí cuando realices envíos o pagos"}
               </Text>
               {!searchQuery && (
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={styles.emptyActionButton}
                   onPress={handleSend}
                 >
@@ -1736,7 +1914,7 @@ export const AccountDetailScreen = () => {
         ListFooterComponent={() => {
           if (!unifiedLoading && allTransactions.length >= transactionLimit && !hasReachedEnd) {
             return (
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.loadMoreButton}
                 onPress={loadMoreTransactions}
                 disabled={loadingMore}
@@ -1775,90 +1953,86 @@ export const AccountDetailScreen = () => {
           <>
             {/* USDC Balance Section - Only show for cUSD account */}
             {route.params.accountType === 'cusd' && usdcAccount && (
-          <View style={styles.usdcSection}>
-            <View style={styles.sectionHeaderContainer}>
-              <Text style={styles.sectionTitle}>Gestión Avanzada</Text>
-              <TouchableOpacity style={styles.helpButton} onPress={() => setShowHelpModal(true)}>
-                <Icon name="help-circle" size={18} color="#6b7280" />
-              </TouchableOpacity>
-            </View>
-            
-            <View style={styles.usdcCard}>
-              <View style={styles.usdcHeader}>
-                <View style={styles.usdcInfo}>
-                  <View style={styles.usdcLogoContainer}>
-                    <Image source={USDCLogo} style={styles.usdcLogo} />
-                    <View style={styles.usdcBadge}>
-                      <Text style={styles.usdcBadgeText}>ALGO</Text>
+              <View style={styles.usdcSection}>
+                <View style={styles.sectionHeaderContainer}>
+                  <Text style={styles.sectionTitle}>Gestión Avanzada</Text>
+                  <TouchableOpacity style={styles.helpButton} onPress={() => setShowHelpModal(true)}>
+                    <Icon name="help-circle" size={18} color="#6b7280" />
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.usdcCard}>
+                  <View style={styles.usdcHeader}>
+                    <View style={styles.usdcInfo}>
+                      <View style={styles.usdcLogoContainer}>
+                        <Image source={USDCLogo} style={styles.usdcLogo} />
+                        <View style={styles.usdcBadge}>
+                          <Text style={styles.usdcBadgeText}>ALGO</Text>
+                        </View>
+                      </View>
+                      <View style={styles.usdcTextContainer}>
+                        <Text style={styles.usdcName}>{usdcAccount.name}</Text>
+                        <Text style={styles.usdcDescription}>
+                          Convierte entre USDC y cUSD
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.usdcBalance}>
+                      <Text style={styles.usdcBalanceText}>
+                        {!canViewBalance ? usdcAccount.balanceHidden : (showBalance ? usdcAccount.balance : usdcAccount.balanceHidden)}
+                      </Text>
+                      <Text style={styles.usdcSymbol}>{usdcAccount.symbol}</Text>
                     </View>
                   </View>
-                  <View style={styles.usdcTextContainer}>
-                    <Text style={styles.usdcName}>{usdcAccount.name}</Text>
-                    <Text style={styles.usdcDescription}>
-                      Convierte entre USDC y cUSD
+
+                  <View style={styles.exchangeRateInfo}>
+                    <Icon name="info" size={14} color="#3b82f6" />
+                    <Text style={styles.exchangeRateText}>
+                      1 USDC = 1 cUSD • Sin comisión
                     </Text>
                   </View>
-                </View>
-                <View style={styles.usdcBalance}>
-                  <Text style={styles.usdcBalanceText}>
-                    {!canViewBalance ? usdcAccount.balanceHidden : (showBalance ? usdcAccount.balance : usdcAccount.balanceHidden)}
-                  </Text>
-                  <Text style={styles.usdcSymbol}>{usdcAccount.symbol}</Text>
-                </View>
-              </View>
 
-              <View style={styles.exchangeRateInfo}>
-                <Icon name="info" size={14} color="#3b82f6" />
-                <Text style={styles.exchangeRateText}>
-                  1 USDC = 1 cUSD • Sin comisión
-                </Text>
-              </View>
+                  <View style={styles.usdcActions}>
+                    <TouchableOpacity
+                      style={styles.usdcActionButton}
+                      onPress={() => navigation.navigate('USDCDeposit', { tokenType: 'usdc' })}
+                    >
+                      <Icon name="download" size={16} color="#3b82f6" style={styles.actionIcon} />
+                      <View style={styles.actionTextContainer}>
+                        <Text style={styles.usdcActionButtonText}>Depositar</Text>
+                        <Text style={styles.usdcActionSubtext}>Recibe desde Algorand</Text>
+                      </View>
+                    </TouchableOpacity>
 
-              <View style={styles.usdcActions}>
-                <TouchableOpacity 
-                  style={styles.usdcActionButton}
-                  onPress={() => navigation.navigate('USDCDeposit', { tokenType: 'usdc' })}
-                >
-                  <Icon name="download" size={16} color="#3b82f6" style={styles.actionIcon} />
-                  <View style={styles.actionTextContainer}>
-                    <Text style={styles.usdcActionButtonText}>Depositar</Text>
-                    <Text style={styles.usdcActionSubtext}>Recibe desde Algorand</Text>
+                    <Animated.View style={hasUsdcToConvert ? [{ transform: [{ scale: convertPulseAnim }] }] : undefined}>
+                      <TouchableOpacity
+                        style={[styles.usdcActionButton, styles.usdcSecondaryButton]}
+                        onPress={() => {
+                          console.log('Convert button pressed - navigating to USDCConversion screen');
+                          navigation.navigate('USDCConversion');
+                        }}
+                      >
+                        <Icon name="refresh-cw" size={16} color="#fff" style={styles.actionIcon} />
+                        <View style={styles.actionTextContainer}>
+                          <Text style={[styles.usdcActionButtonText, { color: '#ffffff' }]}>
+                            Convertir
+                          </Text>
+                          <Text style={[styles.usdcActionSubtext, { color: 'rgba(255,255,255,0.8)' }]}>
+                            USDC ↔ cUSD
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                    </Animated.View>
+
+                    <TouchableOpacity
+                      style={styles.usdcMoreButton}
+                      onPress={() => setShowMoreOptionsModal(true)}
+                    >
+                      <Icon name="more-horizontal" size={20} color="#6b7280" />
+                    </TouchableOpacity>
                   </View>
-                </TouchableOpacity>
-                
-                <Animated.View style={hasUsdcToConvert ? [{ transform: [{ scale: convertPulseAnim }] }] : undefined}>
-                  <TouchableOpacity
-                    style={[styles.usdcActionButton, styles.usdcSecondaryButton]}
-                    onPress={() => {
-                      console.log('Convert button pressed - navigating to USDCConversion screen');
-                      navigation.navigate('USDCConversion');
-                    }}
-                  >
-                    <Icon name="refresh-cw" size={16} color="#fff" style={styles.actionIcon} />
-                    <View style={styles.actionTextContainer}>
-                      <Text style={[styles.usdcActionButtonText, { color: '#ffffff' }]}>
-                        Convertir
-                      </Text>
-                      <Text style={[styles.usdcActionSubtext, { color: 'rgba(255,255,255,0.8)' }]}>
-                        USDC ↔ cUSD
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                </Animated.View>
-                
-                <TouchableOpacity
-                  style={styles.usdcMoreButton}
-                  onPress={() => setShowMoreOptionsModal(true)}
-                >
-                  <Icon name="more-horizontal" size={20} color="#6b7280" />
-                </TouchableOpacity>
+                </View>
               </View>
-            </View>
-            
-            <Text style={styles.usdcDisclaimer}>
-              Para usuarios avanzados • Requiere conocimiento de wallets Algorand
-            </Text>
-          </View>
             )}
 
             {/* CONFIO Presale Section - Only show for CONFIO accounts and if presale is active */}
@@ -1867,7 +2041,7 @@ export const AccountDetailScreen = () => {
                 <View style={styles.sectionHeaderContainer}>
                   <Text style={styles.sectionTitle}>🚀 Preventa Exclusiva</Text>
                 </View>
-                
+
                 <View style={styles.confioPresaleCard}>
                   <View style={styles.confioPresaleHeader}>
                     <View style={styles.confioPresaleInfo}>
@@ -1877,7 +2051,7 @@ export const AccountDetailScreen = () => {
                       </Text>
                     </View>
                   </View>
-                  
+
                   <TouchableOpacity
                     style={styles.confioPresaleButton}
                     onPress={() => navigation.navigate('ConfioPresale')}
@@ -1901,66 +2075,66 @@ export const AccountDetailScreen = () => {
               <View style={styles.transactionsHeader}>
                 <Text style={styles.transactionsTitle}>Historial de transacciones</Text>
                 <View style={styles.transactionsFilters}>
-                  <TouchableOpacity 
+                  <TouchableOpacity
                     style={[styles.filterButton, showSearch && styles.filterButtonActive]}
                     onPress={() => setShowSearch(!showSearch)}
                   >
                     <Icon name="search" size={16} color={showSearch ? account.textColor : "#6b7280"} />
                   </TouchableOpacity>
-                  <TouchableOpacity 
+                  <TouchableOpacity
                     style={[
                       styles.filterButton,
                       hasActiveFilters() && styles.filterButtonActive
                     ]}
                     onPress={() => setShowFilterModal(true)}
                   >
-                    <Icon 
-                      name="filter" 
-                      size={16} 
-                      color={hasActiveFilters() ? account.textColor : "#6b7280"} 
+                    <Icon
+                      name="filter"
+                      size={16}
+                      color={hasActiveFilters() ? account.textColor : "#6b7280"}
                     />
                     {hasActiveFilters() && (
                       <View style={[styles.filterDot, { backgroundColor: account.color }]} />
                     )}
                   </TouchableOpacity>
                 </View>
-            </View>
+              </View>
 
-            {/* Search Bar */}
-            {showSearch && (
-              <Animated.View 
-                style={[
-                  styles.searchContainer,
-                  {
-                    opacity: searchAnim,
-                    transform: [
-                      {
-                        translateY: searchAnim.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: [-10, 0],
-                        })
-                      }
-                    ]
-                  }
-                ]}
-              >
-                <Icon name="search" size={18} color="#9ca3af" style={styles.searchIcon} />
-                <TextInput
-                  style={styles.searchInput}
-                  placeholder="Buscar transacciones..."
-                  placeholderTextColor="#9ca3af"
-                  value={searchQuery}
-                  onChangeText={setSearchQuery}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
-                {searchQuery.length > 0 && (
-                  <TouchableOpacity onPress={() => setSearchQuery('')}>
-                    <Icon name="x" size={18} color="#9ca3af" />
-                  </TouchableOpacity>
-                )}
-              </Animated.View>
-            )}
+              {/* Search Bar */}
+              {showSearch && (
+                <Animated.View
+                  style={[
+                    styles.searchContainer,
+                    {
+                      opacity: searchAnim,
+                      transform: [
+                        {
+                          translateY: searchAnim.interpolate({
+                            inputRange: [0, 1],
+                            outputRange: [-10, 0],
+                          })
+                        }
+                      ]
+                    }
+                  ]}
+                >
+                  <Icon name="search" size={18} color="#9ca3af" style={styles.searchIcon} />
+                  <TextInput
+                    style={styles.searchInput}
+                    placeholder="Buscar transacciones..."
+                    placeholderTextColor="#9ca3af"
+                    value={searchQuery}
+                    onChangeText={setSearchQuery}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                  {searchQuery.length > 0 && (
+                    <TouchableOpacity onPress={() => setSearchQuery('')}>
+                      <Icon name="x" size={18} color="#9ca3af" />
+                    </TouchableOpacity>
+                  )}
+                </Animated.View>
+              )}
             </View>
           </>
         )}
@@ -1974,8 +2148,8 @@ export const AccountDetailScreen = () => {
         onRequestClose={() => setShowHelpModal(false)}
       >
         <View style={styles.modalOverlay}>
-          <TouchableOpacity 
-            style={styles.modalBackdrop} 
+          <TouchableOpacity
+            style={styles.modalBackdrop}
             activeOpacity={1}
             onPress={() => setShowHelpModal(false)}
           />
@@ -1986,8 +2160,8 @@ export const AccountDetailScreen = () => {
                 <Icon name="x" size={24} color="#6b7280" />
               </TouchableOpacity>
             </View>
-            
-            <ScrollView 
+
+            <ScrollView
               style={styles.helpModalBody}
               contentContainerStyle={styles.helpModalScrollContent}
               showsVerticalScrollIndicator={true}
@@ -1998,12 +2172,12 @@ export const AccountDetailScreen = () => {
                 <View style={styles.helpTextContainer}>
                   <Text style={styles.helpSectionTitle}>USDC en red de Algorand</Text>
                   <Text style={styles.helpSectionText}>
-                    USDC es una moneda estable respaldada 1:1 por dólares estadounidenses. 
+                    USDC es una moneda estable respaldada 1:1 por dólares estadounidenses.
                     Puedes depositar USDC desde la red de Algorand y convertirlo a cUSD sin comisiones.
                   </Text>
                 </View>
               </View>
-              
+
               <View style={styles.helpSection}>
                 <Icon name="shield" size={20} color="#10b981" style={styles.helpIcon} />
                 <View style={styles.helpTextContainer}>
@@ -2015,18 +2189,18 @@ export const AccountDetailScreen = () => {
                   </Text>
                 </View>
               </View>
-              
+
               <View style={styles.helpSection}>
                 <Icon name="users" size={20} color="#8b5cf6" style={styles.helpIcon} />
                 <View style={styles.helpTextContainer}>
                   <Text style={styles.helpSectionTitle}>¿Para quién es?</Text>
                   <Text style={styles.helpSectionText}>
-                    Esta función es para usuarios avanzados que ya tienen USDC en wallets 
+                    Esta función es para usuarios avanzados que ya tienen USDC en wallets
                     de Algorand como Pera Wallet, Binance o exchanges compatibles.
                   </Text>
                 </View>
               </View>
-              
+
               <View style={styles.helpSection}>
                 <Icon name="zap" size={20} color="#f59e0b" style={styles.helpIcon} />
                 <View style={styles.helpTextContainer}>
@@ -2039,8 +2213,8 @@ export const AccountDetailScreen = () => {
                 </View>
               </View>
             </ScrollView>
-            
-            <TouchableOpacity 
+
+            <TouchableOpacity
               style={styles.helpModalButton}
               onPress={() => setShowHelpModal(false)}
             >
@@ -2049,7 +2223,7 @@ export const AccountDetailScreen = () => {
           </View>
         </View>
       </Modal>
-      
+
       {/* More Options Modal */}
       <Modal
         visible={showMoreOptionsModal}
@@ -2057,17 +2231,28 @@ export const AccountDetailScreen = () => {
         animationType="slide"
         onRequestClose={() => setShowMoreOptionsModal(false)}
       >
-        <TouchableOpacity 
-          style={styles.modalOverlay} 
-          activeOpacity={1} 
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
           onPress={() => setShowMoreOptionsModal(false)}
         >
           <View style={styles.moreOptionsModalContent}>
             <View style={styles.moreOptionsHandle} />
-            
+
             <Text style={styles.moreOptionsTitle}>Más opciones</Text>
-            
-            <TouchableOpacity 
+
+            <TouchableOpacity
+              style={styles.moreOptionsItem}
+              onPress={() => {
+                setShowMoreOptionsModal(false);
+                navigation.navigate('Sell');
+              }}
+            >
+              <Icon name="dollar-sign" size={20} color="#1f2937" />
+              <Text style={styles.moreOptionsItemText}>Retirar USDC a tu banco</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
               style={styles.moreOptionsItem}
               onPress={() => {
                 setShowMoreOptionsModal(false);
@@ -2077,8 +2262,8 @@ export const AccountDetailScreen = () => {
               <Icon name="arrow-up-circle" size={20} color="#1f2937" />
               <Text style={styles.moreOptionsItemText}>Retirar USDC a Algorand</Text>
             </TouchableOpacity>
-            
-            <TouchableOpacity 
+
+            <TouchableOpacity
               style={styles.moreOptionsItem}
               onPress={() => {
                 setShowMoreOptionsModal(false);
@@ -2088,8 +2273,8 @@ export const AccountDetailScreen = () => {
               <Icon name="clock" size={20} color="#1f2937" />
               <Text style={styles.moreOptionsItemText}>Historial de conversiones</Text>
             </TouchableOpacity>
-            
-            <TouchableOpacity 
+
+            <TouchableOpacity
               style={styles.moreOptionsItem}
               onPress={() => {
                 setShowMoreOptionsModal(false);
@@ -2129,8 +2314,8 @@ export const AccountDetailScreen = () => {
               <Icon name="play-circle" size={20} color="#1f2937" />
               <Text style={styles.moreOptionsItemText}>Ver tutorial</Text>
             </TouchableOpacity>
-            
-            <TouchableOpacity 
+
+            <TouchableOpacity
               style={[styles.moreOptionsItem, styles.moreOptionsCancelItem]}
               onPress={() => setShowMoreOptionsModal(false)}
             >
@@ -2139,7 +2324,7 @@ export const AccountDetailScreen = () => {
           </View>
         </TouchableOpacity>
       </Modal>
-      
+
       {/* Transaction Filter Modal */}
       <TransactionFilterModal
         visible={showFilterModal}

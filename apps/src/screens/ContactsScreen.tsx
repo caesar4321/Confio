@@ -1227,26 +1227,7 @@ const ListHeaderComponent = useMemo(() => {
   const HeaderContent = () => (
     <>
 
-      {/* Pending payroll banner for delegates on personal accounts */}
-      {isPersonalAccount && pendingPayrollCount > 0 && (
-        <TouchableOpacity
-          style={styles.payrollBanner}
-          onPress={() => {
-            navigation.navigate('PayrollPending' as any);
-          }}
-        >
-          <View style={styles.payrollBannerIcon}>
-            <Icon name="briefcase" size={18} color="#fff" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.payrollBannerTitle}>Nómina pendiente</Text>
-            <Text style={styles.payrollBannerSubtitle}>
-              Tienes {pendingPayrollCount} pagos para firmar
-            </Text>
-          </View>
-          <Icon name="chevron-right" size={18} color="#9CA3AF" />
-        </TouchableOpacity>
-      )}
+      {/* Pending payroll banner removed (handled elsewhere) */}
 
       {/* Send/Receive Options */}
       <View style={styles.actionSection}>
@@ -1272,17 +1253,17 @@ const ListHeaderComponent = useMemo(() => {
         )}
 
         {isBusinessAccount && !activeAccount?.isEmployee && (
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.addEmployeeActionButton}
-            onPress={() => navigation.navigate('PayrollSettings' as any)}
+            onPress={() => navigation.navigate('PayrollHome' as any)}
           >
             <View style={styles.actionButtonContent}>
               <View style={[styles.actionIconContainer, { backgroundColor: '#8B5CF6' }]}>
-                <Icon name="settings" size={20} color="#fff" />
+                <Icon name="dollar-sign" size={20} color="#fff" />
               </View>
               <View style={styles.actionTextContainer}>
-                <Text style={styles.actionButtonTitle}>Configurar nómina</Text>
-                <Text style={styles.actionButtonSubtitle}>Delegados y permisos de pago</Text>
+                <Text style={styles.actionButtonTitle}>Nómina</Text>
+                <Text style={styles.actionButtonSubtitle}>Paga a tu equipo automáticamente</Text>
               </View>
             </View>
             <Icon name="chevron-right" size={20} color="#9ca3af" />

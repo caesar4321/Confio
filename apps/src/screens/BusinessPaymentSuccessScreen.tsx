@@ -375,7 +375,7 @@ export const BusinessPaymentSuccessScreen = () => {
                 <Text style={[styles.comparisonText, { color: isCUSD ? '#065F46' : '#5B21B6' }]}>
                   💡 <Text style={styles.bold}>Confío: 0.9% para comerciantes</Text>
                   {'\n'}vs. tarjetas tradicionales <Text style={styles.bold}>(2.5-3.5%)</Text>
-                  {'\n'}Apoyamos a los comerciantes venezolanos 🇻🇪
+                  {'\n'}Apoyamos a los comerciantes argentinos 🇦🇷
                 </Text>
               </View>
             </View>

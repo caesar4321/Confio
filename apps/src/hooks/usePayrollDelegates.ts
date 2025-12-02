@@ -26,34 +26,43 @@ export const usePayrollDelegates = () => {
   const { activeAccount } = useAccount();
   const { data, loading, refetch } = useQuery(GET_PAYROLL_DELEGATES, {
     skip: !activeAccount || activeAccount.type !== 'business',
-    fetchPolicy: 'cache-and-network',
+    fetchPolicy: 'network-only', // Always fetch fresh data from server
   });
   const [mutateDelegates, { loading: mutating }] = useMutation(SET_BUSINESS_DELEGATES);
   const [activatedOverride, setActivatedOverride] = useState(false);
 
-  const delegates = useMemo(() => (data?.payrollDelegates || []).map((d: string) => ({ address: d })), [data]);
+  // Keep as raw address strings so screens can compare directly
+  const delegates = useMemo(() => data?.payrollDelegates || [], [data]);
   const isActivated = useMemo(() => delegates.length > 0 || activatedOverride, [delegates, activatedOverride]);
 
   const activatePayroll = useCallback(
-    async (ownerAddress?: string) => {
+    async (ownerAddress?: string, delegateAddresses?: string[]) => {
       if (!activeAccount || activeAccount.type !== 'business') {
         Alert.alert('Solo negocios', 'Cambia a una cuenta de negocio para activar nómina.');
         return { success: false, error: 'Solo negocios' };
       }
-      const businessAddr = activeAccount.algorandAddress || activeAccount.address;
+      const businessAddr = activeAccount.algorandAddress || (activeAccount as any).address;
+      const delegateAddr = activeAccount?.ownerAddress || activeAccount?.algorandAddress || businessAddr;
       if (!businessAddr) {
         Alert.alert('Dirección faltante', 'No se encontró la dirección de la cuenta de negocio.');
         return { success: false, error: 'Dirección faltante' };
       }
-      const adds = [businessAddr].concat(ownerAddress ? [ownerAddress] : []);
+      // Always include business + delegate (personal) so allowlist gets created for payouts
+      const adds = [businessAddr, delegateAddr]
+        .concat(ownerAddress ? [ownerAddress] : [])
+        .concat(delegateAddresses || []);
       try {
         // Step 1: ask server for unsigned txn
         const prepRes = await mutateDelegates({
           variables: { businessAccount: businessAddr, add: adds, remove: [], signedTransaction: null },
         });
-        const unsignedB64 = prepRes.data?.setBusinessDelegates?.unsignedTransactionB64;
-        if (!prepRes.data?.setBusinessDelegates?.success || !unsignedB64) {
-          const msg = prepRes.data?.setBusinessDelegates?.errors?.[0] || 'No se pudo preparar la activación.';
+        const prepData = prepRes.data?.setBusinessDelegates;
+        const unsignedB64 = prepData?.unsignedTransactionB64;
+        if (!prepData?.success || !unsignedB64) {
+          const msg =
+            prepData?.errors?.filter(Boolean).join('\n') ||
+            prepRes.errors?.map((e: any) => e.message).join('\n') ||
+            'No se pudo preparar la activación.';
           return { success: false, error: msg };
         }
         // Step 2: sign client-side
@@ -68,7 +77,10 @@ export const usePayrollDelegates = () => {
         const ok = submitData?.success;
         const txId = submitData?.transactionHash;
         if (!ok) {
-          const msg = submitData?.errors?.[0] || 'No se pudo activar nómina.';
+          const msg =
+            submitData?.errors?.filter(Boolean).join('\n') ||
+            submitRes.errors?.map((e: any) => e.message).join('\n') ||
+            'No se pudo activar nómina.';
           return { success: false, error: msg };
         }
         await refetch();

@@ -1,11 +1,14 @@
 from django.shortcuts import render
 from django.utils.translation import get_language_from_request
 from django.views.generic import TemplateView
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 import logging
 import os
 import json
 from django.conf import settings
+from django.views.decorators.csrf import csrf_exempt
+import requests
+from graphql_jwt.utils import jwt_decode
 
 logger = logging.getLogger(__name__)
 
@@ -158,3 +161,263 @@ def deletion_view(request):
 
 
 # Removed /health endpoint (not required for WS flow)
+
+
+@csrf_exempt
+def guardarian_transaction_proxy(request):
+    """Server-side proxy to Guardarian to keep API key off client devices."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+    api_key = getattr(settings, 'GUARDARIAN_API_KEY', None)
+    base_url = getattr(settings, 'GUARDARIAN_API_URL', 'https://api-payments.guardarian.com/v1')
+    if not api_key:
+        return JsonResponse({'error': 'Guardarian API key not configured'}, status=503)
+
+    auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+    if not auth_header.startswith('JWT '):
+        return JsonResponse({'error': 'Unauthorized'}, status=401)
+
+    try:
+        token = auth_header.split(' ', 1)[1]
+        payload = jwt_decode(token)
+    except Exception as e:
+        logger.warning('Guardarian proxy token decode failed: %s', e)
+        return JsonResponse({'error': 'Invalid token'}, status=401)
+
+    user_id = payload.get('user_id')
+    if not user_id:
+        return JsonResponse({'error': 'Invalid token payload'}, status=401)
+
+    try:
+        from users.models import User
+        user = User.objects.get(id=user_id)
+    except Exception:
+        return JsonResponse({'error': 'User not found'}, status=401)
+
+    try:
+        body = json.loads(request.body or '{}')
+    except ValueError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
+
+    amount = body.get('amount')
+    if amount is None:
+        amount = body.get('from_amount')
+    from_currency = body.get('from_currency') or body.get('fromCurrency')
+    payout_address = body.get('payout_address') or body.get('payoutAddress')
+    request_email = body.get('email') or body.get('customer_email') or body.get('customerEmail')
+
+    if amount is None or from_currency is None:
+        return JsonResponse({'error': 'amount and from_currency are required'}, status=400)
+
+    # Determine if this is a buy (fiat-to-crypto) or sell (crypto-to-fiat) transaction
+    to_currency_raw = body.get('to_currency') or body.get('toCurrency')
+    to_currency_clean = (to_currency_raw or 'USDC').strip().upper()
+    from_network = (body.get('from_network') or body.get('fromNetwork') or '').strip().upper() or None
+    to_network = (body.get('to_network') or body.get('toNetwork') or '').strip().upper() or None
+    
+    # Common fiat currencies (sell destination). If not sure, treat as buy (crypto destination).
+    fiat_currencies = ['USD', 'EUR', 'GBP', 'BRL', 'ARS', 'MXN', 'COP', 'CLP', 'PEN', 'CAD', 'AUD', 'JPY', 'CHF']
+    is_sell_transaction = to_currency_clean in fiat_currencies
+    
+    guardarian_payload = {
+        'from_amount': float(amount),
+        'from_currency': from_currency,
+        'to_currency': to_currency_clean,
+        'locale': body.get('locale') or 'es',
+        'redirects': body.get('redirects') or {
+            'successful': 'https://confio.lat/checkout/success',
+            'cancelled': 'https://confio.lat/checkout/cancelled',
+            'failed': 'https://confio.lat/checkout/failed',
+        },
+
+        'deposit': {
+            'skip_choose_payment_category': True,
+        },
+    }
+    
+    # Only set from_network for sell transactions (crypto source). Default to ALGO for USDC sells if not provided.
+    if is_sell_transaction:
+        if from_network:
+            guardarian_payload['from_network'] = from_network
+        elif from_currency.upper() == 'USDC':
+            guardarian_payload['from_network'] = 'ALGO'
+    
+    # Only set to_network for buy transactions (crypto destination)
+    if not is_sell_transaction:
+        guardarian_payload['to_network'] = to_network or 'ALGO'
+
+    # Add customer country
+    customer_country = body.get('customer_country') or body.get('customerCountry') or getattr(user, 'phone_country', None)
+    if customer_country:
+        guardarian_payload['customer_country'] = customer_country
+
+    # Add external ID for tracking
+    external_id = body.get('external_partner_link_id') or body.get('externalId')
+    if external_id:
+        guardarian_payload['external_partner_link_id'] = external_id
+
+    # Add payout info - this should pre-fill the address
+    if payout_address:
+        guardarian_payload['payout_info'] = {
+            'payout_address': payout_address,
+            'skip_choose_payout_address': True,
+        }
+        # Also add as top-level for some Guardarian versions/widgets just in case
+        guardarian_payload['default_payout_address'] = payout_address
+        guardarian_payload['skip_payout_address_selection'] = True
+
+    # Add customer info if email is present
+    if request_email or user.email:
+        guardarian_payload['customer'] = {
+            'contact_info': {
+                'email': request_email or user.email or '',
+            }
+        }
+
+    # Log the payload for debugging
+    logger.info(f'Guardarian transaction request for user {user_id}: '
+                f'amount={amount}, currency={from_currency}, '
+                f'email={bool(user.email)}, address={bool(payout_address)}')
+    logger.debug(f'Guardarian payload: {json.dumps(guardarian_payload, indent=2)}')
+
+    try:
+        resp = requests.post(
+            f'{base_url.rstrip("/")}/transaction',
+            json=guardarian_payload,
+            headers={
+                'Content-Type': 'application/json',
+                'x-api-key': api_key,
+            },
+            timeout=20,
+        )
+
+    except requests.RequestException as e:
+        logger.error('Guardarian proxy network error: %s', e)
+        return JsonResponse({'error': 'Servicio no disponible temporalmente. Por favor intenta más tarde.'}, status=502)
+
+    # Log response for debugging
+    logger.debug(f'Guardarian response status: {resp.status_code}')
+
+    try:
+        data = resp.json()
+        if resp.ok:
+            redirect_url = data.get("redirect_url")
+            if redirect_url:
+                # Append query parameters to prefill data (Backend fallback)
+                from urllib.parse import urlencode
+                
+                params = {}
+                # Email prefill (Confirmed supported)
+                if request_email or user.email:
+                    params['email'] = request_email or user.email
+                
+                # Address prefill (Attempting as fallback)
+                if payout_address:
+                    params['payout_address'] = payout_address
+                    params['default_payout_address'] = payout_address
+                    params['skip_choose_payout_address'] = 'true'
+
+                if params:
+                    separator = '&' if '?' in redirect_url else '?'
+                    redirect_url = f"{redirect_url}{separator}{urlencode(params)}"
+                    data['redirect_url'] = redirect_url
+
+            logger.debug(f'Guardarian redirect_url: {data.get("redirect_url", "No URL")}')
+    except ValueError:
+        data = {'error': 'Respuesta inválida de Guardarian'}
+
+    if not resp.ok:
+        # Translate common Guardarian errors to Spanish
+        error_msg = data.get('error') or data.get('message') or 'Error de Guardarian'
+
+        # Check if there are detailed errors array
+        if 'errors' in data and isinstance(data['errors'], list) and len(data['errors']) > 0:
+            error_msg = data['errors'][0].get('reason') or error_msg
+
+        # Pattern matching for dynamic amount messages with regex
+        import re
+
+        # Pattern: "USD amount must be higher than 19.185 and lower than 29069"
+        amount_range_pattern = r'(\w+)\s+amount\s+must\s+be\s+higher\s+than\s+([\d.,]+)\s+and\s+lower\s+than\s+([\d.,]+)'
+        match = re.search(amount_range_pattern, error_msg, re.IGNORECASE)
+        if match:
+            currency, min_amt, max_amt = match.groups()
+            error_msg = f'El monto en {currency} debe ser mayor a {min_amt} y menor a {max_amt}.'
+        else:
+            # Pattern: "Amount must be at least 20"
+            min_pattern = r'amount\s+must\s+be\s+at\s+least\s+([\d.,]+)'
+            match = re.search(min_pattern, error_msg, re.IGNORECASE)
+            if match:
+                min_amt = match.group(1)
+                error_msg = f'El monto mínimo es {min_amt}.'
+            else:
+                # Pattern: "Amount must be less than 30000"
+                max_pattern = r'amount\s+must\s+be\s+less\s+than\s+([\d.,]+)'
+                match = re.search(max_pattern, error_msg, re.IGNORECASE)
+                if match:
+                    max_amt = match.group(1)
+                    error_msg = f'El monto máximo es {max_amt}.'
+                else:
+                    # Common error translations
+                    error_translations = {
+                        'amount is too low': 'El monto es demasiado bajo',
+                        'amount is too high': 'El monto es demasiado alto',
+                        'invalid amount': 'Monto inválido',
+                        'currency not supported': 'Moneda no soportada',
+                        'country not supported': 'País no soportado',
+                        'invalid email': 'Correo electrónico inválido',
+                        'invalid address': 'Dirección inválida',
+                        'minimum amount': 'Monto mínimo no alcanzado',
+                        'maximum amount': 'Monto máximo excedido',
+                    }
+
+                    # Translate if match found
+                    lower_error = error_msg.lower()
+                    for eng, esp in error_translations.items():
+                        if eng in lower_error:
+                            error_msg = esp
+                            break
+
+        return JsonResponse({'error': error_msg, 'message': error_msg}, status=resp.status_code)
+
+    return JsonResponse(data)
+
+
+def _guardarian_request(path: str, method: str = 'GET', payload: dict | None = None):
+    api_key = getattr(settings, 'GUARDARIAN_API_KEY', None)
+    base_url = getattr(settings, 'GUARDARIAN_API_URL', 'https://api-payments.guardarian.com/v1')
+    if not api_key:
+        return None, JsonResponse({'error': 'Guardarian API key not configured'}, status=503)
+
+    url = f'{base_url.rstrip("/")}{path}'
+    try:
+        if method.upper() == 'GET':
+            resp = requests.get(url, params=payload, headers={'x-api-key': api_key}, timeout=15)
+        else:
+            resp = requests.request(method, url, json=payload, headers={'x-api-key': api_key}, timeout=15)
+    except requests.RequestException as e:
+        logger.error('Guardarian proxy network error (%s): %s', path, e)
+        return None, JsonResponse({'error': 'Guardarian unavailable'}, status=502)
+
+    try:
+        data = resp.json()
+    except ValueError:
+        data = {'error': 'Invalid response from Guardarian'}
+
+    if not resp.ok:
+        return None, JsonResponse(data or {'error': 'Guardarian error'}, status=resp.status_code)
+
+    return data, None
+
+
+@csrf_exempt
+def guardarian_fiat_currencies(request):
+    """Expose available fiat currencies (filtered to available ones) without leaking API key."""
+    if request.method != 'GET':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+
+    data, error_response = _guardarian_request('/currencies/fiat', payload={'available': True})
+    if error_response:
+        return error_response
+    return JsonResponse(data, safe=False)
