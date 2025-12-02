@@ -18,8 +18,13 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# The compromised mnemonic to remove
-COMPROMISED_MNEMONIC="<REDACTED_OLD_COMPROMISED_MNEMONIC>"
+# The mnemonics to remove from git history
+# 1. Old compromised mnemonic
+OLD_COMPROMISED_MNEMONIC="<REDACTED_OLD_COMPROMISED_MNEMONIC>"
+# 2. New testnet mnemonic (should not be in git history)
+NEW_TESTNET_MNEMONIC="<REDACTED_TESTNET_MNEMONIC>"
+# 3. New mainnet mnemonic (should not be in git history)
+NEW_MAINNET_MNEMONIC="<REDACTED_MAINNET_MNEMONIC>"
 
 echo "=========================================="
 echo "Git History Cleanup Script"
@@ -91,9 +96,8 @@ for file in "${FILES_TO_CLEAN[@]}"; do
 done
 echo
 
-# Create a temporary file with the mnemonic for replacement
+# Create temporary files (not used in new method, just for cleanup)
 TEMP_FILE=$(mktemp)
-echo "$COMPROMISED_MNEMONIC" > "$TEMP_FILE"
 
 if [ "$DRY_RUN" = true ]; then
     echo "Would remove the compromised mnemonic from git history..."
@@ -112,10 +116,12 @@ fi
 echo "Cleaning git history..."
 echo
 
-# Method: Use git-filter-repo to replace the mnemonic with a placeholder
+# Method: Use git-filter-repo to replace all three mnemonics with placeholders
 # Create a replacements file
 REPLACE_FILE=$(mktemp)
-echo "literal:${COMPROMISED_MNEMONIC}==><REDACTED_MNEMONIC>" > "$REPLACE_FILE"
+echo "literal:${OLD_COMPROMISED_MNEMONIC}==><REDACTED_OLD_COMPROMISED_MNEMONIC>" > "$REPLACE_FILE"
+echo "literal:${NEW_TESTNET_MNEMONIC}==><REDACTED_TESTNET_MNEMONIC>" >> "$REPLACE_FILE"
+echo "literal:${NEW_MAINNET_MNEMONIC}==><REDACTED_MAINNET_MNEMONIC>" >> "$REPLACE_FILE"
 
 # Run git-filter-repo
 git filter-repo \
@@ -132,12 +138,39 @@ echo
 # Show what changed
 echo "Verifying cleanup..."
 echo
-if git log --all --full-history -S "$COMPROMISED_MNEMONIC" | grep -q commit; then
-    echo -e "${RED}⚠️  WARNING: Mnemonic may still exist in history!${NC}"
-    echo "Commits that may still contain it:"
-    git log --all --full-history -S "$COMPROMISED_MNEMONIC" --oneline
+
+# Check all three mnemonics
+ALL_CLEAN=true
+
+echo "Checking old compromised mnemonic..."
+if git log --all --full-history -S "$OLD_COMPROMISED_MNEMONIC" | grep -q commit; then
+    echo -e "${RED}⚠️  WARNING: Old mnemonic may still exist in history!${NC}"
+    ALL_CLEAN=false
 else
-    echo -e "${GREEN}✓ Mnemonic successfully removed from all history${NC}"
+    echo -e "${GREEN}✓ Old compromised mnemonic removed${NC}"
+fi
+
+echo "Checking new testnet mnemonic..."
+if git log --all --full-history -S "$NEW_TESTNET_MNEMONIC" | grep -q commit; then
+    echo -e "${RED}⚠️  WARNING: Testnet mnemonic may still exist in history!${NC}"
+    ALL_CLEAN=false
+else
+    echo -e "${GREEN}✓ Testnet mnemonic removed${NC}"
+fi
+
+echo "Checking new mainnet mnemonic..."
+if git log --all --full-history -S "$NEW_MAINNET_MNEMONIC" | grep -q commit; then
+    echo -e "${RED}⚠️  WARNING: Mainnet mnemonic may still exist in history!${NC}"
+    ALL_CLEAN=false
+else
+    echo -e "${GREEN}✓ Mainnet mnemonic removed${NC}"
+fi
+
+echo
+if [ "$ALL_CLEAN" = true ]; then
+    echo -e "${GREEN}✓ All mnemonics successfully removed from git history!${NC}"
+else
+    echo -e "${RED}⚠️  Some mnemonics may still exist in history${NC}"
 fi
 echo
 
