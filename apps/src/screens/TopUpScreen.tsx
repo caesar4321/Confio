@@ -264,6 +264,9 @@ const TopUpScreen = () => {
           <Text style={styles.heroSubtitle}>
             Compra USDC con tu tarjeta o transferencia bancaria. Rápido, seguro y sin complicaciones.
           </Text>
+          <Text style={styles.heroSubtitleSmall}>
+            Guardarian es un socio regulado. En algunos países solo está disponible la recarga (no el retiro) por regulación local. Retiros disponibles en EUR {getFlagForCurrency('EUR')} MXN {getFlagForCurrency('MXN')} CLP {getFlagForCurrency('CLP')} COP {getFlagForCurrency('COP')} ARS {getFlagForCurrency('ARS')} BRL {getFlagForCurrency('BRL')}.
+          </Text>
         </View>
 
         {/* Info card */}
@@ -301,7 +304,10 @@ const TopUpScreen = () => {
           <Text style={styles.inputLabel}>¿Cuánto quieres recargar?</Text>
 
           <View style={styles.amountInputContainer}>
-            <Text style={styles.currencySymbol}>{getCurrencySymbol(currencyCode)}</Text>
+            <View style={styles.currencyBadge}>
+              <Text style={styles.flagEmoji}>{getFlagForCurrency(currencyCode)}</Text>
+              <Text style={styles.currencyCodeText}>{currencyCode}</Text>
+            </View>
             <TextInput
               style={styles.amountInput}
               placeholder="0"
@@ -310,10 +316,6 @@ const TopUpScreen = () => {
               value={amount}
               onChangeText={setAmount}
             />
-            <View style={styles.currencyBadge}>
-              <Text style={styles.flagEmoji}>{getFlagForCurrency(currencyCode)}</Text>
-              <Text style={styles.currencyCodeText}>{currencyCode}</Text>
-            </View>
           </View>
 
           <View style={styles.conversionHint}>
@@ -433,6 +435,14 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     paddingHorizontal: 16,
   },
+  heroSubtitleSmall: {
+    fontSize: 12,
+    color: '#6B7280',
+    textAlign: 'center',
+    lineHeight: 18,
+    paddingHorizontal: 20,
+    marginTop: 6,
+  },
 
   // Info Card
   infoCard: {
@@ -525,11 +535,17 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#E5E7EB',
   },
+  currencyBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: '#DBEAFE',
+    borderRadius: 12,
+  },
   currencySymbol: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#6B7280',
-    marginRight: 8,
+    display: 'none',
   },
   amountInput: {
     flex: 1,
