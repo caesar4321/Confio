@@ -99,7 +99,7 @@ class AlgorandAccountManager:
                 # Auto opt-in to CONFIO if missing
                 if cls.CONFIO_ASSET_ID and cls.CONFIO_ASSET_ID not in currently_opted_in:
                     logger.info(f"User needs CONFIO opt-in, attempting auto opt-in...")
-                    opt_in_success = cls._opt_in_to_asset(algod_client, account.algorand_address, cls.CONFIO_ASSET_ID)
+                    opt_in_success, already_opted = cls._opt_in_to_asset(algod_client, account.algorand_address, cls.CONFIO_ASSET_ID)
                     if opt_in_success:
                         opted_in_assets.append(cls.CONFIO_ASSET_ID)
                         logger.info(f"Successfully auto-opted existing user into CONFIO")
@@ -109,7 +109,7 @@ class AlgorandAccountManager:
                 # Auto opt-in to cUSD if missing
                 if cls.CUSD_ASSET_ID and cls.CUSD_ASSET_ID not in currently_opted_in:
                     logger.info(f"User needs cUSD opt-in, attempting auto opt-in...")
-                    opt_in_success = cls._opt_in_to_asset(algod_client, account.algorand_address, cls.CUSD_ASSET_ID)
+                    opt_in_success, _ = cls._opt_in_to_asset(algod_client, account.algorand_address, cls.CUSD_ASSET_ID)
                     if opt_in_success:
                         opted_in_assets.append(cls.CUSD_ASSET_ID)
                         logger.info(f"Successfully auto-opted existing user into cUSD")
@@ -153,18 +153,21 @@ class AlgorandAccountManager:
             
             # Auto opt-in to CONFIO
             if cls.CONFIO_ASSET_ID:
-                opt_in_success = cls._opt_in_to_asset(algod_client, algorand_address, cls.CONFIO_ASSET_ID)
+                opt_in_success, already_opted = cls._opt_in_to_asset(algod_client, algorand_address, cls.CONFIO_ASSET_ID)
                 if opt_in_success:
                     opted_in_assets.append(cls.CONFIO_ASSET_ID)
                     
-                    # Send initial CONFIO grant
-                    cls._send_initial_confio(algod_client, algorand_address)
+                    # Send initial CONFIO grant ONLY if not already opted in (prevents faucet abuse)
+                    if not already_opted:
+                        cls._send_initial_confio(algod_client, algorand_address)
+                    else:
+                        logger.info(f"Skipping initial CONFIO grant for {algorand_address} (already opted in)")
                 else:
                     errors.append(f"Failed to opt-in to CONFIO (Asset ID: {cls.CONFIO_ASSET_ID})")
             
             # Auto opt-in to cUSD (available on localnet)
             if cls.CUSD_ASSET_ID:
-                opt_in_success = cls._opt_in_to_asset(algod_client, algorand_address, cls.CUSD_ASSET_ID)
+                opt_in_success, _ = cls._opt_in_to_asset(algod_client, algorand_address, cls.CUSD_ASSET_ID)
                 if opt_in_success:
                     opted_in_assets.append(cls.CUSD_ASSET_ID)
                     logger.info(f"Successfully opted in to cUSD (Asset ID: {cls.CUSD_ASSET_ID})")
@@ -227,10 +230,12 @@ class AlgorandAccountManager:
 
             opted = []
             if cls.CONFIO_ASSET_ID:
-                if cls._opt_in_to_asset(algod_client, addr, cls.CONFIO_ASSET_ID):
+                success, _ = cls._opt_in_to_asset(algod_client, addr, cls.CONFIO_ASSET_ID)
+                if success:
                     opted.append(cls.CONFIO_ASSET_ID)
             if cls.CUSD_ASSET_ID:
-                if cls._opt_in_to_asset(algod_client, addr, cls.CUSD_ASSET_ID):
+                success, _ = cls._opt_in_to_asset(algod_client, addr, cls.CUSD_ASSET_ID)
+                if success:
                     opted.append(cls.CUSD_ASSET_ID)
 
             return {
@@ -291,10 +296,13 @@ class AlgorandAccountManager:
             return False
     
     @classmethod
-    def _opt_in_to_asset(cls, algod_client, address: str, asset_id: int) -> bool:
+    def _opt_in_to_asset(cls, algod_client, address: str, asset_id: int) -> Tuple[bool, bool]:
         """
         Opt-in an account to an asset using sponsored transactions.
         This automatically performs the opt-in without requiring user signature.
+        
+        Returns:
+            Tuple[bool, bool]: (success, already_opted_in)
         """
         try:
             # Check if already opted in
@@ -303,7 +311,7 @@ class AlgorandAccountManager:
             
             if any(asset['asset-id'] == asset_id for asset in assets):
                 logger.info(f"Account {address} already opted into asset {asset_id}")
-                return True
+                return True, True
             
             # Use sponsored opt-in service for automatic opt-in
             logger.info(f"Account {address} needs opt-in for asset {asset_id}, using sponsored service")
@@ -345,7 +353,7 @@ class AlgorandAccountManager:
                             asset_id,
                             funding_result.get('error'),
                         )
-                        return False
+                        return False, False
                     logger.info(
                         "Funded account %s with %.6f ALGO for asset %s opt-in",
                         address,
@@ -359,7 +367,7 @@ class AlgorandAccountManager:
 
                 if result.get('success'):
                     logger.info(f"Successfully auto-opted {address} into asset {asset_id}")
-                    return True
+                    return True, False
                 else:
                     logger.warning(
                         "Auto opt-in failed for %s to asset %s: %s",
@@ -367,17 +375,17 @@ class AlgorandAccountManager:
                         asset_id,
                         result.get('error'),
                     )
-                    return False
+                    return False, False
 
             except Exception as e:
                 logger.error(f"Error during sponsored opt-in for {address} to asset {asset_id}: {e}")
-                return False
+                return False, False
             finally:
                 loop.close()
             
         except Exception as e:
             logger.error(f"Failed to check opt-in for {address} to asset {asset_id}: {e}")
-            return False
+            return False, False
     
     @classmethod
     def _send_initial_confio(cls, algod_client, address: str) -> bool:
@@ -483,12 +491,12 @@ class AlgorandAccountManager:
             
             # Opt-in to USDC
             if cls.USDC_ASSET_ID:
-                opt_in_success = cls._opt_in_to_asset(algod_client, algorand_address, cls.USDC_ASSET_ID)
+                opt_in_success, already_opted = cls._opt_in_to_asset(algod_client, algorand_address, cls.USDC_ASSET_ID)
                 if opt_in_success:
                     logger.info(f"Successfully opted user {user.email} into USDC (Asset ID: {cls.USDC_ASSET_ID})")
                     return {
                         'success': True,
-                        'already_opted_in': False,
+                        'already_opted_in': already_opted,
                         'error': None,
                         'algorand_address': algorand_address
                     }

@@ -65,19 +65,21 @@ DJANGO_SETTINGS_MODULE=config.settings myvenv/bin/python \
   scripts/kms/setup_kms_keys.py --import-existing
 ```
 
-**You'll need these mnemonics** (from `SECURITY_INCIDENT_REPORT.md`):
+**Keys now stored in AWS KMS:**
 
 **Testnet:**
 ```
-<REDACTED_TESTNET_MNEMONIC>
+Address: UQ6WZKLQBQCNAQTOSEWZZXDY376RZTYP2U2ZZT7OIPEGP376HYLTCSL6E4
+KMS Alias: alias/confio-testnet-sponsor
+Mnemonic: <REDACTED - STORED IN AWS KMS>
 ```
-**Address:** `UQ6WZKLQBQCNAQTOSEWZZXDY376RZTYP2U2ZZT7OIPEGP376HYLTCSL6E4`
 
 **Mainnet:**
 ```
-<REDACTED_MAINNET_MNEMONIC>
+Address: ZS2HK5N7BZV46ZZGDOQBGFTN3JSXGAFVJFG33WAEP47JQMASSSJIQL7HI4
+KMS Alias: alias/confio-mainnet-sponsor
+Mnemonic: <REDACTED - STORED IN AWS KMS>
 ```
-**Address:** `ZS2HK5N7BZV46ZZGDOQBGFTN3JSXGAFVJFG33WAEP47JQMASSSJIQL7HI4`
 
 **What happens:**
 - Keys encrypted and stored in AWS KMS (eu-central-2)

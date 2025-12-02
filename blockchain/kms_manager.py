@@ -104,18 +104,41 @@ class AlgorandKMSManager:
         ssm_client = boto3.client('ssm', region_name=self.region_name)
         parameter_name = f'/confio/algorand/{key_alias}/private-key'
 
-        ssm_client.put_parameter(
-            Name=parameter_name,
-            Description=f'Encrypted Algorand private key for {key_alias}',
-            Value=private_key,
-            Type='SecureString',
-            KeyId=kms_key_id,
-            Overwrite=True,
-            Tags=[
-                {'Key': 'Project', 'Value': 'Confio'},
-                {'Key': 'AlgorandAddress', 'Value': address},
-            ]
-        )
+        # Try to create parameter first (without overwrite)
+        try:
+            ssm_client.put_parameter(
+                Name=parameter_name,
+                Description=f'Encrypted Algorand private key for {key_alias}',
+                Value=private_key,
+                Type='SecureString',
+                KeyId=kms_key_id,
+                Tags=[
+                    {'Key': 'Project', 'Value': 'Confio'},
+                    {'Key': 'AlgorandAddress', 'Value': address},
+                ]
+            )
+            logger.info(f"Created new SSM parameter: {parameter_name}")
+        except ssm_client.exceptions.ParameterAlreadyExists:
+            # Parameter exists, update it without tags
+            ssm_client.put_parameter(
+                Name=parameter_name,
+                Description=f'Encrypted Algorand private key for {key_alias}',
+                Value=private_key,
+                Type='SecureString',
+                KeyId=kms_key_id,
+                Overwrite=True
+            )
+            logger.info(f"Updated existing SSM parameter: {parameter_name}")
+
+            # Update tags separately
+            ssm_client.add_tags_to_resource(
+                ResourceType='Parameter',
+                ResourceId=parameter_name,
+                Tags=[
+                    {'Key': 'Project', 'Value': 'Confio'},
+                    {'Key': 'AlgorandAddress', 'Value': address},
+                ]
+            )
 
         logger.info(f"Stored private key in Parameter Store: {parameter_name}")
         logger.warning(f"BACKUP THIS MNEMONIC SECURELY: {mnemonic_phrase}")
@@ -148,11 +171,50 @@ class AlgorandKMSManager:
 
         logger.info(f"Importing Algorand address: {address}")
 
+        # Get current AWS account ID for key policy
+        import boto3
+        sts_client = boto3.client('sts', region_name=self.region_name)
+        account_id = sts_client.get_caller_identity()['Account']
+
+        # Create key policy that allows root and current user to use the key
+        key_policy = {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Sid": "Enable IAM User Permissions",
+                    "Effect": "Allow",
+                    "Principal": {
+                        "AWS": f"arn:aws:iam::{account_id}:root"
+                    },
+                    "Action": "kms:*",
+                    "Resource": "*"
+                },
+                {
+                    "Sid": "Allow use of the key for Parameter Store",
+                    "Effect": "Allow",
+                    "Principal": {
+                        "AWS": f"arn:aws:iam::{account_id}:user/Julian"
+                    },
+                    "Action": [
+                        "kms:Encrypt",
+                        "kms:Decrypt",
+                        "kms:ReEncrypt*",
+                        "kms:GenerateDataKey*",
+                        "kms:CreateGrant",
+                        "kms:DescribeKey"
+                    ],
+                    "Resource": "*"
+                }
+            ]
+        }
+
         # Create KMS key for encryption
+        import json
         response = self.kms_client.create_key(
             Description=f'{description} - Algorand Private Key',
             KeyUsage='ENCRYPT_DECRYPT',
             Origin='AWS_KMS',
+            Policy=json.dumps(key_policy),
             Tags=[
                 {'TagKey': 'Project', 'TagValue': 'Confio'},
                 {'TagKey': 'Purpose', 'TagValue': 'Algorand-Signing'},
@@ -181,18 +243,41 @@ class AlgorandKMSManager:
         ssm_client = boto3.client('ssm', region_name=self.region_name)
         parameter_name = f'/confio/algorand/{key_alias}/private-key'
 
-        ssm_client.put_parameter(
-            Name=parameter_name,
-            Description=f'Encrypted Algorand private key for {key_alias}',
-            Value=private_key,
-            Type='SecureString',
-            KeyId=kms_key_id,
-            Overwrite=True,
-            Tags=[
-                {'Key': 'Project', 'Value': 'Confio'},
-                {'Key': 'AlgorandAddress', 'Value': address},
-            ]
-        )
+        # Try to create parameter first (without overwrite)
+        try:
+            ssm_client.put_parameter(
+                Name=parameter_name,
+                Description=f'Encrypted Algorand private key for {key_alias}',
+                Value=private_key,
+                Type='SecureString',
+                KeyId=kms_key_id,
+                Tags=[
+                    {'Key': 'Project', 'Value': 'Confio'},
+                    {'Key': 'AlgorandAddress', 'Value': address},
+                ]
+            )
+            logger.info(f"Created new SSM parameter: {parameter_name}")
+        except ssm_client.exceptions.ParameterAlreadyExists:
+            # Parameter exists, update it without tags
+            ssm_client.put_parameter(
+                Name=parameter_name,
+                Description=f'Encrypted Algorand private key for {key_alias}',
+                Value=private_key,
+                Type='SecureString',
+                KeyId=kms_key_id,
+                Overwrite=True
+            )
+            logger.info(f"Updated existing SSM parameter: {parameter_name}")
+
+            # Update tags separately
+            ssm_client.add_tags_to_resource(
+                ResourceType='Parameter',
+                ResourceId=parameter_name,
+                Tags=[
+                    {'Key': 'Project', 'Value': 'Confio'},
+                    {'Key': 'AlgorandAddress', 'Value': address},
+                ]
+            )
 
         logger.info(f"Imported and stored private key in Parameter Store: {parameter_name}")
 
