@@ -36,6 +36,7 @@ confio.tar.gz filter=git-crypt diff=git-crypt
 deploy.sh filter=git-crypt diff=git-crypt
 scripts/deployment/** filter=git-crypt diff=git-crypt
 scripts/admin/** filter=git-crypt diff=git-crypt
+scripts/kms/** filter=git-crypt diff=git-crypt
 tests/integration/rewards/** filter=git-crypt diff=git-crypt
 
 # Credentials directory
