@@ -32,6 +32,7 @@ import com.worklets.WorkletsPackage
 import com.rt2zz.reactnativecontacts.ReactNativeContacts
 import com.learnium.RNDeviceInfo.RNDeviceInfo
 import com.Confio.Confio.MediaPickerPackage
+import com.proyecto26.inappbrowser.RNInAppBrowserPackage
 
 class MainApplication : Application(), ReactApplication {
 
@@ -62,7 +63,8 @@ class MainApplication : Application(), ReactApplication {
             WorkletsPackage(),
             ReactNativeContacts(),
             RNDeviceInfo(),
-            MediaPickerPackage()
+            MediaPickerPackage(),
+            RNInAppBrowserPackage()
           )
         }
 

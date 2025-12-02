@@ -65,12 +65,6 @@ module.exports = {
         // ios: enabled (autolinking)
       }
     },
-    'react-native-fs': {
-      platforms: {
-        android: null,
-        // ios: enabled (autolinking)
-      }
-    },
     'react-native-get-random-values': {
       platforms: {
         android: null,

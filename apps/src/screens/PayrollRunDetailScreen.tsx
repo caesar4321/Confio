@@ -14,7 +14,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import ViewShot from 'react-native-view-shot';
-import RNFS from 'react-native-fs';
+import { CameraRoll } from '@react-native-camera-roll/camera-roll';
 import { MainStackParamList } from '../types/navigation';
 import { PayrollReceiptView } from '../components/PayrollReceiptView';
 import { PayrollRunReceiptView } from '../components/PayrollRunReceiptView';
@@ -115,23 +115,34 @@ export const PayrollRunDetailScreen = () => {
       // Capture the view as an image
       const uri = await fullRunRef.current?.capture?.();
 
-      const fileName = `corrida_nomina_${run?.runId || 'recibo'}_${formatShortDate(run?.scheduledAt).replace(/ /g, '_')}.jpg`;
-      const destPath = `${RNFS.TemporaryDirectoryPath}/${fileName}`;
+      // Save directly to Camera Roll (complies with Google Play policy)
+      const savedUri = await CameraRoll.save(uri, { type: 'photo' });
 
-      // Copy the captured image to a shareable location
-      await RNFS.copyFile(uri, destPath);
-
-      const shareUrl = Platform.OS === 'android' ? `file://${destPath}` : destPath;
-      await Share.share({
-        title: 'Comprobante de Corrida de Nómina',
-        message: `Corrida #${run?.runId || run?.id?.slice(0, 6)} - ${businessName}`,
-        url: shareUrl,
-      });
-
-      setCapturingFullRun(false);
+      Alert.alert(
+        'Comprobante guardado',
+        'El comprobante se guardó en tu galería de fotos.',
+        [
+          { text: 'OK', onPress: () => setCapturingFullRun(false) },
+          {
+            text: 'Compartir',
+            onPress: async () => {
+              try {
+                await Share.share({
+                  title: 'Comprobante de Corrida de Nómina',
+                  message: `Corrida #${run?.runId || run?.id?.slice(0, 6)} - ${businessName}`,
+                  url: savedUri,
+                });
+              } catch (error) {
+                console.error('Share error:', error);
+              }
+              setCapturingFullRun(false);
+            },
+          },
+        ]
+      );
     } catch (e: any) {
       console.error('PDF share error', e);
-      Alert.alert('Error', 'No se pudo generar el comprobante.');
+      Alert.alert('Error', 'No se pudo guardar el comprobante. Verifica los permisos de galería.');
       setCapturingFullRun(false);
     }
   };
@@ -158,23 +169,34 @@ export const PayrollRunDetailScreen = () => {
       // Capture the view as an image
       const uri = await ref?.capture?.();
 
-      const fileName = `pago_nomina_${it.itemId || idx}_${name.replace(/ /g, '_')}.jpg`;
-      const destPath = `${RNFS.TemporaryDirectoryPath}/${fileName}`;
+      // Save directly to Camera Roll (complies with Google Play policy)
+      const savedUri = await CameraRoll.save(uri, { type: 'photo' });
 
-      // Copy the captured image to a shareable location
-      await RNFS.copyFile(uri, destPath);
-
-      const shareUrl = Platform.OS === 'android' ? `file://${destPath}` : destPath;
-      await Share.share({
-        title: 'Comprobante de Pago de Nómina',
-        message: `Pago de nómina - ${name}`,
-        url: shareUrl,
-      });
-
-      setCapturingIndex(null);
+      Alert.alert(
+        'Comprobante guardado',
+        'El comprobante se guardó en tu galería de fotos.',
+        [
+          { text: 'OK', onPress: () => setCapturingIndex(null) },
+          {
+            text: 'Compartir',
+            onPress: async () => {
+              try {
+                await Share.share({
+                  title: 'Comprobante de Pago de Nómina',
+                  message: `Pago de nómina - ${name}`,
+                  url: savedUri,
+                });
+              } catch (error) {
+                console.error('Share error:', error);
+              }
+              setCapturingIndex(null);
+            },
+          },
+        ]
+      );
     } catch (e: any) {
       console.error('Item PDF share error', e);
-      Alert.alert('Error', 'No se pudo generar el comprobante individual.');
+      Alert.alert('Error', 'No se pudo guardar el comprobante. Verifica los permisos de galería.');
       setCapturingIndex(null);
     }
   };
