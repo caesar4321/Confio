@@ -12,6 +12,7 @@ import {
     Platform,
     Clipboard,
     Linking,
+    Image,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
@@ -21,10 +22,11 @@ import GuardarianLogo from '../assets/svg/guardarian.svg';
 import { useAuth } from '../contexts/AuthContext';
 import { useAccount } from '../contexts/AccountContext';
 import { useCountry } from '../contexts/CountryContext';
-import { getCurrencyForCountry, getCurrencySymbol } from '../utils/currencyMapping';
+import { getCurrencyForCountry } from '../utils/currencyMapping';
 import { getCountryByIso } from '../utils/countries';
-import { createGuardarianTransaction, fetchGuardarianFiatCurrencies, fetchGuardarianCryptoCurrencies, GuardarianFiatCurrency } from '../services/guardarianService';
+import { createGuardarianTransaction, fetchGuardarianFiatCurrencies, GuardarianFiatCurrency } from '../services/guardarianService';
 import { getFlagForCurrency } from '../utils/currencyFlags';
+import USDCLogo from '../assets/png/USDC.png';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'Sell'>;
 
@@ -66,48 +68,35 @@ export const SellScreen = () => {
 
     // Whitelist of currencies that Guardarian supports for USDC-ALGO sells
     // Based on testing and Guardarian's API limitations
-    const SUPPORTED_SELL_CURRENCIES = ['EUR', 'GBP', 'BRL', 'ARS', 'MXN', 'COP', 'CLP', 'PEN'];
+    const SELL_SUPPORTED = ['EUR', 'MXN', 'CLP', 'COP', 'ARS', 'BRL'];
+    const isCountrySupportedForSell = SELL_SUPPORTED.includes(derivedCurrencyCode);
 
     useEffect(() => {
-        const pickDefaultPayout = (available: string[]): string => {
-            if (available.includes(derivedCurrencyCode)) return derivedCurrencyCode;
-            if (available.includes('USD')) return 'USD';
-            if (available.length > 0) return available[0];
-            return derivedCurrencyCode || 'USD';
-        };
+    const pickDefaultPayout = (): { code: string; fallback: boolean } => {
+        if (SELL_SUPPORTED.includes(derivedCurrencyCode)) return { code: derivedCurrencyCode, fallback: false };
+        return { code: 'EUR', fallback: true };
+    };
 
         const loadFiats = async () => {
             setFiatLoading(true);
             setFiatError(null);
             try {
-                const res = await fetchGuardarianFiatCurrencies();
-                setFiatOptions(res || []);
+                const fiatsRes = await fetchGuardarianFiatCurrencies();
+                setFiatOptions(fiatsRes || []);
 
-                const payoutEnabled = (res || [])
-                    .filter((f) =>
-                        (f.payment_categories || []).some(
-                            pc => pc.withdrawal_enabled || pc.deposit_enabled || pc.category
-                        )
-                    )
-                    .map((f) => f.ticker)
-                    .filter(Boolean);
-
-                setPayoutFiats(payoutEnabled);
-
-                const fallbackAll = (res || []).map(f => f.ticker).filter(Boolean);
-                const candidates = payoutEnabled.length > 0 ? payoutEnabled : fallbackAll;
-
-                if (candidates.length === 0) {
-                    setFiatError('Guardarian no soporta retiros para tu país/moneda en este momento.');
-                    setCurrencyCode('');
-                } else {
-                    setCurrencyCode(pickDefaultPayout(candidates));
+                // Hardcode supported list; prefer local if supported, else EUR.
+                const { code, fallback } = pickDefaultPayout();
+                setCurrencyCode(code);
+                setPayoutFiats(SELL_SUPPORTED);
+                if (fallback) {
+                    setFiatError('Guardarian no soporta retiros en tu moneda. Usaremos EUR como predeterminado.');
                 }
 
             } catch (err: any) {
                 console.warn('Guardarian fiat load failed', err);
-                setFiatError('No pudimos cargar monedas con retiro. Intenta más tarde o cambia de país/moneda.');
-                setCurrencyCode('');
+                setFiatError('No pudimos cargar monedas con retiro. Usaremos EUR.');
+                setCurrencyCode('EUR');
+                setPayoutFiats(SELL_SUPPORTED);
             } finally {
                 setFiatLoading(false);
             }
@@ -274,44 +263,21 @@ export const SellScreen = () => {
                                 : `Abriremos Guardarian pre-configurado. Deberás ingresar tu correo electrónico.`
                             }
                         </Text>
+                        {!isCountrySupportedForSell && (
+                            <Text style={styles.infoCardTextSecondary}>
+                                Retiros disponibles en EUR {getFlagForCurrency('EUR')} MXN {getFlagForCurrency('MXN')} CLP {getFlagForCurrency('CLP')} COP {getFlagForCurrency('COP')} ARS {getFlagForCurrency('ARS')} BRL {getFlagForCurrency('BRL')}. Tu país actual permite recargar, pero el retiro puede no estar disponible hasta que Guardarian habilite ese mercado.
+                            </Text>
+                        )}
                     </View>
                 </View>
 
                 {/* Payout currency selection */}
-                <View style={styles.card}>
-                    <Text style={styles.cardLabel}>Moneda de retiro</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 8 }}>
-                        {payoutFiats.map((ticker) => (
-                            <TouchableOpacity
-                                key={ticker}
-                                style={[
-                                    styles.chip,
-                                    currencyCode === ticker && styles.chipActive
-                                ]}
-                                onPress={() => setCurrencyCode(ticker)}
-                            >
-                                <Text style={[
-                                    styles.chipText,
-                                    currencyCode === ticker && styles.chipTextActive
-                                ]}>
-                                    {getFlagForCurrency(ticker)} {ticker}
-                                </Text>
-                            </TouchableOpacity>
-                        ))}
-                    </ScrollView>
-                    {fiatLoading && <ActivityIndicator style={{ marginTop: 8 }} color="#0EA5E9" />}
-                    {fiatError && <Text style={styles.errorText}>{fiatError}</Text>}
-                    {!currencyCode && !fiatLoading && !fiatError && (
-                        <Text style={styles.errorText}>Guardarian no ofrece retiros para tu país/moneda.</Text>
-                    )}
-                </View>
-
                 {/* Amount Input Card */}
                 <View style={styles.inputCard}>
                     <Text style={styles.inputLabel}>¿Cuánto quieres retirar?</Text>
 
                     <View style={styles.amountInputContainer}>
-                        <Text style={styles.currencySymbol}>{getCurrencySymbol(currencyCode)}</Text>
+                        <Image source={USDCLogo} style={styles.usdcLogo} />
                         <TextInput
                             style={styles.amountInput}
                             placeholder="0"
@@ -355,9 +321,9 @@ export const SellScreen = () => {
 
                 {/* CTA Button */}
                 <TouchableOpacity
-                    style={[styles.ctaButton, (!amount || loading || !currencyCode) && styles.ctaButtonDisabled]}
+                    style={[styles.ctaButton, (!amount || loading) && styles.ctaButtonDisabled]}
                     onPress={handleCreateOrder}
-                    disabled={!amount || loading || !currencyCode}
+                    disabled={!amount || loading}
                 >
                     {loading ? (
                         <ActivityIndicator color="#fff" />
@@ -467,6 +433,12 @@ const styles = StyleSheet.create({
         color: '#1F2937',
         lineHeight: 16,
     },
+    infoCardTextSecondary: {
+        fontSize: 12,
+        color: '#6B7280',
+        lineHeight: 16,
+        marginTop: 4,
+    },
     // Amount Input Card
     inputCard: {
         backgroundColor: '#fff',
@@ -500,6 +472,12 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         color: '#6B7280',
         marginRight: 8,
+    },
+    usdcLogo: {
+        width: 28,
+        height: 28,
+        marginRight: 8,
+        borderRadius: 14,
     },
     amountInput: {
         flex: 1,
