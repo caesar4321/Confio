@@ -37,10 +37,12 @@ if [ ! -d .git ]; then
     exit 1
 fi
 
-# Check for uncommitted changes
-if ! git diff-index --quiet HEAD --; then
+# Check for uncommitted changes (excluding git-crypt files which may show as modified)
+MODIFIED_FILES=$(git diff-index --name-only HEAD -- | grep -v '__init__.py' | grep -v 'filter=git-crypt')
+if [ -n "$MODIFIED_FILES" ]; then
     echo -e "${RED}Error: You have uncommitted changes${NC}"
     echo "Please commit or stash your changes first"
+    echo "$MODIFIED_FILES"
     exit 1
 fi
 
