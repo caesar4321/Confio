@@ -14,7 +14,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import ViewShot from 'react-native-view-shot';
-import RNFS from 'react-native-fs';
+import { CameraRoll } from '@react-native-camera-roll/camera-roll';
 import { MainStackParamList } from '../types/navigation';
 import { useAuth } from '../contexts/AuthContext';
 import { PayrollReceiptView } from '../components/PayrollReceiptView';
@@ -146,21 +146,33 @@ export const PayrollReceiptScreen = () => {
       // Capture the view as an image
       const uri = await viewShotRef.current.capture();
 
-      const fileName = `comprobante_nomina_${payrollRunId || 'pago'}_${formatShortDate(date).replace(/\//g, '-')}.jpg`;
-      const destPath = `${RNFS.TemporaryDirectoryPath}/${fileName}`;
+      // Save directly to Camera Roll (complies with Google Play policy)
+      const savedUri = await CameraRoll.save(uri, { type: 'photo' });
 
-      // Copy the captured image to a shareable location
-      await RNFS.copyFile(uri, destPath);
-
-      const shareUrl = Platform.OS === 'android' ? `file://${destPath}` : destPath;
-      await Share.share({
-        title: 'Comprobante de Nómina - Confío',
-        message: `Comprobante de pago de nómina - ${employeeName}`,
-        url: shareUrl,
-      });
+      Alert.alert(
+        'Comprobante guardado',
+        'El comprobante se guardó en tu galería de fotos.',
+        [
+          { text: 'OK' },
+          {
+            text: 'Compartir',
+            onPress: async () => {
+              try {
+                await Share.share({
+                  title: 'Comprobante de Nómina - Confío',
+                  message: `Comprobante de pago de nómina - ${employeeName}`,
+                  url: savedUri,
+                });
+              } catch (error) {
+                console.error('Share error:', error);
+              }
+            },
+          },
+        ]
+      );
     } catch (e: any) {
-      console.error('PDF export error', e);
-      Alert.alert('Error', 'No se pudo generar el comprobante.');
+      console.error('Export error', e);
+      Alert.alert('Error', 'No se pudo guardar el comprobante. Verifica los permisos de galería.');
     }
   };
 

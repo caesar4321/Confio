@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import InAppBrowser from 'react-native-inappbrowser-reborn';
+import { Linking } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
@@ -199,41 +200,43 @@ const TopUpScreen = () => {
       console.log(checkoutUrl);
       console.log('==============================');
 
-      // Open Guardarian in system in-app browser
-      if (await InAppBrowser.isAvailable()) {
-        const result = await InAppBrowser.open(checkoutUrl, {
-          // iOS Settings
-          dismissButtonStyle: 'done',
-          preferredBarTintColor: '#72D9BC',
-          preferredControlTintColor: 'white',
-          readerMode: false,
-          animated: true,
-          modalPresentationStyle: 'fullScreen',
-          modalTransitionStyle: 'coverVertical',
-          modalEnabled: true,
-          enableBarCollapsing: false,
-          // Android Settings
-          showTitle: true,
-          toolbarColor: '#72D9BC',
-          secondaryToolbarColor: 'white',
-          navigationBarColor: 'white',
-          navigationBarDividerColor: 'white',
-          enableUrlBarHiding: true,
-          enableDefaultShare: false,
-          forceCloseOnRedirection: false,
-          // Common
-          headers: {
-            'Accept-Language': 'es',
-          },
-        });
+      // Simplify options to minimize conflicts
+      const options = {
+        // iOS Properties
+        dismissButtonStyle: 'done',
+        preferredBarTintColor: '#72D9BC',
+        preferredControlTintColor: 'white',
+        readerMode: false,
+        animated: true,
+        modalPresentationStyle: 'fullScreen',
+        modalTransitionStyle: 'coverVertical',
+        modalEnabled: true,
+        enableBarCollapsing: false,
+        // Android Properties
+        showTitle: true,
+        toolbarColor: '#72D9BC',
+        secondaryToolbarColor: 'white',
+        navigationBarColor: 'white',
+        navigationBarDividerColor: 'white',
+        enableUrlBarHiding: true,
+        enableDefaultShare: false,
+        forceCloseOnRedirection: false,
+        // Specify full options to be safe
+        hasBackButton: true,
+        browserPackage: undefined,
+        showInRecents: false
+      };
 
-        // Handle result when browser closes
-        if (result.type === 'cancel') {
-          console.log('User cancelled Guardarian flow');
+      try {
+        if (await InAppBrowser.isAvailable()) {
+          await InAppBrowser.open(checkoutUrl, options);
+        } else {
+          console.warn('[TopUp] InAppBrowser not available, using Linking');
+          await Linking.openURL(checkoutUrl);
         }
-      } else {
-        // Fallback to external browser if InAppBrowser not available
-        const { Linking } = require('react-native');
+      } catch (browserErr: any) {
+        console.warn('InAppBrowser open failed, falling back to Linking', browserErr);
+        Alert.alert('Aviso', `No pudimos abrir el navegador interno (${browserErr.message || 'Error desconocido'}). Intentaremos abrir el navegador externo.`);
         await Linking.openURL(checkoutUrl);
       }
     } catch (err: any) {
@@ -535,15 +538,6 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#E5E7EB',
   },
-  currencyBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginRight: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    backgroundColor: '#DBEAFE',
-    borderRadius: 12,
-  },
   currencySymbol: {
     display: 'none',
   },
@@ -562,6 +556,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     gap: 6,
+    marginRight: 12,
   },
   flagEmoji: {
     fontSize: 20,

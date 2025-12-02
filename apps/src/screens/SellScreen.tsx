@@ -130,12 +130,16 @@ export const SellScreen = () => {
                 setOrderId(tx.id);
                 setOrderCreated(true);
             } else if (tx.redirect_url) {
-                const canOpen = await Linking.canOpenURL(tx.redirect_url);
-                if (!canOpen) {
-                    throw new Error('Guardarian requiere información adicional, pero no pudimos abrir el enlace.');
+                try {
+                    await Linking.openURL(tx.redirect_url);
+                    return;
+                } catch (openErr) {
+                    console.warn('Failed to open Guardarian redirect', openErr);
+                    Alert.alert(
+                        'Necesitamos más datos',
+                        'Guardarian requiere información adicional. Abre el enlace en tu navegador y completa el proceso.'
+                    );
                 }
-                await Linking.openURL(tx.redirect_url);
-                return;
             } else {
                 throw new Error('Guardarian no devolvió métodos de retiro. Prueba otra moneda o intenta más tarde.');
             }
