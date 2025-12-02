@@ -1818,6 +1818,8 @@ PODS:
   - RNGoogleSignin (14.0.1):
     - GoogleSignIn (~> 7.1)
     - React-Core
+  - RNInAppBrowser (3.7.0):
+    - React-Core
   - RNKeychain (10.0.0):
     - DoubleConversion
     - glog
@@ -2115,6 +2117,7 @@ DEPENDENCIES:
   - "RNFBMessaging (from `../node_modules/@react-native-firebase/messaging`)"
   - RNFS (from `../node_modules/react-native-fs`)
   - "RNGoogleSignin (from `../node_modules/@react-native-google-signin/google-signin`)"
+  - RNInAppBrowser (from `../node_modules/react-native-inappbrowser-reborn`)
   - RNKeychain (from `../node_modules/react-native-keychain`)
   - "RNNotifee (from `../node_modules/@notifee/react-native`)"
   - RNReanimated (from `../node_modules/react-native-reanimated`)
@@ -2310,6 +2313,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native-fs"
   RNGoogleSignin:
     :path: "../node_modules/@react-native-google-signin/google-signin"
+  RNInAppBrowser:
+    :path: "../node_modules/react-native-inappbrowser-reborn"
   RNKeychain:
     :path: "../node_modules/react-native-keychain"
   RNNotifee:
@@ -2427,6 +2432,7 @@ SPEC CHECKSUMS:
   RNFBMessaging: 4627e84e9e363953357dd122543e4223c49e6bc1
   RNFS: 89de7d7f4c0f6bafa05343c578f61118c8282ed8
   RNGoogleSignin: 607fe748d8ca0cf59614dc00771578b1b0e215e8
+  RNInAppBrowser: 6d3eb68d471b9834335c664704719b8be1bfdb20
   RNKeychain: 2d50732463cf0e4bdc16f15ba2a265b4e4c5e17f
   RNNotifee: 5e3b271e8ea7456a36eec994085543c9adca9168
   RNReanimated: 19d8e3e2f2d26a591d2a688ddd07c5b0addaacac

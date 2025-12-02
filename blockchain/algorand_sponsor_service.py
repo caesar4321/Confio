@@ -401,6 +401,91 @@ class AlgorandSponsorService:
                 'success': False,
                 'error': str(e)
             }
+
+    async def create_sponsored_execution(
+        self,
+        user_txn: Transaction
+    ) -> Dict[str, Any]:
+        """
+        Create a sponsored execution for an arbitrary transaction (e.g. App Call).
+        The user_txn fee will be set to 0.
+        The sponsor will pay user_txn.fee + min_fee.
+        
+        Args:
+            user_txn: The transaction object to sponsor
+            
+        Returns:
+            Dict with unsigned user transaction and signed sponsor transaction
+        """
+        try:
+            # Check sponsor health
+            health = await self.check_sponsor_health()
+            if not health['can_sponsor']:
+                return {
+                    'success': False,
+                    'error': 'Sponsor service unavailable',
+                    'details': health
+                }
+            
+            # Get suggested params
+            params = self.algod.suggested_params()
+            
+            # Calculate required fee
+            # user_txn.fee should already be set to cover inner txns if needed (e.g. 3x min_fee)
+            # We need to cover that PLUS the sponsor's own txn fee (1x min_fee)
+            required_fee = user_txn.fee + params.min_fee
+            
+            # Set user fee to 0
+            user_txn.fee = 0
+            
+            # Create fee payment transaction from sponsor
+            fee_payment_txn = PaymentTxn(
+                sender=self.sponsor_address,
+                sp=params,
+                receiver=user_txn.sender, # Send 0 to user (or anyone)
+                amt=0,  # Just paying fees
+                note=b"Fee sponsorship"
+            )
+            fee_payment_txn.fee = required_fee
+            
+            # Create atomic group
+            # IMPORTANT: Sponsor transaction must be first for proper fee payment
+            txn_group = [fee_payment_txn, user_txn]
+            
+            # Assign group ID
+            gid = calculate_group_id(txn_group)
+            for txn in txn_group:
+                txn.group = gid
+            
+            # Sign sponsor transaction
+            signed_fee_txn = await self._sign_transaction(fee_payment_txn)
+            
+            if not signed_fee_txn:
+                return {
+                    'success': False,
+                    'error': 'Failed to sign sponsor transaction'
+                }
+            
+            # Return unsigned user transaction and signed sponsor transaction
+            # Use encoding.msgpack_encode to properly encode the transaction with group ID
+            user_txn_b64 = encoding.msgpack_encode(user_txn)
+            sponsor_txn_b64 = signed_fee_txn
+            
+            return {
+                'success': True,
+                'user_transaction': user_txn_b64,
+                'sponsor_transaction': sponsor_txn_b64,
+                'group_id': gid.hex(),
+                'total_fee': required_fee,
+                'sponsored': True
+            }
+            
+        except Exception as e:
+            logger.error(f"Error creating sponsored execution: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
     
     async def submit_solo_transaction(
         self,
@@ -1110,3 +1195,187 @@ async def sponsor_algorand_transfer(
 async def get_sponsor_status() -> Dict[str, Any]:
     """Get current sponsor service status"""
     return await algorand_sponsor_service.check_sponsor_health()
+
+
+async def create_sponsored_vault_funding(
+    business_address: str,
+    amount_base: int,
+    payroll_app_id: int,
+    payroll_asset_id: int
+) -> Dict[str, Any]:
+    """
+    Create a sponsored vault funding transaction group.
+
+    Contract expects exactly 2 transactions:
+    [0] AXFER(business→app, amount, fee=0) - signed by business
+    [1] AppCall(sponsor→app, fund_business, fee=2000) - signed by sponsor (pays all fees)
+
+    Args:
+        business_address: Business account address
+        amount_base: Amount to fund in base units (e.g., cUSD with 6 decimals)
+        payroll_app_id: Payroll application ID
+        payroll_asset_id: Payroll asset ID
+
+    Returns:
+        Dict with unsigned business AXFER and signed sponsor AppCall
+    """
+    try:
+        from algosdk.abi import Method, AddressType, UintType
+        from algosdk import transaction, encoding, logic
+
+        # Check sponsor health
+        health = await algorand_sponsor_service.check_sponsor_health()
+        if not health['can_sponsor']:
+            return {
+                'success': False,
+                'error': 'Sponsor service unavailable',
+                'details': health
+            }
+
+        app_addr = logic.get_application_address(payroll_app_id)
+
+        # Ensure app has sufficient ALGO for vault MBR (separate transaction, not in group)
+        try:
+            app_info = algorand_sponsor_service.algod.account_info(app_addr)
+            current_balance = app_info.get('amount', 0)
+            min_balance = app_info.get('min-balance', 0)
+
+            if current_balance < min_balance + 500_000:  # Need buffer for vault box
+                logger.info(f"Auto-funding vault app {app_addr} for MBR (current: {current_balance}, min: {min_balance})")
+                fund_result = await algorand_sponsor_service.fund_account(app_addr, 1_000_000)  # 1 ALGO
+                if not fund_result.get('success'):
+                    logger.warning(f"Vault MBR funding failed: {fund_result.get('error')}")
+        except Exception as e:
+            logger.warning(f"Could not check/fund vault MBR: {e}")
+
+        # Transaction 0: cUSD asset transfer from business to app (user signs, 0 fee)
+        params_user = algorand_sponsor_service.algod.suggested_params()
+        params_user.flat_fee = True
+        params_user.fee = 0  # User pays NO fee
+
+        axfer = transaction.AssetTransferTxn(
+            sender=business_address,
+            sp=params_user,
+            receiver=app_addr,
+            amt=amount_base,
+            index=payroll_asset_id,
+        )
+
+        # Transaction 1: App call from sponsor (pays all fees including AXFER)
+        params_app = algorand_sponsor_service.algod.suggested_params()
+        params_app.flat_fee = True
+        params_app.fee = params_app.min_fee * 2  # Cover both transactions
+
+        method = Method.from_signature("fund_business(address,uint64)void")
+        addr_type = AddressType()
+        u64_type = UintType(64)
+
+        app_args = [
+            method.get_selector(),
+            addr_type.encode(business_address),
+            u64_type.encode(amount_base),
+        ]
+        vault_key = b"VAULT" + encoding.decode_address(business_address)
+
+        app_call = transaction.ApplicationNoOpTxn(
+            sender=algorand_sponsor_service.sponsor_address,
+            sp=params_app,
+            index=payroll_app_id,
+            app_args=app_args,
+            boxes=[(payroll_app_id, vault_key)],
+        )
+
+        # Assign group ID - exactly 2 transactions as contract expects
+        gid = transaction.calculate_group_id([axfer, app_call])
+        axfer.group = gid
+        app_call.group = gid
+
+        # Sign sponsor app call
+        signed_app_call = await algorand_sponsor_service._sign_transaction(app_call)
+
+        if not signed_app_call:
+            return {
+                'success': False,
+                'error': 'Failed to sign sponsor transaction'
+            }
+
+        # Return unsigned business AXFER and signed sponsor AppCall
+        user_txn_b64 = encoding.msgpack_encode(axfer)
+
+        return {
+            'success': True,
+            'user_transaction': user_txn_b64,  # Business signs this
+            'sponsor_app_call': signed_app_call,  # Already signed
+            'group_id': gid.hex(),
+            'amount': float(amount_base) / 1_000_000,
+        }
+
+    except Exception as e:
+        logger.error(f"Error creating sponsored vault funding: {e}")
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
+
+async def submit_sponsored_vault_funding(
+    signed_user_txn: str,
+    signed_sponsor_app_call: str
+) -> Dict[str, Any]:
+    """
+    Submit a sponsored vault funding transaction group (2 transactions).
+
+    Args:
+        signed_user_txn: Base64 encoded signed business AXFER transaction
+        signed_sponsor_app_call: Base64 encoded signed sponsor app call transaction
+
+    Returns:
+        Dict with transaction result
+    """
+    try:
+        # Decode both transactions
+        try:
+            user_stxn = base64.b64decode(signed_user_txn)
+        except Exception as e:
+            logger.error(f"Failed to decode user transaction: {e}")
+            return {
+                'success': False,
+                'error': f'Failed to decode user transaction: {e}'
+            }
+
+        try:
+            app_call_stxn = signed_sponsor_app_call if isinstance(signed_sponsor_app_call, bytes) else base64.b64decode(signed_sponsor_app_call)
+        except Exception as e:
+            logger.error(f"Failed to decode sponsor app call: {e}")
+            return {
+                'success': False,
+                'error': f'Failed to decode sponsor app call: {e}'
+            }
+
+        # Submit atomic group in correct order: [axfer, app_call]
+        try:
+            logger.info("Submitting sponsored vault funding group (2 txns)...")
+            start_time = time.time()
+            combined_b64 = base64.b64encode(user_stxn + app_call_stxn).decode('utf-8')
+            tx_id = algorand_sponsor_service.algod.send_raw_transaction(combined_b64)
+            elapsed_time = time.time() - start_time
+            logger.info(f"Successfully submitted vault funding group, tx_id: {tx_id}, took {elapsed_time:.2f} seconds")
+        except Exception as e:
+            logger.error(f"Failed to submit vault funding group: {e}")
+            raise
+
+        return {
+            'success': True,
+            'tx_id': tx_id,
+            'confirmed_round': None,
+            'sponsored': True,
+            'pending': True
+        }
+
+    except Exception as e:
+        msg = str(e)
+        logger.error(f"Error submitting sponsored vault funding: {msg}")
+        return {
+            'success': False,
+            'error': msg
+        }

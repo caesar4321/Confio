@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import {
-  View, 
-  Text, 
-  StyleSheet, 
-  TouchableOpacity, 
-  ScrollView, 
-  Platform, 
-  Modal, 
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  Platform,
+  Modal,
   Alert,
   Linking,
   StatusBar,
@@ -57,8 +57,8 @@ const formatAmount = (amount: string | number | undefined): string => {
   return numericAmount.toFixed(2);
 };
 
-  // Helper function to format amount with sign
-  const formatAmountWithSign = (amount: string | undefined): string => {
+// Helper function to format amount with sign
+const formatAmountWithSign = (amount: string | undefined): string => {
   if (!amount) return '0.00';
   const sign = amount.startsWith('-') ? '-' : amount.startsWith('+') ? '+' : '';
   const numericPart = formatAmount(amount);
@@ -68,14 +68,14 @@ const formatAmount = (amount: string | number | undefined): string => {
 // Helper function to format phone numbers for display
 const formatPhoneNumber = (phone: string | undefined): string => {
   if (!phone) return '';
-  
+
   // Extract country code and phone number
   // Format: "AS9293993619" where AS = American Samoa, DO = Dominican Republic, etc.
   const countryCodeMatch = phone.match(/^([A-Z]{2})(.+)$/);
   if (!countryCodeMatch) return phone;
-  
+
   const [, countryPrefix, phoneNumber] = countryCodeMatch;
-  
+
   // Map common country prefixes to dialing codes
   const countryDialingCodes: { [key: string]: string } = {
     'US': '1',    // United States
@@ -94,9 +94,9 @@ const formatPhoneNumber = (phone: string | undefined): string => {
     'BO': '591',  // Bolivia
     // Add more as needed
   };
-  
+
   const dialingCode = countryDialingCodes[countryPrefix] || '';
-  
+
   // Format based on length and country
   if (dialingCode === '1' && phoneNumber.length === 10) {
     // North American format: +1 (XXX) XXX-XXXX
@@ -105,7 +105,7 @@ const formatPhoneNumber = (phone: string | undefined): string => {
     // International format: +XX XXXX XXXXXX (adjust spacing as needed)
     return `+${dialingCode} ${phoneNumber}`;
   }
-  
+
   return phone; // Return as-is if we can't format it
 };
 
@@ -113,8 +113,8 @@ const formatPhoneNumber = (phone: string | undefined): string => {
 const computeConfioFee = (amountLike: string | number | undefined): number => {
   try {
     if (amountLike === undefined || amountLike === null) return 0;
-    const amt = typeof amountLike === 'string' 
-      ? parseFloat(amountLike.replace(/[+-]/g, '')) 
+    const amt = typeof amountLike === 'string'
+      ? parseFloat(amountLike.replace(/[+-]/g, ''))
       : Number(amountLike);
     if (!isFinite(amt)) return 0;
     // 0.9% fee charged to the merchant (keep high precision; display may round)
@@ -752,10 +752,10 @@ export const TransactionDetailScreen = () => {
       alignItems: 'center',
     },
     iconContainer: {
-      width: 64,
-      height: 64,
-      backgroundColor: '#fff',
-      borderRadius: 32,
+      width: 72,
+      height: 72,
+      backgroundColor: '#ffffff',
+      borderRadius: 24,
       justifyContent: 'center',
       alignItems: 'center',
       marginBottom: 16,
@@ -1054,7 +1054,7 @@ export const TransactionDetailScreen = () => {
 
   // Get transaction type from route params
   const { transactionType, transactionData: rawTransactionData } = route.params;
-  
+
   // Parse transactionData if it's a string (GraphQL JSONField returns as string)
   let transactionData = rawTransactionData;
   if (typeof rawTransactionData === 'string') {
@@ -1065,7 +1065,7 @@ export const TransactionDetailScreen = () => {
       transactionData = null;
     }
   }
-  
+
   // Fetch transaction data if we lack phoneKey-style phones (to mirror AccountDetail behavior)
   // Basic completeness for UI
   const hasCompleteData = Boolean(transactionData?.amount && transactionData?.from && transactionData?.to);
@@ -1081,7 +1081,7 @@ export const TransactionDetailScreen = () => {
   // Decide fetch: if send-type and we don't have phoneKey-style phones, fetch even if names exist
   const needsFetch = Boolean((transactionData?.id || transactionData?.transaction_id) && (lacksPhonesForSend));
   const transactionId = transactionData?.id || transactionData?.transaction_id;
-  
+
   console.log('[TransactionDetailScreen] Data parsing:', {
     rawDataType: typeof rawTransactionData,
     parsedDataType: typeof transactionData,
@@ -1096,19 +1096,19 @@ export const TransactionDetailScreen = () => {
     is_external_address_type: typeof transactionData?.is_external_address,
     allKeys: transactionData ? Object.keys(transactionData) : []
   });
-  
+
   console.log('[TransactionDetailScreen] Fetch check:', {
     needsFetch,
     transactionId,
     hasAmount: !!transactionData?.amount,
     dataKeys: transactionData ? Object.keys(transactionData) : []
   });
-  
+
   // Determine transaction kind to select proper fetch behavior
   const typeLower = (transactionType || transactionData?.transaction_type || '').toString().toLowerCase();
   const isUSDCTransaction = typeLower === 'deposit' || typeLower === 'withdrawal' || typeLower === 'conversion' ||
     (transactionData && ['deposit', 'withdrawal', 'conversion'].includes((transactionData.type || transactionData.transaction_type || '').toString().toLowerCase()));
-  const isSendTransaction = ['send', 'sent', 'received'].includes(typeLower);
+  const isSendTransaction = ['send', 'sent', 'received', 'payroll'].includes(typeLower);
   const isPaymentTransaction = typeLower === 'payment';
 
   const { data: fetchedData, loading: fetchLoading, error: fetchError } = useQuery(
@@ -1206,6 +1206,24 @@ export const TransactionDetailScreen = () => {
       location: 'Av. Libertador, Caracas',
       merchantId: 'SUP001',
       avatar: 'S'
+    },
+    payroll: {
+      type: 'payroll',
+      from: 'Empresa Demo',
+      fromAddress: '0x123...abc',
+      to: 'Juan Pérez',
+      toAddress: '0x456...def',
+      amount: '+1500.00',
+      currency: 'cUSD',
+      date: '2025-06-15',
+      time: '09:00',
+      status: 'completed',
+      hash: '0xpay123...',
+      blockNumber: '123456',
+      gasUsed: '21000',
+      gasFee: '0.001',
+      confirmations: 10,
+      avatar: 'E'
     }
   };
 
@@ -1219,7 +1237,7 @@ export const TransactionDetailScreen = () => {
     fetchedData: fetchedData?.sendTransaction,
     fetchError: fetchError?.message
   });
-  
+
   // Transform fetched data to match the expected format
   // We'll build txData from the most reliable source in order:
   // 1) Server-fetched details (when available)
@@ -1233,14 +1251,14 @@ export const TransactionDetailScreen = () => {
     const resolvedType = routeTypeRaw === 'sent' || routeTypeRaw === 'send'
       ? 'sent'
       : routeTypeRaw === 'received' ? 'received' : 'received';
-    
+
     console.log('[TransactionDetailScreen] Transforming fetched data:', {
       tx,
       resolvedType,
       amount: tx.amount,
       tokenType: tx.tokenType,
     });
-    
+
     // Determine invitation flags accurately: only when there is an invitation context
     const inviteFromRoute = Boolean((transactionData as any)?.is_invited_friend || (transactionData as any)?.isInvitedFriend);
     const isInvite = Boolean(tx.invitationExpiresAt) || inviteFromRoute;
@@ -1278,18 +1296,18 @@ export const TransactionDetailScreen = () => {
       txData.type = 'received';
     }
   }
-  
+
   // If transactionData exists and has content, normalize it
   let normalizedTransactionData = transactionData;
   if (transactionData && Object.keys(transactionData).length > 1) {
     // Handle USDC conversion transactions
     let type = transactionData.transaction_type || transactionData.transactionType || transactionData.type;
-    
+
     // If it has conversion_type, it's a conversion transaction
     if (transactionData.conversion_type) {
       type = 'conversion';
     }
-    
+
     // Normalize field names from notification data (snake_case to camelCase)
     normalizedTransactionData = {
       ...transactionData,
@@ -1318,29 +1336,29 @@ export const TransactionDetailScreen = () => {
       is_invited_friend: transactionData.is_invited_friend,
       is_external_address: transactionData.is_external_address,
       // Override 'to' and 'from' if they contain truncated addresses
-      to: (transactionData.to && transactionData.to.includes('...') && transactionData.to.startsWith('0x')) 
+      to: (transactionData.to && transactionData.to.includes('...') && transactionData.to.startsWith('0x'))
         ? '' : transactionData.to,
-      from: (transactionData.from && transactionData.from.includes('...') && transactionData.from.startsWith('0x')) 
+      from: (transactionData.from && transactionData.from.includes('...') && transactionData.from.startsWith('0x'))
         ? '' : transactionData.from,
       // For conversions (will override currency below based on direction)
       currency: transactionData.from_token || transactionData.token_type || transactionData.currency || 'USDC',
       secondaryCurrency: transactionData.to_token || 'cUSD',
       // For conversions: cUSD -> USDC should be negative (money out), USDC -> cUSD should be positive (money in)
       // For withdrawals: always negative (money out)
-      amount: transactionData.conversion_type === 'cusd_to_usdc' 
+      amount: transactionData.conversion_type === 'cusd_to_usdc'
         ? `-${transactionData.from_amount || transactionData.amount || '0'}`
         : transactionData.conversion_type === 'usdc_to_cusd'
-        ? `+${transactionData.to_amount || transactionData.amount || '0'}`
-        : type === 'withdrawal'
-        ? `-${transactionData.amount || '0'}`.replace('--', '-') // Ensure single negative sign
-        : transactionData.amount || transactionData.from_amount || transactionData.to_amount,
+          ? `+${transactionData.to_amount || transactionData.amount || '0'}`
+          : type === 'withdrawal'
+            ? `-${transactionData.amount || '0'}`.replace('--', '-') // Ensure single negative sign
+            : transactionData.amount || transactionData.from_amount || transactionData.to_amount,
       status: transactionData.status || 'completed',
       // Format date if timestamp is available
       date: transactionData.timestamp ? moment.utc(transactionData.timestamp).local().format('YYYY-MM-DD') : transactionData.date,
       time: transactionData.timestamp ? moment.utc(transactionData.timestamp).local().format('HH:mm') : transactionData.time,
       // Format conversion title
-      formattedTitle: transactionData.conversion_type === 'usdc_to_cusd' ? 'Conversión USDC → cUSD' : 
-                      transactionData.conversion_type === 'cusd_to_usdc' ? 'Conversión cUSD → USDC' : null,
+      formattedTitle: transactionData.conversion_type === 'usdc_to_cusd' ? 'Conversión USDC → cUSD' :
+        transactionData.conversion_type === 'cusd_to_usdc' ? 'Conversión cUSD → USDC' : null,
       // For withdrawals
       destinationAddress: transactionData.destination_address || transactionData.destinationAddress,
       toAddress: transactionData.destination_address || transactionData.destinationAddress || transactionData.toAddress,
@@ -1350,7 +1368,7 @@ export const TransactionDetailScreen = () => {
     if (transactionData?.notification_type === 'INVITE_RECEIVED') {
       normalizedTransactionData.type = 'received';
     }
-    
+
     // Normalize currency symbol casing and cUSD mapping
     if (typeof normalizedTransactionData.currency === 'string') {
       const cur = (normalizedTransactionData.currency as string).toUpperCase();
@@ -1371,7 +1389,7 @@ export const TransactionDetailScreen = () => {
       (normalizedTransactionData as any).date = moment(now).format('YYYY-MM-DD');
       (normalizedTransactionData as any).time = moment(now).format('HH:mm');
     }
-    
+
     // Provide from/to fallback names from sender/recipient_name
     if (!normalizedTransactionData.from && normalizedTransactionData.senderName) {
       (normalizedTransactionData as any).from = normalizedTransactionData.senderName;
@@ -1379,7 +1397,7 @@ export const TransactionDetailScreen = () => {
     if (!normalizedTransactionData.to && normalizedTransactionData.recipientName) {
       (normalizedTransactionData as any).to = normalizedTransactionData.recipientName;
     }
-    
+
     // Provide addresses mapping if missing
     if (!normalizedTransactionData.fromAddress && normalizedTransactionData.senderAddress) {
       (normalizedTransactionData as any).fromAddress = normalizedTransactionData.senderAddress;
@@ -1388,7 +1406,7 @@ export const TransactionDetailScreen = () => {
       (normalizedTransactionData as any).toAddress = normalizedTransactionData.recipientAddress;
     }
   }
-  
+
   // If we couldn't build txData from server, prefer the normalized payload
   if (!txData) {
     if (normalizedTransactionData && Object.keys(normalizedTransactionData).length > 1) {
@@ -1397,12 +1415,12 @@ export const TransactionDetailScreen = () => {
       txData = transactionData;
     }
   }
-  
+
   // Keep txData as-is; invitationClaimed inferred from recipientUser presence when fetched
 
   // Prefer server-fetched data when available; otherwise fall back to normalized notification payload
   const currentTx = txData || transactions[transactionType];
-  
+
   console.log('[TransactionDetailScreen] currentTx selection:', {
     hasTransactionData: !!(transactionData && Object.keys(transactionData).length > 1),
     hasTxData: !!txData,
@@ -1416,7 +1434,7 @@ export const TransactionDetailScreen = () => {
     created_at: currentTx?.created_at,
     timestamp: currentTx?.timestamp,
   });
-  
+
   // Debug timezone conversion
   if (currentTx?.createdAt) {
     const deviceOffset = new Date().getTimezoneOffset();
@@ -1424,7 +1442,7 @@ export const TransactionDetailScreen = () => {
       rawCreatedAt: currentTx.createdAt,
       parsedUTC: moment.utc(currentTx.createdAt).format('YYYY-MM-DD HH:mm:ss'),
       convertedLocal: moment.utc(currentTx.createdAt).local().format('YYYY-MM-DD HH:mm:ss'),
-      deviceTimezoneOffset: `${deviceOffset} minutes (${-deviceOffset/60} hours)`,
+      deviceTimezoneOffset: `${deviceOffset} minutes (${-deviceOffset / 60} hours)`,
       currentLocalTime: moment().format('YYYY-MM-DD HH:mm:ss'),
       momentLocalTime: moment.utc(currentTx.createdAt).local().format(),
       isUTC: moment.utc(currentTx.createdAt).isUTC(),
@@ -1442,19 +1460,19 @@ export const TransactionDetailScreen = () => {
     recipient_phone: currentTx?.recipient_phone,
     keys: currentTx ? Object.keys(currentTx) : []
   });
-  
+
   // Get contact names for display - check all possible phone fields
   // MUST be called before any early returns to follow React hooks rules
   const senderPhone = currentTx?.sender_phone || currentTx?.senderPhone || currentTx?.fromPhone || (transactionData as any)?.sender_phone || (transactionData as any)?.fromPhone;
   const recipientPhone = currentTx?.recipient_phone || currentTx?.recipientPhone || currentTx?.toPhone || (transactionData as any)?.recipient_phone || (transactionData as any)?.toPhone || (transactionData as any)?.counterpartyPhone;
-  
+
   console.log('[TransactionDetailScreen] Contact lookup:', {
     senderPhone,
     recipientPhone,
     fallbackSenderName: currentTx?.from || currentTx?.senderName,
     fallbackRecipientName: currentTx?.to || currentTx?.recipientName,
   });
-  
+
   // Detect external wallet counterparties to label them as "Billetera externa"
   const isExternalSender = ((currentTx?.type === 'received' || currentTx?.type === 'deposit') && (
     currentTx?.is_external_address || currentTx?.sourceAddress || (currentTx?.fromAddress && !senderPhone)
@@ -1464,8 +1482,8 @@ export const TransactionDetailScreen = () => {
   )) as boolean;
 
   // Don't use truncated addresses as fallback names
-  const senderFallbackName = isExternalSender 
-    ? 'Billetera externa' 
+  const senderFallbackName = isExternalSender
+    ? 'Billetera externa'
     : (currentTx?.from || currentTx?.senderName || currentTx?.sender_name);
   const recipientFallbackName = (() => {
     const name = currentTx?.to || currentTx?.recipientName || currentTx?.recipient_name;
@@ -1475,7 +1493,7 @@ export const TransactionDetailScreen = () => {
     }
     return isExternalRecipient ? 'Billetera externa' : name;
   })();
-  
+
   const senderContactInfo = useContactNameSync(senderPhone, senderFallbackName);
   // Only use contact sync if we have a phone number or a valid name
   const shouldUseContactSync = (recipientPhone && recipientPhone.trim() !== '') || (recipientFallbackName && !recipientFallbackName.startsWith('0x'));
@@ -1489,32 +1507,32 @@ export const TransactionDetailScreen = () => {
     toField: currentTx?.to,
     recipientAddress: currentTx?.recipient_address
   });
-  
+
   // Derive phone from local contact by name when phone isn't present or didn't match a contact
   // Try derive by Algorand address first (more reliable than name)
   const toAlgAddress = currentTx?.toAddress || currentTx?.recipient_address;
   const recipientContactByAddress = (!recipientPhone && toAlgAddress)
     ? (contactService.getContactByAlgorandAddressSync
-        ? contactService.getContactByAlgorandAddressSync(toAlgAddress)
-        : null)
+      ? contactService.getContactByAlgorandAddressSync(toAlgAddress)
+      : null)
     : null;
   const derivedRecipientPhoneFromAddress = recipientContactByAddress?.normalizedPhones?.[0] || recipientContactByAddress?.phoneNumbers?.[0] || null;
 
   const recipientContactByName = (!recipientPhone && recipientFallbackName)
     ? (contactService.getContactByNameFuzzy
-        ? contactService.getContactByNameFuzzy(recipientFallbackName)
-        : contactService.getContactByNameSync(recipientFallbackName))
+      ? contactService.getContactByNameFuzzy(recipientFallbackName)
+      : contactService.getContactByNameSync(recipientFallbackName))
     : null;
   const derivedRecipientPhoneFromName = recipientContactByName?.normalizedPhones?.[0] || recipientContactByName?.phoneNumbers?.[0] || null;
-  const resolvedRecipientPhone = (recipientPhone && recipientPhone.trim() !== '') 
-    ? recipientPhone 
+  const resolvedRecipientPhone = (recipientPhone && recipientPhone.trim() !== '')
+    ? recipientPhone
     : (derivedRecipientPhoneFromAddress || derivedRecipientPhoneFromName || undefined);
 
   const recipientContactInfo = shouldUseContactSync
     ? useContactNameSync(resolvedRecipientPhone, recipientFallbackName)
     : { displayName: '', isFromContacts: false };
 
-  
+
   console.log('[TransactionDetailScreen] Contact info results:', {
     senderContactInfo,
     recipientContactInfo,
@@ -1522,7 +1540,7 @@ export const TransactionDetailScreen = () => {
     recipientPhone,
     displayToName: recipientContactInfo.displayName
   });
-  
+
   // Show loading state while fetching
   if (fetchLoading) {
     return (
@@ -1532,7 +1550,7 @@ export const TransactionDetailScreen = () => {
       </View>
     );
   }
-  
+
   // If no transaction data is available, show an error state
   if (!currentTx) {
     return (
@@ -1541,20 +1559,20 @@ export const TransactionDetailScreen = () => {
       </View>
     );
   }
-  
+
   const isInvitedFriend = currentTx?.isInvitedFriend || currentTx?.is_invited_friend || false;
   const isExternalAddress = currentTx?.is_external_address || false;
   const invitationClaimed = currentTx?.invitationClaimed || currentTx?.invitation_claimed || false;
   const invitationReverted = currentTx?.invitationReverted || currentTx?.invitation_reverted || false;
   const invitationExpiresAt = currentTx?.invitationExpiresAt || currentTx?.invitation_expires_at;
   const isInvitationExpired = invitationExpiresAt ? moment(invitationExpiresAt).isBefore(moment()) : false;
-  const showInvitationWarning = isInvitedFriend 
-    && !isExternalAddress 
-    && (currentTx?.type === 'send' || currentTx?.type === 'sent') 
-    && !invitationClaimed 
-    && !invitationReverted 
+  const showInvitationWarning = isInvitedFriend
+    && !isExternalAddress
+    && (currentTx?.type === 'send' || currentTx?.type === 'sent')
+    && !invitationClaimed
+    && !invitationReverted
     && !isInvitationExpired;
-  
+
   // Debug invitation status
   console.log('[TransactionDetailScreen] Invitation status:', {
     isInvitedFriend,
@@ -1570,7 +1588,7 @@ export const TransactionDetailScreen = () => {
     recipient_phone: currentTx?.recipient_phone,
     willShowInvitationCard: showInvitationWarning,
   });
-  
+
   // Debug phone numbers
   console.log('[TransactionDetailScreen] Phone number data:', {
     sender_phone: currentTx?.sender_phone,
@@ -1584,7 +1602,7 @@ export const TransactionDetailScreen = () => {
     raw_recipient_phone: transactionData?.recipient_phone,
     all_keys: currentTx ? Object.keys(currentTx) : [],
   });
-  
+
   // Use contact names if available
   // Prefer phone contact name over any server-provided display values
   const preferredFrom = getPreferredDisplayName(senderPhone, senderContactInfo.displayName);
@@ -1608,8 +1626,8 @@ export const TransactionDetailScreen = () => {
         }
       }
     }
-  } catch {}
-  
+  } catch { }
+
   console.log('[TransactionDetailScreen] Display names:', {
     displayFromName,
     displayToName,
@@ -1626,12 +1644,12 @@ export const TransactionDetailScreen = () => {
       transactionData?.conversionType;
     const fallbackFrom =
       typeHint === 'usdc_to_cusd' ? 'USDC' :
-      typeHint === 'cusd_to_usdc' ? 'cUSD' :
-      undefined;
+        typeHint === 'cusd_to_usdc' ? 'cUSD' :
+          undefined;
     const fallbackTo =
       typeHint === 'usdc_to_cusd' ? 'cUSD' :
-      typeHint === 'cusd_to_usdc' ? 'USDC' :
-      undefined;
+        typeHint === 'cusd_to_usdc' ? 'USDC' :
+          undefined;
     const fromToken =
       tx?.conversionFromCurrency ||
       tx?.conversion_from_currency ||
@@ -1665,7 +1683,7 @@ export const TransactionDetailScreen = () => {
   };
 
   const getTransactionIcon = (type: string) => {
-    switch(type) {
+    switch (type) {
       case 'received':
         return <Icon name="arrow-down" size={24} color="#10b981" />;
       case 'sent':
@@ -1675,6 +1693,8 @@ export const TransactionDetailScreen = () => {
         return <Icon name="refresh-cw" size={24} color="#3b82f6" />;
       case 'payment':
         return <Icon name="shopping-bag" size={24} color="#8b5cf6" />;
+      case 'payroll':
+        return <Icon name="briefcase" size={24} color="#059669" />;
       case 'deposit':
         return <Icon name="arrow-down-circle" size={24} color="#10b981" />;
       case 'withdrawal':
@@ -1691,8 +1711,8 @@ export const TransactionDetailScreen = () => {
       typeofType: typeof tx.type,
       displayToName
     });
-    
-    switch(tx.type) {
+
+    switch (tx.type) {
       case 'received':
         return `Recibido de ${displayFromName}`;
       // Both 'send' and 'sent' are handled for compatibility
@@ -1709,7 +1729,7 @@ export const TransactionDetailScreen = () => {
           toAddress: tx.toAddress,
           recipient_address: tx.recipient_address
         });
-        
+
         if (displayToName) {
           return `Enviado a ${displayToName}`;
         } else if (tx.is_invited_friend && tx.recipient_phone) {
@@ -1726,9 +1746,13 @@ export const TransactionDetailScreen = () => {
       }
       case 'payment':
         // Check if it's a received payment (positive amount) or sent payment (negative amount)
-        return tx.amount.startsWith('+') 
+        return tx.amount.startsWith('+')
           ? `Pago recibido de ${displayFromName}`
           : `Pago a ${displayToName}`;
+      case 'payroll':
+        return tx.amount.startsWith('+')
+          ? `Nómina recibida de ${displayFromName}`
+          : `Pago de nómina a ${displayToName}`;
       case 'deposit':
         return tx.formattedTitle || `Depósito ${tx.currency}`;
       case 'withdrawal':
@@ -1739,7 +1763,7 @@ export const TransactionDetailScreen = () => {
   };
 
   const getStatusColor = (status: string) => {
-    switch(status?.toLowerCase()) {
+    switch (status?.toLowerCase()) {
       case 'completed':
         return { text: '#059669', bg: '#d1fae5' };
       case 'pending':
@@ -1759,7 +1783,7 @@ export const TransactionDetailScreen = () => {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
-      
+
       {/* Entire screen scrollable */}
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         {/* Header */}
@@ -1773,12 +1797,12 @@ export const TransactionDetailScreen = () => {
               <Icon name="share" size={24} color="#fff" />
             </TouchableOpacity>
           </View>
-          
+
           <View style={styles.transactionSummary}>
             <View style={styles.iconContainer}>
               {getTransactionIcon(currentTx.type)}
             </View>
-            
+
             {(() => {
               const raw = currentTx.amount as any;
               const isNeg = typeof raw === 'string' ? raw.startsWith('-') : Number(raw) < 0;
@@ -1787,14 +1811,14 @@ export const TransactionDetailScreen = () => {
               return (
                 <Text style={[
                   styles.amountText,
-                  (currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'payment' || currentTx.type === 'withdrawal' || 
-                   (currentTx.type === 'conversion' && currentTx.amount?.startsWith('-'))) && styles.negativeAmount
+                  (currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'payment' || currentTx.type === 'withdrawal' ||
+                    (currentTx.type === 'conversion' && currentTx.amount?.startsWith('-'))) && styles.negativeAmount
                 ]}>
                   {sign ? `${sign} ` : ''}{abs} {currentTx.currency || 'cUSD'}
                 </Text>
               );
             })()}
-            
+
             <Text style={styles.transactionTitle}>
               {(() => {
                 const title = getTransactionTitle(currentTx);
@@ -1808,7 +1832,7 @@ export const TransactionDetailScreen = () => {
                 return title;
               })()}
             </Text>
-            
+
             <View style={[styles.statusBadge, { backgroundColor: statusColors.bg }]}>
               {(currentTx.status?.toLowerCase() === 'completed' || currentTx.status?.toLowerCase() === 'confirmed') && (
                 <Icon name="check-circle" size={16} color={statusColors.text} style={styles.statusIcon} />
@@ -1824,13 +1848,13 @@ export const TransactionDetailScreen = () => {
               )}
               <Text style={[styles.statusText, { color: statusColors.text }]}>
                 {currentTx.status?.toLowerCase() === 'completed' ? 'Completado' :
-                 currentTx.status?.toLowerCase() === 'confirmed' ? 'Completado' :
-                 (currentTx.status?.toLowerCase() === 'pending' || currentTx.status?.toLowerCase() === 'submitted') ? 'Pendiente' :
-                 currentTx.status?.toLowerCase() === 'processing' ? 'Procesando' :
-                 currentTx.status?.toLowerCase() === 'failed' ? 'Fallido' : 'Desconocido'}
+                  currentTx.status?.toLowerCase() === 'confirmed' ? 'Completado' :
+                    (currentTx.status?.toLowerCase() === 'pending' || currentTx.status?.toLowerCase() === 'submitted') ? 'Pendiente' :
+                      currentTx.status?.toLowerCase() === 'processing' ? 'Procesando' :
+                        currentTx.status?.toLowerCase() === 'failed' ? 'Fallido' : 'Desconocido'}
               </Text>
             </View>
-            
+
             {showInvitationWarning && (
               <View style={styles.invitationNotice}>
                 <Icon name="alert-triangle" size={16} color="#fff" style={{ marginRight: 6 }} />
@@ -1838,7 +1862,7 @@ export const TransactionDetailScreen = () => {
               </View>
             )}
             {!showInvitationWarning && isInvitedFriend && invitationClaimed && (currentTx.type === 'send' || currentTx.type === 'sent') && (
-              <View style={[styles.invitationNotice, { backgroundColor: '#10b981' }]}> 
+              <View style={[styles.invitationNotice, { backgroundColor: '#10b981' }]}>
                 <Icon name="check-circle" size={16} color="#fff" style={{ marginRight: 6 }} />
                 <Text style={styles.invitationText}>Invitación reclamada</Text>
               </View>
@@ -1861,7 +1885,7 @@ export const TransactionDetailScreen = () => {
                     <Text style={styles.participantName}>Depósito desde wallet externa</Text>
                     <View style={styles.addressContainer}>
                       <Text style={styles.addressText}>{currentTx.sourceAddress || currentTx.fromAddress}</Text>
-                      <TouchableOpacity 
+                      <TouchableOpacity
                         onPress={() => handleCopy(currentTx.sourceAddress || currentTx.fromAddress, 'from')}
                         style={styles.copyButton}
                       >
@@ -1885,7 +1909,7 @@ export const TransactionDetailScreen = () => {
                     <Text style={styles.participantName}>Retiro hacia wallet externa</Text>
                     <View style={styles.addressContainer}>
                       <Text style={styles.addressText}>{currentTx.destinationAddress || currentTx.toAddress}</Text>
-                      <TouchableOpacity 
+                      <TouchableOpacity
                         onPress={() => handleCopy(currentTx.destinationAddress || currentTx.toAddress, 'to')}
                         style={styles.copyButton}
                       >
@@ -1926,17 +1950,17 @@ export const TransactionDetailScreen = () => {
                         (() => {
                           const rate = currentTx.exchangeRate;
                           const isOneToOne = parseFloat(rate) === 1 || rate === '1' || rate === '1.000000';
-                          
+
                           // For USDC conversions with 1:1 rate
                           if ((conversionFromCurrencyLabel.toUpperCase() === 'USDC' || conversionToCurrencyLabel.toUpperCase() === 'USDC') && isOneToOne) {
                             return `1 ${conversionFromCurrencyLabel || currentTx.currency} = 1 ${conversionToCurrencyLabel || currentTx.secondaryCurrency}`;
                           }
-                          
+
                           // If rate already contains '=', use as is
                           if (rate && rate.includes('=')) {
                             return rate;
                           }
-                          
+
                           // Format rate without decimals if it's a whole number
                           const formattedRate = isOneToOne ? '1' : rate;
                           return `1 ${conversionFromCurrencyLabel || currentTx.currency} = ${formattedRate} ${conversionToCurrencyLabel || currentTx.secondaryCurrency}`;
@@ -1958,9 +1982,9 @@ export const TransactionDetailScreen = () => {
                       <Text style={styles.addressText}>
                         {getPreferredSecondaryLine({ phone: senderPhone, address: currentTx.fromAddress, isExternal: !!currentTx.is_external_address })}
                       </Text>
-                      <TouchableOpacity 
+                      <TouchableOpacity
                         onPress={() => handleCopy(
-                          senderPhone ? formatPhoneNumber(senderPhone) : currentTx.fromAddress, 
+                          senderPhone ? formatPhoneNumber(senderPhone) : currentTx.fromAddress,
                           'from'
                         )}
                         style={styles.copyButton}
@@ -1976,7 +2000,7 @@ export const TransactionDetailScreen = () => {
                 </View>
               )}
 
-              {(currentTx.type === 'send' || currentTx.type === 'sent') && (
+              {(currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'payroll') && (
                 <View style={styles.participantInfo}>
                   <View style={styles.avatarContainer}>
                     <Text style={styles.avatarText}>
@@ -2004,17 +2028,17 @@ export const TransactionDetailScreen = () => {
                       {(() => {
                         // If we have a display name from contacts or transaction data
                         if (displayToName) return displayToName;
-                        
+
                         // For invited friends (non-Confío users)
                         if (currentTx.is_invited_friend && currentTx.recipient_phone) {
                           return `Invitación enviada${currentTx.recipient_display_name ? ` a ${currentTx.recipient_display_name}` : ''}`;
                         }
-                        
+
                         // For external addresses
                         if (currentTx.is_external_address || (currentTx.toAddress && !currentTx.recipient_phone && !displayToName)) {
                           return 'Billetera externa';
                         }
-                        
+
                         // Fallback - but don't use truncated addresses
                         const fallbackName = currentTx.to || currentTx.recipient_name || 'Desconocido';
                         // If the fallback looks like a truncated address, don't use it
@@ -2037,11 +2061,11 @@ export const TransactionDetailScreen = () => {
                           });
                         })()}
                       </Text>
-                      <TouchableOpacity 
+                      <TouchableOpacity
                         onPress={() => handleCopy(
-                          recipientPhone || currentTx.recipient_phone 
-                            ? formatPhoneNumber(recipientPhone || currentTx.recipient_phone) 
-                            : (currentTx.toAddress || currentTx.recipient_address || ''), 
+                          recipientPhone || currentTx.recipient_phone
+                            ? formatPhoneNumber(recipientPhone || currentTx.recipient_phone)
+                            : (currentTx.toAddress || currentTx.recipient_address || ''),
                           'to'
                         )}
                         style={styles.copyButton}
@@ -2056,12 +2080,12 @@ export const TransactionDetailScreen = () => {
                   </View>
                 </View>
               )}
-              
+
               {currentTx.type === 'payment' && (
                 <View style={styles.participantInfo}>
                   <View style={styles.avatarContainer}>
                     <Text style={styles.avatarText}>
-                      {currentTx.amount?.startsWith('+') 
+                      {currentTx.amount?.startsWith('+')
                         ? (currentTx.from ? currentTx.from.charAt(0) : 'U')
                         : (currentTx.to ? currentTx.to.charAt(0) : 'U')
                       }
@@ -2145,7 +2169,7 @@ export const TransactionDetailScreen = () => {
                       }
                       // If we only have date (already formatted), combine with time if available
                       else if (currentTx.date) {
-                        const dateTime = currentTx.time 
+                        const dateTime = currentTx.time
                           ? moment(`${currentTx.date} ${currentTx.time}`, 'YYYY-MM-DD HH:mm')
                           : moment(currentTx.date, 'YYYY-MM-DD');
                         return dateTime.locale('es').fromNow();
@@ -2183,7 +2207,7 @@ export const TransactionDetailScreen = () => {
           {/* Transaction Summary */}
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Resumen de Operación</Text>
-            
+
             <View style={styles.summaryContainer}>
               {/* Amount and Fee Breakdown */}
               <View style={styles.feeBreakdown}>
@@ -2207,7 +2231,7 @@ export const TransactionDetailScreen = () => {
                     {formatAmount(currentTx.amount)} {currentTx.currency || 'cUSD'}
                   </Text>
                 </View>
-                
+
                 <View style={styles.feeRow}>
                   <Text style={styles.feeLabel}>Comisión de red</Text>
                   <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -2231,7 +2255,7 @@ export const TransactionDetailScreen = () => {
                     </View>
                   ) : null;
                 })()}
-                
+
                 {(currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'payment') && (
                   <>
                     <View style={styles.divider} />
@@ -2275,9 +2299,9 @@ export const TransactionDetailScreen = () => {
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>ID de Operación</Text>
                 <Text style={styles.summaryValue}>
-                  #{currentTx.hash?.slice(-8).toUpperCase() || 
-                    currentTx.transactionId?.slice(-8).toUpperCase() || 
-                    currentTx.transaction_id?.slice(-8).toUpperCase() || 
+                  #{currentTx.hash?.slice(-8).toUpperCase() ||
+                    currentTx.transactionId?.slice(-8).toUpperCase() ||
+                    currentTx.transaction_id?.slice(-8).toUpperCase() ||
                     'N/A'}
                 </Text>
               </View>
@@ -2320,11 +2344,11 @@ export const TransactionDetailScreen = () => {
                 <Icon name="alert-circle" size={24} color="#ef4444" />
                 <Text style={[styles.invitationCardTitle, { color: '#ef4444' }]}>¡Acción Requerida!</Text>
               </View>
-              
+
               <Text style={[styles.invitationCardText, { fontWeight: 'bold', color: '#dc2626' }]}>
                 ⏰ Tu amigo tiene solo 7 días para reclamar el dinero o se perderá
               </Text>
-              
+
               <View style={[styles.invitationInfoBox, { backgroundColor: '#fef2f2', borderColor: '#ef4444' }]}>
                 <Text style={[styles.invitationInfoTitle, { color: '#dc2626' }]}>¡Avísale ahora mismo!</Text>
                 <View style={styles.invitationInfoRow}>
@@ -2337,9 +2361,9 @@ export const TransactionDetailScreen = () => {
                   <Text style={styles.invitationInfoText}>3. Una vez registrado, recibirá el dinero al instante</Text>
                 </View>
               </View>
-              
-              <TouchableOpacity 
-                style={styles.shareButton} 
+
+              <TouchableOpacity
+                style={styles.shareButton}
                 onPress={async () => {
                   try {
                     console.log('[WhatsApp Share] Starting share process...');
@@ -2395,7 +2419,7 @@ export const TransactionDetailScreen = () => {
                       try {
                         await Linking.openURL('market://details?id=com.whatsapp');
                         return;
-                      } catch (_) {}
+                      } catch (_) { }
                       await Share.share({ message });
                       return;
                     } else {
@@ -2423,7 +2447,7 @@ export const TransactionDetailScreen = () => {
                     console.error('[WhatsApp Share] Error:', error);
                     try {
                       await Share.share({ message: `Te envié dinero por Confío. ${SHARE_LINKS.campaigns.beta}` });
-                    } catch (_) {}
+                    } catch (_) { }
                     Alert.alert('Error', 'No se pudo abrir WhatsApp.');
                   }
                 }}
@@ -2435,7 +2459,7 @@ export const TransactionDetailScreen = () => {
           )}
 
           {/* Confío Value Proposition */}
-          {(currentTx.type === 'received' || currentTx.type === 'send' || currentTx.type === 'sent') && (
+          {(currentTx.type === 'received' || currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'payroll') && (
             <View style={styles.card}>
               <Text style={styles.cardTitle}>¿Por qué elegir Confío?</Text>
               <View style={styles.valuePropositionOuter}>
@@ -2444,7 +2468,7 @@ export const TransactionDetailScreen = () => {
                   <Text style={styles.valueTitle}>Transferencias 100% gratuitas</Text>
                 </View>
                 <Text style={styles.valueDescription}>
-                  {currentTx.type === 'received' 
+                  {currentTx.type === 'received'
                     ? 'Recibiste este dinero sin pagar comisiones'
                     : 'Enviaste este dinero sin pagar comisiones'
                   }
@@ -2453,7 +2477,7 @@ export const TransactionDetailScreen = () => {
                   <Text style={styles.valueHighlightText}>
                     💡 <Text style={styles.bold}>Confío: 0% comisión</Text>{'\n'}
                     vs. remesadoras tradicionales <Text style={styles.bold}>(5%-20%)</Text>{'\n'}
-                    Apoyamos a los venezolanos 🇻🇪 con transferencias gratuitas
+                    Apoyamos a los argentinos 🇦🇷 con transferencias gratuitas
                   </Text>
                 </View>
               </View>
@@ -2463,7 +2487,7 @@ export const TransactionDetailScreen = () => {
           {/* Merchant Support Message for Payments */}
           {currentTx.type === 'payment' && (
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>Apoyamos negocios venezolanos</Text>
+              <Text style={styles.cardTitle}>Apoyamos negocios argentinos</Text>
               <View style={styles.valuePropositionOuter}>
                 <View style={styles.valueRow}>
                   <Icon name="shopping-bag" size={20} color={colors.secondary} style={styles.valueIcon} />
@@ -2476,7 +2500,7 @@ export const TransactionDetailScreen = () => {
                   <Text style={styles.valueHighlightText}>
                     💡 <Text style={styles.bold}>Confío: 0.9% para comerciantes</Text>{'\n'}
                     vs. tarjetas y POS tradicionales <Text style={styles.bold}>(3%–8%)</Text>{'\n'}
-                    Apoyamos a los comerciantes venezolanos 🇻🇪
+                    Apoyamos a los comerciantes argentinos 🇦🇷
                   </Text>
                 </View>
               </View>
@@ -2485,7 +2509,7 @@ export const TransactionDetailScreen = () => {
 
           {/* Blockchain Details Button */}
           <View style={styles.card}>
-            <TouchableOpacity 
+            <TouchableOpacity
               onPress={() => setShowBlockchainDetails(true)}
               style={styles.blockchainButton}
             >
@@ -2497,16 +2521,16 @@ export const TransactionDetailScreen = () => {
           {/* Actions */}
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Acciones</Text>
-            
+
             <View style={styles.actionsContainer}>
-              {(currentTx.type === 'received' || currentTx.type === 'send' || currentTx.type === 'sent') && (
-                <TouchableOpacity 
+              {(currentTx.type === 'received' || currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'payroll') && (
+                <TouchableOpacity
                   style={styles.primaryAction}
                   onPress={() => {
                     // Navigate to SendToFriend screen
                     const friendName = currentTx.type === 'received' ? displayFromName : displayToName;
                     const friendPhone = currentTx.type === 'received' ? senderPhone : recipientPhone;
-                    
+
                     // Debug logging to understand the data
                     console.log('[TransactionDetail] Navigation data:', {
                       transactionType: currentTx.type,
@@ -2516,7 +2540,7 @@ export const TransactionDetailScreen = () => {
                       recipientPhone,
                       isInvitedFriend: currentTx.isInvitedFriend || currentTx.is_invited_friend
                     });
-                    
+
                     // For navigation, we need to determine if this is a Confío user
                     // If it's an invited friend (non-Confío user), we shouldn't navigate
                     // Note: isInvitedFriend means they are NOT on Confío (invitation transaction)
@@ -2537,9 +2561,9 @@ export const TransactionDetailScreen = () => {
                         phone: friendPhone || '',
                         // No userId here, but server can look up by phone
                       };
-                      
+
                       console.log('[TransactionDetail] Navigating to SendToFriend with data:', friendData);
-                      
+
                       navigation.navigate('SendToFriend', {
                         friend: friendData,
                         tokenType: currentTx.currency.toLowerCase() === 'cusd' ? 'cusd' : 'confio'

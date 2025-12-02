@@ -767,6 +767,76 @@ def confirm_payment_transaction(self, payment_id: str, txid: str):
         raise
 
 
+@shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=5, retry_kwargs={"max_retries": 6})
+@ensure_db_connection_closed
+def confirm_payroll_item_payout(self, item_id: str, txid: str):
+    """
+    Poll algod for a submitted payroll payout transaction until confirmed, then
+    update DB state and trigger signal for notification.
+
+    Args:
+        item_id: PayrollItem.item_id
+        txid: Algorand transaction id
+    """
+    try:
+        from payroll.models import PayrollItem
+        
+        client = AlgorandClient()
+        algod_client = client.algod
+
+        delays = [0.5, 1, 2, 4, 6, 8, 10]
+        confirmed_round = 0
+        pool_error = None
+
+        for d in delays:
+            try:
+                info = algod_client.pending_transaction_info(txid)
+            except Exception as e:
+                logger.warning(f"pending_transaction_info error for {txid}: {e}")
+                info = {}
+
+            confirmed_round = int(info.get('confirmed-round') or 0)
+            pool_error = info.get('pool-error') or info.get('pool_error')
+
+            if confirmed_round > 0:
+                break
+            if pool_error:
+                break
+
+            try:
+                import time
+                time.sleep(d)
+            except Exception:
+                pass
+
+        try:
+            payroll_item = PayrollItem.objects.select_related('run__business', 'recipient_user', 'recipient_account').get(item_id=item_id)
+        except PayrollItem.DoesNotExist:
+            logger.error(f"PayrollItem {item_id} not found for confirmation")
+            return {'status': 'missing'}
+
+        if pool_error:
+            payroll_item.status = 'FAILED'
+            payroll_item.error_message = str(pool_error)
+            payroll_item.save(update_fields=['status', 'error_message', 'updated_at'])
+            logger.error(f"Payroll item {item_id} failed in pool: {pool_error}")
+            return {'status': 'failed', 'pool_error': pool_error}
+
+        if confirmed_round > 0:
+            payroll_item.status = 'CONFIRMED'
+            payroll_item.save(update_fields=['status', 'updated_at'])
+            # Signal will trigger UnifiedTransactionTable creation and notification
+            logger.info(f"Payroll item {item_id} confirmed in round {confirmed_round}")
+            return {'status': 'confirmed', 'round': confirmed_round}
+
+        # Not confirmed yet: keep polling via Celery retry
+        raise Exception(f"Tx {txid} not yet confirmed; scheduling retry")
+    except Exception as e:
+        # Allow Celery autoretry to handle transient issues
+        logger.warning(f"confirm_payroll_item_payout error: {e}")
+        raise
+
+
 @shared_task(name='blockchain.scan_outbound_confirmations')
 @ensure_db_connection_closed
 def scan_outbound_confirmations(max_batch: int = 50):
@@ -919,6 +989,23 @@ def scan_outbound_confirmations(max_batch: int = 50):
                     e.save(update_fields=['is_escrowed', 'escrowed_at', 'updated_at'])
                 except Exception as ue:
                     logger.warning(f"Failed to mark P2P escrow confirmed for trade {getattr(e.trade, 'id', None)}: {ue}")
+                processed += 1
+
+        # Payroll items
+        from payroll.models import PayrollItem
+        payroll_qs = PayrollItem.objects.filter(status='SUBMITTED').exclude(transaction_hash__isnull=True).exclude(transaction_hash='')[:max_batch]
+        for pi in payroll_qs:
+            cr, pe = check_tx(pi.transaction_hash)
+            if pe:
+                pi.status = 'FAILED'
+                pi.error_message = str(pe)
+                pi.save(update_fields=['status', 'error_message', 'updated_at'])
+                processed += 1
+                continue
+            if cr > 0:
+                # Mark confirmed - this will trigger the signal that creates notifications
+                pi.status = 'CONFIRMED'
+                pi.save(update_fields=['status', 'updated_at'])
                 processed += 1
 
         # Presale purchases

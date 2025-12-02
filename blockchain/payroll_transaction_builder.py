@@ -7,11 +7,16 @@ Builds unsigned Algorand transactions for the payroll escrow contract:
 """
 
 from typing import Dict, Optional
+import base64
 from algosdk import transaction, encoding, logic
 from algosdk.transaction import SuggestedParams
 from algosdk.abi import Method, AddressType, UintType, StringType, ArrayDynamicType
 from algosdk.v2client import algod
 from django.conf import settings
+try:
+    from algosdk.transaction import BoxReference  # available in newer SDK versions
+except Exception:  # pragma: no cover
+    BoxReference = None
 
 
 class PayrollTransactionBuilder:
@@ -27,6 +32,7 @@ class PayrollTransactionBuilder:
         self.payroll_app_id = config["ALGORAND_PAYROLL_APP_ID"]
         self.payroll_asset_id = config["ALGORAND_PAYROLL_ASSET_ID"]
         self.sponsor_address = config.get("ALGORAND_SPONSOR_ADDRESS")
+        self._fee_recipient: Optional[str] = None
 
         # ABI method definitions
         self.payout_method = Method.from_signature("payout(address,uint64,string)void")
@@ -63,9 +69,26 @@ class PayrollTransactionBuilder:
         sp.flat_fee = True
         sp.fee = max(sp.min_fee * 3, sp.fee)
 
+        # Fetch fee recipient from app global state (cached)
+        if not self._fee_recipient:
+            try:
+                info = self.algod_client.application_info(self.payroll_app_id)
+                for kv in info.get("params", {}).get("global-state", []):
+                    key = kv.get("key")
+                    if key and base64.b64decode(key).decode(errors="ignore") == "fee_recipient":
+                        val = kv.get("value", {})
+                        if val.get("bytes"):
+                            self._fee_recipient = encoding.encode_address(
+                                base64.b64decode(val["bytes"])
+                            )
+                            break
+            except Exception:
+                self._fee_recipient = None
+
         business_bytes = encoding.decode_address(business_address)
         delegate_bytes = encoding.decode_address(delegate_address)
         allow_key = business_bytes + delegate_bytes
+        sender_key = delegate_bytes + delegate_bytes
 
         app_args = [
             self.payout_method.get_selector(),
@@ -74,10 +97,27 @@ class PayrollTransactionBuilder:
             self._str_type.encode(payroll_item_id),
         ]
 
-        boxes = [
-            (self.payroll_app_id, allow_key),  # per-business allowlist lookup: business||delegate
-            (self.payroll_app_id, payroll_item_id.encode("utf-8")),  # receipt box
-        ]
+        vault_key = b"VAULT" + encoding.decode_address(business_address)
+        # Use current app (index=0) for boxes to keep mobile decoding happy; foreign_apps left empty
+        if BoxReference:
+            boxes = [
+                BoxReference(0, allow_key),
+                BoxReference(0, sender_key),
+                BoxReference(0, payroll_item_id.encode("utf-8")),
+                BoxReference(0, vault_key),
+            ]
+        else:
+            boxes = [
+                (0, allow_key),
+                (0, sender_key),
+                (0, payroll_item_id.encode("utf-8")),
+                (0, vault_key),
+            ]
+
+        # Only include business (for vault/allowlist) and recipient (inner tx) + optional fee recipient
+        accounts = [business_address, recipient_address]
+        if self._fee_recipient and self._fee_recipient not in accounts:
+            accounts.append(self._fee_recipient)
 
         txn = transaction.ApplicationNoOpTxn(
             sender=delegate_address,
@@ -85,7 +125,9 @@ class PayrollTransactionBuilder:
             index=self.payroll_app_id,
             app_args=app_args,
             boxes=boxes,
-            accounts=[business_address],
+            accounts=accounts,
+            foreign_assets=[self.payroll_asset_id],
+            foreign_apps=[],
             note=note,
         )
         return txn
@@ -218,17 +260,30 @@ class PayrollTransactionBuilder:
         business_account: str,
         amount_base: int,
         suggested_params: Optional[SuggestedParams] = None,
+        algo_amount: int = 1_000_000,  # Default 1 ALGO for MBR
     ) -> list[transaction.Transaction]:
         """
         Build the atomic group for fund_business:
-        [0] ASA transfer business -> app
-        [1] App call fund_business(business_account, amount)
+        [0] ALGO payment business -> app (for vault MBR)
+        [1] ASA transfer business -> app
+        [2] App call fund_business(business_account, amount)
         """
         sp = suggested_params or self.algod_client.suggested_params()
         sp.flat_fee = True
         sp.fee = max(sp.min_fee, sp.fee)
 
         app_addr = transaction.logic.get_application_address(self.payroll_app_id)
+        
+        # ALGO payment for vault MBR
+        algo_payment = transaction.PaymentTxn(
+            sender=business_account,
+            sp=sp,
+            receiver=app_addr,
+            amt=algo_amount,
+            note=b"Payroll vault MBR funding"
+        )
+        
+        # cUSD asset transfer
         axfer = transaction.AssetTransferTxn(
             sender=business_account,
             sp=sp,
@@ -257,5 +312,5 @@ class PayrollTransactionBuilder:
             boxes=[(self.payroll_app_id, vault_key)],
         )
 
-        transaction.assign_group_id([axfer, app_call])
-        return [axfer, app_call]
+        transaction.assign_group_id([algo_payment, axfer, app_call])
+        return [algo_payment, axfer, app_call]

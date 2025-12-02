@@ -16,6 +16,12 @@ Key behaviors:
       - expects business account in Txn.accounts[0]
       - allowlist check on business||sender
       - require vault >= gross; decrement vault; inner transfers net to recipient, fee to fee_recipient.
+  * withdraw_vault(business_account, amount, recipient) [business only]:
+      - business can withdraw (partial or full) from its own vault
+      - decrements vault; sends funds to recipient
+  * admin_withdraw_vault(business_account, amount, recipient) [admin only]:
+      - admin emergency withdrawal from any business vault
+      - use for migrations, emergencies, or recovering stuck funds
 """
 
 from typing import Final
@@ -157,7 +163,7 @@ def payout(recipient: abi.Address, net_amount: abi.Uint64, payroll_item_id: abi.
         Assert(asset != Int(0)),
         Assert(app.state.is_paused == Int(0)),
         Assert(Txn.accounts.length() >= Int(1)),
-        biz_addr.store(Txn.accounts[0]),
+        biz_addr.store(Txn.accounts[1]),
         (delegate_check := App.box_get(Concat(biz_addr.load(), Txn.sender()))),
         Assert(delegate_check.hasValue()),
         ts.store(Global.latest_timestamp()),
@@ -203,6 +209,98 @@ def payout(recipient: abi.Address, net_amount: abi.Uint64, payroll_item_id: abi.
             )
         ),
         App.box_put(payroll_item_id.get(), receipt_data.load()),
+        Approve()
+    )
+
+
+@app.external
+def withdraw_vault(business_account: abi.Address, amount: abi.Uint64, recipient: abi.Address):
+    """
+    Withdraw funds from business vault. Only the business account can withdraw its own vault.
+    Amount can be partial or full. Recipient typically the business account itself.
+    """
+    asset = app.state.payroll_asset
+    vault_key = ScratchVar(TealType.bytes)
+    vault_amt = ScratchVar(TealType.uint64)
+    existing_bytes = ScratchVar(TealType.bytes)
+
+    return Seq(
+        Assert(asset != Int(0)),
+        # Only the business account can withdraw from its own vault
+        Assert(Txn.sender() == business_account.get()),
+        Assert(amount.get() > Int(0)),
+        Assert(Txn.fee() >= Global.min_txn_fee() * Int(2)),  # Base + inner tx
+
+        # Read vault balance
+        vault_key.store(Concat(Bytes("VAULT"), business_account.get())),
+        (vault_tuple := App.box_get(vault_key.load())),
+        Assert(vault_tuple.hasValue()),
+        existing_bytes.store(vault_tuple.value()),
+        vault_amt.store(Btoi(existing_bytes.load())),
+
+        # Ensure sufficient balance
+        Assert(vault_amt.load() >= amount.get()),
+
+        # Decrement vault
+        vault_amt.store(vault_amt.load() - amount.get()),
+        App.box_put(vault_key.load(), Itob(vault_amt.load())),
+
+        # Send funds to recipient
+        InnerTxnBuilder.Begin(),
+        InnerTxnBuilder.SetFields({
+            TxnField.type_enum: TxnType.AssetTransfer,
+            TxnField.xfer_asset: asset,
+            TxnField.asset_receiver: recipient.get(),
+            TxnField.asset_amount: amount.get(),
+            TxnField.fee: Int(0),
+        }),
+        InnerTxnBuilder.Submit(),
+        Approve()
+    )
+
+
+@app.external
+def admin_withdraw_vault(business_account: abi.Address, amount: abi.Uint64, recipient: abi.Address):
+    """
+    Admin emergency withdrawal from any business vault.
+    Use for migrations, emergencies, or recovering stuck funds.
+    """
+    asset = app.state.payroll_asset
+    vault_key = ScratchVar(TealType.bytes)
+    vault_amt = ScratchVar(TealType.uint64)
+    existing_bytes = ScratchVar(TealType.bytes)
+
+    return Seq(
+        Assert(asset != Int(0)),
+        # Only admin can use this function
+        Assert(Txn.sender() == app.state.admin.get()),
+        Assert(amount.get() > Int(0)),
+        Assert(Txn.fee() >= Global.min_txn_fee() * Int(2)),
+
+        # Read vault balance
+        vault_key.store(Concat(Bytes("VAULT"), business_account.get())),
+        (vault_tuple := App.box_get(vault_key.load())),
+        Assert(vault_tuple.hasValue()),
+        existing_bytes.store(vault_tuple.value()),
+        vault_amt.store(Btoi(existing_bytes.load())),
+
+        # Ensure sufficient balance
+        Assert(vault_amt.load() >= amount.get()),
+
+        # Decrement vault
+        vault_amt.store(vault_amt.load() - amount.get()),
+        App.box_put(vault_key.load(), Itob(vault_amt.load())),
+
+        # Send funds to recipient
+        InnerTxnBuilder.Begin(),
+        InnerTxnBuilder.SetFields({
+            TxnField.type_enum: TxnType.AssetTransfer,
+            TxnField.xfer_asset: asset,
+            TxnField.asset_receiver: recipient.get(),
+            TxnField.asset_amount: amount.get(),
+            TxnField.fee: Int(0),
+        }),
+        InnerTxnBuilder.Submit(),
         Approve()
     )
 

@@ -26,9 +26,7 @@ export const ReferralActionPromptScreen: React.FC = () => {
           label: 'Recargar en Confío',
           icon: 'credit-card',
           onPress: () =>
-            navigation.navigate('USDCDeposit', {
-              tokenType: 'cusd',
-            }),
+            navigation.navigate('TopUp' as never),
         },
         {
           label: 'Depositar USDC/cUSD',

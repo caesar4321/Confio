@@ -521,8 +521,8 @@ class AccountType(DjangoObjectType):
 	
 	class Meta:
 		model = Account
-		fields = ('id', 'user', 'account_type', 'account_index', 'business', 'created_at', 'last_login_at')
-		# Note: 'algorand_address' removed from fields - client computes addresses on-demand
+		fields = ('id', 'user', 'account_type', 'account_index', 'business', 'created_at', 'last_login_at', 'algorand_address')
+		# Note: algorand_address added back for payroll delegate matching
 	
 	@classmethod
 	def get_queryset(cls, queryset, info):
@@ -2358,13 +2358,33 @@ class CreateBusiness(graphene.Mutation):
 
 			# Automatically create BusinessEmployee record with owner role
 			from .models_employee import BusinessEmployee
-			BusinessEmployee.objects.create(
+			owner_emp = BusinessEmployee.objects.create(
 				business=business,
 				user=user,
 				role='owner',
 				hired_by=user,  # Owner hires themselves
 				is_active=True
 			)
+
+			# Auto-add owner as payroll recipient if personal account exists
+			try:
+				owner_personal_account = Account.objects.filter(
+					user=user,
+					account_type='personal',
+					account_index=0,
+					deleted_at__isnull=True
+				).first()
+				if owner_personal_account:
+					from payroll.models import PayrollRecipient
+					PayrollRecipient.objects.get_or_create(
+						business=business,
+						recipient_user=user,
+						recipient_account=owner_personal_account,
+						defaults={'display_name': f"{user.first_name} {user.last_name}".strip() or user.username or 'Propietario'}
+					)
+			except Exception:
+				# Fail silently; UI can prompt to add later
+				pass
 
 			return CreateBusiness(
 				success=True,

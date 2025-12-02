@@ -1,0 +1,92 @@
+diff --git a/node_modules/react-native-keychain/android/src/main/java/com/oblador/keychain/DeviceAvailability.kt b/node_modules/react-native-keychain/android/src/main/java/com/oblador/keychain/DeviceAvailability.kt
+index 0209b2d..db5f3ad 100644
+--- a/node_modules/react-native-keychain/android/src/main/java/com/oblador/keychain/DeviceAvailability.kt
++++ b/node_modules/react-native-keychain/android/src/main/java/com/oblador/keychain/DeviceAvailability.kt
+@@ -23,8 +23,11 @@ object DeviceAvailability {
+   }
+ 
+   fun isStrongBiometricAuthAvailable(context: Context): Boolean {
++    // Accept both STRONG and WEAK so devices with weaker sensors/ROMs still report availability
++    val authenticators =
++      BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.BIOMETRIC_WEAK
+     return BiometricManager.from(context)
+-      .canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) ==
++      .canAuthenticate(authenticators) ==
+       BiometricManager.BIOMETRIC_SUCCESS
+   }
+ 
+diff --git a/node_modules/react-native-keychain/android/src/main/java/com/oblador/keychain/KeychainModule.kt b/node_modules/react-native-keychain/android/src/main/java/com/oblador/keychain/KeychainModule.kt
+index f8d0362..9151d84 100644
+--- a/node_modules/react-native-keychain/android/src/main/java/com/oblador/keychain/KeychainModule.kt
++++ b/node_modules/react-native-keychain/android/src/main/java/com/oblador/keychain/KeychainModule.kt
+@@ -761,18 +761,19 @@ class KeychainModule(private val reactContext: ReactApplicationContext) :
+ 
+       val allowedAuthenticators = when {
+         usePasscode && useBiometry ->
+-          BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL
++          BiometricManager.Authenticators.BIOMETRIC_STRONG or
++            BiometricManager.Authenticators.BIOMETRIC_WEAK or
++            BiometricManager.Authenticators.DEVICE_CREDENTIAL
+ 
+         usePasscode ->
+           BiometricManager.Authenticators.DEVICE_CREDENTIAL
+ 
+         else ->
+-          null
++          BiometricManager.Authenticators.BIOMETRIC_STRONG or
++            BiometricManager.Authenticators.BIOMETRIC_WEAK
+       }
+ 
+-      if (allowedAuthenticators != null) {
+-        promptInfoBuilder.setAllowedAuthenticators(allowedAuthenticators)
+-      }
++      promptInfoBuilder.setAllowedAuthenticators(allowedAuthenticators)
+ 
+       if (!usePasscode) {
+         promptInfoOptionsMap?.getString(AuthPromptOptions.CANCEL)?.let {
+diff --git a/node_modules/react-native-keychain/android/src/main/java/com/oblador/keychain/cipherStorage/CipherStorageKeystoreAesGcm.kt b/node_modules/react-native-keychain/android/src/main/java/com/oblador/keychain/cipherStorage/CipherStorageKeystoreAesGcm.kt
+index 9a99fc6..160e049 100644
+--- a/node_modules/react-native-keychain/android/src/main/java/com/oblador/keychain/cipherStorage/CipherStorageKeystoreAesGcm.kt
++++ b/node_modules/react-native-keychain/android/src/main/java/com/oblador/keychain/cipherStorage/CipherStorageKeystoreAesGcm.kt
+@@ -166,16 +166,10 @@ class CipherStorageKeystoreAesGcm(
+ 
+         if (requiresAuth) {
+             keyGenParameterSpecBuilder.setUserAuthenticationRequired(true)
+-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+-                keyGenParameterSpecBuilder.setUserAuthenticationParameters(
+-                    validityDuration,
+-                    KeyProperties.AUTH_BIOMETRIC_STRONG or KeyProperties.AUTH_DEVICE_CREDENTIAL
+-                )
+-            } else {
+-                keyGenParameterSpecBuilder.setUserAuthenticationValidityDurationSeconds(
+-                    validityDuration
+-                )
+-            }
++            // Allow biometric auth without enforcing STRONG-only flags; keep device credential fallback disabled in the prompt layer
++            keyGenParameterSpecBuilder.setUserAuthenticationValidityDurationSeconds(
++                validityDuration
++            )
+         }
+ 
+         return keyGenParameterSpecBuilder
+diff --git a/node_modules/react-native-keychain/android/src/main/java/com/oblador/keychain/cipherStorage/CipherStorageKeystoreRsaEcb.kt b/node_modules/react-native-keychain/android/src/main/java/com/oblador/keychain/cipherStorage/CipherStorageKeystoreRsaEcb.kt
+index 560c2f3..98b2b9c 100644
+--- a/node_modules/react-native-keychain/android/src/main/java/com/oblador/keychain/cipherStorage/CipherStorageKeystoreRsaEcb.kt
++++ b/node_modules/react-native-keychain/android/src/main/java/com/oblador/keychain/cipherStorage/CipherStorageKeystoreRsaEcb.kt
+@@ -191,14 +191,8 @@ class CipherStorageKeystoreRsaEcb(
+                 .setUserAuthenticationRequired(true)
+                 .setKeySize(keySize)
+ 
+-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+-            keyGenParameterSpecBuilder.setUserAuthenticationParameters(
+-                validityDuration,
+-                KeyProperties.AUTH_BIOMETRIC_STRONG or KeyProperties.AUTH_DEVICE_CREDENTIAL
+-            )
+-        } else {
+-            keyGenParameterSpecBuilder.setUserAuthenticationValidityDurationSeconds(validityDuration)
+-        }
++        // Allow biometric auth without enforcing STRONG-only flags; keep device credential fallback disabled in the prompt layer
++        keyGenParameterSpecBuilder.setUserAuthenticationValidityDurationSeconds(validityDuration)
+ 
+         return keyGenParameterSpecBuilder
+     }

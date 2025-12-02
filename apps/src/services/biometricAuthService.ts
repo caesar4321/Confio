@@ -12,6 +12,8 @@ class BiometricAuthService {
   private readonly DEBOUNCE_MS = 1500; // Prevent multiple prompts within 1.5 seconds
   private lastSuccessTime: number = 0;
   private readonly SUCCESS_COOLDOWN_MS = 10000; // Skip new prompts for 10s after a success
+  private lastError: string | null = null;
+  private lastLockout: boolean = false;
 
   /**
    * Invalidate the cached biometric support status to force a fresh check.
@@ -140,6 +142,8 @@ class BiometricAuthService {
    * Require biometric authentication. Returns true when passed or not enabled.
    */
   async authenticate(reason?: string, forcePrompt = false, failIfUnsupported = false): Promise<boolean> {
+    this.lastError = null;
+    this.lastLockout = false;
     // Debounce: prevent multiple simultaneous authentication prompts
     const now = Date.now();
     const timeSinceLastAuth = now - this.lastAuthenticationTime;
@@ -190,16 +194,31 @@ class BiometricAuthService {
         console.warn('[BiometricAuthService] Biometric auth failed or was cancelled');
       } else {
         this.lastSuccessTime = Date.now();
+        this.lastError = null;
+        this.lastLockout = false;
         console.log('[BiometricAuthService] Biometric authentication successful');
       }
       return success;
     } catch (error: any) {
       // Do not allow device passcode fallback; fail closed
       console.warn('[BiometricAuthService] Biometric auth error:', error?.message || error);
+       const msg = typeof error?.message === 'string' ? error.message : '';
+       const lower = msg.toLowerCase();
+       const lockout = lower.includes('lockout') || lower.includes('locked out') || lower.includes('biometry is locked') || lower.includes('lockedout');
+       this.lastError = msg || 'Biometric authentication failed';
+       this.lastLockout = lockout;
       return false;
     } finally {
       this.isAuthenticating = false;
     }
+  }
+
+  getLastError(): string | null {
+    return this.lastError;
+  }
+
+  isLockout(): boolean {
+    return this.lastLockout;
   }
 }
 

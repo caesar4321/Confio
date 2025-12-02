@@ -585,7 +585,7 @@ export const PaymentConfirmationScreen = () => {
                 <Text style={styles.valueHighlightText}>
                   💡 Confío: 0% para clientes, solo 0.9% para comerciantes{'\n'}
                   vs. tarjetas tradicionales (2.5-3.5% para comerciantes){'\n'}
-                  Apoyamos a los venezolanos 🇻🇪 con un ecosistema justo
+                  Apoyamos a los argentinos 🇦🇷 con un ecosistema justo
                 </Text>
               </View>
             </View>

@@ -9,7 +9,7 @@ from payments.models import PaymentTransaction
 from p2p_exchange.models import P2PTrade
 from conversion.models import Conversion
 from .models_unified import UnifiedTransactionTable
-from payroll.models import PayrollRecipient
+from payroll.models import PayrollRecipient, PayrollItem, PayrollRun
 from users.models_employee import BusinessEmployee
 from users.models import Account
 from achievements.signals import _award_referral_pair
@@ -284,6 +284,82 @@ def create_unified_transaction_from_conversion(conversion):
         return None
 
 
+def create_unified_transaction_from_payroll(payroll_item):
+    """Create or update UnifiedTransactionTable from PayrollItem"""
+    # Only create unified transaction when payroll is confirmed
+    if payroll_item.status not in ['CONFIRMED', 'SUBMITTED']:
+        return None
+    try:
+        # Get business and recipient info
+        business = payroll_item.run.business
+        recipient_user = payroll_item.recipient_user
+        recipient_account = payroll_item.recipient_account
+        
+        # Get business account address (business accounts are stored in Account table)
+        business_address = ''
+        try:
+            from users.models import Account
+            business_account = Account.objects.filter(
+                business=business,
+                account_type='business',
+                deleted_at__isnull=True
+            ).first()
+            if business_account:
+                business_address = business_account.algorand_address or ''
+        except Exception as e:
+            logger.warning(f"Could not get business address for payroll item {payroll_item.id}: {e}")
+        
+        # Build display names
+        business_name = business.name if business else 'Negocio'
+        recipient_name = f"{recipient_user.first_name} {recipient_user.last_name}".strip() or recipient_user.username if recipient_user else 'Empleado'
+        
+        description = f"Pago de nómina: {payroll_item.net_amount} {payroll_item.token_type}"
+        
+        # Normalize token type
+        token_type = (payroll_item.token_type or 'CUSD').upper()
+        
+        unified, created = UnifiedTransactionTable.objects.update_or_create(
+            payroll_item=payroll_item,
+            defaults={
+                'transaction_type': 'payroll',
+                'amount': str(payroll_item.net_amount),
+                'token_type': token_type,
+                'status': payroll_item.status,
+                'transaction_hash': payroll_item.transaction_hash or '',
+                'error_message': payroll_item.error_message or '',
+                
+                # Sender info (business)
+                'sender_user': None,
+                'sender_business': business,
+                'sender_type': 'business',
+                'sender_display_name': business_name,
+                'sender_phone': '',
+                'sender_address': business_address,
+                
+                # Counterparty info (recipient)
+                'counterparty_user': recipient_user,
+                'counterparty_business': None,
+                'counterparty_type': 'user',
+                'counterparty_display_name': recipient_name,
+                'counterparty_phone': recipient_user.phone_number if recipient_user else '',
+                'counterparty_address': recipient_account.algorand_address if recipient_account else '',
+                
+                # Additional fields
+                'description': description,
+                'from_address': business_address or '',
+                'to_address': recipient_account.algorand_address or '' if recipient_account else '',
+                
+                # Timestamps
+                'transaction_date': payroll_item.executed_at or payroll_item.updated_at,
+                'deleted_at': payroll_item.deleted_at,
+            }
+        )
+        return unified
+    except Exception as e:
+        logger.exception("Error creating unified transaction from payroll item %s", payroll_item.id)
+        return None
+
+
 # Signal receivers
 @receiver(post_save, sender=SendTransaction)
 def handle_send_transaction_save(sender, instance, created, **kwargs):
@@ -402,6 +478,88 @@ def handle_conversion_save(sender, instance, created, **kwargs):
             logger.exception("Error processing referral reward for conversion %s", instance.id)
 
 
+@receiver(post_save, sender=PayrollItem)
+def handle_payroll_item_save(sender, instance, created, **kwargs):
+    """Create/update unified transaction and send notification when PayrollItem is confirmed"""
+    if instance.deleted_at is None:  # Only process non-deleted transactions
+        # Create unified transaction for CONFIRMED or SUBMITTED status
+        if instance.status in ['CONFIRMED', 'SUBMITTED']:
+            create_unified_transaction_from_payroll(instance)
+            
+            # Send notification to recipient when confirmed
+            if instance.status == 'CONFIRMED':
+                try:
+                    from notifications import utils as notif_utils
+                    from notifications.models import NotificationType as NotificationTypeChoices
+                    
+                    business = instance.run.business
+                    recipient_user = instance.recipient_user
+                    recipient_account = instance.recipient_account
+                    
+                    # Normalize token type for display
+                    token_type = (instance.token_type or 'CUSD').upper()
+                    display_token = 'cUSD' if token_type == 'CUSD' else token_type
+                    
+                    # Create notification for recipient
+                    notif_utils.create_notification(
+                        user=recipient_user,
+                        account=recipient_account,
+                        business=None,
+                        notification_type=NotificationTypeChoices.PAYROLL_RECEIVED,
+                        title="Pago de nómina recibido",
+                        message=f"Recibiste {instance.net_amount} {display_token} de {business.name}",
+                        data={
+                            'transaction_id': instance.item_id,
+                            'transaction_hash': instance.transaction_hash,
+                            'transaction_type': 'payroll',
+                            'amount': str(instance.net_amount),
+                            'token_type': token_type,
+                            'business_name': business.name,
+                        },
+                        related_object_type='PayrollItem',
+                        related_object_id=str(instance.id),
+                        action_url=f"confio://transaction/{instance.item_id}",
+                    )
+                    
+                    # Create notification for business owner
+                    # Get business account
+                    business_account = Account.objects.filter(
+                        business=business,
+                        account_type='business',
+                        deleted_at__isnull=True
+                    ).first()
+                    
+                    if business_account:
+                        recipient_name = f"{recipient_user.first_name} {recipient_user.last_name}".strip() or recipient_user.username
+                        notif_utils.create_notification(
+                            user=business_account.user,
+                            account=business_account,
+                            business=business,
+                            notification_type=NotificationTypeChoices.PAYROLL_SENT,
+                            title="Nómina enviada",
+                            message=f"Enviaste {instance.net_amount} {display_token} a {recipient_name}",
+                            data={
+                                'transaction_id': instance.item_id,
+                                'transaction_hash': instance.transaction_hash,
+                                'transaction_type': 'payroll',
+                                'amount': str(instance.net_amount),
+                                'token_type': token_type,
+                                'recipient_name': recipient_name,
+                            },
+                            related_object_type='PayrollItem',
+                            related_object_id=str(instance.id),
+                            action_url=f"confio://transaction/{instance.item_id}",
+                        )
+                except Exception as e:
+                    logger.warning(f"Failed to create payroll notification for item {instance.item_id}: {e}")
+
+    # Always sync parent PayrollRun status based on child items
+    try:
+        sync_payroll_run_status(instance.run_id)
+    except Exception as e:
+        logger.warning(f"Failed to sync payroll run status for item {instance.item_id}: {e}")
+
+
 # Handle soft deletes
 @receiver(post_save, sender=SendTransaction)
 def handle_send_transaction_soft_delete(sender, instance, **kwargs):
@@ -437,6 +595,52 @@ def handle_conversion_soft_delete(sender, instance, **kwargs):
         UnifiedTransactionTable.objects.filter(conversion=instance).update(
             deleted_at=timezone.now()
         )
+
+
+@receiver(post_save, sender=PayrollItem)
+def handle_payroll_item_soft_delete(sender, instance, **kwargs):
+    """Handle soft delete of PayrollItem"""
+    if instance.deleted_at is not None:
+        UnifiedTransactionTable.objects.filter(payroll_item=instance).update(
+            deleted_at=instance.deleted_at
+        )
+    try:
+        sync_payroll_run_status(instance.run_id)
+    except Exception as e:
+        logger.warning(f"Failed to sync payroll run after delete for item {instance.item_id}: {e}")
+
+
+def sync_payroll_run_status(run_id: int):
+    """
+    Update PayrollRun.status based on its items.
+    - COMPLETED: all non-deleted items are CONFIRMED
+    - PARTIAL: at least one CONFIRMED/SUBMITTED/PREPARED but not all confirmed
+    - READY: all items still PENDING
+    - CANCELLED: all items are FAILED or CANCELLED
+    """
+    run = PayrollRun.objects.filter(id=run_id).first()
+    if not run:
+        return
+
+    items = list(run.items.filter(deleted_at__isnull=True).values_list('status', flat=True))
+    if not items:
+        return
+
+    statuses = set(items)
+    new_status = run.status
+
+    if statuses == {'CONFIRMED'}:
+        new_status = 'COMPLETED'
+    elif statuses.issubset({'PENDING'}):
+        new_status = 'READY'
+    elif statuses.issubset({'FAILED', 'CANCELLED'}):
+        new_status = 'CANCELLED'
+    elif statuses.intersection({'CONFIRMED', 'SUBMITTED', 'PREPARED'}):
+        new_status = 'PARTIAL'
+
+    if new_status != run.status:
+        run.status = new_status
+        run.save(update_fields=['status', 'updated_at'])
 
 
 # Achievement system signals have been moved to achievements/signals.py

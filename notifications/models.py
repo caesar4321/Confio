@@ -20,6 +20,8 @@ class NotificationType(models.TextChoices):
     PAYMENT_RECEIVED = 'PAYMENT_RECEIVED', 'Payment Received'
     PAYMENT_SENT = 'PAYMENT_SENT', 'Payment Sent'
     INVOICE_PAID = 'INVOICE_PAID', 'Invoice Paid'
+    PAYROLL_RECEIVED = 'PAYROLL_RECEIVED', 'Payroll Received'
+    PAYROLL_SENT = 'PAYROLL_SENT', 'Payroll Sent'
     
     # P2P Trade transactions
     P2P_OFFER_RECEIVED = 'P2P_OFFER_RECEIVED', 'P2P Offer Received'

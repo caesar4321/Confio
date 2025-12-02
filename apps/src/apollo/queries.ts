@@ -94,7 +94,22 @@ export const GET_PAYROLL_RUNS = gql`
         itemId
         status
         netAmount
-        recipientAccount { id }
+        recipientAccount {
+          id
+          accountType
+          accountIndex
+          user {
+            firstName
+            lastName
+            username
+          }
+        }
+        recipientUser {
+          id
+          firstName
+          lastName
+          username
+        }
       }
     }
   }
@@ -2501,6 +2516,12 @@ export const GET_CURRENT_BUSINESS_EMPLOYEES = gql`
         lastName
         phoneNumber
         phoneCountry
+        accounts {
+          id
+          accountType
+          accountIndex
+          algorandAddress
+        }
       }
       role
       isActive

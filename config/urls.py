@@ -121,8 +121,11 @@ if settings.DEBUG:
 
 # Import the index view
 from .views import index
+from .views import guardarian_transaction_proxy, guardarian_fiat_currencies
 
 # Catch-all pattern should be last
 urlpatterns += [
+    path('api/guardarian/fiat/', guardarian_fiat_currencies, name='guardarian_fiat_currencies'),
+    path('api/guardarian/transaction/', guardarian_transaction_proxy, name='guardarian_transaction_proxy'),
     re_path(r'^.*$', index),
 ]

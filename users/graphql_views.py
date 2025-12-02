@@ -32,6 +32,9 @@ class UnifiedTransactionType(DjangoObjectType):
     # P2P Trade ID for navigation
     p2p_trade_id = graphene.String(description="P2P Trade ID if this is an exchange transaction")
     
+    # Override token_type to be String to avoid Enum validation errors with mixed case
+    token_type = graphene.String(description="Token type (CUSD, USDC, etc)")
+    
     class Meta:
         model = UnifiedTransactionTable
         fields = [
@@ -64,7 +67,24 @@ class UnifiedTransactionType(DjangoObjectType):
         # Conversions are always "self" transactions
         if self.transaction_type == 'conversion':
             return 'conversion'
-        
+
+        # Payroll: derive from user identity first (addresses may be missing)
+        if self.transaction_type == 'payroll':
+            user = info.context.user if info.context else None
+            if user and user.is_authenticated:
+                if self.counterparty_user_id == user.id:
+                    return 'received'
+                if self.sender_user_id == user.id:
+                    return 'sent'
+            # If viewing as business context, sender is the business
+            acct_type = getattr(self, '_account_type', None)
+            acct_biz_id = getattr(self, '_account_business_id', None)
+            if acct_type == 'business' and acct_biz_id:
+                if self.sender_business_id == acct_biz_id:
+                    return 'sent'
+                if self.counterparty_business_id == acct_biz_id:
+                    return 'received'
+		
         # P2P exchanges need special handling: derive from the viewer's active account context first
         if self.transaction_type == 'exchange':
             user = info.context.user if info.context else None
@@ -82,7 +102,7 @@ class UnifiedTransactionType(DjangoObjectType):
                 if self.counterparty_user and self.counterparty_user.id == user.id:
                     return 'received'
             return 'unknown'
-            
+			
         # Get the user's address from the transaction context
         user_address = getattr(self, '_user_address', None)
         
@@ -257,13 +277,19 @@ class UnifiedTransactionQuery(graphene.ObjectType):
                 Q(counterparty_business=account.business)
             )
         else:
-            # For personal accounts, filter by user relationships BUT exclude business transactions
+            # For personal accounts, filter by user relationships
+            # Include:
+            # 1. Personal-to-personal transactions (no business involved)
+            # 2. Payroll transactions where user is the recipient
             queryset = UnifiedTransactionTable.objects.filter(
                 Q(
                     Q(sender_user=user) & Q(sender_business__isnull=True)
                 ) | 
                 Q(
                     Q(counterparty_user=user) & Q(counterparty_business__isnull=True)
+                ) |
+                Q(
+                    Q(counterparty_user=user) & Q(transaction_type='payroll')
                 )
             )
         
@@ -349,19 +375,27 @@ class UnifiedTransactionQuery(graphene.ObjectType):
                 Q(counterparty_business=business)
             )
         else:
-            # For personal accounts, filter by user relationships BUT exclude business transactions
+            # For personal accounts, filter by user relationships
+            # Include:
+            # 1. Personal-to-personal transactions (no business involved)
+            # 2. Payroll transactions where user is the recipient
             queryset = UnifiedTransactionTable.objects.filter(
                 Q(
                     Q(sender_user=user) & Q(sender_business__isnull=True)
                 ) | 
                 Q(
                     Q(counterparty_user=user) & Q(counterparty_business__isnull=True)
+                ) |
+                Q(
+                    Q(counterparty_user=user) & Q(transaction_type='payroll')
                 )
             )
         
-        # Filter by token types if provided
+        # Filter by token types if provided (case-insensitive)
         if token_types:
-            queryset = queryset.filter(token_type__in=token_types)
+            from django.db.models.functions import Upper
+            wanted = [t.upper() for t in token_types]
+            queryset = queryset.annotate(tok_upper=Upper('token_type')).filter(tok_upper__in=wanted)
         
         # Order by created_at descending to show newest first
         queryset = queryset.order_by('-created_at')
@@ -443,13 +477,19 @@ class UnifiedTransactionQuery(graphene.ObjectType):
                 Q(counterparty_business=business)
             )
         else:
-            # For personal accounts, filter by user relationships BUT exclude business transactions
+            # For personal accounts, filter by user relationships
+            # Include:
+            # 1. Personal-to-personal transactions (no business involved)
+            # 2. Payroll transactions where user is the recipient
             queryset = UnifiedTransactionTable.objects.filter(
                 Q(
                     Q(sender_user=user) & Q(sender_business__isnull=True)
                 ) | 
                 Q(
                     Q(counterparty_user=user) & Q(counterparty_business__isnull=True)
+                ) |
+                Q(
+                    Q(counterparty_user=user) & Q(transaction_type='payroll')
                 )
             )
         

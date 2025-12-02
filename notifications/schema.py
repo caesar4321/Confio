@@ -29,6 +29,10 @@ class NotificationTypeEnum(graphene.Enum):
     PAYMENT_SENT = 'PAYMENT_SENT'
     INVOICE_PAID = 'INVOICE_PAID'
     
+    # Payroll transactions
+    PAYROLL_RECEIVED = 'PAYROLL_RECEIVED'
+    PAYROLL_SENT = 'PAYROLL_SENT'
+    
     # P2P Trade transactions
     P2P_OFFER_RECEIVED = 'P2P_OFFER_RECEIVED'
     P2P_OFFER_ACCEPTED = 'P2P_OFFER_ACCEPTED'

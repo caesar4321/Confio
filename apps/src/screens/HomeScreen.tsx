@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
+import {
+  View,
+  Text,
+  StyleSheet,
   TouchableOpacity,
-  Pressable, 
-  Platform, 
-  Alert, 
-  ScrollView, 
+  Pressable,
+  Platform,
+  Alert,
+  ScrollView,
   Image,
   RefreshControl,
   Animated,
@@ -54,7 +54,7 @@ const INVITE_TS_KEY = 'invite_banner_last_ts';
 
 const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string => {
   if (!phoneNumber) return '';
-  
+
   // If we have a country code, format it
   if (phoneCountry) {
     const country = getCountryByIso(phoneCountry);
@@ -63,7 +63,7 @@ const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string 
       return `${countryCode} ${phoneNumber}`;
     }
   }
-  
+
   return phoneNumber;
 };
 
@@ -121,12 +121,12 @@ export const HomeScreen = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [showBalance, setShowBalance] = useState(true);
   const [inviteNotice, setInviteNotice] = useState<{ exists: boolean; amount?: number; assetId?: number; timestamp?: number } | null>(null);
-  
+
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.95)).current;
   const balanceAnim = useRef(new Animated.Value(0)).current;
-  
+
   // Use account context
   const {
     activeAccount,
@@ -137,14 +137,14 @@ export const HomeScreen = () => {
     getActiveAccountContext,
     syncWithServer,
   } = useAccount();
-  
+
   // Use atomic account switching
-  const { 
-    switchAccount: atomicSwitchAccount, 
-    state: switchState, 
-    isAccountSwitchInProgress 
+  const {
+    switchAccount: atomicSwitchAccount,
+    state: switchState,
+    isAccountSwitchInProgress
   } = useAtomicAccountSwitch();
-  
+
   // Fetch all balances in a single call to avoid flicker
   const { data: myBalancesData, loading: myBalancesLoading, error: myBalancesError, refetch: refetchMyBalances } = useQuery(GET_MY_BALANCES, {
     fetchPolicy: 'network-only',
@@ -152,7 +152,7 @@ export const HomeScreen = () => {
     notifyOnNetworkStatusChange: true,
   });
   const [refreshAccountBalance] = useMutation(REFRESH_ACCOUNT_BALANCE);
-  
+
   // Check if presale is globally active / claims unlocked
   const { data: presaleStatusData } = useQuery(GET_PRESALE_STATUS, {
     fetchPolicy: 'cache-and-network',
@@ -166,7 +166,7 @@ export const HomeScreen = () => {
   const isBusinessAccount = (activeAccount?.type || '').toLowerCase() === 'business';
   const isPersonalAccount = (activeAccount?.type || '').toLowerCase() === 'personal';
   const isEmployeeDelegate = !!activeAccount?.isEmployee;
-  const { data: pendingPayrollData } = useQuery(GET_PENDING_PAYROLL_ITEMS, {
+  const { data: pendingPayrollData, refetch: refetchPendingPayroll } = useQuery(GET_PENDING_PAYROLL_ITEMS, {
     skip: !activeAccount,
     fetchPolicy: 'cache-and-network',
   });
@@ -176,8 +176,8 @@ export const HomeScreen = () => {
   const isPresaleActive = presaleStatusData?.isPresaleActive === true;
   const isPresaleClaimsUnlocked = presaleStatusData?.isPresaleClaimsUnlocked === true;
   const [presaleDismissed, setPresaleDismissed] = useState(false);
-  const showPayrollCard = isBusinessAccount || isEmployeeDelegate || (isPersonalAccount && pendingPayrollCount > 0);
-  
+  const showPayrollCard = (isBusinessAccount || isEmployeeDelegate || isPersonalAccount) && pendingPayrollCount > 0;
+
   // Refetch balances when active account changes
   useEffect(() => {
     if (activeAccount) {
@@ -188,21 +188,23 @@ export const HomeScreen = () => {
   // Force refresh balances when navigating to this screen
   useFocusEffect(
     useCallback(() => {
-      console.log('HomeScreen focused - refreshing balances');
+      console.log('HomeScreen focused - refreshing balances and payroll');
       refetchMyBalances();
+      refetchPendingPayroll();
       // Also nudge account refresh on focus in case auth just resumed
-      try { refreshAccounts(); } catch {}
-    }, [refetchMyBalances])
+      try { refreshAccounts(); } catch { }
+    }, [refetchMyBalances, refetchPendingPayroll])
   );
 
   // Extra guard: subscribe to navigation focus event to refetch
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
-      console.log('HomeScreen navigation focus - refetching balances');
+      console.log('HomeScreen navigation focus - refetching balances and payroll');
       refetchMyBalances();
+      refetchPendingPayroll();
     });
     return unsubscribe;
-  }, [navigation, refetchMyBalances]);
+  }, [navigation, refetchMyBalances, refetchPendingPayroll]);
 
   // On initial mount after auth, pull accounts once to avoid blank ProfileMenu
   useEffect(() => {
@@ -217,7 +219,7 @@ export const HomeScreen = () => {
       return () => clearTimeout(t);
     }
   }, [isAuthenticated, refreshAccounts]);
-  
+
   // Log any errors and data for debugging
   useEffect(() => {
     console.log('Balance query status:', {
@@ -230,22 +232,22 @@ export const HomeScreen = () => {
       console.error('Error fetching balances:', myBalancesError);
     }
   }, [isInitialized, myBalancesLoading, myBalancesData, myBalancesError]);
-  
+
   // Parse balances safely - memoized for performance
-  const cUSDBalance = React.useMemo(() => 
-    parseFloat(myBalancesData?.myBalances?.cusd || '0'), 
+  const cUSDBalance = React.useMemo(() =>
+    parseFloat(myBalancesData?.myBalances?.cusd || '0'),
     [myBalancesData?.myBalances?.cusd]
   );
-  const usdcBalance = React.useMemo(() => 
-    parseFloat(myBalancesData?.myBalances?.usdc || '0'), 
+  const usdcBalance = React.useMemo(() =>
+    parseFloat(myBalancesData?.myBalances?.usdc || '0'),
     [myBalancesData?.myBalances?.usdc]
   );
-  const confioLive = React.useMemo(() => 
-    parseFloat(myBalancesData?.myBalances?.confio || '0'), 
+  const confioLive = React.useMemo(() =>
+    parseFloat(myBalancesData?.myBalances?.confio || '0'),
     [myBalancesData?.myBalances?.confio]
   );
-  const confioPresaleLocked = React.useMemo(() => 
-    parseFloat(myBalancesData?.myBalances?.confioPresaleLocked || '0'), 
+  const confioPresaleLocked = React.useMemo(() =>
+    parseFloat(myBalancesData?.myBalances?.confioPresaleLocked || '0'),
     [myBalancesData?.myBalances?.confioPresaleLocked]
   );
   const confioTotal = React.useMemo(() => confioLive + confioPresaleLocked, [confioLive, confioPresaleLocked]);
@@ -287,20 +289,20 @@ export const HomeScreen = () => {
     // Use toLocaleString for grouping but preserve exact decimals
     return floored.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
   }, [floorToDecimals]);
-  
+
   // Calculate portfolio value including CONFIO marked to current presale price
   const totalUSDValue = React.useMemo(
-    () => cUSDBalance + usdcBalance + confioUsdValue, 
+    () => cUSDBalance + usdcBalance + confioUsdValue,
     [cUSDBalance, usdcBalance, confioUsdValue]
   );
-  
+
   // Use real exchange rate from API only - no fallbacks
   const localExchangeRate = marketRate || 1;
   const totalLocalValue = totalUSDValue * localExchangeRate;
-  
+
   // Don't show local currency option if exchange rate is not available
   const canShowLocalCurrency = marketRate !== null && marketRate !== 1 && currency.code !== 'USD';
-  
+
   // Debug exchange rate
   console.log('HomeScreen - Exchange rate:', {
     marketRate,
@@ -316,17 +318,17 @@ export const HomeScreen = () => {
     selectedCountryISO: selectedCountry?.[2],
     showLocalCurrency,
     formattedLocal: formatAmount.plain(totalLocalValue),
-    formattedUSD: totalUSDValue.toLocaleString('en-US', { 
+    formattedUSD: totalUSDValue.toLocaleString('en-US', {
       minimumFractionDigits: 2,
-      maximumFractionDigits: 2 
+      maximumFractionDigits: 2
     })
   });
-  
+
   // Track initialization state (one-time) to avoid flicker
   const [isInitialized, setIsInitialized] = useState(false);
   // Only show loading during the initial pass; do not toggle back after first render
   const isLoading = !isInitialized;
-  
+
   // No more mock accounts - we fetch from server
 
   // Convert stored accounts to the format expected by ProfileMenu
@@ -399,34 +401,34 @@ export const HomeScreen = () => {
   const displayAccounts = accountMenuItems.length > 0
     ? accountMenuItems
     : (bootstrapAccounts.length > 0
-        ? bootstrapAccounts
-        : (() => {
-            const bp = profileData?.businessProfile;
-            if (bp && bp.id && bp.name) {
-              return [{
-                id: `business_${bp.id}_0`,
-                name: bp.name,
-                type: 'business' as const,
-                phone: undefined,
-                category: bp.category,
-                avatar: (bp.name || 'N').charAt(0).toUpperCase(),
-                isEmployee: false,
-              }];
-            }
-            if (userProfile) {
-              return [{
-                id: 'personal_0',
-                name: userProfile.firstName || userProfile.username || 'Personal',
-                type: 'personal' as const,
-                phone: formatPhoneNumber(userProfile.phoneNumber, userProfile.phoneCountry),
-                category: undefined,
-                avatar: (userProfile.firstName || userProfile.username || 'P').charAt(0).toUpperCase(),
-                isEmployee: false,
-              }];
-            }
-            return [];
-          })()
-      );
+      ? bootstrapAccounts
+      : (() => {
+        const bp = profileData?.businessProfile;
+        if (bp && bp.id && bp.name) {
+          return [{
+            id: `business_${bp.id}_0`,
+            name: bp.name,
+            type: 'business' as const,
+            phone: undefined,
+            category: bp.category,
+            avatar: (bp.name || 'N').charAt(0).toUpperCase(),
+            isEmployee: false,
+          }];
+        }
+        if (userProfile) {
+          return [{
+            id: 'personal_0',
+            name: userProfile.firstName || userProfile.username || 'Personal',
+            type: 'personal' as const,
+            phone: formatPhoneNumber(userProfile.phoneNumber, userProfile.phoneCountry),
+            category: undefined,
+            avatar: (userProfile.firstName || userProfile.username || 'P').charAt(0).toUpperCase(),
+            isEmployee: false,
+          }];
+        }
+        return [];
+      })()
+    );
 
   // Debug display accounts
   console.log('HomeScreen - Display accounts:', {
@@ -448,10 +450,10 @@ export const HomeScreen = () => {
         // Only if we still have just a placeholder or nothing
         if (accounts.length > 1) return;
         // Ensure we only hydrate after a fresh/finalized token is in place
-        try { await waitForAuthReady(); } catch {}
+        try { await waitForAuthReady(); } catch { }
         console.log('HomeScreen - Hydrating accounts via GET_USER_ACCOUNTS');
-        const result = await apollo.query({ 
-          query: GET_USER_ACCOUNTS, 
+        const result = await apollo.query({
+          query: GET_USER_ACCOUNTS,
           fetchPolicy: 'no-cache',
           context: { skipProactiveRefresh: true },
         });
@@ -496,12 +498,12 @@ export const HomeScreen = () => {
             console.log('HomeScreen - Using derived accounts from profileData:', derived.length);
             try { await syncWithServer(derived); } catch (e) { console.log('HomeScreen - derived syncWithServer failed', e); }
           }
+        }
+      } catch (e) {
+        console.warn('HomeScreen - GET_USER_ACCOUNTS hydrate failed:', (e as any)?.message || e);
       }
-    } catch (e) {
-      console.warn('HomeScreen - GET_USER_ACCOUNTS hydrate failed:', (e as any)?.message || e);
-    }
-  })();
-  return () => { cancelled = true; };
+    })();
+    return () => { cancelled = true; };
   }, [isAuthenticated, accounts.length, apollo, syncWithServer, profileData?.userProfile?.firstName, profileData?.userProfile?.username, profileData?.businessProfile?.id, profileData?.businessProfile?.name, profileData?.businessProfile?.category]);
 
   // Fallback: if accounts are still empty shortly after auth/profile are ready, derive from profileData immediately
@@ -541,7 +543,7 @@ export const HomeScreen = () => {
       });
     }
     if (derived.length > 0) {
-      (async () => { try { await syncWithServer(derived); } catch {} })();
+      (async () => { try { await syncWithServer(derived); } catch { } })();
     }
   }, [isAuthenticated, accounts.length, profileData?.userProfile?.firstName, profileData?.userProfile?.username, profileData?.businessProfile?.id, profileData?.businessProfile?.name, profileData?.businessProfile?.category, syncWithServer]);
 
@@ -579,7 +581,7 @@ export const HomeScreen = () => {
         const ts = parseInt(creds.password, 10);
         return isNaN(ts) ? null : ts;
       }
-    } catch {}
+    } catch { }
     return null;
   };
 
@@ -605,11 +607,11 @@ export const HomeScreen = () => {
 
   const currentAccount = activeAccount ? {
     ...activeAccount,
-    phone: activeAccount.type === 'personal' && userProfile 
+    phone: activeAccount.type === 'personal' && userProfile
       ? formatPhoneNumber(userProfile.phoneNumber, userProfile.phoneCountry)
       : activeAccount.phone,
   } : (displayAccounts.length > 0 ? displayAccounts[0] : null); // Only use first account if accounts exist
-  
+
   // Debug display accounts
   console.log('HomeScreen - Display accounts:', {
     accountsLength: accounts.length,
@@ -631,7 +633,7 @@ export const HomeScreen = () => {
     userProfileName: userProfile?.firstName || userProfile?.username
   });
 
-  
+
   // Pull to refresh handler
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -639,7 +641,7 @@ export const HomeScreen = () => {
     if (Platform.OS === 'ios') {
       Vibration.vibrate(10);
     }
-    
+
     try {
       // Force refresh balances from blockchain (bypass cache)
       await Promise.all([
@@ -653,7 +655,7 @@ export const HomeScreen = () => {
       setRefreshing(false);
     }
   }, [refreshAccounts, refetchMyBalances]);
-  
+
   // Quick actions configuration - filter based on permissions
   const quickActionsData: QuickAction[] = [
     {
@@ -678,8 +680,8 @@ export const HomeScreen = () => {
       route: () => {
         // For business accounts, navigate to Charge screen instead of Scan
         const isBusinessAccount = activeAccount?.type?.toLowerCase() === 'business';
-        navigation.navigate('BottomTabs', { 
-          screen: isBusinessAccount ? 'Charge' : 'Scan' 
+        navigation.navigate('BottomTabs', {
+          screen: isBusinessAccount ? 'Charge' : 'Scan'
         } as any);
       },
     },
@@ -688,16 +690,16 @@ export const HomeScreen = () => {
       label: 'Recargar',
       icon: 'dollar-sign',
       color: '#3b82f6',
-      route: () => navigation.navigate('USDCDeposit', { tokenType: 'usdc' }),
+      route: () => navigation.navigate('TopUp'),
     },
   ];
-  
+
   // Filter quick actions based on employee permissions
   const quickActions = React.useMemo(() => {
     // If user is an employee, filter actions based on permissions
     if (activeAccount?.isEmployee) {
       const permissions = activeAccount.employeePermissions || {};
-      
+
       return quickActionsData.filter(action => {
         switch (action.id) {
           case 'send':
@@ -717,7 +719,7 @@ export const HomeScreen = () => {
         }
       });
     }
-    
+
     // Non-employees get all actions
     return quickActionsData;
   }, [activeAccount, quickActionsData]);
@@ -743,7 +745,7 @@ export const HomeScreen = () => {
       }, 50);
     }
   }, [fadeAnim, scaleAnim, isInitialized, isLoading]);
-  
+
   // Balance animation when value changes
   React.useEffect(() => {
     Animated.timing(balanceAnim, {
@@ -752,7 +754,7 @@ export const HomeScreen = () => {
       useNativeDriver: true,
     }).start();
   }, [showLocalCurrency, balanceAnim]);
-  
+
   // Reset to USD if exchange rate is not available
   React.useEffect(() => {
     if (!canShowLocalCurrency && showLocalCurrency) {
@@ -763,22 +765,22 @@ export const HomeScreen = () => {
   // Combined initialization effect
   React.useEffect(() => {
     let mounted = true;
-    
+
     const initializeHomeScreen = async () => {
       if (!mounted) return;
       // Mark initialized immediately to avoid long blocking loading screens
       setIsInitialized(true);
-      
+
       try {
         // Load balance visibility preference first
         await loadBalanceVisibility();
-        
+
         // Initialize auth service
         const authService = AuthService.getInstance();
         await authService.initialize();
-        
+
         if (!mounted) return;
-        
+
         const address = await authService.getAlgorandAddress();
         setAlgorandAddress(address);
 
@@ -796,7 +798,7 @@ export const HomeScreen = () => {
         } catch (e) {
           console.log('HomeScreen: invite receipt check skipped');
         }
-        
+
       } catch (error) {
         console.error('HomeScreen - Error during initialization:', error);
       } finally {
@@ -805,7 +807,7 @@ export const HomeScreen = () => {
     };
 
     initializeHomeScreen();
-    
+
     return () => {
       mounted = false;
     };
@@ -825,7 +827,7 @@ export const HomeScreen = () => {
               // Do NOT pass phone so backend resolves the latest PhoneInvite or uses invitation_id when provided via deep link later
               await inviteSendService.claimInviteForPhone(undefined, undefined, address);
             }
-          } catch {}
+          } catch { }
           const r = await inviteSendService.getInviteReceiptNotice(userProfile.phoneNumber, userProfile.phoneCountry);
           if (r?.exists) {
             const lastTs = await loadLastInviteTimestamp();
@@ -834,9 +836,9 @@ export const HomeScreen = () => {
             }
           }
           // Clear the param to avoid rechecks
-          try { (navigation as any).setParams({ checkInviteReceipt: undefined }); } catch {}
+          try { (navigation as any).setParams({ checkInviteReceipt: undefined }); } catch { }
         }
-      } catch {}
+      } catch { }
     })();
   }, [route, userProfile?.phoneNumber, userProfile?.phoneCountry]);
 
@@ -849,7 +851,7 @@ export const HomeScreen = () => {
       userProfileLoaded: !!userProfile,
       userProfileName: userProfile?.firstName || userProfile?.username
     });
-    
+
     if (currentAccount) {
       setCurrentAccountAvatar(currentAccount.avatar);
     }
@@ -865,7 +867,7 @@ export const HomeScreen = () => {
 
   // Memoized navigation handlers for better performance
   const navigateToCUSDAccount = useCallback(() => {
-    navigation.navigate('AccountDetail', { 
+    navigation.navigate('AccountDetail', {
       accountType: 'cusd',
       accountName: 'Confío Dollar',
       accountSymbol: '$cUSD',
@@ -875,7 +877,7 @@ export const HomeScreen = () => {
   }, [navigation, cUSDBalance, activeAccount?.algorandAddress]);
 
   const navigateToConfioAccount = useCallback(() => {
-    navigation.navigate('AccountDetail', { 
+    navigation.navigate('AccountDetail', {
       accountType: 'confio',
       accountName: 'Confío',
       accountSymbol: '$CONFIO',
@@ -883,7 +885,7 @@ export const HomeScreen = () => {
       accountAddress: activeAccount?.algorandAddress || ''
     });
   }, [navigation, confioTotal, activeAccount?.algorandAddress]);
-  
+
   useFocusEffect(
     React.useCallback(() => {
       // Only refresh if we've done the initial load and are coming back
@@ -903,16 +905,16 @@ export const HomeScreen = () => {
   const handleAccountSwitch = async (accountId: string): Promise<boolean> => {
     try {
       console.log('HomeScreen - handleAccountSwitch called with:', accountId);
-      
+
       // Close the profile menu immediately to provide feedback
       profileMenu.closeProfileMenu();
-      
+
       // All accounts are now real accounts from the server
       console.log('HomeScreen - Switching to account:', accountId);
-      
+
       // Use atomic account switching
       const success = await atomicSwitchAccount(accountId);
-      
+
       if (success) {
         console.log('HomeScreen - Account switch successful');
         // Refresh balances after successful switch
@@ -948,24 +950,24 @@ export const HomeScreen = () => {
       const timer = setTimeout(() => {
         const pendingSwitch = PushNotificationService.getPendingAccountSwitch();
         const pendingNavigation = PushNotificationService.getPendingNavigation();
-        
+
         console.log('HomeScreen - Checking for pending account switch:', {
           pendingSwitch,
           hasPendingNavigation: !!pendingNavigation,
           hasHandleAccountSwitch: !!handleAccountSwitch
         });
-        
+
         // Only process if we have BOTH a pending switch AND navigation
         if (pendingSwitch && pendingNavigation && handleAccountSwitch) {
           console.log('HomeScreen - Processing pending account switch');
-          
+
           // Clear the pending switch to prevent duplicate processing
           PushNotificationService.clearPendingAccountSwitch();
           PushNotificationService.clearPendingNavigation();
-          
+
           // Store the navigation function before clearing
           const navigationToExecute = pendingNavigation;
-          
+
           // Execute the account switch
           handleAccountSwitch(pendingSwitch).then(success => {
             if (success) {
@@ -983,7 +985,7 @@ export const HomeScreen = () => {
           });
         }
       }, 100); // Small delay to ensure screen is ready
-      
+
       return () => clearTimeout(timer);
     }, [handleAccountSwitch])
   );
@@ -1004,7 +1006,7 @@ export const HomeScreen = () => {
 
   return (
     <View style={styles.container}>
-      <ScrollView 
+      <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         refreshControl={
@@ -1018,7 +1020,7 @@ export const HomeScreen = () => {
         showsVerticalScrollIndicator={false}
       >
         {/* Enhanced Balance Card Section */}
-        <Animated.View 
+        <Animated.View
           style={[
             styles.balanceCard,
             {
@@ -1037,7 +1039,7 @@ export const HomeScreen = () => {
             <View style={styles.portfolioActions}>
               {/* Only show eye toggle if employee has viewBalance permission or not an employee */}
               {(!activeAccount?.isEmployee || activeAccount?.employeePermissions?.viewBalance) && (
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={styles.eyeToggle}
                   onPress={toggleBalanceVisibility}
                   activeOpacity={0.7}
@@ -1046,7 +1048,7 @@ export const HomeScreen = () => {
                 </TouchableOpacity>
               )}
               {canShowLocalCurrency && (
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={styles.currencyToggle}
                   onPress={() => setShowLocalCurrency(!showLocalCurrency)}
                   activeOpacity={0.7}
@@ -1059,8 +1061,8 @@ export const HomeScreen = () => {
               )}
             </View>
           </View>
-          
-          <Animated.View 
+
+          <Animated.View
             style={[
               styles.balanceContainer,
               {
@@ -1084,17 +1086,17 @@ export const HomeScreen = () => {
                 });
                 return (activeAccount?.isEmployee && !activeAccount?.employeePermissions?.viewBalance)
                   ? '••••••'
-                  : showBalance 
-                  ? (showLocalCurrency 
+                  : showBalance
+                    ? (showLocalCurrency
                       ? formatAmount.plain(floorToDecimals(totalLocalValue, 2))
                       : formatFixedFloor(totalUSDValue, 2)
                     )
-                  : '••••••';
+                    : '••••••';
               })()}
             </Text>
           </Animated.View>
         </Animated.View>
-        
+
 
         {/* Payroll quick action */}
         {showPayrollCard && (
@@ -1120,106 +1122,106 @@ export const HomeScreen = () => {
 
         {/* CONFIO Presale Banner - Show claims unlocked (green) or presale active (purple) */}
         {isPresaleClaimsUnlocked && !presaleDismissed && (
-          <Animated.View 
-          style={[
-            styles.presaleBanner,
-            {
-              opacity: fadeAnim,
-              transform: [
-                { 
-                  translateY: fadeAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [20, 0],
-                  })
-                }
-              ],
-            }
-          ]}
-        >
-          <View style={styles.presaleBannerContent}>
-            <View style={styles.presaleBannerLeft}>
-              <View style={[styles.presaleBadge, { backgroundColor: '#10b981' }]}>
-                <Text style={styles.presaleBadgeText}>🔓 RECLAMO</Text>
+          <Animated.View
+            style={[
+              styles.presaleBanner,
+              {
+                opacity: fadeAnim,
+                transform: [
+                  {
+                    translateY: fadeAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [20, 0],
+                    })
+                  }
+                ],
+              }
+            ]}
+          >
+            <View style={styles.presaleBannerContent}>
+              <View style={styles.presaleBannerLeft}>
+                <View style={[styles.presaleBadge, { backgroundColor: '#10b981' }]}>
+                  <Text style={styles.presaleBadgeText}>🔓 RECLAMO</Text>
+                </View>
+                <Text style={styles.presaleBannerTitle}>¡Reclama tus $CONFIO!</Text>
+                <Text style={styles.presaleBannerSubtitle}>
+                  Tus monedas ya están disponibles. Reclámalas en segundos.
+                </Text>
+                <TouchableOpacity
+                  onPress={() => navigation.navigate('ConfioPresale')}
+                  activeOpacity={0.7}
+                  style={{ marginTop: 8 }}
+                >
+                  <Text style={[styles.presaleDetailsLink, { color: '#10b981' }]}>Ir a reclamar</Text>
+                </TouchableOpacity>
               </View>
-              <Text style={styles.presaleBannerTitle}>¡Reclama tus $CONFIO!</Text>
-              <Text style={styles.presaleBannerSubtitle}>
-                Tus monedas ya están disponibles. Reclámalas en segundos.
-              </Text>
-              <TouchableOpacity
-                onPress={() => navigation.navigate('ConfioPresale')}
-                activeOpacity={0.7}
-                style={{ marginTop: 8 }}
-              >
-                <Text style={[styles.presaleDetailsLink, { color: '#10b981' }]}>Ir a reclamar</Text>
-              </TouchableOpacity>
+              <View style={styles.presaleBannerRight}>
+                <TouchableOpacity onPress={() => setPresaleDismissed(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={{ position: 'absolute', top: -6, right: -6 }}>
+                  <Icon name="x" size={18} color="#10b981" />
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => navigation.navigate('ConfioPresale')} activeOpacity={0.9} style={{ alignItems: 'center' }}>
+                  <Image source={CONFIOLogo} style={styles.presaleBannerLogo} />
+                  <Icon name="chevron-right" size={20} color="#10b981" />
+                </TouchableOpacity>
+              </View>
             </View>
-            <View style={styles.presaleBannerRight}>
-              <TouchableOpacity onPress={() => setPresaleDismissed(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={{ position: 'absolute', top: -6, right: -6 }}>
-                <Icon name="x" size={18} color="#10b981" />
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => navigation.navigate('ConfioPresale')} activeOpacity={0.9} style={{ alignItems: 'center' }}>
-                <Image source={CONFIOLogo} style={styles.presaleBannerLogo} />
-                <Icon name="chevron-right" size={20} color="#10b981" />
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Animated.View>
+          </Animated.View>
         )}
         {isPresaleActive && !isPresaleClaimsUnlocked && !presaleDismissed && (
-          <Animated.View 
-          style={[
-            styles.presaleBanner,
-            {
-              opacity: fadeAnim,
-              transform: [
-                { 
-                  translateY: fadeAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [20, 0],
-                  })
-                }
-              ],
-            }
-          ]}
-        >
-          <View style={styles.presaleBannerContent}>
-            <View style={styles.presaleBannerLeft}>
-              <View style={styles.presaleBadge}>
-                <Text style={styles.presaleBadgeText}>🚀 PREVENTA</Text>
+          <Animated.View
+            style={[
+              styles.presaleBanner,
+              {
+                opacity: fadeAnim,
+                transform: [
+                  {
+                    translateY: fadeAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [20, 0],
+                    })
+                  }
+                ],
+              }
+            ]}
+          >
+            <View style={styles.presaleBannerContent}>
+              <View style={styles.presaleBannerLeft}>
+                <View style={styles.presaleBadge}>
+                  <Text style={styles.presaleBadgeText}>🚀 PREVENTA</Text>
+                </View>
+                <Text style={styles.presaleBannerTitle}>Únete a la Preventa de $CONFIO</Text>
+                <Text style={styles.presaleBannerSubtitle}>
+                  Sé de los primeros en obtener monedas $CONFIO antes del lanzamiento público
+                </Text>
+                <TouchableOpacity
+                  onPress={() => navigation.navigate('ConfioPresale')}
+                  activeOpacity={0.7}
+                  style={{ marginTop: 8 }}
+                >
+                  <Text style={styles.presaleDetailsLink}>Ver detalles</Text>
+                </TouchableOpacity>
               </View>
-              <Text style={styles.presaleBannerTitle}>Únete a la Preventa de $CONFIO</Text>
-              <Text style={styles.presaleBannerSubtitle}>
-                Sé de los primeros en obtener monedas $CONFIO antes del lanzamiento público
-              </Text>
-              <TouchableOpacity
-                onPress={() => navigation.navigate('ConfioPresale')}
-                activeOpacity={0.7}
-                style={{ marginTop: 8 }}
-              >
-                <Text style={styles.presaleDetailsLink}>Ver detalles</Text>
-              </TouchableOpacity>
+              <View style={styles.presaleBannerRight}>
+                <TouchableOpacity onPress={() => setPresaleDismissed(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={{ position: 'absolute', top: -6, right: -6 }}>
+                  <Icon name="x" size={18} color="#8b5cf6" />
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => navigation.navigate('ConfioPresale')} activeOpacity={0.9} style={{ alignItems: 'center' }}>
+                  <Image source={CONFIOLogo} style={styles.presaleBannerLogo} />
+                  <Icon name="chevron-right" size={20} color="#8b5cf6" />
+                </TouchableOpacity>
+              </View>
             </View>
-            <View style={styles.presaleBannerRight}>
-              <TouchableOpacity onPress={() => setPresaleDismissed(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={{ position: 'absolute', top: -6, right: -6 }}>
-                <Icon name="x" size={18} color="#8b5cf6" />
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => navigation.navigate('ConfioPresale')} activeOpacity={0.9} style={{ alignItems: 'center' }}>
-                <Image source={CONFIOLogo} style={styles.presaleBannerLogo} />
-                <Icon name="chevron-right" size={20} color="#8b5cf6" />
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Animated.View>
+          </Animated.View>
         )}
-        
+
         {/* Quick Actions */}
-        <Animated.View 
+        <Animated.View
           style={[
             styles.quickActionsCard,
             {
               opacity: fadeAnim,
               transform: [
-                { 
+                {
                   translateY: fadeAnim.interpolate({
                     inputRange: [0, 1],
                     outputRange: [30, 0],
@@ -1239,10 +1241,10 @@ export const HomeScreen = () => {
                 ¡Hola, equipo {activeAccount?.business?.name}!
               </Text>
               <Text style={styles.employeeWelcomeText}>
-                Como {activeAccount?.employeeRole === 'cashier' ? 'cajero' : 
-                       activeAccount?.employeeRole === 'manager' ? 'gerente' : 
-                       activeAccount?.employeeRole === 'admin' ? 'administrador' : 'parte del equipo'},{' '}
-                {activeAccount?.employeePermissions?.acceptPayments 
+                Como {activeAccount?.employeeRole === 'cashier' ? 'cajero' :
+                  activeAccount?.employeeRole === 'manager' ? 'gerente' :
+                    activeAccount?.employeeRole === 'admin' ? 'administrador' : 'parte del equipo'},{' '}
+                {activeAccount?.employeePermissions?.acceptPayments
                   ? 'estás listo para recibir pagos y atender a nuestros clientes.'
                   : 'eres una parte importante de nuestro equipo.'}
               </Text>
@@ -1255,7 +1257,7 @@ export const HomeScreen = () => {
                 onPress={action.route}
                 activeOpacity={0.7}
               >
-                <Animated.View 
+                <Animated.View
                   style={[
                     styles.actionIcon,
                     { backgroundColor: action.color },
@@ -1282,7 +1284,7 @@ export const HomeScreen = () => {
         {/* Wallets Section */}
         <View style={styles.walletsSection}>
           <Text style={styles.walletsTitle}>Mis Billeteras</Text>
-          
+
           {myBalancesLoading ? (
             <>
               <WalletCardSkeleton />
@@ -1303,7 +1305,7 @@ export const HomeScreen = () => {
               }}
             >
               {/* cUSD Wallet */}
-              <Pressable 
+              <Pressable
                 style={({ pressed }) => [
                   styles.walletCard,
                   pressed && { opacity: 0.7 }
@@ -1331,7 +1333,7 @@ export const HomeScreen = () => {
               </Pressable>
 
               {/* CONFIO Wallet */}
-              <Pressable 
+              <Pressable
                 style={({ pressed }) => [
                   styles.walletCard,
                   pressed && { opacity: 0.7 }
@@ -1395,7 +1397,7 @@ export const HomeScreen = () => {
         onAccountSwitch={handleAccountSwitch}
         onCreateBusinessAccount={handleCreateBusinessAccount}
       />
-      
+
       {/* Account Switch Overlay */}
       <AccountSwitchOverlay
         visible={switchState.isLoading}

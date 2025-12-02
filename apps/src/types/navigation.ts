@@ -16,8 +16,8 @@ export type BottomTabParamList = {
   Employees: undefined;
   Scan: { mode?: 'cobrar' | 'pagar' };
   Charge: undefined;
-  Exchange: { 
-    showMyOffers?: boolean; 
+  Exchange: {
+    showMyOffers?: boolean;
     refreshData?: boolean;
   };
   Profile: undefined;
@@ -43,7 +43,7 @@ export type MainStackParamList = {
       rate: string;
       limit: string;
       available: string;
-      paymentMethods: Array<{id: string; name: string; displayName: string; icon?: string}>;
+      paymentMethods: Array<{ id: string; name: string; displayName: string; icon?: string }>;
       responseTime: string;
       completedTrades: number;
       successRate: number;
@@ -75,7 +75,7 @@ export type MainStackParamList = {
       rate: string;
       limit: string;
       available: string;
-      paymentMethods: Array<{id: string; name: string; displayName: string; icon?: string}>;
+      paymentMethods: Array<{ id: string; name: string; displayName: string; icon?: string }>;
       responseTime: string;
       completedTrades: number;
       successRate: number;
@@ -94,7 +94,7 @@ export type MainStackParamList = {
       rate: string;
       limit: string;
       available: string;
-      paymentMethods: Array<{id: string; name: string; displayName: string; icon?: string}>;
+      paymentMethods: Array<{ id: string; name: string; displayName: string; icon?: string }>;
       responseTime: string;
       completedTrades: number;
       successRate: number;
@@ -147,13 +147,19 @@ export type MainStackParamList = {
     accountBalance: string;
     accountAddress?: string;
   };
+  TopUp: undefined;
+  Sell: undefined;
   USDCDeposit: { tokenType?: 'usdc' | 'cusd' | 'confio' };
   USDCManage: undefined;
   USDCWithdraw: undefined;
   USDCHistory: undefined;
   USDCConversion: undefined;
-  SendWithAddress: { tokenType: 'cusd' | 'confio' };
-  SendToFriend: { 
+  SendWithAddress: {
+    tokenType: 'cusd' | 'confio';
+    prefilledAddress?: string;
+    prefilledAmount?: string;
+  };
+  SendToFriend: {
     friend: { name: string; avatar: string; isOnConfio: boolean; phone: string };
     tokenType?: 'cusd' | 'confio';
   };
@@ -361,7 +367,7 @@ export type MainStackParamList = {
       minAmount: number;
       maxAmount: number;
       countryCode: string;
-      paymentMethods: Array<{id: string; name: string; displayName: string}>;
+      paymentMethods: Array<{ id: string; name: string; displayName: string }>;
       terms?: string;
     };
   } | undefined;
@@ -378,6 +384,13 @@ export type MainStackParamList = {
   ReferralRewardClaim: undefined;
   PayrollPending: undefined;
   PayrollSettings: undefined;
+  PayrollTopUp: undefined;
+  PayrollHome: undefined;
+  PayrollRunDetail: { run: any };
+  PayrollReceipt: { transaction: any };
+  PayrollSetupWizard: undefined;
+  PayrollRecipientsManage: undefined;
+  PayrollDelegatesManage: undefined;
   // NotificationSettings: undefined; // Hidden: Notifications mandatory
 };
 

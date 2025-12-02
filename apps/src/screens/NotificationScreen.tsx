@@ -12,6 +12,7 @@ import { MARK_NOTIFICATION_READ, MARK_ALL_NOTIFICATIONS_READ } from '../apollo/m
 import moment from 'moment';
 import 'moment/locale/es';
 import { contactService } from '../services/contactService';
+import { useAuth } from '../contexts/AuthContext';
 
 const REFERRAL_EVENT_TYPE_MAP: Record<string, string> = {
   REFERRAL_EVENT_TOP_UP: 'top_up',
@@ -41,7 +42,9 @@ interface Notification {
 export const NotificationScreen = () => {
   const navigation = useNavigation<NotificationScreenNavigationProp>();
   const [refreshing, setRefreshing] = useState(false);
-  
+  const { isAuthenticated, isLoading: authLoading, accountContextTick, userProfile, profileData } = useAuth();
+  const canQueryNotifications = isAuthenticated && !authLoading;
+
   // Check if presale is globally active
   const { data: presaleStatusData } = useQuery(GET_PRESALE_STATUS, {
     fetchPolicy: 'cache-and-network',
@@ -52,7 +55,10 @@ export const NotificationScreen = () => {
   // Query notifications
   const { data, loading, error, refetch, fetchMore } = useQuery(GET_NOTIFICATIONS, {
     variables: { first: 20 },
-    fetchPolicy: 'cache-and-network',
+    fetchPolicy: 'network-only',
+    nextFetchPolicy: 'cache-first',
+    notifyOnNetworkStatusChange: true,
+    skip: !canQueryNotifications,
   });
 
   // Mutations
@@ -67,15 +73,37 @@ export const NotificationScreen = () => {
     ],
   });
 
+  useEffect(() => {
+    if (!canQueryNotifications) return;
+    refetch();
+  }, [canQueryNotifications, accountContextTick, refetch]);
+
   const notifications = data?.notifications?.edges?.map((edge: any) => edge.node) || [];
+
+  console.log('[NotificationScreen] Fetched notifications:', notifications.length);
+  if (notifications.length > 0) {
+    console.log('[NotificationScreen] First notification type:', notifications[0].notificationType);
+    const payrollNotifs = notifications.filter((n: any) => n.notificationType === 'PAYROLL_RECEIVED');
+    console.log('[NotificationScreen] Payroll notifications count:', payrollNotifs.length);
+  }
+
+  const currentUserName = profileData?.currentAccountType === 'business'
+    ? profileData.businessProfile?.name
+    : (userProfile
+      ? (userProfile.firstName && userProfile.lastName
+        ? `${userProfile.firstName} ${userProfile.lastName}`
+        : (userProfile.firstName || userProfile.lastName || userProfile.username || ''))
+      : '');
+
   const unreadCount = data?.notifications?.unreadCount || 0;
   const hasNextPage = data?.notifications?.pageInfo?.hasNextPage || false;
 
   const handleRefresh = useCallback(async () => {
+    if (!canQueryNotifications) return;
     setRefreshing(true);
     await refetch();
     setRefreshing(false);
-  }, [refetch]);
+  }, [refetch, canQueryNotifications]);
 
   const parseParams = (url: string) => {
     const query = url.split('?')[1];
@@ -110,6 +138,7 @@ export const NotificationScreen = () => {
     let baseTxnType: any = 'send';
     if (notifType === 'INVITE_RECEIVED' || notifType === 'SEND_RECEIVED') baseTxnType = 'received';
     if (notifType === 'PAYMENT_RECEIVED' || notifType === 'PAYMENT_SENT' || notifType === 'INVOICE_PAID') baseTxnType = 'payment';
+    if (notifType === 'PAYROLL_RECEIVED' || notifType === 'PAYROLL_SENT') baseTxnType = 'payroll';
     if (notifType === 'SEND_SENT') baseTxnType = 'sent';
 
     // Parse data blob once
@@ -168,10 +197,10 @@ export const NotificationScreen = () => {
       }
       if (url.includes('p2p/trade/')) {
         const tradeId = url.split('p2p/trade/')[1];
-        navigation.navigate('ActiveTrade', { 
-          trade: { 
-            id: tradeId 
-          } 
+        navigation.navigate('ActiveTrade', {
+          trade: {
+            id: tradeId
+          }
         });
       } else if (url.includes('p2p/offer/')) {
         const offerId = url.split('p2p/offer/')[1];
@@ -197,15 +226,15 @@ export const NotificationScreen = () => {
 
         const fullData: any = parsedData;
         // Attempt to enrich with phones via contact name where possible for better display priority
-        const contactFromName = senderNameFromMsg 
-          ? (contactService.getContactByNameFuzzy 
-              ? contactService.getContactByNameFuzzy(String(senderNameFromMsg)) 
-              : contactService.getContactByNameSync(String(senderNameFromMsg))) 
+        const contactFromName = senderNameFromMsg
+          ? (contactService.getContactByNameFuzzy
+            ? contactService.getContactByNameFuzzy(String(senderNameFromMsg))
+            : contactService.getContactByNameSync(String(senderNameFromMsg)))
           : null;
-        const contactToName = recipientNameFromMsg 
-          ? (contactService.getContactByNameFuzzy 
-              ? contactService.getContactByNameFuzzy(String(recipientNameFromMsg)) 
-              : contactService.getContactByNameSync(String(recipientNameFromMsg))) 
+        const contactToName = recipientNameFromMsg
+          ? (contactService.getContactByNameFuzzy
+            ? contactService.getContactByNameFuzzy(String(recipientNameFromMsg))
+            : contactService.getContactByNameSync(String(recipientNameFromMsg)))
           : null;
         const derivedFromPhone = contactFromName?.normalizedPhones?.[0] || contactFromName?.phoneNumbers?.[0];
         const derivedToPhone = contactToName?.normalizedPhones?.[0] || contactToName?.phoneNumbers?.[0];
@@ -270,6 +299,32 @@ export const NotificationScreen = () => {
 
         // Parse notification.data if it's a JSON string to avoid spreading characters
         const fullData: any = parsedData;
+
+        // Handle payroll notifications - navigate to PayrollReceipt screen
+        if (notifType === 'PAYROLL_RECEIVED' || notifType === 'PAYROLL_SENT') {
+          navigation.navigate('PayrollReceipt', {
+            transaction: {
+              id: transactionId,
+              type: 'payroll',
+              direction: notifType === 'PAYROLL_RECEIVED' ? 'received' : 'sent',
+              employeeName: fullData.employee_name || fullData.employeeName || fullData.recipient_name || fullData.recipientName || fullData.employee_username || fullData.employeeUsername || fullData.recipient_username || fullData.recipientUsername,
+              employeeUsername: fullData.employee_username || fullData.employeeUsername || fullData.recipient_username || fullData.recipientUsername,
+              employeePhone: fullData.employee_phone || fullData.employeePhone || fullData.recipient_phone || fullData.recipientPhone,
+              businessName: notifType === 'PAYROLL_SENT' ? (currentUserName || 'Tu Empresa') : (fullData.business_name || fullData.businessName || fullData.sender_name || fullData.senderName || fullData.sender_display_name || fullData.senderDisplayName || fullData.from),
+              amount: fullData.amount || '0.00',
+              currency: fullData.currency || 'cUSD',
+              date: fullData.date || fullData.executed_at || fullData.executedAt || fullData.created_at || fullData.createdAt || notification.createdAt,
+              status: fullData.status || 'completed',
+              hash: fullData.hash || fullData.transaction_hash || fullData.transactionHash,
+              transactionHash: fullData.hash || fullData.transaction_hash || fullData.transactionHash,
+              payrollRunId: fullData.payroll_run_id || fullData.payrollRunId || fullData.run_id || fullData.runId,
+              runId: fullData.payroll_run_id || fullData.payrollRunId || fullData.run_id || fullData.runId,
+              notification_type: notifType,
+              ...fullData
+            }
+          });
+          return;
+        }
 
         // Derive invitation flags and normalize common fields for a better fallback
         const invitationClaimed = fullData.invitation_claimed ?? fullData.invitationClaimed ?? (notifType === 'SEND_INVITATION_CLAIMED');
@@ -342,10 +397,10 @@ export const NotificationScreen = () => {
           senderPhone: senderPhone || derivedFromPhone,
           sender_phone: senderPhone || derivedFromPhone,
           // Also map common alias keys used by AccountDetailScreen/TransactionDetailScreen
-          ...(isPayment 
-            ? (notifType === 'PAYMENT_SENT' 
-                ? { toPhone: recipientPhone || derivedToPhone } 
-                : { fromPhone: senderPhone || derivedFromPhone })
+          ...(isPayment
+            ? (notifType === 'PAYMENT_SENT'
+              ? { toPhone: recipientPhone || derivedToPhone }
+              : { fromPhone: senderPhone || derivedFromPhone })
             : { toPhone: recipientPhone || derivedToPhone, fromPhone: senderPhone || derivedFromPhone }
           ),
           // addresses
@@ -379,7 +434,7 @@ export const NotificationScreen = () => {
           txnType
         });
 
-        navigation.navigate('TransactionDetail', { 
+        navigation.navigate('TransactionDetail', {
           transactionType: txnType,
           // Pass full notification data as fallback plus id
           transactionData: { id: transactionId, notification_type: notifType, ...fullData, ...fallbackTx }
@@ -417,6 +472,32 @@ export const NotificationScreen = () => {
         return;
       }
 
+      // Handle payroll notifications - navigate to PayrollReceipt screen
+      if (notifType === 'PAYROLL_RECEIVED' || notifType === 'PAYROLL_SENT') {
+        navigation.navigate('PayrollReceipt', {
+          transaction: {
+            id,
+            type: 'payroll',
+            direction: notifType === 'PAYROLL_RECEIVED' ? 'received' : 'sent',
+            employeeName: fullData.employee_name || fullData.employeeName || fullData.recipient_name || fullData.recipientName || fullData.employee_username || fullData.employeeUsername || fullData.recipient_username || fullData.recipientUsername,
+            employeeUsername: fullData.employee_username || fullData.employeeUsername || fullData.recipient_username || fullData.recipientUsername,
+            employeePhone: fullData.employee_phone || fullData.employeePhone || fullData.recipient_phone || fullData.recipientPhone,
+            businessName: notifType === 'PAYROLL_SENT' ? (currentUserName || 'Tu Empresa') : (fullData.business_name || fullData.businessName || fullData.sender_name || fullData.senderName || fullData.sender_display_name || fullData.senderDisplayName || fullData.from),
+            amount: fullData.amount || '0.00',
+            currency: fullData.currency || 'cUSD',
+            date: fullData.date || fullData.executed_at || fullData.executedAt || fullData.created_at || fullData.createdAt || notification.createdAt,
+            status: fullData.status || 'completed',
+            hash: fullData.hash || fullData.transaction_hash || fullData.transactionHash,
+            transactionHash: fullData.hash || fullData.transaction_hash || fullData.transactionHash,
+            payrollRunId: fullData.payroll_run_id || fullData.payrollRunId || fullData.run_id || fullData.runId,
+            runId: fullData.payroll_run_id || fullData.payrollRunId || fullData.run_id || fullData.runId,
+            notification_type: notifType,
+            ...fullData
+          }
+        });
+        return;
+      }
+
       // If this is a SendTransaction fallback, construct AccountDetail-like payload
       if (type === 'SendTransaction' || notifType.startsWith('SEND_')) {
         // Direction
@@ -438,24 +519,24 @@ export const NotificationScreen = () => {
         const candidateFrom = fullData.sender_phone ?? fullData.senderPhone;
         // Normalize to contact phoneKey-like values
         // Try resolve contact by address when phones are missing
-        const contactTo = candidateTo 
-          ? contactService.getContactByPhoneSync(String(candidateTo)) 
-          : (toAddress 
-              ? (contactService.getContactByAlgorandAddressSync 
-                  ? contactService.getContactByAlgorandAddressSync(String(toAddress)) 
-                  : null)
-              : (recipientNameFromMsg 
-              ? (contactService.getContactByNameFuzzy 
-                  ? contactService.getContactByNameFuzzy(recipientNameFromMsg) 
-                  : contactService.getContactByNameSync(recipientNameFromMsg)) 
+        const contactTo = candidateTo
+          ? contactService.getContactByPhoneSync(String(candidateTo))
+          : (toAddress
+            ? (contactService.getContactByAlgorandAddressSync
+              ? contactService.getContactByAlgorandAddressSync(String(toAddress))
+              : null)
+            : (recipientNameFromMsg
+              ? (contactService.getContactByNameFuzzy
+                ? contactService.getContactByNameFuzzy(recipientNameFromMsg)
+                : contactService.getContactByNameSync(recipientNameFromMsg))
               : null));
-        const contactFrom = candidateFrom 
-          ? contactService.getContactByPhoneSync(String(candidateFrom)) 
-          : (senderNameFromMsg 
-              ? (contactService.getContactByNameFuzzy 
-                  ? contactService.getContactByNameFuzzy(senderNameFromMsg) 
-                  : contactService.getContactByNameSync(senderNameFromMsg)) 
-              : null);
+        const contactFrom = candidateFrom
+          ? contactService.getContactByPhoneSync(String(candidateFrom))
+          : (senderNameFromMsg
+            ? (contactService.getContactByNameFuzzy
+              ? contactService.getContactByNameFuzzy(senderNameFromMsg)
+              : contactService.getContactByNameSync(senderNameFromMsg))
+            : null);
         const normalizedTo = contactTo?.normalizedPhones?.[0] || contactTo?.phoneNumbers?.[0] || candidateTo;
         const normalizedFrom = contactFrom?.normalizedPhones?.[0] || contactFrom?.phoneNumbers?.[0] || candidateFrom;
         // Resolve names like AccountDetail
@@ -509,7 +590,32 @@ export const NotificationScreen = () => {
       }
     } else {
       // Fallback: for transaction-like notifications without actionUrl/relatedObject, navigate using data
-      if (notifType.startsWith('SEND_') || notifType.startsWith('PAYMENT_') || notifType === 'INVITE_RECEIVED') {
+      if (notifType === 'PAYROLL_RECEIVED' || notifType === 'PAYROLL_SENT') {
+        // Navigate to PayrollReceipt screen for payroll notifications
+        const derivedId = parsedData.transaction_id || parsedData.transactionId || parsedData.payment_transaction_id || parsedData.paymentTransactionId || parsedData.id;
+
+        navigation.navigate('PayrollReceipt', {
+          transaction: {
+            id: derivedId,
+            type: 'payroll',
+            direction: notifType === 'PAYROLL_RECEIVED' ? 'received' : 'sent',
+            employeeName: parsedData.employee_name || parsedData.employeeName || parsedData.recipient_name || parsedData.recipientName || parsedData.employee_username || parsedData.employeeUsername || parsedData.recipient_username || parsedData.recipientUsername,
+            employeeUsername: parsedData.employee_username || parsedData.employeeUsername || parsedData.recipient_username || parsedData.recipientUsername,
+            employeePhone: parsedData.employee_phone || parsedData.employeePhone || parsedData.recipient_phone || parsedData.recipientPhone,
+            businessName: notifType === 'PAYROLL_SENT' ? (currentUserName || 'Tu Empresa') : (parsedData.business_name || parsedData.businessName || parsedData.sender_name || parsedData.senderName || parsedData.sender_display_name || parsedData.senderDisplayName || parsedData.from),
+            amount: parsedData.amount || '0.00',
+            currency: parsedData.currency || 'cUSD',
+            date: parsedData.date || parsedData.executed_at || parsedData.executedAt || parsedData.created_at || parsedData.createdAt || notification.createdAt,
+            status: parsedData.status || 'completed',
+            hash: parsedData.hash || parsedData.transaction_hash || parsedData.transactionHash,
+            transactionHash: parsedData.hash || parsedData.transaction_hash || parsedData.transactionHash,
+            payrollRunId: parsedData.payroll_run_id || parsedData.payrollRunId || parsedData.run_id || parsedData.runId,
+            runId: parsedData.payroll_run_id || parsedData.payrollRunId || parsedData.run_id || parsedData.runId,
+            notification_type: notifType,
+            ...parsedData
+          }
+        });
+      } else if (notifType.startsWith('SEND_') || notifType.startsWith('PAYMENT_') || notifType === 'INVITE_RECEIVED') {
         // Attempt to derive an id from data for consistency; may be undefined
         const derivedId = parsedData.transaction_id || parsedData.transactionId || parsedData.payment_transaction_id || parsedData.paymentTransactionId || parsedData.id;
         navigation.navigate('TransactionDetail', {
@@ -547,6 +653,10 @@ export const NotificationScreen = () => {
   }, [markAllRead]);
 
   const loadMore = useCallback(() => {
+    if (!canQueryNotifications) {
+      return;
+    }
+
     if (hasNextPage && !loading) {
       fetchMore({
         variables: {
@@ -567,7 +677,7 @@ export const NotificationScreen = () => {
         },
       });
     }
-  }, [hasNextPage, loading, fetchMore, data]);
+  }, [hasNextPage, loading, fetchMore, data, canQueryNotifications]);
 
   const getNotificationIcon = (type: string) => {
     const iconMap: { [key: string]: { icon: string; color: string } } = {
@@ -579,12 +689,14 @@ export const NotificationScreen = () => {
       INVITE_RECEIVED: { icon: 'gift', color: '#10B981' },
       SEND_INVITATION_EXPIRED: { icon: 'user-x', color: '#EF4444' },
       SEND_FROM_EXTERNAL: { icon: 'download', color: '#06B6D4' },
-      
+
       // Payment transactions
       PAYMENT_RECEIVED: { icon: 'credit-card', color: '#10B981' },
       PAYMENT_SENT: { icon: 'credit-card', color: '#3B82F6' },
       INVOICE_PAID: { icon: 'file-text', color: '#10B981' },
-      
+      PAYROLL_RECEIVED: { icon: 'briefcase', color: '#059669' },
+      PAYROLL_SENT: { icon: 'briefcase', color: '#3B82F6' },
+
       // P2P Trade
       P2P_OFFER_RECEIVED: { icon: 'bell', color: '#F59E0B' },
       P2P_OFFER_ACCEPTED: { icon: 'check-circle', color: '#10B981' },
@@ -594,30 +706,30 @@ export const NotificationScreen = () => {
       P2P_TRADE_COMPLETED: { icon: 'check-circle', color: '#10B981' },
       P2P_TRADE_CANCELLED: { icon: 'x-circle', color: '#EF4444' },
       P2P_TRADE_DISPUTED: { icon: 'alert-triangle', color: '#F59E0B' },
-      
+
       // Conversion
       CONVERSION_COMPLETED: { icon: 'refresh-cw', color: '#8B5CF6' },
       CONVERSION_FAILED: { icon: 'x-circle', color: '#EF4444' },
-      
+
       // USDC
       USDC_DEPOSIT_PENDING: { icon: 'clock', color: '#F59E0B' },
       USDC_DEPOSIT_COMPLETED: { icon: 'download', color: '#06B6D4' },
       USDC_WITHDRAWAL_COMPLETED: { icon: 'upload', color: '#06B6D4' },
-      
+
       // Account & Security
       ACCOUNT_VERIFIED: { icon: 'user-check', color: '#10B981' },
       SECURITY_ALERT: { icon: 'shield', color: '#EF4444' },
       NEW_LOGIN: { icon: 'log-in', color: '#F59E0B' },
-      
+
       // Business
       BUSINESS_EMPLOYEE_ADDED: { icon: 'users', color: '#8B5CF6' },
       BUSINESS_PERMISSION_CHANGED: { icon: 'settings', color: '#F59E0B' },
-      
+
       // General
       PROMOTION: { icon: 'gift', color: '#EC4899' },
       SYSTEM: { icon: 'info', color: '#6B7280' },
       ANNOUNCEMENT: { icon: 'bell', color: '#3B82F6' },
-      
+
       // Achievements
       ACHIEVEMENT_EARNED: { icon: 'award', color: '#FFD700' },
 
@@ -626,7 +738,7 @@ export const NotificationScreen = () => {
       REFERRAL_FIRST_TRANSACTION: { icon: 'trending-up', color: '#10B981' },
       REFERRAL_ACTION_REMINDER: { icon: 'target', color: '#F97316' },
     };
-    
+
     return iconMap[type] || { icon: 'bell', color: '#6B7280' };
   };
 
@@ -635,7 +747,7 @@ export const NotificationScreen = () => {
     const date = moment.utc(dateString).local();
     const now = moment();
     const diffInHours = now.diff(date, 'hours');
-    
+
     if (diffInHours < 24) {
       return date.fromNow();
     } else {
@@ -646,7 +758,7 @@ export const NotificationScreen = () => {
   // Helper function to replace names in notification text with contact names
   const replaceWithContactNames = useCallback((text: string, data: any): string => {
     let processedText = text;
-    
+
     // Parse data if it's a string
     let parsedData = data;
     if (typeof data === 'string') {
@@ -657,7 +769,7 @@ export const NotificationScreen = () => {
         return text;
       }
     }
-    
+
     // Try to extract phone numbers and names from notification data
     if (parsedData) {
       try {
@@ -668,7 +780,7 @@ export const NotificationScreen = () => {
             processedText = processedText.replace(parsedData.sender_name, senderContact.name);
           }
         }
-        
+
         // For send notifications - sent
         if (parsedData.recipient_phone && parsedData.recipient_name) {
           const recipientContact = contactService.getContactByPhoneSync(parsedData.recipient_phone);
@@ -676,7 +788,7 @@ export const NotificationScreen = () => {
             processedText = processedText.replace(parsedData.recipient_name, recipientContact.name);
           }
         }
-        
+
         // For invitation notifications - replace phone number in message
         if (parsedData.recipient_phone) {
           const recipientContact = contactService.getContactByPhoneSync(parsedData.recipient_phone);
@@ -688,7 +800,7 @@ export const NotificationScreen = () => {
             processedText = processedText.replace(parsedData.recipient_phone, parsedData.recipient_name);
           }
         }
-        
+
         // For P2P notifications
         if (parsedData.trader_phone && parsedData.trader_name) {
           const traderContact = contactService.getContactByPhoneSync(parsedData.trader_phone);
@@ -696,7 +808,7 @@ export const NotificationScreen = () => {
             processedText = processedText.replace(parsedData.trader_name, traderContact.name);
           }
         }
-        
+
         if (parsedData.counterparty_phone && parsedData.counterparty_name) {
           const counterpartyContact = contactService.getContactByPhoneSync(parsedData.counterparty_phone);
           if (counterpartyContact) {
@@ -707,60 +819,69 @@ export const NotificationScreen = () => {
         console.error('Error getting contact names:', error);
       }
     }
-    
+
     return processedText;
   }, []);
 
   const renderNotification = ({ item }: { item: Notification }) => {
-    const { icon, color } = getNotificationIcon(item.notificationType);
-    
-    // Process title and message to replace with contact names
-    const processedTitle = replaceWithContactNames(item.title, item.data);
-    const processedMessage = replaceWithContactNames(item.message, item.data);
-    
-    return (
-      <TouchableOpacity
-        style={[
-          styles.notificationItem,
-          !item.isRead && styles.unreadNotification
-        ]}
-        onPress={() => handleNotificationPress(item)}
-      >
-        <View style={[styles.notificationIcon, { backgroundColor: `${color}20` }]}>
-          <Icon name={icon as any} size={20} color={color} />
-        </View>
-        <View style={styles.notificationContent}>
-          <View style={styles.notificationHeader}>
-            <Text style={[
-              styles.notificationTitle,
-              !item.isRead && styles.unreadTitle
-            ]}>
-              {processedTitle}
-            </Text>
-            {!item.isRead && (
-              <View style={styles.unreadDot} />
-            )}
+    try {
+      if (item.notificationType === 'PAYROLL_RECEIVED') {
+        console.log('[NotificationScreen] Rendering payroll item:', item.id, item.title);
+      }
+
+      const { icon, color } = getNotificationIcon(item.notificationType);
+
+      // Process title and message to replace with contact names
+      const processedTitle = replaceWithContactNames(item.title, item.data);
+      const processedMessage = replaceWithContactNames(item.message, item.data);
+
+      return (
+        <TouchableOpacity
+          style={[
+            styles.notificationItem,
+            !item.isRead && styles.unreadNotification
+          ]}
+          onPress={() => handleNotificationPress(item)}
+        >
+          <View style={[styles.notificationIcon, { backgroundColor: `${color}20` }]}>
+            <Icon name={icon as any} size={20} color={color} />
           </View>
-          <Text style={styles.notificationMessage}>
-            {processedMessage}
-          </Text>
-          <Text style={styles.notificationTime}>
-            {formatTime(item.createdAt)}
-          </Text>
-        </View>
-      </TouchableOpacity>
-    );
+          <View style={styles.notificationContent}>
+            <View style={styles.notificationHeader}>
+              <Text style={[
+                styles.notificationTitle,
+                !item.isRead && styles.unreadTitle
+              ]}>
+                {processedTitle}
+              </Text>
+              {!item.isRead && (
+                <View style={styles.unreadDot} />
+              )}
+            </View>
+            <Text style={styles.notificationMessage}>
+              {processedMessage}
+            </Text>
+            <Text style={styles.notificationTime}>
+              {formatTime(item.createdAt)}
+            </Text>
+          </View>
+        </TouchableOpacity>
+      );
+    } catch (error) {
+      console.error('[NotificationScreen] Error rendering notification:', item.id, error);
+      return null;
+    }
   };
 
   const ListHeader = () => (
     <>
       {/* Pending Employee Invitations */}
       <PendingInvitationBanner />
-      
+
       {/* CONFIO Presale Banner - Show either active presale or claims unlocked */}
       {isPresaleClaimsUnlocked ? (
         <View style={styles.presaleBanner}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.presaleBannerContent}
             onPress={() => navigation.navigate('ConfioPresale')}
             activeOpacity={0.9}
@@ -782,7 +903,7 @@ export const NotificationScreen = () => {
         </View>
       ) : (isPresaleActive && (
         <View style={styles.presaleBanner}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.presaleBannerContent}
             onPress={() => navigation.navigate('ConfioPresale')}
             activeOpacity={0.9}
@@ -829,11 +950,11 @@ export const NotificationScreen = () => {
     return null;
   };
 
-  if (loading && notifications.length === 0) {
+  if ((loading || authLoading || !canQueryNotifications) && notifications.length === 0) {
     return (
       <View style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.backButton}
             onPress={() => navigation.goBack()}
           >
@@ -852,7 +973,7 @@ export const NotificationScreen = () => {
     return (
       <View style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.backButton}
             onPress={() => navigation.goBack()}
           >
@@ -875,7 +996,7 @@ export const NotificationScreen = () => {
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.backButton}
           onPress={() => navigation.goBack()}
         >
@@ -907,7 +1028,7 @@ export const NotificationScreen = () => {
       {/* Mark all as read button */}
       {unreadCount > 0 && (
         <View style={styles.markAllContainer}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.markAllButton}
             onPress={handleMarkAllAsRead}
           >

@@ -462,7 +462,7 @@ export const TransactionSuccessScreen = () => {
               <Text style={styles.valueHighlightText}>
                 💡 <Text style={styles.valueBold}>Confío: 0% comisión</Text>{'\n'}
                 vs. remesadoras tradicionales <Text style={styles.valueBold}>(5%-20%)</Text>{'\n'}
-                Apoyamos a los venezolanos 🇻🇪 con transferencias gratuitas
+                Apoyamos a los argentinos 🇦🇷 con transferencias gratuitas
               </Text>
             </View>
           </View>

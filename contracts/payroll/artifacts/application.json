@@ -1,0 +1,177 @@
+{
+    "hints": {
+        "create()void": {
+            "call_config": {
+                "no_op": "CREATE"
+            }
+        },
+        "setup_asset(uint64)void": {
+            "call_config": {
+                "no_op": "CALL"
+            }
+        },
+        "set_fee_recipient(address)void": {
+            "call_config": {
+                "no_op": "CALL"
+            }
+        },
+        "set_business_delegates(address,address[],address[])void": {
+            "call_config": {
+                "no_op": "CALL"
+            }
+        },
+        "fund_business(address,uint64)void": {
+            "call_config": {
+                "no_op": "CALL"
+            }
+        },
+        "payout(address,uint64,string)void": {
+            "call_config": {
+                "no_op": "CALL"
+            }
+        }
+    },
+    "source": {
+        "approval": "I3ByYWdtYSB2ZXJzaW9uIDgKaW50Y2Jsb2NrIDAgMSAyIDQgMTAwMDAKYnl0ZWNibG9jayAweDcwNjE3OTcyNmY2YzZjNWY2MTczNzM2NTc0IDB4IDB4NjE2NDZkNjk2ZSAweDY2NjU2NTVmNzI2NTYzNjk3MDY5NjU2ZTc0IDB4NTY0MTU1NGM1NAp0eG5hIEFwcGxpY2F0aW9uQXJncyAwCnB1c2hieXRlcyAweDRjNWM2MWJhIC8vICJjcmVhdGUoKXZvaWQiCj09CmJueiBtYWluX2wxMgp0eG5hIEFwcGxpY2F0aW9uQXJncyAwCnB1c2hieXRlcyAweDZjZDE4MDYyIC8vICJzZXR1cF9hc3NldCh1aW50NjQpdm9pZCIKPT0KYm56IG1haW5fbDExCnR4bmEgQXBwbGljYXRpb25BcmdzIDAKcHVzaGJ5dGVzIDB4YjUzY2EyNTggLy8gInNldF9mZWVfcmVjaXBpZW50KGFkZHJlc3Mpdm9pZCIKPT0KYm56IG1haW5fbDEwCnR4bmEgQXBwbGljYXRpb25BcmdzIDAKcHVzaGJ5dGVzIDB4ZDg3YTA1MDkgLy8gInNldF9idXNpbmVzc19kZWxlZ2F0ZXMoYWRkcmVzcyxhZGRyZXNzW10sYWRkcmVzc1tdKXZvaWQiCj09CmJueiBtYWluX2w5CnR4bmEgQXBwbGljYXRpb25BcmdzIDAKcHVzaGJ5dGVzIDB4MmU0M2YzNWEgLy8gImZ1bmRfYnVzaW5lc3MoYWRkcmVzcyx1aW50NjQpdm9pZCIKPT0KYm56IG1haW5fbDgKdHhuYSBBcHBsaWNhdGlvbkFyZ3MgMApwdXNoYnl0ZXMgMHg4ZWVlMDU3OSAvLyAicGF5b3V0KGFkZHJlc3MsdWludDY0LHN0cmluZyl2b2lkIgo9PQpibnogbWFpbl9sNwplcnIKbWFpbl9sNzoKdHhuIE9uQ29tcGxldGlvbgppbnRjXzAgLy8gTm9PcAo9PQp0eG4gQXBwbGljYXRpb25JRAppbnRjXzAgLy8gMAohPQomJgphc3NlcnQKY2FsbHN1YiBwYXlvdXRjYXN0ZXJfMTEKaW50Y18xIC8vIDEKcmV0dXJuCm1haW5fbDg6CnR4biBPbkNvbXBsZXRpb24KaW50Y18wIC8vIE5vT3AKPT0KdHhuIEFwcGxpY2F0aW9uSUQKaW50Y18wIC8vIDAKIT0KJiYKYXNzZXJ0CmNhbGxzdWIgZnVuZGJ1c2luZXNzY2FzdGVyXzEwCmludGNfMSAvLyAxCnJldHVybgptYWluX2w5Ogp0eG4gT25Db21wbGV0aW9uCmludGNfMCAvLyBOb09wCj09CnR4biBBcHBsaWNhdGlvbklECmludGNfMCAvLyAwCiE9CiYmCmFzc2VydApjYWxsc3ViIHNldGJ1c2luZXNzZGVsZWdhdGVzY2FzdGVyXzkKaW50Y18xIC8vIDEKcmV0dXJuCm1haW5fbDEwOgp0eG4gT25Db21wbGV0aW9uCmludGNfMCAvLyBOb09wCj09CnR4biBBcHBsaWNhdGlvbklECmludGNfMCAvLyAwCiE9CiYmCmFzc2VydApjYWxsc3ViIHNldGZlZXJlY2lwaWVudGNhc3Rlcl84CmludGNfMSAvLyAxCnJldHVybgptYWluX2wxMToKdHhuIE9uQ29tcGxldGlvbgppbnRjXzAgLy8gTm9PcAo9PQp0eG4gQXBwbGljYXRpb25JRAppbnRjXzAgLy8gMAohPQomJgphc3NlcnQKY2FsbHN1YiBzZXR1cGFzc2V0Y2FzdGVyXzcKaW50Y18xIC8vIDEKcmV0dXJuCm1haW5fbDEyOgp0eG4gT25Db21wbGV0aW9uCmludGNfMCAvLyBOb09wCj09CnR4biBBcHBsaWNhdGlvbklECmludGNfMCAvLyAwCj09CiYmCmFzc2VydApjYWxsc3ViIGNyZWF0ZWNhc3Rlcl82CmludGNfMSAvLyAxCnJldHVybgoKLy8gY3JlYXRlCmNyZWF0ZV8wOgpwcm90byAwIDAKYnl0ZWNfMiAvLyAiYWRtaW4iCnR4biBTZW5kZXIKYXBwX2dsb2JhbF9wdXQKYnl0ZWNfMyAvLyAiZmVlX3JlY2lwaWVudCIKdHhuIFNlbmRlcgphcHBfZ2xvYmFsX3B1dAppbnRjXzEgLy8gMQpyZXR1cm4KCi8vIHNldHVwX2Fzc2V0CnNldHVwYXNzZXRfMToKcHJvdG8gMSAwCnR4biBTZW5kZXIKYnl0ZWNfMiAvLyAiYWRtaW4iCmFwcF9nbG9iYWxfZ2V0Cj09CmFzc2VydApieXRlY18wIC8vICJwYXlyb2xsX2Fzc2V0IgphcHBfZ2xvYmFsX2dldAppbnRjXzAgLy8gMAo9PQphc3NlcnQKZnJhbWVfZGlnIC0xCmludGNfMCAvLyAwCj4KYXNzZXJ0CnR4biBGZWUKZ2xvYmFsIE1pblR4bkZlZQppbnRjXzIgLy8gMgoqCj49CmFzc2VydApieXRlY18wIC8vICJwYXlyb2xsX2Fzc2V0IgpmcmFtZV9kaWcgLTEKYXBwX2dsb2JhbF9wdXQKaXR4bl9iZWdpbgppbnRjXzMgLy8gYXhmZXIKaXR4bl9maWVsZCBUeXBlRW51bQpmcmFtZV9kaWcgLTEKaXR4bl9maWVsZCBYZmVyQXNzZXQKZ2xvYmFsIEN1cnJlbnRBcHBsaWNhdGlvbkFkZHJlc3MKaXR4bl9maWVsZCBBc3NldFJlY2VpdmVyCmludGNfMCAvLyAwCml0eG5fZmllbGQgQXNzZXRBbW91bnQKaW50Y18wIC8vIDAKaXR4bl9maWVsZCBGZWUKaXR4bl9zdWJtaXQKaW50Y18xIC8vIDEKcmV0dXJuCgovLyBzZXRfZmVlX3JlY2lwaWVudApzZXRmZWVyZWNpcGllbnRfMjoKcHJvdG8gMSAwCnR4biBTZW5kZXIKYnl0ZWNfMiAvLyAiYWRtaW4iCmFwcF9nbG9iYWxfZ2V0Cj09CmFzc2VydAp0eG4gUmVrZXlUbwpnbG9iYWwgWmVyb0FkZHJlc3MKPT0KYXNzZXJ0CmJ5dGVjXzMgLy8gImZlZV9yZWNpcGllbnQiCmZyYW1lX2RpZyAtMQphcHBfZ2xvYmFsX3B1dAppbnRjXzEgLy8gMQpyZXR1cm4KCi8vIHNldF9idXNpbmVzc19kZWxlZ2F0ZXMKc2V0YnVzaW5lc3NkZWxlZ2F0ZXNfMzoKcHJvdG8gMyAwCmludGNfMCAvLyAwCmJ5dGVjXzEgLy8gIiIKaW50Y18wIC8vIDAKZHVwCmJ5dGVjXzEgLy8gIiIKaW50Y18wIC8vIDAKZnJhbWVfZGlnIC0zCnN0b3JlIDEKdHhuIFNlbmRlcgpieXRlY18yIC8vICJhZG1pbiIKYXBwX2dsb2JhbF9nZXQKPT0KdHhuIFNlbmRlcgpsb2FkIDEKPT0KfHwKYXNzZXJ0CmludGNfMCAvLyAwCnN0b3JlIDAKc2V0YnVzaW5lc3NkZWxlZ2F0ZXNfM19sMToKbG9hZCAwCmZyYW1lX2RpZyAtMgppbnRjXzAgLy8gMApleHRyYWN0X3VpbnQxNgpmcmFtZV9idXJ5IDAKZnJhbWVfZGlnIDAKPApibnogc2V0YnVzaW5lc3NkZWxlZ2F0ZXNfM19sNQppbnRjXzAgLy8gMApzdG9yZSAwCnNldGJ1c2luZXNzZGVsZWdhdGVzXzNfbDM6CmxvYWQgMApmcmFtZV9kaWcgLTEKaW50Y18wIC8vIDAKZXh0cmFjdF91aW50MTYKZnJhbWVfYnVyeSAzCmZyYW1lX2RpZyAzCjwKYnogc2V0YnVzaW5lc3NkZWxlZ2F0ZXNfM19sNgpmcmFtZV9kaWcgLTEKcHVzaGludCAzMiAvLyAzMgpsb2FkIDAKKgppbnRjXzIgLy8gMgorCnB1c2hpbnQgMzIgLy8gMzIKZXh0cmFjdDMKZnJhbWVfYnVyeSA0CmZyYW1lX2RpZyA0CnN0b3JlIDIKbG9hZCAxCmxvYWQgMgpjb25jYXQKYm94X2RlbApzdG9yZSAzCmxvYWQgMAppbnRjXzEgLy8gMQorCnN0b3JlIDAKYiBzZXRidXNpbmVzc2RlbGVnYXRlc18zX2wzCnNldGJ1c2luZXNzZGVsZWdhdGVzXzNfbDU6CmZyYW1lX2RpZyAtMgpwdXNoaW50IDMyIC8vIDMyCmxvYWQgMAoqCmludGNfMiAvLyAyCisKcHVzaGludCAzMiAvLyAzMgpleHRyYWN0MwpmcmFtZV9idXJ5IDEKZnJhbWVfZGlnIDEKc3RvcmUgMgpsb2FkIDEKbG9hZCAyCmNvbmNhdAppbnRjXzEgLy8gMQppdG9iCmJveF9wdXQKbG9hZCAwCmludGNfMSAvLyAxCisKc3RvcmUgMApiIHNldGJ1c2luZXNzZGVsZWdhdGVzXzNfbDEKc2V0YnVzaW5lc3NkZWxlZ2F0ZXNfM19sNjoKaW50Y18xIC8vIDEKcmV0dXJuCgovLyBmdW5kX2J1c2luZXNzCmZ1bmRidXNpbmVzc180Ogpwcm90byAyIDAKYnl0ZWNfMCAvLyAicGF5cm9sbF9hc3NldCIKYXBwX2dsb2JhbF9nZXQKaW50Y18wIC8vIDAKIT0KYXNzZXJ0Cmdsb2JhbCBHcm91cFNpemUKaW50Y18yIC8vIDIKPT0KYXNzZXJ0CnR4biBHcm91cEluZGV4CmludGNfMSAvLyAxCj09CmFzc2VydApndHhuIDAgVHlwZUVudW0KaW50Y18zIC8vIGF4ZmVyCj09CmFzc2VydApndHhuIDAgWGZlckFzc2V0CmJ5dGVjXzAgLy8gInBheXJvbGxfYXNzZXQiCmFwcF9nbG9iYWxfZ2V0Cj09CmFzc2VydApndHhuIDAgQXNzZXRSZWNlaXZlcgpnbG9iYWwgQ3VycmVudEFwcGxpY2F0aW9uQWRkcmVzcwo9PQphc3NlcnQKZ3R4biAwIEFzc2V0QW1vdW50CmZyYW1lX2RpZyAtMQo9PQphc3NlcnQKZ3R4biAwIFNlbmRlcgpmcmFtZV9kaWcgLTIKPT0KYXNzZXJ0CmJ5dGVjIDQgLy8gIlZBVUxUIgpmcmFtZV9kaWcgLTIKY29uY2F0CnN0b3JlIDQKbG9hZCA0CmJveF9nZXQKc3RvcmUgOQpzdG9yZSA4CmxvYWQgOQpzdG9yZSA1CmxvYWQgOApzdG9yZSA3CmxvYWQgNQpibnogZnVuZGJ1c2luZXNzXzRfbDIKaW50Y18wIC8vIDAKYiBmdW5kYnVzaW5lc3NfNF9sMwpmdW5kYnVzaW5lc3NfNF9sMjoKbG9hZCA3CmJ0b2kKZnVuZGJ1c2luZXNzXzRfbDM6CnN0b3JlIDYKbG9hZCA2CmZyYW1lX2RpZyAtMQorCnN0b3JlIDYKbG9hZCA0CmxvYWQgNgppdG9iCmJveF9wdXQKaW50Y18xIC8vIDEKcmV0dXJuCgovLyBwYXlvdXQKcGF5b3V0XzU6CnByb3RvIDMgMApieXRlY18wIC8vICJwYXlyb2xsX2Fzc2V0IgphcHBfZ2xvYmFsX2dldAppbnRjXzAgLy8gMAohPQphc3NlcnQKcHVzaGJ5dGVzIDB4Njk3MzVmNzA2MTc1NzM2NTY0IC8vICJpc19wYXVzZWQiCmFwcF9nbG9iYWxfZ2V0CmludGNfMCAvLyAwCj09CmFzc2VydAp0eG4gTnVtQWNjb3VudHMKaW50Y18xIC8vIDEKPj0KYXNzZXJ0CnR4bmEgQWNjb3VudHMgMApzdG9yZSAxMwpsb2FkIDEzCnR4biBTZW5kZXIKY29uY2F0CmJveF9nZXQKc3RvcmUgMTkKc3RvcmUgMTgKbG9hZCAxOQphc3NlcnQKZ2xvYmFsIExhdGVzdFRpbWVzdGFtcApzdG9yZSAxMgpmcmFtZV9kaWcgLTIKaW50YyA0IC8vIDEwMDAwCioKaW50YyA0IC8vIDEwMDAwCnB1c2hpbnQgOTAgLy8gOTAKLQppbnRjXzEgLy8gMQotCisKaW50YyA0IC8vIDEwMDAwCnB1c2hpbnQgOTAgLy8gOTAKLQovCnN0b3JlIDEwCmxvYWQgMTAKZnJhbWVfZGlnIC0yCi0Kc3RvcmUgMTEKYnl0ZWMgNCAvLyAiVkFVTFQiCmxvYWQgMTMKY29uY2F0CnN0b3JlIDE2CmxvYWQgMTYKYm94X2dldApzdG9yZSAyMQpzdG9yZSAyMApsb2FkIDIxCmFzc2VydApsb2FkIDIwCmJ0b2kKc3RvcmUgMTcKbG9hZCAxNwpsb2FkIDEwCj49CmFzc2VydApsb2FkIDE3CmxvYWQgMTAKLQpzdG9yZSAxNwpsb2FkIDE2CmxvYWQgMTcKaXRvYgpib3hfcHV0CmZyYW1lX2RpZyAtMwpzdG9yZSAxNAppdHhuX2JlZ2luCmludGNfMyAvLyBheGZlcgppdHhuX2ZpZWxkIFR5cGVFbnVtCmJ5dGVjXzAgLy8gInBheXJvbGxfYXNzZXQiCmFwcF9nbG9iYWxfZ2V0Cml0eG5fZmllbGQgWGZlckFzc2V0CmxvYWQgMTQKaXR4bl9maWVsZCBBc3NldFJlY2VpdmVyCmZyYW1lX2RpZyAtMgppdHhuX2ZpZWxkIEFzc2V0QW1vdW50CmludGNfMCAvLyAwCml0eG5fZmllbGQgRmVlCml0eG5fc3VibWl0Cml0eG5fYmVnaW4KaW50Y18zIC8vIGF4ZmVyCml0eG5fZmllbGQgVHlwZUVudW0KYnl0ZWNfMCAvLyAicGF5cm9sbF9hc3NldCIKYXBwX2dsb2JhbF9nZXQKaXR4bl9maWVsZCBYZmVyQXNzZXQKYnl0ZWNfMyAvLyAiZmVlX3JlY2lwaWVudCIKYXBwX2dsb2JhbF9nZXQKaXR4bl9maWVsZCBBc3NldFJlY2VpdmVyCmxvYWQgMTEKaXR4bl9maWVsZCBBc3NldEFtb3VudAppbnRjXzAgLy8gMAppdHhuX2ZpZWxkIEZlZQppdHhuX3N1Ym1pdApsb2FkIDE0CmZyYW1lX2RpZyAtMgppdG9iCmNvbmNhdApsb2FkIDExCml0b2IKY29uY2F0CmxvYWQgMTAKaXRvYgpjb25jYXQKdHhuIFNlbmRlcgpjb25jYXQKbG9hZCAxMgppdG9iCmNvbmNhdApzdG9yZSAxNQpmcmFtZV9kaWcgLTEKZXh0cmFjdCAyIDAKbG9hZCAxNQpib3hfcHV0CmludGNfMSAvLyAxCnJldHVybgoKLy8gY3JlYXRlX2Nhc3RlcgpjcmVhdGVjYXN0ZXJfNjoKcHJvdG8gMCAwCmNhbGxzdWIgY3JlYXRlXzAKcmV0c3ViCgovLyBzZXR1cF9hc3NldF9jYXN0ZXIKc2V0dXBhc3NldGNhc3Rlcl83Ogpwcm90byAwIDAKaW50Y18wIC8vIDAKdHhuYSBBcHBsaWNhdGlvbkFyZ3MgMQpidG9pCmZyYW1lX2J1cnkgMApmcmFtZV9kaWcgMApjYWxsc3ViIHNldHVwYXNzZXRfMQpyZXRzdWIKCi8vIHNldF9mZWVfcmVjaXBpZW50X2Nhc3RlcgpzZXRmZWVyZWNpcGllbnRjYXN0ZXJfODoKcHJvdG8gMCAwCmJ5dGVjXzEgLy8gIiIKdHhuYSBBcHBsaWNhdGlvbkFyZ3MgMQpmcmFtZV9idXJ5IDAKZnJhbWVfZGlnIDAKY2FsbHN1YiBzZXRmZWVyZWNpcGllbnRfMgpyZXRzdWIKCi8vIHNldF9idXNpbmVzc19kZWxlZ2F0ZXNfY2FzdGVyCnNldGJ1c2luZXNzZGVsZWdhdGVzY2FzdGVyXzk6CnByb3RvIDAgMApieXRlY18xIC8vICIiCmR1cG4gMgp0eG5hIEFwcGxpY2F0aW9uQXJncyAxCmZyYW1lX2J1cnkgMAp0eG5hIEFwcGxpY2F0aW9uQXJncyAyCmZyYW1lX2J1cnkgMQp0eG5hIEFwcGxpY2F0aW9uQXJncyAzCmZyYW1lX2J1cnkgMgpmcmFtZV9kaWcgMApmcmFtZV9kaWcgMQpmcmFtZV9kaWcgMgpjYWxsc3ViIHNldGJ1c2luZXNzZGVsZWdhdGVzXzMKcmV0c3ViCgovLyBmdW5kX2J1c2luZXNzX2Nhc3RlcgpmdW5kYnVzaW5lc3NjYXN0ZXJfMTA6CnByb3RvIDAgMApieXRlY18xIC8vICIiCmludGNfMCAvLyAwCnR4bmEgQXBwbGljYXRpb25BcmdzIDEKZnJhbWVfYnVyeSAwCnR4bmEgQXBwbGljYXRpb25BcmdzIDIKYnRvaQpmcmFtZV9idXJ5IDEKZnJhbWVfZGlnIDAKZnJhbWVfZGlnIDEKY2FsbHN1YiBmdW5kYnVzaW5lc3NfNApyZXRzdWIKCi8vIHBheW91dF9jYXN0ZXIKcGF5b3V0Y2FzdGVyXzExOgpwcm90byAwIDAKYnl0ZWNfMSAvLyAiIgppbnRjXzAgLy8gMApieXRlY18xIC8vICIiCnR4bmEgQXBwbGljYXRpb25BcmdzIDEKZnJhbWVfYnVyeSAwCnR4bmEgQXBwbGljYXRpb25BcmdzIDIKYnRvaQpmcmFtZV9idXJ5IDEKdHhuYSBBcHBsaWNhdGlvbkFyZ3MgMwpmcmFtZV9idXJ5IDIKZnJhbWVfZGlnIDAKZnJhbWVfZGlnIDEKZnJhbWVfZGlnIDIKY2FsbHN1YiBwYXlvdXRfNQpyZXRzdWI=",
+        "clear": "I3ByYWdtYSB2ZXJzaW9uIDgKcHVzaGludCAwIC8vIDAKcmV0dXJu"
+    },
+    "state": {
+        "global": {
+            "num_byte_slices": 2,
+            "num_uints": 2
+        },
+        "local": {
+            "num_byte_slices": 0,
+            "num_uints": 0
+        }
+    },
+    "schema": {
+        "global": {
+            "declared": {
+                "admin": {
+                    "type": "bytes",
+                    "key": "admin",
+                    "descr": "Contract admin/owner"
+                },
+                "fee_recipient": {
+                    "type": "bytes",
+                    "key": "fee_recipient",
+                    "descr": "Fee recipient"
+                },
+                "is_paused": {
+                    "type": "uint64",
+                    "key": "is_paused",
+                    "descr": "Pause switch"
+                },
+                "payroll_asset": {
+                    "type": "uint64",
+                    "key": "payroll_asset",
+                    "descr": "ASA used for payroll (e.g., cUSD)"
+                }
+            },
+            "reserved": {}
+        },
+        "local": {
+            "declared": {},
+            "reserved": {}
+        }
+    },
+    "contract": {
+        "name": "PayrollEscrow",
+        "methods": [
+            {
+                "name": "create",
+                "args": [],
+                "returns": {
+                    "type": "void"
+                }
+            },
+            {
+                "name": "setup_asset",
+                "args": [
+                    {
+                        "type": "uint64",
+                        "name": "asset_id"
+                    }
+                ],
+                "returns": {
+                    "type": "void"
+                },
+                "desc": "Admin sets payroll asset and opts the app into it."
+            },
+            {
+                "name": "set_fee_recipient",
+                "args": [
+                    {
+                        "type": "address",
+                        "name": "addr"
+                    }
+                ],
+                "returns": {
+                    "type": "void"
+                }
+            },
+            {
+                "name": "set_business_delegates",
+                "args": [
+                    {
+                        "type": "address",
+                        "name": "business_account"
+                    },
+                    {
+                        "type": "address[]",
+                        "name": "add"
+                    },
+                    {
+                        "type": "address[]",
+                        "name": "remove"
+                    }
+                ],
+                "returns": {
+                    "type": "void"
+                },
+                "desc": "Manage delegates for a business. Admin or that business account."
+            },
+            {
+                "name": "fund_business",
+                "args": [
+                    {
+                        "type": "address",
+                        "name": "business_account"
+                    },
+                    {
+                        "type": "uint64",
+                        "name": "amount"
+                    }
+                ],
+                "returns": {
+                    "type": "void"
+                },
+                "desc": "Increase business vault by amount. Expected group: [axfer business->app, app call]"
+            },
+            {
+                "name": "payout",
+                "args": [
+                    {
+                        "type": "address",
+                        "name": "recipient"
+                    },
+                    {
+                        "type": "uint64",
+                        "name": "net_amount"
+                    },
+                    {
+                        "type": "string",
+                        "name": "payroll_item_id"
+                    }
+                ],
+                "returns": {
+                    "type": "void"
+                }
+            }
+        ],
+        "networks": {},
+        "desc": "Confio payroll escrow per-business vault"
+    },
+    "bare_call_config": {}
+}

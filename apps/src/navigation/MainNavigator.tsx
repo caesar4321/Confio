@@ -17,6 +17,11 @@ import USDCManageScreen from '../screens/USDCManageScreen';
 import { USDCWithdrawScreen } from '../screens/USDCWithdrawScreen';
 import { USDCHistoryScreen } from '../screens/USDCHistoryScreen';
 import { USDCConversionScreen } from '../screens/USDCConversionScreen';
+import TopUpScreen from '../screens/TopUpScreen';
+import { SellScreen } from '../screens/SellScreen';
+
+// ... existing imports ...
+
 import { SendWithAddressScreen } from '../screens/SendWithAddressScreen';
 import { SendToFriendScreen } from '../screens/SendToFriendScreen';
 import { FriendDetailScreen } from '../screens/FriendDetailScreen';
@@ -54,7 +59,13 @@ import { ReferralActionPromptScreen } from '../screens/ReferralActionPromptScree
 import { ReferralEventDetailScreen } from '../screens/ReferralEventDetailScreen';
 import ReferralRewardClaimScreen from '../screens/ReferralRewardClaimScreen';
 import PayrollPendingScreen from '../screens/PayrollPendingScreen';
-import PayrollSettingsScreen from '../screens/PayrollSettingsScreen';
+import PayrollTopUpScreen from '../screens/PayrollTopUpScreen';
+import PayrollHomeScreen from '../screens/PayrollHomeScreen';
+import PayrollRunDetailScreen from '../screens/PayrollRunDetailScreen';
+import PayrollReceiptScreen from '../screens/PayrollReceiptScreen';
+import PayrollSetupWizard from '../screens/PayrollSetupWizard';
+import PayrollRecipientsManageScreen from '../screens/PayrollRecipientsManageScreen';
+import PayrollDelegatesManageScreen from '../screens/PayrollDelegatesManageScreen';
 // import NotificationSettingsScreen from '../screens/NotificationSettingsScreen'; // Hidden: Notifications mandatory
 
 console.log('MainNavigator: TransactionProcessingScreen imported:', !!TransactionProcessingScreen);
@@ -64,7 +75,7 @@ const Stack = createNativeStackNavigator<MainStackParamList>();
 
 export const MainNavigator = () => {
   console.log('MainNavigator: Component rendering at:', new Date().toISOString());
-  
+
   return (
     <Stack.Navigator
       screenOptions={{
@@ -74,106 +85,120 @@ export const MainNavigator = () => {
       }}
     >
       <Stack.Screen name="BottomTabs" component={BottomTabNavigator} />
-      <Stack.Screen 
-        name="LegalDocument" 
+      <Stack.Screen
+        name="LegalDocument"
         component={LegalDocumentScreen}
         options={{
           headerShown: false,
         }}
       />
-      <Stack.Screen 
-        name="Verification" 
+      <Stack.Screen
+        name="Verification"
         component={VerificationScreen}
         options={{
           headerShown: false,
         }}
       />
-      <Stack.Screen 
-        name="BankInfo" 
+      <Stack.Screen
+        name="BankInfo"
         component={BankInfoScreen}
         options={{
           headerShown: false,
         }}
       />
-      <Stack.Screen 
-        name="ConfioAddress" 
+      <Stack.Screen
+        name="ConfioAddress"
         component={ConfioAddressScreen}
         options={{
           headerShown: false,
         }}
       />
-      <Stack.Screen 
-        name="Notification" 
+      <Stack.Screen
+        name="Notification"
         component={NotificationScreen}
         options={{
           headerShown: false,
         }}
       />
-      <Stack.Screen 
-        name="CreateBusiness" 
+      <Stack.Screen
+        name="CreateBusiness"
         component={CreateBusinessScreen}
         options={{
           headerShown: false,
         }}
       />
-      <Stack.Screen 
-        name="EditBusiness" 
+      <Stack.Screen
+        name="EditBusiness"
         component={EditBusinessScreen}
         options={{
           headerShown: false,
         }}
       />
-      <Stack.Screen 
-        name="EditProfile" 
+      <Stack.Screen
+        name="EditProfile"
         component={EditProfileScreen}
         options={{
           headerShown: false,
         }}
       />
-      <Stack.Screen 
-        name="UpdateUsername" 
+      <Stack.Screen
+        name="UpdateUsername"
         component={UpdateUsernameScreen}
         options={{
           headerShown: false,
         }}
       />
-      <Stack.Screen 
-        name="PhoneVerification" 
+      <Stack.Screen
+        name="PhoneVerification"
         component={PhoneVerificationScreen}
         options={{
           headerShown: false,
         }}
       />
-      <Stack.Screen 
-        name="TraderProfile" 
+      <Stack.Screen
+        name="TraderProfile"
         component={TraderProfileScreen}
         options={{
           headerShown: false,
         }}
       />
-      <Stack.Screen 
-        name="TradeConfirm" 
+      <Stack.Screen
+        name="TradeConfirm"
         component={TradeConfirmScreen}
         options={{
           headerShown: false,
         }}
       />
-      <Stack.Screen 
-        name="TradeChat" 
+      <Stack.Screen
+        name="TradeChat"
         component={TradeChatScreen}
         options={{
           headerShown: false,
         }}
       />
-      <Stack.Screen 
-        name="AccountDetail" 
+      <Stack.Screen
+        name="AccountDetail"
         component={AccountDetailScreen}
         options={{
           headerShown: false,
         }}
       />
-      <Stack.Screen 
-        name="USDCDeposit" 
+      <Stack.Screen
+        name="TopUp"
+        component={TopUpScreen}
+        options={{
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="Sell"
+        component={SellScreen}
+        options={{
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="USDCDeposit"
         component={DepositScreen}
         options={{
           headerShown: false,
@@ -252,7 +277,7 @@ export const MainNavigator = () => {
       <Stack.Screen
         name="TransactionProcessing"
         component={TransactionProcessingScreen}
-        options={{ 
+        options={{
           headerShown: false,
           gestureEnabled: false, // Prevent back gesture
           animation: 'slide_from_right'
@@ -264,7 +289,7 @@ export const MainNavigator = () => {
       <Stack.Screen
         name="TransactionSuccess"
         component={TransactionSuccessScreen}
-        options={{ 
+        options={{
           headerShown: false,
           gestureEnabled: false, // Prevent back gesture
           animation: 'slide_from_right'
@@ -276,7 +301,7 @@ export const MainNavigator = () => {
       <Stack.Screen
         name="PaymentConfirmation"
         component={PaymentConfirmationScreen}
-        options={{ 
+        options={{
           headerShown: false,
           animation: 'slide_from_bottom'
         }}
@@ -284,7 +309,7 @@ export const MainNavigator = () => {
       <Stack.Screen
         name="PaymentProcessing"
         component={PaymentProcessingScreen}
-        options={{ 
+        options={{
           headerShown: false,
           gestureEnabled: false, // Prevent back gesture
           animation: 'slide_from_right',
@@ -300,7 +325,7 @@ export const MainNavigator = () => {
       <Stack.Screen
         name="PaymentSuccess"
         component={PaymentSuccessScreen}
-        options={{ 
+        options={{
           headerShown: false,
           gestureEnabled: false, // Prevent back gesture
           animation: 'slide_from_right'
@@ -392,8 +417,38 @@ export const MainNavigator = () => {
         options={{ headerShown: false }}
       />
       <Stack.Screen
-        name="PayrollSettings"
-        component={PayrollSettingsScreen}
+        name="PayrollTopUp"
+        component={PayrollTopUpScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="PayrollHome"
+        component={PayrollHomeScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="PayrollRunDetail"
+        component={PayrollRunDetailScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="PayrollReceipt"
+        component={PayrollReceiptScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="PayrollSetupWizard"
+        component={PayrollSetupWizard}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="PayrollRecipientsManage"
+        component={PayrollRecipientsManageScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="PayrollDelegatesManage"
+        component={PayrollDelegatesManageScreen}
         options={{ headerShown: false }}
       />
       {/* Hidden: Notifications are mandatory for financial apps

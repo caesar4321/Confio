@@ -60,9 +60,10 @@ export const SendWithAddressScreen = () => {
   const { formatNumber } = useNumberFormat();
   const tokenType: TokenType = (route.params as any)?.tokenType || 'cusd';
   const prefilledAddress = (route.params as any)?.prefilledAddress || '';
+  const prefilledAmount = (route.params as any)?.prefilledAmount || '';
   const config = tokenConfig[tokenType];
 
-  const [amount, setAmount] = useState('');
+  const [amount, setAmount] = useState(prefilledAmount);
   const [destination, setDestination] = useState(prefilledAddress);
   const [showSuccess, setShowSuccess] = useState(false);
   const [showError, setShowError] = useState(false);
@@ -83,7 +84,7 @@ export const SendWithAddressScreen = () => {
         variables: { tokenType: tok }
       });
       if (cached?.accountBalance && mounted) setBalanceSnapshot(cached.accountBalance);
-    } catch {}
+    } catch { }
     setBalanceLoading(true);
     apolloClient.query<{ accountBalance: string }>({
       query: GET_ACCOUNT_BALANCE,
@@ -92,7 +93,7 @@ export const SendWithAddressScreen = () => {
     }).then(res => {
       if (!mounted) return;
       setBalanceSnapshot(res.data?.accountBalance ?? null);
-    }).catch(() => {}).finally(() => mounted && setBalanceLoading(false));
+    }).catch(() => { }).finally(() => mounted && setBalanceLoading(false));
     return () => { mounted = false; };
   }, [tokenType]);
   const availableBalance = React.useMemo(() => parseFloat(balanceSnapshot || '0'), [balanceSnapshot]);
@@ -141,13 +142,13 @@ export const SendWithAddressScreen = () => {
 
   const handleSend = async () => {
     console.log('SendWithAddressScreen: handleSend called');
-    
+
     // Prevent double-clicks/rapid button presses
     if (isProcessing || navLock.current) {
       console.log('SendWithAddressScreen: Already processing, ignoring duplicate click');
       return;
     }
-    
+
     if (!amount || parseFloat(amount) < config.minSend) {
       setErrorMessage(`El mínimo para enviar es ${config.minSend} ${config.name}`);
       setShowError(true);
@@ -158,13 +159,13 @@ export const SendWithAddressScreen = () => {
       setShowError(true);
       return;
     }
-    
+
     // Check if it's an Algorand address (58 characters, uppercase letters and numbers 2-7)
     const isAlgorandAddress = destination.length === 58 && /^[A-Z2-7]{58}$/.test(destination);
-    
+
     // Check if it's a Sui address (0x + 64 hex characters) - legacy support
     const isSuiAddress = destination.startsWith('0x') && destination.match(/^0x[0-9a-f]{64}$/); // Legacy Sui support
-    
+
     if (!isAlgorandAddress && !isSuiAddress) {
       if (destination.startsWith('0x')) {
         // Attempted legacy Sui address
@@ -185,16 +186,16 @@ export const SendWithAddressScreen = () => {
 
     setIsProcessing(true);
     navLock.current = true;
-    
+
     try {
       console.log('SendWithAddressScreen: Navigating to TransactionProcessing');
-      
+
       // Generate idempotency key to prevent double-spending
       const minuteTimestamp = Math.floor(Date.now() / 60000);
       const recipientSuffix = destination.slice(-8);
       const amountStr = amount.replace('.', '');
       const idempotencyKey = `send_${recipientSuffix}_${amountStr}_${config.name}_${minuteTimestamp}`;
-      
+
       // Navigate to processing screen with transaction data
       (navigation as any).replace('TransactionProcessing', {
         transactionData: {
@@ -227,22 +228,22 @@ export const SendWithAddressScreen = () => {
       <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
         {/* Header */}
         <SafeAreaView edges={['top']} style={{ backgroundColor: config.color }}>
-        <View style={[styles.header, { backgroundColor: config.color, paddingTop: 8 }]}> 
-          <View style={styles.headerContent}>
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-              <Icon name="arrow-left" size={24} color="#ffffff" />
-            </TouchableOpacity>
-            <Text style={styles.headerTitle}>Enviar {config.name}</Text>
-            <View style={styles.placeholder} />
-          </View>
-          <View style={styles.headerInfo}>
-            <View style={styles.logoContainer}>
-              <Image source={config.logo} style={styles.logo} />
+          <View style={[styles.header, { backgroundColor: config.color, paddingTop: 8 }]}>
+            <View style={styles.headerContent}>
+              <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+                <Icon name="arrow-left" size={24} color="#ffffff" />
+              </TouchableOpacity>
+              <Text style={styles.headerTitle}>Enviar {config.name}</Text>
+              <View style={styles.placeholder} />
             </View>
-            <Text style={styles.headerSubtitle}>{config.fullName}</Text>
-            <Text style={styles.headerDescription}>{config.description}</Text>
+            <View style={styles.headerInfo}>
+              <View style={styles.logoContainer}>
+                <Image source={config.logo} style={styles.logo} />
+              </View>
+              <Text style={styles.headerSubtitle}>{config.fullName}</Text>
+              <Text style={styles.headerDescription}>{config.description}</Text>
+            </View>
           </View>
-        </View>
         </SafeAreaView>
 
         {/* Available Balance */}
@@ -324,7 +325,7 @@ export const SendWithAddressScreen = () => {
           style={[
             styles.sendButton,
             { backgroundColor: config.color },
-            (isProcessing || !amount || !destination || parseFloat(amount || '0') > availableBalance) && 
+            (isProcessing || !amount || !destination || parseFloat(amount || '0') > availableBalance) &&
             styles.sendButtonDisabled
           ]}
           onPress={handleSend}
