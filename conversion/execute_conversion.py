@@ -118,7 +118,7 @@ class ConversionExecutor:
                 'error': 'Conversion not found or not pending'
             }
         except Exception as e:
-            logger.error(f"Error executing conversion: {e}")
+            logger.exception("Error executing conversion id=%s type=%s user=%s", conversion_id, getattr(conversion, 'conversion_type', None), getattr(user, 'id', None))
             return {
                 'success': False,
                 'error': str(e)
@@ -149,7 +149,7 @@ class ConversionExecutor:
             return result
             
         except Exception as e:
-            logger.error(f"Error executing mint: {e}")
+            logger.exception("Error executing mint conversion_id=%s user=%s amount=%s", conversion.id, user_address, conversion.from_amount)
             return None
     
     async def _execute_burn(
@@ -177,7 +177,7 @@ class ConversionExecutor:
             return result
             
         except Exception as e:
-            logger.error(f"Error executing burn: {e}")
+            logger.exception("Error executing burn conversion_id=%s user=%s amount=%s", conversion.id, user_address, conversion.from_amount)
             return None
 
 

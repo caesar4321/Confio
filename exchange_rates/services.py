@@ -62,7 +62,7 @@ class ExchangeRateService:
             # Yadio API endpoint for VES/USD
             url = "https://api.yadio.io/convert/1/VES/USD"
             
-            response = self.session.get(url)
+            response = self.session.get(url, timeout=10)
             response.raise_for_status()
             
             data = response.json()
@@ -131,7 +131,7 @@ class ExchangeRateService:
             # ExchangeRate-API endpoint - get all rates with USD as base
             url = "https://api.exchangerate-api.com/v4/latest/USD"
             
-            response = self.session.get(url)
+            response = self.session.get(url, timeout=10)
             response.raise_for_status()
             
             data = response.json()

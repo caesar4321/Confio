@@ -157,7 +157,13 @@ class AlgorandClient:
                     balances[str(asset_id)] = Decimal('0')
         
         except Exception as e:
-            logger.error(f"Error getting balance for {address}: {e}")
+            logger.exception(
+                "Error getting balance for %s (asset_id=%s, using_fallback_algod=%s): %s",
+                address,
+                asset_id,
+                self._using_fallback_algod,
+                e,
+            )
             if asset_id:
                 balances[str(asset_id)] = Decimal('0')
             else:
