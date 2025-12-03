@@ -178,6 +178,50 @@ class PayrollTransactionBuilder:
         app_call.group = gid
         return [axfer, app_call]
 
+    def build_withdrawal_app_call(
+        self,
+        business_account: str,
+        amount_base: int,
+        recipient_address: Optional[str] = None,
+        suggested_params: Optional[SuggestedParams] = None,
+        note: Optional[bytes] = None,
+    ) -> transaction.ApplicationNoOpTxn:
+        """
+        Build a single app call for the on-chain withdraw_vault method.
+
+        The business signs and pays fees (no sponsor). Amount is in base units of the
+        payroll asset (1e6). Recipient defaults to the business address.
+        """
+        sp = suggested_params or self.algod_client.suggested_params()
+        sp.flat_fee = True
+        # Contract requires fee >= 2x min fee because of inner asset xfer
+        sp.fee = max(sp.min_fee * 2, sp.fee)
+
+        recipient = recipient_address or business_account
+
+        method = Method.from_signature("withdraw_vault(address,uint64,address)void")
+        app_args = [
+            method.get_selector(),
+            self._addr_type.encode(business_account),
+            self._u64_type.encode(amount_base),
+            self._addr_type.encode(recipient),
+        ]
+
+        vault_key = b"VAULT" + encoding.decode_address(business_account)
+        boxes = [(0, vault_key)] if not BoxReference else [BoxReference(0, vault_key)]
+
+        txn = transaction.ApplicationNoOpTxn(
+            sender=business_account,
+            sp=sp,
+            index=self.payroll_app_id,
+            app_args=app_args,
+            accounts=[recipient] if recipient != business_account else [],
+            foreign_assets=[self.payroll_asset_id],
+            boxes=boxes,
+            note=note,
+        )
+        return txn
+
     def build_set_business_delegates(
         self,
         business_account: str,

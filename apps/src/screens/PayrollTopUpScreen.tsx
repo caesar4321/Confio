@@ -20,7 +20,12 @@ import { useNavigation } from '@react-navigation/native';
 import { useMutation, useQuery } from '@apollo/client';
 import { MainStackParamList } from '../types/navigation';
 import { GET_ACCOUNT_BALANCE, GET_PAYROLL_VAULT_BALANCE } from '../apollo/queries';
-import { PREPARE_PAYROLL_VAULT_FUNDING, SUBMIT_PAYROLL_VAULT_FUNDING } from '../apollo/mutations/payroll';
+import {
+  PREPARE_PAYROLL_VAULT_FUNDING,
+  SUBMIT_PAYROLL_VAULT_FUNDING,
+  PREPARE_PAYROLL_VAULT_WITHDRAWAL,
+  SUBMIT_PAYROLL_VAULT_WITHDRAWAL,
+} from '../apollo/mutations/payroll';
 import algorandService from '../services/algorandService';
 import { Buffer } from 'buffer';
 import { useAccount } from '../contexts/AccountContext';
@@ -42,6 +47,7 @@ const PayrollTopUpScreen = () => {
   const { activeAccount } = useAccount();
   const isBusinessAccount = activeAccount?.type === 'business';
   const [amount, setAmount] = useState('');
+  const [withdrawAmount, setWithdrawAmount] = useState('');
   const [processing, setProcessing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [processingMessage, setProcessingMessage] = useState('');
@@ -57,6 +63,8 @@ const PayrollTopUpScreen = () => {
   });
   const [prepareFunding] = useMutation(PREPARE_PAYROLL_VAULT_FUNDING);
   const [submitFunding] = useMutation(SUBMIT_PAYROLL_VAULT_FUNDING);
+  const [prepareWithdraw] = useMutation(PREPARE_PAYROLL_VAULT_WITHDRAWAL);
+  const [submitWithdraw] = useMutation(SUBMIT_PAYROLL_VAULT_WITHDRAWAL);
 
   const availableBalance = useMemo(() => parseFloat(balanceData?.accountBalance ?? '0'), [balanceData]);
   const vaultBalance = useMemo(() => vaultData?.payrollVaultBalance ?? 0, [vaultData]);
@@ -187,6 +195,98 @@ const PayrollTopUpScreen = () => {
     }
   };
 
+  const handleWithdraw = async () => {
+    if (!isBusinessAccount) {
+      Alert.alert('Solo negocios', 'Cambia a una cuenta de negocio para retirar de la bóveda.');
+      return;
+    }
+    if (processing) return;
+    const parsed = parseFloat((withdrawAmount || '').replace(',', '.'));
+    if (!isFinite(parsed) || parsed <= 0) {
+      Alert.alert('Monto inválido', 'Ingresa un monto mayor a 0.');
+      return;
+    }
+    if (vaultBalance && parsed > vaultBalance) {
+      Alert.alert('Saldo insuficiente', 'El monto supera el saldo en la bóveda.');
+      return;
+    }
+
+    const authMessage = `Autoriza retirar ${parsed.toFixed(2)} cUSD de la bóveda`;
+    let authenticated = await biometricAuthService.authenticate(authMessage, true, true);
+    if (!authenticated) {
+      const lockout = biometricAuthService.isLockout();
+      if (lockout) {
+        Alert.alert(
+          'Biometría bloqueada',
+          'Desbloquea tu dispositivo con passcode y vuelve a intentar.',
+          [{ text: 'OK', style: 'default' }],
+        );
+        return;
+      }
+      const shouldRetry = await new Promise<boolean>((resolve) => {
+        Alert.alert(
+          'Autenticación requerida',
+          'Debes autenticarte para retirar de la bóveda. Si fallaste varias veces, espera unos segundos y reintenta.',
+          [
+            { text: 'Cancelar', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Reintentar', onPress: () => resolve(true) }
+          ]
+        );
+      });
+      if (shouldRetry) {
+        authenticated = await biometricAuthService.authenticate(authMessage, true, true);
+        if (!authenticated) {
+          Alert.alert('No autenticado', 'No pudimos validar tu identidad. Intenta de nuevo en unos segundos.');
+          return;
+        }
+      } else {
+        return;
+      }
+    }
+
+    try {
+      setProcessing(true);
+      setProcessingMessage('Preparando retiro…');
+      const prepRes = await prepareWithdraw({
+        variables: {
+          amount: parsed,
+        }
+      });
+      const prep = prepRes.data?.preparePayrollVaultWithdrawal;
+      if (!prep?.success || !prep?.transaction) {
+        const msg = prep?.errors?.[0] || 'No se pudo preparar el retiro.';
+        throw new Error(msg);
+      }
+
+      setProcessingMessage('Firmando retiro…');
+      const bytes = Uint8Array.from(Buffer.from(prep.transaction, 'base64'));
+      const signedBytes = await algorandService.signTransactionBytes(bytes);
+      let stxB64 = Buffer.from(signedBytes).toString('base64');
+      if (stxB64.length % 4 !== 0) stxB64 = stxB64 + '='.repeat((4 - (stxB64.length % 4)) % 4);
+
+      setProcessingMessage('Enviando a blockchain…');
+      const submitRes = await submitWithdraw({ variables: { signedTransaction: stxB64 } });
+      const submit = submitRes.data?.submitPayrollVaultWithdrawal;
+      if (!submit?.success) {
+        const msg = submit?.errors?.[0] || 'No se pudo enviar el retiro.';
+        throw new Error(msg);
+      }
+
+      setProcessingMessage('Confirmando transacción…');
+      await Promise.all([refetchVault(), refetchBalance()]);
+      setProcessing(false);
+      setWithdrawAmount('');
+      Alert.alert('Retiro enviado', 'Retiramos fondos de la bóveda de nómina.', [
+        { text: 'OK', onPress: () => navigation.goBack() },
+      ]);
+    } catch (e: any) {
+      console.error('Payroll withdraw error', e);
+      setProcessing(false);
+      const gqlMsg = Array.isArray(e?.graphQLErrors) && e.graphQLErrors[0]?.message;
+      Alert.alert('No se pudo retirar', gqlMsg || e?.message || 'Error desconocido');
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
@@ -261,6 +361,32 @@ const PayrollTopUpScreen = () => {
               <Text style={styles.infoText}>Cambia a tu cuenta de negocio para fondear la bóveda de nómina.</Text>
             </View>
           ) : null}
+
+          <View style={styles.card}>
+            <Text style={styles.cardLabel}>Retirar de la bóveda</Text>
+            <Text style={styles.cardHint}>Recupera fondos de la bóveda de nómina hacia tu cuenta o a otra dirección.</Text>
+            <View style={[styles.inputRow, { marginTop: 10 }]}>
+              <Image source={require('../assets/png/cUSD.png')} style={styles.tokenIcon} />
+              <Text style={styles.currency}>cUSD</Text>
+              <TextInput
+                style={styles.input}
+                keyboardType="decimal-pad"
+                placeholder="0.00"
+                value={withdrawAmount}
+                onChangeText={setWithdrawAmount}
+                returnKeyType="done"
+              />
+            </View>
+            <TouchableOpacity
+              style={[styles.secondaryButton, (!isBusinessAccount || processing) && styles.primaryButtonDisabled]}
+              onPress={handleWithdraw}
+              disabled={processing || !isBusinessAccount}
+              activeOpacity={0.9}
+            >
+              {processing ? <ActivityIndicator color="#111" /> : <Icon name="arrow-down-left" size={16} color="#111" />}
+              <Text style={styles.secondaryButtonText}>{processing ? 'Procesando...' : 'Retirar de bóveda'}</Text>
+            </TouchableOpacity>
+          </View>
         </ScrollView>
       </TouchableWithoutFeedback>
 
@@ -380,6 +506,21 @@ const styles = StyleSheet.create({
     flex: 1,
     color: '#92400e',
     fontSize: 13,
+  },
+  secondaryButton: {
+    marginTop: 12,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#e5e7eb',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  secondaryButtonText: {
+    color: '#111827',
+    fontWeight: '700',
+    fontSize: 16,
   },
 });
 

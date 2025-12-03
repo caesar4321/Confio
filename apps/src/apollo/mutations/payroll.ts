@@ -77,6 +77,27 @@ export const SUBMIT_PAYROLL_VAULT_FUNDING = gql`
   }
 `;
 
+export const PREPARE_PAYROLL_VAULT_WITHDRAWAL = gql`
+  mutation PreparePayrollVaultWithdrawal($amount: Float!) {
+    preparePayrollVaultWithdrawal(amount: $amount) {
+      success
+      errors
+      transaction
+      amount
+    }
+  }
+`;
+
+export const SUBMIT_PAYROLL_VAULT_WITHDRAWAL = gql`
+  mutation SubmitPayrollVaultWithdrawal($signedTransaction: String!) {
+    submitPayrollVaultWithdrawal(signedTransaction: $signedTransaction) {
+      success
+      errors
+      transactionHash
+    }
+  }
+`;
+
 export const SET_BUSINESS_DELEGATES_BY_EMPLOYEE = gql`
   mutation SetBusinessDelegatesByEmployee(
     $businessAccount: String!

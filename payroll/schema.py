@@ -14,6 +14,7 @@ from algosdk import transaction
 from algosdk.v2client import algod
 from algosdk import encoding as algo_encoding
 from algosdk import logic as algo_logic
+from blockchain.algorand_client import AlgorandClient
 
 from security.utils import graphql_require_kyc, graphql_require_aml
 from security.utils import check_kyc_required, perform_aml_check
@@ -887,6 +888,115 @@ class SubmitPayrollVaultFunding(graphene.Mutation):
             return SubmitPayrollVaultFunding(success=False, errors=[friendly or f"Broadcast failed: {e}"], transaction_hash=None)
 
 
+class PreparePayrollVaultWithdrawal(graphene.Mutation):
+    """Prepare an unsigned withdrawal from the business payroll vault (to business account_0)."""
+
+    class Arguments:
+        amount = graphene.Float(required=True, description="Amount to withdraw in payroll token units (e.g., cUSD)")
+
+    success = graphene.Boolean()
+    errors = graphene.List(graphene.String)
+    transaction = graphene.String(description="Unsigned withdrawal AppCall (base64 msgpack)")
+    amount = graphene.Float()
+
+    @classmethod
+    @graphql_require_kyc('send_money')
+    @graphql_require_aml()
+    def mutate(cls, root, info, amount):
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return PreparePayrollVaultWithdrawal(success=False, errors=["Authentication required"])
+
+        ctx = get_jwt_business_context_with_validation(info, required_permission='send_funds')
+        if not ctx or ctx.get('account_type') != 'business' or not ctx.get('business_id'):
+            return PreparePayrollVaultWithdrawal(success=False, errors=["Business context with send_funds permission required"])
+
+        try:
+            amt_dec = Decimal(str(amount))
+            if amt_dec <= 0:
+                return PreparePayrollVaultWithdrawal(success=False, errors=["Amount must be greater than 0"])
+            amt_dec = amt_dec.quantize(DECIMAL_QUANT, rounding=ROUND_DOWN)
+            amount_base = int(amt_dec * Decimal(1_000_000))
+        except Exception:
+            return PreparePayrollVaultWithdrawal(success=False, errors=["Invalid amount"])
+
+        if amount_base <= 0:
+            return PreparePayrollVaultWithdrawal(success=False, errors=["Amount too small after rounding"])
+
+        biz_acct = Account.objects.filter(
+            business_id=ctx['business_id'],
+            account_type='business',
+            deleted_at__isnull=True
+        ).order_by('account_index').first()
+        if not biz_acct or not biz_acct.algorand_address:
+            return PreparePayrollVaultWithdrawal(success=False, errors=["Business account not found or missing Algorand address"])
+
+        try:
+            builder = PayrollTransactionBuilder(network=settings.ALGORAND_NETWORK)
+            txn = builder.build_withdrawal_app_call(
+                business_account=biz_acct.algorand_address,
+                amount_base=amount_base,
+                recipient_address=None  # defaults to business account
+            )
+            unsigned_b64 = algo_encoding.msgpack_encode(txn)
+            return PreparePayrollVaultWithdrawal(
+                success=True,
+                transaction=unsigned_b64,
+                amount=float(amt_dec),
+                errors=None
+            )
+        except Exception as e:
+            try:
+                logger.exception("[Payroll] prepare withdrawal build failed biz=%s amt=%s", biz_acct.algorand_address if biz_acct else None, amount)
+            except Exception:
+                pass
+            return PreparePayrollVaultWithdrawal(success=False, errors=[str(e)])
+
+
+class SubmitPayrollVaultWithdrawal(graphene.Mutation):
+    """Submit a signed withdraw_vault transaction."""
+
+    class Arguments:
+        signed_transaction = graphene.String(required=True, description="Base64 signed AppCall for withdraw_vault")
+
+    success = graphene.Boolean()
+    errors = graphene.List(graphene.String)
+    transaction_hash = graphene.String()
+
+    @classmethod
+    @graphql_require_kyc('send_money')
+    @graphql_require_aml()
+    def mutate(cls, root, info, signed_transaction):
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return SubmitPayrollVaultWithdrawal(success=False, errors=["Authentication required"])
+
+        ctx = get_jwt_business_context_with_validation(info, required_permission='send_funds')
+        if not ctx or ctx.get('account_type') != 'business' or not ctx.get('business_id'):
+            return SubmitPayrollVaultWithdrawal(success=False, errors=["Business context with send_funds permission required"])
+
+        try:
+            stx_bytes = base64.b64decode(str(signed_transaction or "").strip())
+        except Exception:
+            return SubmitPayrollVaultWithdrawal(success=False, errors=["Invalid base64 transaction"])
+
+        try:
+            algod_client = AlgorandClient().algod
+            tx_id = algod_client.send_raw_transaction(base64.b64encode(stx_bytes).decode('utf-8'))
+            tx_hash = tx_id if isinstance(tx_id, str) else tx_id.get('txId') if isinstance(tx_id, dict) else None
+            return SubmitPayrollVaultWithdrawal(success=True, errors=None, transaction_hash=tx_hash)
+        except Exception as e:
+            try:
+                logger.exception("[Payroll] withdraw broadcast failed: %s", e)
+            except Exception:
+                pass
+            msg = str(e)
+            friendly = None
+            if "logic eval error" in msg:
+                friendly = "El contrato rechazó la transacción de retiro. Verifica el monto y los permisos."
+            return SubmitPayrollVaultWithdrawal(success=False, errors=[friendly or f"Broadcast failed: {e}"], transaction_hash=None)
+
+
 class SetBusinessDelegates(graphene.Mutation):
     class Arguments:
         business_account = graphene.String(required=True, description="Business account address")
@@ -1560,6 +1670,8 @@ class Mutation(graphene.ObjectType):
     submit_payroll_item_payout = SubmitPayrollItemPayout.Field()
     prepare_payroll_vault_funding = PreparePayrollVaultFunding.Field()
     submit_payroll_vault_funding = SubmitPayrollVaultFunding.Field()
+    prepare_payroll_vault_withdrawal = PreparePayrollVaultWithdrawal.Field()
+    submit_payroll_vault_withdrawal = SubmitPayrollVaultWithdrawal.Field()
     set_business_delegates = SetBusinessDelegates.Field()
     set_business_delegates_by_employee = SetBusinessDelegatesByEmployee.Field()
     # Payroll recipients mutations to be added when ready
