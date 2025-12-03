@@ -22,6 +22,7 @@ from algosdk.transaction import (
 )
 from algosdk.abi import Method, Returns, Argument
 from algosdk.encoding import decode_address
+from blockchain.kms_manager import KMSSigner
 
 # Strict verification helper placed before runtime use
 def verify_post_deploy(algod_client, app_id: int, app_address: str, expected_cusd: int, expected_confio: int, expected_sponsor: str):
@@ -87,7 +88,17 @@ if NETWORK == 'localnet':
             print(f"Using LocalNet CONFIO asset id from env: {CONFIO_ASSET_ID}")
 
 def get_admin_account():
-    """Get admin account from environment"""
+    """Get admin account signer from KMS if enabled, else from mnemonic."""
+    use_kms = os.environ.get('USE_KMS_SIGNING', '').lower() == 'true'
+    if use_kms:
+        region = os.environ.get('KMS_REGION', 'eu-central-2')
+        alias = os.environ.get('KMS_ADMIN_KEY_ALIAS') or os.environ.get('KMS_KEY_ALIAS')
+        if not alias:
+            print("Error: KMS_ADMIN_KEY_ALIAS or KMS_KEY_ALIAS required when USE_KMS_SIGNING=True")
+            sys.exit(1)
+        kms_signer = KMSSigner(alias, region_name=region)
+        return kms_signer.address, kms_signer.sign_transaction
+
     admin_mnemonic = os.environ.get('ALGORAND_ADMIN_MNEMONIC')
     if not admin_mnemonic and NETWORK == 'localnet':
         try:
@@ -103,7 +114,7 @@ def get_admin_account():
     admin_private_key = mnemonic.to_private_key(admin_mnemonic)
     admin_address = account.address_from_private_key(admin_private_key)
     
-    return admin_address, admin_private_key
+    return admin_address, lambda txn: txn.sign(admin_private_key)
 
 def get_required_sponsor_address():
     """Read required sponsor address (no private key needed)."""
@@ -119,7 +130,7 @@ def deploy_payment_contract():
     print(f"Deploying Payment Contract to {NETWORK}...")
     
     # Get accounts
-    admin_address, admin_private_key = get_admin_account()
+    admin_address, admin_signer = get_admin_account()
     sponsor_address = get_required_sponsor_address()
     
     print(f"Admin address: {admin_address}")
@@ -229,7 +240,7 @@ def deploy_payment_contract():
     )
     
     # Sign and send
-    signed_txn = create_txn.sign(admin_private_key)
+    signed_txn = admin_signer(create_txn)
     
     try:
         tx_id = algod_client.send_transaction(signed_txn)
@@ -332,9 +343,9 @@ def deploy_payment_contract():
         assign_group_id(txns)
         
         # Sign transactions
-        signed_fund = fund_txn.sign(admin_private_key)
-        signed_setup = setup_txn.sign(admin_private_key)
-        
+        signed_fund = admin_signer(fund_txn)
+        signed_setup = admin_signer(setup_txn)
+
         # Send grouped transaction
         tx_id = algod_client.send_transactions([signed_fund, signed_setup])
         print(f"Setup transaction sent: {tx_id}")
@@ -361,7 +372,7 @@ def deploy_payment_contract():
             decode_address(sponsor_address)
         ]
     )
-    signed_txn = sponsor_txn.sign(admin_private_key)
+    signed_txn = admin_signer(sponsor_txn)
     tx_id = algod_client.send_transaction(signed_txn)
     print(f"Set sponsor transaction sent: {tx_id}")
     wait_for_confirmation(algod_client, tx_id, 10)
@@ -390,7 +401,7 @@ def deploy_payment_contract():
     )
     
     # Sign and send
-    signed_txn = fee_txn.sign(admin_private_key)
+    signed_txn = admin_signer(fee_txn)
     tx_id = algod_client.send_transaction(signed_txn)
     
     print(f"Set fee recipient transaction sent: {tx_id}")
@@ -419,7 +430,7 @@ def deploy_payment_contract():
             amt=emergency_fund
         )
         
-        signed_emergency = emergency_txn.sign(admin_private_key)
+        signed_emergency = admin_signer(emergency_txn)
         tx_id = algod_client.send_transaction(signed_emergency)
         print(f"Emergency funding transaction sent: {tx_id}")
         wait_for_confirmation(algod_client, tx_id, 10)
@@ -484,7 +495,7 @@ def update_payment_contract(app_id: int):
     """
     print(f"Updating Payment Contract app_id={app_id} on {NETWORK}...")
 
-    admin_address, admin_private_key = get_admin_account()
+    admin_address, admin_signer = get_admin_account()
     algod_client = algod.AlgodClient(ALGOD_TOKEN, ALGOD_ADDRESS)
 
     # Build and compile latest programs
@@ -513,7 +524,7 @@ def update_payment_contract(app_id: int):
         app_args=[update_selector],
     )
 
-    signed_update = update_txn.sign(admin_private_key)
+    signed_update = admin_signer(update_txn)
     tx_id = algod_client.send_transaction(signed_update)
     print(f"Update transaction sent: {tx_id}")
     confirmed_txn = wait_for_confirmation(algod_client, tx_id, 10)
@@ -524,7 +535,7 @@ def update_payment_contract(app_id: int):
 
 def configure_payment_app(app_id: int):
     """Run idempotent configuration steps (assets opt-in, sponsor, fee recipient)."""
-    admin_address, admin_private_key = get_admin_account()
+    admin_address, admin_signer = get_admin_account()
     sponsor_address, _ = get_sponsor_account()
     algod_client = algod.AlgodClient(ALGOD_TOKEN, ALGOD_ADDRESS)
 
@@ -545,7 +556,7 @@ def configure_payment_app(app_id: int):
             fund_amt = 300_000
         if fund_amt:
             fund_txn = PaymentTxn(sender=admin_address, sp=params, receiver=app_address, amt=fund_amt)
-            stx = fund_txn.sign(admin_private_key)
+            stx = admin_signer(fund_txn)
             txid = algod_client.send_transaction(stx)
             wait_for_confirmation(algod_client, txid, 10)
 
@@ -565,7 +576,7 @@ def configure_payment_app(app_id: int):
             app_args=[method.get_selector(), CUSD_ASSET_ID.to_bytes(8, 'big'), CONFIO_ASSET_ID.to_bytes(8, 'big')],
             foreign_assets=[CUSD_ASSET_ID, CONFIO_ASSET_ID],
         )
-        stx = setup_txn.sign(admin_private_key)
+        stx = admin_signer(setup_txn)
         txid = algod_client.send_transaction(stx)
         wait_for_confirmation(algod_client, txid, 10)
         print("✅ Assets configured")
@@ -586,7 +597,7 @@ def configure_payment_app(app_id: int):
             on_complete=OnComplete.NoOpOC,
             app_args=[method.get_selector(), decode_address(sponsor_address)],
         )
-        stx = sponsor_txn.sign(admin_private_key)
+        stx = admin_signer(sponsor_txn)
         txid = algod_client.send_transaction(stx)
         wait_for_confirmation(algod_client, txid, 10)
         print("✅ Sponsor configured")
@@ -606,7 +617,7 @@ def configure_payment_app(app_id: int):
         on_complete=OnComplete.NoOpOC,
         app_args=[method.get_selector(), decode_address(admin_address)],
     )
-    stx = fee_txn.sign(admin_private_key)
+    stx = admin_signer(fee_txn)
     txid = algod_client.send_transaction(stx)
     wait_for_confirmation(algod_client, txid, 10)
     print("✅ Fee recipient configured")
