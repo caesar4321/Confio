@@ -1,4 +1,5 @@
 """Unified referral system mutations for Confío usernames or phone numbers."""
+import logging
 import graphene
 from decimal import Decimal
 from django.db import transaction as db_transaction
@@ -9,6 +10,8 @@ from .decorators import rate_limit, check_suspicious_activity
 from .jwt_context import get_jwt_business_context_with_validation
 from django.utils import timezone
 import re
+
+_logger = logging.getLogger(__name__)
 
 
 class SetReferrer(graphene.Mutation):
@@ -144,10 +147,9 @@ class SetReferrer(graphene.Mutation):
                     message="¡Referidor registrado! Completa tu primera operación válida y ambos recibirán el equivalente a US$5 en $CONFIO."
                 )
                 
-        except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"Error setting referrer: {str(e)}")
+        except Exception:
+            # Ensure we always have a valid logger reference even if module state is odd
+            _logger.exception("Error setting referrer", exc_info=True)
             return SetReferrer(
                 success=False,
                 error="Error al registrar referidor. Por favor intenta de nuevo."
