@@ -423,7 +423,7 @@ class PresalePhaseAdmin(admin.ModelAdmin):
 
             from blockchain.kms_manager import get_kms_signer_from_settings
             try:
-                signer = get_kms_signer_from_settings(role=\"admin\")
+                signer = get_kms_signer_from_settings()
             except Exception:
                 self.message_user(request, 'Admin signer not configured', level='error')
                 return
@@ -491,7 +491,7 @@ class PresalePhaseAdmin(admin.ModelAdmin):
 
             from blockchain.kms_manager import get_kms_signer_from_settings
             try:
-                signer = get_kms_signer_from_settings(role=\"admin\")
+                signer = get_kms_signer_from_settings()
             except Exception:
                 self.message_user(request, 'Admin signer not configured', level='error')
                 return
