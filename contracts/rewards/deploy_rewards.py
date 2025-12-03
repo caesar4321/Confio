@@ -31,7 +31,7 @@ import json
 import os
 import sys
 from dataclasses import dataclass
-from typing import Iterable, List, Optional
+from typing import Callable, Iterable, List, Optional
 
 from algosdk import account, encoding, mnemonic
 from algosdk import transaction
@@ -47,6 +47,7 @@ from algosdk.transaction import (
 )
 from algosdk.logic import get_application_address
 from algosdk.v2client import algod
+from blockchain.kms_manager import KMSSigner
 
 from contracts.rewards.confio_rewards import compile_confio_rewards
 
@@ -121,9 +122,9 @@ def decode_app_log(log_entry: str) -> str:
 @dataclass
 class Accounts:
     sponsor_addr: str
-    sponsor_key: str
+    sponsor_signer: Callable[[Transaction], transaction.SignedTransaction]
     admin_addr: str
-    admin_key: str
+    admin_signer: Callable[[Transaction], transaction.SignedTransaction]
 
 
 def read_env(name: str, default: Optional[str] = None) -> str:
@@ -134,6 +135,30 @@ def read_env(name: str, default: Optional[str] = None) -> str:
 
 
 def init_accounts() -> Accounts:
+    """Initialize sponsor/admin signers from KMS if enabled, else from mnemonics."""
+    kms_enabled = os.getenv("USE_KMS_SIGNING", "").lower() == "true" or bool(os.getenv("KMS_KEY_ALIAS"))
+    if kms_enabled:
+        region = os.getenv("KMS_REGION", "eu-central-2")
+        sponsor_alias = read_env("KMS_KEY_ALIAS")
+        admin_alias = os.getenv("KMS_ADMIN_KEY_ALIAS") or sponsor_alias
+
+        sponsor_kms = KMSSigner(sponsor_alias, region_name=region)
+        admin_kms = KMSSigner(admin_alias, region_name=region)
+
+        expected_sponsor = os.getenv("ALGORAND_SPONSOR_ADDRESS")
+        expected_admin = os.getenv("ALGORAND_ADMIN_ADDRESS") or expected_sponsor
+        if expected_sponsor and sponsor_kms.address != expected_sponsor:
+            print(f"[warn] KMS sponsor address {sponsor_kms.address} != ALGORAND_SPONSOR_ADDRESS {expected_sponsor}")
+        if expected_admin and admin_kms.address != expected_admin:
+            print(f"[warn] KMS admin address {admin_kms.address} != ALGORAND_ADMIN_ADDRESS {expected_admin}")
+
+        return Accounts(
+            sponsor_addr=sponsor_kms.address,
+            sponsor_signer=sponsor_kms.sign_transaction,
+            admin_addr=admin_kms.address,
+            admin_signer=admin_kms.sign_transaction,
+        )
+
     sponsor_mnemonic = read_env("ALGORAND_SPONSOR_MNEMONIC")
     sponsor_key = mnemonic.to_private_key(sponsor_mnemonic)
     sponsor_addr = account.address_from_private_key(sponsor_key)
@@ -144,9 +169,9 @@ def init_accounts() -> Accounts:
 
     return Accounts(
         sponsor_addr=sponsor_addr,
-        sponsor_key=sponsor_key,
+        sponsor_signer=lambda txn: txn.sign(sponsor_key),
         admin_addr=admin_addr,
-        admin_key=admin_key,
+        admin_signer=lambda txn: txn.sign(admin_key),
     )
 
 
@@ -230,7 +255,7 @@ def create_rewards_app(
         extra_pages=extra_pages,
     )
 
-    signed = txn.sign(accounts.admin_key)
+    signed = accounts.admin_signer(txn)
     txid = client.send_transaction(signed)
     info = wait_for_confirmation(client, txid)
     app_id = info["application-index"]
@@ -238,14 +263,21 @@ def create_rewards_app(
     return app_id
 
 
-def grouped_send(client: algod.AlgodClient, txns: Iterable[Transaction], keys: Iterable[str]) -> dict:
+def grouped_send(client: algod.AlgodClient, txns: Iterable[Transaction], signers: Iterable[Callable[[Transaction], transaction.SignedTransaction]]) -> dict:
     txns = list(txns)
-    keys_list = list(keys)
-    if len(txns) != len(keys_list):
-        raise ValueError("Number of transactions and signing keys must match")
+    signers_list = list(signers)
+    if len(txns) != len(signers_list):
+        raise ValueError("Number of transactions and signing functions must match")
     transaction.assign_group_id(txns)
-    signed = [txn.sign(key) for txn, key in zip(txns, keys_list)]
-    tx_ids = [s.transaction.get_txid() for s in signed]
+    signed = [signer(txn) for txn, signer in zip(txns, signers_list)]
+    tx_ids = []
+    for s in signed:
+        if hasattr(s, "transaction"):
+            tx_ids.append(s.transaction.get_txid())
+        elif hasattr(s, "get_txid"):
+            tx_ids.append(s.get_txid())
+        else:
+            tx_ids.append(None)
     try:
         client.send_transactions(signed)
         info = wait_for_confirmation(client, tx_ids[-1])
@@ -302,7 +334,7 @@ def bootstrap_vault(
         foreign_assets=[confio_asset_id],
         sp=app_call_params,
     )
-    grouped_send(client, [payment_txn, app_call_txn], [accounts.sponsor_key, accounts.admin_key])
+    grouped_send(client, [payment_txn, app_call_txn], [accounts.sponsor_signer, accounts.admin_signer])
     print(f"[+] Bootstrapped vault (ASA opt-in)")
 
 
@@ -316,13 +348,13 @@ def fund_vault_with_confio(client: algod.AlgodClient, app_id: int, accounts: Acc
         amt=amount,
         index=asset_id,
     )
-    signed = txn.sign(accounts.sponsor_key)
+    signed = accounts.sponsor_signer(txn)
     txid = client.send_transaction(signed)
     wait_for_confirmation(client, txid)
     print(f"[+] Funded vault with {amount} CONFIO micro-units")
 
 
-def create_and_fund_user(client: algod.AlgodClient, sponsor_addr: str, sponsor_key: str, asset_id: int) -> tuple[str, str]:
+def create_and_fund_user(client: algod.AlgodClient, sponsor_addr: str, sponsor_signer: Callable[[Transaction], transaction.SignedTransaction], asset_id: int) -> tuple[str, str]:
     user_private_key, user_address = account.generate_account()
     params = client.suggested_params()
     funding_txn = PaymentTxn(
@@ -331,7 +363,7 @@ def create_and_fund_user(client: algod.AlgodClient, sponsor_addr: str, sponsor_k
         amt=1_000_000,
         sp=params,
     )
-    signed_funding = funding_txn.sign(sponsor_key)
+    signed_funding = sponsor_signer(funding_txn)
     txid = client.send_transaction(signed_funding)
     wait_for_confirmation(client, txid)
     print(f"[+] Funded new user {user_address}")
@@ -369,7 +401,7 @@ def set_price_override(client: algod.AlgodClient, app_id: int, accounts: Account
             round_id.to_bytes(8, "big"),
         ],
     )
-    signed = txn.sign(accounts.admin_key)
+    signed = accounts.admin_signer(txn)
     txid = client.send_transaction(signed)
     wait_for_confirmation(client, txid)
     print(f"[+] Manual price override set to {price} micro-cUSD per CONFIO")
@@ -444,7 +476,7 @@ def mark_user_eligible(
         print("[debug] user arg", encoding.encode_address(user_key_bytes))
     print("[debug] mark_eligible txn", app_call.dictify())
 
-    grouped_send(client, [pay_txn, app_call], [accounts.sponsor_key, accounts.admin_key])
+    grouped_send(client, [pay_txn, app_call], [accounts.sponsor_signer, accounts.admin_signer])
     print(f"[+] Marked {user_addr} eligible for {reward_cusd_micro} micro-cUSD reward")
 
 
@@ -488,7 +520,7 @@ def main() -> None:
     bootstrap_vault(client, app_id, accounts, confio_asset_id)
     fund_vault_with_confio(client, app_id, accounts, confio_asset_id)
 
-    user_key, user_addr = create_and_fund_user(client, accounts.sponsor_addr, accounts.sponsor_key, confio_asset_id)
+    user_key, user_addr = create_and_fund_user(client, accounts.sponsor_addr, accounts.sponsor_signer, confio_asset_id)
 
     set_price_override(client, app_id, accounts, price=250_000, round_id=1)
     mark_user_eligible(
