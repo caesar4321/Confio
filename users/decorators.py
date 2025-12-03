@@ -6,6 +6,7 @@ from typing import Dict, Any
 from graphql import GraphQLError
 from .abuse_prevention import AbusePreventionService
 import logging
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -22,28 +23,34 @@ def rate_limit(action: str):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            # Extract info object (usually 3rd argument)
-            info = args[2] if len(args) > 2 else kwargs.get('info')
-            if not info:
-                raise GraphQLError("Missing context information")
-            
-            # Get user from context
-            user = getattr(info.context, 'user', None)
-            if not user or not getattr(user, 'is_authenticated', False):
-                raise GraphQLError("Authentication required")
-            
-            # Check rate limit
-            is_allowed, seconds_until_reset = AbusePreventionService.check_rate_limit(
-                user.id, action
-            )
-            
-            if not is_allowed:
-                minutes = seconds_until_reset // 60
-                raise GraphQLError(
-                    f"Rate limit exceeded. Please try again in {minutes} minutes."
+            try:
+                # Extract info object (usually 3rd argument)
+                info = args[2] if len(args) > 2 else kwargs.get('info')
+                if not info:
+                    raise GraphQLError("Missing context information")
+                
+                # Get user from context
+                user = getattr(info.context, 'user', None)
+                if not user or not getattr(user, 'is_authenticated', False):
+                    raise GraphQLError("Authentication required")
+                
+                # Check rate limit
+                is_allowed, seconds_until_reset = AbusePreventionService.check_rate_limit(
+                    user.id, action
                 )
-            
-            return func(*args, **kwargs)
+                
+                if not is_allowed:
+                    minutes = seconds_until_reset // 60
+                    raise GraphQLError(
+                        f"Rate limit exceeded. Please try again in {minutes} minutes."
+                    )
+                
+                return func(*args, **kwargs)
+            except GraphQLError:
+                raise
+            except Exception:
+                logger.exception("Error in rate_limit decorator for action %s", action)
+                raise GraphQLError("Error al procesar la solicitud. Intenta de nuevo.")
         
         return wrapper
     return decorator
@@ -61,51 +68,63 @@ def check_suspicious_activity(action: str):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            # Extract info object
-            info = args[2] if len(args) > 2 else kwargs.get('info')
-            if not info:
-                raise GraphQLError("Missing context information")
-            
-            # Get user from context
-            user = getattr(info.context, 'user', None)
-            if not user or not getattr(user, 'is_authenticated', False):
-                raise GraphQLError("Authentication required")
-            
-            # Build metadata from request
-            metadata = {
-                'ip_address': getattr(info.context, 'META', {}).get('REMOTE_ADDR'),
-                'user_agent': getattr(info.context, 'META', {}).get('HTTP_USER_AGENT'),
-            }
-            
-            # Add device fingerprint if available
-            if hasattr(info.context, 'device_fingerprint'):
-                metadata['device_fingerprint'] = info.context.device_fingerprint
-            
-            # Add action-specific metadata
-            if action == 'referral_submit' and 'referrer_identifier' in kwargs:
-                metadata['referred_username'] = kwargs['referrer_identifier']
-            elif action == 'referral_submit' and 'tiktok_username' in kwargs:  # Backward compatibility
-                metadata['referred_username'] = kwargs['tiktok_username']
-            
-            # Check for suspicious patterns
-            flags = AbusePreventionService.check_suspicious_patterns(
-                user, action, metadata
-            )
-            
-            # Log if suspicious
-            if flags:
-                AbusePreventionService.log_suspicious_activity(
-                    user, action, flags, metadata
+            try:
+                # Extract info object
+                info = args[2] if len(args) > 2 else kwargs.get('info')
+                if not info:
+                    raise GraphQLError("Missing context information")
+                
+                # Get user from context
+                user = getattr(info.context, 'user', None)
+                if not user or not getattr(user, 'is_authenticated', False):
+                    raise GraphQLError("Authentication required")
+                
+                # Build metadata from request
+                metadata = {
+                    'ip_address': getattr(info.context, 'META', {}).get('REMOTE_ADDR'),
+                    'user_agent': getattr(info.context, 'META', {}).get('HTTP_USER_AGENT'),
+                }
+                
+                # Add device fingerprint if available
+                if hasattr(info.context, 'device_fingerprint'):
+                    metadata['device_fingerprint'] = info.context.device_fingerprint
+                
+                # Add action-specific metadata
+                if action == 'referral_submit' and 'referrer_identifier' in kwargs:
+                    metadata['referred_username'] = kwargs['referrer_identifier']
+                elif action == 'referral_submit' and 'tiktok_username' in kwargs:  # Backward compatibility
+                    metadata['referred_username'] = kwargs['tiktok_username']
+                
+                # Check for suspicious patterns
+                flags = AbusePreventionService.check_suspicious_patterns(
+                    user, action, metadata
                 )
                 
-                # Block certain critical flags
-                critical_flags = ['multiple_accounts_per_device']
-                if any(flag in critical_flags for flag in flags):
-                    raise GraphQLError(
-                        "Suspicious activity detected. Please contact support."
+                # Log if suspicious
+                if flags:
+                    AbusePreventionService.log_suspicious_activity(
+                        user, action, flags, metadata
                     )
-            
-            return func(*args, **kwargs)
+                    
+                    # Block certain critical flags
+                    critical_flags = ['multiple_accounts_per_device']
+                    if any(flag in critical_flags for flag in flags):
+                        if getattr(settings, 'DEBUG', False):
+                            logger.warning(
+                                "Critical suspicious activity detected (DEBUG mode, allowing): "
+                                f"user={user.id}, action={action}, flags={flags}"
+                            )
+                        else:
+                            raise GraphQLError(
+                                "Suspicious activity detected. Please contact support."
+                            )
+                
+                return func(*args, **kwargs)
+            except GraphQLError:
+                raise
+            except Exception:
+                logger.exception("Error in check_suspicious_activity for action %s", action)
+                raise GraphQLError("Error al procesar la solicitud. Intenta de nuevo.")
         
         return wrapper
     return decorator
