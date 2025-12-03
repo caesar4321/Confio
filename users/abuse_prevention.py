@@ -285,7 +285,6 @@ class AbusePreventionService:
             )
         except Exception:
             # Never block business logic due to logging errors
-            logger = logging.getLogger(__name__)
             logger.warning('Failed to log suspicious activity', exc_info=True)
         
         # Alert admins if critical flags

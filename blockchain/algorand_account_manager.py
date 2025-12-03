@@ -31,10 +31,6 @@ class AlgorandAccountManager:
     # Determine network from environment or settings
     NETWORK = os.environ.get('ALGORAND_NETWORK', getattr(settings, 'ALGORAND_NETWORK', 'testnet')).lower()
     
-    # Get ALL configuration from Django settings (single source of truth)
-    # These come from settings.py, which reads from .env
-    # NO FALLBACKS - if not in settings, it should be None
-    
     # Asset IDs from settings
     CONFIO_ASSET_ID = settings.ALGORAND_CONFIO_ASSET_ID
     USDC_ASSET_ID = settings.ALGORAND_USDC_ASSET_ID

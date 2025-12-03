@@ -23,7 +23,6 @@ from algosdk.transaction import (
 from algosdk.abi import Method, Returns, Argument
 from algosdk.encoding import decode_address
 from blockchain.kms_manager import KMSSigner
-from blockchain.kms_manager import KMSSigner
 
 # Strict verification helper placed before runtime use
 def verify_post_deploy(algod_client, app_id: int, app_address: str, expected_cusd: int, expected_confio: int, expected_sponsor: str):
@@ -186,6 +185,7 @@ def deploy_payment_contract():
     # Build the contract
     print("\nBuilding contract (approval + clear)...")
     app_spec = payment_app.build()
+    contract = app_spec.contract
     
     # Compile the programs
     approval_result = algod_client.compile(app_spec.approval_program)
@@ -316,15 +316,9 @@ def deploy_payment_contract():
         
         # Setup assets call
         # Create method selector for setup_assets
-        method = Method(
-            name="setup_assets",
-            args=[
-                Argument(arg_type="uint64", name="cusd_id"),
-                Argument(arg_type="uint64", name="confio_id")
-            ],
-            returns=Returns(arg_type="void")
-        )
+        method = contract.get_method_by_name("setup_assets")
         
+        params.flat_fee = True
         params.fee = 3000  # Base + 2 inner transactions
         setup_txn = ApplicationCallTxn(
             sender=admin_address,
@@ -358,24 +352,25 @@ def deploy_payment_contract():
     # Pause -> Set sponsor -> Unpause (contract requires paused state)
     print(f"\nPausing contract to set sponsor...")
     params = algod_client.suggested_params()
+    params.flat_fee = True
+    params.fee = params.min_fee
+    pause_method = contract.get_method_by_name("pause")
     pause_txn = ApplicationCallTxn(
         sender=admin_address,
         sp=params,
         index=app_id,
         on_complete=OnComplete.NoOpOC,
-        app_args=[bytes.fromhex("bdc4f57f")],  # pause()void selector
+        app_args=[pause_method.get_selector()],
     )
     signed_pause = admin_signer(pause_txn)
     algod_client.send_transaction(signed_pause)
     wait_for_confirmation(algod_client, signed_pause.transaction.get_txid(), 10)
 
     print("\nSetting sponsor address...")
-    method = Method(
-        name="set_sponsor",
-        args=[Argument(arg_type="address", name="sponsor")],
-        returns=Returns(arg_type="void")
-    )
+    method = contract.get_method_by_name("set_sponsor")
     params = algod_client.suggested_params()
+    params.flat_fee = True
+    params.fee = params.min_fee
     sponsor_txn = ApplicationCallTxn(
         sender=admin_address,
         sp=params,
@@ -394,12 +389,15 @@ def deploy_payment_contract():
 
     print("\nUnpausing contract...")
     params = algod_client.suggested_params()
+    params.flat_fee = True
+    params.fee = params.min_fee
+    unpause_method = contract.get_method_by_name("unpause")
     unpause_txn = ApplicationCallTxn(
         sender=admin_address,
         sp=params,
         index=app_id,
         on_complete=OnComplete.NoOpOC,
-        app_args=[bytes.fromhex("1f8f2a3f")],  # unpause()void selector
+        app_args=[unpause_method.get_selector()],
     )
     signed_unpause = admin_signer(unpause_txn)
     algod_client.send_transaction(signed_unpause)
@@ -410,13 +408,11 @@ def deploy_payment_contract():
     print(f"\nSetting fee recipient...")
     
     # Create method selector for update_fee_recipient
-    method = Method(
-        name="update_fee_recipient",
-        args=[Argument(arg_type="address", name="new_recipient")],
-        returns=Returns(arg_type="void")
-    )
+    method = contract.get_method_by_name("update_fee_recipient")
     
     params = algod_client.suggested_params()
+    params.flat_fee = True
+    params.fee = params.min_fee
     fee_txn = ApplicationCallTxn(
         sender=admin_address,
         sp=params,

@@ -534,17 +534,13 @@ class KMSTransactionSigner(TransactionSigner):
     def __init__(self, kms_signer: KMSSigner):
         self.kms_signer = kms_signer
 
-    def sign_transactions(self, txns):
-        import base64
-        from algosdk import encoding as algo_encoding
-
-        signed_bytes = []
-        for txn in txns:
-            signed = self.kms_signer.sign_transaction(txn)
-            # Transaction.sign returns a SignedTransaction; encode to canonical bytes
-            b64 = algo_encoding.msgpack_encode(signed)
-            signed_bytes.append(base64.b64decode(b64))
-        return signed_bytes
+    def sign_transactions(self, txns, indexes=None):
+        # Return SignedTransaction objects for ATC compatibility
+        signed = []
+        iterable = enumerate(txns) if indexes is None else ((i, txns[i]) for i in indexes)
+        for _, txn in iterable:
+            signed.append(self.kms_signer.sign_transaction(txn))
+        return signed
 
 
 def get_kms_signer_from_settings(
