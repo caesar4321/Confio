@@ -12,13 +12,16 @@ Security Features:
 - Automatic key backup and recovery
 """
 
-import boto3
 import base64
-import os
-from typing import Tuple, Optional
-from algosdk import account, encoding, mnemonic
-from algosdk.transaction import Transaction
 import logging
+import os
+from typing import Optional, Tuple
+
+import boto3
+from algosdk import account, encoding, mnemonic
+from algosdk.atomic_transaction_composer import TransactionSigner
+from algosdk.transaction import Transaction
+from django.core.exceptions import ImproperlyConfigured
 
 logger = logging.getLogger(__name__)
 
@@ -483,6 +486,107 @@ class KMSSigner:
         """Sign a transaction"""
         return self.kms_manager.sign_transaction(self.key_alias, transaction)
 
-    def sign_transactions(self, transactions: list) -> list:
-        """Sign multiple transactions (e.g., atomic transfer group)"""
-        return [self.sign_transaction(txn) for txn in transactions]
+    def sign_transactions(self, transactions: list, indexes: list = None) -> list:
+        """
+        Sign multiple transactions (e.g., atomic transfer group)
+
+        Args:
+            transactions: List of transactions to sign
+            indexes: Optional list of indexes to sign (for ATC compatibility)
+                    If provided, only sign transactions at those indexes
+
+        Returns:
+            List of signed transactions
+        """
+        if indexes is None:
+            # Sign all transactions
+            return [self.sign_transaction(txn) for txn in transactions]
+        else:
+            # Sign only specified indexes (for AtomicTransactionComposer)
+            signed = []
+            for idx in indexes:
+                signed.append(self.sign_transaction(transactions[idx]))
+            return signed
+
+    def sign_transaction_msgpack(self, transaction: Transaction) -> str:
+        """Sign and return msgpack-encoded transaction (base64 string)."""
+        from algosdk import encoding as algo_encoding
+
+        signed = self.sign_transaction(transaction)
+        return algo_encoding.msgpack_encode(signed)
+
+    def sign_transactions_msgpack(self, transactions: list) -> list:
+        """Sign multiple transactions and return msgpack-encoded payloads."""
+        return [self.sign_transaction_msgpack(txn) for txn in transactions]
+
+    def assert_matches_address(self, expected_address: Optional[str]) -> None:
+        """Raise if the signer address does not match the expected address."""
+        if expected_address and expected_address != self.address:
+            raise ImproperlyConfigured(
+                f"KMS alias '{self.key_alias}' resolves to {self.address}, "
+                f"but settings configured {expected_address}"
+            )
+
+
+class KMSTransactionSigner(TransactionSigner):
+    """AtomicTransactionComposer-compatible signer that delegates to KMSSigner."""
+
+    def __init__(self, kms_signer: KMSSigner):
+        self.kms_signer = kms_signer
+
+    def sign_transactions(self, txns):
+        import base64
+        from algosdk import encoding as algo_encoding
+
+        signed_bytes = []
+        for txn in txns:
+            signed = self.kms_signer.sign_transaction(txn)
+            # Transaction.sign returns a SignedTransaction; encode to canonical bytes
+            b64 = algo_encoding.msgpack_encode(signed)
+            signed_bytes.append(base64.b64decode(b64))
+        return signed_bytes
+
+
+def get_kms_signer_from_settings(
+    use_kms: Optional[bool] = None,
+    key_alias: Optional[str] = None,
+    region_name: Optional[str] = None,
+    role: str = "sponsor",
+) -> KMSSigner:
+    """
+    Construct a KMSSigner using Django settings and enforce required flags.
+
+    Args:
+        use_kms: Optional override for USE_KMS_SIGNING (defaults to settings)
+        key_alias: Optional override for KMS_KEY_ALIAS
+        region_name: Optional override for KMS_REGION
+        role: Logical role for this signer ("sponsor" or "admin")
+
+    Returns:
+        KMSSigner configured for the current environment.
+    """
+    from django.conf import settings
+
+    kms_enabled = use_kms if use_kms is not None else getattr(settings, "USE_KMS_SIGNING", False)
+    if not kms_enabled:
+        raise ImproperlyConfigured("USE_KMS_SIGNING must be enabled for KMS-backed signing.")
+
+    if key_alias:
+        alias = key_alias
+    elif role == "admin":
+        alias = getattr(settings, "KMS_ADMIN_KEY_ALIAS", None) or getattr(settings, "KMS_KEY_ALIAS", None)
+    else:
+        alias = getattr(settings, "KMS_KEY_ALIAS", None)
+    if not alias:
+        raise ImproperlyConfigured("KMS_KEY_ALIAS is required when USE_KMS_SIGNING=True.")
+
+    region = region_name or getattr(settings, "KMS_REGION", None) or "eu-central-2"
+    signer = KMSSigner(alias, region_name=region)
+    expected_addr = (
+        getattr(settings, "ALGORAND_ADMIN_ADDRESS", None)
+        if role == "admin"
+        else getattr(settings, "ALGORAND_SPONSOR_ADDRESS", None)
+    ) or getattr(settings, "ALGORAND_SPONSOR_ADDRESS", None)
+    signer.assert_matches_address(expected_addr)
+
+    return signer

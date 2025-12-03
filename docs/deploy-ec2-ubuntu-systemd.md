@@ -46,7 +46,7 @@ Environment
   - `ALGORAND_NETWORK=mainnet`
   - `ALGORAND_ALGOD_ADDRESS=https://mainnet-api.4160.nodely.dev`
   - `ALGORAND_INDEXER_ADDRESS=https://mainnet-idx.4160.nodely.dev`
-  - Required secrets (must be provided): `ALGORAND_SPONSOR_ADDRESS`, `ALGORAND_SPONSOR_MNEMONIC`, `ALGORAND_PAYMENT_APP_ID`
+  - Required secrets (must be provided): `ALGORAND_SPONSOR_ADDRESS`, `USE_KMS_SIGNING=True`, `KMS_KEY_ALIAS`, `KMS_REGION`, `ALGORAND_PAYMENT_APP_ID`
 
 Nginx
 -----

@@ -3,13 +3,21 @@ Algorand Account Manager - Handles account creation and asset opt-ins
 """
 import logging
 import os
-from typing import Dict, Optional, Tuple
 from decimal import Decimal
+from typing import Dict, Optional, Tuple
+
 from algosdk import account, mnemonic
+from algosdk.transaction import (
+    AssetTransferTxn,
+    PaymentTxn,
+    assign_group_id,
+    wait_for_confirmation,
+)
 from algosdk.v2client import algod
-from algosdk.transaction import PaymentTxn, AssetTransferTxn, wait_for_confirmation, assign_group_id
 from django.conf import settings
 from django.db import transaction as db_transaction
+
+from blockchain.kms_manager import get_kms_signer_from_settings
 from users.models import Account
 
 logger = logging.getLogger(__name__)
@@ -35,7 +43,7 @@ class AlgorandAccountManager:
     
     # Sponsor account from settings
     SPONSOR_ADDRESS = settings.ALGORAND_SPONSOR_ADDRESS
-    SPONSOR_MNEMONIC = settings.ALGORAND_SPONSOR_MNEMONIC
+    SIGNER = get_kms_signer_from_settings()
     
     # Algorand node configuration from settings
     ALGOD_ADDRESS = settings.ALGORAND_ALGOD_ADDRESS
@@ -267,9 +275,6 @@ class AlgorandAccountManager:
                 logger.info(f"Account {address} already funded with {balance} microAlgos")
                 return True
             
-            # Get sponsor private key
-            sponsor_private_key = mnemonic.to_private_key(cls.SPONSOR_MNEMONIC)
-            
             # Get suggested parameters
             params = algod_client.suggested_params()
             
@@ -282,7 +287,7 @@ class AlgorandAccountManager:
             )
             
             # Sign and send
-            signed_txn = fund_txn.sign(sponsor_private_key)
+            signed_txn = cls.SIGNER.sign_transaction(fund_txn)
             tx_id = algod_client.send_transaction(signed_txn)
             
             # Wait for confirmation
@@ -391,9 +396,6 @@ class AlgorandAccountManager:
     def _send_initial_confio(cls, algod_client, address: str) -> bool:
         """Send initial CONFIO tokens to new user"""
         try:
-            # Get sponsor private key
-            sponsor_private_key = mnemonic.to_private_key(cls.SPONSOR_MNEMONIC)
-            
             # Get suggested parameters
             params = algod_client.suggested_params()
             
@@ -407,7 +409,7 @@ class AlgorandAccountManager:
             )
             
             # Sign and send
-            signed_txn = transfer_txn.sign(sponsor_private_key)
+            signed_txn = cls.SIGNER.sign_transaction(transfer_txn)
             tx_id = algod_client.send_transaction(signed_txn)
             
             # Wait for confirmation

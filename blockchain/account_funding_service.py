@@ -2,12 +2,13 @@
 Service to handle automatic account funding from sponsor
 """
 import logging
-from decimal import Decimal
-from algosdk.v2client import algod
-from algosdk.transaction import PaymentTxn, wait_for_confirmation
-from algosdk import account, mnemonic
-from django.conf import settings
 import os
+from decimal import Decimal
+
+from algosdk.transaction import PaymentTxn, wait_for_confirmation
+from django.conf import settings
+
+from blockchain.kms_manager import get_kms_signer_from_settings
 
 logger = logging.getLogger(__name__)
 
@@ -19,13 +20,7 @@ class AccountFundingService:
         from blockchain.algorand_client import get_algod_client
         self.algod_client = get_algod_client()
         self.sponsor_address = settings.ALGORAND_SPONSOR_ADDRESS
-        # Get sponsor mnemonic from Django settings (which loads from .env)
-        self.sponsor_mnemonic = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
-        if self.sponsor_mnemonic:
-            self.sponsor_private_key = mnemonic.to_private_key(self.sponsor_mnemonic)
-        else:
-            self.sponsor_private_key = None
-            logger.warning("Sponsor mnemonic not configured - automatic funding disabled")
+        self.signer = get_kms_signer_from_settings()
     
     def calculate_funding_needed(self, user_address: str, for_app_optin: bool = True) -> int:
         """
@@ -104,12 +99,6 @@ class AccountFundingService:
             Dict with success status and transaction ID or error
         """
         try:
-            if not self.sponsor_private_key:
-                return {
-                    'success': False,
-                    'error': 'Sponsor account not configured'
-                }
-            
             # Calculate how much funding is needed
             funding_amount = self.calculate_funding_needed(user_address, for_app_optin=True)
             
@@ -145,7 +134,7 @@ class AccountFundingService:
             )
             
             # Sign and send
-            signed_txn = funding_txn.sign(self.sponsor_private_key)
+            signed_txn = self.signer.sign_transaction(funding_txn)
             tx_id = self.algod_client.send_transaction(signed_txn)
             
             # Wait for confirmation

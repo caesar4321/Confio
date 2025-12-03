@@ -396,14 +396,11 @@ class GenerateOptInTransactionsMutation(graphene.Mutation):
                 txn.group = group_id
             
             # Sign sponsor transaction
-            from algosdk import mnemonic
-            sponsor_private_key = mnemonic.to_private_key(AlgorandAccountManager.SPONSOR_MNEMONIC)
-            signed_fee_txn = fee_payment_txn.sign(sponsor_private_key)
+            from algosdk import encoding as algo_encoding
+            signed_fee_txn = AlgorandAccountManager.SIGNER.sign_transaction(fee_payment_txn)
             
             # Add the signed sponsor transaction FIRST (it's first in the group)
-            sponsor_txn_encoded = base64.b64encode(
-                msgpack.packb(signed_fee_txn.dictify(), use_bin_type=True)
-            ).decode()
+            sponsor_txn_encoded = algo_encoding.msgpack_encode(signed_fee_txn)
             
             transactions.append({
                 'assetId': 0,  # Not an asset transaction
@@ -1537,17 +1534,15 @@ class GenerateAppOptInTransactionMutation(graphene.Mutation):
             
             # Create sponsored opt-in transaction group
             from algosdk.transaction import ApplicationOptInTxn, PaymentTxn, calculate_group_id, SuggestedParams
-            from algosdk import mnemonic, account as algo_account
+            from algosdk import encoding as algo_encoding
             import base64
             import msgpack
             
             params = algod_client.suggested_params()
             min_fee = getattr(params, 'min_fee', 1000) or 1000
             
-            # Get sponsor credentials
-            sponsor_mnemonic = settings.ALGORAND_SPONSOR_MNEMONIC
-            sponsor_private_key = mnemonic.to_private_key(sponsor_mnemonic)
-            sponsor_address = algo_account.address_from_private_key(sponsor_private_key)
+            # Get sponsor credentials from KMS
+            sponsor_address = AlgorandAccountManager.SIGNER.address
             
             # Calculate funding needed for minimum balance increase
             funding_needed = 0
@@ -1604,10 +1599,8 @@ class GenerateAppOptInTransactionMutation(graphene.Mutation):
                 txn.group = group_id
             
             # Sign sponsor transaction
-            sponsor_signed = sponsor_payment.sign(sponsor_private_key)
-            sponsor_signed_encoded = base64.b64encode(
-                msgpack.packb(sponsor_signed.dictify(), use_bin_type=True)
-            ).decode()
+            sponsor_signed = AlgorandAccountManager.SIGNER.sign_transaction(sponsor_payment)
+            sponsor_signed_encoded = algo_encoding.msgpack_encode(sponsor_signed)
             
             # Encode user transaction for frontend
             from algosdk import encoding
@@ -2050,22 +2043,15 @@ class CheckBusinessOptInMutation(graphene.Mutation):
                 group_id = assign_group_id(transactions)
                 
                 # Sign the sponsor transaction (now at index 0)
-                from algosdk import mnemonic, account
+                from algosdk import encoding as algo_encoding
                 try:
-                    # Ensure mnemonic is a string
-                    sponsor_mnemonic = algorand_sponsor_service.sponsor_mnemonic
-                    if not sponsor_mnemonic:
-                        raise ValueError("No sponsor mnemonic configured")
-                    
-                    # Convert mnemonic to private key
-                    sponsor_private_key = mnemonic.to_private_key(sponsor_mnemonic)
-                    
-                    # Sign the transaction
-                    signed_sponsor_txn = transactions[0].sign(sponsor_private_key)
-                    
+                    signer = getattr(algorand_sponsor_service, 'signer', None)
+                    if not signer:
+                        raise ValueError("KMS signer unavailable")
+                    signer.assert_matches_address(getattr(settings, 'ALGORAND_SPONSOR_ADDRESS', None))
+                    signed_sponsor_txn = signer.sign_transaction(transactions[0])
                 except Exception as sign_error:
                     logger.error(f'CheckBusinessOptIn: Error signing sponsor transaction: {sign_error}')
-                    logger.error(f'CheckBusinessOptIn: Sponsor mnemonic type: {type(algorand_sponsor_service.sponsor_mnemonic)}')
                     return cls(error=f"Failed to sign sponsor transaction: {str(sign_error)}")
                 
                 # Prepare transaction data for frontend (mirror personal flow encoding)
@@ -2077,9 +2063,7 @@ class CheckBusinessOptInMutation(graphene.Mutation):
                     )
                 
                 # Sponsor transaction is already signed - encode the SignedTransaction dict
-                sponsor_transaction = base64.b64encode(
-                    msgpack.packb(signed_sponsor_txn.dictify())
-                ).decode('utf-8')
+                sponsor_transaction = algo_encoding.msgpack_encode(signed_sponsor_txn)
                 
                 logger.info(f'CheckBusinessOptIn: Sponsor transaction base64 length: {len(sponsor_transaction)}')
                 logger.info(f'CheckBusinessOptIn: Sponsor transaction first 100 chars: {sponsor_transaction[:100]}')

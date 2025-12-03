@@ -15,8 +15,8 @@ from typing import List, Optional
 from django.conf import settings
 from algosdk.v2client import algod
 from algosdk import encoding as algo_encoding
-from algosdk import mnemonic
 from algosdk import transaction
+from blockchain.kms_manager import get_kms_signer_from_settings, KMSTransactionSigner
 import msgpack
 import json
 import base64 as _b64
@@ -35,6 +35,7 @@ from users.jwt_context import get_jwt_business_context_with_validation
 from users.models import Account
 
 logger = logging.getLogger(__name__)
+SPONSOR_SIGNER = get_kms_signer_from_settings()
 
 
 class InviteUserTxnType(graphene.ObjectType):
@@ -324,16 +325,14 @@ class SubmitInviteForPhone(graphene.Mutation):
                     return cls(success=False, error='Invalid sponsor transaction payload format')
 
             # Build SignedTransaction objects in their original indices
-            sponsor_mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
-            if not sponsor_mn:
-                return cls(success=False, error='Server missing ALGORAND_SPONSOR_MNEMONIC')
-            sk = mnemonic.to_private_key(sponsor_mn)
+            signer = SPONSOR_SIGNER
 
             # Strictly validate sponsor txns against expected pattern to avoid blind signing
             builder = InviteSendTransactionBuilder()
             expected_mbr = builder._box_mbr_cost(len(invitation_id.encode()), len((message or '').encode()))
             expected_addr = builder.sponsor_address
             expected_rcv = builder.app_address
+            signer.assert_matches_address(expected_addr)
 
             # Debug app global sponsor address
             try:
@@ -396,7 +395,7 @@ class SubmitInviteForPhone(graphene.Mutation):
                 amt = tx_d.get('amt')
                 sponsor_amounts.append(int(amt or 0))
                 tx = transaction.Transaction.undictify(tx_d)
-                stx = tx.sign(sk)
+                stx = signer.sign_transaction(tx)
                 signed_by_index[int(entry.get('index'))] = stx
 
             # Expect exactly two sponsor payments: 0-fee bump and MBR funding
@@ -489,10 +488,6 @@ class ClaimInviteForPhone(graphene.Mutation):
         if not user.is_authenticated:
             return cls(success=False, error='Not authenticated')
 
-        # Contract requires Txn.sender == app.state.admin for claim_invitation.
-        # Use admin mnemonic; only fall back to sponsor if sponsor == admin on-chain.
-        admin_mn = getattr(settings, 'ALGORAND_ADMIN_MNEMONIC', None)
-        sponsor_mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
         algod_client = get_algod_client()
         builder = InviteSendTransactionBuilder()
         contract = builder.contract
@@ -528,36 +523,11 @@ class ClaimInviteForPhone(graphene.Mutation):
         except Exception as e:
             logger.warning('[ClaimInviteForPhone] Could not read app globals: %s', e)
 
-        # Choose operator key with strict validation
-        operator_mn = None
-        operator_label = 'none'
-        operator_addr = None
-        try:
-            from algosdk import account as _acct
-            if admin_mn:
-                admin_sk = mnemonic.to_private_key(admin_mn)
-                operator_addr = _acct.address_from_private_key(admin_sk)
-                operator_mn = admin_mn
-                operator_label = 'admin'
-                if onchain_admin_addr and operator_addr != onchain_admin_addr:
-                    logger.warning('[ClaimInviteForPhone] Provided ALGORAND_ADMIN_MNEMONIC address %s does not match on-chain admin %s', operator_addr, onchain_admin_addr)
-            elif sponsor_mn:
-                # Only use sponsor if it matches on-chain admin (some envs set admin==sponsor)
-                sponsor_sk = mnemonic.to_private_key(sponsor_mn)
-                sponsor_addr = _acct.address_from_private_key(sponsor_sk)
-                if onchain_admin_addr and sponsor_addr != onchain_admin_addr:
-                    err = 'Server missing ALGORAND_ADMIN_MNEMONIC. Contract admin is %s; set this mnemonic to enable claiming.' % (onchain_admin_addr or 'unknown')
-                    logger.warning('[ClaimInviteForPhone] %s', err)
-                    return cls(success=False, error=err)
-                operator_mn = sponsor_mn
-                operator_label = 'sponsor'
-                operator_addr = sponsor_addr
-            else:
-                logger.warning('[ClaimInviteForPhone] Missing ALGORAND_ADMIN_MNEMONIC and ALGORAND_SPONSOR_MNEMONIC; cannot claim invitation')
-                return cls(success=False, error='Server missing admin mnemonic for claiming invitation')
-        except Exception as e:
-            logger.exception('[ClaimInviteForPhone] Failed to derive operator key: %s', e)
-            return cls(success=False, error='Failed to derive operator key for claim')
+        # Use KMS signer for admin/sponsor actions
+        operator_addr = SPONSOR_SIGNER.address
+        operator_label = 'kms_admin'
+        if onchain_admin_addr and operator_addr != onchain_admin_addr:
+            return cls(success=False, error=f'Configured KMS signer {operator_addr} does not match on-chain admin {onchain_admin_addr}')
 
         # Determine the invitation id to claim
         if not invitation_id:
@@ -660,27 +630,12 @@ class ClaimInviteForPhone(graphene.Mutation):
         min_fee = getattr(params, 'min_fee', 1000) or 1000
 
         # Build 2-txn group: fee-bump pay0 (from sponsor), app call (from admin)
-        from algosdk import account as _acct
-        admin_sk = mnemonic.to_private_key(operator_mn)
-        admin_addr = _acct.address_from_private_key(admin_sk)
+        admin_addr = operator_addr
         logger.info('[ClaimInviteForPhone] Using %s address %s for claim', operator_label, admin_addr)
 
         # Choose fee-bump payer: on-chain sponsor if available, else configured sponsor, else admin
         fee_payer_addr = onchain_sponsor_addr or getattr(settings, 'ALGORAND_SPONSOR_ADDRESS', None) or admin_addr
-        fee_payer_sk = None
-        if fee_payer_addr == admin_addr:
-            fee_payer_sk = admin_sk
-        else:
-            if not sponsor_mn:
-                logger.warning('[ClaimInviteForPhone] Missing sponsor mnemonic; falling back to admin to pay fee')
-                fee_payer_sk = admin_sk
-                fee_payer_addr = admin_addr
-            else:
-                fee_payer_sk = mnemonic.to_private_key(sponsor_mn)
-                payer_check = _acct.address_from_private_key(fee_payer_sk)
-                if payer_check != fee_payer_addr:
-                    logger.warning('[ClaimInviteForPhone] Configured sponsor mnemonic/address mismatch; using mnemonic-derived address %s', payer_check)
-                    fee_payer_addr = payer_check
+        SPONSOR_SIGNER.assert_matches_address(fee_payer_addr)
 
         # Increase fee-bump budget to cover inner transactions in the app call
         # Use a generous multiplier to avoid underpayment across networks
@@ -692,7 +647,7 @@ class ClaimInviteForPhone(graphene.Mutation):
         )
 
         atc = AtomicTransactionComposer()
-        atc.add_transaction(TransactionWithSigner(pay0, AccountTransactionSigner(fee_payer_sk)))
+        atc.add_transaction(TransactionWithSigner(pay0, KMSTransactionSigner(SPONSOR_SIGNER)))
         # Include required box references: invitation box and receipt box
         # Build explicit BoxReference objects to avoid SDK tuple ambiguity
         # Index 0 refers to the current application (no ForeignApps needed)
@@ -715,7 +670,7 @@ class ClaimInviteForPhone(graphene.Mutation):
             method=method,
             sender=admin_addr,
             sp=transaction.SuggestedParams(fee=0, first=params.first, last=params.last, gh=params.gh, gen=params.gen, flat_fee=True),
-            signer=AccountTransactionSigner(admin_sk),
+            signer=KMSTransactionSigner(SPONSOR_SIGNER),
             method_args=[invitation_id, recipient_address],
             accounts=accounts_list,
             foreign_assets=foreign_assets,

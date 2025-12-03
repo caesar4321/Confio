@@ -13,13 +13,14 @@ from decimal import Decimal
 from typing import List, Optional, Sequence
 
 import base64
-from algosdk import mnemonic, transaction, encoding
+from algosdk import transaction, encoding
 from algosdk.logic import get_application_address
 from algosdk.error import AlgodHTTPError
 from algosdk.v2client import algod
 from django.conf import settings
 
 from blockchain.algorand_client import get_algod_client
+from blockchain.kms_manager import get_kms_signer_from_settings, KMSTransactionSigner
 
 logger = logging.getLogger(__name__)
 
@@ -53,43 +54,13 @@ class ConfioRewardsService:
         if not self.app_id:
             raise RuntimeError("ALGORAND_REWARD_APP_ID is not configured")
 
-        sponsor_mnemonic: Optional[str] = getattr(
-            settings, "ALGORAND_SPONSOR_MNEMONIC", None
-        )
+        self.signer = get_kms_signer_from_settings()
         reward_sponsor_addr: Optional[str] = getattr(
             settings, "ALGORAND_REWARD_SPONSOR_ADDRESS", None
         )
-
-        if not sponsor_mnemonic:
-            raise RuntimeError("ALGORAND_SPONSOR_MNEMONIC is required for rewards sync")
-
-        self.sponsor_private_key = mnemonic.to_private_key(sponsor_mnemonic)
-        sponsor_address = reward_sponsor_addr or getattr(
-            settings, "ALGORAND_REWARD_SPONSOR_ADDRESS", None
-        )
-        if sponsor_address:
-            self.sponsor_address = sponsor_address
-        else:
-            from algosdk import account
-
-            self.sponsor_address = account.address_from_private_key(
-                self.sponsor_private_key
-            )
-
-        admin_mnemonic: Optional[str] = getattr(
-            settings, "ALGORAND_REWARD_ADMIN_MNEMONIC", None
-        ) or getattr(settings, "ALGORAND_ADMIN_MNEMONIC", None)
-        if not admin_mnemonic:
-            raise RuntimeError(
-                "ALGORAND_REWARD_ADMIN_MNEMONIC or ALGORAND_ADMIN_MNEMONIC is required"
-            )
-
-        self.admin_private_key = mnemonic.to_private_key(admin_mnemonic)
-        from algosdk import account as _account
-
-        self.admin_address = _account.address_from_private_key(
-            self.admin_private_key
-        )
+        self.sponsor_address = reward_sponsor_addr or self.signer.address
+        self.admin_signer = self.signer
+        self.admin_address = self.signer.address
 
         self.confio_asset_id: int = getattr(settings, "ALGORAND_CONFIO_ASSET_ID", 0)
         if not self.confio_asset_id:
@@ -268,8 +239,8 @@ class ConfioRewardsService:
 
         transaction.assign_group_id([payment_txn, app_call])
 
-        signed_payment = payment_txn.sign(self.sponsor_private_key)
-        signed_call = app_call.sign(self.admin_private_key)
+        signed_payment = self.signer.sign_transaction(payment_txn)
+        signed_call = self.admin_signer.sign_transaction(app_call)
 
         try:
             tx_id = self.algod.send_transactions([signed_payment, signed_call])
@@ -468,7 +439,7 @@ class ConfioRewardsService:
         user_app_call.group = gid
 
         try:
-            sponsor_signed = sponsor_fee.sign(self.sponsor_private_key)
+            sponsor_signed = self.signer.sign_transaction(sponsor_fee)
         except Exception as exc:  # pragma: no cover - defensive
             raise RuntimeError("Unable to sign sponsor transaction") from exc
 
@@ -562,7 +533,7 @@ class ConfioRewardsService:
         ref_app_call.group = gid
 
         try:
-            sponsor_signed = sponsor_fee.sign(self.sponsor_private_key)
+            sponsor_signed = self.signer.sign_transaction(sponsor_fee)
         except Exception as exc:  # pragma: no cover - defensive
             raise RuntimeError("Unable to sign sponsor transaction") from exc
 

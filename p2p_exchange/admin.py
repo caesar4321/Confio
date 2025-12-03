@@ -786,24 +786,21 @@ class P2PTradeAdmin(EnhancedAdminMixin, admin.ModelAdmin):
         """
         from django.utils import timezone
         from django.conf import settings
-        from algosdk import mnemonic, encoding as algo_encoding
+        from algosdk import encoding as algo_encoding
         from algosdk.v2client import algod
         from algosdk import transaction
         import base64, msgpack
         from blockchain.p2p_trade_transaction_builder import P2PTradeTransactionBuilder
+        from blockchain.kms_manager import get_kms_signer_from_settings
         from .models import P2PDispute
 
-        admin_mn = getattr(settings, 'ALGORAND_ADMIN_MNEMONIC', None)
-        sponsor_mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
-        if not admin_mn or not sponsor_mn:
-            self.message_user(request, 'Config error: missing ALGORAND_ADMIN_MNEMONIC or ALGORAND_SPONSOR_MNEMONIC', level='error')
+        try:
+            signer = get_kms_signer_from_settings()
+        except Exception:
+            self.message_user(request, 'Config error: missing KMS signer', level='error')
             return
-
-        from algosdk import account as algo_account
-        admin_sk = mnemonic.to_private_key(admin_mn)
-        admin_addr = algo_account.address_from_private_key(admin_sk)
-        sponsor_sk = mnemonic.to_private_key(sponsor_mn)
-        sponsor_addr = algo_account.address_from_private_key(sponsor_sk)
+        admin_addr = signer.address
+        sponsor_addr = admin_addr
 
         client = get_algod_client()
         builder = P2PTradeTransactionBuilder()
@@ -914,12 +911,12 @@ class P2PTradeAdmin(EnhancedAdminMixin, admin.ModelAdmin):
                     continue
                 b0 = base64.b64decode(parsed[0].get('txn'))
                 tx0 = transaction.Transaction.undictify(msgpack.unpackb(b0, raw=False))
-                stx0 = tx0.sign(sponsor_sk)
+                stx0 = signer.sign_transaction(tx0)
 
                 # Sign admin appcall
                 app_b64 = (res.transactions_to_sign or [])[0].get('txn')
                 tx1 = transaction.Transaction.undictify(msgpack.unpackb(base64.b64decode(app_b64), raw=False))
-                stx1 = tx1.sign(admin_sk)
+                stx1 = signer.sign_transaction(tx1)
 
                 try:
                     txid = client.send_transactions([stx0, stx1])

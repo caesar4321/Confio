@@ -9,9 +9,10 @@ def rebuild_sponsor_transactions_option_b(signed_transactions, payment_id, setti
     """
     import base64
     import msgpack
-    from algosdk import encoding, mnemonic, transaction
+    from algosdk import encoding, transaction
     from algosdk.transaction import SuggestedParams
     from algosdk.abi import ABIType, Method, Argument, Returns
+    from blockchain.kms_manager import get_kms_signer_from_settings
     
     try:
         # Step 1: Decode and validate user transactions
@@ -68,11 +69,8 @@ def rebuild_sponsor_transactions_option_b(signed_transactions, payment_id, setti
         from blockchain.payment_transaction_builder import PaymentTransactionBuilder
         builder = PaymentTransactionBuilder(network=settings.ALGORAND_NETWORK)
         
-        sponsor_mnemonic = settings.ALGORAND_SPONSOR_MNEMONIC
-        if not sponsor_mnemonic:
-            return False, 'Sponsor mnemonic not configured', None
-        
-        sponsor_private_key = mnemonic.to_private_key(sponsor_mnemonic)
+        signer = get_kms_signer_from_settings()
+        signer.assert_matches_address(builder.sponsor_address)
         sponsor_address = builder.sponsor_address
         
         # Step 4: Rebuild sponsor transactions with EXACT user parameters
@@ -157,8 +155,8 @@ def rebuild_sponsor_transactions_option_b(signed_transactions, payment_id, setti
         logger.info("Group ID matches! Signing sponsor transactions...")
         
         # Step 6: Sign sponsor transactions
-        stx0 = sponsor_payment.sign(sponsor_private_key)
-        stx3 = app_call.sign(sponsor_private_key)
+        stx0 = signer.sign_transaction(sponsor_payment)
+        stx3 = signer.sign_transaction(app_call)
         
         # Step 7: Prepare final byte array (keep user bytes unchanged)
         from algosdk import encoding as algo_encoding

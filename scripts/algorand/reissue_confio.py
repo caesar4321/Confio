@@ -4,8 +4,8 @@ import sys
 from decimal import Decimal
 
 from algosdk.v2client import algod
-from algosdk import account, mnemonic
 from algosdk import transaction
+from blockchain.kms_manager import get_kms_signer_from_settings
 
 
 def _get_from_django(key: str, default: str | None = None):
@@ -52,13 +52,13 @@ def wait_for_confirmation(client, txid, timeout=20):
 
 
 def main():
-    # Required env vars
-    m = os.getenv('ALGORAND_SPONSOR_MNEMONIC') or _get_from_django('ALGORAND_SPONSOR_MNEMONIC')
-    if not m:
-        print('ALGORAND_SPONSOR_MNEMONIC not set in environment', file=sys.stderr)
+    # Required: KMS signer configured in env/Django settings
+    try:
+        signer = get_kms_signer_from_settings()
+    except Exception as e:
+        print(f'KMS signer not configured: {e}', file=sys.stderr)
         sys.exit(1)
-    sponsor_pk = mnemonic.to_private_key(m)
-    sponsor_addr = account.address_from_private_key(sponsor_pk)
+    sponsor_addr = signer.address
 
     unit_name = os.getenv('CONFIO_UNIT_NAME', 'CONFIO')
     asset_name = os.getenv('CONFIO_ASSET_NAME', 'Confío')
@@ -85,7 +85,7 @@ def main():
         url=url,
         decimals=decimals,
     )
-    stx = txn.sign(sponsor_pk)
+    stx = signer.sign_transaction(txn)
     txid = client.send_transaction(stx)
     ptx = wait_for_confirmation(client, txid, timeout=30)
     asset_id = ptx.get('asset-index') or ptx.get('asset-index', None)
@@ -106,7 +106,7 @@ def main():
         clawback="",
         strict_empty_address_check=False,
     )
-    stx2 = cfg.sign(sponsor_pk)
+    stx2 = signer.sign_transaction(cfg)
     txid2 = client.send_transaction(stx2)
     wait_for_confirmation(client, txid2, timeout=30)
     print('Admin addresses locked (manager/freeze/clawback cleared).')

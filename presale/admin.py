@@ -194,7 +194,7 @@ class PresalePhaseAdmin(admin.ModelAdmin):
     def start_onchain_round(self, request, queryset):
         """Start the selected presale phase on-chain using the contract, matching DB values.
         Uses settings.ALGORAND_PRESALE_APP_ID, ALGORAND_CONFIO_ASSET_ID, ALGORAND_CUSD_ASSET_ID,
-        and admin mnemonic (ALGORAND_ADMIN_MNEMONIC or falls back to ALGORAND_SPONSOR_MNEMONIC).
+        and admin signer (KMS-backed ALGORAND_ADMIN_MNEMONIC deprecated).
         """
         from django.conf import settings
         from decimal import Decimal
@@ -228,21 +228,18 @@ class PresalePhaseAdmin(admin.ModelAdmin):
             # Ensure per-address <= on-chain cap
             if max_per_addr > cap:
                 max_per_addr = cap
-            # Build admin address from mnemonic
-            from algosdk import mnemonic as _mn, account as _acct, encoding as _enc
-            admin_mn = getattr(settings, 'ALGORAND_ADMIN_MNEMONIC', None) or getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
-            if not admin_mn:
-                self.message_user(request, 'Admin/Sponsor mnemonic not configured', level='error')
+            # Build admin address from KMS signer
+            from blockchain.kms_manager import get_kms_signer_from_settings
+            try:
+                signer = get_kms_signer_from_settings()
+                admin_addr = signer.address
+            except Exception:
+                self.message_user(request, 'Admin signer not configured', level='error')
                 return
-            admin_mn_norm = " ".join(str(admin_mn).strip().split())
-            admin_sk = _mn.to_private_key(admin_mn_norm)
-            # Derive the address from the private key using algosdk.account helper
-            admin_addr = _acct.address_from_private_key(admin_sk)
             # Inventory preflight: ensure app holds enough CONFIO for outstanding + (cap / price)
             try:
                 from algosdk.v2client import algod as _algod
                 from contracts.presale.admin_presale import PresaleAdmin as _PA
-                from algosdk import mnemonic as _mn
                 from algosdk.transaction import AssetTransferTxn as _Axfer
                 client = _algod.AlgodClient(
                     getattr(settings, 'ALGORAND_ALGOD_TOKEN', ''),
@@ -293,15 +290,17 @@ class PresalePhaseAdmin(admin.ModelAdmin):
                     SAFETY_BUFFER_CONFIO = 10_000
                 if shortfall > 0:
                     sponsor_addr = getattr(settings, 'ALGORAND_SPONSOR_ADDRESS', None)
-                    sponsor_mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
-                    if not sponsor_addr or not sponsor_mn:
-                        self.message_user(request, 'Sponsor mnemonic/address not configured; cannot auto-fund app', level='error')
+                    try:
+                        from blockchain.kms_manager import get_kms_signer_from_settings
+                        sponsor_signer = get_kms_signer_from_settings()
+                        sponsor_signer.assert_matches_address(sponsor_addr)
+                    except Exception:
+                        self.message_user(request, 'Sponsor signer not configured; cannot auto-fund app', level='error')
                         return
-                    sponsor_sk = _mn.to_private_key(" ".join(str(sponsor_mn).strip().split()))
                     amt = int(shortfall + SAFETY_BUFFER_CONFIO)
                     params_tx = client.suggested_params()
                     tx_fund = _Axfer(sender=sponsor_addr, sp=params_tx, receiver=app_addr, amt=amt, index=int(confio_id))
-                    stx_fund = tx_fund.sign(sponsor_sk)
+                    stx_fund = sponsor_signer.sign_transaction(tx_fund)
                     fund_txid = client.send_transaction(stx_fund)
                     # Wait briefly to ensure balance reflects before start
                     try:
@@ -350,19 +349,20 @@ class PresalePhaseAdmin(admin.ModelAdmin):
             try:
                 from algosdk.logic import get_application_address as _app_addr
                 from algosdk.transaction import ApplicationCallTxn as _AppCall, PaymentTxn as _Pay, OnComplete as _OC, assign_group_id as _assign_gid
-                from algosdk import mnemonic as _mn2
                 app_addr = _app_addr(int(app_id))
                 acct = pa.algod_client.account_info(app_addr)
                 asset_ids = {int(a.get('asset-id')) for a in (acct.get('assets') or [])}
                 needs_confio = int(confio_id) not in asset_ids
                 needs_cusd = int(cusd_id) not in asset_ids
                 if needs_confio or needs_cusd:
-                    sponsor_mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
                     sponsor_addr = getattr(settings, 'ALGORAND_SPONSOR_ADDRESS', None)
-                    if not sponsor_mn or not sponsor_addr:
-                        self.message_user(request, 'Sponsor mnemonic/address not configured; cannot opt-in assets', level='error')
+                    try:
+                        from blockchain.kms_manager import get_kms_signer_from_settings
+                        sponsor_signer = get_kms_signer_from_settings()
+                        sponsor_signer.assert_matches_address(sponsor_addr)
+                    except Exception:
+                        self.message_user(request, 'Sponsor signer not configured; cannot opt-in assets', level='error')
                         return
-                    sponsor_sk = _mn2.to_private_key(" ".join(str(sponsor_mn).strip().split()))
                     params = pa.algod_client.suggested_params()
                     min_fee = getattr(params, 'min_fee', 1000) or 1000
                     # Sponsor bump (2 txns)
@@ -379,7 +379,7 @@ class PresalePhaseAdmin(admin.ModelAdmin):
                         on_complete=_OC.NoOpOC
                     )
                     _assign_gid([bump, call])
-                    stx0 = bump.sign(sponsor_sk)
+                    stx0 = sponsor_signer.sign_transaction(bump)
                     stx1 = call.sign(admin_sk)
                     pa.algod_client.send_transactions([stx0, stx1])
                     # Do not wait; let background tasks/UX handle any confirmation
@@ -421,15 +421,13 @@ class PresalePhaseAdmin(admin.ModelAdmin):
                 self.message_user(request, 'Select exactly one phase to operate on', level='error')
                 return
 
-            # Build admin credentials
-            from algosdk import mnemonic as _mn
-            from algosdk.account import address_from_private_key as _addr_from_sk
-            admin_mn = getattr(settings, 'ALGORAND_ADMIN_MNEMONIC', None) or getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
-            if not admin_mn:
-                self.message_user(request, 'Admin/Sponsor mnemonic not configured', level='error')
+            from blockchain.kms_manager import get_kms_signer_from_settings
+            try:
+                signer = get_kms_signer_from_settings(role=\"admin\")
+            except Exception:
+                self.message_user(request, 'Admin signer not configured', level='error')
                 return
-            admin_sk = _mn.to_private_key(" ".join(str(admin_mn).strip().split()))
-            admin_addr = _addr_from_sk(admin_sk)
+            admin_addr = signer.address
 
             # Query current round state to avoid unnecessary toggle
             from algosdk.v2client import algod as _algod
@@ -468,7 +466,7 @@ class PresalePhaseAdmin(admin.ModelAdmin):
                 foreign_assets=foreign_assets,
                 on_complete=_OC.NoOpOC
             )
-            stx = txn.sign(admin_sk)
+            stx = signer.sign_transaction(txn)
             tx_id = client.send_transaction(stx)
             # No blocking wait; report tx id
             self.message_user(request, f"End round requested (toggle_round). Tx: {tx_id}", level='info')
@@ -491,15 +489,13 @@ class PresalePhaseAdmin(admin.ModelAdmin):
                 self.message_user(request, 'Select exactly one phase to operate on', level='error')
                 return
 
-            # Build admin credentials
-            from algosdk import mnemonic as _mn
-            from algosdk.account import address_from_private_key as _addr_from_sk
-            admin_mn = getattr(settings, 'ALGORAND_ADMIN_MNEMONIC', None) or getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
-            if not admin_mn:
-                self.message_user(request, 'Admin/Sponsor mnemonic not configured', level='error')
+            from blockchain.kms_manager import get_kms_signer_from_settings
+            try:
+                signer = get_kms_signer_from_settings(role=\"admin\")
+            except Exception:
+                self.message_user(request, 'Admin signer not configured', level='error')
                 return
-            admin_sk = _mn.to_private_key(" ".join(str(admin_mn).strip().split()))
-            admin_addr = _addr_from_sk(admin_sk)
+            admin_addr = signer.address
 
             # Read current active/paused state
             from algosdk.v2client import algod as _algod
@@ -536,7 +532,7 @@ class PresalePhaseAdmin(admin.ModelAdmin):
                 foreign_assets=foreign_assets,
                 on_complete=_OC.NoOpOC,
             )
-            stx = txn.sign(admin_sk)
+            stx = signer.sign_transaction(txn)
             tx_id = client.send_transaction(stx)
             self.message_user(request, f"Resume round requested (toggle_round). Tx: {tx_id}", level='info')
         except Exception as e:
@@ -587,12 +583,13 @@ class PresalePhaseAdmin(admin.ModelAdmin):
             )
             return TemplateResponse(request, 'admin/presale/withdraw_unsold_confio.html', context)
 
-        # Build admin credentials
-        from algosdk import mnemonic as _mn
-        from algosdk.account import address_from_private_key as _addr_from_sk
-        admin_mn = getattr(settings, 'ALGORAND_ADMIN_MNEMONIC', None) or getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
-        if not admin_mn:
-            self.message_user(request, 'Admin/Sponsor mnemonic not configured', level='error')
+        # Build admin credentials via KMS
+        from blockchain.kms_manager import get_kms_signer_from_settings
+        try:
+            signer = get_kms_signer_from_settings()
+            admin_addr = signer.address
+        except Exception:
+            self.message_user(request, 'Admin signer not configured', level='error')
             context = dict(
                 self.admin_site.each_context(request),
                 title='Withdraw unsold CONFIO',
@@ -603,11 +600,9 @@ class PresalePhaseAdmin(admin.ModelAdmin):
                 form=None,
                 action='withdraw_unsold_confio',
                 queryset=queryset,
-                error_message='Admin/Sponsor mnemonic not configured',
+                error_message='Admin signer not configured',
             )
             return TemplateResponse(request, 'admin/presale/withdraw_unsold_confio.html', context)
-        admin_sk = _mn.to_private_key(" ".join(str(admin_mn).strip().split()))
-        admin_addr = _addr_from_sk(admin_sk)
 
         # Read current available amount via PresaleAdmin helper
         from contracts.presale.admin_presale import PresaleAdmin as _PA
@@ -678,7 +673,7 @@ class PresalePhaseAdmin(admin.ModelAdmin):
                     return TemplateResponse(request, 'admin/presale/withdraw_unsold_confio.html', context)
                 try:
                     self.logger.info("Submitting withdraw_confio: receiver=%s amount_micro=%s", recv, amt_micro)
-                    result = pa.withdraw_confio(admin_address=admin_addr, admin_sk=admin_sk, receiver=recv, amount=amt_micro)
+                    result = pa.withdraw_confio(admin_address=admin_addr, admin_sk=signer, receiver=recv, amount=amt_micro)
                     tx_id = None
                     withdrawn_amt = None
                     confirmed_round = None
@@ -818,19 +813,16 @@ class PresalePhaseAdmin(admin.ModelAdmin):
             try:
                 has_confio = any(int(a.get('asset-id')) == int(confio_id) for a in (acct.get('assets') or []))
                 if not has_confio:
-                    admin_mn = getattr(settings, 'ALGORAND_ADMIN_MNEMONIC', None) or getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
-                    sponsor_addr = getattr(settings, 'ALGORAND_SPONSOR_ADDRESS', None)
-                    sponsor_mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
-                    if not admin_mn or not sponsor_addr or not sponsor_mn:
-                        self.message_user(request, 'Missing admin/sponsor credentials for app opt-in', level='error')
+                    from blockchain.kms_manager import get_kms_signer_from_settings
+                    try:
+                        signer = get_kms_signer_from_settings()
+                        sponsor_addr = getattr(settings, 'ALGORAND_SPONSOR_ADDRESS', None)
+                        signer.assert_matches_address(sponsor_addr)
+                        admin_addr = signer.address
+                    except Exception:
+                        self.message_user(request, 'Missing admin/sponsor signer for app opt-in', level='error')
                         return
-                    from algosdk import mnemonic as _mn2
                     from algosdk.transaction import ApplicationCallTxn as _AppCall, PaymentTxn as _Pay, OnComplete as _OC, assign_group_id as _assign
-                    admin_sk = _mn2.to_private_key(" ".join(str(admin_mn).strip().split()))
-                    # Derive admin address from sk
-                    from algosdk.account import address_from_private_key as _addr_from_sk
-                    admin_addr = _addr_from_sk(admin_sk)
-                    # Build sponsored bump + app call(opt_in_assets)
                     params = client.suggested_params()
                     min_fee = getattr(params, 'min_fee', 1000) or 1000
                     sp_s = client.suggested_params(); sp_s.flat_fee = True; sp_s.fee = min_fee*2
@@ -838,9 +830,8 @@ class PresalePhaseAdmin(admin.ModelAdmin):
                     sp_a = client.suggested_params(); sp_a.flat_fee = True; sp_a.fee = min_fee*3
                     call = _AppCall(sender=admin_addr, sp=sp_a, index=int(app_id), app_args=[b'opt_in_assets'], foreign_assets=[int(confio_id), int(getattr(settings,'ALGORAND_CUSD_ASSET_ID',0))], on_complete=_OC.NoOpOC)
                     _assign([bump, call])
-                    sponsor_sk = _mn2.to_private_key(" ".join(str(sponsor_mn).strip().split()))
-                    stx0 = bump.sign(sponsor_sk)
-                    stx1 = call.sign(admin_sk)
+                    stx0 = signer.sign_transaction(bump)
+                    stx1 = signer.sign_transaction(call)
                     client.send_transactions([stx0, stx1])
                     # Refresh account info without waiting
                     acct = client.account_info(app_addr)
@@ -866,16 +857,17 @@ class PresalePhaseAdmin(admin.ModelAdmin):
 
             # Send ASA from sponsor to app
             sponsor_addr = getattr(settings, 'ALGORAND_SPONSOR_ADDRESS', None)
-            sponsor_mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
-            if not sponsor_addr or not sponsor_mn:
-                self.message_user(request, 'Sponsor mnemonic/address not configured', level='error')
+            from blockchain.kms_manager import get_kms_signer_from_settings
+            try:
+                sponsor_signer = get_kms_signer_from_settings()
+                sponsor_signer.assert_matches_address(sponsor_addr)
+            except Exception:
+                self.message_user(request, 'Sponsor signer not configured', level='error')
                 return
-            from algosdk import mnemonic as _mn
             from algosdk.transaction import AssetTransferTxn as _Axfer
-            sponsor_sk = _mn.to_private_key(" ".join(str(sponsor_mn).strip().split()))
             params = client.suggested_params()
             txn = _Axfer(sender=sponsor_addr, sp=params, receiver=app_addr, amt=int(shortfall), index=int(confio_id))
-            stx = txn.sign(sponsor_sk)
+            stx = sponsor_signer.sign_transaction(txn)
             txid = client.send_transaction(stx)
             # Do not wait; return to admin immediately
             self.message_user(
@@ -1146,14 +1138,13 @@ class PresaleSettingsAdmin(admin.ModelAdmin):
             app_id = getattr(dj_settings, 'ALGORAND_PRESALE_APP_ID', 0)
             confio_id = getattr(dj_settings, 'ALGORAND_CONFIO_ASSET_ID', 0)
             cusd_id = getattr(dj_settings, 'ALGORAND_CUSD_ASSET_ID', 0)
-            admin_mn = getattr(dj_settings, 'ALGORAND_ADMIN_MNEMONIC', None) or getattr(dj_settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
-            if not app_id or not confio_id or not cusd_id or not admin_mn:
-                self.message_user(request, 'On-chain unlock skipped: missing PRESALE APP/ASSET IDs or admin mnemonic', level='warning')
+            if not app_id or not confio_id or not cusd_id:
+                self.message_user(request, 'On-chain unlock skipped: missing PRESALE APP/ASSET IDs or admin signer', level='warning')
             else:
                 try:
                     from contracts.presale.admin_presale import PresaleAdmin as _PresaleAdmin
-                    from algosdk import mnemonic as _mn
-                    from algosdk.account import address_from_private_key as _addr_from_sk
+                    from blockchain.kms_manager import get_kms_signer_from_settings
+                    signer = get_kms_signer_from_settings()
                     pa = _PresaleAdmin(int(app_id), int(confio_id), int(cusd_id))
                     # Ensure algod client uses Django settings (works with hosted providers)
                     try:
@@ -1168,10 +1159,9 @@ class PresaleSettingsAdmin(admin.ModelAdmin):
                             pa.algod_client = _algod.AlgodClient(_tok, _addr, headers=ua)
                     except Exception:
                         pass
-                    admin_sk = _mn.to_private_key(" ".join(str(admin_mn).strip().split()))
-                    admin_addr = _addr_from_sk(admin_sk)
+                    admin_addr = signer.address
                     # Do not prompt (automation-friendly)
-                    pa.permanent_unlock(admin_address=admin_addr, admin_sk=admin_sk, skip_confirmation=True)
+                    pa.permanent_unlock(admin_address=admin_addr, admin_sk=signer, skip_confirmation=True)
                     self.message_user(request, 'On-chain permanent unlock executed successfully.')
                 except Exception as chain_e:
                     self.message_user(request, f'On-chain unlock attempt failed: {chain_e}', level='error')

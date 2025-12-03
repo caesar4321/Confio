@@ -1,23 +1,35 @@
 """
-Algorand Sponsored Transaction Service with KMD Integration
+Algorand Sponsored Transaction Service backed by AWS KMS
 
 Handles gas sponsorship for Algorand transactions using pooled/atomic transactions.
-Uses KMD (Key Management Daemon) for secure sponsor key management.
+Uses AWS KMS-backed signing for sponsor keys.
 """
 
-import asyncio
-from typing import Dict, List, Optional, Any, Tuple
+import base64
+import logging
+import time
 from decimal import Decimal
+from typing import Any, Dict, List, Optional, Tuple
+
+import asyncio
+from algosdk import account, encoding, transaction
+from algosdk.atomic_transaction_composer import (
+    AccountTransactionSigner,
+    AtomicTransactionComposer,
+    TransactionWithSigner,
+)
+from algosdk.transaction import (
+    AssetTransferTxn,
+    PaymentTxn,
+    Transaction,
+    calculate_group_id,
+    wait_for_confirmation,
+)
 from algosdk.v2client import algod
-from algosdk.kmd import KMDClient
-from algosdk import account, mnemonic, transaction, encoding
-from algosdk.transaction import PaymentTxn, AssetTransferTxn, Transaction, calculate_group_id, wait_for_confirmation
-from algosdk.atomic_transaction_composer import AtomicTransactionComposer, TransactionWithSigner, AccountTransactionSigner
 from django.conf import settings
 from django.core.cache import cache
-import logging
-import base64
-import time
+
+from blockchain.kms_manager import get_kms_signer_from_settings
 
 logger = logging.getLogger(__name__)
 
@@ -30,14 +42,13 @@ class AlgorandSponsorService:
     1. User creates and signs their transaction (0 fee)
     2. Server creates fee payment transaction from sponsor
     3. Both transactions grouped atomically
-    4. KMD signs sponsor transaction securely
+    4. Sponsor transactions are signed via AWS KMS
     5. Atomic group submitted to blockchain
     """
     
     # Cache keys
     SPONSOR_BALANCE_KEY = "algorand:sponsor:balance"
     SPONSOR_STATS_KEY = "algorand:sponsor:stats"
-    KMD_HANDLE_KEY = "algorand:kmd:handle"
     
     # Thresholds
     MIN_SPONSOR_BALANCE = Decimal('0.5')  # Minimum 0.5 ALGO to operate
@@ -48,27 +59,12 @@ class AlgorandSponsorService:
         # Algorand node configuration - single source of truth
         self.algod_address = settings.ALGORAND_ALGOD_ADDRESS
         self.algod_token = getattr(settings, 'ALGORAND_ALGOD_TOKEN', '')
-        self.sponsor_mnemonic = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
-        
-        # KMD configuration (for secure key management) - optional
-        self.kmd_address = getattr(settings, 'ALGORAND_KMD_ADDRESS', None)
-        self.kmd_token = getattr(settings, 'ALGORAND_KMD_TOKEN', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
-        self.kmd_wallet_name = getattr(settings, 'ALGORAND_KMD_WALLET_NAME', 'sponsor_wallet')
-        self.kmd_wallet_password = getattr(settings, 'ALGORAND_KMD_WALLET_PASSWORD', 'sponsor_password')
-        
-        # Sponsor configuration - try direct attribute first, then BLOCKCHAIN_CONFIG
-        self.sponsor_address = getattr(settings, 'ALGORAND_SPONSOR_ADDRESS', None)
-        if not self.sponsor_address and hasattr(settings, 'BLOCKCHAIN_CONFIG'):
-            self.sponsor_address = settings.BLOCKCHAIN_CONFIG.get('ALGORAND_SPONSOR_ADDRESS')
-        
-        self.sponsor_mnemonic = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
-        if not self.sponsor_mnemonic and hasattr(settings, 'BLOCKCHAIN_CONFIG'):
-            self.sponsor_mnemonic = settings.BLOCKCHAIN_CONFIG.get('ALGORAND_SPONSOR_MNEMONIC')
-        
+
+        self.signer = get_kms_signer_from_settings()
+        self.sponsor_address = getattr(settings, 'ALGORAND_SPONSOR_ADDRESS', None) or self.signer.address
+
         # Client instances
         self._algod_client = None
-        self._kmd_client = None
-        self._wallet_handle = None
     
     @property
     def algod(self) -> algod.AlgodClient:
@@ -77,74 +73,6 @@ class AlgorandSponsorService:
             from blockchain.algorand_client import get_algod_client
             self._algod_client = get_algod_client()
         return self._algod_client
-    
-    @property
-    def kmd_client(self) -> KMDClient:
-        """Get KMD client instance"""
-        if not self._kmd_client:
-            self._kmd_client = KMDClient(self.kmd_token, self.kmd_address)
-        return self._kmd_client
-    
-    async def get_wallet_handle(self) -> Optional[str]:
-        """Get or create KMD wallet handle"""
-        # Skip KMD if mnemonic is available (production mode)
-        if self.sponsor_mnemonic:
-            return None
-            
-        # Check cache first
-        cached_handle = cache.get(self.KMD_HANDLE_KEY)
-        if cached_handle:
-            try:
-                # Verify handle is still valid
-                self.kmd_client.list_keys(cached_handle)
-                return cached_handle
-            except:
-                # Handle expired, get new one
-                pass
-        
-        try:
-            # List wallets
-            wallets = self.kmd_client.list_wallets()
-            wallet_id = None
-            
-            for wallet in wallets:
-                if wallet['name'] == self.kmd_wallet_name:
-                    wallet_id = wallet['id']
-                    break
-            
-            if not wallet_id:
-                # Create wallet if it doesn't exist
-                wallet_id = self.kmd_client.create_wallet(
-                    self.kmd_wallet_name,
-                    self.kmd_wallet_password
-                )['id']
-                
-                # Import sponsor key if we have mnemonic
-                if self.sponsor_mnemonic:
-                    handle = self.kmd_client.init_wallet_handle(
-                        wallet_id,
-                        self.kmd_wallet_password
-                    )
-                    self.kmd_client.import_key(
-                        handle,
-                        mnemonic.to_private_key(self.sponsor_mnemonic)
-                    )
-            
-            # Get wallet handle
-            handle = self.kmd_client.init_wallet_handle(
-                wallet_id,
-                self.kmd_wallet_password
-            )
-            
-            # Cache for 5 minutes
-            cache.set(self.KMD_HANDLE_KEY, handle, 300)
-            
-            return handle
-            
-        except Exception as e:
-            logger.error(f"Error getting KMD wallet handle: {e}")
-            # Fall back to using mnemonic directly if KMD unavailable
-            return None
     
     async def fund_account(self, address: str, amount_micro_algos: int) -> Dict[str, Any]:
         """
@@ -654,7 +582,7 @@ class AlgorandSponsorService:
     
     async def _sign_transaction(self, txn: Transaction) -> Optional[str]:
         """
-        Sign a transaction using KMD or fallback to mnemonic.
+        Sign a transaction using the configured KMS signer.
         
         Args:
             txn: Transaction to sign
@@ -663,32 +591,7 @@ class AlgorandSponsorService:
             Base64 encoded signed transaction or None if failed
         """
         try:
-            # In production, always use mnemonic (KMD not available)
-            if self.sponsor_mnemonic:
-                private_key = mnemonic.to_private_key(self.sponsor_mnemonic)
-                signed_txn = txn.sign(private_key)
-                # The sign method returns a SignedTransaction object
-                # Use encoding.msgpack_encode to get the properly formatted bytes
-                signed_bytes = encoding.msgpack_encode(signed_txn)
-                # msgpack_encode returns base64, so just return it
-                return signed_bytes
-            
-            # Try KMD only if no mnemonic (development mode)
-            wallet_handle = await self.get_wallet_handle()
-            if wallet_handle:
-                try:
-                    # Sign with KMD
-                    signed = self.kmd_client.sign_transaction(
-                        wallet_handle,
-                        self.kmd_wallet_password,
-                        txn
-                    )
-                    return base64.b64encode(signed).decode('utf-8')
-                except Exception as e:
-                    logger.warning(f"KMD signing failed: {e}")
-            
-            logger.error("No signing method available")
-            return None
+            return self.signer.sign_transaction_msgpack(txn)
             
         except Exception as e:
             logger.error(f"Error signing transaction: {e}")
@@ -1102,7 +1005,7 @@ class AlgorandSponsorService:
             # For now, return a mock signed transaction
             # In production, this would:
             # 1. Build the fee payment transaction
-            # 2. Sign with sponsor private key from KMD or secure storage
+            # 2. Sign with sponsor private key from KMS
             # 3. Return the signed transaction bytes
             
             logger.info(f"Signing sponsor transaction for {conversion_type} of {amount}")

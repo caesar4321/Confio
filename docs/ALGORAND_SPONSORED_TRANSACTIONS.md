@@ -47,7 +47,7 @@ We've successfully implemented a complete fee-sponsored transaction system for A
 3. **Backend creates atomic group**:
    - Transaction 1: User's transfer (0 fee)
    - Transaction 2: Sponsor's fee payment
-4. **Backend signs sponsor transaction** with KMD or mnemonic
+4. **Backend signs sponsor transaction** with KMD or KMS
 5. **App signs user transaction** with local wallet
 6. **Both transactions submitted** as atomic group
 7. **Blockchain executes atomically** - both succeed or both fail
@@ -82,7 +82,10 @@ group = [user_txn, sponsor_txn]
 ```bash
 # Environment variables are already in .env.algorand
 ALGORAND_SPONSOR_ADDRESS=FZZWDTYUTU2EINV36OAFFG5SJZRJWGUI77PN7ZK2WY7VIHTCT55WERTMSI
-ALGORAND_SPONSOR_MNEMONIC=region crop bonus embody garden health charge keen plastic bottom apology spatial frequent example kitten else legal tobacco filter patrol hurry lizard blur absent knock
+# Sponsor signing is via AWS KMS
+USE_KMS_SIGNING=True
+KMS_KEY_ALIAS=confio-mainnet-sponsor
+KMS_REGION=eu-central-2
 ```
 
 ### 2. Fund Sponsor Account
@@ -180,7 +183,7 @@ query CheckSponsorHealth {
 
 1. **Sponsor Key Protection**:
    - Use KMD in production (memory-only storage)
-   - Never expose sponsor mnemonic in logs
+   - Never expose KMS credentials/aliases in logs
    - Rotate sponsor accounts periodically
 
 2. **Rate Limiting**:

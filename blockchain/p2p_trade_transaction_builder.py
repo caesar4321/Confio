@@ -27,6 +27,7 @@ from algosdk.atomic_transaction_composer import (
     AccountTransactionSigner,
     TransactionSigner,
 )
+from blockchain.kms_manager import get_kms_signer_from_settings
 
 
 def _abi_contract() -> Contract:
@@ -72,10 +73,25 @@ class P2PTradeTransactionBuilder:
         self.cusd_asset_id = int(settings.ALGORAND_CUSD_ASSET_ID)
         self.confio_asset_id = int(getattr(settings, 'ALGORAND_CONFIO_ASSET_ID', 0))
         self.sponsor_address = settings.ALGORAND_SPONSOR_ADDRESS
-        self.sponsor_mnemonic = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
+        self.signer = get_kms_signer_from_settings()
+        self.signer.assert_matches_address(self.sponsor_address)
 
         # ABI
         self.contract = _abi_contract()
+
+    def _sign_sponsor_transactions(self, txns: List[transaction.Transaction]) -> List[Dict]:
+        """Return msgpack-encoded txns plus KMS signatures."""
+        signed = []
+        for idx, txn in enumerate(txns):
+            raw_txn = txn.txn if hasattr(txn, 'txn') else txn
+            signed.append(
+                {
+                    'txn': algo_encoding.msgpack_encode(raw_txn),
+                    'signed': self.signer.sign_transaction_msgpack(raw_txn),
+                    'index': idx,
+                }
+            )
+        return signed
 
     @staticmethod
     def _trade_box_mbr(key_len: int) -> int:
@@ -213,7 +229,9 @@ class P2PTradeTransactionBuilder:
                 elif idx == app_index:
                     user_txs.append({'txn': b64, 'signers': [seller_address], 'message': 'Create trade (AppCall)'})
                 else:
-                    sponsor_txs.append({'txn': b64, 'signed': None, 'index': idx})
+                    sponsor_txs.append(
+                        {'txn': b64, 'signed': self.signer.sign_transaction_msgpack(tw.txn), 'index': idx}
+                    )
 
             return BuildResult(
                 success=True,
@@ -267,7 +285,7 @@ class P2PTradeTransactionBuilder:
 
             tws = atc.build_group()
             gid = transaction.calculate_group_id([t.txn for t in tws])
-            sponsor_txs = [{'txn': algo_encoding.msgpack_encode(t.txn), 'signed': None, 'index': i} for i, t in enumerate(tws)]
+            sponsor_txs = self._sign_sponsor_transactions([t.txn for t in tws])
             return BuildResult(True, transactions_to_sign=[], sponsor_transactions=sponsor_txs, group_id=base64.b64encode(gid).decode(), trade_id=trade_id)
         except Exception as e:
             return BuildResult(False, error=str(e))
@@ -310,7 +328,7 @@ class P2PTradeTransactionBuilder:
 
             tws = atc.build_group()
             gid = transaction.calculate_group_id([t.txn for t in tws])
-            sponsor_txs = [{'txn': algo_encoding.msgpack_encode(tws[0].txn), 'signed': None, 'index': 0}]
+            sponsor_txs = self._sign_sponsor_transactions([tws[0].txn])
             user_txs = [{'txn': algo_encoding.msgpack_encode(tws[1].txn), 'signers': [buyer_address], 'message': 'Accept trade'}]
             return BuildResult(True, transactions_to_sign=user_txs, sponsor_transactions=sponsor_txs, group_id=base64.b64encode(gid).decode(), trade_id=trade_id)
         except Exception as e:
@@ -362,7 +380,7 @@ class P2PTradeTransactionBuilder:
 
             tws = atc.build_group()
             gid = transaction.calculate_group_id([t.txn for t in tws])
-            sponsor_txs = [{'txn': algo_encoding.msgpack_encode(tws[0].txn), 'signed': None, 'index': 0}]
+            sponsor_txs = self._sign_sponsor_transactions([tws[0].txn])
             user_txs = [{'txn': algo_encoding.msgpack_encode(tws[1].txn), 'signers': [buyer_address], 'message': 'Mark P2P trade as paid'}]
             return BuildResult(True, transactions_to_sign=user_txs, sponsor_transactions=sponsor_txs, group_id=base64.b64encode(gid).decode(), trade_id=trade_id)
         except Exception as e:
@@ -426,7 +444,7 @@ class P2PTradeTransactionBuilder:
 
             tws = atc.build_group()
             gid = transaction.calculate_group_id([t.txn for t in tws])
-            sponsor_txs = [{'txn': algo_encoding.msgpack_encode(tws[0].txn), 'signed': None, 'index': 0}]
+            sponsor_txs = self._sign_sponsor_transactions([tws[0].txn])
             user_txs = [{'txn': algo_encoding.msgpack_encode(tws[1].txn), 'signers': [seller_address], 'message': 'Confirm payment received'}]
             return BuildResult(True, transactions_to_sign=user_txs, sponsor_transactions=sponsor_txs, group_id=base64.b64encode(gid).decode(), trade_id=trade_id)
         except Exception as e:
@@ -477,7 +495,7 @@ class P2PTradeTransactionBuilder:
 
             tws = atc.build_group()
             gid = transaction.calculate_group_id([t.txn for t in tws])
-            sponsor_txs = [{'txn': algo_encoding.msgpack_encode(tws[0].txn), 'signed': None, 'index': 0}]
+            sponsor_txs = self._sign_sponsor_transactions([tws[0].txn])
             user_txs = [{'txn': algo_encoding.msgpack_encode(tws[1].txn), 'signers': [caller_address], 'message': 'Cancelar intercambio (expirado)'}]
             return BuildResult(True, transactions_to_sign=user_txs, sponsor_transactions=sponsor_txs, group_id=base64.b64encode(gid).decode(), trade_id=trade_id)
         except Exception as e:
@@ -527,7 +545,7 @@ class P2PTradeTransactionBuilder:
 
             tws = atc.build_group()
             gid = transaction.calculate_group_id([t.txn for t in tws])
-            sponsor_txs = [{'txn': algo_encoding.msgpack_encode(tws[0].txn), 'signed': None, 'index': 0}]
+            sponsor_txs = self._sign_sponsor_transactions([tws[0].txn])
             user_txs = [{'txn': algo_encoding.msgpack_encode(tws[1].txn), 'signers': [opener_address], 'message': 'Open dispute'}]
             return BuildResult(True, transactions_to_sign=user_txs, sponsor_transactions=sponsor_txs, group_id=base64.b64encode(gid).decode(), trade_id=trade_id)
         except Exception as e:
@@ -615,7 +633,7 @@ class P2PTradeTransactionBuilder:
 
             tws = atc.build_group()
             gid = transaction.calculate_group_id([t.txn for t in tws])
-            sponsor_txs = [{'txn': algo_encoding.msgpack_encode(tws[0].txn), 'signed': None, 'index': 0}]
+            sponsor_txs = self._sign_sponsor_transactions([tws[0].txn])
             user_txs = [{'txn': algo_encoding.msgpack_encode(tws[1].txn), 'signers': [admin_address], 'message': 'Resolve dispute'}]
             return BuildResult(True, transactions_to_sign=user_txs, sponsor_transactions=sponsor_txs, group_id=base64.b64encode(gid).decode(), trade_id=trade_id)
         except Exception as e:

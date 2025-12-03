@@ -6,22 +6,21 @@ Usage:
 
 Notes:
 - Uses ALGORAND testnet/mainnet per settings.
-- Signs with ALGORAND_SPONSOR_MNEMONIC (must be the admin of the cUSD app on testnet).
+- Signs with configured KMS sponsor/admin key.
 - Assumes recipient has already opted in to the cUSD ASA.
 """
 from decimal import Decimal
 from django.core.management.base import BaseCommand
 from django.conf import settings
-from algosdk import mnemonic
 from algosdk.atomic_transaction_composer import (
     AtomicTransactionComposer,
-    AccountTransactionSigner,
 )
 from algosdk.v2client import algod
 from algosdk.abi import Contract
 from algosdk.transaction import ApplicationOptInTxn, wait_for_confirmation, PaymentTxn
 from algosdk.atomic_transaction_composer import TransactionWithSigner
 from algosdk.logic import get_application_address
+from blockchain.kms_manager import get_kms_signer_from_settings, KMSTransactionSigner
 
 
 class Command(BaseCommand):
@@ -40,7 +39,6 @@ class Command(BaseCommand):
         asa_id = getattr(settings, 'ALGORAND_CUSD_ASSET_ID', None)
         algod_addr = getattr(settings, 'ALGORAND_ALGOD_ADDRESS', None)
         algod_token = getattr(settings, 'ALGORAND_ALGOD_TOKEN', '')
-        sponsor_mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
 
         if not app_id:
             self.stdout.write(self.style.ERROR('ALGORAND_CUSD_APP_ID not configured'))
@@ -51,19 +49,8 @@ class Command(BaseCommand):
         if not algod_addr:
             self.stdout.write(self.style.ERROR('ALGORAND_ALGOD_ADDRESS not configured'))
             return
-        if not sponsor_mn:
-            self.stdout.write(self.style.ERROR('ALGORAND_SPONSOR_MNEMONIC not configured'))
-            self.stdout.write('Set ALGORAND_SPONSOR_MNEMONIC to the admin/sponsor mnemonic for testnet.')
-            return
-
-        # Derive admin/sponsor account
-        try:
-            sk = mnemonic.to_private_key(sponsor_mn)
-            from algosdk import account
-            sender = account.address_from_private_key(sk)
-        except Exception as e:
-            self.stdout.write(self.style.ERROR(f'Failed to derive sponsor key: {e}'))
-            return
+        kms_signer = get_kms_signer_from_settings()
+        sender = kms_signer.address
 
         # Build algod client
         client = algod.AlgodClient(algod_token, algod_addr)
@@ -104,7 +91,7 @@ class Command(BaseCommand):
                     # Use ABI method call for opt-in so the selector is present in args
                     method_optin = contract.get_method_by_name('opt_in')
                     atc_opt = AtomicTransactionComposer()
-                    signer = AccountTransactionSigner(sk)
+                    signer = KMSTransactionSigner(kms_signer)
                     opt_params = client.suggested_params()
                     atc_opt.add_method_call(
                         app_id=int(app_id),
@@ -143,7 +130,7 @@ class Command(BaseCommand):
             try:
                 method_setup = contract.get_method_by_name('setup_assets')
                 atc_setup = AtomicTransactionComposer()
-                signer = AccountTransactionSigner(sk)
+                signer = KMSTransactionSigner(kms_signer)
                 # Payment to app for min balance + fees (~0.6 ALGO as per docs)
                 app_addr = get_application_address(int(app_id))
                 pay_sp = client.suggested_params()
@@ -177,7 +164,7 @@ class Command(BaseCommand):
 
         try:
             atc = AtomicTransactionComposer()
-            signer = AccountTransactionSigner(sk)
+            signer = KMSTransactionSigner(kms_signer)
             atc.add_method_call(
                 app_id=int(app_id),
                 method=method,

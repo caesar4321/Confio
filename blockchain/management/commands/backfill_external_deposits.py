@@ -21,6 +21,7 @@ from blockchain.algorand_client import AlgorandClient
 from blockchain.models import ProcessedIndexerTransaction
 from users.models import Account
 from send.models import SendTransaction
+from blockchain.kms_manager import get_kms_signer_from_settings
 
 
 class Command(BaseCommand):
@@ -55,12 +56,8 @@ class Command(BaseCommand):
             return
 
         # Determine sponsor address (treated as external)
-        sponsor_address = None
         try:
-            from algosdk import mnemonic as _mn, account as _acct
-            sponsor_mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
-            if sponsor_mn:
-                sponsor_address = _acct.address_from_private_key(_mn.to_private_key(sponsor_mn))
+            sponsor_address = get_kms_signer_from_settings().address
         except Exception:
             sponsor_address = None
 
@@ -159,4 +156,3 @@ class Command(BaseCommand):
                 errors += 1
 
         self.stdout.write(self.style.SUCCESS(f'Backfill complete: created={created}, skipped={skipped}, errors={errors}'))
-
