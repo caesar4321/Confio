@@ -233,6 +233,7 @@ class PresalePhaseAdmin(admin.ModelAdmin):
             try:
                 signer = get_kms_signer_from_settings()
                 admin_addr = signer.address
+                admin_sk = signer.sign_transaction
             except Exception:
                 self.message_user(request, 'Admin signer not configured', level='error')
                 return
