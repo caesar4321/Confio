@@ -23,6 +23,7 @@ from algosdk.transaction import (
 from algosdk.abi import Method, Returns, Argument
 from algosdk.encoding import decode_address
 from blockchain.kms_manager import KMSSigner
+from blockchain.kms_manager import KMSSigner
 
 # Strict verification helper placed before runtime use
 def verify_post_deploy(algod_client, app_id: int, app_address: str, expected_cusd: int, expected_confio: int, expected_sponsor: str):
@@ -354,8 +355,21 @@ def deploy_payment_contract():
         wait_for_confirmation(algod_client, tx_id, 10)
         print("✅ Assets setup complete")
     
-    # Set sponsor (required)
-    print(f"\nSetting sponsor address...")
+    # Pause -> Set sponsor -> Unpause (contract requires paused state)
+    print(f"\nPausing contract to set sponsor...")
+    params = algod_client.suggested_params()
+    pause_txn = ApplicationCallTxn(
+        sender=admin_address,
+        sp=params,
+        index=app_id,
+        on_complete=OnComplete.NoOpOC,
+        app_args=[bytes.fromhex("bdc4f57f")],  # pause()void selector
+    )
+    signed_pause = admin_signer(pause_txn)
+    algod_client.send_transaction(signed_pause)
+    wait_for_confirmation(algod_client, signed_pause.transaction.get_txid(), 10)
+
+    print("\nSetting sponsor address...")
     method = Method(
         name="set_sponsor",
         args=[Argument(arg_type="address", name="sponsor")],
@@ -377,6 +391,20 @@ def deploy_payment_contract():
     print(f"Set sponsor transaction sent: {tx_id}")
     wait_for_confirmation(algod_client, tx_id, 10)
     print("✅ Sponsor address set")
+
+    print("\nUnpausing contract...")
+    params = algod_client.suggested_params()
+    unpause_txn = ApplicationCallTxn(
+        sender=admin_address,
+        sp=params,
+        index=app_id,
+        on_complete=OnComplete.NoOpOC,
+        app_args=[bytes.fromhex("1f8f2a3f")],  # unpause()void selector
+    )
+    signed_unpause = admin_signer(unpause_txn)
+    algod_client.send_transaction(signed_unpause)
+    wait_for_confirmation(algod_client, signed_unpause.transaction.get_txid(), 10)
+    print("✅ Contract unpaused")
     
     # Set fee recipient (use admin as default)
     print(f"\nSetting fee recipient...")
