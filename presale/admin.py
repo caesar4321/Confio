@@ -164,6 +164,7 @@ class PresalePhaseAdmin(admin.ModelAdmin):
         'end_current_round',
         'resume_current_round',
         'withdraw_unsold_confio',
+        'withdraw_cusd',
         'fund_app_with_confio',
     ]
     
@@ -795,6 +796,176 @@ class PresalePhaseAdmin(admin.ModelAdmin):
         )
         return TemplateResponse(request, 'admin/presale/withdraw_unsold_confio.html', context)
     withdraw_unsold_confio.short_description = "Withdraw unsold CONFIO (interactive)"
+
+    def withdraw_cusd(self, request, queryset):
+        """Interactive admin action to withdraw collected cUSD to an address (default admin)."""
+        from django.conf import settings
+        if queryset.count() != 1:
+            self.message_user(request, 'Select exactly one phase to operate on', level='error')
+            context = dict(
+                self.admin_site.each_context(request),
+                title='Withdraw collected cUSD',
+                cusd_balance=0,
+                phase=None,
+                form=None,
+                action='withdraw_cusd',
+                queryset=queryset,
+                error_message='Select exactly one phase to operate on',
+            )
+            return TemplateResponse(request, 'admin/presale/withdraw_cusd.html', context)
+        phase = queryset.first()
+
+        app_id = int(getattr(settings, 'ALGORAND_PRESALE_APP_ID', 0) or 0)
+        cusd_id = int(getattr(settings, 'ALGORAND_CUSD_ASSET_ID', 0) or 0)
+        confio_id = int(getattr(settings, 'ALGORAND_CONFIO_ASSET_ID', 0) or 0)
+        if not app_id or not cusd_id:
+            self.message_user(request, 'PRESALE_APP_ID/cUSD_ASSET_ID not configured', level='error')
+            context = dict(
+                self.admin_site.each_context(request),
+                title='Withdraw collected cUSD',
+                cusd_balance=0,
+                phase=phase,
+                form=None,
+                action='withdraw_cusd',
+                queryset=queryset,
+                error_message='PRESALE_APP_ID/cUSD_ASSET_ID not configured',
+            )
+            return TemplateResponse(request, 'admin/presale/withdraw_cusd.html', context)
+
+        # Build admin credentials via KMS
+        from blockchain.kms_manager import get_kms_signer_from_settings
+        try:
+            signer = get_kms_signer_from_settings()
+            admin_addr = signer.address
+        except Exception:
+            self.message_user(request, 'Admin signer not configured', level='error')
+            context = dict(
+                self.admin_site.each_context(request),
+                title='Withdraw collected cUSD',
+                cusd_balance=0,
+                phase=phase,
+                form=None,
+                action='withdraw_cusd',
+                queryset=queryset,
+                error_message='Admin signer not configured',
+            )
+            return TemplateResponse(request, 'admin/presale/withdraw_cusd.html', context)
+
+        # Read current cUSD balance via PresaleAdmin helper
+        from contracts.presale.admin_presale import PresaleAdmin as _PA
+        from algosdk.v2client import algod as _algod
+        pa = _PA(int(app_id), int(confio_id), int(cusd_id))
+        try:
+            _addr = getattr(settings, 'ALGORAND_ALGOD_ADDRESS', '')
+            _tok = getattr(settings, 'ALGORAND_ALGOD_TOKEN', '')
+            ua = {'User-Agent': 'confio-admin/algosdk'}
+            if 'nodely' in (_addr or '').lower() and (_tok or ''):
+                headers = {**ua, 'X-API-Key': _tok}
+                pa.algod_client = _algod.AlgodClient('', _addr, headers=headers)
+            else:
+                pa.algod_client = _algod.AlgodClient(_tok, _addr, headers=ua)
+        except Exception:
+            pass
+        acct = pa.algod_client.account_info(pa.app_addr)
+        cusd_balance = 0
+        for a in (acct.get('assets') or []):
+            if int(a.get('asset-id')) == int(cusd_id):
+                cusd_balance = int(a.get('amount') or 0)
+                break
+
+        class WithdrawCUSDForm(forms.Form):
+            receiver = forms.CharField(
+                label='Receiver address', required=False,
+                help_text='Leave blank to send to admin address')
+
+        if request.method == 'POST' and request.POST.get('apply') == '1':
+            form = WithdrawCUSDForm(request.POST)
+            if form.is_valid():
+                recv = form.cleaned_data.get('receiver') or admin_addr
+                if cusd_balance <= 0:
+                    self.message_user(request, 'No cUSD available to withdraw.', level='info')
+                    context = dict(
+                        self.admin_site.each_context(request),
+                        title='Withdraw collected cUSD',
+                        cusd_balance=cusd_balance/10**6,
+                        phase=phase,
+                        form=form,
+                        action='withdraw_cusd',
+                        queryset=queryset,
+                        result_message='No cUSD available to withdraw.',
+                        result_level='info',
+                    )
+                    return TemplateResponse(request, 'admin/presale/withdraw_cusd.html', context)
+                try:
+                    self.logger.info("Submitting withdraw_cusd: receiver=%s", recv)
+                    result = pa.withdraw_cusd(admin_address=admin_addr, admin_sk=signer, receiver=recv)
+                    tx_id = None
+                    withdrawn_amt = None
+                    confirmed_round = None
+                    if isinstance(result, dict):
+                        tx_id = result.get('tx_id')
+                        withdrawn_amt = result.get('amount')
+                        confirmed_round = result.get('confirmed')
+                    # Refresh balance
+                    try:
+                        acct = pa.algod_client.account_info(pa.app_addr)
+                        cusd_balance = 0
+                        for a in (acct.get('assets') or []):
+                            if int(a.get('asset-id')) == int(cusd_id):
+                                cusd_balance = int(a.get('amount') or 0)
+                                break
+                    except Exception:
+                        pass
+                    msg = "Withdraw submitted"
+                    if tx_id:
+                        msg += f". Tx: {tx_id}"
+                    if withdrawn_amt is not None:
+                        msg += f". Amount: {withdrawn_amt/10**6:,.6f} cUSD"
+                    if confirmed_round:
+                        msg += f". Round: {confirmed_round}"
+                    self.message_user(request, msg, level='success')
+                    context = dict(
+                        self.admin_site.each_context(request),
+                        title='Withdraw collected cUSD',
+                        cusd_balance=cusd_balance/10**6,
+                        phase=phase,
+                        form=form,
+                        action='withdraw_cusd',
+                        queryset=queryset,
+                        tx_id=tx_id,
+                        withdrawn_cusd=(withdrawn_amt/10**6 if withdrawn_amt is not None else None),
+                        receiver_addr=recv,
+                    )
+                    return TemplateResponse(request, 'admin/presale/withdraw_cusd.html', context)
+                except Exception as e:
+                    self.logger.exception("withdraw_cusd failed")
+                    self.message_user(request, f"Withdraw failed: {e}", level='error')
+                    context = dict(
+                        self.admin_site.each_context(request),
+                        title='Withdraw collected cUSD',
+                        cusd_balance=cusd_balance/10**6,
+                        phase=phase,
+                        form=form,
+                        action='withdraw_cusd',
+                        queryset=queryset,
+                        error_message=str(e),
+                    )
+                    return TemplateResponse(request, 'admin/presale/withdraw_cusd.html', context)
+        else:
+            form = WithdrawCUSDForm(initial={'receiver': admin_addr})
+
+        context = dict(
+            self.admin_site.each_context(request),
+            title='Withdraw collected cUSD',
+            cusd_balance=cusd_balance/10**6,
+            phase=phase,
+            form=form,
+            action='withdraw_cusd',
+            queryset=queryset,
+        )
+        return TemplateResponse(request, 'admin/presale/withdraw_cusd.html', context)
+    withdraw_cusd.short_description = "Withdraw collected cUSD (interactive)"
+
 
     def fund_app_with_confio(self, request, queryset):
         """Fund the presale app address with CONFIO from the sponsor account to cover cap shortfall."""
