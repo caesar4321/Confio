@@ -34,6 +34,7 @@ from algosdk.transaction import (
     wait_for_confirmation
 )
 from algosdk.logic import get_application_address
+from blockchain.kms_manager import KMSSigner
 
 from confio_presale import compile_presale
 from state_utils import decode_state
@@ -56,7 +57,11 @@ class PresaleDeployer:
         resp = self.algod_client.compile(teal_src)
         return base64.b64decode(resp["result"])
         
-    def deploy_contract(self, creator_address: str, creator_sk: str,
+    def _sign(self, txn, signer):
+        """Sign with either a raw private key bytes or a callable signer."""
+        return signer(txn) if callable(signer) else txn.sign(signer)
+
+    def deploy_contract(self, creator_address: str, creator_sk,
                        confio_id: int, cusd_id: int, admin_address: str,
                        sponsor_address: str) -> int:
         """Deploy the presale contract"""
@@ -117,7 +122,7 @@ class PresaleDeployer:
         )
         
         # Sign and send
-        signed_txn = txn.sign(creator_sk)
+        signed_txn = self._sign(txn, creator_sk)
         tx_id = self.algod_client.send_transaction(signed_txn)
         
         # Wait for confirmation
@@ -131,8 +136,8 @@ class PresaleDeployer:
         
         return self.app_id
     
-    def opt_in_assets(self, admin_address: str, admin_sk: str,
-                      sponsor_address: str, sponsor_sk: str,
+    def opt_in_assets(self, admin_address: str, admin_sk,
+                      sponsor_address: str, sponsor_sk,
                       confio_id: int, cusd_id: int):
         """Opt the contract into CONFIO and cUSD assets"""
         
@@ -149,7 +154,7 @@ class PresaleDeployer:
             amt=400000  # 0.40 ALGO MBR: 0.1 base + 0.1 per ASA × 2 + 0.1 buffer for future-proofing
         )
         
-        signed_mbr = mbr_payment.sign(sponsor_sk)
+        signed_mbr = self._sign(mbr_payment, sponsor_sk)
         tx_id = self.algod_client.send_transaction(signed_mbr)
         wait_for_confirmation(self.algod_client, tx_id, 4)
         print("     ✓ MBR funded")
@@ -195,8 +200,8 @@ class PresaleDeployer:
         assign_group_id(group)  # Mutates in place, ignore return value
         
         # Sign transactions
-        signed_bump = group[0].sign(sponsor_sk)
-        signed_app = group[1].sign(admin_sk)
+        signed_bump = self._sign(group[0], sponsor_sk)
+        signed_app = self._sign(group[1], admin_sk)
         
         # Send group
         self.algod_client.send_transactions([signed_bump, signed_app])
@@ -208,7 +213,7 @@ class PresaleDeployer:
         
         return True
     
-    def fund_with_confio(self, sender_address: str, sender_sk: str,
+    def fund_with_confio(self, sender_address: str, sender_sk,
                         confio_id: int, amount: int):
         """Fund the presale contract with CONFIO tokens"""
         
@@ -226,13 +231,13 @@ class PresaleDeployer:
         )
         
         # Sign and send
-        signed_txn = txn.sign(sender_sk)
+        signed_txn = self._sign(txn, sender_sk)
         tx_id = self.algod_client.send_transaction(signed_txn)
         wait_for_confirmation(self.algod_client, tx_id, 4)
         
         print(f"✅ Contract funded with CONFIO")
         
-    def start_presale_round(self, admin_address: str, admin_sk: str,
+    def start_presale_round(self, admin_address: str, admin_sk,
                            price: int, cusd_cap: int, max_per_addr: int):
         """Start a new presale round
         
@@ -264,7 +269,7 @@ class PresaleDeployer:
         )
         
         # Sign and send
-        signed_txn = txn.sign(admin_sk)
+        signed_txn = self._sign(txn, admin_sk)
         tx_id = self.algod_client.send_transaction(signed_txn)
         wait_for_confirmation(self.algod_client, tx_id, 4)
         
@@ -320,25 +325,48 @@ def main():
     sponsor_address = os.getenv('ALGORAND_SPONSOR_ADDRESS')
     sponsor_mn = os.getenv('ALGORAND_SPONSOR_MNEMONIC')
     admin_mn = os.getenv('ALGORAND_ADMIN_MNEMONIC') or sponsor_mn
-    # Normalize mnemonics (collapse whitespace, lowercase)
-    def _norm(m):
-        if not m:
-            return m
-        return " ".join(m.strip().split()).lower()
-    sponsor_mn = _norm(sponsor_mn)
-    admin_mn = _norm(admin_mn)
-    # Fallback if admin mnemonic malformed -> use sponsor
-    if not isinstance(admin_mn, str) or len(admin_mn.split()) != 25:
-        admin_mn = sponsor_mn
+    use_kms = os.getenv("USE_KMS_SIGNING", "").lower() == "true"
+    kms_alias = os.getenv("KMS_ADMIN_KEY_ALIAS") or os.getenv("KMS_KEY_ALIAS")
+    kms_region = os.getenv("KMS_REGION", "eu-central-2")
 
-    if not (confio_id and cusd_id and sponsor_address and sponsor_mn and admin_mn):
-        print('Missing env. Set ALGORAND_CONFIO_ASSET_ID, ALGORAND_CUSD_ASSET_ID, ALGORAND_SPONSOR_ADDRESS, ALGORAND_SPONSOR_MNEMONIC, ALGORAND_ADMIN_MNEMONIC(optional).')
+    if use_kms:
+        if not kms_alias:
+            print("Missing KMS alias; set KMS_ADMIN_KEY_ALIAS or KMS_KEY_ALIAS")
+            return
+        kms_signer = KMSSigner(kms_alias, region_name=kms_region)
+        sponsor_address = sponsor_address or kms_signer.address
+        admin_address = sponsor_address
+        admin_sk = kms_signer.sign_transaction
+        sponsor_sk = kms_signer.sign_transaction
+        # Guard address mismatch
+        if sponsor_address and sponsor_address != kms_signer.address:
+            print(f"Warning: ALGORAND_SPONSOR_ADDRESS ({sponsor_address}) != KMS address ({kms_signer.address}); using KMS address.")
+            sponsor_address = kms_signer.address
+    else:
+        # Normalize mnemonics (collapse whitespace, lowercase)
+        def _norm(m):
+            if not m:
+                return m
+            return " ".join(m.strip().split()).lower()
+        sponsor_mn = _norm(sponsor_mn)
+        admin_mn = _norm(admin_mn)
+        # Fallback if admin mnemonic malformed -> use sponsor
+        if not isinstance(admin_mn, str) or len(admin_mn.split()) != 25:
+            admin_mn = sponsor_mn
+
+        if not (confio_id and cusd_id and sponsor_address and sponsor_mn and admin_mn):
+            print('Missing env. Set ALGORAND_CONFIO_ASSET_ID, ALGORAND_CUSD_ASSET_ID, ALGORAND_SPONSOR_ADDRESS, ALGORAND_SPONSOR_MNEMONIC, ALGORAND_ADMIN_MNEMONIC(optional).')
+            return
+
+        admin_sk = _mn.to_private_key(admin_mn)
+        sponsor_sk = _mn.to_private_key(sponsor_mn)
+        # Use sponsor address as admin address (admin actions signed by same key as requested)
+        admin_address = sponsor_address
+        # Keep sponsor_address as provided
+
+    if not (confio_id and cusd_id and sponsor_address):
+        print('Missing env. Set ALGORAND_CONFIO_ASSET_ID, ALGORAND_CUSD_ASSET_ID, ALGORAND_SPONSOR_ADDRESS (+ KMS_* or mnemonics).')
         return
-
-    admin_sk = _mn.to_private_key(admin_mn)
-    sponsor_sk = _mn.to_private_key(sponsor_mn)
-    # Use sponsor address as admin address (admin actions signed by same key as requested)
-    admin_address = sponsor_address
 
     deployer = PresaleDeployer()
     app_id = deployer.deploy_contract(

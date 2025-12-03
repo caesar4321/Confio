@@ -22,6 +22,7 @@ from algosdk.logic import get_application_address
 from algosdk.transaction import PaymentTxn, AssetTransferTxn, ApplicationNoOpTxn, SuggestedParams
 
 from .algorand_account_manager import AlgorandAccountManager
+from .kms_manager import get_kms_signer_from_settings
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +52,23 @@ class PresaleTransactionBuilder:
             app_id=app_id_int,
             cusd_asset_id=AlgorandAccountManager.CUSD_ASSET_ID,
             sponsor_address=AlgorandAccountManager.SPONSOR_ADDRESS,
-            sponsor_mnemonic=AlgorandAccountManager.SPONSOR_MNEMONIC,
+            sponsor_mnemonic=getattr(AlgorandAccountManager, 'SPONSOR_MNEMONIC', None),
         )
+
+        # Resolve KMS signer if available
+        self.sponsor_signer = None
+        try:
+            self.sponsor_signer = get_kms_signer_from_settings()
+            # Align sponsor address if mismatched
+            if self.sponsor_signer.address and self.config.sponsor_address and self.sponsor_signer.address != self.config.sponsor_address:
+                logger.warning(
+                    "KMS sponsor address %s differs from configured %s; using KMS address",
+                    self.sponsor_signer.address,
+                    self.config.sponsor_address,
+                )
+                self.config.sponsor_address = self.sponsor_signer.address
+        except Exception:
+            self.sponsor_signer = None
 
         # Basic validation logging (don’t crash here; let callers handle)
         if not self.config.app_id:
@@ -65,6 +81,21 @@ class PresaleTransactionBuilder:
             AlgorandAccountManager.ALGOD_TOKEN,
             AlgorandAccountManager.ALGOD_ADDRESS,
         )
+
+    def _sign_sponsor(self, txn):
+        """Sign a sponsor transaction using KMS if available, else mnemonic."""
+        if self.sponsor_signer:
+            try:
+                return self.sponsor_signer.sign_transaction(txn)
+            except Exception as e:
+                logger.warning(f"Failed to sign sponsor txn via KMS: {e}")
+        if self.config.sponsor_mnemonic:
+            try:
+                sk = mnemonic.to_private_key(self.config.sponsor_mnemonic)
+                return txn.sign(sk)
+            except Exception as e:
+                logger.warning(f"Failed to sign sponsor txn via mnemonic: {e}")
+        return None
 
     def _check_user_opted_in_app(self, user_address: str) -> bool:
         try:
@@ -129,12 +160,10 @@ class PresaleTransactionBuilder:
             )
             gid = transaction.calculate_group_id([bump, call])
             bump.group = gid; call.group = gid
-            try:
-                sk_sponsor = mnemonic.to_private_key(AlgorandAccountManager.SPONSOR_MNEMONIC)
-            except Exception:
-                logger.warning("Cannot sign sponsor bump: missing/invalid SPONSOR_MNEMONIC")
+            stx0 = self._sign_sponsor(bump)
+            if not stx0:
+                logger.warning("Cannot sign sponsor bump: missing sponsor signer/credentials")
                 return
-            stx0 = bump.sign(sk_sponsor)
             stx1 = call.sign(admin_sk)
             self.algod.send_transactions([stx0, stx1])
             try:
@@ -168,7 +197,7 @@ class PresaleTransactionBuilder:
             return
         if self._check_address_opted_in_app(self.config.sponsor_address):
             return
-        if not self.config.sponsor_mnemonic:
+        if not (self.sponsor_signer or self.config.sponsor_mnemonic):
             logger.error(
                 "Presale sponsor is not opted into app %s and SPONSOR_MNEMONIC is not configured; cannot auto opt-in",
                 self.config.app_id,
@@ -184,8 +213,10 @@ class PresaleTransactionBuilder:
                 sp=sp,
                 index=int(self.config.app_id),
             )
-            sk = mnemonic.to_private_key(self.config.sponsor_mnemonic)
-            stx = app_opt_in.sign(sk)
+            stx = self._sign_sponsor(app_opt_in)
+            if not stx:
+                logger.error("Failed to sign sponsor opt-in txn; no signer available")
+                return
             txid = self.algod.send_transaction(stx)
             try:
                 from algosdk.transaction import wait_for_confirmation
@@ -334,15 +365,12 @@ class PresaleTransactionBuilder:
 
         sponsor_signed_0 = None
         sponsor_signed_2 = None
-        if self.config.sponsor_mnemonic:
-            try:
-                sk = mnemonic.to_private_key(self.config.sponsor_mnemonic)
-                sponsor_signed_0 = algo_encoding.msgpack_encode(sponsor_bump.sign(sk))
-                sponsor_signed_2 = algo_encoding.msgpack_encode(app_call.sign(sk))
-            except Exception as e:
-                logger.warning(f"Failed to pre-sign sponsor txns: {e}")
-                sponsor_signed_0 = None
-                sponsor_signed_2 = None
+        stx0 = self._sign_sponsor(sponsor_bump)
+        stx2 = self._sign_sponsor(app_call)
+        if stx0:
+            sponsor_signed_0 = algo_encoding.msgpack_encode(stx0)
+        if stx2:
+            sponsor_signed_2 = algo_encoding.msgpack_encode(stx2)
 
         pack = {
             "success": True,
@@ -406,13 +434,9 @@ class PresaleTransactionBuilder:
         app_opt_in.group = gid
 
         sponsor_signed_0 = None
-        if self.config.sponsor_mnemonic:
-            try:
-                sk = mnemonic.to_private_key(self.config.sponsor_mnemonic)
-                sponsor_signed_0 = algo_encoding.msgpack_encode(sponsor_bump.sign(sk))
-            except Exception as e:
-                logger.warning(f"Failed to pre-sign sponsor opt-in bump: {e}")
-                sponsor_signed_0 = None
+        stx0 = self._sign_sponsor(sponsor_bump)
+        if stx0:
+            sponsor_signed_0 = algo_encoding.msgpack_encode(stx0)
 
         return {
             "success": True,
@@ -494,13 +518,9 @@ class PresaleTransactionBuilder:
         app_call.group = gid
 
         sponsor_signed_1 = None
-        if self.config.sponsor_mnemonic:
-            try:
-                sk = mnemonic.to_private_key(self.config.sponsor_mnemonic)
-                sponsor_signed_1 = algo_encoding.msgpack_encode(app_call.sign(sk))
-            except Exception as e:
-                logger.warning(f"Failed to pre-sign sponsor claim app call: {e}")
-                sponsor_signed_1 = None
+        stx1 = self._sign_sponsor(app_call)
+        if stx1:
+            sponsor_signed_1 = algo_encoding.msgpack_encode(stx1)
 
         return {
             "success": True,
