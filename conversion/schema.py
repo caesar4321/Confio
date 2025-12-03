@@ -63,15 +63,8 @@ class ConvertUSDCToCUSD(graphene.Mutation):
     
     @classmethod
     def mutate(cls, root, info, amount):
-        import datetime, traceback, sys
-        # Log to a file to ensure we see the output
-        with open('/tmp/conversion_debug.log', 'a') as f:
-            f.write(f"\n[{datetime.datetime.now()}] ConvertUSDCToCUSD called - amount: {amount}\n")
-            
+        import traceback, sys
         user = getattr(info.context, 'user', None)
-        
-        with open('/tmp/conversion_debug.log', 'a') as f:
-            f.write(f"  User: {user}, Authenticated: {user and getattr(user, 'is_authenticated', False)}\n")
         print(f"[CONVERSION] ConvertUSDCToCUSD called - amount: {amount}, user: {user}", file=sys.stderr)
         
         if not (user and getattr(user, 'is_authenticated', False)):
