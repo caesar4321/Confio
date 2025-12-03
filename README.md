@@ -2188,7 +2188,7 @@ The project uses `patch-package` to maintain fixes for third-party dependencies.
 >     - `DB_HOST`: PostgreSQL database host
 >     - `DB_PORT`: PostgreSQL database port
 >     - `REDIS_URL`: Redis connection URL (e.g., 'redis://localhost:6379/0')
->     - `SECRET_KEY`: Django secret key for cryptographic signing (e.g., '***REMOVED***')
+>     - `SECRET_KEY`: Django secret key for cryptographic signing (e.g., 'django-insecure-&(hehrlb0sqdkf8awe$55l!k9k)u_6a-5wn1ro))s(prkri2_t')
 >     - `PYTHONPATH`: Python path for Django
 >     - `DJANGO_SETTINGS_MODULE`: Django settings module path
 >   - `apps/.env` (⚠️ **Location**: `/Confio/apps/.env`): React Native app settings
