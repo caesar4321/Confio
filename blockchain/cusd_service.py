@@ -100,7 +100,7 @@ class CUSDService:
             }
             
         except Exception as e:
-            logger.error(f"Error minting cUSD: {e}")
+            logger.exception("Error minting cUSD for user=%s amount=%s", user_address, usdc_amount)
             return None
     
     async def burn_for_collateral(
@@ -181,7 +181,7 @@ class CUSDService:
             }
             
         except Exception as e:
-            logger.error(f"Error burning cUSD: {e}")
+            logger.exception("Error burning cUSD for user=%s amount=%s", user_address, cusd_amount)
             return None
     
     async def check_opt_in_status(self, user_address: str) -> Dict[str, bool]:
