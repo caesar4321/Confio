@@ -1373,7 +1373,7 @@ export const HomeScreen = () => {
             // Known cUSD asset IDs on current network
             if ([744151197, 744368179].includes(inviteNotice.assetId || 0)) {
               navigateToCUSDAccount();
-            } else if ([744150851].includes(inviteNotice.assetId || 0)) {
+            } else if ([751114639, 3198568509].includes(inviteNotice.assetId || 0)) {
               navigateToConfioAccount();
             } else {
               navigateToCUSDAccount();

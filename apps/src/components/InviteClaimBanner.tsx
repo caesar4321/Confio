@@ -14,8 +14,11 @@ type Props = {
 function resolveAsset(assetId: string): { symbol: string; bg: string; fg: string } {
   const idNum = parseInt(assetId, 10);
   // Known asset IDs per current network (testnet)
-  const CUSD_IDS = [744151197, 744368179];
-  const CONFIO_IDS = [744150851];
+  const CUSD_IDS = [744151197, 744368179]; // testnet IDs
+  const CONFIO_IDS = [
+    751114639,   // testnet CONFIO
+    3198568509,  // mainnet CONFIO
+  ];
   if (CUSD_IDS.includes(idNum)) {
     return { symbol: 'cUSD', bg: '#ecfeff', fg: '#0e7490' };
   }
