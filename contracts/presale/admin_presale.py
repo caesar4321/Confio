@@ -53,6 +53,14 @@ class PresaleAdmin:
         self.confio_id = confio_id
         self.cusd_id = cusd_id
         self.app_addr = get_application_address(app_id)
+
+    def _sign(self, txn, signer):
+        """Support mnemonic private keys, callable signers, or KMSSigner (sign_transaction)."""
+        if callable(signer):
+            return signer(txn)
+        if hasattr(signer, "sign_transaction"):
+            return signer.sign_transaction(txn)
+        return txn.sign(signer)
         
     def start_round(self, admin_address: str, admin_sk: str,
                    price_cusd_per_confio: float, cusd_cap: float, max_per_addr: float):
@@ -104,7 +112,8 @@ class PresaleAdmin:
             on_complete=OnComplete.NoOpOC
         )
         
-        signed_txn = txn.sign(admin_sk)
+        # Support both raw private keys and callable signers (e.g., KMS)
+        signed_txn = self._sign(txn, admin_sk)
         tx_id = self.algod_client.send_transaction(signed_txn)
         wait_for_confirmation(self.algod_client, tx_id, 4)
         
@@ -131,7 +140,7 @@ class PresaleAdmin:
             on_complete=OnComplete.NoOpOC
         )
         
-        signed_txn = txn.sign(admin_sk)
+        signed_txn = self._sign(txn, admin_sk)
         tx_id = self.algod_client.send_transaction(signed_txn)
         wait_for_confirmation(self.algod_client, tx_id, 4)
         
@@ -162,7 +171,7 @@ class PresaleAdmin:
             on_complete=OnComplete.NoOpOC
         )
         
-        signed_txn = txn.sign(admin_sk)
+        signed_txn = self._sign(txn, admin_sk)
         tx_id = self.algod_client.send_transaction(signed_txn)
         wait_for_confirmation(self.algod_client, tx_id, 4)
         
@@ -193,7 +202,7 @@ class PresaleAdmin:
             on_complete=OnComplete.NoOpOC
         )
         
-        signed_txn = txn.sign(admin_sk)
+        signed_txn = self._sign(txn, admin_sk)
         tx_id = self.algod_client.send_transaction(signed_txn)
         wait_for_confirmation(self.algod_client, tx_id, 4)
         
@@ -224,7 +233,7 @@ class PresaleAdmin:
             on_complete=OnComplete.NoOpOC
         )
         
-        signed_txn = txn.sign(admin_sk)
+        signed_txn = self._sign(txn, admin_sk)
         tx_id = self.algod_client.send_transaction(signed_txn)
         wait_for_confirmation(self.algod_client, tx_id, 4)
         
@@ -255,7 +264,7 @@ class PresaleAdmin:
             on_complete=OnComplete.NoOpOC
         )
         
-        signed_txn = txn.sign(admin_sk)
+        signed_txn = self._sign(txn, admin_sk)
         tx_id = self.algod_client.send_transaction(signed_txn)
         wait_for_confirmation(self.algod_client, tx_id, 4)
         
@@ -330,7 +339,7 @@ class PresaleAdmin:
             foreign_assets=[int(self.confio_id)],
             on_complete=OnComplete.NoOpOC
         )
-        signed_txn = txn.sign(admin_sk)
+        signed_txn = self._sign(txn, admin_sk)
         tx_id = self.algod_client.send_transaction(signed_txn)
         # Wait for confirmation so callers can surface definitive success/failure
         confirmed = wait_for_confirmation(self.algod_client, tx_id, 4)
@@ -391,7 +400,7 @@ class PresaleAdmin:
             foreign_assets=[int(self.cusd_id)],
             on_complete=OnComplete.NoOpOC
         )
-        signed_txn = txn.sign(admin_sk)
+        signed_txn = self._sign(txn, admin_sk)
         tx_id = self.algod_client.send_transaction(signed_txn)
         confirmed = wait_for_confirmation(self.algod_client, tx_id, 4)
         
@@ -441,7 +450,7 @@ class PresaleAdmin:
             on_complete=OnComplete.NoOpOC
         )
         
-        signed_txn = txn.sign(admin_sk)
+        signed_txn = self._sign(txn, admin_sk)
         tx_id = self.algod_client.send_transaction(signed_txn)
         wait_for_confirmation(self.algod_client, tx_id, 4)
         
@@ -474,7 +483,7 @@ class PresaleAdmin:
             on_complete=OnComplete.NoOpOC
         )
         
-        signed_txn = txn.sign(admin_sk)
+        signed_txn = self._sign(txn, admin_sk)
         tx_id = self.algod_client.send_transaction(signed_txn)
         wait_for_confirmation(self.algod_client, tx_id, 4)
         
@@ -499,7 +508,7 @@ class PresaleAdmin:
             on_complete=OnComplete.NoOpOC
         )
         
-        signed_txn = txn.sign(admin_sk)
+        signed_txn = self._sign(txn, admin_sk)
         tx_id = self.algod_client.send_transaction(signed_txn)
         wait_for_confirmation(self.algod_client, tx_id, 4)
         
@@ -608,8 +617,8 @@ class PresaleAdmin:
         group = [sponsor_bump, app_txn]
         assign_group_id(group)  # Mutates in place, ignore return value
         
-        signed_bump = group[0].sign(sponsor_sk)
-        signed_app = group[1].sign(admin_sk)
+        signed_bump = sponsor_sk(group[0]) if callable(sponsor_sk) else group[0].sign(sponsor_sk)
+        signed_app = self._sign(group[1], admin_sk)
         
         # Send group
         self.algod_client.send_transactions([signed_bump, signed_app])
@@ -630,7 +639,7 @@ class PresaleAdmin:
                 index=self.confio_id
             )
             
-            signed_txn = txn.sign(admin_sk)
+            signed_txn = self._sign(txn, admin_sk)
             tx_id = self.algod_client.send_transaction(signed_txn)
             wait_for_confirmation(self.algod_client, tx_id, 4)
             print(f"   ✅ Funded with CONFIO")

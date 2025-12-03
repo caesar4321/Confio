@@ -259,7 +259,8 @@ class PresaleStats(models.Model):
     last_updated = models.DateTimeField(auto_now=True)
     
     class Meta:
-        verbose_name_plural = "Presale stats"
+        verbose_name = "Presale stats (deprecated)"
+        verbose_name_plural = "Presale stats (deprecated)"
         
     def __str__(self):
         return f"Stats for {self.phase}"

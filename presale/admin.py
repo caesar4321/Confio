@@ -160,6 +160,7 @@ class PresalePhaseAdmin(admin.ModelAdmin):
         'pause_phase',
         'complete_phase',
         'start_onchain_round',
+        'change_onchain_price',
         'end_current_round',
         'resume_current_round',
         'withdraw_unsold_confio',
@@ -381,7 +382,7 @@ class PresalePhaseAdmin(admin.ModelAdmin):
                     )
                     _assign_gid([bump, call])
                     stx0 = sponsor_signer.sign_transaction(bump)
-                    stx1 = call.sign(admin_sk)
+                    stx1 = admin_sk(call) if callable(admin_sk) else call.sign(admin_sk)
                     pa.algod_client.send_transactions([stx0, stx1])
                     # Do not wait; let background tasks/UX handle any confirmation
             except Exception as oe:
@@ -406,6 +407,48 @@ class PresalePhaseAdmin(admin.ModelAdmin):
         except Exception as e:
             self.message_user(request, f"Failed to start on-chain round: {e}", level='error')
     start_onchain_round.short_description = "Start on-chain round (match DB values)"
+
+    def change_onchain_price(self, request, queryset):
+        """
+        Update only the on-chain CONFIO price for the active round using the selected phase price.
+        """
+        from django.conf import settings
+        from decimal import Decimal
+        if queryset.count() != 1:
+            self.message_user(request, 'Select exactly one phase to update the on-chain price', level='error')
+            return
+        try:
+            app_id = int(getattr(settings, 'ALGORAND_PRESALE_APP_ID', 0) or 0)
+            confio_id = int(getattr(settings, 'ALGORAND_CONFIO_ASSET_ID', 0) or 0)
+            cusd_id = int(getattr(settings, 'ALGORAND_CUSD_ASSET_ID', 0) or 0)
+            if not app_id or not confio_id or not cusd_id:
+                self.message_user(request, 'Algorand PRESALE_APP_ID/ASSET_IDs not configured', level='error')
+                return
+            phase = queryset.first()
+            price = Decimal(phase.price_per_token)
+            if price <= 0:
+                self.message_user(request, 'Phase price must be positive', level='error')
+                return
+            from blockchain.kms_manager import get_kms_signer_from_settings
+            signer = get_kms_signer_from_settings()
+            admin_addr = signer.address
+        except Exception as exc:
+            self.message_user(request, f"Failed to prepare signer or price: {exc}", level='error')
+            return
+
+        try:
+            from contracts.presale.admin_presale import PresaleAdmin as _PresaleAdmin
+            from algosdk.v2client import algod as _algod
+            pa = _PresaleAdmin(int(app_id), int(confio_id), int(cusd_id))
+            pa.algod_client = _algod.AlgodClient(
+                getattr(settings, 'ALGORAND_ALGOD_TOKEN', ''),
+                getattr(settings, 'ALGORAND_ALGOD_ADDRESS', '')
+            )
+            pa.update_price(admin_addr, signer.sign_transaction, float(price))
+            self.message_user(request, f"On-chain price updated to {price:.4f} cUSD/CONFIO (App {app_id})")
+        except Exception as exc:
+            self.message_user(request, f"Failed to update on-chain price: {exc}", level='error')
+    change_onchain_price.short_description = "Change the on-chain CONFIO price"
 
     def end_current_round(self, request, queryset):
         """End the current on-chain round immediately by toggling round_active -> 0.

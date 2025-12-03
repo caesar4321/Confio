@@ -39,6 +39,7 @@ class AlgorandAccountManager:
     
     # Sponsor account from settings
     SPONSOR_ADDRESS = settings.ALGORAND_SPONSOR_ADDRESS
+    SPONSOR_MNEMONIC = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
     SIGNER = get_kms_signer_from_settings()
     
     # Algorand node configuration from settings
