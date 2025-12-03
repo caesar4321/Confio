@@ -1970,7 +1970,10 @@ export ALGORAND_ALGOD_ADDRESS=https://testnet-api.algonode.cloud
 export ALGORAND_ALGOD_TOKEN=""            # empty for Algonode
 
 # cUSD deploy (uses sponsor as deployer)
-export ALGORAND_SPONSOR_MNEMONIC="your 25 words..."
+# KMS is required for signing. Configure:
+# export USE_KMS_SIGNING=True
+# export KMS_KEY_ALIAS=<alias>
+# export KMS_REGION=<region>
 export ALGORAND_SPONSOR_ADDRESS=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAY5HFKQ
 make deploy-cusd
 

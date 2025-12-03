@@ -36,7 +36,7 @@ def get_sponsor_config():
     """Get sponsor account configuration"""
     return {
         'address': settings.ALGORAND_SPONSOR_ADDRESS,
-        'mnemonic': settings.ALGORAND_SPONSOR_MNEMONIC,
+        'mnemonic': None,
     }
 
 # For LocalNet testing, we need to get the creator keys from environment

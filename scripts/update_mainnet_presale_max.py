@@ -22,20 +22,16 @@ except Exception as e:
     print(f"Warning: Could not load .env.mainnet: {e}")
     pass
 
-from algosdk import mnemonic
 from algosdk.v2client import algod
-from algosdk.transaction import (
-    ApplicationCallTxn,
-    OnComplete,
-    wait_for_confirmation
-)
+from algosdk.transaction import ApplicationCallTxn, OnComplete, wait_for_confirmation
+from blockchain.kms_manager import get_kms_signer_from_settings
 
 # Network configuration
 ALGOD_ADDRESS = os.getenv("ALGORAND_ALGOD_ADDRESS", "https://mainnet-api.4160.nodely.dev")
 ALGOD_TOKEN = os.getenv("ALGORAND_ALGOD_TOKEN", "")
 
 
-def update_presale_parameter(algod_client, app_id, admin_address, admin_sk, param_type, value, confio_asset_id=None):
+def update_presale_parameter(algod_client, app_id, admin_address, signer, param_type, value, confio_asset_id=None):
     """Update a presale contract parameter"""
 
     print(f"\nUpdating parameter '{param_type}' to {value}...")
@@ -60,7 +56,7 @@ def update_presale_parameter(algod_client, app_id, admin_address, admin_sk, para
         on_complete=OnComplete.NoOpOC
     )
 
-    signed_txn = txn.sign(admin_sk)
+    signed_txn = signer.sign_transaction(txn)
     tx_id = algod_client.send_transaction(signed_txn)
 
     result = wait_for_confirmation(algod_client, tx_id, 4)
@@ -93,13 +89,16 @@ def main():
     print("MAINNET PRESALE - UPDATE MAX CONTRIBUTION")
     print("=" * 60)
 
-    # Read env vars
-    from algosdk import mnemonic as _mn
-
     app_id = int(os.getenv('ALGORAND_PRESALE_APP_ID', '0') or '0')
     confio_asset_id = int(os.getenv('ALGORAND_CONFIO_ASSET_ID', '0') or '0')
     admin_address = os.getenv('ALGORAND_SPONSOR_ADDRESS')
-    admin_mn = os.getenv('ALGORAND_ADMIN_MNEMONIC')
+    try:
+        signer = get_kms_signer_from_settings()
+        if admin_address:
+            signer.assert_matches_address(admin_address)
+        admin_address = admin_address or signer.address
+    except Exception as e:
+        signer = None
 
     print(f"\nConfiguration:")
     print(f"   Network: MAINNET")
@@ -108,18 +107,10 @@ def main():
     print(f"   CONFIO Asset ID: {confio_asset_id}")
     print(f"   Admin Address: {admin_address}")
 
-    # Normalize mnemonic
-    def _norm(m):
-        if not m:
-            return m
-        return " ".join(m.strip().split()).lower()
-
-    admin_mn = _norm(admin_mn)
-
-    if not (app_id and confio_asset_id and admin_address and admin_mn):
+    if not (app_id and confio_asset_id and admin_address and signer):
         print('\n❌ ERROR: Missing required environment variables.')
         print('   Required: ALGORAND_PRESALE_APP_ID, ALGORAND_CONFIO_ASSET_ID,')
-        print('             ALGORAND_SPONSOR_ADDRESS, ALGORAND_ADMIN_MNEMONIC')
+        print('             ALGORAND_SPONSOR_ADDRESS, USE_KMS_SIGNING/KMS_KEY_ALIAS')
         return
 
     # Verify this is mainnet
@@ -130,7 +121,6 @@ def main():
             print('   Aborted.')
             return
 
-    admin_sk = _mn.to_private_key(admin_mn)
     algod_client = algod.AlgodClient(ALGOD_TOKEN, ALGOD_ADDRESS)
 
     # Get current state
@@ -165,7 +155,7 @@ def main():
         algod_client=algod_client,
         app_id=app_id,
         admin_address=admin_address,
-        admin_sk=admin_sk,
+        signer=signer,
         param_type="max",
         value=new_max,
         confio_asset_id=confio_asset_id

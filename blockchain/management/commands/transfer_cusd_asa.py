@@ -6,14 +6,14 @@ Usage:
 
 Notes:
 - This performs a plain ASA transfer (bypasses app method checks).
-- Requires ALGORAND_SPONSOR_MNEMONIC and cUSD ASA to be configured in settings.
+- Requires cUSD ASA to be configured in settings and uses KMS-backed sponsor signing.
 """
 from decimal import Decimal
 from django.core.management.base import BaseCommand
 from django.conf import settings
-from algosdk import mnemonic, account
 from algosdk.v2client import algod
 from algosdk.transaction import AssetTransferTxn, wait_for_confirmation
+from blockchain.kms_manager import get_kms_signer_from_settings
 
 
 class Command(BaseCommand):
@@ -30,13 +30,12 @@ class Command(BaseCommand):
         asa_id = getattr(settings, 'ALGORAND_CUSD_ASSET_ID', None)
         algod_addr = getattr(settings, 'ALGORAND_ALGOD_ADDRESS', None)
         algod_token = getattr(settings, 'ALGORAND_ALGOD_TOKEN', '')
-        sponsor_mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
-        if not (asa_id and algod_addr and sponsor_mn):
-            self.stdout.write(self.style.ERROR('Missing settings: ensure ALGORAND_CUSD_ASSET_ID, ALGORAND_ALGOD_ADDRESS, ALGORAND_SPONSOR_MNEMONIC are set'))
+        if not (asa_id and algod_addr):
+            self.stdout.write(self.style.ERROR('Missing settings: ensure ALGORAND_CUSD_ASSET_ID and ALGORAND_ALGOD_ADDRESS are set'))
             return
 
-        sk = mnemonic.to_private_key(sponsor_mn)
-        sender = account.address_from_private_key(sk)
+        signer = get_kms_signer_from_settings()
+        sender = signer.address
         client = algod.AlgodClient(algod_token, algod_addr)
 
         sp = client.suggested_params()
@@ -50,11 +49,10 @@ class Command(BaseCommand):
 
         try:
             txn = AssetTransferTxn(sender=sender, sp=sp, receiver=recipient, amt=amt_units, index=int(asa_id))
-            signed = txn.sign(sk)
+            signed = signer.sign_transaction(txn)
             txid = client.send_transaction(signed)
             wait_for_confirmation(client, txid, 10)
             self.stdout.write(self.style.SUCCESS(f'✅ Transfer submitted. TxID: {txid}'))
         except Exception as e:
             self.stdout.write(self.style.ERROR(f'❌ Transfer failed: {e}'))
             return
-

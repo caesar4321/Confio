@@ -7,17 +7,15 @@ Usage examples:
     --amounts 12.34,56.78,90.12
 
 Notes:
-- Uses ALGORAND_ALGOD_ADDRESS and ALGORAND_SPONSOR_MNEMONIC from settings.
+- Uses ALGORAND_ALGOD_ADDRESS and KMS-backed sponsor signing.
 - Assumes recipients are opted-in to the ASA.
 """
 from decimal import Decimal
 from django.core.management.base import BaseCommand
 from django.conf import settings
 from algosdk.v2client import algod
-from algosdk import mnemonic
 from algosdk.transaction import AssetTransferTxn
-from algosdk import encoding as algo_encoding
-import base64
+from blockchain.kms_manager import get_kms_signer_from_settings
 
 
 class Command(BaseCommand):
@@ -39,19 +37,12 @@ class Command(BaseCommand):
 
         algod_addr = getattr(settings, 'ALGORAND_ALGOD_ADDRESS', None)
         algod_token = getattr(settings, 'ALGORAND_ALGOD_TOKEN', '')
-        sponsor_mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
-
-        if not algod_addr or not sponsor_mn:
-            self.stdout.write(self.style.ERROR('Missing ALGORAND_ALGOD_ADDRESS or ALGORAND_SPONSOR_MNEMONIC in settings'))
+        if not algod_addr:
+            self.stdout.write(self.style.ERROR('Missing ALGORAND_ALGOD_ADDRESS in settings'))
             return
 
-        try:
-            sk = mnemonic.to_private_key(sponsor_mn)
-            from algosdk import account
-            sender = account.address_from_private_key(sk)
-        except Exception as e:
-            self.stdout.write(self.style.ERROR(f'Failed to derive sponsor key: {e}'))
-            return
+        signer = get_kms_signer_from_settings()
+        sender = signer.address
 
         client = algod.AlgodClient(algod_token, algod_addr)
 
@@ -72,7 +63,7 @@ class Command(BaseCommand):
                 sp = client.suggested_params()
                 base = int(a * (Decimal(10) ** Decimal(decimals)))
                 txn = AssetTransferTxn(sender=sender, sp=sp, receiver=r, amt=base, index=asset_id)
-                stx = txn.sign(sk)
+                stx = signer.sign_transaction(txn)
                 txid = client.send_transaction(stx)
                 self.stdout.write(self.style.SUCCESS(f'Submitted transfer {a} -> {r[:12]}... (txid={txid})'))
             except Exception as e:

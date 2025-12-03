@@ -31,6 +31,7 @@ from users.phone_utils import (
     normalize_phone as _normalize_phone,
     normalize_any_phone as _normalize_any_phone,
 )
+from blockchain.kms_manager import get_kms_signer_from_settings
 
 
 def _abi_contract() -> Contract:
@@ -72,12 +73,23 @@ class InviteSendTransactionBuilder:
         self.cusd_asset_id = settings.ALGORAND_CUSD_ASSET_ID
         self.confio_asset_id = settings.ALGORAND_CONFIO_ASSET_ID
         self.sponsor_address = settings.ALGORAND_SPONSOR_ADDRESS
-        self.sponsor_mnemonic = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
+        self.signer = get_kms_signer_from_settings()
+        self.signer.assert_matches_address(self.sponsor_address)
 
         self.app_address = get_application_address(self.app_id)
 
         # Load ABI for selector and arg typing
         self.contract = _abi_contract()
+
+    def _sign_sponsor_entry(self, txn: transaction.Transaction, idx: int) -> Dict:
+        """Return sponsor txn payload and KMS signature."""
+        raw_bytes = msgpack.packb(txn.dictify(), use_bin_type=True)
+        payload_b64 = base64.b64encode(raw_bytes).decode()
+        return {
+            'txn': payload_b64,
+            'signed': self.signer.sign_transaction_msgpack(txn),
+            'index': idx,
+        }
 
     @staticmethod
     def normalize_phone(phone_number: str, country: Optional[str]) -> str:
@@ -256,10 +268,6 @@ class InviteSendTransactionBuilder:
                 # Always produce canonical msgpack bytes then base64-encode
                 raw_bytes = msgpack.packb(tx.dictify(), use_bin_type=True)
                 payload_b64 = base64.b64encode(raw_bytes).decode()
-                entry = {
-                    'txn': payload_b64,
-                    'index': idx
-                }
                 if isinstance(tx, transaction.AssetTransferTxn):
                     user_txs.append({
                         'txn': payload_b64,
@@ -268,7 +276,13 @@ class InviteSendTransactionBuilder:
                         'index': idx
                     })
                 else:
-                    sponsor_txs.append(entry)
+                    sponsor_txs.append(
+                        {
+                            'txn': payload_b64,
+                            'signed': self.signer.sign_transaction_msgpack(tx),
+                            'index': idx,
+                        }
+                    )
 
             return InviteBuildResult(
                 True,

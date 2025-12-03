@@ -11,6 +11,8 @@ from algosdk.v2client import algod
 from algosdk.abi import Method, Returns, Argument
 import base64
 from django.conf import settings
+
+from blockchain.kms_manager import get_kms_signer_from_settings
 from .utils.cache import ttl_cache
 
 class PaymentTransactionBuilder:
@@ -36,6 +38,8 @@ class PaymentTransactionBuilder:
         self.sponsor_address = settings.BLOCKCHAIN_CONFIG.get('ALGORAND_SPONSOR_ADDRESS')
         if not self.sponsor_address:
             raise ValueError("ALGORAND_SPONSOR_ADDRESS not configured. Must be set in environment variables.")
+        self.signer = get_kms_signer_from_settings()
+        self.signer.assert_matches_address(self.sponsor_address)
         
         # Debug logging for sponsor address
         import logging
@@ -313,16 +317,9 @@ class PaymentTransactionBuilder:
             app_call.group = group_id
             
             # Sign sponsor transactions if we have the key
-            from algosdk import mnemonic
             from algosdk import encoding as algo_encoding
-            sponsor_payment_signed = None
-            app_call_signed = None
-            
-            sponsor_mnemonic = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
-            if sponsor_mnemonic:
-                sponsor_private_key = mnemonic.to_private_key(sponsor_mnemonic)
-                sponsor_payment_signed = algo_encoding.msgpack_encode(sponsor_payment.sign(sponsor_private_key))
-                app_call_signed = algo_encoding.msgpack_encode(app_call.sign(sponsor_private_key))
+            sponsor_payment_signed = self.signer.sign_transaction_msgpack(sponsor_payment)
+            app_call_signed = self.signer.sign_transaction_msgpack(app_call)
             
             # Encode transactions for client - user signs BOTH asset transfers (index 1 and 2)
             transactions_to_sign = [

@@ -18,8 +18,9 @@ from typing import List, Optional
 import graphene
 from django.conf import settings
 from algosdk.v2client import algod
-from algosdk import mnemonic, encoding as algo_encoding
+from algosdk import encoding as algo_encoding
 from algosdk import transaction
+from blockchain.kms_manager import get_kms_signer_from_settings, KMSTransactionSigner
 import msgpack
 
 from .p2p_trade_transaction_builder import P2PTradeTransactionBuilder
@@ -31,6 +32,7 @@ from channels.layers import get_channel_layer
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
+SPONSOR_SIGNER = get_kms_signer_from_settings()
 
 
 def _b64_to_bytes(s: str) -> bytes:
@@ -91,16 +93,13 @@ def accept_trade_for_trade_id(trade_id: str) -> tuple[bool, str | None]:
         if not res.success:
             return False, res.error or 'Failed to build accept trade group'
 
-        sponsor_mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
-        if not sponsor_mn:
-            return False, 'Server missing ALGORAND_SPONSOR_MNEMONIC'
-        sk = mnemonic.to_private_key(sponsor_mn)
+        SPONSOR_SIGNER.assert_matches_address(getattr(settings, 'ALGORAND_SPONSOR_ADDRESS', None))
         algod_client = get_algod_client()
 
         signed = []
         for e in (res.sponsor_transactions or []):
             tx = transaction.Transaction.undictify(msgpack.unpackb(base64.b64decode(e.get('txn')), raw=False))
-            signed.append(tx.sign(sk))
+            signed.append(SPONSOR_SIGNER.sign_transaction(tx))
         if not signed:
             return False, 'No sponsor transactions built'
         txid = algod_client.send_transactions(signed)
@@ -345,10 +344,7 @@ class SubmitP2PCreateTrade(graphene.Mutation):
 
         # Sign sponsor transactions
         try:
-            sponsor_mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
-            if not sponsor_mn:
-                return cls(success=False, error='Server missing ALGORAND_SPONSOR_MNEMONIC')
-            sk = mnemonic.to_private_key(sponsor_mn)
+            SPONSOR_SIGNER.assert_matches_address(getattr(settings, 'ALGORAND_SPONSOR_ADDRESS', None))
 
             # Rebuild the expected sponsor transactions server-side to avoid blind signing
             seller_addr_from_user = None
@@ -395,7 +391,7 @@ class SubmitP2PCreateTrade(graphene.Mutation):
                 unpacked = msgpack.unpackb(b, raw=False)
                 txn_core = unpacked if isinstance(unpacked, dict) and 'type' in unpacked else (unpacked or {}).get('txn', {})
                 tx = transaction.Transaction.undictify(unpacked)
-                stx = tx.sign(sk)
+                stx = SPONSOR_SIGNER.sign_transaction(tx)
                 signed_by_idx[idx] = stx
                 try:
                     ttype = (txn_core or {}).get('type')
@@ -631,17 +627,14 @@ class AcceptP2PTrade(graphene.Mutation):
 
         # Sign sponsor txns and submit (2 transactions)
         try:
-            sponsor_mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
-            if not sponsor_mn:
-                return cls(success=False, error='Server missing ALGORAND_SPONSOR_MNEMONIC')
-            sk = mnemonic.to_private_key(sponsor_mn)
+            SPONSOR_SIGNER.assert_matches_address(getattr(settings, 'ALGORAND_SPONSOR_ADDRESS', None))
             algod_client = get_algod_client()
 
             # Decode and sign
             signed = []
             for e in (res.sponsor_transactions or []):
                 tx = transaction.Transaction.undictify(msgpack.unpackb(base64.b64decode(e.get('txn')), raw=False))
-                signed.append(tx.sign(sk))
+                signed.append(SPONSOR_SIGNER.sign_transaction(tx))
             txid = algod_client.send_transactions(signed)
             logger.info('[P2P Accept] Submitted sponsor group: trade_id=%s txid=%s', trade_id, txid)
             transaction.wait_for_confirmation(algod_client, signed[-1].get_txid(), 8)
@@ -713,11 +706,6 @@ class MarkP2PTradePaid(graphene.Mutation):
 
         # Rebuild sponsor txn deterministically to avoid blind signing
         try:
-            sponsor_mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
-            if not sponsor_mn:
-                return cls(success=False, error='Server missing ALGORAND_SPONSOR_MNEMONIC')
-            sk = mnemonic.to_private_key(sponsor_mn)
-
             builder = P2PTradeTransactionBuilder()
             # Derive buyer address from signed AppCall sender
             buyer_addr = algo_encoding.encode_address(user_dict['txn'].get('snd')) if user_dict.get('txn', {}).get('snd') else None
@@ -738,7 +726,7 @@ class MarkP2PTradePaid(graphene.Mutation):
 
             b = base64.b64decode(expected[0].get('txn'))
             tx = transaction.Transaction.undictify(msgpack.unpackb(b, raw=False))
-            stx0 = tx.sign(sk)
+            stx0 = SPONSOR_SIGNER.sign_transaction(tx)
             user_stx = transaction.SignedTransaction.undictify(user_dict)
             txid = algod_client.send_transactions([stx0, user_stx])
             # Do not wait; respond immediately. Celery will confirm and extend expiry/notify.
@@ -804,11 +792,6 @@ class ConfirmP2PTradeReceived(graphene.Mutation):
 
         # Rebuild sponsor txn deterministically to avoid blind signing
         try:
-            sponsor_mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
-            if not sponsor_mn:
-                return cls(success=False, error='Server missing ALGORAND_SPONSOR_MNEMONIC')
-            sk = mnemonic.to_private_key(sponsor_mn)
-
             builder = P2PTradeTransactionBuilder()
             seller_addr = algo_encoding.encode_address(user_dict['txn'].get('snd')) if user_dict.get('txn', {}).get('snd') else None
             res = builder.build_confirm_received(seller_addr, trade_id)
@@ -827,7 +810,7 @@ class ConfirmP2PTradeReceived(graphene.Mutation):
 
             b = base64.b64decode(expected[0].get('txn'))
             tx = transaction.Transaction.undictify(msgpack.unpackb(b, raw=False))
-            stx0 = tx.sign(sk)
+            stx0 = SPONSOR_SIGNER.sign_transaction(tx)
             user_stx = transaction.SignedTransaction.undictify(user_dict)
             txid = algod_client.send_transactions([stx0, user_stx])
             # Do not wait for confirmation. Record tx hash for Celery to confirm, respond immediately.
@@ -942,11 +925,6 @@ class SubmitP2pAcceptTrade(graphene.Mutation):
 
         # Sign sponsor fee-bump and submit atomic group [sponsorPay, userAppCall]
         try:
-            sponsor_mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
-            if not sponsor_mn:
-                return cls(success=False, error='Server missing ALGORAND_SPONSOR_MNEMONIC')
-            sk = mnemonic.to_private_key(sponsor_mn)
-
             buyer_addr = algo_encoding.encode_address(user_dict['txn'].get('snd')) if user_dict.get('txn', {}).get('snd') else None
             builder = P2PTradeTransactionBuilder()
             res = builder.build_accept_trade(buyer_addr, trade_id)
@@ -964,7 +942,7 @@ class SubmitP2pAcceptTrade(graphene.Mutation):
                 return cls(success=False, error='Sponsor transaction mismatch; please re-run prepare')
 
             b = base64.b64decode(expected[0].get('txn'))
-            stx0 = transaction.Transaction.undictify(msgpack.unpackb(b, raw=False)).sign(sk)
+            stx0 = SPONSOR_SIGNER.sign_transaction(transaction.Transaction.undictify(msgpack.unpackb(b, raw=False)))
             user_stx = transaction.SignedTransaction.undictify(user_dict)
 
             txid = algod_client.send_transactions([stx0, user_stx])
@@ -1074,8 +1052,7 @@ class PrepareP2PMarkPaid(graphene.Mutation):
             env_sponsor_addr = getattr(settings, 'ALGORAND_SPONSOR_ADDRESS', None)
             try:
                 from algosdk import account as algo_account
-                _mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
-                env_sponsor_from_mn = algo_account.address_from_private_key(mnemonic.to_private_key(_mn)) if _mn else None
+                env_sponsor_from_mn = SPONSOR_SIGNER.address
             except Exception:
                 env_sponsor_from_mn = None
             logger.info('[P2P Prepare][mark_paid] Sponsor sanity: app=%s env_addr=%s env_from_mn=%s', (app_sponsor or '')[:12], (env_sponsor_addr or '')[:12], (env_sponsor_from_mn or '')[:12])
@@ -1286,10 +1263,7 @@ class CancelP2PTrade(graphene.Mutation):
             return cls(success=False, error=f'Invalid signed AppCall: {e}')
 
         try:
-            sponsor_mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
-            if not sponsor_mn:
-                return cls(success=False, error='Server missing ALGORAND_SPONSOR_MNEMONIC')
-            sk = mnemonic.to_private_key(sponsor_mn)
+            SPONSOR_SIGNER.assert_matches_address(getattr(settings, 'ALGORAND_SPONSOR_ADDRESS', None))
 
             builder = P2PTradeTransactionBuilder()
             caller_addr = algo_encoding.encode_address(user_dict['txn'].get('snd')) if user_dict.get('txn', {}).get('snd') else None
@@ -1309,7 +1283,7 @@ class CancelP2PTrade(graphene.Mutation):
 
             b = base64.b64decode(expected[0].get('txn'))
             tx = transaction.Transaction.undictify(msgpack.unpackb(b, raw=False))
-            stx0 = tx.sign(sk)
+            stx0 = SPONSOR_SIGNER.sign_transaction(tx)
             user_stx = transaction.SignedTransaction.undictify(user_dict)
             txid = algod_client.send_transactions([stx0, user_stx])
             # Return immediately; background scanner/celery will confirm and finalize
@@ -1445,11 +1419,6 @@ class SubmitP2POpenDispute(graphene.Mutation):
 
         # Sign sponsor txn and submit group
         try:
-            sponsor_mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
-            if not sponsor_mn:
-                return cls(success=False, error='Server missing ALGORAND_SPONSOR_MNEMONIC')
-            sk = mnemonic.to_private_key(sponsor_mn)
-
             builder = P2PTradeTransactionBuilder()
             opener_addr = algo_encoding.encode_address(user_dict['txn'].get('snd')) if user_dict.get('txn', {}).get('snd') else None
             res = builder.build_open_dispute(opener_addr, trade_id, reason or '')
@@ -1468,7 +1437,7 @@ class SubmitP2POpenDispute(graphene.Mutation):
 
             b = base64.b64decode(expected[0].get('txn'))
             tx = transaction.Transaction.undictify(msgpack.unpackb(b, raw=False))
-            stx0 = tx.sign(sk)
+            stx0 = SPONSOR_SIGNER.sign_transaction(tx)
             user_stx = transaction.SignedTransaction.undictify(user_dict)
             txid = algod_client.send_transactions([stx0, user_stx])
             ref_txid = user_stx.get_txid()
@@ -1672,11 +1641,6 @@ class SubmitP2PResolveDispute(graphene.Mutation):
             return cls(success=False, error=f'Invalid signed AppCall: {e}')
 
         try:
-            sponsor_mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
-            if not sponsor_mn:
-                return cls(success=False, error='Server missing ALGORAND_SPONSOR_MNEMONIC')
-            sk = mnemonic.to_private_key(sponsor_mn)
-
             builder = P2PTradeTransactionBuilder()
             res = builder.build_resolve_dispute(admin_addr, trade_id, winner_addr)
             if not res.success:
@@ -1694,7 +1658,7 @@ class SubmitP2PResolveDispute(graphene.Mutation):
 
             b = base64.b64decode(expected[0].get('txn'))
             tx = transaction.Transaction.undictify(msgpack.unpackb(b, raw=False))
-            stx0 = tx.sign(sk)
+            stx0 = SPONSOR_SIGNER.sign_transaction(tx)
             user_stx = transaction.SignedTransaction.undictify(user_dict)
             txid = algod_client.send_transactions([stx0, user_stx])
             ref_txid = user_stx.get_txid()
@@ -1735,13 +1699,7 @@ class ResolveP2pDisputeOnchain(graphene.Mutation):
         if not (user.is_staff or user.is_superuser):
             return cls(success=False, error='Admin privileges required')
 
-        # Require server-held admin mnemonic
-        admin_mn = getattr(settings, 'ALGORAND_ADMIN_MNEMONIC', None)
-        if not admin_mn:
-            return cls(success=False, error='Server missing ALGORAND_ADMIN_MNEMONIC')
-
         try:
-            from algosdk import mnemonic
             from algosdk.v2client import algod
             from algosdk import encoding as algo_encoding
             from algosdk import transaction
@@ -1777,10 +1735,8 @@ class ResolveP2pDisputeOnchain(graphene.Mutation):
             if not winner_addr:
                 return cls(success=False, error='Winner Algorand address not found')
 
-            # Admin sender address
-            from algosdk import account as algo_account
-            admin_sk = mnemonic.to_private_key(admin_mn)
-            admin_addr = algo_account.address_from_private_key(admin_sk)
+            # Admin sender address (KMS signer)
+            admin_addr = SPONSOR_SIGNER.address
 
             # Build group
             builder = P2PTradeTransactionBuilder()
@@ -1789,11 +1745,6 @@ class ResolveP2pDisputeOnchain(graphene.Mutation):
                 return cls(success=False, error=res.error)
 
             # Sign sponsor txn
-            sponsor_mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
-            if not sponsor_mn:
-                return cls(success=False, error='Server missing ALGORAND_SPONSOR_MNEMONIC')
-            sponsor_sk = mnemonic.to_private_key(sponsor_mn)
-
             parsed = [json.loads(s) if isinstance(s, str) else s for s in (res.sponsor_transactions or [])]
             if not parsed:
                 return cls(success=False, error='Missing sponsor transaction from builder')
@@ -1801,7 +1752,7 @@ class ResolveP2pDisputeOnchain(graphene.Mutation):
             # Undictify and sign
             sponsor_b = base64.b64decode(parsed[0].get('txn'))
             sponsor_tx = transaction.Transaction.undictify(msgpack.unpackb(sponsor_b, raw=False))
-            stx0 = sponsor_tx.sign(sponsor_sk)
+            stx0 = SPONSOR_SIGNER.sign_transaction(sponsor_tx)
 
             # User/admin appcall: res.transactions_to_sign[0]
             if not res.transactions_to_sign:
@@ -1810,7 +1761,7 @@ class ResolveP2pDisputeOnchain(graphene.Mutation):
             if not appcall_b64:
                 return cls(success=False, error='Missing admin AppCall payload')
             appcall_tx = transaction.Transaction.undictify(msgpack.unpackb(base64.b64decode(appcall_b64), raw=False))
-            stx1 = appcall_tx.sign(admin_sk)
+            stx1 = SPONSOR_SIGNER.sign_transaction(appcall_tx)
 
             algod_client = get_algod_client()
             txid = algod_client.send_transactions([stx0, stx1])

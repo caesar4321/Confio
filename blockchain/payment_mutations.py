@@ -14,13 +14,15 @@ from .models import Payment, PaymentReceipt
 from .payment_transaction_builder import PaymentTransactionBuilder
 from .algorand_account_manager import AlgorandAccountManager
 from algosdk.v2client import algod
-from algosdk import mnemonic, account, encoding
+from algosdk import account, encoding
+from blockchain.kms_manager import get_kms_signer_from_settings
 import asyncio
 import base64
 import msgpack
 import time
 
 logger = logging.getLogger(__name__)
+SPONSOR_SIGNER = get_kms_signer_from_settings()
 
 
 class CreateSponsoredPaymentMutation(graphene.Mutation):
@@ -460,7 +462,7 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
             t_parse_start = time.time()
             import msgpack
             import json
-            from algosdk import transaction, encoding, mnemonic
+            from algosdk import transaction, encoding
             from algosdk.transaction import SuggestedParams
             from algosdk.abi import Method, Argument, Returns
             from blockchain.payment_transaction_builder import PaymentTransactionBuilder
@@ -842,11 +844,8 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                 except Exception as ghe:
                     logger.warning(f"Group-hash self-check skipped due to parsing error: {ghe}")
 
-                sponsor_mnemonic = settings.ALGORAND_SPONSOR_MNEMONIC
-                if not sponsor_mnemonic:
-                    return cls(success=False, error='Sponsor mnemonic not configured')
-                sponsor_private_key = mnemonic.to_private_key(sponsor_mnemonic)
-                
+                SPONSOR_SIGNER.assert_matches_address(getattr(settings, 'ALGORAND_SPONSOR_ADDRESS', None))
+
                 # CRITICAL: Final verification before signing
                 # Ensure the rebuilt group matches what the user signed
                 try:
@@ -884,8 +883,8 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                     # Continue anyway but log warning
 
                 # Sign sponsor transactions and prepare bytes
-                stx0 = sponsor_payment.sign(sponsor_private_key)
-                stx3 = app_call.sign(sponsor_private_key)
+                stx0 = SPONSOR_SIGNER.sign_transaction(sponsor_payment)
+                stx3 = SPONSOR_SIGNER.sign_transaction(app_call)
                 
                 # Debug: Log the sponsor transaction details
                 logger.info(f"Sponsor payment txn: fv={sponsor_payment.first_valid_round}, lv={sponsor_payment.last_valid_round}, fee={sponsor_payment.fee}")

@@ -4,12 +4,16 @@ Transaction builder for cUSD conversions with sponsored fees
 import logging
 from typing import Dict, List, Optional, Tuple
 from decimal import Decimal
-from algosdk import transaction, encoding
-from algosdk.transaction import AssetTransferTxn, ApplicationCallTxn, PaymentTxn
+import base64
+import base64
+
+from algosdk import encoding, transaction
 from algosdk import encoding as algo_encoding
 from algosdk.logic import get_application_address
+from algosdk.transaction import ApplicationCallTxn, AssetTransferTxn, PaymentTxn
 from django.conf import settings
-import base64
+
+from blockchain.kms_manager import get_kms_signer_from_settings
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +26,8 @@ class CUSDTransactionBuilder:
         self.cusd_asset_id = settings.ALGORAND_CUSD_ASSET_ID
         self.usdc_asset_id = settings.ALGORAND_USDC_ASSET_ID
         self.sponsor_address = settings.ALGORAND_SPONSOR_ADDRESS
-        self.sponsor_mnemonic = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
+        self.signer = get_kms_signer_from_settings()
+        self.signer.assert_matches_address(self.sponsor_address)
     
     def build_app_optin_transaction(
         self,
@@ -109,12 +114,8 @@ class CUSDTransactionBuilder:
             sponsor_payment.group = group_id
             opt_in_txn.group = group_id
             
-            # Sign sponsor payment if we have the key
-            sponsor_payment_signed = None
-            if self.sponsor_mnemonic:
-                from algosdk import mnemonic
-                sponsor_private_key = mnemonic.to_private_key(self.sponsor_mnemonic)
-                sponsor_payment_signed = algo_encoding.msgpack_encode(sponsor_payment.sign(sponsor_private_key))
+            # Sign sponsor payment via KMS
+            sponsor_payment_signed = self.signer.sign_transaction_msgpack(sponsor_payment)
             
             # Return transactions
             import base64
@@ -319,14 +320,9 @@ class CUSDTransactionBuilder:
             usdc_transfer.group = group_id
             app_call.group = group_id
             
-            # Sign sponsor transactions if we have the key
-            sponsor_payment_signed = None
-            app_call_signed = None
-            if self.sponsor_mnemonic:
-                from algosdk import mnemonic
-                sponsor_private_key = mnemonic.to_private_key(self.sponsor_mnemonic)
-                sponsor_payment_signed = algo_encoding.msgpack_encode(sponsor_payment.sign(sponsor_private_key))
-                app_call_signed = algo_encoding.msgpack_encode(app_call.sign(sponsor_private_key))
+            # Sign sponsor transactions via KMS
+            sponsor_payment_signed = self.signer.sign_transaction_msgpack(sponsor_payment)
+            app_call_signed = self.signer.sign_transaction_msgpack(app_call)
             
             # Encode transactions for client - user ONLY signs the USDC transfer (index 1)
             transactions_to_sign = [
@@ -516,14 +512,9 @@ class CUSDTransactionBuilder:
             cusd_transfer.group = group_id
             app_call.group = group_id
             
-            # Sign sponsor transactions if we have the key
-            sponsor_payment_signed = None
-            app_call_signed = None
-            if self.sponsor_mnemonic:
-                from algosdk import mnemonic
-                sponsor_private_key = mnemonic.to_private_key(self.sponsor_mnemonic)
-                sponsor_payment_signed = algo_encoding.msgpack_encode(sponsor_payment.sign(sponsor_private_key))
-                app_call_signed = algo_encoding.msgpack_encode(app_call.sign(sponsor_private_key))
+            # Sign sponsor transactions via KMS
+            sponsor_payment_signed = self.signer.sign_transaction_msgpack(sponsor_payment)
+            app_call_signed = self.signer.sign_transaction_msgpack(app_call)
             
             # Encode transactions for client - user ONLY signs the cUSD transfer (index 1)
             transactions_to_sign = [

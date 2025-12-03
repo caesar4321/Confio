@@ -210,13 +210,14 @@ class WithdrawSessionConsumer(AsyncJsonWebsocketConsumer):
         sponsor_payment.group = gid
         user_axfer.group = gid
 
-        # Pre-sign sponsor if possible
-        sponsor_signed_b64 = None
-        mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
-        if mn:
-            from algosdk import mnemonic
-            sk = mnemonic.to_private_key(mn)
-            sponsor_signed_b64 = algo_encoding.msgpack_encode(sponsor_payment.sign(sk))
+        # Pre-sign sponsor via KMS
+        try:
+            from blockchain.kms_manager import get_kms_signer_from_settings
+            signer = get_kms_signer_from_settings()
+            signer.assert_matches_address(getattr(settings, "ALGORAND_SPONSOR_ADDRESS", None))
+            sponsor_signed_b64 = signer.sign_transaction_msgpack(sponsor_payment)
+        except Exception:
+            sponsor_signed_b64 = None
 
         return {
             "success": True,

@@ -24,7 +24,7 @@ This guide explains how to set up AWS KMS (Key Management Service) for secure Al
 | Access Control | File permissions | IAM policies + MFA |
 | Audit Logging | None | CloudTrail logs all access |
 | Key Rotation | Manual | Can be automated |
-| Backup/Recovery | Manual mnemonic backup | AWS managed backups |
+| Backup/Recovery | Manual backup phrase (for recovery only) | AWS managed backups |
 | Compliance | Limited | HIPAA, PCI-DSS compliant |
 
 ### Cost
@@ -247,7 +247,7 @@ if USE_KMS_SIGNING:
     else:
         ALGORAND_SPONSOR_ADDRESS = kms_manager.get_address(KMS_KEY_ALIAS_MAINNET)
 else:
-    # Fallback to .env mnemonic-based approach
+    # Fallback to .env (KMS required in production)
     ALGORAND_SPONSOR_ADDRESS = config('ALGORAND_SPONSOR_ADDRESS')
 ```
 
@@ -264,19 +264,19 @@ KMS_KEY_ALIAS_TESTNET=confio-testnet-sponsor
 KMS_KEY_ALIAS_MAINNET=confio-mainnet-sponsor
 KMS_REGION=eu-central-2
 
-# Optional: Keep old mnemonic as backup (will not be used if KMS enabled)
-# ALGORAND_ADMIN_MNEMONIC=<your_backup_mnemonic>
+# Optional: Keep old backup phrase securely (KMS used for signing)
+# ALGORAND_ADMIN_MNEMONIC (backup only, not used for signing)=<your_backup_mnemonic>
 ```
 
 ### Update Signing Code
 
-Replace mnemonic-based signing with KMS:
+Replace KMS-based signing with KMS:
 
 **Before (using mnemonic):**
 ```python
 from algosdk import mnemonic
 
-admin_mnemonic = os.environ.get('ALGORAND_ADMIN_MNEMONIC')
+admin_mnemonic = os.environ.get('ALGORAND_ADMIN_MNEMONIC (backup only, not used for signing)')
 private_key = mnemonic.to_private_key(admin_mnemonic)
 signed_txn = unsigned_txn.sign(private_key)
 ```
@@ -311,7 +311,7 @@ class AlgorandSponsorService:
         else:
             # Legacy mnemonic-based approach
             from algosdk import mnemonic, account
-            admin_mnemonic = settings.ALGORAND_ADMIN_MNEMONIC
+            admin_mnemonic = settings.ALGORAND_ADMIN_MNEMONIC (backup only, not used for signing)
             self.private_key = mnemonic.to_private_key(admin_mnemonic)
             self.sponsor_address = account.address_from_private_key(self.private_key)
             self.signer = None
@@ -542,7 +542,7 @@ Store backup mnemonics in:
    export USE_KMS_SIGNING=False
 
    # Add mnemonic to .env
-   ALGORAND_ADMIN_MNEMONIC="your 25 word backup mnemonic"
+   ALGORAND_ADMIN_MNEMONIC (backup only, not used for signing)="your 25 word backup mnemonic"
 
    # Transfer funds to new KMS-managed account
    ```

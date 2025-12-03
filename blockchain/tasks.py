@@ -351,13 +351,9 @@ def scan_inbound_deposits():
         skipped = 0
 
         # Treat deposits from the sponsor/admin as external deposits, not internal transfers
-        sponsor_address = None
         try:
-            from algosdk import mnemonic as _mn
-            from algosdk import account as _acct
-            sponsor_mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
-            if sponsor_mn:
-                sponsor_address = _acct.address_from_private_key(_mn.to_private_key(sponsor_mn))
+            from blockchain.kms_manager import get_kms_signer_from_settings
+            sponsor_address = get_kms_signer_from_settings().address
         except Exception:
             sponsor_address = None
 
