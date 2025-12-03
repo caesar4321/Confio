@@ -39,6 +39,16 @@ class ExchangeRateService:
         results['dolarapi'] = self.fetch_dolarapi_rates()
         
         return results
+
+    def fetch_dolartoday_rates(self) -> bool:
+        """
+        Legacy placeholder for DolarToday rates.
+
+        The upstream source was removed (see README note) but tasks/commands may still call it.
+        Return False and log a warning to avoid AttributeError crashes in Celery.
+        """
+        logger.warning("DolarToday source removed; fetch_dolartoday_rates is a no-op")
+        return False
     
     
     def fetch_yadio_rates(self) -> bool:
