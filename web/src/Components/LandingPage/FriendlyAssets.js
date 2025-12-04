@@ -56,21 +56,21 @@ const FriendlyAssets = () => {
         { label: t('Respaldado por', 'Backed by', '지원'), value: t('Confianza y participación de la comunidad Confío.', 'Trust and participation from the Confío community.', 'Confío 커뮤니티의 신뢰와 참여.') },
         { label: t('Uso principal', 'Main use', '주요 용도'), value: t('Refleja la participación y beneficios dentro de Confío.', 'Reflects engagement and benefits inside Confío.', 'Confío 내 참여와 혜택을 반영합니다.') },
         { label: t('Valor', 'Value', '가치'), value: t('Variable', 'Variable', '변동') },
-        { 
-          label: t('ID del Activo', 'Asset ID', '자산 ID'), 
+        {
+          label: t('ID del Activo', 'Asset ID', '자산 ID'),
           value: (
-            <a href="https://explorer.perawallet.app/asset/3198568509/" target="_blank" rel="noopener noreferrer" className={styles.detailLink}>
-              3198568509
+            <a href="https://explorer.perawallet.app/asset/3351104258/" target="_blank" rel="noopener noreferrer" className={styles.detailLink}>
+              3351104258
             </a>
-          ) 
+          )
         },
-        { 
-          label: t('Explorador', 'Explorer', '탐색기'), 
+        {
+          label: t('Explorador', 'Explorer', '탐색기'),
           value: (
-            <a href="https://explorer.perawallet.app/asset/3198568509/" target="_blank" rel="noopener noreferrer" className={styles.detailLink}>
+            <a href="https://explorer.perawallet.app/asset/3351104258/" target="_blank" rel="noopener noreferrer" className={styles.detailLink}>
               {t('Ver en Pera Explorer', 'View on Pera Explorer', 'Pera Explorer에서 보기')}
             </a>
-          ) 
+          )
         }
       ],
       highlight: {

@@ -34,9 +34,9 @@ const FriendlyTestimonials = () => {
   ];
 
   const stats = [
-    { number: '6000+', label: t('Miembros en el grupo de Telegram', 'Miembros en el grupo de Telegram', 'Miembros en el grupo de Telegram') },
-    { number: '1800+', label: t('Usuarios activos de la app', 'Usuarios activos de la app', 'Usuarios activos de la app') },
-    { number: '3', label: t('Países: 🇻🇪 🇦🇷 🇧🇴', 'Countries: 🇻🇪 🇦🇷 🇧🇴', '국가: 🇻🇪 🇦🇷 🇧🇴') },
+    { number: '9000+', label: t('Miembros en el grupo de Telegram', 'Telegram group members', 'Telegram 그룹 멤버') },
+    { number: '2700+', label: t('Usuarios activos de la app', 'Active app users', '앱 활성 사용자') },
+    { number: '21+', label: t('Países (LATAM, EEUU, España)', 'Countries (LATAM, USA, Spain)', '국가 (라틴 아메리카, 미국, 스페인)') },
     { number: t('Gratis', 'Free', '무료'), label: t('Para usuarios normales', 'For regular users', '일반 사용자를 위해') }
   ];
 
