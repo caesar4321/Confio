@@ -9,12 +9,14 @@ import os
 import sys
 from typing import Dict, Any, Optional
 
-# Add parent directory to path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add parent directory and repo root to path
+contracts_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+repo_root = os.path.dirname(contracts_dir)
+sys.path.append(contracts_dir)
+sys.path.append(repo_root)
 try:
     from dotenv import load_dotenv
     # Load .env from project root
-    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     load_dotenv(os.path.join(repo_root, '.env'))
 except Exception:
     pass
@@ -37,16 +39,13 @@ from beaker.client import ApplicationClient
 # Import the payroll contract (Teal app)
 from contracts.payroll.payroll import app as payroll_app
 
-# Network configuration
-ALGOD_ADDRESS = os.getenv("ALGORAND_ALGOD_ADDRESS", "http://localhost:4001")
-ALGOD_TOKEN = os.getenv("ALGORAND_ALGOD_TOKEN", "a" * 64)
-
-
 class PayrollDeployer:
     """Deploy and manage Confío payroll contract"""
 
     def __init__(self, txn_signer, sender_address: str, kms_signer: Optional[KMSSigner] = None, sk: Optional[str] = None):
-        self.algod_client = algod.AlgodClient(ALGOD_TOKEN, ALGOD_ADDRESS)
+        algod_address = os.getenv("ALGORAND_ALGOD_ADDRESS", "http://localhost:4001")
+        algod_token = os.getenv("ALGORAND_ALGOD_TOKEN", "a" * 64)
+        self.algod_client = algod.AlgodClient(algod_token, algod_address)
         self.app_id = None
         self.app_addr = None
         self.txn_signer = txn_signer
