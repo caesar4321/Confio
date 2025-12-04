@@ -1,79 +1,47 @@
 #pragma version 8
 intcblock 0 1 2 4 10000
-bytecblock 0x706179726f6c6c5f6173736574 0x 0x61646d696e 0x6665655f726563697069656e74 0x5641554c54
+bytecblock 0x 0x706179726f6c6c5f6173736574 0x61646d696e 0x73706f6e736f725f61646472657373 0x5641554c54 0x637573645f666565735f62616c616e6365 0x6665655f726563697069656e74 0x746f74616c5f666565735f636f6c6c6563746564
 txna ApplicationArgs 0
 pushbytes 0x4c5c61ba // "create()void"
 ==
-bnz main_l12
+bnz main_l20
 txna ApplicationArgs 0
 pushbytes 0x6cd18062 // "setup_asset(uint64)void"
 ==
-bnz main_l11
+bnz main_l19
 txna ApplicationArgs 0
 pushbytes 0xb53ca258 // "set_fee_recipient(address)void"
 ==
-bnz main_l10
+bnz main_l18
+txna ApplicationArgs 0
+pushbytes 0xbe77aae6 // "set_sponsor_address(address)void"
+==
+bnz main_l17
 txna ApplicationArgs 0
 pushbytes 0xd87a0509 // "set_business_delegates(address,address[],address[])void"
 ==
-bnz main_l9
+bnz main_l16
 txna ApplicationArgs 0
 pushbytes 0x2e43f35a // "fund_business(address,uint64)void"
 ==
-bnz main_l8
+bnz main_l15
 txna ApplicationArgs 0
 pushbytes 0x8eee0579 // "payout(address,uint64,string)void"
 ==
-bnz main_l7
+bnz main_l14
+txna ApplicationArgs 0
+pushbytes 0x62886d8e // "withdraw_vault(address,uint64,address)void"
+==
+bnz main_l13
+txna ApplicationArgs 0
+pushbytes 0x3280d5f5 // "admin_withdraw_vault(address,uint64,address)void"
+==
+bnz main_l12
+txna ApplicationArgs 0
+pushbytes 0x681fd939 // "withdraw_fees(address)void"
+==
+bnz main_l11
 err
-main_l7:
-txn OnCompletion
-intc_0 // NoOp
-==
-txn ApplicationID
-intc_0 // 0
-!=
-&&
-assert
-callsub payoutcaster_11
-intc_1 // 1
-return
-main_l8:
-txn OnCompletion
-intc_0 // NoOp
-==
-txn ApplicationID
-intc_0 // 0
-!=
-&&
-assert
-callsub fundbusinesscaster_10
-intc_1 // 1
-return
-main_l9:
-txn OnCompletion
-intc_0 // NoOp
-==
-txn ApplicationID
-intc_0 // 0
-!=
-&&
-assert
-callsub setbusinessdelegatescaster_9
-intc_1 // 1
-return
-main_l10:
-txn OnCompletion
-intc_0 // NoOp
-==
-txn ApplicationID
-intc_0 // 0
-!=
-&&
-assert
-callsub setfeerecipientcaster_8
-intc_1 // 1
-return
 main_l11:
 txn OnCompletion
 intc_0 // NoOp
@@ -83,7 +51,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub setupassetcaster_7
+callsub withdrawfeescaster_19
 intc_1 // 1
 return
 main_l12:
@@ -92,10 +60,106 @@ intc_0 // NoOp
 ==
 txn ApplicationID
 intc_0 // 0
+!=
+&&
+assert
+callsub adminwithdrawvaultcaster_18
+intc_1 // 1
+return
+main_l13:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub withdrawvaultcaster_17
+intc_1 // 1
+return
+main_l14:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub payoutcaster_16
+intc_1 // 1
+return
+main_l15:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub fundbusinesscaster_15
+intc_1 // 1
+return
+main_l16:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub setbusinessdelegatescaster_14
+intc_1 // 1
+return
+main_l17:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub setsponsoraddresscaster_13
+intc_1 // 1
+return
+main_l18:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub setfeerecipientcaster_12
+intc_1 // 1
+return
+main_l19:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub setupassetcaster_11
+intc_1 // 1
+return
+main_l20:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
 ==
 &&
 assert
-callsub createcaster_6
+callsub createcaster_10
 intc_1 // 1
 return
 
@@ -105,7 +169,10 @@ proto 0 0
 bytec_2 // "admin"
 txn Sender
 app_global_put
-bytec_3 // "fee_recipient"
+bytec 6 // "fee_recipient"
+txn Sender
+app_global_put
+bytec_3 // "sponsor_address"
 txn Sender
 app_global_put
 intc_1 // 1
@@ -119,7 +186,7 @@ bytec_2 // "admin"
 app_global_get
 ==
 assert
-bytec_0 // "payroll_asset"
+bytec_1 // "payroll_asset"
 app_global_get
 intc_0 // 0
 ==
@@ -134,7 +201,7 @@ intc_2 // 2
 *
 >=
 assert
-bytec_0 // "payroll_asset"
+bytec_1 // "payroll_asset"
 frame_dig -1
 app_global_put
 itxn_begin
@@ -164,20 +231,38 @@ txn RekeyTo
 global ZeroAddress
 ==
 assert
-bytec_3 // "fee_recipient"
+bytec 6 // "fee_recipient"
+frame_dig -1
+app_global_put
+intc_1 // 1
+return
+
+// set_sponsor_address
+setsponsoraddress_3:
+proto 1 0
+txn Sender
+bytec_2 // "admin"
+app_global_get
+==
+assert
+frame_dig -1
+global ZeroAddress
+!=
+assert
+bytec_3 // "sponsor_address"
 frame_dig -1
 app_global_put
 intc_1 // 1
 return
 
 // set_business_delegates
-setbusinessdelegates_3:
+setbusinessdelegates_4:
 proto 3 0
 intc_0 // 0
-bytec_1 // ""
+bytec_0 // ""
 intc_0 // 0
 dup
-bytec_1 // ""
+bytec_0 // ""
 intc_0 // 0
 frame_dig -3
 store 1
@@ -192,7 +277,7 @@ load 1
 assert
 intc_0 // 0
 store 0
-setbusinessdelegates_3_l1:
+setbusinessdelegates_4_l1:
 load 0
 frame_dig -2
 intc_0 // 0
@@ -200,10 +285,10 @@ extract_uint16
 frame_bury 0
 frame_dig 0
 <
-bnz setbusinessdelegates_3_l5
+bnz setbusinessdelegates_4_l5
 intc_0 // 0
 store 0
-setbusinessdelegates_3_l3:
+setbusinessdelegates_4_l3:
 load 0
 frame_dig -1
 intc_0 // 0
@@ -211,7 +296,7 @@ extract_uint16
 frame_bury 3
 frame_dig 3
 <
-bz setbusinessdelegates_3_l6
+bz setbusinessdelegates_4_l6
 frame_dig -1
 pushint 32 // 32
 load 0
@@ -232,8 +317,8 @@ load 0
 intc_1 // 1
 +
 store 0
-b setbusinessdelegates_3_l3
-setbusinessdelegates_3_l5:
+b setbusinessdelegates_4_l3
+setbusinessdelegates_4_l5:
 frame_dig -2
 pushint 32 // 32
 load 0
@@ -255,15 +340,15 @@ load 0
 intc_1 // 1
 +
 store 0
-b setbusinessdelegates_3_l1
-setbusinessdelegates_3_l6:
+b setbusinessdelegates_4_l1
+setbusinessdelegates_4_l6:
 intc_1 // 1
 return
 
 // fund_business
-fundbusiness_4:
+fundbusiness_5:
 proto 2 0
-bytec_0 // "payroll_asset"
+bytec_1 // "payroll_asset"
 app_global_get
 intc_0 // 0
 !=
@@ -281,7 +366,7 @@ intc_3 // axfer
 ==
 assert
 gtxn 0 XferAsset
-bytec_0 // "payroll_asset"
+bytec_1 // "payroll_asset"
 app_global_get
 ==
 assert
@@ -310,13 +395,13 @@ store 5
 load 8
 store 7
 load 5
-bnz fundbusiness_4_l2
+bnz fundbusiness_5_l2
 intc_0 // 0
-b fundbusiness_4_l3
-fundbusiness_4_l2:
+b fundbusiness_5_l3
+fundbusiness_5_l2:
 load 7
 btoi
-fundbusiness_4_l3:
+fundbusiness_5_l3:
 store 6
 load 6
 frame_dig -1
@@ -330,9 +415,9 @@ intc_1 // 1
 return
 
 // payout
-payout_5:
+payout_6:
 proto 3 0
-bytec_0 // "payroll_asset"
+bytec_1 // "payroll_asset"
 app_global_get
 intc_0 // 0
 !=
@@ -346,7 +431,7 @@ txn NumAccounts
 intc_1 // 1
 >=
 assert
-txna Accounts 0
+txna Accounts 1
 store 13
 load 13
 txn Sender
@@ -355,6 +440,11 @@ box_get
 store 19
 store 18
 load 19
+txn Sender
+bytec_3 // "sponsor_address"
+app_global_get
+==
+||
 assert
 global LatestTimestamp
 store 12
@@ -406,7 +496,7 @@ store 14
 itxn_begin
 intc_3 // axfer
 itxn_field TypeEnum
-bytec_0 // "payroll_asset"
+bytec_1 // "payroll_asset"
 app_global_get
 itxn_field XferAsset
 load 14
@@ -416,20 +506,18 @@ itxn_field AssetAmount
 intc_0 // 0
 itxn_field Fee
 itxn_submit
-itxn_begin
-intc_3 // axfer
-itxn_field TypeEnum
-bytec_0 // "payroll_asset"
+bytec 5 // "cusd_fees_balance"
+bytec 5 // "cusd_fees_balance"
 app_global_get
-itxn_field XferAsset
-bytec_3 // "fee_recipient"
-app_global_get
-itxn_field AssetReceiver
 load 11
-itxn_field AssetAmount
-intc_0 // 0
-itxn_field Fee
-itxn_submit
++
+app_global_put
+bytec 7 // "total_fees_collected"
+bytec 7 // "total_fees_collected"
+app_global_get
+load 11
++
+app_global_put
 load 14
 frame_dig -2
 itob
@@ -453,14 +541,201 @@ box_put
 intc_1 // 1
 return
 
+// withdraw_vault
+withdrawvault_7:
+proto 3 0
+bytec_1 // "payroll_asset"
+app_global_get
+intc_0 // 0
+!=
+assert
+txn Sender
+frame_dig -3
+==
+txn Sender
+bytec_3 // "sponsor_address"
+app_global_get
+==
+||
+assert
+frame_dig -2
+intc_0 // 0
+>
+assert
+txn Fee
+global MinTxnFee
+intc_2 // 2
+*
+>=
+assert
+bytec 4 // "VAULT"
+frame_dig -3
+concat
+store 22
+load 22
+box_get
+store 25
+store 24
+load 25
+assert
+load 24
+btoi
+store 23
+load 23
+frame_dig -2
+>=
+assert
+load 23
+frame_dig -2
+-
+store 23
+load 22
+load 23
+itob
+box_put
+itxn_begin
+intc_3 // axfer
+itxn_field TypeEnum
+bytec_1 // "payroll_asset"
+app_global_get
+itxn_field XferAsset
+frame_dig -1
+itxn_field AssetReceiver
+frame_dig -2
+itxn_field AssetAmount
+intc_0 // 0
+itxn_field Fee
+itxn_submit
+intc_1 // 1
+return
+
+// admin_withdraw_vault
+adminwithdrawvault_8:
+proto 3 0
+bytec_1 // "payroll_asset"
+app_global_get
+intc_0 // 0
+!=
+assert
+txn Sender
+bytec_2 // "admin"
+app_global_get
+==
+assert
+frame_dig -2
+intc_0 // 0
+>
+assert
+txn Fee
+global MinTxnFee
+intc_2 // 2
+*
+>=
+assert
+bytec 4 // "VAULT"
+frame_dig -3
+concat
+store 26
+load 26
+box_get
+store 29
+store 28
+load 29
+assert
+load 28
+btoi
+store 27
+load 27
+frame_dig -2
+>=
+assert
+load 27
+frame_dig -2
+-
+store 27
+load 26
+load 27
+itob
+box_put
+itxn_begin
+intc_3 // axfer
+itxn_field TypeEnum
+bytec_1 // "payroll_asset"
+app_global_get
+itxn_field XferAsset
+frame_dig -1
+itxn_field AssetReceiver
+frame_dig -2
+itxn_field AssetAmount
+intc_0 // 0
+itxn_field Fee
+itxn_submit
+intc_1 // 1
+return
+
+// withdraw_fees
+withdrawfees_9:
+proto 1 0
+txn Sender
+bytec_2 // "admin"
+app_global_get
+==
+assert
+bytec_1 // "payroll_asset"
+app_global_get
+intc_0 // 0
+!=
+assert
+bytec 5 // "cusd_fees_balance"
+app_global_get
+store 30
+load 30
+intc_0 // 0
+>
+assert
+frame_dig -1
+store 31
+load 31
+global ZeroAddress
+==
+bz withdrawfees_9_l2
+bytec 6 // "fee_recipient"
+app_global_get
+store 31
+withdrawfees_9_l2:
+txn Fee
+global MinTxnFee
+intc_2 // 2
+*
+>=
+assert
+bytec 5 // "cusd_fees_balance"
+intc_0 // 0
+app_global_put
+itxn_begin
+intc_3 // axfer
+itxn_field TypeEnum
+bytec_1 // "payroll_asset"
+app_global_get
+itxn_field XferAsset
+load 31
+itxn_field AssetReceiver
+load 30
+itxn_field AssetAmount
+intc_0 // 0
+itxn_field Fee
+itxn_submit
+intc_1 // 1
+return
+
 // create_caster
-createcaster_6:
+createcaster_10:
 proto 0 0
 callsub create_0
 retsub
 
 // setup_asset_caster
-setupassetcaster_7:
+setupassetcaster_11:
 proto 0 0
 intc_0 // 0
 txna ApplicationArgs 1
@@ -471,19 +746,29 @@ callsub setupasset_1
 retsub
 
 // set_fee_recipient_caster
-setfeerecipientcaster_8:
+setfeerecipientcaster_12:
 proto 0 0
-bytec_1 // ""
+bytec_0 // ""
 txna ApplicationArgs 1
 frame_bury 0
 frame_dig 0
 callsub setfeerecipient_2
 retsub
 
-// set_business_delegates_caster
-setbusinessdelegatescaster_9:
+// set_sponsor_address_caster
+setsponsoraddresscaster_13:
 proto 0 0
-bytec_1 // ""
+bytec_0 // ""
+txna ApplicationArgs 1
+frame_bury 0
+frame_dig 0
+callsub setsponsoraddress_3
+retsub
+
+// set_business_delegates_caster
+setbusinessdelegatescaster_14:
+proto 0 0
+bytec_0 // ""
 dupn 2
 txna ApplicationArgs 1
 frame_bury 0
@@ -494,13 +779,13 @@ frame_bury 2
 frame_dig 0
 frame_dig 1
 frame_dig 2
-callsub setbusinessdelegates_3
+callsub setbusinessdelegates_4
 retsub
 
 // fund_business_caster
-fundbusinesscaster_10:
+fundbusinesscaster_15:
 proto 0 0
-bytec_1 // ""
+bytec_0 // ""
 intc_0 // 0
 txna ApplicationArgs 1
 frame_bury 0
@@ -509,15 +794,15 @@ btoi
 frame_bury 1
 frame_dig 0
 frame_dig 1
-callsub fundbusiness_4
+callsub fundbusiness_5
 retsub
 
 // payout_caster
-payoutcaster_11:
+payoutcaster_16:
 proto 0 0
-bytec_1 // ""
+bytec_0 // ""
 intc_0 // 0
-bytec_1 // ""
+bytec_0 // ""
 txna ApplicationArgs 1
 frame_bury 0
 txna ApplicationArgs 2
@@ -528,5 +813,53 @@ frame_bury 2
 frame_dig 0
 frame_dig 1
 frame_dig 2
-callsub payout_5
+callsub payout_6
+retsub
+
+// withdraw_vault_caster
+withdrawvaultcaster_17:
+proto 0 0
+bytec_0 // ""
+intc_0 // 0
+bytec_0 // ""
+txna ApplicationArgs 1
+frame_bury 0
+txna ApplicationArgs 2
+btoi
+frame_bury 1
+txna ApplicationArgs 3
+frame_bury 2
+frame_dig 0
+frame_dig 1
+frame_dig 2
+callsub withdrawvault_7
+retsub
+
+// admin_withdraw_vault_caster
+adminwithdrawvaultcaster_18:
+proto 0 0
+bytec_0 // ""
+intc_0 // 0
+bytec_0 // ""
+txna ApplicationArgs 1
+frame_bury 0
+txna ApplicationArgs 2
+btoi
+frame_bury 1
+txna ApplicationArgs 3
+frame_bury 2
+frame_dig 0
+frame_dig 1
+frame_dig 2
+callsub adminwithdrawvault_8
+retsub
+
+// withdraw_fees_caster
+withdrawfeescaster_19:
+proto 0 0
+bytec_0 // ""
+txna ApplicationArgs 1
+frame_bury 0
+frame_dig 0
+callsub withdrawfees_9
 retsub

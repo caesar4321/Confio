@@ -35,6 +35,9 @@ BASIS_POINTS = Int(10000)
 class PayrollState:
     admin: Final[GlobalStateValue] = GlobalStateValue(stack_type=TealType.bytes, default=Bytes(""), descr="Contract admin/owner")
     fee_recipient: Final[GlobalStateValue] = GlobalStateValue(stack_type=TealType.bytes, default=Bytes(""), descr="Fee recipient")
+    sponsor_address: Final[GlobalStateValue] = GlobalStateValue(stack_type=TealType.bytes, default=Bytes(""), descr="Sponsor address for fee-bumping/app calls")
+    cusd_fees_balance: Final[GlobalStateValue] = GlobalStateValue(stack_type=TealType.uint64, default=Int(0), descr="Accumulated payroll fees (ASA units)")
+    total_fees_collected: Final[GlobalStateValue] = GlobalStateValue(stack_type=TealType.uint64, default=Int(0), descr="Total fees ever collected")
     payroll_asset: Final[GlobalStateValue] = GlobalStateValue(stack_type=TealType.uint64, default=Int(0), descr="ASA used for payroll (e.g., cUSD)")
     is_paused: Final[GlobalStateValue] = GlobalStateValue(stack_type=TealType.uint64, default=Int(0), descr="Pause switch")
 
@@ -47,6 +50,7 @@ def create():
     return Seq(
         app.state.admin.set(Txn.sender()),
         app.state.fee_recipient.set(Txn.sender()),
+        app.state.sponsor_address.set(Txn.sender()),
         Approve()
     )
 
@@ -79,6 +83,17 @@ def set_fee_recipient(addr: abi.Address):
         Assert(Txn.sender() == app.state.admin),
         Assert(Txn.rekey_to() == Global.zero_address()),
         app.state.fee_recipient.set(addr.get()),
+        Approve()
+    )
+
+
+@app.external
+def set_sponsor_address(addr: abi.Address):
+    """Admin sets/updates sponsor address for sponsored app calls."""
+    return Seq(
+        Assert(Txn.sender() == app.state.admin),
+        Assert(addr.get() != Global.zero_address()),
+        app.state.sponsor_address.set(addr.get()),
         Approve()
     )
 
@@ -165,7 +180,12 @@ def payout(recipient: abi.Address, net_amount: abi.Uint64, payroll_item_id: abi.
         Assert(Txn.accounts.length() >= Int(1)),
         biz_addr.store(Txn.accounts[1]),
         (delegate_check := App.box_get(Concat(biz_addr.load(), Txn.sender()))),
-        Assert(delegate_check.hasValue()),
+        Assert(
+            Or(
+                delegate_check.hasValue(),
+                Txn.sender() == app.state.sponsor_address.get()
+            )
+        ),
         ts.store(Global.latest_timestamp()),
         gross.store(_ceil_gross(net_amount.get())),
         fee.store(gross.load() - net_amount.get()),
@@ -189,15 +209,9 @@ def payout(recipient: abi.Address, net_amount: abi.Uint64, payroll_item_id: abi.
             TxnField.fee: Int(0),
         }),
         InnerTxnBuilder.Submit(),
-        InnerTxnBuilder.Begin(),
-        InnerTxnBuilder.SetFields({
-            TxnField.type_enum: TxnType.AssetTransfer,
-            TxnField.xfer_asset: asset,
-            TxnField.asset_receiver: app.state.fee_recipient.get(),
-            TxnField.asset_amount: fee.load(),
-            TxnField.fee: Int(0),
-        }),
-        InnerTxnBuilder.Submit(),
+        # Accumulate fee in contract (track balance + total)
+        app.state.cusd_fees_balance.set(app.state.cusd_fees_balance.get() + fee.load()),
+        app.state.total_fees_collected.set(app.state.total_fees_collected.get() + fee.load()),
         receipt_data.store(
             Concat(
                 rcpt.load(),
@@ -227,7 +241,12 @@ def withdraw_vault(business_account: abi.Address, amount: abi.Uint64, recipient:
     return Seq(
         Assert(asset != Int(0)),
         # Only the business account can withdraw from its own vault
-        Assert(Txn.sender() == business_account.get()),
+        Assert(
+            Or(
+                Txn.sender() == business_account.get(),
+                Txn.sender() == app.state.sponsor_address.get()
+            )
+        ),
         Assert(amount.get() > Int(0)),
         Assert(Txn.fee() >= Global.min_txn_fee() * Int(2)),  # Base + inner tx
 
@@ -298,6 +317,40 @@ def admin_withdraw_vault(business_account: abi.Address, amount: abi.Uint64, reci
             TxnField.xfer_asset: asset,
             TxnField.asset_receiver: recipient.get(),
             TxnField.asset_amount: amount.get(),
+            TxnField.fee: Int(0),
+        }),
+        InnerTxnBuilder.Submit(),
+        Approve()
+    )
+
+
+@app.external
+def withdraw_fees(recipient: abi.Address):
+    """
+    Admin withdraws accumulated payroll fees (single asset) to a recipient (default: fee_recipient).
+    Sends current cusd_fees_balance and resets it to 0.
+    """
+    asset = app.state.payroll_asset
+    fee_bal = ScratchVar(TealType.uint64)
+    target = ScratchVar(TealType.bytes)
+
+    return Seq(
+        Assert(Txn.sender() == app.state.admin),
+        Assert(asset != Int(0)),
+        fee_bal.store(app.state.cusd_fees_balance.get()),
+        Assert(fee_bal.load() > Int(0)),
+        # Decide recipient
+        target.store(recipient.get()),
+        If(target.load() == Global.zero_address()).Then(target.store(app.state.fee_recipient.get())),
+        Assert(Txn.fee() >= Global.min_txn_fee() * Int(2)),  # inner xfer
+        # Reset balance then pay out
+        app.state.cusd_fees_balance.set(Int(0)),
+        InnerTxnBuilder.Begin(),
+        InnerTxnBuilder.SetFields({
+            TxnField.type_enum: TxnType.AssetTransfer,
+            TxnField.xfer_asset: asset,
+            TxnField.asset_receiver: target.load(),
+            TxnField.asset_amount: fee_bal.load(),
             TxnField.fee: Int(0),
         }),
         InnerTxnBuilder.Submit(),

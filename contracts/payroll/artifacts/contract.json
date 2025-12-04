@@ -34,6 +34,19 @@
             }
         },
         {
+            "name": "set_sponsor_address",
+            "args": [
+                {
+                    "type": "address",
+                    "name": "addr"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Admin sets/updates sponsor address for sponsored app calls."
+        },
+        {
             "name": "set_business_delegates",
             "args": [
                 {
@@ -90,6 +103,61 @@
             "returns": {
                 "type": "void"
             }
+        },
+        {
+            "name": "withdraw_vault",
+            "args": [
+                {
+                    "type": "address",
+                    "name": "business_account"
+                },
+                {
+                    "type": "uint64",
+                    "name": "amount"
+                },
+                {
+                    "type": "address",
+                    "name": "recipient"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Withdraw funds from business vault. Only the business account can withdraw its own vault.\nAmount can be partial or full. Recipient typically the business account itself."
+        },
+        {
+            "name": "admin_withdraw_vault",
+            "args": [
+                {
+                    "type": "address",
+                    "name": "business_account"
+                },
+                {
+                    "type": "uint64",
+                    "name": "amount"
+                },
+                {
+                    "type": "address",
+                    "name": "recipient"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Admin emergency withdrawal from any business vault.\nUse for migrations, emergencies, or recovering stuck funds."
+        },
+        {
+            "name": "withdraw_fees",
+            "args": [
+                {
+                    "type": "address",
+                    "name": "recipient"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Admin withdraws accumulated payroll fees (single asset) to a recipient (default: fee_recipient).\nSends current cusd_fees_balance and resets it to 0."
         }
     ],
     "networks": {},
