@@ -32,6 +32,11 @@ import os
 import sys
 from dataclasses import dataclass
 from typing import Callable, Iterable, List, Optional
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))
 
 from algosdk import account, encoding, mnemonic
 from algosdk import transaction
@@ -134,6 +139,13 @@ def read_env(name: str, default: Optional[str] = None) -> str:
     return value
 
 
+def read_env_bool(name: str, default: bool = False) -> bool:
+    val = os.getenv(name)
+    if val is None:
+        return default
+    return str(val).lower() in ("1", "true", "yes", "on")
+
+
 def init_accounts() -> Accounts:
     """Initialize sponsor/admin signers from KMS if enabled, else from mnemonics."""
     kms_enabled = os.getenv("USE_KMS_SIGNING", "").lower() == "true" or bool(os.getenv("KMS_KEY_ALIAS"))
@@ -173,6 +185,31 @@ def init_accounts() -> Accounts:
         admin_addr=admin_addr,
         admin_signer=lambda txn: txn.sign(admin_key),
     )
+
+
+def update_dotenv_with_app_id(app_id: int, key_name: str = "ALGORAND_REWARD_APP_ID") -> None:
+    """Write/replace the reward app id in the project .env."""
+    root = Path(__file__).resolve().parents[2]
+    env_path = root / ".env"
+    line = f"{key_name}={app_id}\n"
+    try:
+        if not env_path.exists():
+            env_path.write_text(line)
+            print(f"[i] Created .env with {key_name}={app_id}")
+            return
+        content = env_path.read_text().splitlines(keepends=True)
+        replaced = False
+        for i, l in enumerate(content):
+            if l.startswith(f"{key_name}="):
+                content[i] = line
+                replaced = True
+                break
+        if not replaced:
+            content.append(line)
+        env_path.write_text("".join(content))
+        print(f"[i] Updated .env with {key_name}={app_id}")
+    except Exception as e:
+        print(f"[warn] Failed to update .env automatically: {e}")
 
 
 def get_algod_client() -> algod.AlgodClient:
@@ -512,13 +549,25 @@ def main() -> None:
     accounts = init_accounts()
 
     confio_asset_id = int(read_env("ALGORAND_CONFIO_ASSET_ID"))
+    skip_smoke = read_env_bool("SKIP_SMOKE_TEST", default=True)
+    fund_amount = int(os.getenv("REWARDS_FUND_AMOUNT", "100000000"))
+    update_env = read_env_bool("UPDATE_ENV_APP_ID", default=True)
 
     app_id = create_rewards_app(client, accounts, confio_asset_id)
     app_address = get_application_address(app_id)
     print(f"[i] Application address: {app_address}")
+    if update_env:
+        update_dotenv_with_app_id(app_id)
 
     bootstrap_vault(client, app_id, accounts, confio_asset_id)
-    fund_vault_with_confio(client, app_id, accounts, confio_asset_id)
+    if fund_amount > 0:
+        fund_vault_with_confio(client, app_id, accounts, confio_asset_id, amount=fund_amount)
+    else:
+        print("[i] Skipping funding vault (REWARDS_FUND_AMOUNT<=0)")
+
+    if skip_smoke:
+        print("[i] SKIP_SMOKE_TEST set; stopping after bootstrap/fund.")
+        return
 
     user_key, user_addr = create_and_fund_user(client, accounts.sponsor_addr, accounts.sponsor_signer, confio_asset_id)
 

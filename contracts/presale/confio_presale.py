@@ -780,6 +780,27 @@ def confio_presale():
             
             Int(1)
         ])
+
+    # Update admin address (admin only)
+    @Subroutine(TealType.uint64)
+    def update_admin():
+        new_admin = Txn.application_args[1]
+        old = ScratchVar(TealType.bytes)
+
+        return Seq([
+            Assert(Txn.sender() == App.globalGet(admin_address)),
+            Assert(Len(new_admin) == Int(32)),
+            Assert(Txn.rekey_to() == Global.zero_address()),
+            old.store(App.globalGet(admin_address)),
+            App.globalPut(admin_address, new_admin),
+            Log(Concat(
+                Bytes("ADMIN|UPDATE_ADMIN|"),
+                old.load(),
+                Bytes("|"),
+                new_admin
+            )),
+            Int(1)
+        ])
     
     # Emergency pause (admin only)
     @Subroutine(TealType.uint64)
@@ -937,6 +958,7 @@ def confio_presale():
              [Txn.application_args[0] == Bytes("unlock"), permanent_unlock()],
              [Txn.application_args[0] == Bytes("withdraw"), withdraw_cusd()],
              [Txn.application_args[0] == Bytes("withdraw_confio"), withdraw_confio()],
+             [Txn.application_args[0] == Bytes("update_admin"), update_admin()],
              [Txn.application_args[0] == Bytes("update_sponsor"), update_sponsor()],
              [Txn.application_args[0] == Bytes("pause"), emergency_pause()],
              [Txn.application_args[0] == Bytes("info"), get_user_info()],

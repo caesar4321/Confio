@@ -88,6 +88,18 @@ def set_fee_recipient(addr: abi.Address):
 
 
 @app.external
+def set_admin(addr: abi.Address):
+    """Rotate admin to a new address"""
+    return Seq(
+        Assert(Txn.sender() == app.state.admin),
+        Assert(Txn.rekey_to() == Global.zero_address()),
+        Assert(addr.get() != Global.zero_address()),
+        Assert(addr.get() != Global.current_application_address()),
+        app.state.admin.set(addr.get()),
+        Approve()
+    )
+
+@app.external
 def set_sponsor_address(addr: abi.Address):
     """Admin sets/updates sponsor address for sponsored app calls."""
     return Seq(
