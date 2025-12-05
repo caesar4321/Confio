@@ -745,6 +745,17 @@ def confio_rewards_app() -> Expr:
             Int(1),
         )
 
+    @Subroutine(TealType.uint64)
+    def update_admin() -> Expr:
+        return Seq(
+            assert_admin(),
+            Assert(Txn.application_args.length() >= Int(2)),
+            Assert(Len(Txn.application_args[1]) == Int(32)),
+            Assert(Txn.rekey_to() == Global.zero_address()),
+            App.globalPut(ADMIN, Txn.application_args[1]),
+            Int(1),
+        )
+
     on_create = initialize()
 
     return Cond(
@@ -761,6 +772,7 @@ def confio_rewards_app() -> Expr:
         [Txn.application_args[0] == Bytes("withdraw"), admin_withdraw()],
         [Txn.application_args[0] == Bytes("withdraw_algo"), withdraw_algo()],
         [Txn.application_args[0] == Bytes("set_sponsor"), update_sponsor()],
+        [Txn.application_args[0] == Bytes("update_admin"), update_admin()],
         [Txn.application_args[0] == Bytes("set_price_override"), set_price_override()],
         [Txn.application_args[0] == Bytes("clear_price_override"), clear_price_override()],
         [Txn.application_args[0] == Bytes("delete_box"), delete_box()],

@@ -485,6 +485,20 @@ def update_fee_recipient(new_recipient: abi.Address):
     )
 
 @app.external
+def set_admin(new_admin: abi.Address):
+    """Rotate admin to a new address (requires pause)"""
+    return Seq(
+        Assert(Txn.sender() == app.state.admin),
+        # Require pause before rotating admin to avoid in-flight surprises
+        Assert(app.state.is_paused == Int(1)),
+        Assert(Txn.rekey_to() == Global.zero_address()),
+        Assert(new_admin.get() != Global.zero_address()),
+        Assert(new_admin.get() != Global.current_application_address()),
+        app.state.admin.set(new_admin.get()),
+        Approve()
+    )
+
+@app.external
 def set_sponsor(sponsor: abi.Address):
     """Admin sets or updates the sponsor address for sponsored transactions"""
     return Seq(
