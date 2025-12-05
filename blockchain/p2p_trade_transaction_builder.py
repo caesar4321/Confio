@@ -125,6 +125,7 @@ class P2PTradeTransactionBuilder:
         token: str,
         amount: int,
         trade_id: str,
+        params: Optional[transaction.SuggestedParams] = None,
     ) -> BuildResult:
         try:
             asset_id = self._asset_id_for_type(token)
@@ -157,7 +158,8 @@ class P2PTradeTransactionBuilder:
                 return BuildResult(False, error='trade_id must be 1..56 bytes')
             mbr = self._trade_box_mbr(key_len)
 
-            params = self.algod_client.suggested_params()
+            if not params:
+                params = self.algod_client.suggested_params()
             min_fee = getattr(params, 'min_fee', 1000) or 1000
 
             # Build with ATC to correctly pass the AXFER txn as ABI arg
@@ -294,13 +296,15 @@ class P2PTradeTransactionBuilder:
         self,
         buyer_address: str,
         trade_id: str,
+        params: Optional[transaction.SuggestedParams] = None,
     ) -> BuildResult:
         """Build [Payment(sponsor fee-bump), AppCall(buyer)] so buyer is txn.Sender.
 
         This guarantees buyer is written correctly even if the approval uses txn.Sender.
         """
         try:
-            params = self.algod_client.suggested_params()
+            if not params:
+                params = self.algod_client.suggested_params()
             min_fee = getattr(params, 'min_fee', 1000) or 1000
 
             atc = AtomicTransactionComposer()
@@ -312,7 +316,7 @@ class P2PTradeTransactionBuilder:
             method = self._method('accept_trade')
             if method is None:
                 return BuildResult(False, error='ABI method accept_trade not found')
-            sp1 = transaction.SuggestedParams(fee=min_fee, first=params.first, last=params.last, gh=params.gh, gen=params.gen, flat_fee=True)
+            sp1 = transaction.SuggestedParams(fee=params.fee if getattr(params, 'flat_fee', False) else min_fee, first=params.first, last=params.last, gh=params.gh, gen=params.gen, flat_fee=True)
             # Include both common assets to satisfy asset_holding_get availability in app logic
             foreign_assets = [a for a in [self.cusd_asset_id, self.confio_asset_id] if a]
             atc.add_method_call(
@@ -330,6 +334,7 @@ class P2PTradeTransactionBuilder:
             gid = transaction.calculate_group_id([t.txn for t in tws])
             sponsor_txs = self._sign_sponsor_transactions([tws[0].txn])
             user_txs = [{'txn': algo_encoding.msgpack_encode(tws[1].txn), 'signers': [buyer_address], 'message': 'Accept trade'}]
+            self.logger.info('[P2P Builder] accept_trade_user: sponsor_txs len=%s', len(sponsor_txs))
             return BuildResult(True, transactions_to_sign=user_txs, sponsor_transactions=sponsor_txs, group_id=base64.b64encode(gid).decode(), trade_id=trade_id)
         except Exception as e:
             return BuildResult(False, error=str(e))
@@ -339,6 +344,7 @@ class P2PTradeTransactionBuilder:
         buyer_address: str,
         trade_id: str,
         payment_ref: str,
+        params: Optional[transaction.SuggestedParams] = None,
     ) -> BuildResult:
         """Build [Payment(sponsor→app, MBR), AppCall(buyer)]. Buyer signs only AppCall.
 
@@ -349,7 +355,8 @@ class P2PTradeTransactionBuilder:
             if len(key) > 64:
                 return BuildResult(False, error='trade_id too long for _paid box key')
             mbr = self._paid_box_mbr(len(key))
-            params = self.algod_client.suggested_params()
+            if not params:
+                params = self.algod_client.suggested_params()
             min_fee = getattr(params, 'min_fee', 1000) or 1000
 
             atc = AtomicTransactionComposer()
@@ -382,6 +389,7 @@ class P2PTradeTransactionBuilder:
             gid = transaction.calculate_group_id([t.txn for t in tws])
             sponsor_txs = self._sign_sponsor_transactions([tws[0].txn])
             user_txs = [{'txn': algo_encoding.msgpack_encode(tws[1].txn), 'signers': [buyer_address], 'message': 'Mark P2P trade as paid'}]
+            self.logger.info('[P2P Builder] mark_paid: sponsor_txs len=%s', len(sponsor_txs))
             return BuildResult(True, transactions_to_sign=user_txs, sponsor_transactions=sponsor_txs, group_id=base64.b64encode(gid).decode(), trade_id=trade_id)
         except Exception as e:
             return BuildResult(False, error=str(e))
@@ -390,6 +398,7 @@ class P2PTradeTransactionBuilder:
         self,
         seller_address: str,
         trade_id: str,
+        params: Optional[transaction.SuggestedParams] = None,
     ) -> BuildResult:
         """Build [Payment(sponsor fee-bump), AppCall(seller)] with user-signed AppCall."""
         try:
@@ -405,7 +414,8 @@ class P2PTradeTransactionBuilder:
             except Exception:
                 buyer_addr = None
 
-            params = self.algod_client.suggested_params()
+            if not params:
+                params = self.algod_client.suggested_params()
             min_fee = getattr(params, 'min_fee', 1000) or 1000
 
             atc = AtomicTransactionComposer()
@@ -454,13 +464,15 @@ class P2PTradeTransactionBuilder:
         self,
         caller_address: str,
         trade_id: str,
+        params: Optional[transaction.SuggestedParams] = None,
     ) -> BuildResult:
         """Build cancellation group for expired trades.
         Pattern: optional sponsor fee-bump Payment + user AppCall(cancel_trade).
         Boxes: trade_id, trade_id+"_paid", trade_id+"_dispute" (the app tolerates missing boxes).
         """
         try:
-            params = self.algod_client.suggested_params()
+            if not params:
+                params = self.algod_client.suggested_params()
             min_fee = getattr(params, 'min_fee', 1000) or 1000
 
             atc = AtomicTransactionComposer()
@@ -506,6 +518,7 @@ class P2PTradeTransactionBuilder:
         opener_address: str,
         trade_id: str,
         reason: str,
+        params: Optional[transaction.SuggestedParams] = None,
     ) -> BuildResult:
         """Build [Payment(sponsor→app, MBR), AppCall(opener)] to open dispute.
 
@@ -520,7 +533,8 @@ class P2PTradeTransactionBuilder:
                 return BuildResult(False, error='trade_id too long for _dispute box key')
             mbr = self._dispute_box_mbr(len(key))
 
-            params = self.algod_client.suggested_params()
+            if not params:
+                params = self.algod_client.suggested_params()
             min_fee = getattr(params, 'min_fee', 1000) or 1000
 
             atc = AtomicTransactionComposer()

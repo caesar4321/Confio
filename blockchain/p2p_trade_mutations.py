@@ -300,6 +300,25 @@ class PrepareP2PCreateTrade(graphene.Mutation):
         )
 
 
+def _extract_params(user_txn_dict: Dict) -> Optional[transaction.SuggestedParams]:
+    try:
+        t = user_txn_dict.get('txn', {})
+        gh = t.get('gh')
+        if isinstance(gh, bytes):
+            import base64
+            gh = base64.b64encode(gh).decode()
+        return transaction.SuggestedParams(
+            fee=t.get('fee', 1000),
+            first=t.get('fv'),
+            last=t.get('lv'),
+            gh=gh,
+            gen=t.get('gen'),
+            flat_fee=True
+        )
+    except Exception:
+        return None
+
+
 class SubmitP2PCreateTrade(graphene.Mutation):
     class Arguments:
         signed_user_txns = graphene.List(graphene.String, required=True, description='Signed user txns: AXFER and AppCall (base64 msgpack)')
@@ -371,7 +390,8 @@ class SubmitP2PCreateTrade(graphene.Mutation):
 
             # Rebuild sponsor txns deterministically
             builder = P2PTradeTransactionBuilder()
-            res = builder.build_create_trade(seller_addr_from_user, token_type, int(amount_u), trade_id)
+            sp = _extract_params(axfer_dict)
+            res = builder.build_create_trade(seller_addr_from_user, token_type, int(amount_u), trade_id, params=sp)
             if not res.success:
                 return cls(success=False, error=res.error or 'Failed to rebuild sponsor transactions')
             expected = {int(e.get('index')): e.get('txn') for e in (res.sponsor_transactions or [])}
@@ -709,12 +729,14 @@ class MarkP2PTradePaid(graphene.Mutation):
             builder = P2PTradeTransactionBuilder()
             # Derive buyer address from signed AppCall sender
             buyer_addr = algo_encoding.encode_address(user_dict['txn'].get('snd')) if user_dict.get('txn', {}).get('snd') else None
-            res = builder.build_mark_paid(buyer_addr, trade_id, payment_ref)
+            sp = _extract_params(user_dict)
+            res = builder.build_mark_paid(buyer_addr, trade_id, payment_ref, params=sp)
             if not res.success:
                 return cls(success=False, error=res.error)
             expected = res.sponsor_transactions or []
             if not expected or len(expected) != 1:
-                return cls(success=False, error='Unexpected sponsor transaction set')
+                logger.error(f'[P2P MarkPaid] Unexpected sponsor transaction set: len={len(expected)} expected={expected}')
+                return cls(success=False, error=f'Unexpected sponsor transaction set: len={len(expected)}')
 
             # Require client payload to match canonical sponsor txn
             try:
@@ -794,12 +816,14 @@ class ConfirmP2PTradeReceived(graphene.Mutation):
         try:
             builder = P2PTradeTransactionBuilder()
             seller_addr = algo_encoding.encode_address(user_dict['txn'].get('snd')) if user_dict.get('txn', {}).get('snd') else None
-            res = builder.build_confirm_received(seller_addr, trade_id)
+            sp = _extract_params(user_dict)
+            res = builder.build_confirm_received(seller_addr, trade_id, params=sp)
             if not res.success:
                 return cls(success=False, error=res.error)
             expected = res.sponsor_transactions or []
             if not expected or len(expected) != 1:
-                return cls(success=False, error='Unexpected sponsor transaction set')
+                logger.error(f'[P2P ConfirmReceived] Unexpected sponsor transaction set: len={len(expected)} expected={expected}')
+                return cls(success=False, error=f'Unexpected sponsor transaction set: len={len(expected)}')
 
             try:
                 provided = [json.loads(s) if isinstance(s, str) else s for s in sponsor_transactions or []]
@@ -927,19 +951,24 @@ class SubmitP2pAcceptTrade(graphene.Mutation):
         try:
             buyer_addr = algo_encoding.encode_address(user_dict['txn'].get('snd')) if user_dict.get('txn', {}).get('snd') else None
             builder = P2PTradeTransactionBuilder()
-            res = builder.build_accept_trade(buyer_addr, trade_id)
+            # Rebuild the same (buyer-signed) group used during prepare to verify sponsor txn
+            # Use params from user txn to ensure validity window matches
+            sp = _extract_params(user_dict)
+            res = builder.build_accept_trade_user(buyer_addr, trade_id, params=sp)
             if not res.success:
                 return cls(success=False, error=res.error)
             expected = res.sponsor_transactions or []
             if not expected or len(expected) != 1:
-                return cls(success=False, error='Unexpected sponsor transaction set')
+                logger.error(f'[P2P SubmitAccept] Unexpected sponsor transaction set: len={len(expected)} expected={expected}')
+                return cls(success=False, error=f'Unexpected sponsor transaction set: len={len(expected)}')
 
             try:
                 provided = [json.loads(s) if isinstance(s, str) else s for s in sponsor_transactions or []]
             except Exception:
                 provided = []
-            if not provided or provided[0].get('txn') != expected[0].get('txn') or int(provided[0].get('index')) != int(expected[0].get('index')):
-                return cls(success=False, error='Sponsor transaction mismatch; please re-run prepare')
+            if not provided or int(provided[0].get('index')) != int(expected[0].get('index')):
+                # We relax the strict txn check to allow client to update fee/group_id
+                return cls(success=False, error='Sponsor transaction mismatch (index); please re-run prepare')
 
             b = base64.b64decode(expected[0].get('txn'))
             stx0 = SPONSOR_SIGNER.sign_transaction(transaction.Transaction.undictify(msgpack.unpackb(b, raw=False)))
@@ -1267,12 +1296,14 @@ class CancelP2PTrade(graphene.Mutation):
 
             builder = P2PTradeTransactionBuilder()
             caller_addr = algo_encoding.encode_address(user_dict['txn'].get('snd')) if user_dict.get('txn', {}).get('snd') else None
-            res = builder.build_cancel_trade(caller_addr, trade_id)
+            sp = _extract_params(user_dict)
+            res = builder.build_cancel_trade(caller_addr, trade_id, params=sp)
             if not res.success:
                 return cls(success=False, error=res.error)
             expected = res.sponsor_transactions or []
             if not expected or len(expected) != 1:
-                return cls(success=False, error='Unexpected sponsor transaction set')
+                logger.error(f'[P2P Cancel] Unexpected sponsor transaction set: len={len(expected)} expected={expected}')
+                return cls(success=False, error=f'Unexpected sponsor transaction set: len={len(expected)}')
 
             try:
                 provided = [json.loads(s) if isinstance(s, str) else s for s in sponsor_transactions or []]
@@ -1421,12 +1452,14 @@ class SubmitP2POpenDispute(graphene.Mutation):
         try:
             builder = P2PTradeTransactionBuilder()
             opener_addr = algo_encoding.encode_address(user_dict['txn'].get('snd')) if user_dict.get('txn', {}).get('snd') else None
-            res = builder.build_open_dispute(opener_addr, trade_id, reason or '')
+            sp = _extract_params(user_dict)
+            res = builder.build_open_dispute(opener_addr, trade_id, reason or '', params=sp)
             if not res.success:
                 return cls(success=False, error=res.error)
             expected = res.sponsor_transactions or []
             if not expected or len(expected) != 1:
-                return cls(success=False, error='Unexpected sponsor transaction set')
+                logger.error(f'[P2P OpenDispute] Unexpected sponsor transaction set: len={len(expected)} expected={expected}')
+                return cls(success=False, error=f'Unexpected sponsor transaction set: len={len(expected)}')
 
             try:
                 provided = [json.loads(s) if isinstance(s, str) else s for s in (sponsor_transactions or [])]
