@@ -98,6 +98,17 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
         console.error(`[GraphQL error code]: ${err.extensions.code}`);
       }
 
+      // Check for token version mismatch or invalidation - force logout
+      if (err.message === 'Token has been invalidated' ||
+          err.message === 'Token version mismatch' ||
+          err.message.includes('Invalid token payload')) {
+        console.log('[Apollo] Token invalidated, clearing credentials and requiring re-login');
+        // Clear stored credentials immediately
+        Keychain.resetGenericPassword({ service: AUTH_KEYCHAIN_SERVICE }).catch(console.error);
+        // Don't retry - user must log in again
+        return;
+      }
+
       if (err.message === 'Signature has expired' || err.message === 'Invalid payload') {
         // Token has expired or is invalid, perform a single-flight refresh
         return new ApolloObservable<FetchResult>((observer) => {
@@ -125,7 +136,7 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
               forward(operation).subscribe(observer);
             } catch (error) {
               // Only clear tokens if refresh token is expired or invalid
-              if (error instanceof Error && 
+              if (error instanceof Error &&
                   (error.message.includes('expired') ||
                    error.message.includes('Invalid refresh token') ||
                    error.message.includes('No refresh token found'))) {
