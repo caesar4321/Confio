@@ -9,6 +9,10 @@ import os
 import sys
 import base64
 from pathlib import Path
+# Ensure project root on sys.path for blockchain imports
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))
 from algosdk import account, mnemonic, logic
 from algosdk.v2client import algod
 from algosdk.transaction import (
