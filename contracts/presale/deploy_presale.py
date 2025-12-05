@@ -9,6 +9,12 @@ import os
 import sys
 import json
 from typing import Dict, Any
+from pathlib import Path
+
+# Ensure project root on sys.path for blockchain modules
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))
 
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
