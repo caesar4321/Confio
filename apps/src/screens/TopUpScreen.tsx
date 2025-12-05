@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,10 @@ import {
   Alert,
   ScrollView,
   Platform,
+  Modal,
+  Animated,
+  Easing,
+  Image,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import InAppBrowser from 'react-native-inappbrowser-reborn';
@@ -26,10 +30,30 @@ import { countries, getCountryByIso } from '../utils/countries';
 import { createGuardarianTransaction, fetchGuardarianFiatCurrencies, GuardarianFiatCurrency } from '../services/guardarianService';
 import { useCurrencyByCode } from '../hooks/useCurrency';
 import { getFlagForCurrency } from '../utils/currencyFlags';
+import { useMutation, gql } from '@apollo/client';
+import algorandService from '../services/algorandService';
+
+// GraphQL mutation for USDC opt-in
+const OPT_IN_TO_USDC = gql`
+  mutation OptInToAsset($assetType: String!) {
+    optInToAssetByType(assetType: $assetType) {
+      success
+      error
+      alreadyOptedIn
+      requiresUserSignature
+      userTransaction
+      sponsorTransaction
+      groupId
+      assetId
+      assetName
+    }
+  }
+`;
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'TopUp'>;
 
 const TopUpScreen = () => {
+
   const navigation = useNavigation<NavigationProp>();
   const { userProfile } = useAuth() as any;
   const { activeAccount } = useAccount();
@@ -60,6 +84,35 @@ const TopUpScreen = () => {
   const [fiatLoading, setFiatLoading] = useState(false);
   const [fiatError, setFiatError] = useState<string | null>(null);
   const [showCurrencyNotAvailableHint, setShowCurrencyNotAvailableHint] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState('');
+
+  // USDC opt-in mutation
+  const [optInToUsdc] = useMutation(OPT_IN_TO_USDC);
+
+  // Animation for loading spinner
+  const spinValue = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (loadingMessage) {
+      // Start spinning animation when loading
+      Animated.loop(
+        Animated.timing(spinValue, {
+          toValue: 1,
+          duration: 2000,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        })
+      ).start();
+    } else {
+      // Reset animation when not loading
+      spinValue.setValue(0);
+    }
+  }, [loadingMessage]);
+
+  const spin = spinValue.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
 
   const algorandAddress = activeAccount?.algorandAddress || '';
   const email = userProfile?.email || '';
@@ -165,7 +218,63 @@ const TopUpScreen = () => {
     return errorMessage;
   };
 
+  // Helper function to handle USDC asset opt-in
+  const handleUSDCOptIn = async (): Promise<boolean> => {
+    try {
+      setLoadingMessage('Configurando acceso a USDC...');
+      console.log('[TopUpScreen] Calling optInToAsset mutation for USDC...');
+
+      const { data, errors } = await optInToUsdc({
+        variables: { assetType: 'USDC' }
+      });
+
+      if (errors) {
+        console.error('[TopUpScreen] GraphQL errors:', errors);
+        setLoadingMessage('');
+        return false;
+      }
+
+      console.log('[TopUpScreen] USDC opt-in mutation response:', data);
+
+      if (data?.optInToAssetByType?.alreadyOptedIn) {
+        console.log('[TopUpScreen] User already opted in to USDC');
+        setLoadingMessage('');
+        return true;
+      }
+
+      if (data?.optInToAssetByType?.success && data.optInToAssetByType.requiresUserSignature) {
+        const userTxn = data.optInToAssetByType.userTransaction;
+        const sponsorTxn = data.optInToAssetByType.sponsorTransaction;
+
+        console.log('[TopUpScreen] Signing and submitting USDC opt-in...');
+        const txId = await algorandService.signAndSubmitSponsoredTransaction(
+          userTxn,
+          sponsorTxn
+        );
+
+        if (txId) {
+          console.log('[TopUpScreen] Successfully opted in to USDC:', txId);
+          setLoadingMessage('');
+          return true;
+        } else {
+          console.error('[TopUpScreen] Failed to submit USDC opt-in transaction');
+          setLoadingMessage('');
+          return false;
+        }
+      } else {
+        console.error('[TopUpScreen] Failed to generate USDC opt-in transaction:', data?.optInToAssetByType?.error);
+        setLoadingMessage('');
+        return false;
+      }
+    } catch (error) {
+      console.error('[TopUpScreen] Error during USDC opt-in:', error);
+      setLoadingMessage('');
+      return false;
+    }
+  };
+
   const handleStartTopUp = async () => {
+
     if (!email || !algorandAddress) {
       Alert.alert('Faltan datos', 'Necesitamos tu correo y dirección de Algorand para continuar.');
       return;
@@ -174,6 +283,13 @@ const TopUpScreen = () => {
     const parsedAmount = parseAmount(amount);
     if (!amount.trim() || isNaN(parsedAmount) || parsedAmount <= 0) {
       Alert.alert('Monto inválido', 'Ingresa un monto mayor a 0.');
+      return;
+    }
+
+    // Check and opt-in to USDC before proceeding
+    const usdcOptInSuccess = await handleUSDCOptIn();
+    if (!usdcOptInSuccess) {
+      console.log('[TopUpScreen] USDC opt-in failed, stopping top-up flow');
       return;
     }
 
@@ -376,6 +492,36 @@ const TopUpScreen = () => {
           </Text>
         </View>
       </ScrollView>
+
+      {/* Loading Modal */}
+      <Modal
+        visible={!!loadingMessage}
+        transparent={true}
+        animationType="fade"
+        statusBarTranslucent={true}
+      >
+        <View style={styles.loadingOverlay}>
+          <View style={styles.loadingCard}>
+            {/* Animated Confío Logo */}
+            <Animated.View style={{ transform: [{ rotate: spin }] }}>
+              <Image
+                source={require('../assets/png/CONFIO.png')}
+                style={styles.loadingLogo}
+              />
+            </Animated.View>
+
+            {/* Loading Message */}
+            <Text style={styles.loadingText}>{loadingMessage}</Text>
+
+            {/* Progress Dots Animation */}
+            <View style={styles.dotsContainer}>
+              <View style={[styles.dot, { backgroundColor: '#72D9BC' }]} />
+              <View style={[styles.dot, { backgroundColor: '#72D9BC', opacity: 0.6 }]} />
+              <View style={[styles.dot, { backgroundColor: '#72D9BC', opacity: 0.3 }]} />
+            </View>
+          </View>
+        </View>
+      </Modal>
 
     </SafeAreaView>
   );
@@ -664,6 +810,50 @@ const styles = StyleSheet.create({
     lineHeight: 13,
     paddingHorizontal: 16,
     marginTop: 4,
+  },
+  // Loading Modal Styles
+  loadingOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 32,
+    alignItems: 'center',
+    minWidth: 280,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 10,
+  },
+  loadingLogo: {
+    width: 80,
+    height: 80,
+    marginBottom: 24,
+  },
+  loadingText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1F2937',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  dotsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
 });
 

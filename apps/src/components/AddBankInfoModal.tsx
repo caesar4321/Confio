@@ -14,8 +14,8 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useQuery, useMutation, useApolloClient } from '@apollo/client';
-import { 
-  GET_COUNTRIES, 
+import {
+  GET_COUNTRIES,
   GET_P2P_PAYMENT_METHODS,
   GET_USER_BANK_ACCOUNTS,
   CREATE_BANK_INFO,
@@ -209,17 +209,17 @@ export const AddBankInfoModal = ({
   }, [editingBankInfo, isVisible]);
 
   // GraphQL queries
-  const { 
-    data: countriesData, 
-    loading: countriesLoading 
+  const {
+    data: countriesData,
+    loading: countriesLoading
   } = useQuery(GET_COUNTRIES, {
     variables: { isActive: true },
     skip: !isVisible
   });
 
-  const { 
-    data: paymentMethodsData, 
-    loading: paymentMethodsLoading 
+  const {
+    data: paymentMethodsData,
+    loading: paymentMethodsLoading
   } = useQuery(GET_P2P_PAYMENT_METHODS, {
     variables: { countryCode: selectedCountry?.code },
     skip: !isVisible || !selectedCountry,
@@ -250,7 +250,7 @@ export const AddBankInfoModal = ({
       }
     }
   });
-  
+
   const [updateBankInfo] = useMutation(UPDATE_BANK_INFO, {
     update(cache, { data }) {
       if (data?.updateBankInfo?.success) {
@@ -281,7 +281,7 @@ export const AddBankInfoModal = ({
         label: getAccountTypeLabel(type)
       }));
     }
-    
+
     // Default options
     return [
       { value: 'ahorro', label: 'Cuenta de Ahorros' },
@@ -307,35 +307,35 @@ export const AddBankInfoModal = ({
       Alert.alert('Error', 'Por favor selecciona un método de pago');
       return false;
     }
-    
-    
+
+
     if (!formData.accountHolderName.trim()) {
       Alert.alert('Error', 'Por favor ingresa el nombre del titular');
       return false;
     }
-    
+
     // Validate required fields based on payment method
     if (selectedPaymentMethod.requiresAccountNumber && !formData.accountNumber.trim()) {
       Alert.alert('Error', 'Por favor ingresa el número de cuenta');
       return false;
     }
-    
+
     if (selectedPaymentMethod.requiresPhone && !formData.phoneNumber.trim()) {
       Alert.alert('Error', 'Por favor ingresa el número de teléfono');
       return false;
     }
-    
+
     if (selectedPaymentMethod.requiresEmail && !formData.email.trim()) {
       Alert.alert('Error', 'Por favor ingresa el email');
       return false;
     }
-    
+
     // For bank payments, validate ID requirements
     if (selectedPaymentMethod.bank?.country?.requiresIdentification && !formData.identificationNumber.trim()) {
       Alert.alert('Error', `Por favor ingresa tu ${selectedPaymentMethod.bank.country.identificationName}`);
       return false;
     }
-    
+
     return true;
   };
 
@@ -371,7 +371,7 @@ export const AddBankInfoModal = ({
           awaitRefetchQueries: true
         });
       } else {
-        result = await createBankInfo({ 
+        result = await createBankInfo({
           variables,
           refetchQueries: [
             { query: GET_USER_BANK_ACCOUNTS, variables: {} },
@@ -390,12 +390,12 @@ export const AddBankInfoModal = ({
           await apolloClient.refetchQueries({
             include: ['GetUserBankAccounts']
           });
-          
+
           // Method 2: Safer global refresh to avoid in-flight reset invariant
           apolloClient.stop();
           await apolloClient.clearStore();
           apolloClient.reFetchObservableQueries();
-          
+
           console.log('Successfully reset Apollo store and refetched all queries');
         } catch (refetchError) {
           console.error('Error refetching queries:', refetchError);
@@ -407,9 +407,9 @@ export const AddBankInfoModal = ({
             console.error('Error clearing cache:', cacheError);
           }
         }
-        
+
         Alert.alert(
-          'Éxito', 
+          'Éxito',
           isEditing ? 'Método de pago actualizado' : 'Método de pago agregado',
           [{ text: 'OK', onPress: onSuccess }]
         );
@@ -427,12 +427,12 @@ export const AddBankInfoModal = ({
   const renderPaymentMethodPicker = () => {
     // No need to filter by isActive - backend already returns only active methods
     const activePaymentMethods = paymentMethods;
-    
+
     console.log('[AddBankInfoModal] Payment methods to display:', {
       total: paymentMethods.length,
       methods: paymentMethods.slice(0, 5).map(m => m.displayName)
     });
-    
+
     const renderPaymentMethodItem = ({ item: method }: { item: P2PPaymentMethod }) => (
       <TouchableOpacity
         style={styles.pickerItem}
@@ -451,9 +451,9 @@ export const AddBankInfoModal = ({
         <View style={{ flex: 1, marginLeft: 12 }}>
           <Text style={styles.pickerItemText}>{method.displayName}</Text>
           <Text style={styles.providerTypeSubtext}>
-            {method.providerType === 'bank' ? 'Banco' : 
-             method.providerType === 'fintech' ? 'Billetera Digital' : 
-             method.providerType}
+            {method.providerType === 'bank' ? 'Banco' :
+              method.providerType === 'fintech' ? 'Billetera Digital' :
+                method.providerType}
           </Text>
         </View>
         {selectedPaymentMethod?.id === method.id && (
@@ -461,7 +461,7 @@ export const AddBankInfoModal = ({
         )}
       </TouchableOpacity>
     );
-    
+
     return (
       <Modal
         visible={showPaymentMethodPicker}
@@ -476,7 +476,7 @@ export const AddBankInfoModal = ({
             <Text style={styles.pickerTitle}>Seleccionar Método</Text>
             <View style={{ width: 60 }} />
           </View>
-          
+
           {activePaymentMethods.length > 10 && (
             <View style={styles.scrollHint}>
               <Text style={styles.scrollHintText}>
@@ -484,7 +484,7 @@ export const AddBankInfoModal = ({
               </Text>
             </View>
           )}
-          
+
           <FlatList
             data={activePaymentMethods}
             renderItem={renderPaymentMethodItem}
@@ -528,7 +528,7 @@ export const AddBankInfoModal = ({
         )}
       </TouchableOpacity>
     );
-    
+
     return (
       <Modal
         visible={showCountryPicker}
@@ -543,7 +543,7 @@ export const AddBankInfoModal = ({
             <Text style={styles.pickerTitle}>Seleccionar País</Text>
             <View style={{ width: 60 }} />
           </View>
-          
+
           {countries.length > 10 && (
             <View style={styles.scrollHint}>
               <Text style={styles.scrollHintText}>
@@ -551,7 +551,7 @@ export const AddBankInfoModal = ({
               </Text>
             </View>
           )}
-          
+
           <FlatList
             data={countries}
             renderItem={renderCountryItem}
@@ -578,10 +578,20 @@ export const AddBankInfoModal = ({
   };
 
 
+  // Auto-select Venezuela when countries load
+  useEffect(() => {
+    if (!isEditing && !selectedCountry && countries.length > 0) {
+      const ve = countries.find(c => c.code === 'VE');
+      if (ve) {
+        setSelectedCountry(ve);
+      }
+    }
+  }, [countries, isEditing, selectedCountry]);
+
   return (
     <View style={styles.container}>
       {/* Header */}
-      <View style={[styles.header, { paddingTop: 8 }]}> 
+      <View style={[styles.header, { paddingTop: 8 }]}>
         <View style={styles.headerContent}>
           <TouchableOpacity onPress={onClose} style={styles.closeButton}>
             <Icon name="x" size={24} color={colors.text.primary} />
@@ -610,8 +620,8 @@ export const AddBankInfoModal = ({
         <View style={styles.inputGroup}>
           <Text style={styles.label}>País *</Text>
           <TouchableOpacity
-            style={styles.picker}
-            onPress={() => setShowCountryPicker(true)}
+            style={[styles.picker, styles.pickerDisabled]}
+            disabled={true}
           >
             <View style={styles.pickerContent}>
               {selectedCountry ? (
@@ -620,10 +630,10 @@ export const AddBankInfoModal = ({
                   <Text style={styles.pickerText}>{selectedCountry.name}</Text>
                 </>
               ) : (
-                <Text style={styles.pickerPlaceholder}>Seleccionar país</Text>
+                <Text style={styles.pickerPlaceholder}>Cargando...</Text>
               )}
             </View>
-            <Icon name="chevron-down" size={20} color={colors.text.secondary} />
+            <Icon name="lock" size={16} color={colors.text.secondary} />
           </TouchableOpacity>
         </View>
 

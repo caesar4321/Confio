@@ -12,7 +12,8 @@ import { REQUEST_IDENTITY_UPLOAD, SUBMIT_IDENTITY_VERIFICATION_S3 } from '../apo
 import { pickImageUri } from '../native/MediaPicker';
 import { uploadFileToPresigned, uploadFileToPresignedForm } from '../services/uploadService';
 import { GET_ME, GET_USER_ACCOUNTS, GET_MY_PERSONAL_KYC_STATUS, GET_BUSINESS_KYC_STATUS, GET_MY_KYC_STATUS } from '../apollo/queries';
-import { useAccountManager } from '../hooks/useAccountManager';
+import { useAccount } from '../contexts/AccountContext';
+
 
 // Define colors directly in the component
 const colors = {
@@ -68,19 +69,19 @@ const VerificationScreen = () => {
   const [verifiedDob, setVerifiedDob] = useState<string>('');
 
   const [requestIdentityUpload] = useMutation(REQUEST_IDENTITY_UPLOAD);
-  const [submitIdentityVerificationS3, { loading: submitting } ] = useMutation(SUBMIT_IDENTITY_VERIFICATION_S3);
+  const [submitIdentityVerificationS3, { loading: submitting }] = useMutation(SUBMIT_IDENTITY_VERIFICATION_S3);
   const backDevice = useCameraDevice('back');
   const frontDevice = useCameraDevice('front');
   const cameraRef = useRef<Camera | null>(null);
   const [showCamera, setShowCamera] = useState(false);
-  const [cameraPurpose, setCameraPurpose] = useState<'front'|'selfie'|'payout'|'business'>('front');
+  const [cameraPurpose, setCameraPurpose] = useState<'front' | 'selfie' | 'payout' | 'business'>('front');
   // Removed custom gallery; we use system picker on Android
   const [previewUri, setPreviewUri] = useState<string | null>(null);
-  const [previewPurpose, setPreviewPurpose] = useState<'front'|'back'|'selfie'|'payout'|'business'>('front');
+  const [previewPurpose, setPreviewPurpose] = useState<'front' | 'back' | 'selfie' | 'payout' | 'business'>('front');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const apolloClient = useApolloClient();
-  const normalizeStatus = (s?: any): 'unverified'|'pending'|'verified'|'rejected' => {
+  const normalizeStatus = (s?: any): 'unverified' | 'pending' | 'verified' | 'rejected' => {
     const v = (s ?? '').toString().trim().toLowerCase();
     if (['pending', 'submitted', 'in_review', 'en revisión', 'en revision'].includes(v)) return 'pending';
     if (['verified', 'approved'].includes(v)) return 'verified';
@@ -152,7 +153,7 @@ const VerificationScreen = () => {
     }
   };
 
-  const openCamera = async (purpose: 'front'|'back'|'selfie'|'payout'|'business') => {
+  const openCamera = async (purpose: 'front' | 'back' | 'selfie' | 'payout' | 'business') => {
     try {
       const perm = await Camera.requestCameraPermission();
       if (perm !== 'granted') {
@@ -224,7 +225,7 @@ const VerificationScreen = () => {
   const anyStatus = normalizeStatus(anyKycData?.myKycStatus?.status);
   const verificationStatus = personalStatus !== 'unverified' ? personalStatus : (anyStatus === 'pending' ? 'pending' : 'unverified');
   const isPersonalVerified = Boolean(meData?.me?.isIdentityVerified || verificationStatus === 'verified');
-  const { activeAccount } = useAccountManager();
+  const { activeAccount } = useAccount();
   const isBusinessAccount = (activeAccount?.type || '').toLowerCase() === 'business';
   const userPhoneCountryIso = (meData?.me?.phoneCountry || '').trim().toUpperCase();
   const requiresPayoutProof = userPhoneCountryIso === 'VE';
@@ -269,7 +270,7 @@ const VerificationScreen = () => {
   const businessVerificationStatusEffective = normalizeStatus(bizKycData?.businessKycStatus?.status || businessVerificationStatus);
 
   // Sync currentLevel from server verification status
-  const inferredLevel = (isBusinessAccount ? (isBusinessVerified ? 1 : 0) : (isPersonalVerified ? 1 : 0));
+  const inferredLevel = (isBusinessAccount ? (businessVerificationStatusEffective === 'verified' ? 1 : 0) : (isPersonalVerified ? 1 : 0));
   if (currentLevel !== inferredLevel) {
     setTimeout(() => setCurrentLevel(inferredLevel), 0);
   }
@@ -306,13 +307,13 @@ const VerificationScreen = () => {
         isBusinessVerified,
         meVerificationStatus: meData?.me?.verificationStatus,
       });
-    } catch {}
+    } catch { }
   }, [isBusinessAccount, personalStatus, anyStatus, verificationStatus, businessVerificationStatusEffective, isBusinessVerified, meData?.me?.verificationStatus]);
 
   const renderLevelCard = (levelInfo: VerificationLevel) => {
     const isActive = currentLevel >= levelInfo.level;
     const canUpgrade = currentLevel === levelInfo.level - 1;
-    
+
     return (
       <View key={levelInfo.level} style={[
         styles.levelCard,
@@ -320,10 +321,10 @@ const VerificationScreen = () => {
       ]}>
         <View style={styles.levelHeader}>
           <View style={styles.levelTitleContainer}>
-            <Icon 
-              name={levelInfo.icon} 
-              size={24} 
-              color={isActive ? levelInfo.textColor : '#6B7280'} 
+            <Icon
+              name={levelInfo.icon}
+              size={24}
+              color={isActive ? levelInfo.textColor : '#6B7280'}
             />
             <View style={styles.levelTitleText}>
               <Text style={[styles.levelTitle, { color: isActive ? levelInfo.textColor : '#1F2937' }]}>
@@ -349,10 +350,10 @@ const VerificationScreen = () => {
         <View style={styles.featuresList}>
           {levelInfo.features.map((feature, index) => (
             <View key={index} style={styles.featureItem}>
-              <Icon 
-                name="check-circle" 
-                size={14} 
-                color={isActive ? levelInfo.textColor : '#6B7280'} 
+              <Icon
+                name="check-circle"
+                size={14}
+                color={isActive ? levelInfo.textColor : '#6B7280'}
               />
               <Text style={[styles.featureText, { color: isActive ? levelInfo.textColor : '#4B5563' }]}>
                 {feature}
@@ -362,12 +363,14 @@ const VerificationScreen = () => {
         </View>
 
         {canUpgrade && levelInfo.level === 1 && (
-          <TouchableOpacity 
-            style={[styles.verifyButton, { backgroundColor: (
-              isBusinessAccount
-                ? ((businessVerificationStatusEffective === 'pending' || isBusinessVerified) ? '#D1D5DB' : colors.primary)
-                : ((verificationStatus === 'pending' || verificationStatus === 'verified') ? '#D1D5DB' : colors.primary)
-            ) }]}
+          <TouchableOpacity
+            style={[styles.verifyButton, {
+              backgroundColor: (
+                isBusinessAccount
+                  ? ((businessVerificationStatusEffective === 'pending' || isBusinessVerified) ? '#D1D5DB' : colors.primary)
+                  : ((verificationStatus === 'pending' || verificationStatus === 'verified') ? '#D1D5DB' : colors.primary)
+              )
+            }]}
             disabled={isBusinessAccount ? (businessVerificationStatusEffective === 'pending' || isBusinessVerified) : (verificationStatus === 'pending' || verificationStatus === 'verified')}
             onPress={() => setShowUploadFlow(true)}
           >
@@ -378,7 +381,7 @@ const VerificationScreen = () => {
             </Text>
           </TouchableOpacity>
         )}
-        
+
         {levelInfo.level > currentLevel + 1 && (
           <View style={styles.lockedButton}>
             <Text style={styles.lockedButtonText}>Requiere nivel anterior</Text>
@@ -422,13 +425,13 @@ const VerificationScreen = () => {
           </View>
 
           <View style={styles.buttonRow}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.secondaryButton}
               onPress={() => setShowUploadFlow(false)}
             >
               <Text style={styles.secondaryButtonText}>Cancelar</Text>
             </TouchableOpacity>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[styles.primaryButton, { backgroundColor: frontImageUri ? colors.primary : '#D1D5DB' }]}
               onPress={() => frontImageUri ? goToNextStep() : console.warn('[Verification] Debes tomar foto del documento para continuar')}
               disabled={!frontImageUri}
@@ -471,7 +474,7 @@ const VerificationScreen = () => {
 
           {/* Removed back and selfie buttons to encourage immediate capture via camera icon */}
           <View style={styles.buttonRow}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[styles.primaryButton, { backgroundColor: backImageUri ? colors.primary : '#D1D5DB' }]}
               onPress={() => backImageUri ? goToNextStep() : console.warn('[Verification] Debes tomar el reverso para continuar')}
               disabled={!backImageUri}
@@ -503,7 +506,7 @@ const VerificationScreen = () => {
 
           {/* Payment method name moved to Step 4 */}
 
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.primaryButton, { backgroundColor: (selfieImageUri ? colors.primary : '#D1D5DB') }]}
             onPress={() => selfieImageUri ? goToNextStep() : console.warn('[Verification] Debes tomar tu selfie para continuar')}
             disabled={!selfieImageUri}
@@ -580,7 +583,7 @@ const VerificationScreen = () => {
           )}
 
           <View style={styles.buttonRow}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[styles.primaryButton, { backgroundColor: (payoutProofUri && (payoutLabel || '').trim() && isValidDobStrict(verifiedDob)) ? colors.primary : '#D1D5DB' }]}
               onPress={() => {
                 if (payoutProofUri && (payoutLabel || '').trim() && isValidDobStrict(verifiedDob)) {
@@ -617,7 +620,7 @@ const VerificationScreen = () => {
             <Text style={styles.cameraPreviewText}>{businessCertUri ? 'Certificado listo. Toca para repetir' : 'Toca para tomar foto del certificado'}</Text>
           </TouchableOpacity>
           <View style={styles.buttonRow}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[styles.primaryButton, { backgroundColor: businessCertUri ? colors.primary : '#D1D5DB' }]}
               onPress={() => businessCertUri ? goToNextStep() : console.warn('[Verification] Debes tomar la foto del certificado')}
               disabled={!businessCertUri}
@@ -679,14 +682,14 @@ const VerificationScreen = () => {
               </Text>
             )}
           </View>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.primaryButton, { backgroundColor: reviewReady ? colors.primary : '#D1D5DB' }]}
             disabled={!reviewReady}
             onPress={async () => {
               try {
                 setIsSubmitting(true);
                 // Upload all staged files now
-                const uploadOne = async (part: 'front'|'back'|'selfie'|'payout', uri: string) => {
+                const uploadOne = async (part: 'front' | 'back' | 'selfie' | 'payout', uri: string) => {
                   const filename = `${part}-${Date.now()}.jpg`;
                   const contentType = 'image/jpeg';
                   const { data } = await requestIdentityUpload({ variables: { part, filename, contentType } });
@@ -744,8 +747,8 @@ const VerificationScreen = () => {
                     refetchAnyKyc?.(),
                     isBusinessAccount ? (refetchBizKyc?.() as any || Promise.resolve()) : Promise.resolve(),
                   ])
-                } catch {}
-              } catch (e:any) {
+                } catch { }
+              } catch (e: any) {
                 setIsSubmitting(false);
                 console.error('[Verification] Submit failed:', e?.message || e);
               }
@@ -774,7 +777,7 @@ const VerificationScreen = () => {
     };
     return (
       <View style={styles.container}>
-        <Header 
+        <Header
           title="Verificación de Identidad"
           navigation={navigation}
           backgroundColor={colors.primary}
@@ -881,7 +884,7 @@ const VerificationScreen = () => {
 
   return (
     <View style={styles.container}>
-      <Header 
+      <Header
         title="Verificación"
         navigation={navigation}
         backgroundColor={colors.primary}
