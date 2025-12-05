@@ -4,6 +4,7 @@ import './src/setup/silenceLogs'; // Silence noisy logs early in app boot
 
 // Apollo Client setup and error messages (after polyfills)
 import { loadErrorMessages, loadDevMessages } from "@apollo/client/dev";
+import { Buffer } from 'buffer';
 
 // @ts-ignore
 if (__DEV__) {
@@ -17,13 +18,9 @@ if (__DEV__) {
 // Import React Native components
 import { AppRegistry, Platform, UIManager } from 'react-native';
 import { name as appName } from './app.json';
-import * as suiUtils from '@mysten/sui/utils';
-import { Buffer } from 'buffer';
 
-// Monkey-patch the Sui helpers to use Buffer directly
+// Ensure Buffer is available globally before anything else
 global.Buffer = Buffer;
-suiUtils.fromB64 = (str) => Buffer.from(str, 'base64');
-suiUtils.toB64 = (bytes) => Buffer.from(bytes).toString('base64');
 
 // Import App component
 import App from './src/App';

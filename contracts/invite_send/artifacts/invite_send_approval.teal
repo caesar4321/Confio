@@ -788,9 +788,18 @@ load 24
 extract 65 1
 store 15
 txn Sender
+frame_dig -1
+==
+txn Sender
 bytec_1 // "admin"
 app_global_get
 ==
+||
+txn Sender
+bytec 9 // "sponsor_address"
+app_global_get
+==
+||
 bytec_3 // "is_paused"
 app_global_get
 intc_0 // 0
@@ -1433,6 +1442,10 @@ proto 1 0
 txn Sender
 bytec_1 // "admin"
 app_global_get
+==
+assert
+txn RekeyTo
+global ZeroAddress
 ==
 assert
 frame_dig -1

@@ -6,6 +6,7 @@
  */
 
 const path = require('path');
+const fs = require('fs');
 const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
 const exclusionList = require('metro-config/src/defaults/exclusionList');
 
@@ -16,15 +17,16 @@ const {
 } = defaultConfig;
 
 const projectRoot = path.resolve(__dirname);
+const watchFolders = [
+  path.resolve(__dirname, 'stubs'),
+  path.resolve(__dirname, 'node_modules'),
+  path.resolve(__dirname, '../node_modules'),
+  path.resolve(__dirname, '..'),
+].filter(fs.existsSync); // Only watch folders that actually exist to avoid ENOENT errors
 
 const config = {
   projectRoot,
-  watchFolders: [
-    path.resolve(__dirname, 'stubs'),
-    path.resolve(__dirname, 'node_modules'),
-    path.resolve(__dirname, '../node_modules'),
-    path.resolve(__dirname, '..'),
-  ],
+  watchFolders,
   transformer: {
     getTransformOptions: async () => ({
       transform: {
@@ -56,7 +58,7 @@ const config = {
       zlib: require.resolve('empty-module'),
       path: require.resolve('empty-module'),
       stream: require.resolve('./stubs/stream.js'),
-      buffer: require.resolve('./stubs/buffer.js'),
+      buffer: require.resolve('buffer/'),
       process: require.resolve('./stubs/process.js'),
       util: require.resolve('./stubs/util.js'),
       punycode: require.resolve('punycode/'),
@@ -79,7 +81,7 @@ const config = {
       }
       if (moduleName === 'buffer' || moduleName === 'node:buffer') {
         return {
-          filePath: require.resolve('./stubs/buffer.js'),
+          filePath: require.resolve('buffer/'),
           type: 'sourceFile',
         };
       }

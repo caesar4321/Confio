@@ -3093,6 +3093,7 @@ export const INVITE_RECEIPT_FOR_PHONE = gql`
       assetId
       amount
       timestamp
+      invitationId
     }
   }
 `;

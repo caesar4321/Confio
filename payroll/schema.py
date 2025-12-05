@@ -1552,7 +1552,7 @@ class Query(graphene.ObjectType):
 
         logger = logging.getLogger(__name__)
         biz_addr = biz_acct.algorand_address
-        delegates = set([biz_addr])
+        delegates = set()
         print(f"[Payroll DEBUG] resolve_payroll_delegates for biz={biz_addr}")
 
         # Try to read allowlist boxes for this business to return all delegates (biz||delegate)
@@ -1595,7 +1595,8 @@ class Query(graphene.ObjectType):
                 algod_client = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS, headers={"User-Agent": "py-algorand-sdk"})
                 allow_key = algo_encoding.decode_address(biz_addr) + algo_encoding.decode_address(biz_addr)
                 algod_client.application_box_by_name(settings.ALGORAND_PAYROLL_APP_ID, allow_key)
-                print(f"[Payroll DEBUG] Fallback: Found biz||biz box, returning [biz_addr]")
+                print(f"[Payroll DEBUG] Fallback: Found biz||biz box, adding business address")
+                delegates.add(biz_addr)
             except Exception:
                 print(f"[Payroll DEBUG] Fallback: biz||biz box not found, returning empty")
                 return []

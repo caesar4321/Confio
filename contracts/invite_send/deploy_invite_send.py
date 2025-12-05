@@ -13,7 +13,9 @@ Environment variables used (with sensible defaults where possible):
 - ALGORAND_ALGOD_ADDRESS (required)
 - ALGORAND_ALGOD_TOKEN (optional)
 - ALGORAND_NETWORK (optional, for metadata only)
-- ALGORAND_DEPLOYER_MNEMONIC (required): mnemonic to sign deploy/config calls
+- USE_KMS_SIGNING / KMS_KEY_ALIAS / KMS_ADMIN_KEY_ALIAS / KMS_REGION (optional): enable KMS-backed signing
+- ALGORAND_ADMIN_ADDRESS (optional): expected admin address when using KMS
+- ALGORAND_DEPLOYER_MNEMONIC (fallback): mnemonic to sign deploy/config calls
 - ALGORAND_SPONSOR_ADDRESS (optional): address to set as sponsor
 - ALGORAND_CUSD_ASSET_ID (optional, default from repo settings)
 - ALGORAND_CONFIO_ASSET_ID (optional, default from repo settings)
@@ -31,7 +33,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from typing import Optional
+from dataclasses import dataclass
+from typing import Callable, Optional
 
 try:
     from decouple import config as env
@@ -49,15 +52,72 @@ from algosdk import transaction
 from algosdk.atomic_transaction_composer import (
     AccountTransactionSigner,
     AtomicTransactionComposer,
+    TransactionSigner,
     TransactionWithSigner,
 )
 from algosdk.abi import Contract, Method, Argument, Returns
+from algosdk.transaction import Transaction
+
+
+# Ensure project root is importable for KMS helpers
+sys.path.append(str(Path(__file__).resolve().parents[2]))
+from blockchain.kms_manager import KMSSigner, KMSTransactionSigner  # noqa: E402
 
 
 # When located under contracts/invite_send/, repo root is two levels up
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_DIR = ROOT / "contracts" / "invite_send"
 ARTIFACTS_DIR = CONTRACT_DIR / "artifacts"
+
+
+@dataclass
+class SigningContext:
+    address: str
+    sign_txn: Callable[[Transaction], transaction.SignedTransaction]
+    atc_signer: TransactionSigner
+
+
+def get_signing_context() -> SigningContext:
+    """
+    Resolve signing strategy.
+
+    Prefers KMS when USE_KMS_SIGNING/KMS_KEY_ALIAS is set, otherwise falls back to mnemonics.
+    """
+    use_kms = str(env("USE_KMS_SIGNING", default="")).lower() == "true" or bool(env("KMS_KEY_ALIAS", default="")) or bool(env("KMS_ADMIN_KEY_ALIAS", default=""))
+    if use_kms:
+        region = env("KMS_REGION", default="eu-central-2")
+        alias = env("KMS_ADMIN_KEY_ALIAS", default=None) or env("KMS_KEY_ALIAS", default=None)
+        if not alias:
+            raise SystemExit("Set KMS_ADMIN_KEY_ALIAS or KMS_KEY_ALIAS when USE_KMS_SIGNING=True")
+        kms = KMSSigner(alias, region_name=region)
+        expected_addr = env("ALGORAND_ADMIN_ADDRESS", default=None) or env("ALGORAND_SPONSOR_ADDRESS", default=None)
+        try:
+            kms.assert_matches_address(expected_addr)
+        except Exception as e:
+            print(f"[warn] KMS address mismatch: {e}")
+        print(f"Using KMS signer alias={alias} region={region} address={kms.address}")
+        return SigningContext(
+            address=kms.address,
+            sign_txn=kms.sign_transaction,
+            atc_signer=KMSTransactionSigner(kms),
+        )
+
+    deployer_mn = env("ALGORAND_DEPLOYER_MNEMONIC", default=None)
+    if not deployer_mn:
+        # Fallbacks: try admin, then sponsor
+        deployer_mn = env("ALGORAND_ADMIN_MNEMONIC", default=None) or env("ALGORAND_SPONSOR_MNEMONIC", default=None)
+    if not deployer_mn:
+        raise SystemExit("Provide ALGORAND_DEPLOYER_MNEMONIC/ALGORAND_ADMIN_MNEMONIC or enable USE_KMS_SIGNING")
+
+    sk = mnemonic.to_private_key(deployer_mn)
+    addr = account.address_from_private_key(sk)
+    print(f"Using mnemonic signer address={addr}")
+
+    return SigningContext(
+        address=addr,
+        sign_txn=lambda txn: txn.sign(sk),
+        atc_signer=AccountTransactionSigner(sk),
+    )
 
 
 def run_build() -> None:
@@ -103,7 +163,7 @@ def wait_for_confirmation(client: algod.AlgodClient, txid: str, timeout: int = 1
     return transaction.wait_for_confirmation(client, txid, timeout)
 
 
-def create_app(client: algod.AlgodClient, sk: bytes) -> int:
+def create_app(client: algod.AlgodClient, signer: SigningContext) -> int:
     approval_path = ARTIFACTS_DIR / "invite_send_approval.teal"
     clear_path = ARTIFACTS_DIR / "invite_send_clear.teal"
 
@@ -112,7 +172,7 @@ def create_app(client: algod.AlgodClient, sk: bytes) -> int:
     clear = compile_teal(client, clear_path)
     print(f"✓ Approval size: {len(approval)} bytes, Clear size: {len(clear)} bytes")
 
-    sender = account.address_from_private_key(sk)
+    sender = signer.address
     sp = client.suggested_params()
     # Ensure flat min-fee to avoid underpayment on some nodes
     try:
@@ -149,7 +209,7 @@ def create_app(client: algod.AlgodClient, sk: bytes) -> int:
         extra_pages=extra_pages,
         app_args=create_args,
     )
-    stx = txn.sign(sk)
+    stx = signer.sign_txn(txn)
     txid = client.send_transaction(stx)
     print(f"Sent app create tx: {txid}")
     rcpt = wait_for_confirmation(client, txid, 20)
@@ -162,7 +222,7 @@ def create_app(client: algod.AlgodClient, sk: bytes) -> int:
 
 def try_set_sponsor(
     client: algod.AlgodClient,
-    sk: bytes,
+    signer_ctx: SigningContext,
     app_id: int,
     abi_contract: Contract,
     sponsor_address: Optional[str],
@@ -179,8 +239,8 @@ def try_set_sponsor(
             returns=Returns(arg_type="void")
         )
 
-    sender = account.address_from_private_key(sk)
-    signer = AccountTransactionSigner(sk)
+    sender = signer_ctx.address
+    signer = signer_ctx.atc_signer
     sp = client.suggested_params()
     try:
         sp.flat_fee = True
@@ -204,7 +264,7 @@ def try_set_sponsor(
 
 def try_setup_assets(
     client: algod.AlgodClient,
-    sk: bytes,
+    signer_ctx: SigningContext,
     app_id: int,
     abi_contract: Contract,
     cusd_id: Optional[int],
@@ -222,8 +282,8 @@ def try_setup_assets(
             returns=Returns(arg_type="void")
         )
 
-    sender = account.address_from_private_key(sk)
-    signer = AccountTransactionSigner(sk)
+    sender = signer_ctx.address
+    signer = signer_ctx.atc_signer
     sp = client.suggested_params()
     try:
         sp.flat_fee = True
@@ -239,7 +299,7 @@ def try_setup_assets(
         receiver=logic.get_application_address(app_id),
         amt=base_fund,
     )
-    client.send_transaction(fund_txn.sign(sk))
+    client.send_transaction(signer_ctx.sign_txn(fund_txn))
     wait_for_confirmation(client, fund_txn.get_txid(), 10)
 
     # Step 2: Grouped MBR funding for 2 ASA opt-ins (per contract constant)
@@ -335,18 +395,11 @@ def main():
     client = get_algod_client()
     network = env("ALGORAND_NETWORK", default="testnet")
 
-    deployer_mn = env("ALGORAND_DEPLOYER_MNEMONIC", default=None)
-    if not deployer_mn:
-        # Fallbacks: try admin, then sponsor
-        deployer_mn = env("ALGORAND_ADMIN_MNEMONIC", default=None) or env("ALGORAND_SPONSOR_MNEMONIC", default=None)
-    if not deployer_mn:
-        raise SystemExit("Provide ALGORAND_DEPLOYER_MNEMONIC or ALGORAND_ADMIN_MNEMONIC in .env")
-    sk = mnemonic.to_private_key(deployer_mn)
-    sender = account.address_from_private_key(sk)
-    print(f"Deployer: {sender}")
+    signer_ctx = get_signing_context()
+    print(f"Deployer: {signer_ctx.address}")
 
     # Create app
-    app_id = create_app(client, sk)
+    app_id = create_app(client, signer_ctx)
     app_address = logic.get_application_address(app_id)
     print(f"Application address: {app_address}")
 
@@ -361,7 +414,7 @@ def main():
     # Optional post-deploy configuration
     try_set_sponsor(
         client,
-        sk,
+        signer_ctx,
         app_id,
         contract,
         sponsor_address=env("ALGORAND_SPONSOR_ADDRESS", default=None),
@@ -369,7 +422,7 @@ def main():
 
     try_setup_assets(
         client,
-        sk,
+        signer_ctx,
         app_id,
         contract,
         cusd_id=env("ALGORAND_CUSD_ASSET_ID", default=None, cast=int),

@@ -407,7 +407,11 @@ def claim_invitation(
         # Verify conditions
         Assert(
             And(
-                Txn.sender() == recipient.get(),  # Require recipient to self-claim
+                Or(  # allow recipient self-claim or sponsored claim by admin/sponsor
+                    Txn.sender() == recipient.get(),
+                    Txn.sender() == app.state.admin,
+                    Txn.sender() == app.state.sponsor_address,
+                ),
                 app.state.is_paused == Int(0),
                 is_claimed.load() == Bytes("base16", "00"),  # Not claimed
                 is_reclaimed.load() == Bytes("base16", "00"),  # Not reclaimed

@@ -105,7 +105,7 @@ class InviteSendService {
   }
 
   async getInviteReceiptNotice(phone: string, phoneCountry?: string): Promise<
-    { exists: true; amount: number; assetId: string; timestamp: number } | { exists: false }
+    { exists: true; amount: number; assetId: string; timestamp: number; invitationId?: string | null } | { exists: false }
   > {
     const { data } = await apolloClient.query({
       query: INVITE_RECEIPT_FOR_PHONE,
@@ -114,7 +114,13 @@ class InviteSendService {
     })
     const r = data?.inviteReceiptForPhone
     if (!r?.exists) return { exists: false }
-    return { exists: true, amount: r.amount, assetId: String(r.assetId), timestamp: r.timestamp }
+
+    // Hide banner when the receipt already reflects a claimed/reclaimed invite
+    // statusCode: 1 = claimed, 2 = reclaimed (per contract)
+    const statusCode = Number(r.statusCode ?? 0)
+    if (statusCode === 1 || statusCode === 2) return { exists: false }
+
+    return { exists: true, amount: r.amount, assetId: String(r.assetId), timestamp: r.timestamp, invitationId: r.invitationId }
   }
 
   async claimInviteForPhone(phone: string | undefined, phoneCountry: string | undefined, recipientAddress: string, invitationId?: string): Promise<{ success: boolean; error?: string; txid?: string }> {

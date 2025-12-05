@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   FlatList,
+  Alert,
 } from 'react-native';
 import { useMutation } from '@apollo/client';
 import { gql } from '@apollo/client';
@@ -73,6 +74,24 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
   const [existingReferrer, setExistingReferrer] = useState<string | null>(null);
   const [error, setError] = useState('');
 
+  const formatErrorMessage = (rawMessage: string | undefined | null) => {
+    if (!rawMessage) {
+      return 'Error al registrar referidor';
+    }
+
+    if (/rate limit/i.test(rawMessage)) {
+      const minutesMatch = rawMessage.match(/(\d+)\s*minutes?/i);
+      const minutesText = minutesMatch ? `${minutesMatch[1]} minutos` : 'unos minutos';
+      return `Intentaste demasiadas veces. Intenta de nuevo después de ${minutesText}.`;
+    }
+
+    if (/suspicious/i.test(rawMessage)) {
+      return 'Detectamos actividad inusual. Por favor contacta a soporte.';
+    }
+
+    return rawMessage;
+  };
+
   useEffect(() => {
     if (visible) {
       checkStatus().then(({ data }) => {
@@ -120,11 +139,10 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
         },
       });
 
-      console.log('SetReferrer response:', { data, errors });
-
       if (errors && errors.length > 0) {
-        console.error('GraphQL errors:', errors);
-        setError(errors[0].message || 'Error al registrar referidor');
+        const friendly = formatErrorMessage(errors[0].message);
+        setError(friendly);
+        Alert.alert('Aviso', friendly);
         return;
       }
 
@@ -135,8 +153,9 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
           onClose();
         }, 2000);
       } else {
-        console.log('Validation error:', data?.setReferrer?.error);
-        setError(data?.setReferrer?.error || 'Error al registrar referidor');
+        const friendly = formatErrorMessage(data?.setReferrer?.error);
+        setError(friendly);
+        Alert.alert('Aviso', friendly);
       }
     } catch (err) {
       console.error('Network error:', err);
