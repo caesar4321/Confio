@@ -11,6 +11,10 @@ import os
 import sys
 import base64
 from pathlib import Path
+# Ensure project root on path for blockchain imports
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))
 
 from algosdk import account, mnemonic, logic
 from algosdk.v2client import algod
@@ -25,6 +29,7 @@ from algosdk.transaction import (
 )
 from algosdk.abi import Method, Returns, Argument
 from algosdk.encoding import decode_address
+from blockchain.kms_manager import KMSSigner
 
 # Allow importing the contract module
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -87,6 +92,13 @@ if not ALGOD_ADDRESS:
 
 
 def _get_admin():
+    use_kms = os.getenv("USE_KMS_SIGNING", "").lower() == "true" or bool(os.getenv("KMS_KEY_ALIAS"))
+    kms_alias = os.getenv("KMS_ADMIN_KEY_ALIAS") or os.getenv("KMS_KEY_ALIAS")
+    kms_region = os.getenv("KMS_REGION", "eu-central-2")
+    if use_kms and kms_alias:
+        kms = KMSSigner(kms_alias, region_name=kms_region)
+        return kms.address, kms.sign_transaction, kms
+
     mn = os.environ.get('ALGORAND_ADMIN_MNEMONIC')
     if not mn and NETWORK == 'localnet':
         try:
@@ -99,14 +111,31 @@ def _get_admin():
         raise SystemExit('ALGORAND_ADMIN_MNEMONIC not set')
     sk = mnemonic.to_private_key(mn)
     addr = account.address_from_private_key(sk)
-    return addr, sk
+    return addr, lambda txn: txn.sign(sk), None
 
 
-def _get_required_sponsor():
-    sponsor_addr = os.environ.get('ALGORAND_SPONSOR_ADDRESS', '').strip()
-    if not sponsor_addr:
-        raise SystemExit('ALGORAND_SPONSOR_ADDRESS not set')
-    return sponsor_addr
+def _get_required_sponsor(fallback_addr: str) -> tuple[str, callable]:
+    sponsor_addr = os.environ.get('ALGORAND_SPONSOR_ADDRESS', '').strip() or fallback_addr
+    sponsor_mn = os.environ.get('ALGORAND_SPONSOR_MNEMONIC')
+    use_kms = os.getenv("USE_KMS_SIGNING", "").lower() == "true" or bool(os.getenv("KMS_KEY_ALIAS"))
+    kms_alias = os.getenv("KMS_KEY_ALIAS") or os.getenv("KMS_ADMIN_KEY_ALIAS")
+    kms_region = os.getenv("KMS_REGION", "eu-central-2")
+
+    if use_kms and kms_alias:
+        kms = KMSSigner(kms_alias, region_name=kms_region)
+        if sponsor_addr and sponsor_addr != kms.address:
+            print(f"Warning: ALGORAND_SPONSOR_ADDRESS ({sponsor_addr}) != KMS address ({kms.address}); using KMS address.")
+        sponsor_addr = kms.address
+        return sponsor_addr, kms.sign_transaction
+
+    if not sponsor_mn:
+        raise SystemExit('ALGORAND_SPONSOR_MNEMONIC not set')
+    sk = mnemonic.to_private_key(sponsor_mn)
+    addr = account.address_from_private_key(sk)
+    if sponsor_addr and sponsor_addr != addr:
+        print(f"Warning: ALGORAND_SPONSOR_ADDRESS ({sponsor_addr}) != mnemonic addr ({addr}); using mnemonic addr.")
+        sponsor_addr = addr
+    return sponsor_addr, lambda txn: txn.sign(sk)
 
 
 def _resolve_asset_ids() -> tuple[int, int]:
@@ -132,8 +161,8 @@ def _resolve_asset_ids() -> tuple[int, int]:
 def deploy_p2p_trade():
     print(f"Deploying P2P Trade to {NETWORK}...")
 
-    admin_addr, admin_sk = _get_admin()
-    sponsor_addr = _get_required_sponsor()
+    admin_addr, admin_sign, admin_kms = _get_admin()
+    sponsor_addr, sponsor_sign = _get_required_sponsor(admin_addr)
     cusd_id, confio_id = _resolve_asset_ids()
 
     print(f"Admin:   {admin_addr}")
@@ -192,7 +221,7 @@ def deploy_p2p_trade():
         extra_pages=extra_pages,
     )
 
-    stx = create_txn.sign(admin_sk)
+    stx = admin_sign(create_txn)
     try:
         txid = algod_client.send_transaction(stx)
         print(f"Create tx sent: {txid}")
@@ -216,7 +245,7 @@ def deploy_p2p_trade():
         on_complete=OnComplete.NoOpOC,
         app_args=[method.get_selector(), decode_address(sponsor_addr)],
     )
-    txid = algod_client.send_transaction(set_sp.sign(admin_sk))
+    txid = algod_client.send_transaction(admin_sign(set_sp))
     wait_for_confirmation(algod_client, txid, 10)
     print("✓ Sponsor set")
 
@@ -246,12 +275,8 @@ def deploy_p2p_trade():
     stx = [grp[0], grp[1]]
     # Sign and send (admin signs call, sponsor signs pay is off-chain; here we only have admin key)
     # For production, sponsor Payment can be sent by ADMIN if sponsor==admin; otherwise expect sponsor mnemonic
-    sponsor_mn = os.environ.get('ALGORAND_SPONSOR_MNEMONIC')
-    if not sponsor_mn:
-        raise SystemExit('ALGORAND_SPONSOR_MNEMONIC not set for setup_assets funding')
-    sponsor_sk = mnemonic.to_private_key(sponsor_mn)
-    stx[0] = pay.sign(sponsor_sk)
-    stx[1] = call.sign(admin_sk)
+    stx[0] = sponsor_sign(pay)
+    stx[1] = admin_sign(call)
     txid = algod_client.send_transactions(stx)
     wait_for_confirmation(algod_client, txid, 10)
     print("✓ Asset setup complete")
