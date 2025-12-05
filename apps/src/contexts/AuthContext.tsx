@@ -351,6 +351,32 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     loadProfileForCurrentAccount();
   }, [isAuthenticated]);
 
+  // Monitor for credential invalidation (e.g., token version mismatch on server)
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const checkInterval = setInterval(async () => {
+      try {
+        const credentials = await Keychain.getGenericPassword({
+          service: AUTH_KEYCHAIN_SERVICE,
+          username: AUTH_KEYCHAIN_USERNAME,
+        });
+
+        // If credentials are gone but we're still marked as authenticated, log out
+        if (!credentials && isAuthenticated) {
+          console.log('[AuthContext] Credentials cleared externally, logging out...');
+          setIsAuthenticated(false);
+          setProfileData(null);
+          navigateToScreen('Auth');
+        }
+      } catch (error) {
+        console.error('[AuthContext] Error checking credentials:', error);
+      }
+    }, 1000); // Check every second
+
+    return () => clearInterval(checkInterval);
+  }, [isAuthenticated, isNavigationReady]);
+
   // Refresh on resume to ensure valid access token before UI queries
   useEffect(() => {
     let isAuthenticating = false;
