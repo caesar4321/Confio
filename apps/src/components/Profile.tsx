@@ -1,13 +1,13 @@
 import React from 'react';
 import { View, Text, ActivityIndicator } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
-import { useAccountManager } from '../hooks/useAccountManager';
+import { useAccount } from '../contexts/AccountContext';
 import moment from 'moment';
 import 'moment/locale/es';
 
 const Profile: React.FC = () => {
   const { profileData, isProfileLoading } = useAuth();
-  const { activeAccount } = useAccountManager();
+  const { activeAccount } = useAccount();
 
   if (isProfileLoading) return <ActivityIndicator size="large" />;
   if (!profileData) return <Text>No profile data available</Text>;
@@ -21,7 +21,7 @@ const Profile: React.FC = () => {
       <Text style={{ fontSize: 24, marginBottom: 20 }}>
         {isBusinessMode ? 'Business Profile' : 'User Profile'}
       </Text>
-      
+
       {isBusinessMode && businessProfile ? (
         // Business Profile Display
         <View>
@@ -47,7 +47,7 @@ const Profile: React.FC = () => {
         // User Profile Display
         <View>
           <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 10 }}>
-            {userProfile.firstName && userProfile.lastName 
+            {userProfile.firstName && userProfile.lastName
               ? `${userProfile.firstName} ${userProfile.lastName}`
               : userProfile.username
             }

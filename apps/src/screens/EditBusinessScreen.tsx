@@ -19,7 +19,7 @@ import { MainStackParamList } from '../types/navigation';
 import { useAccount } from '../contexts/AccountContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useMutation, useQuery } from '@apollo/client';
-import { UPDATE_BUSINESS, GET_USER_ACCOUNTS } from '../apollo/queries';
+import { UPDATE_BUSINESS, GET_USER_ACCOUNTS, GET_BUSINESS_KYC_STATUS } from '../apollo/queries';
 
 type EditBusinessScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
@@ -77,7 +77,7 @@ export const EditBusinessScreen = () => {
         businessAddress: activeAccount.business.address,
         avatar: activeAccount.avatar
       });
-      
+
       setBusinessName(activeAccount.business.name || '');
       setBusinessCategory(activeAccount.business.category || '');
       setBusinessDescription(activeAccount.business.description || '');
@@ -97,27 +97,27 @@ export const EditBusinessScreen = () => {
   const getCategoryDisplayName = (categoryId: string) => {
     console.log('getCategoryDisplayName called with:', categoryId);
     console.log('Available categories:', businessCategories.map(cat => ({ id: cat.id, name: cat.name })));
-    
+
     if (!categoryId) return 'No especificada';
-    
+
     // First try to find by ID (for database values like 'food', 'retail', etc.)
     let category = businessCategories.find(cat => cat.id === categoryId);
     console.log('Found category by exact match:', category);
-    
+
     if (category) {
       console.log('Returning display name:', category.name);
       return category.name;
     }
-    
+
     // Try case-insensitive match
     category = businessCategories.find(cat => cat.id.toLowerCase() === categoryId.toLowerCase());
     console.log('Found category by case-insensitive match:', category);
-    
+
     if (category) {
       console.log('Returning display name (case-insensitive):', category.name);
       return category.name;
     }
-    
+
     // If not found by ID, it might be a display name already, so return as is
     console.log('Category not found, returning as is:', categoryId);
     return categoryId;
@@ -129,7 +129,18 @@ export const EditBusinessScreen = () => {
   };
 
   // Determine if current business is verified (from server data)
+  const { data: bizKycData } = useQuery(GET_BUSINESS_KYC_STATUS, {
+    variables: { businessId: activeAccount?.business?.id || '' },
+    skip: !activeAccount?.business?.id,
+    fetchPolicy: 'network-only'
+  });
+
   const isBusinessVerified = (() => {
+    // Check real-time status first
+    const status = bizKycData?.businessKycStatus?.status;
+    if (status && status.toLowerCase() === 'verified') return true;
+
+    // Fallback to account data
     const list = accountsData?.userAccounts || [];
     const currentBizId = activeAccount?.business?.id;
     const match = list.find((acc: any) => acc.business?.id === currentBizId);
@@ -179,7 +190,7 @@ export const EditBusinessScreen = () => {
       if (result.data?.updateBusiness?.success) {
         // Refresh accounts to get updated data
         await refetchAccounts();
-        
+
         Alert.alert(
           'Éxito',
           'Información del negocio actualizada correctamente',

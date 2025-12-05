@@ -17,7 +17,7 @@ const __authReadyResolvers: Array<() => void> = [];
 export function signalAuthReady() {
   __authReady = true;
   while (__authReadyResolvers.length) {
-    try { __authReadyResolvers.pop()?.(); } catch {}
+    try { __authReadyResolvers.pop()?.(); } catch { }
   }
 }
 export async function waitForAuthReady() {
@@ -93,15 +93,15 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
 
   // Reset auth gate on mount so cold starts don't inherit a stale ready state
   useEffect(() => {
-    try { (function resetGate(){ /* scoped */ })(); __authReady = false; } catch {}
+    try { (function resetGate() { /* scoped */ })(); __authReady = false; } catch { }
   }, []);
 
   // Helper to prefetch accounts immediately after auth is aligned
   const prefetchUserAccounts = async (reason: string) => {
     try {
       const { GET_USER_ACCOUNTS } = await import('../apollo/queries');
-      await apolloClient.query({ 
-        query: GET_USER_ACCOUNTS, 
+      await apolloClient.query({
+        query: GET_USER_ACCOUNTS,
         fetchPolicy: 'network-only',
         context: { skipProactiveRefresh: true },
       });
@@ -141,7 +141,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       hasNavigationRef: !!navigationRef.current,
       currentRoute: navigationRef.current?.getCurrentRoute()?.name
     });
-    
+
     if (!isNavigationReady || !navigationRef.current) {
       console.log('[NAV] Navigation not ready yet, queuing navigation');
       // Queue navigation for when ready
@@ -153,23 +153,23 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       }, 100);
       return;
     }
-    
+
     console.log(`[NAV] Executing navigation to ${screenName}`);
-    
+
     // Use setTimeout to ensure navigation happens on next tick
     // This fixes Android navigation freeze issue
     setTimeout(() => {
       try {
         navigationRef.current?.reset({
           index: 0,
-          routes: [{ 
+          routes: [{
             name: screenName,
             params: undefined,
             state: undefined
           }],
         });
         console.log(`[NAV] Navigation reset completed for ${screenName}`);
-        
+
         // After navigating to Main, process any pending push notifications
         if (screenName === 'Main') {
           console.log('[AuthContext] Navigated to Main, processing pending notifications...');
@@ -193,11 +193,11 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           query: GET_ME,
           fetchPolicy: 'network-only',
         });
-        
+
         // Check phone verification status from server
         const serverPhoneVerified = data?.me?.phoneNumber && data?.me?.phoneCountry;
         console.log('Profile refresh - Server phone verification status:', serverPhoneVerified);
-        
+
         // If phone verification was lost on server but user is authenticated, require re-verification
         if (!serverPhoneVerified && isAuthenticated) {
           console.log('Profile refresh - Phone verification lost on server, requiring re-verification');
@@ -217,22 +217,38 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           }
           return; // Exit early to prevent setting profile data
         }
-        
+
         setProfileData({
           userProfile: data?.me || null,
           businessProfile: undefined,
           currentAccountType: 'personal'
         });
       } else if (accountType === 'business' && businessId) {
-        // Fetch only business profile in business context
-        const { data } = await apolloClient.query({
+        // Fetch business profile
+        const { data: businessData } = await apolloClient.query({
           query: GET_BUSINESS_PROFILE,
           variables: { businessId },
           fetchPolicy: 'network-only',
         });
+
+        // ALSO fetch user profile to keep phone/country info available
+        // This is required for ProfileScreen logic (e.g. payment methods visibility)
+        let userProfile = null;
+        try {
+          const { data: userData } = await apolloClient.query({
+            query: GET_ME,
+            fetchPolicy: 'network-only',
+          });
+          userProfile = userData?.me || null;
+        } catch (e) {
+          console.warn('AuthContext - Failed to fetch user profile in business mode:', e);
+          // Fallback: keep existing user profile if available
+          userProfile = profileData?.userProfile || null;
+        }
+
         setProfileData({
-          userProfile: undefined,
-          businessProfile: data?.business || null,
+          userProfile: userProfile,
+          businessProfile: businessData?.business || null,
           currentAccountType: 'business'
         });
       }
@@ -251,9 +267,9 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
         try {
           const authService = AuthService.getInstance();
           const accountContext = await authService.getActiveAccountContext();
-          
+
           console.log('AuthContext - Loading profile for account type:', accountContext.type);
-          
+
           // CRITICAL: Sync JWT token with stored active account context on app startup
           // This ensures the JWT has the correct business context after app restart
           if (accountContext.type === 'business' && accountContext.businessId) {
@@ -268,49 +284,49 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
                   businessId: accountContext.businessId
                 }
               });
-              
+
               if (data?.switchAccountToken?.token) {
                 console.log('AuthContext - JWT token synced with business context on startup');
                 // Update stored tokens with the new JWT that has business context
                 const Keychain = await import('react-native-keychain');
                 const AUTH_KEYCHAIN_SERVICE = 'com.confio.auth';
                 const AUTH_KEYCHAIN_USERNAME = 'auth_tokens';
-                
+
                 // Get existing refresh token
                 const credentials = await Keychain.getGenericPassword({
                   service: AUTH_KEYCHAIN_SERVICE,
                   username: AUTH_KEYCHAIN_USERNAME
                 });
-                
-              if (credentials) {
-                const tokens = JSON.parse(credentials.password);
-                // Update with new access token while keeping refresh token
-                await Keychain.setGenericPassword(
-                  AUTH_KEYCHAIN_USERNAME,
-                  JSON.stringify({
-                    accessToken: data.switchAccountToken.token,
-                    refreshToken: tokens.refreshToken
-                  }),
-                  {
-                    service: AUTH_KEYCHAIN_SERVICE,
-                    username: AUTH_KEYCHAIN_USERNAME,
-                    accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
-                  }
-                );
-                console.log('AuthContext - Stored updated JWT token with business context');
-                setAccountContextTick((t) => t + 1);
-                // Now signal that auth is ready: final token is aligned with stored business context
-                try { signalAuthReady(); } catch {}
-                // Warm user accounts using the new token/context
-                prefetchUserAccounts('post-business-switch');
-              }
+
+                if (credentials) {
+                  const tokens = JSON.parse(credentials.password);
+                  // Update with new access token while keeping refresh token
+                  await Keychain.setGenericPassword(
+                    AUTH_KEYCHAIN_USERNAME,
+                    JSON.stringify({
+                      accessToken: data.switchAccountToken.token,
+                      refreshToken: tokens.refreshToken
+                    }),
+                    {
+                      service: AUTH_KEYCHAIN_SERVICE,
+                      username: AUTH_KEYCHAIN_USERNAME,
+                      accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
+                    }
+                  );
+                  console.log('AuthContext - Stored updated JWT token with business context');
+                  setAccountContextTick((t) => t + 1);
+                  // Now signal that auth is ready: final token is aligned with stored business context
+                  try { signalAuthReady(); } catch { }
+                  // Warm user accounts using the new token/context
+                  prefetchUserAccounts('post-business-switch');
+                }
               }
             } catch (syncError) {
               console.error('AuthContext - Error syncing JWT token on startup:', syncError);
               // Don't fail the app startup, but operations requiring business context may fail
             }
           }
-          
+
           // Load the correct profile for the active context to avoid a "personal" flash
           if (accountContext.type === 'business' && accountContext.businessId) {
             await refreshProfile('business', accountContext.businessId);
@@ -318,20 +334,20 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
             await refreshProfile('personal');
           }
           // By this point, token is either aligned to business (signaled above) or personal; unblock dependents.
-          try { signalAuthReady(); } catch {}
+          try { signalAuthReady(); } catch { }
           prefetchUserAccounts('post-profile-load');
         } catch (error) {
           console.error('Error determining account type for profile loading:', error);
           // Fallback to personal profile
           await refreshProfile('personal');
-          try { signalAuthReady(); } catch {}
+          try { signalAuthReady(); } catch { }
           prefetchUserAccounts('post-profile-fallback');
         }
       } else {
         setProfileData(null);
       }
     };
-    
+
     loadProfileForCurrentAccount();
   }, [isAuthenticated]);
 
@@ -371,11 +387,11 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           if (!at || !rt) return;
           const decoded: any = jwtDecode(at);
           const now = Math.floor(Date.now() / 1000);
-            if ((decoded?.exp ?? 0) <= now + 30) {
-              const { data } = await apolloClient.mutate({
-                mutation: REFRESH_TOKEN,
-                variables: { refreshToken: rt },
-                context: { skipAuth: true },
+          if ((decoded?.exp ?? 0) <= now + 30) {
+            const { data } = await apolloClient.mutate({
+              mutation: REFRESH_TOKEN,
+              variables: { refreshToken: rt },
+              context: { skipAuth: true },
             });
             const newAccess = data?.refreshToken?.token;
             if (newAccess) {
@@ -484,7 +500,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   const completeAuthenticatedEntry = async (source: 'login' | 'phoneVerification' | 'resume') => {
     setIsAuthenticated(true);
     await refreshProfile('personal');
-    
+
     // Ensure FCM token is registered for the user
     console.log('[AuthContext] Registering FCM token after auth...');
     try {
@@ -494,11 +510,11 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       console.error('[AuthContext] Failed to register FCM token:', fcmError);
       // Don't block navigation if FCM registration fails
     }
-    
+
     // Handle auto opt-in after successful auth
     try {
       console.log('[AuthContext] Checking for required asset opt-ins...');
-      
+
       // Check if user needs opt-ins
       const GENERATE_OPT_IN_TRANSACTIONS = gql`
         mutation GenerateOptInTransactions {
@@ -509,11 +525,11 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           }
         }
       `;
-      
+
       const { data } = await apolloClient.mutate({
         mutation: GENERATE_OPT_IN_TRANSACTIONS
       });
-      
+
       const mutationResult = data?.generateOptInTransactions;
       if (mutationResult?.success && mutationResult?.transactions) {
         // Parse transactions payload defensively; GraphQL JSONString may already be an array in some environments
@@ -531,7 +547,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           console.log('[AuthContext] Opt-in transactions needed, processing...');
           const { default: algorandService } = await import('../services/algorandService');
           const optInSuccess = await algorandService.processSponsoredOptIn(transactions);
-          
+
           if (optInSuccess) {
             console.log('[AuthContext] Auto opt-in completed successfully');
           } else {
@@ -545,13 +561,13 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       } else {
         console.error('[AuthContext] Failed to generate opt-in transactions:', mutationResult?.error);
       }
-      
+
     } catch (optInError) {
       console.error('[AuthContext] Error during auto opt-in:', optInError);
       // Don't block login even if backend reports expired credentials; let user proceed
     }
 
-    try { signalAuthReady(); } catch {}
+    try { signalAuthReady(); } catch { }
     prefetchUserAccounts(`post-${source}`);
     navigateToScreen('Main');
   };
@@ -572,10 +588,10 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     const authOk = biometricResult.didAuthenticate
       ? true
       : await biometricAuthService.authenticate(
-          'Confirma tu biometría para continuar',
-          true,
-          true
-        );
+        'Confirma tu biometría para continuar',
+        true,
+        true
+      );
     if (!authOk) {
       Alert.alert('Biometría requerida', 'Confirma con Face ID / Touch ID o huella para continuar.');
       return false;
@@ -634,19 +650,19 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   const checkAuthState = async () => {
     try {
       console.log('Checking auth state...');
-      
+
       // Check for JWT tokens instead of zkLogin data
       const Keychain = await import('react-native-keychain');
       const credentials = await Keychain.getGenericPassword({
         service: 'com.confio.auth',
         username: 'auth_tokens'
       });
-      
+
       console.log('Auth state JWT tokens:', {
         hasCredentials: !!credentials,
         credentialType: typeof credentials
       });
-      
+
       if (credentials && credentials !== false) {
         try {
           const tokens = JSON.parse(credentials.password);
@@ -799,7 +815,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
         service: 'com.confio.auth',
         username: 'auth_tokens'
       });
-      
+
       if (credentials && credentials !== false) {
         const tokens = JSON.parse(credentials.password);
         const hasValidTokens = tokens.accessToken && tokens.refreshToken;
@@ -855,16 +871,16 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   };
 
   return (
-    <AuthContext.Provider value={{ 
-      isAuthenticated, 
-      isLoading, 
-      signOut, 
-      checkLocalAuthState, 
-      handleSuccessfulLogin, 
+    <AuthContext.Provider value={{
+      isAuthenticated,
+      isLoading,
+      signOut,
+      checkLocalAuthState,
+      handleSuccessfulLogin,
       completePhoneVerification,
       completeBiometricAndEnter,
-      profileData, 
-      isProfileLoading, 
+      profileData,
+      isProfileLoading,
       refreshProfile,
       userProfile: profileData?.userProfile,
       isUserProfileLoading: isProfileLoading && profileData?.currentAccountType === 'personal',
@@ -881,7 +897,7 @@ export const useAuth = () => {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
-}; 
+};
 const isExpiredCredentialsError = (error: any): boolean => {
   const msg = (error?.message || error?.toString?.() || '').toString().toLowerCase();
   return msg.includes('credentials were refreshed') && msg.includes('expired');

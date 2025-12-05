@@ -316,11 +316,4 @@ def deploy_p2p_trade():
 
 
 if __name__ == '__main__':
-    print("DEBUG: Calling deploy_p2p_trade()", file=sys.stderr)
-    try:
-        deploy_p2p_trade()
-    except Exception as e:
-        print(f"DEBUG: Exception in main: {e}", file=sys.stderr)
-        import traceback
-        traceback.print_exc()
-
+    deploy_p2p_trade()
