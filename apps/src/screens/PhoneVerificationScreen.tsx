@@ -27,6 +27,7 @@ import { INITIATE_TELEGRAM_VERIFICATION, VERIFY_TELEGRAM_CODE, UPDATE_PHONE_NUMB
 import { useAuth } from '../contexts/AuthContext';
 import { useCountrySelection } from '../hooks/useCountrySelection';
 import { AuthStackParamList, MainStackParamList } from '../types/navigation';
+import { navigationRef } from '../navigation/RootNavigation';
 
 type PhoneVerificationScreenNavigationProp = CompositeNavigationProp<
   NativeStackNavigationProp<AuthStackParamList, 'PhoneVerification'>,
@@ -98,6 +99,23 @@ const PhoneVerificationScreen = () => {
     } else if (currentScreen === 'code') {
       setCurrentScreen('method');
     }
+  };
+
+  const safeNavigateToMain = (params?: any) => {
+    const state: any = (navigation as any).getState?.();
+    const hasMain = !!state?.routeNames?.includes?.('Main');
+
+    if (hasMain) {
+      (navigation as any).navigate('Main' as never, params as never);
+      return;
+    }
+
+    if (navigationRef.isReady()) {
+      navigationRef.navigate('Main' as never, params as never);
+      return;
+    }
+
+    console.warn('[PhoneVerification] Navigation to Main skipped; navigator not ready');
   };
 
   const handleContinue = async () => {
@@ -203,10 +221,10 @@ const PhoneVerificationScreen = () => {
               if (hasBottomTabs) {
                 (navigation as any).navigate('BottomTabs', { screen: 'Home', params: { checkInviteReceipt: true } });
               } else {
-                (navigation as any).navigate('Main' as never, { screen: 'Home', params: { checkInviteReceipt: true } } as never);
+                safeNavigateToMain({ screen: 'Home', params: { checkInviteReceipt: true } });
               }
             } catch (e) {
-              try { (navigation as any).navigate('Main' as never); } catch {}
+              try { safeNavigateToMain(); } catch {}
             }
           }
         } else {
@@ -246,10 +264,10 @@ const PhoneVerificationScreen = () => {
               if (hasBottomTabs) {
                 (navigation as any).navigate('BottomTabs', { screen: 'Home', params: { checkInviteReceipt: true } });
               } else {
-                (navigation as any).navigate('Main' as never, { screen: 'Home', params: { checkInviteReceipt: true } } as never);
+                safeNavigateToMain({ screen: 'Home', params: { checkInviteReceipt: true } });
               }
             } catch (e) {
-              try { (navigation as any).navigate('Main' as never); } catch {}
+              try { safeNavigateToMain(); } catch {}
             }
           }
         } else {

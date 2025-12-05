@@ -548,7 +548,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       
     } catch (optInError) {
       console.error('[AuthContext] Error during auto opt-in:', optInError);
-      // Don't block login if opt-in fails
+      // Don't block login even if backend reports expired credentials; let user proceed
     }
 
     try { signalAuthReady(); } catch {}
@@ -882,3 +882,7 @@ export const useAuth = () => {
   }
   return context;
 }; 
+const isExpiredCredentialsError = (error: any): boolean => {
+  const msg = (error?.message || error?.toString?.() || '').toString().toLowerCase();
+  return msg.includes('credentials were refreshed') && msg.includes('expired');
+};

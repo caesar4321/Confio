@@ -20,8 +20,19 @@ import * as Keychain from 'react-native-keychain';
 import { apolloClient, AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME } from '../apollo/client';
 import { gql } from '@apollo/client';
 import { randomBytes } from '@noble/hashes/utils';
-import { Buffer } from 'buffer'; // RN polyfill for base64
 import { CONFIO_DERIVATION_SPEC } from './derivationSpec';
+import { base64ToBytes, bytesToBase64, stringToUtf8Bytes } from '../utils/encoding';
+
+const decodeUtf8 = (bytes: Uint8Array): string => {
+  if (typeof TextDecoder !== 'undefined') {
+    return new TextDecoder().decode(bytes);
+  }
+  let out = '';
+  for (let i = 0; i < bytes.length; i++) {
+    out += String.fromCharCode(bytes[i]);
+  }
+  return out;
+};
 
 // GraphQL mutations for peppers (per-account, derived from JWT context)
 const GET_DERIVATION_PEPPER = gql`
@@ -153,8 +164,8 @@ function wrapSeed(
     sf: meta?.saltFingerprint || null
   };
   
-  // Use Buffer for base64 encoding (RN compatible)
-  return Buffer.from(JSON.stringify(blob)).toString('base64');
+  // Encode to base64 without relying on Buffer
+  return bytesToBase64(stringToUtf8Bytes(JSON.stringify(blob)));
 }
 
 /**
@@ -169,7 +180,7 @@ function parseSeedBlob(blobB64: string): {
   scope?: string | null;
   sf?: string | null;
 } {
-  const blob = JSON.parse(Buffer.from(blobB64, 'base64').toString('utf8'));
+  const blob = JSON.parse(decodeUtf8(base64ToBytes(blobB64)));
   return {
     pepperVersion: parseInt(blob.pepperVersion || '1'),
     nonce: blob.nonce,
@@ -186,7 +197,6 @@ function parseSeedBlob(blobB64: string): {
  */
 function unwrapSeed(blobB64: string, kek32: Uint8Array): Uint8Array {
   try {
-    // Use Buffer for base64 decoding (RN compatible)
     const blob = parseSeedBlob(blobB64);
     const nonce = hexToBytes(blob.nonce);
     const ciphertext = hexToBytes(blob.ct);
@@ -756,7 +766,21 @@ export class SecureDeterministicWalletService {
         console.log(`[SecureDeterministicWallet] Boxes: ${txn.boxes.length} references`);
         txn.boxes.forEach((box: any, i: number) => {
           const boxName = box.name;
-          console.log(`[SecureDeterministicWallet]   Box ${i}: app=${box.appIndex}, name_hex=${Buffer.from(boxName).toString('hex')}`);
+          let boxBytes: Uint8Array;
+          if (boxName instanceof Uint8Array) {
+            boxBytes = boxName;
+          } else if (Array.isArray(boxName)) {
+            boxBytes = Uint8Array.from(boxName);
+          } else if (typeof boxName === 'string') {
+            boxBytes = stringToUtf8Bytes(boxName);
+          } else {
+            try {
+              boxBytes = new Uint8Array(boxName);
+            } catch (_e) {
+              boxBytes = new Uint8Array([]);
+            }
+          }
+          console.log(`[SecureDeterministicWallet]   Box ${i}: app=${box.appIndex}, name_hex=${bytesToHex(boxBytes)}`);
           // Try to decode as address
           try {
             const boxAddr = algosdk.encodeAddress(boxName);
@@ -850,7 +874,7 @@ export class SecureDeterministicWalletService {
         console.log('[SecureDeterministicWallet] Signing raw msgpack bytes (sponsored transaction)');
 
         // Build the "TX" prefix that Algorand uses
-        const TX_PREFIX = new Uint8Array(Buffer.from('TX'));
+        const TX_PREFIX = stringToUtf8Bytes('TX');
 
         // Concatenate prefix + transaction bytes
         const toBeSigned = new Uint8Array(TX_PREFIX.length + txnOrBytes.length);
@@ -887,7 +911,7 @@ export class SecureDeterministicWalletService {
 
         // Key "sig" (fixstr 3)
         result.push(0xa3);
-        result.push(...Buffer.from('sig'));
+        result.push(...Array.from(stringToUtf8Bytes('sig')));
 
         // Signature value (bin8 format for 64 bytes)
         result.push(0xc4);  // bin 8
@@ -896,7 +920,7 @@ export class SecureDeterministicWalletService {
 
         // Key "txn" (fixstr 3)
         result.push(0xa3);
-        result.push(...Buffer.from('txn'));
+        result.push(...Array.from(stringToUtf8Bytes('txn')));
 
         // Transaction value: the ORIGINAL bytes without any modification
         result.push(...txnOrBytes);

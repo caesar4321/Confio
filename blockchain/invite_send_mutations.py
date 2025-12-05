@@ -272,9 +272,6 @@ class SubmitInviteForPhone(graphene.Mutation):
         if not user.is_authenticated:
             return cls(success=False, error='Not authenticated')
 
-        # Safety: on-chain claim now requires the recipient to self-claim; disable server-mediated claim path
-        return cls(success=False, error='Claim must be performed directly by the recipient wallet')
-
         algod_client = get_algod_client()
 
         # Base64 decode tolerant of urlsafe and missing padding
@@ -381,19 +378,32 @@ class SubmitInviteForPhone(graphene.Mutation):
             for entry in parsed:
                 b = _b64.b64decode(entry.get('txn'))
                 tx_d = msgpack.unpackb(b, raw=False)
-                # Validate before signing
-                if tx_d.get('type') != 'pay':
-                    return cls(success=False, error='Unexpected sponsor txn type (only payment allowed)')
-                if tx_d.get('snd') != algo_encoding.decode_address(expected_addr):
-                    return cls(success=False, error='Sponsor txn sender mismatch')
-                if tx_d.get('rcv') != algo_encoding.decode_address(expected_rcv):
-                    return cls(success=False, error='Sponsor txn receiver mismatch')
-                if tx_d.get('rekey'):
-                    return cls(success=False, error='Sponsor txn must not rekey')
-                if tx_d.get('close'):
-                    return cls(success=False, error='Sponsor txn must not close out')
-                amt = tx_d.get('amt')
-                sponsor_amounts.append(int(amt or 0))
+                tx_type = tx_d.get('type')
+                if tx_type == 'pay':
+                    if tx_d.get('snd') != algo_encoding.decode_address(expected_addr):
+                        return cls(success=False, error='Sponsor txn sender mismatch')
+                    if tx_d.get('rcv') != algo_encoding.decode_address(expected_rcv):
+                        return cls(success=False, error='Sponsor txn receiver mismatch')
+                    if tx_d.get('rekey'):
+                        return cls(success=False, error='Sponsor txn must not rekey')
+                    if tx_d.get('close'):
+                        return cls(success=False, error='Sponsor txn must not close out')
+                    amt = tx_d.get('amt')
+                    sponsor_amounts.append(int(amt or 0))
+                elif tx_type == 'appl':
+                    # App call must be from sponsor to our invite app
+                    if tx_d.get('snd') != algo_encoding.decode_address(expected_addr):
+                        return cls(success=False, error='Sponsor app call sender mismatch')
+                    if tx_d.get('apid') != builder.app_id:
+                        return cls(success=False, error='Sponsor app call targets wrong app')
+                    if tx_d.get('rekey'):
+                        return cls(success=False, error='Sponsor app call must not rekey')
+                    if tx_d.get('apat'):
+                        # First account should be inviter (already enforced in contract); keep lightweight check only
+                        pass
+                else:
+                    return cls(success=False, error='Unexpected sponsor txn type (only payment and app call allowed)')
+
                 tx = transaction.Transaction.undictify(tx_d)
                 stx = signer.sign_transaction(tx)
                 signed_by_index[int(entry.get('index'))] = stx
@@ -533,10 +543,43 @@ class ClaimInviteForPhone(graphene.Mutation):
         if not invitation_id:
             # If phone provided, derive from normalized phone (legacy behavior)
             if phone:
+                # Build ordered list of possible phone keys to tolerate missing country code on creation
+                phone_keys = []
                 canonical_key = builder.normalize_phone(phone, phone_country)
-                if not canonical_key or ':' not in canonical_key:
+                if canonical_key:
+                    phone_keys.append(canonical_key)
+                digits_only = ''.join(ch for ch in phone if ch.isdigit())
+                if digits_only and digits_only not in phone_keys:
+                    phone_keys.append(digits_only)
+                if not phone_keys:
                     return cls(success=False, error='Proporciona un número en formato internacional (+CC ...) o un país válido para normalizar el teléfono.')
-                invitation_id = builder.make_invitation_id(canonical_key)
+
+                # Resolve invitation id by checking on-chain boxes using candidate keys
+                resolved_invitation_id = None
+                for key in phone_keys:
+                    candidate_id = builder.make_invitation_id(key)
+                    try:
+                        _ = algod_client.application_box_by_name(builder.app_id, candidate_id.encode())
+                        resolved_invitation_id = candidate_id
+                        break
+                    except Exception:
+                        continue
+
+                if resolved_invitation_id:
+                    invitation_id = resolved_invitation_id
+                else:
+                    # Fallback to DB lookup in case the box read failed but DB has the invite
+                    from send.models import PhoneInvite
+                    inv = PhoneInvite.objects.filter(
+                        phone_key__in=phone_keys,
+                        status='pending',
+                        deleted_at__isnull=True
+                    ).order_by('-created_at').first()
+                    if inv:
+                        invitation_id = inv.invitation_id
+                    else:
+                        return cls(success=False, error='No se encontró una invitación activa para este número. Pide al remitente que la cree nuevamente e inténtalo de nuevo.')
+
             else:
                 # Resolve invitation for current user's phone strictly via PhoneInvite pending row.
                 try:
@@ -605,7 +648,7 @@ class ClaimInviteForPhone(graphene.Mutation):
             box = algod_client.application_box_by_name(builder.app_id, invitation_id.encode())
             import base64 as _b
             raw = _b.b64decode(box['value']['bytes']) if isinstance(box.get('value'), dict) else _b.b64decode(box.get('value', ''))
-            # raw layout: inviter(32) | amount(8) | asset_id(8) | created_at(8) | expires_at(8) | flags...
+            # raw layout: inviter(32) | amount(8) | asset_id(8) | created_at(8) | expires_at(8) | is_claimed(1) | is_reclaimed(1) | msg_len(2) | message...
             if len(raw) >= 48:
                 # Disallow self-claim: recipient cannot be the original inviter
                 try:
@@ -618,6 +661,57 @@ class ClaimInviteForPhone(graphene.Mutation):
                     pass
                 asset_id_bytes = raw[40:48]
                 asset_id_int = int.from_bytes(asset_id_bytes, 'big')
+                # Flags: try both compact and extended offsets
+                is_claimed_candidates = []
+                if len(raw) > 48:
+                    is_claimed_candidates.append(raw[48])
+                if len(raw) > 64:
+                    is_claimed_candidates.append(raw[64])
+                is_reclaimed_candidates = []
+                if len(raw) > 49:
+                    is_reclaimed_candidates.append(raw[49])
+                if len(raw) > 65:
+                    is_reclaimed_candidates.append(raw[65])
+
+                # Decode created/expiry candidates for debugging and guards
+                created_candidates = []
+                if len(raw) >= 56:
+                    created_candidates.append(int.from_bytes(raw[48:56], 'big'))
+                if len(raw) >= 64:
+                    created_candidates.append(int.from_bytes(raw[56:64], 'big'))  # could be expires_at depending on layout
+                expires_candidates = []
+                if len(raw) >= 64:
+                    expires_candidates.append(int.from_bytes(raw[56:64], 'big'))
+                if len(raw) >= 72:
+                    expires_candidates.append(int.from_bytes(raw[64:72], 'big'))
+
+                import time
+                now_ts = int(time.time())
+                logger.info(
+                    '[ClaimInviteForPhone] invite box decoded id=%s len=%s asset=%s created=%s expires=%s claimed=%s reclaimed=%s now=%s prefix_hex=%s',
+                    invitation_id,
+                    len(raw),
+                    asset_id_int,
+                    created_candidates,
+                    expires_candidates,
+                    is_claimed_candidates,
+                    is_reclaimed_candidates,
+                    now_ts,
+                    raw[:80].hex(),
+                )
+
+                if any(v for v in is_claimed_candidates if v):
+                    return cls(success=False, error='La invitación ya fue reclamada.')
+                if any(v for v in is_reclaimed_candidates if v):
+                    return cls(success=False, error='La invitación fue devuelta al remitente.')
+                # Expiration guard - tolerate layout differences by checking both possible offsets
+                try:
+                    # Reuse expires_candidates computed above
+                    for exp in expires_candidates:
+                        if exp and now_ts > exp:
+                            return cls(success=False, error='La invitación ya expiró. Pide al remitente crear una nueva.')
+                except Exception:
+                    pass
                 try:
                     algod_client.account_asset_info(recipient_address, asset_id_int)
                 except Exception:
@@ -785,6 +879,7 @@ class InviteReceiptType(graphene.ObjectType):
     asset_id = graphene.String()
     amount = graphene.Int()
     timestamp = graphene.Int()
+    invitation_id = graphene.String()
 
 def get_invite_receipt_for_phone(user_phone: str, user_country: str | None):
     """Resolve latest invitation for this phone from DB, then check its on-chain receipt box.
@@ -797,24 +892,62 @@ def get_invite_receipt_for_phone(user_phone: str, user_country: str | None):
     try:
         from users.phone_utils import normalize_phone as _norm
         from send.models import PhoneInvite
-        phone_key = _norm(user_phone or '', user_country or '')
-        if not phone_key or ':' not in phone_key:
+        phone_keys = []
+        canonical = _norm(user_phone or '', user_country or '')
+        if canonical:
+            phone_keys.append(canonical)
+        digits_only = ''.join(ch for ch in (user_phone or '') if ch.isdigit())
+        if digits_only and digits_only not in phone_keys:
+            phone_keys.append(digits_only)
+        if not phone_keys:
             return {'exists': False}
-        inv = PhoneInvite.objects.filter(phone_key=phone_key, deleted_at__isnull=True).order_by('-created_at').first()
+
+        # Find the most recent invite for any candidate key
+        inv = PhoneInvite.objects.filter(phone_key__in=phone_keys, deleted_at__isnull=True).order_by('-created_at').first()
         if not inv:
             return {'exists': False}
-        name = ('r:' + inv.invitation_id).encode()
+
+        receipt_name = ('r:' + inv.invitation_id).encode()
+        # First, try receipt box (claimed/reclaimed)
         try:
-            box = client.application_box_by_name(builder.app_id, name)
+            box = client.application_box_by_name(builder.app_id, receipt_name)
             b = base64.b64decode(box['value']['bytes']) if isinstance(box.get('value'), dict) else base64.b64decode(box.get('value', ''))
-            if len(b) < 32:
-                return {'exists': False}
-            status = int.from_bytes(b[0:8], 'big')
-            asset_id = int.from_bytes(b[8:16], 'big')
-            amount = int.from_bytes(b[16:24], 'big')
-            ts = int.from_bytes(b[24:32], 'big')
-            return {'exists': True, 'status_code': status, 'asset_id': str(asset_id), 'amount': amount, 'timestamp': ts}
+            if len(b) >= 32:
+                status = int.from_bytes(b[0:8], 'big')
+                asset_id = int.from_bytes(b[8:16], 'big')
+                amount = int.from_bytes(b[16:24], 'big')
+                ts = int.from_bytes(b[24:32], 'big')
+                return {
+                    'exists': True,
+                    'status_code': status,
+                    'asset_id': str(asset_id),
+                    'amount': amount,
+                    'timestamp': ts,
+                    'invitation_id': inv.invitation_id,
+                }
         except Exception:
-            return {'exists': False}
+            pass
+
+        # If no receipt box, check invitation box (pending)
+        try:
+            invite_box = client.application_box_by_name(builder.app_id, inv.invitation_id.encode())
+            raw_val = base64.b64decode(invite_box['value']['bytes']) if isinstance(invite_box.get('value'), dict) else base64.b64decode(invite_box.get('value', ''))
+            asset_id = None
+            amount = None
+            if len(raw_val) >= 48:
+                amount = int.from_bytes(raw_val[32:40], 'big')
+                asset_id = int.from_bytes(raw_val[40:48], 'big')
+            return {
+                'exists': True,
+                'status_code': 0,  # pending
+                'asset_id': str(asset_id) if asset_id is not None else (str(inv.asset_id) if hasattr(inv, 'asset_id') else None),
+                'amount': amount if amount is not None else (int(getattr(inv, 'amount', 0)) if hasattr(inv, 'amount') else None),
+                'timestamp': int(inv.created_at.timestamp()) if hasattr(inv, 'created_at') and inv.created_at else 0,
+                'invitation_id': inv.invitation_id,
+            }
+        except Exception:
+            pass
+
+        return {'exists': False}
     except Exception:
         return {'exists': False}

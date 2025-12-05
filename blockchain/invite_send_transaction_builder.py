@@ -161,6 +161,8 @@ class InviteSendTransactionBuilder:
                 return InviteBuildResult(False, error=err)
 
             phone_key = self.normalize_phone(phone_number, phone_country)
+            if not phone_key or ':' not in phone_key:
+                return InviteBuildResult(False, error='Proporciona un número en formato internacional (+CC ...) o un país válido para normalizar el teléfono.')
             invitation_id = invitation_id_override or self.make_invitation_id(phone_key)
             msg = (message or '')[:256]
             mbr = self._box_mbr_cost(len(invitation_id.encode()), len(msg.encode()))

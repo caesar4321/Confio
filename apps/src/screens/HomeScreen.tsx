@@ -44,6 +44,7 @@ import { useCurrency } from '../hooks/useCurrency';
 import { useSelectedCountryRate } from '../hooks/useExchangeRate';
 import { inviteSendService } from '../services/inviteSendService';
 import { GET_PENDING_PAYROLL_ITEMS } from '../apollo/queries';
+import { LoadingOverlay } from '../components/LoadingOverlay';
 
 const AUTH_KEYCHAIN_SERVICE = 'com.confio.auth';
 const AUTH_KEYCHAIN_USERNAME = 'auth_tokens';
@@ -120,7 +121,12 @@ export const HomeScreen = () => {
   const [showLocalCurrency, setShowLocalCurrency] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [showBalance, setShowBalance] = useState(true);
-  const [inviteNotice, setInviteNotice] = useState<{ exists: boolean; amount?: number; assetId?: number; timestamp?: number } | null>(null);
+  // Invite receipt banner removed; self-claim card state
+  const [showInviteClaimCard, setShowInviteClaimCard] = useState(false);
+  const [claimingInvite, setClaimingInvite] = useState(false);
+  const [claimInviteMessage, setClaimInviteMessage] = useState<string | null>(null);
+  const [claimInviteError, setClaimInviteError] = useState<string | null>(null);
+  const [inviteReceiptId, setInviteReceiptId] = useState<string | undefined>(undefined);
 
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -656,6 +662,37 @@ export const HomeScreen = () => {
     }
   }, [refreshAccounts, refetchMyBalances]);
 
+  const handleClaimInvite = useCallback(async () => {
+    if (claimingInvite) return;
+    setClaimInviteError(null);
+    setClaimInviteMessage(null);
+    setClaimingInvite(true);
+    try {
+      const authService = AuthService.getInstance();
+      const address = await authService.getAlgorandAddress();
+      if (!address) {
+        setClaimInviteError('No se encontró tu dirección Algorand');
+        return;
+      }
+      const res = await inviteSendService.claimInviteForPhone(
+        userProfile?.phoneNumber,
+        userProfile?.phoneCountry,
+        address,
+        inviteReceiptId
+      );
+      if (!res.success) {
+        setClaimInviteError(res.error || 'No se pudo reclamar la invitación');
+      } else {
+        setClaimInviteMessage('Invitación reclamada. Revisa tu billetera.');
+        setShowInviteClaimCard(false);
+      }
+    } catch (e: any) {
+      setClaimInviteError(e?.message || 'No se pudo reclamar la invitación');
+    } finally {
+      setClaimingInvite(false);
+    }
+  }, [claimingInvite, userProfile?.phoneNumber, userProfile?.phoneCountry, inviteReceiptId]);
+
   // Quick actions configuration - filter based on permissions
   const quickActionsData: QuickAction[] = [
     {
@@ -762,6 +799,43 @@ export const HomeScreen = () => {
     }
   }, [canShowLocalCurrency, showLocalCurrency]);
 
+  // Surface self-claim card only when invite receipt exists
+  React.useEffect(() => {
+    let cancelled = false;
+    const checkInvite = async () => {
+      if (!userProfile?.phoneNumber) {
+        setShowInviteClaimCard(false);
+        setInviteReceiptId(undefined);
+        return;
+      }
+      try {
+        const receipt = await inviteSendService.getInviteReceiptNotice(userProfile.phoneNumber, userProfile.phoneCountry);
+        if (!cancelled) {
+          setShowInviteClaimCard(receipt.exists === true);
+          setInviteReceiptId((receipt as any).invitationId || undefined);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setShowInviteClaimCard(false);
+          setInviteReceiptId(undefined);
+        }
+      }
+    };
+    checkInvite();
+    return () => {
+      cancelled = true;
+    };
+  }, [userProfile?.phoneNumber, userProfile?.phoneCountry]);
+
+  // Route hint to surface claim card (e.g., after verification)
+  useEffect(() => {
+    const anyRoute: any = route as any;
+    if (anyRoute?.params?.checkInviteReceipt) {
+      setShowInviteClaimCard(true);
+      try { (navigation as any).setParams({ checkInviteReceipt: undefined }); } catch { }
+    }
+  }, [route, navigation]);
+
   // Combined initialization effect
   React.useEffect(() => {
     let mounted = true;
@@ -784,21 +858,6 @@ export const HomeScreen = () => {
         const address = await authService.getAlgorandAddress();
         setAlgorandAddress(address);
 
-        // Check for invite receipt notice (surprise banner)
-        try {
-          if (userProfile?.phoneNumber) {
-            const r = await inviteSendService.getInviteReceiptNotice(userProfile.phoneNumber, userProfile.phoneCountry);
-            if (r?.exists) {
-              const lastTs = await loadLastInviteTimestamp();
-              if (!lastTs || r.timestamp > lastTs) {
-                setInviteNotice(r);
-              }
-            }
-          }
-        } catch (e) {
-          console.log('HomeScreen: invite receipt check skipped');
-        }
-
       } catch (error) {
         console.error('HomeScreen - Error during initialization:', error);
       } finally {
@@ -813,34 +872,7 @@ export const HomeScreen = () => {
     };
   }, []);
 
-  // One-time optional trigger via route param after verification
-  useEffect(() => {
-    (async () => {
-      try {
-        const anyRoute: any = route as any;
-        if (anyRoute?.params?.checkInviteReceipt && userProfile?.phoneNumber) {
-          // Attempt to claim invitation first (best effort), then fetch receipt
-          try {
-            const authService = AuthService.getInstance();
-            const address = await authService.getAlgorandAddress();
-            if (address) {
-              // Do NOT pass phone so backend resolves the latest PhoneInvite or uses invitation_id when provided via deep link later
-              await inviteSendService.claimInviteForPhone(undefined, undefined, address);
-            }
-          } catch { }
-          const r = await inviteSendService.getInviteReceiptNotice(userProfile.phoneNumber, userProfile.phoneCountry);
-          if (r?.exists) {
-            const lastTs = await loadLastInviteTimestamp();
-            if (!lastTs || r.timestamp > lastTs) {
-              setInviteNotice(r);
-            }
-          }
-          // Clear the param to avoid rechecks
-          try { (navigation as any).setParams({ checkInviteReceipt: undefined }); } catch { }
-        }
-      } catch { }
-    })();
-  }, [route, userProfile?.phoneNumber, userProfile?.phoneCountry]);
+  // Invite receipt banner removed
 
   // Update header when account changes or user profile updates
   useEffect(() => {
@@ -1097,6 +1129,31 @@ export const HomeScreen = () => {
           </Animated.View>
         </Animated.View>
 
+
+        {showInviteClaimCard && (
+          <View style={styles.inviteClaimCard}>
+            <View style={styles.inviteClaimHeader}>
+              <View style={styles.inviteClaimBadge}>
+                <Text style={styles.inviteClaimBadgeText}>INVITACIÓN</Text>
+              </View>
+              <Text style={styles.inviteClaimTitle}>Reclama fondos pendientes</Text>
+              <Text style={styles.inviteClaimSubtitle}>
+                Completa el reclamo para mover el dinero a tu billetera y empezar a usarlo.
+              </Text>
+            </View>
+            {claimInviteError ? <Text style={styles.inviteClaimError}>{claimInviteError}</Text> : null}
+            {claimInviteMessage ? <Text style={styles.inviteClaimSuccess}>{claimInviteMessage}</Text> : null}
+            <TouchableOpacity
+              style={[styles.inviteClaimButton, claimingInvite && { opacity: 0.7 }]}
+              onPress={handleClaimInvite}
+              activeOpacity={0.85}
+              disabled={claimingInvite}
+            >
+              <Text style={styles.inviteClaimButtonText}>{claimingInvite ? 'Reclamando...' : 'Reclamar ahora'}</Text>
+              <Icon name="arrow-right" size={16} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Payroll quick action */}
         {showPayrollCard && (
@@ -1364,30 +1421,6 @@ export const HomeScreen = () => {
         </View>
       </ScrollView>
 
-      {/* Invite receipt notice banner */}
-      {inviteNotice?.exists && (
-        <InviteClaimBanner
-          amountMicros={inviteNotice.amount || 0}
-          assetId={inviteNotice.assetId || 0}
-          onPressDetails={async () => {
-            // Known cUSD asset IDs on current network
-            if ([744151197, 744368179].includes(inviteNotice.assetId || 0)) {
-              navigateToCUSDAccount();
-            } else if ([751114639, 3198568509].includes(inviteNotice.assetId || 0)) {
-              navigateToConfioAccount();
-            } else {
-              navigateToCUSDAccount();
-            }
-            if (inviteNotice.timestamp) await saveLastInviteTimestamp(inviteNotice.timestamp);
-            setInviteNotice(null);
-          }}
-          onDismiss={async () => {
-            if (inviteNotice.timestamp) await saveLastInviteTimestamp(inviteNotice.timestamp);
-            setInviteNotice(null);
-          }}
-        />
-      )}
-
       {/* Profile Menu */}
       <ProfileMenu
         visible={profileMenu.showProfileMenu}
@@ -1402,6 +1435,11 @@ export const HomeScreen = () => {
       <AccountSwitchOverlay
         visible={switchState.isLoading}
         progress={switchState.progress}
+      />
+
+      <LoadingOverlay
+        visible={claimingInvite}
+        message="Reclamando tu invitación..."
       />
     </View>
   );
@@ -1587,6 +1625,83 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#111827',
     marginRight: 8,
+  },
+  inviteClaimCard: {
+    marginHorizontal: 20,
+    marginTop: 16,
+    marginBottom: 8,
+    backgroundColor: '#f0fdf4',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  inviteClaimHeader: {
+    marginBottom: 12,
+  },
+  inviteClaimBadge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    backgroundColor: '#22c55e',
+    marginBottom: 8,
+  },
+  inviteClaimBadgeText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 12,
+    letterSpacing: 0.3,
+  },
+  inviteClaimTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1e293b',
+    marginBottom: 4,
+  },
+  inviteClaimSubtitle: {
+    fontSize: 13,
+    color: '#64748b',
+    lineHeight: 18,
+  },
+  inviteClaimButton: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#22c55e',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 12,
+    shadowColor: '#22c55e',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  inviteClaimButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 14,
+    letterSpacing: 0.3,
+  },
+  inviteClaimError: {
+    color: '#dc2626',
+    marginTop: 8,
+    fontSize: 13,
+    textAlign: 'center',
+  },
+  inviteClaimSuccess: {
+    color: '#059669',
+    marginTop: 8,
+    fontSize: 13,
+    textAlign: 'center',
   },
   payrollCard: {
     flexDirection: 'row',

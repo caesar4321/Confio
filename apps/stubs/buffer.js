@@ -1,6 +1,13 @@
 /**
  * Buffer polyfill wrapper for React Native
+ * NOTE: Metro now aliases 'buffer' directly to the package. This stub remains
+ * as a safety net for any direct imports of this file.
  */
 
-// Simple re-export of the buffer package
-module.exports = require('../../node_modules/buffer/index.js');
+// Prefer an existing global Buffer
+if (global.Buffer) {
+  module.exports = { Buffer: global.Buffer };
+} else {
+  // Fallback to the actual buffer package (resolved by Metro alias)
+  module.exports = require('buffer/');
+}
