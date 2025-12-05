@@ -124,7 +124,11 @@ export const BottomTabNavigator = () => {
   }, [userCountry]);
 
   const isP2PEnabled = useMemo(() => {
-    return Platform.OS === 'android' && normalizedCountryIso === 'VE';
+    if (normalizedCountryIso !== 'VE') return false;
+    if (Platform.OS === 'android') return true;
+    // Allow on iOS only for debug builds
+    if (Platform.OS === 'ios' && __DEV__) return true;
+    return false;
   }, [normalizedCountryIso]);
 
   const ProfileHeader = useCallback(() => (
