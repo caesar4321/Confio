@@ -364,10 +364,24 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
 
         // If credentials are gone but we're still marked as authenticated, log out
         if (!credentials && isAuthenticated) {
-          console.log('[AuthContext] Credentials cleared externally, logging out...');
+          console.log('[AuthContext] Credentials cleared externally (token invalidated), logging out...');
           setIsAuthenticated(false);
           setProfileData(null);
-          navigateToScreen('Auth');
+
+          // Navigate directly to Login screen (not phone verification)
+          if (isNavigationReady && navigationRef.current) {
+            navigationRef.current.reset({
+              index: 0,
+              routes: [
+                {
+                  name: 'Auth',
+                  params: {
+                    screen: 'Login',
+                  },
+                },
+              ],
+            });
+          }
         }
       } catch (error) {
         console.error('[AuthContext] Error checking credentials:', error);
