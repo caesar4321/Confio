@@ -7,6 +7,38 @@ from django.contrib.auth import get_user_model
 
 logger = logging.getLogger(__name__)
 
+def jwt_decode_handler_with_version_check(token, context=None):
+    """Custom JWT decode handler that validates token version"""
+    # First decode the token normally
+    payload = jwt_decode(token)
+
+    # Verify the auth_token_version
+    user_id = payload.get('user_id')
+    token_version = payload.get('auth_token_version')
+
+    if not user_id:
+        logger.error("No user_id in token payload")
+        raise PermissionDenied('Invalid token payload: missing user_id')
+
+    if token_version is None:
+        logger.error("No auth_token_version in token payload")
+        raise PermissionDenied('Invalid token payload: missing auth_token_version')
+
+    User = get_user_model()
+    try:
+        user = User.objects.get(id=user_id)
+        logger.info(f"Token decode - User: id={user.id}, token_version={token_version}, db_version={user.auth_token_version}")
+    except User.DoesNotExist:
+        logger.error(f"User not found: id={user_id}")
+        raise PermissionDenied('User not found')
+
+    if user.auth_token_version != token_version:
+        logger.error(f"Token version mismatch: token={token_version}, user={user.auth_token_version}")
+        raise PermissionDenied('Token has been invalidated')
+
+    logger.info("Token version verification successful")
+    return payload
+
 def jwt_payload_handler(*args, **kwargs):
     """Add auth_token_version and account context to the JWT payload
     
