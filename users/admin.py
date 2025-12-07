@@ -14,7 +14,7 @@ from .models_employee import BusinessEmployee, EmployeeInvitation
 class UserAdmin(admin.ModelAdmin):
     list_display = ('username', 'email', 'firebase_uid', 'phone_display', 'phone_key', 'verification_status_display', 'accounts_count', 'employment_status', 'soft_delete_status', 'is_staff', 'created_at')
     list_filter = ('is_staff', 'is_superuser', 'phone_country', 'created_at', 'deleted_at')
-    search_fields = ('username', 'email', 'firebase_uid', 'first_name', 'last_name')
+    search_fields = ('username', 'email', 'firebase_uid', 'first_name', 'last_name', 'phone_number', 'phone_key')
     readonly_fields = ('firebase_uid', 'auth_token_version', 'created_at', 'updated_at')
     actions = ('soft_delete_selected',)
     
