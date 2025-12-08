@@ -497,14 +497,16 @@
 
         <div class="metric-card">
             <div class="metric-label">Available for Withdrawal</div>
-            <div class="metric-value" style="color: #16a34a;">{{ fraud_stats.available_total|default:"0"|floatformat:2}} CONFIO</div>
+            <div class="metric-value" style="color: #16a34a;">{{ fraud_stats.available_total|default:"0"|floatformat:2}}
+                CONFIO</div>
             <div class="metric-change">Withdrawn to date: {{ fraud_stats.total_withdrawn|default:"0"|floatformat:2 }}
                 CONFIO</div>
         </div>
 
         <div class="metric-card">
             <div class="metric-label">Withdrawal Velocity</div>
-            <div class="metric-value" style="color: #2563eb;">{{ fraud_stats.daily_withdrawn|default:"0"|floatformat:2}} CONFIO</div>
+            <div class="metric-value" style="color: #2563eb;">{{ fraud_stats.daily_withdrawn|default:"0"|floatformat:2}}
+                CONFIO</div>
             <div class="metric-change">Last 7 days: {{ fraud_stats.weekly_withdrawn|default:"0"|floatformat:2 }} CONFIO
             </div>
         </div>
@@ -794,7 +796,8 @@
             <tbody>
                 {% for dispute in ongoing_disputes %}
                 <tr>
-                    <td><a href="{% url 'confio_admin:p2p_exchange_p2pdispute_change' dispute.id %}">#{{ dispute.id}}</a></td>
+                    <td><a href="{% url 'confio_admin:p2p_exchange_p2pdispute_change' dispute.id %}">#{{
+                            dispute.id}}</a></td>
                     <td><a href="{% url 'confio_admin:p2p_exchange_p2ptrade_change' dispute.trade.id %}">Trade #{{
                             dispute.trade.id }}</a></td>
                     <td>
@@ -808,7 +811,8 @@
                             {{ dispute.get_status_display }}
                         </span>
                     </td>
-                    <td>{% if dispute.priority == 3 %}🔴 High{% elif dispute.priority == 2 %}🟡 Medium{% else %}🟢 Low{% endif %}</td>
+                    <td>{% if dispute.priority == 3 %}🔴 High{% elif dispute.priority == 2 %}🟡 Medium{% else %}🟢 Low{%
+                        endif %}</td>
                     <td>{{ dispute.evidence_count }}</td>
                     <td>{{ dispute.opened_at|timesince }} ago</td>
                 </tr>
@@ -819,7 +823,8 @@
     {% endif %}
 
     <!-- New ID Verification Submissions -->
-    <h2 class="section-title">New ID Verifications{% if pending_verifications_count %} ({{ pending_verifications_count}} pending){% endif %}</h2>
+    <h2 class="section-title">New ID Verifications{% if pending_verifications_count %} ({{ pending_verifications_count}}
+        pending){% endif %}</h2>
     <div class="data-table">
         <table>
             <thead>
@@ -857,7 +862,8 @@
                     </td>
                     <td>{{ v.obj.created_at|timesince }} ago</td>
                     <td>{% if v.obj.id %}<a class="action-button secondary"
-                            href="/admin/security/identityverification/{{ v.obj.id }}/change/">Review</a>{% else %}-{% endif %}</td>
+                            href="/admin/security/identityverification/{{ v.obj.id }}/change/">Review</a>{% else %}-{%
+                        endif %}</td>
                 </tr>
                 {% endfor %}
                 {% else %}
