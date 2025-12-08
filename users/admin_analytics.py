@@ -123,9 +123,9 @@ class DailyMetricsAdmin(admin.ModelAdmin):
             color = '#EF4444'  # Red - needs improvement
         
         return format_html(
-            '<span style="color: {}; font-weight: bold;">{:.1%}</span>',
+            '<span style="color: {}; font-weight: bold;">{}</span>',
             color,
-            ratio
+            f"{ratio:.1%}"
         )
     engagement_ratio.short_description = 'DAU/MAU'
     engagement_ratio.admin_order_field = 'dau_mau_ratio'
@@ -308,8 +308,8 @@ class CountryMetricsAdmin(admin.ModelAdmin):
             color = '#EF4444'
         
         return format_html(
-            '<span style="color: {};">{:.1%}</span>',
+            '<span style="color: {};">{}</span>',
             color,
-            ratio
+            f"{ratio:.1%}"
         )
     engagement_ratio.short_description = 'DAU/MAU'
