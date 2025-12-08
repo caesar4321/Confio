@@ -94,6 +94,13 @@ buck-out/
 *.swo
 *~
 
+# Build and debug output files
+build_artifacts/
+debug_out.txt
+deploy_out.txt
+*.teal
+application.json
+
 # IDE and editor files
 .idea/
 .vscode/

@@ -540,12 +540,12 @@ def sync_referral_reward_for_event(user, event_ctx: EventContext) -> Optional[Us
             ref_event, _ = ReferralRewardEvent.objects.get_or_create(
                 user=referral.referrer_user,
                 trigger="referral_pending",
+                referral=referral,
                 defaults={
                     "actor_role": "referrer",
                     "amount": Decimal("0"),
                     "transaction_reference": event.transaction_reference,
                     "occurred_at": event.occurred_at,
-                    "referral": referral,
                 },
             )
             metadata = ref_event.metadata or {}

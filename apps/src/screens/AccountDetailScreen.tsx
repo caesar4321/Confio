@@ -2039,15 +2039,15 @@ export const AccountDetailScreen = () => {
             {route.params.accountType === 'confio' && isPresaleActive && (
               <View style={styles.confioPresaleSection}>
                 <View style={styles.sectionHeaderContainer}>
-                  <Text style={styles.sectionTitle}>🚀 Preventa Exclusiva</Text>
+                  <Text style={styles.sectionTitle}>💎 Sobre la Moneda $CONFIO</Text>
                 </View>
 
                 <View style={styles.confioPresaleCard}>
                   <View style={styles.confioPresaleHeader}>
                     <View style={styles.confioPresaleInfo}>
-                      <Text style={styles.confioPresaleTitle}>Únete a la Preventa de $CONFIO</Text>
+                      <Text style={styles.confioPresaleTitle}>Utilidad, gobernanza y cómo obtenerla</Text>
                       <Text style={styles.confioPresaleDescription}>
-                        Acceso anticipado a las monedas $CONFIO
+                        Descubre el valor de la moneda en el ecosistema
                       </Text>
                     </View>
                   </View>
@@ -2056,7 +2056,7 @@ export const AccountDetailScreen = () => {
                     style={styles.confioPresaleButton}
                     onPress={() => navigation.navigate('ConfioPresale')}
                   >
-                    <Icon name="star" size={16} color="#fff" style={styles.actionIcon} />
+                    <Icon name="info" size={16} color="#fff" style={styles.actionIcon} />
                     <View style={styles.actionTextContainer}>
                       <Text style={[styles.confioPresaleButtonText, { color: '#ffffff' }]}>
                         Ver Detalles

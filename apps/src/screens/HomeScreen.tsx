@@ -1244,11 +1244,11 @@ export const HomeScreen = () => {
             <View style={styles.presaleBannerContent}>
               <View style={styles.presaleBannerLeft}>
                 <View style={styles.presaleBadge}>
-                  <Text style={styles.presaleBadgeText}>🚀 PREVENTA</Text>
+                  <Text style={styles.presaleBadgeText}>💎 INFORMACIÓN</Text>
                 </View>
-                <Text style={styles.presaleBannerTitle}>Únete a la Preventa de $CONFIO</Text>
+                <Text style={styles.presaleBannerTitle}>¿Qué es la Moneda $CONFIO?</Text>
                 <Text style={styles.presaleBannerSubtitle}>
-                  Sé de los primeros en obtener monedas $CONFIO antes del lanzamiento público
+                  Información sobre su papel en el ecosistema de Confío
                 </Text>
                 <TouchableOpacity
                   onPress={() => navigation.navigate('ConfioPresale')}

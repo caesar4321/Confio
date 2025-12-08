@@ -910,11 +910,11 @@ export const NotificationScreen = () => {
           >
             <View style={styles.presaleBannerLeft}>
               <View style={styles.presaleBadge}>
-                <Text style={styles.presaleBadgeText}>🚀 PREVENTA</Text>
+                <Text style={styles.presaleBadgeText}>📢 NOVEDADES</Text>
               </View>
-              <Text style={styles.presaleBannerTitle}>Preventa Exclusiva de $CONFIO</Text>
+              <Text style={styles.presaleBannerTitle}>Actualizaciones de la Moneda $CONFIO</Text>
               <Text style={styles.presaleBannerSubtitle}>
-                Únete ahora y obtén acceso anticipado a las monedas $CONFIO
+                Información disponible cuando lo necesites
               </Text>
             </View>
             <View style={styles.presaleBannerRight}>
