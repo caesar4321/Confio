@@ -69,8 +69,8 @@ class DailyMetricsAdmin(admin.ModelAdmin):
     def dau_display(self, obj):
         """Display DAU with formatting"""
         return format_html(
-            '<strong style="font-size: 1.1em; color: #3B82F6;">{:,}</strong>',
-            obj.dau
+            '<strong style="font-size: 1.1em; color: #3B82F6;">{}</strong>',
+            f"{obj.dau:,}"
         )
     dau_display.short_description = 'DAU'
     dau_display.admin_order_field = 'dau'
@@ -78,8 +78,8 @@ class DailyMetricsAdmin(admin.ModelAdmin):
     def wau_display(self, obj):
         """Display WAU with formatting"""
         return format_html(
-            '<strong style="font-size: 1.1em; color: #8B5CF6;">{:,}</strong>',
-            obj.wau
+            '<strong style="font-size: 1.1em; color: #8B5CF6;">{}</strong>',
+            f"{obj.wau:,}"
         )
     wau_display.short_description = 'WAU'
     wau_display.admin_order_field = 'wau'
@@ -87,8 +87,8 @@ class DailyMetricsAdmin(admin.ModelAdmin):
     def mau_display(self, obj):
         """Display MAU with formatting"""
         return format_html(
-            '<strong style="font-size: 1.1em; color: #10B981;">{:,}</strong>',
-            obj.mau
+            '<strong style="font-size: 1.1em; color: #10B981;">{}</strong>',
+            f"{obj.mau:,}"
         )
     mau_display.short_description = 'MAU'
     mau_display.admin_order_field = 'mau'
@@ -103,8 +103,8 @@ class DailyMetricsAdmin(admin.ModelAdmin):
         """Display new users with badge"""
         if obj.new_users_today > 0:
             return format_html(
-                '<span style="background-color: #10B981; color: white; padding: 2px 6px; border-radius: 4px;">+{:,}</span>',
-                obj.new_users_today
+                '<span style="background-color: #10B981; color: white; padding: 2px 6px; border-radius: 4px;">+{}</span>',
+                f"{obj.new_users_today:,}"
             )
         return '0'
     new_users_display.short_description = 'New Users'
@@ -273,8 +273,8 @@ class CountryMetricsAdmin(admin.ModelAdmin):
     def mau_display(self, obj):
         """Display MAU with formatting"""
         return format_html(
-            '<strong style="color: #10B981;">{:,}</strong>',
-            obj.mau
+            '<strong style="color: #10B981;">{}</strong>',
+            f"{obj.mau:,}"
         )
     mau_display.short_description = 'MAU'
     mau_display.admin_order_field = 'mau'
@@ -289,8 +289,8 @@ class CountryMetricsAdmin(admin.ModelAdmin):
         """Display new users"""
         if obj.new_users_today > 0:
             return format_html(
-                '<span style="color: #10B981;">+{:,}</span>',
-                obj.new_users_today
+                '<span style="color: #10B981;">+{}</span>',
+                f"{obj.new_users_today:,}"
             )
         return '0'
     new_users_display.short_description = 'New'
