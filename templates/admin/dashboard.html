@@ -12,71 +12,71 @@
         max-width: 1400px;
         margin: 0 auto;
     }
-    
+
     .metrics-grid {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
         gap: 20px;
         margin-bottom: 30px;
     }
-    
+
     .metric-card {
         background: white;
         border-radius: 12px;
         padding: 20px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
         border: 1px solid #e5e7eb;
         transition: transform 0.2s;
     }
-    
+
     .metric-card:hover {
         transform: translateY(-2px);
-        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
     }
-    
+
     .metric-label {
         color: #6b7280;
         font-size: 14px;
         font-weight: 500;
         margin-bottom: 8px;
     }
-    
+
     .metric-value {
         font-size: 32px;
         font-weight: 700;
         color: #1f2937;
         margin-bottom: 4px;
     }
-    
+
     .metric-change {
         font-size: 14px;
         color: #10b981;
     }
-    
+
     .metric-change.negative {
         color: #ef4444;
     }
-    
+
     .section-title {
         font-size: 24px;
         font-weight: 700;
         color: #1f2937;
         margin: 30px 0 20px;
     }
-    
+
     .data-table {
         background: white;
         border-radius: 12px;
         overflow: hidden;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
         margin-bottom: 30px;
     }
-    
+
     .data-table table {
         width: 100%;
         border-collapse: collapse;
     }
-    
+
     .data-table th {
         background: #f9fafb;
         padding: 12px 16px;
@@ -86,16 +86,16 @@
         font-size: 14px;
         border-bottom: 1px solid #e5e7eb;
     }
-    
+
     .data-table td {
         padding: 12px 16px;
         border-bottom: 1px solid #f3f4f6;
     }
-    
+
     .data-table tr:last-child td {
         border-bottom: none;
     }
-    
+
     .status-badge {
         display: inline-block;
         padding: 4px 12px;
@@ -103,33 +103,33 @@
         font-size: 12px;
         font-weight: 600;
     }
-    
+
     .status-badge.active {
         background: #d1fae5;
         color: #065f46;
     }
-    
+
     .status-badge.pending {
         background: #fef3c7;
         color: #92400e;
     }
-    
+
     .status-badge.completed {
         background: #dbeafe;
         color: #1e40af;
     }
-    
+
     .status-badge.disputed {
         background: #fee2e2;
         color: #991b1b;
     }
-    
+
     .quick-actions {
         display: flex;
         gap: 16px;
         margin-bottom: 30px;
     }
-    
+
     .action-button {
         background: #8b5cf6;
         color: white !important;
@@ -140,29 +140,29 @@
         transition: background 0.2s;
         display: inline-block;
     }
-    
+
     .action-button:hover {
         background: #7c3aed;
         color: white !important;
         text-decoration: none;
     }
-    
+
     .action-button.secondary {
         background: #a78bfa;
         color: white !important;
         border: 1px solid #9333ea;
     }
-    
+
     .action-button.secondary:hover {
         background: #9333ea;
         color: white !important;
         text-decoration: none;
     }
-    
+
     .metric-progress {
         margin-top: 8px;
     }
-    
+
     .progress-bar {
         width: 100%;
         height: 8px;
@@ -170,13 +170,13 @@
         border-radius: 4px;
         overflow: hidden;
     }
-    
+
     .progress-fill {
         height: 100%;
         background: #8b5cf6;
         transition: width 0.3s ease;
     }
-    
+
     .alert {
         padding: 16px;
         border-radius: 8px;
@@ -185,30 +185,30 @@
         align-items: center;
         gap: 8px;
     }
-    
+
     .alert a {
         color: inherit;
         text-decoration: underline;
     }
-    
+
     .chart-container {
         background: white;
         border-radius: 12px;
         padding: 20px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
         margin-bottom: 30px;
     }
-    
+
     .country-flag {
         font-size: 20px;
         margin-right: 8px;
     }
-    
+
     .amount-display {
         font-weight: 600;
         color: #1f2937;
     }
-    
+
     .alert-box {
         background: #fef3c7;
         border: 1px solid #fbbf24;
@@ -219,12 +219,12 @@
         align-items: center;
         gap: 12px;
     }
-    
+
     .alert-box.critical {
         background: #fee2e2;
         border-color: #f87171;
     }
-    
+
     .alert-icon {
         font-size: 24px;
     }
@@ -234,7 +234,7 @@
 {% block content %}
 <div class="dashboard-container">
     <h1>Dashboard Overview</h1>
-    
+
     <!-- Alert boxes for urgent matters -->
     {% if escalated_disputes > 0 %}
     <div class="alert-box critical">
@@ -245,29 +245,37 @@
         </div>
     </div>
     {% endif %}
-    
+
     {% if open_disputes > 5 %}
     <div class="alert-box">
         <span class="alert-icon">⚠️</span>
         <div>
             <strong>{{ open_disputes }} Open Disputes</strong> are pending review.
-            <a href="{% url 'confio_admin:p2p_exchange_p2pdispute_changelist' %}?status__in=OPEN,UNDER_REVIEW">Review disputes</a>
+            <a href="{% url 'confio_admin:p2p_exchange_p2pdispute_changelist' %}?status__in=OPEN,UNDER_REVIEW">Review
+                disputes</a>
         </div>
     </div>
     {% endif %}
-    
+
     <!-- Quick Actions -->
     <div class="quick-actions">
         <a href="{% url 'confio_admin:p2p_analytics' %}" class="action-button">P2P Analytics</a>
         <a href="{% url 'confio_admin:user_analytics' %}" class="action-button secondary">User Analytics</a>
-        <a href="{% url 'confio_admin:transaction_analytics' %}" class="action-button secondary">Transaction Analytics</a>
-        <a href="{% url 'confio_admin:blockchain_analytics' %}" class="action-button secondary">🔗 Blockchain Analytics</a>
+        <a href="/admin/users/dailymetrics/" class="action-button secondary">📈 DAU/WAU/MAU</a>
+        <a href="/admin/users/countrymetrics/" class="action-button secondary">🌍 Country Metrics</a>
+        <a href="{% url 'confio_admin:transaction_analytics' %}" class="action-button secondary">Transaction
+            Analytics</a>
+        <a href="{% url 'confio_admin:blockchain_analytics' %}" class="action-button secondary">🔗 Blockchain
+            Analytics</a>
         <a href="{% url 'confio_admin:achievement_dashboard' %}" class="action-button">🏆 Achievement Dashboard</a>
-        <a href="{% url 'confio_admin:notifications_notification_broadcast' %}" class="action-button">📡 Send Broadcast</a>
-        <a href="{% url 'confio_admin:notifications_notification_stats' %}" class="action-button secondary">📊 Push Notification Stats</a>
-        <a href="{% url 'confio_admin:p2p_exchange_p2poffer_add' %}" class="action-button secondary">Create Test Offer</a>
+        <a href="{% url 'confio_admin:notifications_notification_broadcast' %}" class="action-button">📡 Send
+            Broadcast</a>
+        <a href="{% url 'confio_admin:notifications_notification_stats' %}" class="action-button secondary">📊 Push
+            Notification Stats</a>
+        <a href="{% url 'confio_admin:p2p_exchange_p2poffer_add' %}" class="action-button secondary">Create Test
+            Offer</a>
     </div>
-    
+
     <!-- Key Metrics -->
     <div class="metrics-grid">
         <div class="metric-card">
@@ -275,26 +283,26 @@
             <div class="metric-value">{{ total_users|intcomma }}</div>
             <div class="metric-change">+{{ new_users_last_7_days }} last 7 days</div>
         </div>
-        
+
         <div class="metric-card">
             <div class="metric-label">Active (24h)</div>
             <div class="metric-value">{{ active_users_today|intcomma }}</div>
             <div class="metric-change">Last 24 hours</div>
         </div>
-        
+
         <div class="metric-card">
             <div class="metric-label">Verified Users</div>
             <div class="metric-value">{{ verified_users|intcomma }}</div>
             <div class="metric-change">Verified accounts</div>
         </div>
-        
+
         <div class="metric-card">
             <div class="metric-label">Active P2P Offers</div>
             <div class="metric-value">{{ active_offers|intcomma }}</div>
             <div class="metric-change">{{ trades_today }} trades today</div>
         </div>
     </div>
-    
+
     {% if referral_stats %}
     <div class="metrics-grid" style="margin-top: 20px;">
         <div class="metric-card">
@@ -322,22 +330,26 @@
         Referral metrics reflect balances earned via invites only. cUSD, USDC, and presale funds remain unrestricted.
     </p>
     {% endif %}
-    
+
     <!-- Presale Status -->
     <h2 class="section-title">🚀 CONFIO Token Presale</h2>
     <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px;">
         <span style="font-weight: 600;">Global Presale Switch:</span>
         {% if presale_global_enabled %}
-        <span style="background: #10b981; color: white; padding: 4px 12px; border-radius: 6px; font-weight: 600;">✓ ENABLED</span>
+        <span style="background: #10b981; color: white; padding: 4px 12px; border-radius: 6px; font-weight: 600;">✓
+            ENABLED</span>
         {% else %}
-        <span style="background: #6b7280; color: white; padding: 4px 12px; border-radius: 6px; font-weight: 600;">○ DISABLED</span>
+        <span style="background: #6b7280; color: white; padding: 4px 12px; border-radius: 6px; font-weight: 600;">○
+            DISABLED</span>
         {% endif %}
-        <a href="/admin/presale/presalesettings/" style="margin-left: auto; color: #3b82f6; text-decoration: none; font-size: 14px;">⚙️ Settings</a>
+        <a href="/admin/presale/presalesettings/"
+            style="margin-left: auto; color: #3b82f6; text-decoration: none; font-size: 14px;">⚙️ Settings</a>
     </div>
 
     {% if presale_active %}
     <!-- Active Presale Phase -->
-    <h3 style="font-size: 20px; color: #1f2937; margin-bottom: 16px;">📊 Active Phase {{ presale_phase }}: {{ presale_name }}</h3>
+    <h3 style="font-size: 20px; color: #1f2937; margin-bottom: 16px;">📊 Active Phase {{ presale_phase }}: {{
+        presale_name }}</h3>
     <div class="metrics-grid">
         <div class="metric-card">
             <div class="metric-label">Total Raised</div>
@@ -368,10 +380,12 @@
         </div>
     </div>
     {% else %}
-    <div class="alert" style="background: #fef3c7; color: #92400e; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
+    <div class="alert"
+        style="background: #fef3c7; color: #92400e; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
         <strong>⚠️ No Active Presale</strong>
         {% if not presale_global_enabled %}
-        - Global switch is disabled. Enable it in <a href="/admin/presale/presalesettings/">Settings</a> and activate a phase.
+        - Global switch is disabled. Enable it in <a href="/admin/presale/presalesettings/">Settings</a> and activate a
+        phase.
         {% else %}
         - <a href="/admin/presale/presalephase/">Activate a presale phase</a>
         {% endif %}
@@ -385,11 +399,16 @@
         <table style="width: 100%; border-collapse: collapse;">
             <thead style="background: #f9fafb;">
                 <tr>
-                    <th style="padding: 12px; text-align: left; font-weight: 600; color: #6b7280; font-size: 13px;">Phase</th>
-                    <th style="padding: 12px; text-align: left; font-weight: 600; color: #6b7280; font-size: 13px;">Name</th>
-                    <th style="padding: 12px; text-align: left; font-weight: 600; color: #6b7280; font-size: 13px;">Status</th>
-                    <th style="padding: 12px; text-align: right; font-weight: 600; color: #6b7280; font-size: 13px;">Raised</th>
-                    <th style="padding: 12px; text-align: right; font-weight: 600; color: #6b7280; font-size: 13px;">Participants</th>
+                    <th style="padding: 12px; text-align: left; font-weight: 600; color: #6b7280; font-size: 13px;">
+                        Phase</th>
+                    <th style="padding: 12px; text-align: left; font-weight: 600; color: #6b7280; font-size: 13px;">Name
+                    </th>
+                    <th style="padding: 12px; text-align: left; font-weight: 600; color: #6b7280; font-size: 13px;">
+                        Status</th>
+                    <th style="padding: 12px; text-align: right; font-weight: 600; color: #6b7280; font-size: 13px;">
+                        Raised</th>
+                    <th style="padding: 12px; text-align: right; font-weight: 600; color: #6b7280; font-size: 13px;">
+                        Participants</th>
                 </tr>
             </thead>
             <tbody>
@@ -399,15 +418,21 @@
                     <td style="padding: 12px; font-weight: 500;">{{ phase.name }}</td>
                     <td style="padding: 12px;">
                         {% if phase.status == 'active' %}
-                        <span style="background: #10b981; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">ACTIVE</span>
+                        <span
+                            style="background: #10b981; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">ACTIVE</span>
                         {% elif phase.status == 'completed' %}
-                        <span style="background: #3b82f6; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">COMPLETED</span>
+                        <span
+                            style="background: #3b82f6; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">COMPLETED</span>
                         {% elif phase.status == 'paused' %}
-                        <span style="background: #f59e0b; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">PAUSED</span>
+                        <span
+                            style="background: #f59e0b; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">PAUSED</span>
                         {% elif phase.status == 'upcoming' %}
-                        <span style="background: #8b5cf6; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">UPCOMING</span>
+                        <span
+                            style="background: #8b5cf6; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">UPCOMING</span>
                         {% else %}
-                        <span style="background: #6b7280; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">{{ phase.status|upper }}</span>
+                        <span
+                            style="background: #6b7280; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">{{
+                            phase.status|upper }}</span>
                         {% endif %}
                     </td>
                     <td style="padding: 12px; text-align: right;">${{ phase.total_raised|floatformat:2|intcomma }}</td>
@@ -460,7 +485,8 @@
     {% if fraud_stats %}
     <h2 class="section-title">🔍 $CONFIO Reward Security</h2>
     <p style="margin-bottom: 18px; color: #1f2937;">
-        Monitoring referral-earned $CONFIO balances and withdrawal limits. Presale and externally deposited tokens stay unrestricted.
+        Monitoring referral-earned $CONFIO balances and withdrawal limits. Presale and externally deposited tokens stay
+        unrestricted.
     </p>
     <div class="metrics-grid">
         <div class="metric-card">
@@ -468,56 +494,65 @@
             <div class="metric-value">{{ fraud_stats.earned_total|default:"0"|floatformat:2 }} CONFIO</div>
             <div class="metric-change">Lifetime referral earnings</div>
         </div>
-        
+
         <div class="metric-card">
             <div class="metric-label">Available for Withdrawal</div>
-            <div class="metric-value" style="color: #16a34a;">{{ fraud_stats.available_total|default:"0"|floatformat:2 }} CONFIO</div>
-            <div class="metric-change">Withdrawn to date: {{ fraud_stats.total_withdrawn|default:"0"|floatformat:2 }} CONFIO</div>
+            <div class="metric-value" style="color: #16a34a;">{{ fraud_stats.available_total|default:"0"|floatformat:2
+                }} CONFIO</div>
+            <div class="metric-change">Withdrawn to date: {{ fraud_stats.total_withdrawn|default:"0"|floatformat:2 }}
+                CONFIO</div>
         </div>
-        
+
         <div class="metric-card">
             <div class="metric-label">Withdrawal Velocity</div>
-            <div class="metric-value" style="color: #2563eb;">{{ fraud_stats.daily_withdrawn|default:"0"|floatformat:2 }} CONFIO</div>
-            <div class="metric-change">Last 7 days: {{ fraud_stats.weekly_withdrawn|default:"0"|floatformat:2 }} CONFIO</div>
+            <div class="metric-value" style="color: #2563eb;">{{ fraud_stats.daily_withdrawn|default:"0"|floatformat:2
+                }} CONFIO</div>
+            <div class="metric-change">Last 7 days: {{ fraud_stats.weekly_withdrawn|default:"0"|floatformat:2 }} CONFIO
+            </div>
         </div>
-        
+
         <div class="metric-card">
             <div class="metric-label">Reviews & High Value</div>
             <div class="metric-value" style="color: #dc2626;">{{ fraud_stats.pending_review|default:"0" }}</div>
             <div class="metric-change">High-value (&gt;500 CONFIO): {{ fraud_stats.high_value|default:"0" }}</div>
         </div>
-        
+
         <div class="metric-card">
             <div class="metric-label">Unique Referrers</div>
             <div class="metric-value">{{ fraud_stats.unique_users|default:"0"|intcomma }}</div>
             <div class="metric-change">With referral withdrawals</div>
         </div>
-        
+
         <div class="metric-card">
             <div class="metric-label">Device Watchlist</div>
-            <div class="metric-value" style="color: #f59e0b;">{{ fraud_stats.multi_user_devices|default:"0"|intcomma }}</div>
+            <div class="metric-value" style="color: #f59e0b;">{{ fraud_stats.multi_user_devices|default:"0"|intcomma }}
+            </div>
             <div class="metric-change">Devices with multiple referral accounts</div>
         </div>
     </div>
-    
+
     {% if fraud_stats.pending_review > 0 %}
     <div class="alert-box" style="margin-bottom: 20px;">
         <span class="alert-icon">⚠️</span>
         <div>
             <strong>Review queue:</strong>
-            {{ fraud_stats.pending_review }} withdrawal{{ fraud_stats.pending_review|pluralize }} awaiting manual verification.
+            {{ fraud_stats.pending_review }} withdrawal{{ fraud_stats.pending_review|pluralize }} awaiting manual
+            verification.
         </div>
     </div>
     {% endif %}
-    
+
     <!-- Reward Security Actions -->
     <div style="margin-bottom: 20px;">
-        <a href="{% url 'confio_admin:achievements_userachievement_fraud_dashboard' %}" class="action-button" style="margin-right: 10px;">🔍 Reward Security Dashboard</a>
-        <a href="{% url 'confio_admin:achievements_userachievement_changelist' %}?fraud_status=multi_device" class="action-button secondary" style="margin-right: 10px;">Device Flags</a>
-        <a href="{% url 'confio_admin:achievements_referralwithdrawallog_changelist' %}" class="action-button secondary">Withdrawal Log</a>
+        <a href="{% url 'confio_admin:achievements_userachievement_fraud_dashboard' %}" class="action-button"
+            style="margin-right: 10px;">🔍 Reward Security Dashboard</a>
+        <a href="{% url 'confio_admin:achievements_userachievement_changelist' %}?fraud_status=multi_device"
+            class="action-button secondary" style="margin-right: 10px;">Device Flags</a>
+        <a href="{% url 'confio_admin:achievements_referralwithdrawallog_changelist' %}"
+            class="action-button secondary">Withdrawal Log</a>
     </div>
     {% endif %}
-    
+
     <!-- P2P Trading Volume -->
     <h2 class="section-title">P2P Trading Volume (This Month)</h2>
     <div class="metrics-grid">
@@ -526,26 +561,26 @@
             <div class="metric-value">${{ monthly_cusd_volume|floatformat:0|intcomma }}</div>
             <div class="metric-change">{{ trades_this_month }} trades</div>
         </div>
-        
+
         <div class="metric-card">
             <div class="metric-label">CONFIO Volume</div>
             <div class="metric-value">{{ monthly_confio_volume|floatformat:0|intcomma }}</div>
             <div class="metric-change">CONFIO tokens</div>
         </div>
-        
+
         <div class="metric-card">
             <div class="metric-label">Send Transactions</div>
             <div class="metric-value">{{ send_transactions_today }}</div>
             <div class="metric-change">Today</div>
         </div>
-        
+
         <div class="metric-card">
             <div class="metric-label">Payment Transactions</div>
             <div class="metric-value">{{ payment_transactions_today }}</div>
             <div class="metric-change">Today</div>
         </div>
     </div>
-    
+
     <!-- Conversion Volume -->
     <h2 class="section-title">USDC ↔ cUSD Conversions</h2>
     <div class="metrics-grid">
@@ -554,7 +589,7 @@
             <div class="metric-value">${{ usdc_to_cusd_volume|floatformat:0|intcomma }}</div>
             <div class="metric-change">This month</div>
         </div>
-        
+
         <div class="metric-card">
             <div class="metric-label">Net USDC Inflow</div>
             <div class="metric-value {% if net_usdc_inflow < 0 %}negative{% endif %}">
@@ -562,38 +597,38 @@
             </div>
             <div class="metric-change">
                 {% if net_usdc_inflow >= 0 %}
-                    More USDC → cUSD
+                More USDC → cUSD
                 {% else %}
-                    More cUSD → USDC
+                More cUSD → USDC
                 {% endif %}
             </div>
         </div>
-        
+
         <div class="metric-card">
             <div class="metric-label">Circulating cUSD</div>
             <div class="metric-value">${{ circulating_cusd|floatformat:0|intcomma }}</div>
             <div class="metric-change">Total supply</div>
         </div>
-        
+
         <div class="metric-card">
             <div class="metric-label">Conversions Today</div>
             <div class="metric-value">{{ conversions_today|intcomma }}</div>
             <div class="metric-change">{{ conversions_last_7_days }} last 7 days</div>
         </div>
-        
+
         <div class="metric-card">
             <div class="metric-label">Notifications Today</div>
             <div class="metric-value">{{ notifications_sent_today|intcomma }}</div>
             <div class="metric-change">{{ push_notifications_today }} push sent</div>
         </div>
-        
+
         <div class="metric-card">
             <div class="metric-label">Active Devices</div>
             <div class="metric-value">{{ active_fcm_tokens|intcomma }}</div>
             <div class="metric-change">Ready for push</div>
         </div>
     </div>
-    
+
     <!-- Blockchain Integration -->
     <h2 class="section-title">Blockchain Integration</h2>
     <div class="metrics-grid">
@@ -602,20 +637,20 @@
             <div class="metric-value">{{ cached_balances|intcomma }}</div>
             <div class="metric-change">{{ balance_cache_health.stale_percentage|floatformat:1 }}% stale</div>
         </div>
-        
+
         <div class="metric-card">
             <div class="metric-label">Last Blockchain Sync</div>
             <div class="metric-value" style="font-size: 16px;">
                 {% if last_blockchain_sync %}
-                    {{ last_blockchain_sync|timesince }} ago
+                {{ last_blockchain_sync|timesince }} ago
                 {% else %}
-                    Never
+                Never
                 {% endif %}
             </div>
             <div class="metric-change">Balance reconciliation</div>
         </div>
     </div>
-    
+
     <!-- Top Countries -->
     <h2 class="section-title">Top P2P Countries</h2>
     <div class="data-table">
@@ -650,7 +685,7 @@
             </tbody>
         </table>
     </div>
-    
+
     <!-- Recent Trades -->
     <h2 class="section-title">Recent P2P Trades</h2>
     <div class="data-table">
@@ -674,7 +709,7 @@
                     </td>
                     <td>
                         <span class="amount-display">
-                            {{ trade.crypto_amount|floatformat:2 }} 
+                            {{ trade.crypto_amount|floatformat:2 }}
                             {% if trade.offer.token_type == 'cUSD' %}cUSD{% else %}CONFIO{% endif %}
                         </span>
                     </td>
@@ -682,7 +717,8 @@
                         {{ trade.buyer_display_name }} → {{ trade.seller_display_name }}
                     </td>
                     <td>
-                        <span class="status-badge {% if trade.status == 'COMPLETED' %}completed{% elif trade.status == 'DISPUTED' %}disputed{% else %}pending{% endif %}">
+                        <span
+                            class="status-badge {% if trade.status == 'COMPLETED' %}completed{% elif trade.status == 'DISPUTED' %}disputed{% else %}pending{% endif %}">
                             {{ trade.get_status_display }}
                         </span>
                     </td>
@@ -692,7 +728,7 @@
             </tbody>
         </table>
     </div>
-    
+
     <!-- Recent Disputes -->
     {% if recent_disputes %}
     <h2 class="section-title">Recent Disputes</h2>
@@ -723,7 +759,8 @@
                     </td>
                     <td>{{ dispute.reason|truncatewords:10 }}</td>
                     <td>
-                        <span class="status-badge {% if dispute.status == 'ESCALATED' %}disputed{% elif dispute.status == 'RESOLVED' %}completed{% else %}pending{% endif %}">
+                        <span
+                            class="status-badge {% if dispute.status == 'ESCALATED' %}disputed{% elif dispute.status == 'RESOLVED' %}completed{% else %}pending{% endif %}">
                             {{ dispute.get_status_display }}
                         </span>
                     </td>
@@ -759,19 +796,23 @@
             <tbody>
                 {% for dispute in ongoing_disputes %}
                 <tr>
-                    <td><a href="{% url 'confio_admin:p2p_exchange_p2pdispute_change' dispute.id %}">#{{ dispute.id }}</a></td>
-                    <td><a href="{% url 'confio_admin:p2p_exchange_p2ptrade_change' dispute.trade.id %}">Trade #{{ dispute.trade.id }}</a></td>
+                    <td><a href="{% url 'confio_admin:p2p_exchange_p2pdispute_change' dispute.id %}">#{{ dispute.id
+                            }}</a></td>
+                    <td><a href="{% url 'confio_admin:p2p_exchange_p2ptrade_change' dispute.trade.id %}">Trade #{{
+                            dispute.trade.id }}</a></td>
                     <td>
                         {% if dispute.initiator_business %}🏢 {{ dispute.initiator_business.name }}
                         {% elif dispute.initiator_user %}👤 {{ dispute.initiator_user.username }}
                         {% else %}-{% endif %}
                     </td>
                     <td>
-                        <span class="status-badge {% if dispute.status == 'ESCALATED' %}disputed{% elif dispute.status == 'RESOLVED' %}completed{% else %}pending{% endif %}">
+                        <span
+                            class="status-badge {% if dispute.status == 'ESCALATED' %}disputed{% elif dispute.status == 'RESOLVED' %}completed{% else %}pending{% endif %}">
                             {{ dispute.get_status_display }}
                         </span>
                     </td>
-                    <td>{% if dispute.priority == 3 %}🔴 High{% elif dispute.priority == 2 %}🟡 Medium{% else %}🟢 Low{% endif %}</td>
+                    <td>{% if dispute.priority == 3 %}🔴 High{% elif dispute.priority == 2 %}🟡 Medium{% else %}🟢 Low{%
+                        endif %}</td>
                     <td>{{ dispute.evidence_count }}</td>
                     <td>{{ dispute.opened_at|timesince }} ago</td>
                 </tr>
@@ -782,7 +823,8 @@
     {% endif %}
 
     <!-- New ID Verification Submissions -->
-    <h2 class="section-title">New ID Verifications{% if pending_verifications_count %} ({{ pending_verifications_count }} pending){% endif %}</h2>
+    <h2 class="section-title">New ID Verifications{% if pending_verifications_count %} ({{ pending_verifications_count
+        }} pending){% endif %}</h2>
     <div class="data-table">
         <table>
             <thead>
@@ -798,31 +840,36 @@
             </thead>
             <tbody>
                 {% if recent_verifications %}
-                    {% for v in recent_verifications %}
-                    <tr>
-                        <td>{% if v.obj.id %}<a href="/admin/security/identityverification/{{ v.obj.id }}/change/">#{{ v.obj.id }}</a>{% else %}-{% endif %}</td>
-                        <td><a href="{% url 'confio_admin:users_user_change' v.obj.user.id %}">{{ v.obj.user.username }}</a></td>
-                        <td>{% if v.context == 'business' %}Business{% else %}Personal{% endif %}</td>
-                        <td>{% if v.business %}<a href="{% url 'confio_admin:users_business_change' v.business.id %}">{{ v.business.name }}</a>{% else %}-{% endif %}</td>
-                        <td>
-                            {% if v.obj.status == 'pending' %}
-                                <span class="status-badge pending">Pending</span>
-                            {% elif v.obj.status == 'verified' %}
-                                <span class="status-badge completed">Verified</span>
-                            {% elif v.obj.status == 'rejected' %}
-                                <span class="status-badge disputed">Rejected</span>
-                            {% else %}
-                                <span class="status-badge">{{ v.obj.get_status_display }}</span>
-                            {% endif %}
-                        </td>
-                        <td>{{ v.obj.created_at|timesince }} ago</td>
-                        <td>{% if v.obj.id %}<a class="action-button secondary" href="/admin/security/identityverification/{{ v.obj.id }}/change/">Review</a>{% else %}-{% endif %}</td>
-                    </tr>
-                    {% endfor %}
+                {% for v in recent_verifications %}
+                <tr>
+                    <td>{% if v.obj.id %}<a href="/admin/security/identityverification/{{ v.obj.id }}/change/">#{{
+                            v.obj.id }}</a>{% else %}-{% endif %}</td>
+                    <td><a href="{% url 'confio_admin:users_user_change' v.obj.user.id %}">{{ v.obj.user.username }}</a>
+                    </td>
+                    <td>{% if v.context == 'business' %}Business{% else %}Personal{% endif %}</td>
+                    <td>{% if v.business %}<a href="{% url 'confio_admin:users_business_change' v.business.id %}">{{
+                            v.business.name }}</a>{% else %}-{% endif %}</td>
+                    <td>
+                        {% if v.obj.status == 'pending' %}
+                        <span class="status-badge pending">Pending</span>
+                        {% elif v.obj.status == 'verified' %}
+                        <span class="status-badge completed">Verified</span>
+                        {% elif v.obj.status == 'rejected' %}
+                        <span class="status-badge disputed">Rejected</span>
+                        {% else %}
+                        <span class="status-badge">{{ v.obj.get_status_display }}</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ v.obj.created_at|timesince }} ago</td>
+                    <td>{% if v.obj.id %}<a class="action-button secondary"
+                            href="/admin/security/identityverification/{{ v.obj.id }}/change/">Review</a>{% else %}-{%
+                        endif %}</td>
+                </tr>
+                {% endfor %}
                 {% else %}
-                    <tr>
-                        <td colspan="5">No recent ID verifications.</td>
-                    </tr>
+                <tr>
+                    <td colspan="5">No recent ID verifications.</td>
+                </tr>
                 {% endif %}
             </tbody>
         </table>
