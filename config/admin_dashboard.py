@@ -67,80 +67,10 @@ class ConfioAdminSite(admin.AdminSite):
         month_start = today_start.replace(day=1)
         
         # User metrics
+        # DAU/MAU now uses centralized last_activity_at field (single source of truth)
+        # See users/activity_tracking.py for activity tracking implementation
         context['total_users'] = User.objects.count()
-        # Active users (24h): union of users with any activity in the last 24 hours
-        active_user_ids = set()
-
-        # Account activity (app usage)
-        active_user_ids.update(
-            Account.objects
-            .filter(last_login_at__gte=last_24h)
-            .values_list('user_id', flat=True)
-        )
-
-        # Auth logins
-        active_user_ids.update(
-            User.objects
-            .filter(last_login__gte=last_24h)
-            .values_list('id', flat=True)
-        )
-
-        # P2P Trades (created in last 24h)
-        q_trades = P2PTrade.objects.filter(created_at__gte=last_24h)
-        active_user_ids.update(q_trades.filter(buyer_user__isnull=False).values_list('buyer_user_id', flat=True))
-        active_user_ids.update(q_trades.filter(seller_user__isnull=False).values_list('seller_user_id', flat=True))
-        # Legacy fields
-        active_user_ids.update(q_trades.filter(buyer__isnull=False).values_list('buyer_id', flat=True))
-        active_user_ids.update(q_trades.filter(seller__isnull=False).values_list('seller_id', flat=True))
-
-        # P2P Messages (chat activity)
-        from p2p_exchange.models import P2PMessage, P2PTradeConfirmation
-        active_user_ids.update(
-            P2PMessage.objects
-            .filter(created_at__gte=last_24h, sender_user__isnull=False)
-            .values_list('sender_user_id', flat=True)
-        )
-        # Legacy sender
-        active_user_ids.update(
-            P2PMessage.objects
-            .filter(created_at__gte=last_24h, sender__isnull=False)
-            .values_list('sender_id', flat=True)
-        )
-
-        # P2P Confirmations (actions on trades)
-        active_user_ids.update(
-            P2PTradeConfirmation.objects
-            .filter(created_at__gte=last_24h, confirmer_user__isnull=False)
-            .values_list('confirmer_user_id', flat=True)
-        )
-
-        # Direct Sends
-        q_sends = SendTransaction.objects.filter(created_at__gte=last_24h)
-        active_user_ids.update(q_sends.filter(sender_user__isnull=False).values_list('sender_user_id', flat=True))
-        active_user_ids.update(q_sends.filter(recipient_user__isnull=False).values_list('recipient_user_id', flat=True))
-
-        # Merchant Payments
-        q_payments = PaymentTransaction.objects.filter(created_at__gte=last_24h)
-        active_user_ids.update(q_payments.values_list('payer_user_id', flat=True))
-        active_user_ids.update(q_payments.filter(merchant_account_user__isnull=False).values_list('merchant_account_user_id', flat=True))
-
-        # Conversions
-        from conversion.models import Conversion
-        active_user_ids.update(
-            Conversion.objects
-            .filter(created_at__gte=last_24h, actor_user__isnull=False)
-            .values_list('actor_user_id', flat=True)
-        )
-
-        # Achievements earned today
-        active_user_ids.update(
-            UserAchievement.objects
-            .filter(earned_at__gte=last_24h)
-            .values_list('user_id', flat=True)
-        )
-
-        # Remove Nones and set the metric
-        context['active_users_today'] = len({uid for uid in active_user_ids if uid})
+        context['active_users_today'] = User.objects.filter(last_activity_at__gte=last_24h).count()
         context['new_users_last_7_days'] = User.objects.filter(created_at__gte=last_7_start).count()
         context['verified_users'] = IdentityVerification.objects.filter(status='verified').count()
         
@@ -518,34 +448,25 @@ class ConfioAdminSite(admin.AdminSite):
         
         context['account_types'] = account_types
         
-        # User activity metrics
+        # User activity metrics (using centralized last_activity_at)
+        # All activity periods now use the same consistent method
         active_ranges = [
             ('Last 24h', 1),
             ('Last 7 days', 7),
             ('Last 30 days', 30),
             ('Last 90 days', 90),
         ]
-        
+
         activity_metrics = []
         for label, days in active_ranges:
             cutoff = timezone.now() - timedelta(days=days)
-            # Prefer single-field activity when available
-            try:
-                count = User.objects.filter(last_activity_at__gte=cutoff).count()
-            except Exception:
-                count = (
-                    Account.objects
-                    .filter(last_login_at__gte=cutoff)
-                    .values('user_id')
-                    .distinct()
-                    .count()
-                )
+            count = User.objects.filter(last_activity_at__gte=cutoff).count()
             activity_metrics.append({
                 'label': label,
                 'count': count,
                 'percentage': (count / context['users_total'] * 100) if context['users_total'] > 0 else 0
             })
-        
+
         context['activity_metrics'] = activity_metrics
         
         return render(request, 'admin/user_analytics.html', context)

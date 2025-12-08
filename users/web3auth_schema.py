@@ -407,17 +407,21 @@ class Web3AuthLoginMutation(graphene.Mutation):
             access_payload = jwt_payload_handler(user, context=None)
             access_token = jwt_encode(access_payload)
             
-            # Refresh token with default personal account context  
+            # Refresh token with default personal account context
             refresh_payload = refresh_token_payload_handler(
-                user, 
-                account_type='personal', 
-                account_index=0, 
+                user,
+                account_type='personal',
+                account_index=0,
                 business_id=None
             )
             refresh_token = jwt_encode(refresh_payload)
-            
+
+            # Track login activity for DAU/MAU
+            from users.activity_tracking import touch_last_activity
+            touch_last_activity(user)
+
             logger.info(f'Web3Auth user {"created" if created else "updated"} for {email} ({provider})')
-            
+
             return cls(
                 success=True,
                 access_token=access_token,
