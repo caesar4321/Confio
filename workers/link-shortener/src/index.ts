@@ -81,19 +81,38 @@ export default {
         const userAgent = request.headers.get('user-agent') || '';
         const platform = detectPlatform(userAgent);
 
+        let redirectUrl = `${env.LANDING_PAGE_URL}?invite=${referralCode}`;
         if (platform === 'android') {
-          // Direct Play Store referrer
-          return Response.redirect(`${env.PLAY_STORE_URL}&referrer=${referralCode}`, 302);
-        } else {
-          // iOS / Desktop -> App Store (App will check API via IP)
-          // We should probably check if it is iOS specifically, otherwise fallback to landing
-          if (platform === 'ios') {
-            return Response.redirect(env.APP_STORE_URL, 302);
-          } else {
-            // Desktop fallback
-            return Response.redirect(`${env.LANDING_PAGE_URL}?invite=${referralCode}`, 302);
-          }
+          redirectUrl = `${env.PLAY_STORE_URL}&referrer=${referralCode}`;
+        } else if (platform === 'ios') {
+          redirectUrl = env.APP_STORE_URL;
         }
+
+        const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Regalo de Confío</title>
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Te envié un regalo de US$5 en $CONFIO 🎁">
+  <meta property="og:description" content="Estoy usando Confío para ahorrar en dólares sin restricciones. Reclama tu regalo aquí.">
+  <meta property="og:image" content="https://confio.lat/WhatsApp_og_card.jpeg">
+  <meta property="og:url" content="${url.href}">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script>
+    window.location.href = "${redirectUrl}";
+  </script>
+</head>
+<body>
+  <p>Redirigiendo a Confío...</p>
+  <a href="${redirectUrl}">Click aquí si no eres redirigido</a>
+</body>
+</html>`;
+
+        return new Response(html, {
+          headers: { 'Content-Type': 'text/html;charset=UTF-8' }
+        });
       }
     }
 

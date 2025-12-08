@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, Linking, Image, Share, Alert, Clipboard, AppState, AppStateStatus } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
+import WhatsAppLogo from '../assets/svg/WhatsApp.svg';
 import { useAuth } from '../contexts/AuthContext';
 import { useAccount } from '../contexts/AccountContext';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -10,6 +11,8 @@ import { getCountryByIso } from '../utils/countries';
 import { usePushNotificationPrompt } from '../hooks/usePushNotificationPrompt';
 import { PushNotificationModal } from '../components/PushNotificationModal';
 import { ReferralInputModal } from '../components/ReferralInputModal';
+import { useQuery } from '@apollo/client';
+import { GET_MY_REFERRALS } from '../apollo/queries';
 import { biometricAuthService } from '../services/biometricAuthService';
 
 // Utility function to format phone number with country code
@@ -82,13 +85,16 @@ export const ProfileScreen = () => {
     const inviteLink = `https://confio.lat/invite/${cleanUsername}`;
 
     return [
-      'Únete a Confío y gana US$5 en $CONFIO conmigo.',
+      'Te envié un regalo de US$5 en $CONFIO 🎁',
       '',
-      `📲 Descarga la App aquí: ${inviteLink}`,
+      'Estoy usando Confío para ahorrar en dólares sin restricciones. Es como una bóveda digital personal.',
       '',
-      `Mi código de invitado es: ${cleanUsername}`,
+      `👇 Reclama tu regalo aquí:`,
+      inviteLink,
       '',
-      'Completa tu primera operación válida (recarga, depósito o P2P) y ambos recibiremos US$5 en $CONFIO.',
+      `*Código: ${cleanUsername}*`,
+      '',
+      '(El bono se desbloquea al cargar tus primeros 20 USDC)',
     ].join('\n');
   }, [userProfile?.username]);
 
@@ -336,6 +342,38 @@ export const ProfileScreen = () => {
 
   const displayInfo = getDisplayInfo();
 
+  const { data: referralData } = useQuery(GET_MY_REFERRALS, {
+    fetchPolicy: 'cache-and-network',
+  });
+
+  const referralStats = React.useMemo(() => {
+    if (!referralData?.myReferrals || !userProfile?.id) return { pending: 0, claimable: 0, isReferred: false };
+
+    const currentUserId = String(userProfile.id);
+    let pending = 0;
+    let claimable = 0;
+    let isReferred = false;
+
+    referralData.myReferrals.forEach((ref: any) => {
+      const isReferrer = String(ref.referrerUser?.id) === currentUserId;
+      const isReferee = String(ref.referredUser?.id) === currentUserId;
+
+      if (isReferee) isReferred = true;
+
+      const frameworkStatus = isReferrer ? ref.referrerRewardStatus : ref.refereeRewardStatus;
+      const amount = isReferrer ? (ref.rewardReferrerConfio || 0) : (ref.rewardRefereeConfio || 0);
+
+      // 'pending' or 'locked' count as pending. 'ready' counts as claimable.
+      if (frameworkStatus === 'pending' || frameworkStatus === 'locked') {
+        pending += amount;
+      } else if (frameworkStatus === 'ready') {
+        claimable += amount;
+      }
+    });
+
+    return { pending, claimable, isReferred };
+  }, [referralData, userProfile]);
+
   return (
     <>
       <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
@@ -375,93 +413,86 @@ export const ProfileScreen = () => {
           <View style={styles.referralCard}>
             <View style={styles.referralHeader}>
               <View style={styles.referralIconBadge}>
-                <Icon name="gift" size={20} color="#FFFFFF" />
+                <Icon name="lock" size={20} color="#FFFFFF" />
               </View>
               <View style={styles.referralHeaderText}>
-                <Text style={styles.referralTitle}>Invita y ganen US$5 en $CONFIO</Text>
+                <Text style={styles.referralTitle}>Gana US$5 en $CONFIO por cada amigo</Text>
                 <Text style={styles.referralSubtitle}>
-                  Cuando tu amigo completa su primera operación válida en Confío, ambos reciben el equivalente a US$5 en $CONFIO.
+                  Tú y tus amigos reciben US$5 en $CONFIO (bloqueados) cuando se registran con tu link. Se desbloquean cuando hacen su primera recarga de 20 USDC.
                 </Text>
               </View>
-            </View>
-
-            <View style={styles.referralUsername}>
-              <Text style={styles.referralUsernameLabel}>Tu usuario Confío</Text>
-              <Text style={styles.referralUsernameValue}>{username || 'Configura tu @usuario'}</Text>
-              {needsFriendlyUsername && (
-                <Text style={styles.referralUsernameHint}>
-                  Elige un usuario corto y fácil de recordar para que tus amigos lo escriban sin errores.
-                </Text>
-              )}
             </View>
 
             <View style={styles.referralActions}>
-              <TouchableOpacity style={styles.referralCopyButton} onPress={handleCopyUsername}>
-                <Icon name="copy" size={16} color="#047857" />
-                <Text style={styles.referralCopyText}>Copiar</Text>
-              </TouchableOpacity>
               <TouchableOpacity style={styles.referralShareButton} onPress={handleShareReferral}>
-                <Icon name="share-2" size={16} color="#FFFFFF" />
-                <Text style={styles.referralShareText}>Compartir por WhatsApp</Text>
+                <WhatsAppLogo width={20} height={20} style={{ marginRight: 8 }} />
+                <Text style={styles.referralShareText}>Regala US$5 en WhatsApp</Text>
               </TouchableOpacity>
             </View>
 
             <TouchableOpacity
-              style={styles.referralClaimButton}
+              style={[
+                styles.referralClaimButton,
+                // Change style if claimable
+                referralStats.claimable > 0 && { backgroundColor: '#ECFDF5', borderColor: '#10B981', borderLeftWidth: 4 }
+              ]}
               onPress={() => navigation.navigate('ReferralRewardClaim' as never)}
             >
-              <Icon name="unlock" size={16} color="#10b981" />
-              <Text style={styles.referralClaimText}>Ver mis recompensas en $CONFIO</Text>
-              <Icon name="chevron-right" size={16} color="#10b981" />
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                {referralStats.claimable > 0 ? (
+                  <Text style={{ marginRight: 8 }}>🟢</Text>
+                ) : referralStats.pending > 0 ? (
+                  <Text style={{ marginRight: 8 }}>🔴</Text>
+                ) : (
+                  <Icon name="unlock" size={16} color="#10b981" style={{ marginRight: 8 }} />
+                )}
+
+                <Text style={[
+                  styles.referralClaimText,
+                  referralStats.claimable > 0 && { color: '#047857', fontWeight: '700' },
+                  referralStats.pending > 0 && { color: '#B91C1C' } // dark red
+                ]}>
+                  {referralStats.claimable > 0
+                    ? `${referralStats.claimable} $CONFIO Listos para Desbloquear`
+                    : referralStats.pending > 0
+                      ? `${referralStats.pending} $CONFIO Pendientes`
+                      : 'Ver mis recompensas ($CONFIO)'}
+                </Text>
+              </View>
+              <Icon name="chevron-right" size={16} color={referralStats.claimable > 0 ? '#047857' : '#10b981'} />
             </TouchableOpacity>
 
             {needsFriendlyUsername && (
               <TouchableOpacity style={styles.referralUpdateUsername} onPress={() => navigation.navigate('UpdateUsername')}>
                 <Icon name="edit-3" size={16} color="#047857" />
-                <Text style={styles.referralUpdateUsernameText}>Actualizar mi usuario</Text>
+                <Text style={styles.referralUpdateUsernameText}>Personalizar mi código</Text>
                 <Icon name="chevron-right" size={16} color="#047857" />
               </TouchableOpacity>
             )}
 
-            <View style={styles.referralSteps}>
-              <View style={styles.referralStep}>
-                <Text style={styles.referralStepNumber}>1</Text>
-                <Text style={styles.referralStepText}>Envía tu @usuario a la persona que quieres invitar.</Text>
-              </View>
-              <View style={styles.referralStep}>
-                <Text style={styles.referralStepNumber}>2</Text>
-                <Text style={styles.referralStepText}>
-                  Dile que lo escriba cuando la app pregunte "¿Quién te invitó?" durante el registro.
-                </Text>
-              </View>
-              <View style={styles.referralStep}>
-                <Text style={styles.referralStepNumber}>3</Text>
-                <Text style={styles.referralStepText}>
-                  Ayúdalo a completar su primera operación válida (recarga, depósito USDC + conversión a cUSD, enviar, pagar o P2P).
-                  Al finalizar, Confío acredita US$5 en $CONFIO a cada uno.
-                </Text>
-              </View>
-            </View>
+            {!referralStats.isReferred && (
+              <TouchableOpacity
+                style={styles.referralUpdateUsername}
+                onPress={() => navigation.navigate('Achievements' as never)}
+              >
+                <Icon name="user-plus" size={16} color="#047857" />
+                <Text style={styles.referralUpdateUsernameText}>¿Te invitaron? Ingresa código</Text>
+                <Icon name="chevron-right" size={16} color="#047857" />
+              </TouchableOpacity>
+            )}
+
             <View style={styles.referralCriteria}>
-              <Text style={styles.referralCriteriaTitle}>¿Qué cuenta como primera operación para liberar el bono?</Text>
-              <Text style={styles.referralCriteriaItem}>• Primera recarga de dólares digitales mayor a US$20</Text>
-              <Text style={styles.referralCriteriaItem}>• Primer depósito de USDC convertido a cUSD (≥ US$20)</Text>
-              <Text style={styles.referralCriteriaItem}>• Primer envío dentro de Confío</Text>
-              <Text style={styles.referralCriteriaItem}>• Primer pago a negocio con Confío</Text>
-              <Text style={styles.referralCriteriaItem}>• Primer trade P2P completado</Text>
-              <Text style={styles.referralCriteriaNote}>El bono se acredita en $CONFIO al tipo de cambio equivalente a US$5.</Text>
+              <Text style={styles.referralCriteriaTitle}>¿Cómo funciona el desbloqueo?</Text>
+              <Text style={styles.referralCriteriaItem}>1. Tu amigo se registra con tu link (ambos reciben US$5 en $CONFIO bloqueados).</Text>
+              <Text style={styles.referralCriteriaItem}>2. Recarga 20 USDC o más.</Text>
+              <Text style={styles.referralCriteriaItem}>3. ¡Listo! El bono se desbloquea para ambos.</Text>
+
+              <TouchableOpacity onPress={() => navigation.navigate('Achievements' as never)}>
+                <Text style={[styles.referralCriteriaItem, { color: '#3B82F6', marginTop: 4, fontWeight: '600' }]}>
+                  Ver instrucciones completas
+                </Text>
+              </TouchableOpacity>
             </View>
-
-            <TouchableOpacity style={styles.referralRegisterButton} onPress={() => setShowReferralModal(true)}>
-              <Icon name="user-plus" size={16} color="#047857" />
-              <Text style={styles.referralRegisterButtonText}>Registrar quién te invitó</Text>
-              <Icon name="chevron-right" size={16} color="#047857" />
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.referralLink} onPress={() => navigation.navigate('Achievements')}>
-              <Text style={styles.referralLinkText}>Ver instrucciones completas</Text>
-              <Icon name="chevron-right" size={16} color="#047857" />
-            </TouchableOpacity>
           </View>
         )}
 

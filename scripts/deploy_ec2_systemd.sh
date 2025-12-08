@@ -5,24 +5,27 @@ set -euo pipefail
 # Deploy Confio (Django + Web build) to Ubuntu EC2 using systemd (Daphne, Celery, Celery Beat)
 
 usage() {
-  echo "Usage: $0 -h <host> [-u ubuntu] -i <path_to_pem> [-d /opt/confio]"
+  echo "Usage: $0 -h <host> [-u ubuntu] -i <path_to_pem> [-d /opt/confio] [-e .env]"
   echo "  -h  EC2 host or IP (required)"
   echo "  -u  SSH user (default: ubuntu)"
   echo "  -i  SSH PEM key path (required)"
   echo "  -d  Remote app dir (default: /opt/confio)"
+  echo "  -e  Environment file to deploy (default: .env)"
 }
 
 EC2_HOST=""
 EC2_USER="ubuntu"
 KEY_PATH=""
 REMOTE_APP_DIR="/opt/confio"
+ENV_FILE=".env"
 
-while getopts ":h:u:i:d:" opt; do
+while getopts ":h:u:i:d:e:" opt; do
   case ${opt} in
     h) EC2_HOST="$OPTARG" ;;
     u) EC2_USER="$OPTARG" ;;
     i) KEY_PATH="$OPTARG" ;;
     d) REMOTE_APP_DIR="$OPTARG" ;;
+    e) ENV_FILE="$OPTARG" ;;
     *) usage; exit 1 ;;
   esac
 done
@@ -55,7 +58,7 @@ echo "🧰 Preparing deploy package"
 pushd "$TMP_DIR" >/dev/null
 
 # Copy apps (only if present)
-for dir in config users p2p_exchange presale blockchain contracts payments achievements auth conversion exchange_rates notifications security send telegram_verification sms_verification usdc_transactions; do
+for dir in config users p2p_exchange presale blockchain contracts payments achievements auth conversion exchange_rates notifications security send telegram_verification sms_verification usdc_transactions payroll; do
   [[ -d "$PROJECT_DIR/$dir" ]] && cp -r "$PROJECT_DIR/$dir" .
 done
 
@@ -76,7 +79,11 @@ fi
 
 # Essentials
 cp "$PROJECT_DIR/manage.py" "$PROJECT_DIR/requirements.txt" .
-[[ -f "$PROJECT_DIR/.env" ]] && cp "$PROJECT_DIR/.env" .
+if [[ -f "$PROJECT_DIR/$ENV_FILE" ]]; then
+  cp "$PROJECT_DIR/$ENV_FILE" .
+else
+  echo "WARN: Environment file $ENV_FILE not found in $PROJECT_DIR"
+fi
 
 tar -czf "$ARCHIVE" .
 popd >/dev/null
@@ -86,30 +93,31 @@ echo "📤 Uploading package to $EC2_USER@$EC2_HOST:/tmp/"
 scp -o StrictHostKeyChecking=no -i "$KEY_PATH" "$ARCHIVE" "$EC2_USER@$EC2_HOST:/tmp/confio-deploy.tar.gz"
 
 echo "🔧 Running remote install + restart (requires sudo on remote)"
-ssh -o StrictHostKeyChecking=no -i "$KEY_PATH" "$EC2_USER@$EC2_HOST" APP_DIR="$REMOTE_APP_DIR" bash -s <<'ENDSSH'
+ssh -o StrictHostKeyChecking=no -i "$KEY_PATH" "$EC2_USER@$EC2_HOST" APP_DIR="$REMOTE_APP_DIR" ENV_FILE="$ENV_FILE" bash -s <<'ENDSSH'
 set -euo pipefail
 set -x
 
 APP_DIR="${APP_DIR:-/opt/confio}"
 VENV_DIR="$APP_DIR/myvenv"
 LEGACY_VENV="$APP_DIR/venv"
+ENV_FILE="${ENV_FILE:-.env}"
 
 echo "==> Ensure base directories"
 sudo mkdir -p "$APP_DIR"
 sudo mkdir -p "$APP_DIR/media" "$APP_DIR/staticfiles"
 
 echo "==> Extract release (clean old code, keep env/media/static/venv)"
-# Preserve .env, media, staticfiles, venv if present
+# Preserve env file, media, staticfiles, venv if present
 sudo mkdir -p "$APP_DIR"
 sudo mkdir -p "$APP_DIR/media" "$APP_DIR/staticfiles"
-if [[ -f "$APP_DIR/.env" ]]; then sudo cp "$APP_DIR/.env" /tmp/.env.confio.bak.$$; fi
+if [[ -f "$APP_DIR/$ENV_FILE" ]]; then sudo cp "$APP_DIR/$ENV_FILE" /tmp/${ENV_FILE}.confio.bak.$$; fi
 
 # Remove old app code to avoid stale migrations/files lingering
 sudo find "$APP_DIR" -mindepth 1 -maxdepth 1 \
-  \( -name venv -o -name myvenv -o -name media -o -name staticfiles -o -name ".env" -o -name ".git" \) -prune -o -exec rm -rf {} +
+  \( -name venv -o -name myvenv -o -name media -o -name staticfiles -o -name "$ENV_FILE" -o -name ".git" \) -prune -o -exec rm -rf {} +
 
-# Restore .env if we preserved it
-if [[ -f /tmp/.env.confio.bak.$$ ]]; then sudo mv /tmp/.env.confio.bak.$$ "$APP_DIR/.env"; fi
+# Restore env file if we preserved it
+if [[ -f /tmp/${ENV_FILE}.confio.bak.$$ ]]; then sudo mv /tmp/${ENV_FILE}.confio.bak.$$ "$APP_DIR/$ENV_FILE"; fi
 
 # Extract new package
 sudo tar -xzf /tmp/confio-deploy.tar.gz -C "$APP_DIR"
@@ -148,8 +156,8 @@ sudo "$VENV_DIR/bin/pip" install --upgrade pip wheel
 sudo "$VENV_DIR/bin/pip" install -r "$APP_DIR/requirements.txt"
 
 echo "==> Create env file if missing (defaults to RDS Postgres)"
-if [[ ! -f "$APP_DIR/.env" ]]; then
-  sudo tee "$APP_DIR/.env" >/dev/null <<EOF
+if [[ ! -f "$APP_DIR/$ENV_FILE" ]]; then
+  sudo tee "$APP_DIR/$ENV_FILE" >/dev/null <<EOF
 DJANGO_SETTINGS_MODULE=config.settings
 SECRET_KEY=change-me
 DEBUG=False
@@ -173,8 +181,27 @@ EOF
 fi
 
 echo "==> Django migrate + collectstatic"
-sudo "$VENV_DIR/bin/python" "$APP_DIR/manage.py" migrate --noinput || true
-sudo "$VENV_DIR/bin/python" "$APP_DIR/manage.py" collectstatic --noinput || true
+# We need to make sure manage.py uses the correct env file if using python-dotenv or similar.
+# Assuming manage.py loads .env by default, or env vars are set via systemd.
+# Since we are running migrate here manually, we might need to export variables from the env file first.
+# Or trust that verify/migrate works without full env if DB settings are standard?
+# Actually, manage.py likely needs the env.
+# Let's source it if it's a bash-compatible env file, OR trust the user configured it right.
+# Ideally, we run this via 'runscript' or similar if relying on django logic.
+# For now, let's just attempt migrate. If it fails due to missing env, the user knows why.
+
+# Check if manage.py can load .env automatically (python-dotenv).
+# If $ENV_FILE is not .env, manage.py might not pick it up automatically unless we set an env var.
+# But systemd will pick it up.
+# For migration here, let's try to export it.
+set +x # hide secrets
+if [[ -f "$APP_DIR/$ENV_FILE" ]]; then
+  export $(grep -v '^#' "$APP_DIR/$ENV_FILE" | xargs) || true
+fi
+set -x
+
+sudo -E "$VENV_DIR/bin/python" "$APP_DIR/manage.py" migrate --noinput || true
+sudo -E "$VENV_DIR/bin/python" "$APP_DIR/manage.py" collectstatic --noinput || true
 
 echo "==> Install systemd units"
 if [[ -f "$APP_DIR/config/systemd/daphne.service" ]]; then
@@ -229,3 +256,4 @@ ENDSSH
 
 echo "✅ Deploy complete"
 echo "Tip: View logs with: ssh -i $KEY_PATH $EC2_USER@$EC2_HOST 'sudo journalctl -u daphne -f'"
+

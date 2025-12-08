@@ -85,37 +85,37 @@ export const SimpleAchievementsScreen: React.FC<SimpleAchievementsScreenProps> =
 
       {/* Core Message */}
       <View style={styles.mainCard}>
-        <Text style={styles.mainTitle}>🎁 Gana 4 $CONFIO por cada $1</Text>
+        <Text style={styles.mainTitle}>🎁 Gana 5 $CONFIO por recarga</Text>
         <Text style={styles.mainDescription}>
-          Envía o recibe al menos $1 y tanto tú como la otra persona ganan 4 $CONFIO cada uno
+          Si eres nuevo, recarga o convierte al menos 20 USDC y tanto tú como quien te invitó ganan 5 $CONFIO.
         </Text>
-        
+
         {!hasFirstTransaction && (
           <TouchableOpacity
             style={styles.ctaButton}
-            onPress={() => navigation.navigate('Send')}
+            onPress={() => navigation.navigate('TopUp')}
           >
-            <Text style={styles.ctaButtonText}>Hacer mi Primera Transacción</Text>
+            <Text style={styles.ctaButtonText}>Recargar 20 USDC</Text>
           </TouchableOpacity>
         )}
-        
+
         {hasFirstTransaction && !hasDollarMilestone && (
           <TouchableOpacity
             style={styles.ctaButton}
-            onPress={() => navigation.navigate('Send')}
+            onPress={() => navigation.navigate('TopUp')}
           >
-            <Text style={styles.ctaButtonText}>Enviar $1 para Ganar</Text>
+            <Text style={styles.ctaButtonText}>Recargar para Ganar</Text>
           </TouchableOpacity>
         )}
-        
+
         {hasDollarMilestone && (
           <View style={styles.completedContainer}>
             <Text style={styles.completedText}>✅ ¡Ya ganaste tus primeros CONFIO!</Text>
             <TouchableOpacity
               style={styles.secondaryButton}
-              onPress={() => navigation.navigate('Send')}
+              onPress={() => navigation.navigate('Referrals')}
             >
-              <Text style={styles.secondaryButtonText}>Seguir Ganando</Text>
+              <Text style={styles.secondaryButtonText}>Invitar Amigos</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -124,33 +124,33 @@ export const SimpleAchievementsScreen: React.FC<SimpleAchievementsScreenProps> =
       {/* Simple Steps */}
       <View style={styles.stepsContainer}>
         <Text style={styles.stepsTitle}>Cómo funciona:</Text>
-        
+
         <View style={styles.step}>
           <Text style={styles.stepNumber}>1</Text>
           <View style={styles.stepContent}>
-            <Text style={styles.stepTitle}>Envía o recibe $1+</Text>
+            <Text style={styles.stepTitle}>Recarga o Convierte</Text>
             <Text style={styles.stepDescription}>
-              Cualquier transacción de $1 o más califica
+              Un depósito de 20 USDC o más activa el bono
             </Text>
           </View>
         </View>
-        
+
         <View style={styles.step}>
           <Text style={styles.stepNumber}>2</Text>
           <View style={styles.stepContent}>
-            <Text style={styles.stepTitle}>Ambos ganan 4 $CONFIO</Text>
+            <Text style={styles.stepTitle}>Ambos ganan 5 $CONFIO</Text>
             <Text style={styles.stepDescription}>
-              Tú y la otra persona reciben la recompensa
+              Tú y quien te invitó reciben la recompensa
             </Text>
           </View>
         </View>
-        
+
         <View style={styles.step}>
           <Text style={styles.stepNumber}>3</Text>
           <View style={styles.stepContent}>
             <Text style={styles.stepTitle}>Valor futuro</Text>
             <Text style={styles.stepDescription}>
-              4 $CONFIO = $1 al precio de preventa
+              Acumula CONFIO y gástalos o retíralos después
             </Text>
           </View>
         </View>

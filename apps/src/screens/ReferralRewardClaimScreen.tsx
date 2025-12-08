@@ -236,6 +236,12 @@ export const ReferralRewardClaimScreen: React.FC = () => {
               Si completaste una misión, asegúrate de iniciar sesión con la
               cuenta que ganó el bono o inténtalo más tarde.
             </Text>
+            <TouchableOpacity
+              style={styles.emptyButton}
+              onPress={() => navigation.goBack()}
+            >
+              <Text style={styles.emptyButtonText}>Invitar amigos ahora 🚀</Text>
+            </TouchableOpacity>
           </View>
         );
       }
@@ -539,6 +545,23 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 8,
     lineHeight: 20,
+  },
+  emptyButton: {
+    marginTop: 24,
+    backgroundColor: colors.accent,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 24,
+    shadowColor: colors.accent,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  emptyButtonText: {
+    color: '#ffffff',
+    fontWeight: '700',
+    fontSize: 15,
   },
   rewardCard: {
     backgroundColor: colors.surface,

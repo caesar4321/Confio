@@ -13,14 +13,14 @@ export const ReferralActionPromptScreen: React.FC = () => {
 
   const stepOptions = useMemo(() => ({
     top_up: {
-      title: 'Deposita desde Confío o exchanges',
+      title: 'Desbloquea tu bono de 5 $CONFIO',
       steps: [
-        'Elige Recargar dentro de Confío o Depositar desde otro exchange',
-        'Si recarga en Confío, sigue las instrucciones para pagar con tarjeta o vendedores P2P',
-        'Si deposita desde Binance/Coinbase, envía cUSD a su dirección Confío',
+        'Tienes 5 $CONFIO bloqueados en tu cuenta',
+        'Haz una recarga de 20 USDC o más para activarlos',
+        '¡Listo! El bono se desbloquea al instante',
       ],
       requirement:
-        'La primera recarga o depósito por al menos 20 USD desbloquea el bono. Si su país no admite tarjetas, puede transferir cUSD/USDC desde Binance, Coinbase u otro exchange hacia su dirección Confío.',
+        'El bono está reservado para ti. Solo necesitas completar tu primera recarga de 20 USDC (con tarjeta o cripto) para desbloquearlo y usarlo.',
       actions: [
         {
           label: 'Recargar en Confío',
@@ -43,33 +43,12 @@ export const ReferralActionPromptScreen: React.FC = () => {
           tokenType: 'cusd',
         }),
     },
-    send: {
-      title: 'Primer envío completado',
-      steps: ['Elige un contacto o dirección Confío', 'Ingresa el monto a enviar', 'Confirma la operación'],
-      requirement: 'Un solo envío completado desbloquea el bono. Después del primero no necesita repetirlo para este referido.',
-      ctaLabel: 'Ir a Enviar',
-      action: () => navigation.navigate('SendToFriend', { tokenType: 'cusd', friend: { name: '', avatar: '', phone: '', isOnConfio: true } }),
-    },
     conversion_usdc_to_cusd: {
       title: 'Conversión USDC → cUSD',
-      steps: ['Deposita USDC en su cuenta', 'Abre la pantalla de Conversión', 'Convierte un equivalente mínimo de 20 en cUSD'],
-      requirement: 'Solo registramos la primera conversión exitosa del referido para liberar el bono.',
+      steps: ['Deposita USDC en su cuenta', 'Abre la pantalla de Conversión', 'Convierte al menos 20 USDC a cUSD'],
+      requirement: 'Solo registramos la primera conversión exitosa de 20 USDC o más para liberar el bono.',
       ctaLabel: 'Ir a Convertir',
       action: () => navigation.navigate('USDCConversion'),
-    },
-    payment: {
-      title: 'Pagar a un comercio',
-      steps: ['El comercio genera un QR Confío', 'Escanéalo desde la app', 'Confirma el pago'],
-      requirement: 'Un pago exitoso es suficiente; no necesita hacer más para este bono.',
-      ctaLabel: 'Escanear un pago',
-      action: () => navigation.navigate('Scan', { mode: 'pagar' }),
-    },
-    p2p_trade: {
-      title: 'Primer trade P2P',
-      steps: ['Explora ofertas disponibles', 'Confirma el pago fiat al vendedor', 'Recibe los cUSD en Confío'],
-      requirement: 'El bono solo requiere el primer trade exitoso de tu referido, sin importar el monto mientras cumpla el mínimo.',
-      ctaLabel: 'Explorar P2P',
-      action: () => navigation.navigate('Exchange', { showMyOffers: false }),
     },
   }), [navigation]);
 

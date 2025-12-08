@@ -26,30 +26,30 @@ DEFAULT_EVENT_REWARD_CONFIG: Dict[str, Dict[str, Any]] = {
     #   referrer_confio: CONFIO tokens to award the referrer (Decimal)
     #   reward_cusd: cUSD notion used for vault accounting (Decimal, optional)
     "top_up": {
-        "threshold": Decimal("20"),
+        "threshold": Decimal("19"),
         "records_checkpoint": "conversion_usdc_to_cusd",
     },
     "conversion_usdc_to_cusd": {
-        "threshold": Decimal("20"),
+        "threshold": Decimal("19"),
         "reward_cusd": Decimal("5"),
         # Referrer reward mirrors the referee's CONFIO once conversion happens
         "referrer_confio": None,
         "requires_checkpoint": "top_up",
     },
-    "send": {
-        "reward_cusd": Decimal("5"),
-        # Mirror referee allocation for referrer so both earn the same $ value
-        "referrer_confio": None,
-        "notification_type": NotificationTypeChoices.REFERRAL_FIRST_TRANSACTION,
-    },
-    "payment": {
-        "reward_cusd": Decimal("5"),
-        "referrer_confio": None,
-    },
-    "p2p_trade": {
-        "reward_cusd": Decimal("5"),
-        "referrer_confio": None,
-    },
+    # "send": {
+    #     "reward_cusd": Decimal("5"),
+    #     # Mirror referee allocation for referrer so both earn the same $ value
+    #     "referrer_confio": None,
+    #     "notification_type": NotificationTypeChoices.REFERRAL_FIRST_TRANSACTION,
+    # },
+    # "payment": {
+    #     "reward_cusd": Decimal("5"),
+    #     "referrer_confio": None,
+    # },
+    # "p2p_trade": {
+    #     "reward_cusd": Decimal("5"),
+    #     "referrer_confio": None,
+    # },
 }
 
 MICRO_MULTIPLIER = Decimal("1000000")

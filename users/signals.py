@@ -371,20 +371,22 @@ def handle_send_transaction_save(sender, instance, created, **kwargs):
             # Consider only successful/confimed sends
             if str(instance.status).upper() in ['CONFIRMED', 'COMPLETED', 'SUCCESS']:
                 if instance.sender_user_id:
-                    _award_referral_pair(instance.sender_user)
-                    sync_referral_reward_for_event(
-                        instance.sender_user,
-                        EventContext(
-                            event="send",
-                            amount=Decimal(instance.amount),
-                            metadata={
-                                "send_id": instance.id,
-                                "transaction_hash": instance.transaction_hash or "",
-                            },
-                        ),
-                    )
+                    pass
+                    # _award_referral_pair(instance.sender_user)
+                    # sync_referral_reward_for_event(
+                    #     instance.sender_user,
+                    #     EventContext(
+                    #         event="send",
+                    #         amount=Decimal(instance.amount),
+                    #         metadata={
+                    #             "send_id": instance.id,
+                    #             "transaction_hash": instance.transaction_hash or "",
+                    #         },
+                    #     ),
+                    # )
                 if instance.recipient_user_id:
-                    _award_referral_pair(instance.recipient_user)
+                    pass
+                    # _award_referral_pair(instance.recipient_user)
         except Exception as exc:
             logger.exception("Error processing referral reward for send %s", instance.id)
 
@@ -400,18 +402,19 @@ def handle_payment_transaction_save(sender, instance, created, **kwargs):
             status = str(instance.status).upper()
             if status in ['PAID', 'CONFIRMED']:
                 if instance.payer_user_id:
-                    _award_referral_pair(instance.payer_user)
-                    sync_referral_reward_for_event(
-                        instance.payer_user,
-                        EventContext(
-                            event="payment",
-                            amount=Decimal(instance.amount),
-                            metadata={
-                                "payment_id": instance.id,
-                                "invoice_id": instance.invoice_id if instance.invoice_id else None,
-                            },
-                        ),
-                    )
+                    pass
+                    # _award_referral_pair(instance.payer_user)
+                    # sync_referral_reward_for_event(
+                    #     instance.payer_user,
+                    #     EventContext(
+                    #         event="payment",
+                    #         amount=Decimal(instance.amount),
+                    #         metadata={
+                    #             "payment_id": instance.id,
+                    #             "invoice_id": instance.invoice_id if instance.invoice_id else None,
+                    #         },
+                    #     ),
+                    # )
         except Exception as exc:
             logger.exception("Error processing referral reward for payment %s", instance.id)
 
@@ -425,29 +428,31 @@ def handle_p2p_trade_save(sender, instance, created, **kwargs):
             status = str(instance.status).upper()
             if status in ['CRYPTO_RELEASED', 'COMPLETED']:
                 if instance.buyer_user_id:
-                    sync_referral_reward_for_event(
-                        instance.buyer_user,
-                        EventContext(
-                            event="p2p_trade",
-                            amount=Decimal(instance.crypto_amount),
-                            metadata={
-                                "trade_id": instance.id,
-                                "role": "buyer",
-                            },
-                        ),
-                    )
+                    pass
+                    # sync_referral_reward_for_event(
+                    #     instance.buyer_user,
+                    #     EventContext(
+                    #         event="p2p_trade",
+                    #         amount=Decimal(instance.crypto_amount),
+                    #         metadata={
+                    #             "trade_id": instance.id,
+                    #             "role": "buyer",
+                    #         },
+                    #     ),
+                    # )
                 if instance.seller_user_id:
-                    sync_referral_reward_for_event(
-                        instance.seller_user,
-                        EventContext(
-                            event="p2p_trade",
-                            amount=Decimal(instance.crypto_amount),
-                            metadata={
-                                "trade_id": instance.id,
-                                "role": "seller",
-                            },
-                        ),
-                    )
+                    pass
+                    # sync_referral_reward_for_event(
+                    #     instance.seller_user,
+                    #     EventContext(
+                    #         event="p2p_trade",
+                    #         amount=Decimal(instance.crypto_amount),
+                    #         metadata={
+                    #             "trade_id": instance.id,
+                    #             "role": "seller",
+                    #         },
+                    #     ),
+                    # )
         except Exception as exc:
             logger.exception("Error processing referral reward for p2p trade %s", instance.id)
 

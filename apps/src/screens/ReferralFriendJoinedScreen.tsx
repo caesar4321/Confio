@@ -25,24 +25,26 @@ export const ReferralFriendJoinedScreen: React.FC = () => {
           <Text style={styles.eyebrow}>Referidos Confío</Text>
           <Text style={styles.title}>¡{friendName} ya se unió!</Text>
           <Text style={styles.subtitle}>
-            Solo se necesita que tu invitado complete su primera operación válida. Una vez lo haga, ambos reciben el bono equivalente a US$5 en $CONFIO.
+            Tu amigo ya recibió sus 5 $CONFIO (bloqueados). Ahora solo falta desbloquearlos.
           </Text>
 
           <View style={styles.stepCard}>
-            <Text style={styles.stepTitle}>¿Qué sigue?</Text>
+            <Text style={styles.stepTitle}>¿Cómo desbloquear el bono?</Text>
             <View style={styles.stepRow}>
-              <Icon name="credit-card" size={18} color="#10B981" />
+              <Icon name="lock" size={18} color="#10B981" />
               <Text style={styles.stepText}>
-                Muéstrale cómo recargar con tarjeta o depositar cUSD desde Binance/Coinbase enviándolo a su dirección Confío.
+                El bono ya está en su cuenta, pero necesita una recarga para activarse.
               </Text>
             </View>
             <View style={styles.stepRow}>
-              <Icon name="refresh-cw" size={18} color="#10B981" />
-              <Text style={styles.stepText}>También aplica su primer envío, pago o trade P2P completado.</Text>
+              <Icon name="credit-card" size={18} color="#10B981" />
+              <Text style={styles.stepText}>
+                Guíalo para que recargue 20 USDC o más.
+              </Text>
             </View>
             <View style={styles.stepRow}>
               <Icon name="check-circle" size={18} color="#10B981" />
-              <Text style={styles.stepText}>Cuando lo logre, Confío depositará automáticamente el equivalente a US$5 en $CONFIO para ambos.</Text>
+              <Text style={styles.stepText}>¡Listo! El bono se desbloquea automáticamente para ambos.</Text>
             </View>
           </View>
 

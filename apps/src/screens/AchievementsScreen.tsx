@@ -11,6 +11,7 @@ import {
   Linking,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
+import WhatsAppLogo from '../assets/svg/WhatsApp.svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { NavigationProp } from '@react-navigation/native';
@@ -54,34 +55,37 @@ export const AchievementsScreen: React.FC = () => {
     const inviteLink = `https://confio.lat/invite/${cleanUsername}`;
 
     return [
-      'Únete a Confío y gana US$5 en $CONFIO conmigo.',
+      'Te envié un regalo de US$5 en $CONFIO 🎁',
       '',
-      `📲 Descarga la App aquí: ${inviteLink}`,
+      'Estoy usando Confío para ahorrar en dólares sin restricciones. Es como una bóveda digital personal.',
       '',
-      `Mi código de invitado es: ${cleanUsername}`,
+      `👇 Reclama tu regalo aquí:`,
+      inviteLink,
       '',
-      'Completa tu primera operación válida (recarga, depósito o P2P) y ambos recibiremos US$5 en $CONFIO.',
+      `*Código: ${cleanUsername}*`,
+      '',
+      '(El bono se desbloquea al cargar tus primeros 20 USDC)',
     ].join('\n');
   }, [username]);
 
   const steps: Step[] = useMemo(
     () => [
       {
-        title: 'Comparte tu usuario Confío',
-        description: 'Envía tu @usuario a amigos, familia o clientes para que te mencionen al registrarse.',
+        title: 'Envía tu enlace invitación',
+        description: 'Toca "Compartir por WhatsApp" y elige a tus amigos. El mensaje incluye tu link único.',
       },
       {
-        title: 'Tu amigo ingresa tu @usuario',
-        description: 'Durante el onboarding verán "¿Quién te invitó?". Ahí deben escribir tu @usuario tal cual.',
+        title: 'Tu amigo se registra',
+        description: 'Al crear su cuenta usando tu enlace, recibe automáticamente US$5 en $CONFIO bloqueados.',
       },
       {
-        title: 'Primera operación completada',
+        title: 'Desbloqueo del bono',
         description:
-          'Tu invitado debe completar una operación válida: recarga (US$20+), depósito USDC + conversión a cUSD (US$20+), enviar, pagar o P2P.',
+          'Cuando tu amigo recarga 20 USDC o más, el bono se desbloquea y activan los US$5 en $CONFIO para ambos.',
       },
       {
-        title: 'US$5 en $CONFIO para ambos',
-        description: 'Confío acreditará el equivalente a US$5 en $CONFIO a cada uno automáticamente. Puedes repetirlo todas las veces que quieras.',
+        title: '¡Ganen sin límites!',
+        description: 'No hay límite de invitaciones. Entre más amigos invites, más ganarás.',
       },
     ],
     []
@@ -129,9 +133,9 @@ export const AchievementsScreen: React.FC = () => {
 
         <View style={styles.heroCard}>
           <Text style={styles.heroEyebrow}>Programa de referidos Confío</Text>
-          <Text style={styles.heroTitle}>US$5 en $CONFIO para ti y tu amigo</Text>
+          <Text style={styles.heroTitle}>Regala US$5 en $CONFIO a tus amigos</Text>
           <Text style={styles.heroSubtitle}>
-            Comparte tu @usuario. Cuando tu invitado completa su primera operación válida, Confío recompensa a ambos con el equivalente a US$5 en $CONFIO.
+            Comparte tu link. Tus amigos reciben US$5 en $CONFIO (bloqueados) al registrarse. Se desbloquean cuando hacen su primera recarga de 20 USDC.
           </Text>
 
           <View style={styles.usernamePill}>
@@ -150,7 +154,7 @@ export const AchievementsScreen: React.FC = () => {
               <Text style={styles.copyButtonText}>Copiar usuario</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.shareButton} onPress={handleShare}>
-              <Icon name="share-2" size={18} color="#fff" />
+              <WhatsAppLogo width={18} height={18} style={{ marginRight: 8 }} />
               <Text style={styles.shareButtonText}>Compartir por WhatsApp</Text>
             </TouchableOpacity>
           </View>
@@ -194,32 +198,28 @@ export const AchievementsScreen: React.FC = () => {
           <Text style={styles.sectionTitle}>Tips para compartir</Text>
           <View style={styles.tipRow}>
             <Icon name="send" size={18} color={colors.primaryDark} />
-            <Text style={styles.tipText}>Incluye tu @usuario en mensajes de WhatsApp, Telegram o redes sociales.</Text>
+            <Text style={styles.tipText}>Usa el botón de WhatsApp para que el link se pegue automáticamente.</Text>
           </View>
           <View style={styles.tipRow}>
             <Icon name="check-circle" size={18} color={colors.primaryDark} />
-            <Text style={styles.tipText}>Recuérdale a tu amigo escribir tu @usuario al registrarse.</Text>
+            <Text style={styles.tipText}>Asegúrate de que tu amigo descargue la App desde tu enlace.</Text>
           </View>
           <View style={styles.tipRow}>
             <Icon name="zap" size={18} color={colors.primaryDark} />
-            <Text style={styles.tipText}>Ayúdalo a completar su primera compra o envío para desbloquear la recompensa.</Text>
+            <Text style={styles.tipText}>Ayúdalo a completar su recarga de 20 USDC para liberar el dinero.</Text>
           </View>
         </View>
 
         <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>¿Qué verás aquí pronto?</Text>
+          <Text style={styles.sectionTitle}>Estado de tus invitaciones</Text>
           <Text style={styles.futureText}>
-            Estamos simplificando el programa de logros para enfocarlo 100% en invitaciones. Pronto tendrás el resumen
-            de invitaciones completadas y tus recompensas en esta pantalla.
+            Estamos simplificando el programa. Pronto verás aquí tu historial de invitaciones y recompensas.
           </Text>
           <View style={styles.criteria}>
-            <Text style={styles.criteriaTitle}>Operaciones válidas para el bono:</Text>
-            <Text style={styles.criteriaItem}>• Primera recarga de dólares digitales mayor a US$20</Text>
-            <Text style={styles.criteriaItem}>• Primer depósito de USDC convertido a cUSD (≥ US$20)</Text>
-            <Text style={styles.criteriaItem}>• Primer envío dentro de Confío</Text>
-            <Text style={styles.criteriaItem}>• Primer pago a comercio con Confío</Text>
-            <Text style={styles.criteriaItem}>• Primer trade P2P completado</Text>
-            <Text style={styles.criteriaNote}>El bono se acredita en $CONFIO al tipo equivalente a US$5.</Text>
+            <Text style={styles.criteriaTitle}>Operaciones para desbloquear el bono:</Text>
+            <Text style={styles.criteriaItem}>• Primera recarga de al menos 20 USDC</Text>
+            <Text style={styles.criteriaItem}>• Primer depósito de USDC convertido a cUSD (≥ 20 USDC)</Text>
+            <Text style={styles.criteriaNote}>El bono se acredita en $CONFIO automáticamente.</Text>
           </View>
         </View>
 
