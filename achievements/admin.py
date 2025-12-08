@@ -10,7 +10,7 @@ import logging
 from decimal import Decimal
 from datetime import timedelta
 
-from blockchain.mutations import REFERRAL_ACHIEVEMENT_SLUGS
+from blockchain.constants import REFERRAL_ACHIEVEMENT_SLUGS
 
 from .models import (
     AchievementType,

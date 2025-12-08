@@ -28,7 +28,7 @@ from achievements.models import (
 from p2p_exchange.models import P2POffer, P2PTrade, P2PUserStats, P2PDispute
 from send.models import SendTransaction
 from payments.models import PaymentTransaction
-from blockchain.mutations import REFERRAL_ACHIEVEMENT_SLUGS
+from blockchain.constants import REFERRAL_ACHIEVEMENT_SLUGS
 
 
 class ConfioAdminSite(admin.AdminSite):

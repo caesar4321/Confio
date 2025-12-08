@@ -16,15 +16,16 @@ from django.utils import timezone
 from users.models import Account
 from .algorand_account_manager import AlgorandAccountManager
 from .algorand_sponsor_service import algorand_sponsor_service
+from .constants import (
+    REFERRAL_ACHIEVEMENT_SLUGS,
+    REFERRAL_DAILY_LIMIT,
+    REFERRAL_WEEKLY_LIMIT,
+    REFERRAL_SINGLE_REVIEW_THRESHOLD,
+    REFERRAL_VERIFICATION_TRIGGER,
+    REFERRAL_MAX_USERS_PER_IP,
+)
 
 logger = logging.getLogger(__name__)
-
-REFERRAL_ACHIEVEMENT_SLUGS = {'successful_referral', 'llegaste_por_influencer'}
-REFERRAL_DAILY_LIMIT = Decimal('10')
-REFERRAL_WEEKLY_LIMIT = Decimal('50')
-REFERRAL_SINGLE_REVIEW_THRESHOLD = Decimal('500')
-REFERRAL_VERIFICATION_TRIGGER = Decimal('100')
-REFERRAL_MAX_USERS_PER_IP = 3
 
 
 def _get_referral_reward_summary(user) -> dict:
