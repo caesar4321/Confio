@@ -122,6 +122,9 @@ def _record_referral_claim_payout(*, user, referral, event, claim_amount, tx_id)
 		event.error = ""
 		event.save(update_fields=['reward_status', 'reward_tx_id', 'error', 'updated_at'])
 
+		# Update placeholder events for THIS specific actor role only
+		# to avoid marking the other party's event as claimed
+		actor_role = (getattr(event, "actor_role", "") or "").lower() if event else ""
 		placeholder_filters = {
 			"trigger": "referral_pending",
 			"reward_status__in": ["pending", "eligible"],
@@ -130,6 +133,12 @@ def _record_referral_claim_payout(*, user, referral, event, claim_amount, tx_id)
 			placeholder_filters["referral"] = referral
 		else:
 			placeholder_filters["user"] = user
+
+		# CRITICAL: Only update events for the same actor_role to prevent
+		# marking the referrer's event as claimed when referee claims (or vice versa)
+		if actor_role:
+			placeholder_filters["actor_role"] = actor_role
+
 		updated_count = ReferralRewardEvent.objects.filter(**placeholder_filters).update(
 			reward_status='claimed',
 			error="",
