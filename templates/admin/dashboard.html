@@ -839,13 +839,11 @@
                 {% if recent_verifications %}
                 {% for v in recent_verifications %}
                 <tr>
-                    <td>{% if v.obj.id %}<a href="/admin/security/identityverification/{{ v.obj.id }}/change/">#{{
-                            v.obj.id }}</a>{% else %}-{% endif %}</td>
+                    <td>{% if v.obj.id %}<a href="/admin/security/identityverification/{{ v.obj.id }}/change/">#{{ v.obj.id }}</a>{% else %}-{% endif %}</td>
                     <td><a href="{% url 'confio_admin:users_user_change' v.obj.user.id %}">{{ v.obj.user.username }}</a>
                     </td>
                     <td>{% if v.context == 'business' %}Business{% else %}Personal{% endif %}</td>
-                    <td>{% if v.business %}<a href="{% url 'confio_admin:users_business_change' v.business.id %}">{{
-                            v.business.name }}</a>{% else %}-{% endif %}</td>
+                    <td>{% if v.business %}<a href="{% url 'confio_admin:users_business_change' v.business.id %}">{{ v.business.name }}</a>{% else %}-{% endif %}</td>
                     <td>
                         {% if v.obj.status == 'pending' %}
                         <span class="status-badge pending">Pending</span>
@@ -859,8 +857,7 @@
                     </td>
                     <td>{{ v.obj.created_at|timesince }} ago</td>
                     <td>{% if v.obj.id %}<a class="action-button secondary"
-                            href="/admin/security/identityverification/{{ v.obj.id }}/change/">Review</a>{% else %}-{%
-                        endif %}</td>
+                            href="/admin/security/identityverification/{{ v.obj.id }}/change/">Review</a>{% else %}-{% endif %}</td>
                 </tr>
                 {% endfor %}
                 {% else %}
