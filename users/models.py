@@ -936,3 +936,6 @@ def ensure_single_default_bank_account(sender, instance, **kwargs):
 
 # Import wallet models
 from .models_wallet import WalletPepper, WalletDerivationPepper
+
+# Import analytics models to register them with Django
+from .models_analytics import DailyMetrics, CountryMetrics  # noqa: F401
