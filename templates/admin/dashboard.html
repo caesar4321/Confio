@@ -860,9 +860,7 @@
                         {% endif %}
                     </td>
                     <td>{{ v.obj.created_at|timesince }} ago</td>
-                    <td>{% if v.obj.id %}<a class="action-button secondary"
-                            href="/admin/security/identityverification/{{ v.obj.id }}/change/">Review</a>{% else %}-{%
-                        endif %}</td>
+                    <td>{% if v.obj.id %}<a class="action-button secondary" href="/admin/security/identityverification/{{ v.obj.id }}/change/">Review</a>{% else %}-{% endif %}</td>
                 </tr>
                 {% endfor %}
                 {% else %}
