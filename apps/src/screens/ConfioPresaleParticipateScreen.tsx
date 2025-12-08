@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, TextInput, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, TextInput, Alert, ActivityIndicator, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Buffer } from 'buffer';
 import Icon from 'react-native-vector-icons/Feather';
@@ -35,12 +35,12 @@ type ConfioPresaleParticipateScreenNavigationProp = NativeStackNavigationProp<Ma
 export const ConfioPresaleParticipateScreen = () => {
   const navigation = useNavigation<ConfioPresaleParticipateScreenNavigationProp>();
   const { selectedCountry } = useCountry();
-  
+
   const [amount, setAmount] = useState('');
-  
+
   // Use the app's selected country for formatting
   const countryCode = selectedCountry?.[2] || 'VE';
-  const formatWithLocale = (num: number, options = {}) => 
+  const formatWithLocale = (num: number, options = {}) =>
     formatNumber(num, countryCode, { minimumFractionDigits: 2, maximumFractionDigits: 2, ...options });
 
   // Fetch presale data
@@ -70,7 +70,7 @@ export const ConfioPresaleParticipateScreen = () => {
     goal: presale ? parseFloat(presale.goalAmount) : 1000000,
     participants: presale?.totalParticipants || 0,
   };
-  
+
   const percentComplete = Math.min((presaleData.raised / presaleData.goal) * 100, 100);
   const hasExceededGoal = presaleData.raised > presaleData.goal;
 
@@ -130,7 +130,7 @@ export const ConfioPresaleParticipateScreen = () => {
         false
       );
       if (!bioOk) {
-        Alert.alert('Se requiere biometría', 'Confirma con Face ID / Touch ID o huella para continuar.', [{ text: 'OK' }]);
+        Alert.alert('Se requiere biometría', Platform.OS === 'ios' ? 'Confirma con Face ID o Touch ID para continuar.' : 'Confirma con tu huella digital para continuar.', [{ text: 'OK' }]);
         return;
       }
 
@@ -230,7 +230,7 @@ export const ConfioPresaleParticipateScreen = () => {
         },
         {
           text: 'Confirmar',
-            onPress: () => executeSwap(),
+          onPress: () => executeSwap(),
         },
       ]
     );
@@ -279,7 +279,7 @@ export const ConfioPresaleParticipateScreen = () => {
     <SafeAreaView style={styles.container}>
       <LoadingOverlay visible={initializing || busy} message={loadingMessage || (busy ? 'Procesando intercambio...' : 'Preparando preventa...')} />
       {busy && (
-        <View style={styles.overlay}> 
+        <View style={styles.overlay}>
           <ActivityIndicator size="large" color="#fff" />
         </View>
       )}
@@ -295,8 +295,8 @@ export const ConfioPresaleParticipateScreen = () => {
         {/* Hero Section */}
         <View style={styles.heroSection}>
           <View style={styles.tokenIcon}>
-            <Image 
-              source={CONFIOLogo} 
+            <Image
+              source={CONFIOLogo}
               style={styles.tokenImage}
               resizeMode="contain"
             />
@@ -305,7 +305,7 @@ export const ConfioPresaleParticipateScreen = () => {
           <Text style={styles.heroSubtitle}>
             {presale?.name || 'Raíces Fuertes'} - {presale?.phaseNumber === 1 ? 'Donde todo comienza 🌱' : presale?.description || ''}
           </Text>
-          
+
           <View style={styles.priceBadge}>
             <Text style={styles.priceText}>{presalePrice.toFixed(2)} cUSD por $CONFIO</Text>
           </View>
@@ -318,7 +318,7 @@ export const ConfioPresaleParticipateScreen = () => {
               {hasExceededGoal ? '¡Meta Superada! 🎉' : `¡Fase ${presale?.phaseNumber || 1} Activa!`}
             </Text>
             <Text style={styles.statusDescription}>
-              {hasExceededGoal 
+              {hasExceededGoal
                 ? `La comunidad ha superado todas las expectativas. La Fase ${presale?.phaseNumber || 1} continúa disponible por tiempo limitado.`
                 : `¡La Fase ${presale?.phaseNumber || 1} está activa! Puedes convertir cUSD a $CONFIO al precio más bajo de la historia. Oferta limitada mientras tengamos monedas disponibles.`
               }
@@ -328,7 +328,7 @@ export const ConfioPresaleParticipateScreen = () => {
               <Text style={[styles.progressAmount, hasExceededGoal && styles.progressAmountExceeded]}>
                 {formatWithLocale(presaleData.raised, { minimumFractionDigits: 0, maximumFractionDigits: 0 })} cUSD
               </Text>
-              
+
               {hasExceededGoal ? (
                 <View style={styles.exceededContainer}>
                   <Text style={styles.progressGoal}>
@@ -346,11 +346,11 @@ export const ConfioPresaleParticipateScreen = () => {
                   Meta: {formatWithLocale(presaleData.goal, { minimumFractionDigits: 0, maximumFractionDigits: 0 })} cUSD
                 </Text>
               )}
-              
+
               <View style={styles.progressBarContainer}>
                 <View style={styles.progressBar}>
                   <View style={[
-                    styles.progressFill, 
+                    styles.progressFill,
                     { width: `${percentComplete}%` },
                     hasExceededGoal && styles.progressFillExceeded
                   ]} />
@@ -359,7 +359,7 @@ export const ConfioPresaleParticipateScreen = () => {
                   {hasExceededGoal ? '¡Meta alcanzada!' : `${Math.round(percentComplete)}% completado`}
                 </Text>
               </View>
-              
+
               <View style={styles.participantStats}>
                 <Icon name="users" size={14} color={hasExceededGoal ? colors.secondary : colors.primary} />
                 <Text style={styles.participantText}>
@@ -375,7 +375,7 @@ export const ConfioPresaleParticipateScreen = () => {
         {/* Swap Interface */}
         <View style={styles.swapSection}>
           <Text style={styles.sectionTitle}>Convertir cUSD a $CONFIO</Text>
-          
+
           <View style={styles.swapCard}>
             <View style={styles.inputContainer}>
               <Text style={styles.inputLabel}>Cantidad de cUSD</Text>
@@ -424,7 +424,7 @@ export const ConfioPresaleParticipateScreen = () => {
 
         {/* Swap Execution */}
         <View style={styles.swapSection}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[
               styles.swapButton,
               (!isValidAmount || parsedAmount === 0 || exceedsBalance) && styles.swapButtonDisabled
@@ -439,19 +439,19 @@ export const ConfioPresaleParticipateScreen = () => {
               </>
             )}
           </TouchableOpacity>
-          
+
           <View style={styles.lockingNotice}>
             <Icon name="lock" size={16} color="#f59e0b" />
             <Text style={styles.lockingText}>
-              <Text style={styles.lockingBold}>Importante:</Text> Las monedas $CONFIO permanecerán bloqueadas hasta que Confío alcance adopción masiva. 
+              <Text style={styles.lockingBold}>Importante:</Text> Las monedas $CONFIO permanecerán bloqueadas hasta que Confío alcance adopción masiva.
               Esto protege el valor y asegura que construyamos juntos el futuro financiero de Latinoamérica.
             </Text>
           </View>
-          
+
           <View style={styles.riskDisclosure}>
             <Icon name="alert-triangle" size={14} color="#ef4444" />
             <Text style={styles.riskText}>
-              <Text style={styles.riskBold}>Inversión de alto riesgo:</Text> Como cualquier negocio nuevo, 
+              <Text style={styles.riskBold}>Inversión de alto riesgo:</Text> Como cualquier negocio nuevo,
               el éxito no está garantizado. Participa con responsabilidad.
             </Text>
           </View>
@@ -460,7 +460,7 @@ export const ConfioPresaleParticipateScreen = () => {
         {/* Benefits */}
         <View style={styles.benefitsSection}>
           <Text style={styles.sectionTitle}>Beneficios de Participar</Text>
-          
+
           <View style={styles.benefitsList}>
             <View style={styles.benefitItem}>
               <Icon name="star" size={20} color={colors.secondary} />
@@ -468,21 +468,21 @@ export const ConfioPresaleParticipateScreen = () => {
                 <Text style={styles.benefitBold}>Precio más bajo:</Text> {presalePrice.toFixed(2)} cUSD por moneda vs precios futuros más altos
               </Text>
             </View>
-            
+
             <View style={styles.benefitItem}>
               <Icon name="users" size={20} color={colors.secondary} />
               <Text style={styles.benefitText}>
                 <Text style={styles.benefitBold}>Comunidad fundadora:</Text> Serás parte de la base que construye el futuro
               </Text>
             </View>
-            
+
             <View style={styles.benefitItem}>
               <Icon name="shield" size={20} color={colors.secondary} />
               <Text style={styles.benefitText}>
                 <Text style={styles.benefitBold}>Transparencia total:</Text> Fundador comprometido, sin estafas ni sorpresas
               </Text>
             </View>
-            
+
             <View style={styles.benefitItem}>
               <Icon name="zap" size={20} color={colors.secondary} />
               <Text style={styles.benefitText}>

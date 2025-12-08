@@ -10,6 +10,7 @@ import {
   TextInput,
   Alert,
   Modal,
+  Platform,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import LoadingOverlay from '../components/LoadingOverlay';
@@ -31,13 +32,13 @@ export const TradeConfirmScreen: React.FC = () => {
   const navigation = useNavigation<TradeConfirmNavigationProp>();
   const route = useRoute<TradeConfirmRouteProp>();
   const { offer, crypto, tradeType } = route.params;
-  
+
   // Currency formatting
   const { formatAmount } = useCurrency();
-  
+
   // Account context
   const { activeAccount } = useAccount();
-  
+
   // GraphQL queries and mutations
   const [createP2PTrade, { loading: createTradeLoading }] = useMutation(CREATE_P2P_TRADE, {
     refetchQueries: [
@@ -57,14 +58,14 @@ export const TradeConfirmScreen: React.FC = () => {
     }
   });
   // Query user bank accounts for payment method validation
-  const { 
+  const {
     data: userBankAccountsData,
-    refetch: refetchBankAccounts 
+    refetch: refetchBankAccounts
   } = useQuery(GET_USER_BANK_ACCOUNTS, {
     fetchPolicy: 'cache-and-network',
     notifyOnNetworkStatusChange: true
   });
-  
+
   const [amount, setAmount] = useState('');
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(offer.paymentMethods[0] || null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -75,7 +76,7 @@ export const TradeConfirmScreen: React.FC = () => {
     setBusy(true);
     try { return await fn(); } finally { setBusy(false); setBusyText(''); }
   };
-  
+
   // Refetch bank accounts when screen comes into focus
   useFocusEffect(
     React.useCallback(() => {
@@ -85,7 +86,7 @@ export const TradeConfirmScreen: React.FC = () => {
       }
     }, [refetchBankAccounts, activeAccount?.id])
   );
-  
+
   // Auto-select first configured payment method when data loads
   React.useEffect(() => {
     if (userBankAccountsData?.userBankAccounts && offer.paymentMethods.length > 0) {
@@ -99,11 +100,11 @@ export const TradeConfirmScreen: React.FC = () => {
       }
     }
   }, [userBankAccountsData, offer.paymentMethods]);
-  
+
   // Check if user has configured a specific payment method
   const isPaymentMethodConfigured = (paymentMethod: any) => {
     if (!userBankAccountsData?.userBankAccounts) return false;
-    
+
     return userBankAccountsData.userBankAccounts.some((account: any) => {
       // Check if user has this payment method configured
       if (account.paymentMethod?.id === paymentMethod.id) {
@@ -130,7 +131,7 @@ export const TradeConfirmScreen: React.FC = () => {
       Alert.alert('Error', 'Por favor completa todos los campos');
       return;
     }
-    
+
     const cryptoAmount = parseFloat(amount);
     if (isNaN(cryptoAmount) || cryptoAmount <= 0) {
       Alert.alert('Error', 'Por favor ingresa un monto válido');
@@ -141,10 +142,10 @@ export const TradeConfirmScreen: React.FC = () => {
       'Autoriza esta operación de intercambio'
     );
     if (!bioOk) {
-      Alert.alert('Se requiere biometría', 'Confirma con Face ID / Touch ID o huella para continuar.', [{ text: 'OK' }]);
+      Alert.alert('Se requiere biometría', Platform.OS === 'ios' ? 'Confirma con Face ID o Touch ID para continuar.' : 'Confirma con tu huella digital para continuar.', [{ text: 'OK' }]);
       return;
     }
-    
+
     // Check if user has configured the selected payment method
     if (!isPaymentMethodConfigured(selectedPaymentMethod)) {
       Alert.alert(
@@ -152,16 +153,16 @@ export const TradeConfirmScreen: React.FC = () => {
         `No tienes configurado ${selectedPaymentMethod.displayName || selectedPaymentMethod.name}. ¿Deseas configurarlo ahora?`,
         [
           { text: 'Cancelar', style: 'cancel' },
-          { 
-            text: 'Configurar', 
+          {
+            text: 'Configurar',
             onPress: () => navigation.navigate('BankInfo'),
-            style: 'default' 
+            style: 'default'
           }
         ]
       );
       return;
     }
-    
+
     try {
       // Create the trade in the database
       const { data } = await createP2PTrade({
@@ -194,9 +195,9 @@ export const TradeConfirmScreen: React.FC = () => {
         } catch (e) {
           console.warn('[P2P] Skipping escrow create hook:', e);
         }
-        
+
         // Navigate to TradeChatScreen with the actual trade data
-        navigation.navigate('TradeChat', { 
+        navigation.navigate('TradeChat', {
           offer: offer,
           crypto: crypto,
           amount: amount,
@@ -239,7 +240,7 @@ export const TradeConfirmScreen: React.FC = () => {
     <SafeAreaView style={styles.container}>
       <LoadingOverlay visible={busy} message={busyText || 'Procesando…'} />
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
-      
+
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={handleBack} style={styles.backButton}>
@@ -253,7 +254,7 @@ export const TradeConfirmScreen: React.FC = () => {
         {/* Trade Summary */}
         <View style={styles.summaryCard}>
           <Text style={styles.summaryTitle}>Resumen del intercambio</Text>
-          
+
           <View style={styles.summaryContent}>
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Vas a comprar</Text>
@@ -269,17 +270,17 @@ export const TradeConfirmScreen: React.FC = () => {
                 <Text style={styles.cryptoLabel}>{crypto}</Text>
               </View>
             </View>
-            
+
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Pagarás</Text>
               <Text style={styles.totalAmount}>{calculateTotal()}</Text>
             </View>
-            
+
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Tasa</Text>
               <Text style={styles.summaryValue}>{offer.rate} / {crypto}</Text>
             </View>
-            
+
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Comerciante</Text>
               <View style={styles.traderInfo}>
@@ -288,26 +289,26 @@ export const TradeConfirmScreen: React.FC = () => {
               </View>
             </View>
           </View>
-          
+
           {/* Warning */}
           <View style={styles.warningBox}>
             <Icon name="alert-triangle" size={20} color="#D97706" style={styles.warningIcon} />
             <View style={styles.warningContent}>
               <Text style={styles.warningTitle}>Importante</Text>
               <Text style={styles.warningText}>
-                Solo procede si tienes los fondos listos para el pago inmediato. 
+                Solo procede si tienes los fondos listos para el pago inmediato.
                 Tienes 15 minutos para completar el pago.
               </Text>
             </View>
           </View>
         </View>
-        
+
         {/* Payment Method Selection */}
         <View style={styles.paymentCard}>
           <Text style={styles.paymentTitle}>Método de pago seleccionado</Text>
-          
+
           <View style={styles.paymentSelector}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.paymentDropdown}
               onPress={() => setShowPaymentModal(true)}
             >
@@ -317,13 +318,13 @@ export const TradeConfirmScreen: React.FC = () => {
               <Icon name="chevron-down" size={20} color="#6B7280" />
             </TouchableOpacity>
           </View>
-          
+
           <View style={styles.paymentMethodContainer}>
             <View style={styles.paymentMethodIcon}>
-              <Icon 
-                name={getPaymentMethodIcon(selectedPaymentMethod?.icon, selectedPaymentMethod?.providerType, selectedPaymentMethod?.displayName || selectedPaymentMethod?.name)} 
-                size={20} 
-                color="#fff" 
+              <Icon
+                name={getPaymentMethodIcon(selectedPaymentMethod?.icon, selectedPaymentMethod?.providerType, selectedPaymentMethod?.displayName || selectedPaymentMethod?.name)}
+                size={20}
+                color="#fff"
               />
             </View>
             <View style={styles.paymentMethodInfo}>
@@ -346,8 +347,8 @@ export const TradeConfirmScreen: React.FC = () => {
 
       {/* Action Button */}
       <View style={styles.bottomButtonContainer}>
-        <TouchableOpacity 
-          style={[styles.confirmButton, createTradeLoading && styles.confirmButtonDisabled]} 
+        <TouchableOpacity
+          style={[styles.confirmButton, createTradeLoading && styles.confirmButtonDisabled]}
           onPress={handleConfirmTrade}
           disabled={createTradeLoading}
         >
@@ -365,7 +366,7 @@ export const TradeConfirmScreen: React.FC = () => {
         onRequestClose={() => setShowPaymentModal(false)}
       >
         <View style={styles.modalOverlay}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.modalBackdrop}
             activeOpacity={1}
             onPress={() => setShowPaymentModal(false)}
@@ -393,13 +394,13 @@ export const TradeConfirmScreen: React.FC = () => {
                           `Necesitas configurar ${method.displayName || method.name} antes de poder usarlo.`,
                           [
                             { text: 'Cancelar', style: 'cancel' },
-                            { 
-                              text: 'Configurar ahora', 
+                            {
+                              text: 'Configurar ahora',
                               onPress: () => {
                                 setShowPaymentModal(false);
                                 navigation.navigate('BankInfo');
                               },
-                              style: 'default' 
+                              style: 'default'
                             }
                           ]
                         );
@@ -407,10 +408,10 @@ export const TradeConfirmScreen: React.FC = () => {
                     }}
                   >
                     <View style={[styles.paymentOptionIcon, !isConfigured && styles.paymentOptionIconDisabled]}>
-                      <Icon 
-                        name={getPaymentMethodIcon(method.icon, method.providerType, method.displayName || method.name)} 
-                        size={16} 
-                        color={isConfigured ? "#fff" : "#9CA3AF"} 
+                      <Icon
+                        name={getPaymentMethodIcon(method.icon, method.providerType, method.displayName || method.name)}
+                        size={16}
+                        color={isConfigured ? "#fff" : "#9CA3AF"}
                       />
                     </View>
                     <View style={styles.paymentOptionInfo}>

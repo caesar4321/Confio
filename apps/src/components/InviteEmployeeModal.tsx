@@ -41,7 +41,7 @@ interface RoleDropdownProps {
 const RoleDropdown: React.FC<RoleDropdownProps> = ({ value, options, onSelect, placeholder }) => {
   const [isOpen, setIsOpen] = useState(false);
   const selectedOption = options.find(opt => opt.value === value);
-  
+
   return (
     <>
       <TouchableOpacity
@@ -103,12 +103,12 @@ export const InviteEmployeeModal: React.FC<InviteEmployeeModalProps> = ({
   const [role, setRole] = useState('cashier');
   const [message, setMessage] = useState('');
   const [showCountryPicker, setShowCountryPicker] = useState(false);
-  
+
   const [inviteEmployee, { loading }] = useMutation(INVITE_EMPLOYEE);
-  
+
   // Use the country selection hook
   const { selectedCountry, selectCountry } = useCountrySelection();
-  
+
   // Default to Venezuela if no country selected
   React.useEffect(() => {
     if (!selectedCountry) {
@@ -118,13 +118,13 @@ export const InviteEmployeeModal: React.FC<InviteEmployeeModalProps> = ({
       }
     }
   }, [selectedCountry, selectCountry]);
-  
+
   const roleOptions = [
     { value: 'cashier', label: 'Cajero' },
     { value: 'manager', label: 'Gerente' },
     { value: 'admin', label: 'Administrador' },
   ];
-  
+
   const renderCountryItem = ({ item }: { item: Country }) => (
     <TouchableOpacity
       style={styles.countryItem}
@@ -141,21 +141,21 @@ export const InviteEmployeeModal: React.FC<InviteEmployeeModalProps> = ({
       )}
     </TouchableOpacity>
   );
-  
+
   const handleInvite = async () => {
     const isUsernameMode = mode === 'username';
     if (isUsernameMode) {
       if (!employeeUsername.trim()) {
-        Alert.alert('Error', 'Ingresa el @usuario de Confío del empleado');
+        Alert.alert('Error', 'Ingresa el @usuario de Confío del empleado', [{ text: 'OK' }]);
         return;
       }
     } else {
       if (!phoneNumber) {
-        Alert.alert('Error', 'Por favor ingresa el número de teléfono del empleado');
+        Alert.alert('Error', 'Por favor ingresa el número de teléfono del empleado', [{ text: 'OK' }]);
         return;
       }
     }
-    
+
     try {
       const input: any = {
         employeeName,
@@ -170,7 +170,7 @@ export const InviteEmployeeModal: React.FC<InviteEmployeeModalProps> = ({
       }
 
       const { data } = await inviteEmployee({ variables: { input } });
-      
+
       if (data?.inviteEmployee?.success) {
         Alert.alert(
           'Invitación enviada',
@@ -179,13 +179,13 @@ export const InviteEmployeeModal: React.FC<InviteEmployeeModalProps> = ({
         );
         onClose();
       } else {
-        Alert.alert('Error', data?.inviteEmployee?.errors?.[0] || 'No se pudo enviar la invitación');
+        Alert.alert('Error', data?.inviteEmployee?.errors?.[0] || 'No se pudo enviar la invitación', [{ text: 'OK' }]);
       }
     } catch (error) {
-      Alert.alert('Error', 'Ocurrió un error al enviar la invitación');
+      Alert.alert('Error', 'Ocurrió un error al enviar la invitación', [{ text: 'OK' }]);
     }
   };
-  
+
   return (
     <Modal
       visible={visible}
@@ -198,7 +198,7 @@ export const InviteEmployeeModal: React.FC<InviteEmployeeModalProps> = ({
         style={styles.container}
       >
         <TouchableOpacity style={styles.backdrop} onPress={onClose} />
-        
+
         <View style={styles.content}>
           <View style={styles.header}>
             <Text style={styles.title}>Invitar Empleado</Text>
@@ -206,7 +206,7 @@ export const InviteEmployeeModal: React.FC<InviteEmployeeModalProps> = ({
               <Icon name="x" size={20} color="#666" />
             </TouchableOpacity>
           </View>
-          
+
           <ScrollView style={styles.form}>
             <View style={styles.modeToggle}>
               <TouchableOpacity
@@ -255,7 +255,7 @@ export const InviteEmployeeModal: React.FC<InviteEmployeeModalProps> = ({
                     <Icon name="chevron-down" size={20} color="#6b7280" />
                   </TouchableOpacity>
                 </View>
-                
+
                 <View style={styles.inputGroup}>
                   <Text style={styles.label}>Número de teléfono</Text>
                   <View style={styles.phoneInputContainer}>
@@ -274,7 +274,7 @@ export const InviteEmployeeModal: React.FC<InviteEmployeeModalProps> = ({
                 </View>
               </>
             )}
-            
+
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Nombre (opcional)</Text>
               <TextInput
@@ -285,7 +285,7 @@ export const InviteEmployeeModal: React.FC<InviteEmployeeModalProps> = ({
                 onChangeText={setEmployeeName}
               />
             </View>
-            
+
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Rol</Text>
               <RoleDropdown
@@ -295,7 +295,7 @@ export const InviteEmployeeModal: React.FC<InviteEmployeeModalProps> = ({
                 placeholder="Seleccionar rol"
               />
             </View>
-            
+
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Mensaje (opcional)</Text>
               <TextInput
@@ -308,7 +308,7 @@ export const InviteEmployeeModal: React.FC<InviteEmployeeModalProps> = ({
                 numberOfLines={3}
               />
             </View>
-            
+
             <View style={styles.permissionsInfo}>
               <Icon name="shield" size={18} color="#065f46" />
               <Text style={styles.permissionsText}>
@@ -318,7 +318,7 @@ export const InviteEmployeeModal: React.FC<InviteEmployeeModalProps> = ({
               </Text>
             </View>
           </ScrollView>
-          
+
           <View style={styles.footer}>
             <TouchableOpacity
               style={[styles.button, styles.cancelButton]}
@@ -326,7 +326,7 @@ export const InviteEmployeeModal: React.FC<InviteEmployeeModalProps> = ({
             >
               <Text style={styles.cancelButtonText}>Cancelar</Text>
             </TouchableOpacity>
-            
+
             <TouchableOpacity
               style={[styles.button, styles.inviteButton]}
               onPress={handleInvite}
@@ -339,7 +339,7 @@ export const InviteEmployeeModal: React.FC<InviteEmployeeModalProps> = ({
           </View>
         </View>
       </KeyboardAvoidingView>
-      
+
       {/* Country Selection Modal */}
       <Modal
         visible={showCountryPicker}

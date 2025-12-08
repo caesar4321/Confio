@@ -39,7 +39,7 @@ export const PayrollRecipientModal: React.FC<Props> = ({ visible, onClose, onCha
 
       if (mode === 'phone') {
         if (!phone.trim()) {
-          Alert.alert('Ingresa teléfono', 'Por favor ingresa el número de teléfono del destinatario');
+          Alert.alert('Ingresa teléfono', 'Por favor ingresa el número de teléfono del destinatario', [{ text: 'OK' }]);
           return;
         }
         const fullPhone = `${selectedCountry?.[1] || ''}${phone.replace(/[^0-9]/g, '')}`;
@@ -52,7 +52,7 @@ export const PayrollRecipientModal: React.FC<Props> = ({ visible, onClose, onCha
         identifierDisplay = fullPhone;
       } else {
         if (!username.trim()) {
-          Alert.alert('Ingresa usuario', 'Por favor ingresa el @usuario de Confío');
+          Alert.alert('Ingresa usuario', 'Por favor ingresa el @usuario de Confío', [{ text: 'OK' }]);
           return;
         }
         const handle = username.trim().replace(/^@/, '');
@@ -66,11 +66,11 @@ export const PayrollRecipientModal: React.FC<Props> = ({ visible, onClose, onCha
       }
 
       if (!match || !match.isOnConfio) {
-        Alert.alert('No encontrado', 'No encontramos un usuario de Confío con ese dato.');
+        Alert.alert('No encontrado', 'No encontramos un usuario de Confío con ese dato.', [{ text: 'OK' }]);
         return;
       }
       if (!match.activeAccountId) {
-        Alert.alert('Cuenta faltante', 'El usuario no tiene una cuenta activa seleccionable.');
+        Alert.alert('Cuenta faltante', 'El usuario no tiene una cuenta activa seleccionable.', [{ text: 'OK' }]);
         return;
       }
 
@@ -88,7 +88,7 @@ export const PayrollRecipientModal: React.FC<Props> = ({ visible, onClose, onCha
         setDisplayName('');
         onClose();
       } else {
-        Alert.alert('Error', resCreate.data?.createPayrollRecipient?.errors?.[0] || 'No se pudo guardar');
+        Alert.alert('Error', resCreate.data?.createPayrollRecipient?.errors?.[0] || 'No se pudo guardar', [{ text: 'OK' }]);
       }
     } catch (e) {
       Alert.alert('Error', 'Ocurrió un error al guardar');
@@ -101,12 +101,12 @@ export const PayrollRecipientModal: React.FC<Props> = ({ visible, onClose, onCha
     try {
       const res = await deleteRecipient({ variables: { recipientId: id } });
       if (!res.data?.deletePayrollRecipient?.success) {
-        Alert.alert('Error', res.data?.deletePayrollRecipient?.errors?.[0] || 'No se pudo eliminar');
+        Alert.alert('Error', res.data?.deletePayrollRecipient?.errors?.[0] || 'No se pudo eliminar', [{ text: 'OK' }]);
       } else {
         onChanged?.();
       }
     } catch (e) {
-      Alert.alert('Error', 'Ocurrió un error al eliminar');
+      Alert.alert('Error', 'Ocurrió un error al eliminar', [{ text: 'OK' }]);
     }
   };
 

@@ -214,13 +214,13 @@ export const ReferralRewardClaimScreen: React.FC = () => {
       if (item.type === 'summary') {
         return (
           <View style={styles.summaryCard}>
-            <Text style={styles.summaryLabel}>Listo para reclamar</Text>
+            <Text style={styles.summaryLabel}>Listo para desbloquear</Text>
             <Text style={styles.summaryValue}>
               {item.totalClaimable.toFixed(2)} $CONFIO
             </Text>
             <Text style={styles.summarySubtext}>
               Estas recompensas fueron confirmadas on-chain y ya puedes
-              reclamarlas. Firmaremos una transacción para que las recibas en tu
+              desbloquearlas. Firmaremos una transacción para liberarlas en tu
               billetera Confío.
             </Text>
           </View>
@@ -281,7 +281,7 @@ export const ReferralRewardClaimScreen: React.FC = () => {
                 ) : (
                   <>
                     <Icon name="unlock" size={16} color="#fff" />
-                    <Text style={styles.claimButtonText}>Reclamar</Text>
+                    <Text style={styles.claimButtonText}>Desbloquear</Text>
                   </>
                 )}
               </TouchableOpacity>
@@ -363,13 +363,13 @@ export const ReferralRewardClaimScreen: React.FC = () => {
         if (!eventId) {
           throw new Error('No pudimos encontrar la recompensa para este rol.');
         }
-        setLoadingMessage('Preparando el reclamo...');
+        setLoadingMessage('Desbloqueando...');
         const prepareRes = await prepareClaim({
           variables: { eventId },
         });
         const payload = prepareRes.data?.prepareReferralRewardClaim;
         if (!payload?.success) {
-          throw new Error(payload?.error || 'No pudimos preparar el reclamo.');
+          throw new Error(payload?.error || 'No pudimos preparar la transacción.');
         }
 
         const unsigned = payload.unsignedTransaction;
@@ -395,11 +395,11 @@ export const ReferralRewardClaimScreen: React.FC = () => {
           );
         }
 
-        Alert.alert('¡Listo!', 'Tus $CONFIO fueron reclamados con éxito.');
+        Alert.alert('¡Listo!', 'Tus $CONFIO fueron desbloqueados con éxito.');
         await refetch();
       } catch (err: any) {
         const message =
-          err?.message || 'Ocurrió un error al reclamar la recompensa.';
+          err?.message || 'Ocurrió un error al desbloquear la recompensa.';
         Alert.alert('Ups', message);
       } finally {
         setLoadingMessage('');
@@ -418,7 +418,7 @@ export const ReferralRewardClaimScreen: React.FC = () => {
         <TouchableOpacity onPress={handleBack} style={styles.backButton}>
           <Icon name="arrow-left" size={22} color={colors.textPrimary} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Reclamar $CONFIO</Text>
+        <Text style={styles.headerTitle}>Desbloquear $CONFIO</Text>
         <View style={styles.headerSpacer} />
       </View>
 

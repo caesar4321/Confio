@@ -17,10 +17,10 @@ import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQuery, useMutation } from '@apollo/client';
-import { 
-  GET_USER_BANK_ACCOUNTS, 
-  GET_COUNTRIES, 
-  GET_BANKS, 
+import {
+  GET_USER_BANK_ACCOUNTS,
+  GET_COUNTRIES,
+  GET_BANKS,
   CREATE_BANK_INFO,
   UPDATE_BANK_INFO,
   DELETE_BANK_INFO,
@@ -153,11 +153,11 @@ export const BankInfoScreen = () => {
   const navigation = useNavigation<BankInfoNavigationProp>();
   // No dynamic insets; SafeAreaView handles device padding
   const { activeAccount } = useAccount();
-  
+
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingBankInfo, setEditingBankInfo] = useState<BankAccount | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  
+
   // Check if user is an employee without manage_bank_accounts permission
   const isEmployee = activeAccount?.isEmployee || false;
   const canManageBankAccounts = !isEmployee || activeAccount?.employeePermissions?.manageBankAccounts;
@@ -165,11 +165,11 @@ export const BankInfoScreen = () => {
 
   // GraphQL queries
   // Server determines context from JWT token
-  const { 
-    data: bankAccountsData, 
-    loading: bankAccountsLoading, 
+  const {
+    data: bankAccountsData,
+    loading: bankAccountsLoading,
     error: bankAccountsError,
-    refetch: refetchBankAccounts 
+    refetch: refetchBankAccounts
   } = useQuery(GET_USER_BANK_ACCOUNTS, {
     fetchPolicy: 'cache-and-network'
   });
@@ -209,11 +209,11 @@ export const BankInfoScreen = () => {
         Alert.alert('Éxito', 'Cuenta bancaria marcada como predeterminada');
         refetchBankAccounts();
       } else {
-        Alert.alert('Error', data?.setDefaultBankInfo?.error || 'Error al marcar como predeterminada');
+        Alert.alert('Error', data?.setDefaultBankInfo?.error || 'Error al marcar como predeterminada', [{ text: 'OK' }]);
       }
     } catch (error) {
       console.error('Error setting default bank info:', error);
-      Alert.alert('Error', 'Error de conexión');
+      Alert.alert('Error', 'Error de conexión', [{ text: 'OK' }]);
     }
   };
 
@@ -233,14 +233,14 @@ export const BankInfoScreen = () => {
               });
 
               if (data?.deleteBankInfo?.success) {
-                Alert.alert('Éxito', 'Cuenta bancaria eliminada');
+                Alert.alert('Éxito', 'Cuenta bancaria eliminada', [{ text: 'OK' }]);
                 refetchBankAccounts();
               } else {
-                Alert.alert('Error', data?.deleteBankInfo?.error || 'Error al eliminar');
+                Alert.alert('Error', data?.deleteBankInfo?.error || 'Error al eliminar', [{ text: 'OK' }]);
               }
             } catch (error) {
               console.error('Error deleting bank info:', error);
-              Alert.alert('Error', 'Error de conexión');
+              Alert.alert('Error', 'Error de conexión', [{ text: 'OK' }]);
             }
           }
         }
@@ -264,31 +264,31 @@ export const BankInfoScreen = () => {
     const isBank = bankAccount.paymentMethod?.providerType === 'BANK';
     const isDigitalWallet = bankAccount.paymentMethod?.providerType === 'DIGITAL_WALLET';
     const isMobilePayment = bankAccount.paymentMethod?.providerType === 'MOBILE_PAYMENT';
-    
+
     // Get country flag emoji - check payment method first, then legacy fields
-    let flagEmoji = bankAccount.paymentMethod?.bank?.country?.flagEmoji || 
-                    bankAccount.paymentMethod?.country?.flagEmoji ||  // For non-bank payment methods
-                    bankAccount.country?.flagEmoji;
-                    
+    let flagEmoji = bankAccount.paymentMethod?.bank?.country?.flagEmoji ||
+      bankAccount.paymentMethod?.country?.flagEmoji ||  // For non-bank payment methods
+      bankAccount.country?.flagEmoji;
+
     // Use specific icons for non-bank payment methods if no flag
     if (!flagEmoji) {
       if (isDigitalWallet) flagEmoji = '💳';
       else if (isMobilePayment) flagEmoji = '📱';
       else flagEmoji = '🏦';
     }
-    
+
     // Get bank/payment method name
-    const displayName = bankAccount.fullBankName || 
-                       bankAccount.paymentMethod?.displayName || 
-                       bankAccount.bank?.name || 
-                       'Payment Method';
-    
+    const displayName = bankAccount.fullBankName ||
+      bankAccount.paymentMethod?.displayName ||
+      bankAccount.bank?.name ||
+      'Payment Method';
+
     // Get country name for additional context
-    const countryName = bankAccount.paymentMethod?.bank?.country?.name || 
-                        bankAccount.paymentMethod?.country?.name ||  // For non-bank payment methods
-                        bankAccount.country?.name || 
-                        '';
-    
+    const countryName = bankAccount.paymentMethod?.bank?.country?.name ||
+      bankAccount.paymentMethod?.country?.name ||  // For non-bank payment methods
+      bankAccount.country?.name ||
+      '';
+
     return (
       <View key={bankAccount.id} style={styles.bankCard}>
         <View style={styles.bankCardHeader}>
@@ -305,49 +305,49 @@ export const BankInfoScreen = () => {
                 <View style={styles.defaultBadge}>
                   <Text style={styles.defaultText}>Predeterminada</Text>
                 </View>
+              )}
+            </View>
+            <Text style={styles.accountHolder}>{bankAccount.accountHolderName}</Text>
+            <Text style={styles.accountDetails}>
+              {bankAccount.summaryText}
+            </Text>
+            {bankAccount.identificationNumber && (
+              <Text style={styles.identificationText}>
+                {bankAccount.identificationLabel}: {bankAccount.identificationNumber}
+              </Text>
             )}
           </View>
-          <Text style={styles.accountHolder}>{bankAccount.accountHolderName}</Text>
-          <Text style={styles.accountDetails}>
-            {bankAccount.summaryText}
-          </Text>
-          {bankAccount.identificationNumber && (
-            <Text style={styles.identificationText}>
-              {bankAccount.identificationLabel}: {bankAccount.identificationNumber}
-            </Text>
-          )}
-        </View>
-        <View style={styles.bankActions}>
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={() => handleEdit(bankAccount)}
-          >
-            <Icon name="edit-2" size={16} color={colors.accent} />
-          </TouchableOpacity>
-          {!bankAccount.isDefault && (
+          <View style={styles.bankActions}>
             <TouchableOpacity
               style={styles.actionButton}
-              onPress={() => handleSetDefault(bankAccount.id)}
+              onPress={() => handleEdit(bankAccount)}
             >
-              <Icon name="star" size={16} color={colors.warning} />
+              <Icon name="edit-2" size={16} color={colors.accent} />
             </TouchableOpacity>
-          )}
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={() => handleDelete(bankAccount.id, displayName)}
-          >
-            <Icon name="trash-2" size={16} color={colors.error} />
-          </TouchableOpacity>
+            {!bankAccount.isDefault && (
+              <TouchableOpacity
+                style={styles.actionButton}
+                onPress={() => handleSetDefault(bankAccount.id)}
+              >
+                <Icon name="star" size={16} color={colors.warning} />
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={() => handleDelete(bankAccount.id, displayName)}
+            >
+              <Icon name="trash-2" size={16} color={colors.error} />
+            </TouchableOpacity>
+          </View>
         </View>
+
+        {bankAccount.isVerified && (
+          <View style={styles.verifiedBadge}>
+            <Icon name="check-circle" size={14} color={colors.success} />
+            <Text style={styles.verifiedText}>Cuenta Verificada</Text>
+          </View>
+        )}
       </View>
-      
-      {bankAccount.isVerified && (
-        <View style={styles.verifiedBadge}>
-          <Icon name="check-circle" size={14} color={colors.success} />
-          <Text style={styles.verifiedText}>Cuenta Verificada</Text>
-        </View>
-      )}
-    </View>
     );
   };
 
@@ -379,7 +379,7 @@ export const BankInfoScreen = () => {
             <View style={{ width: 40 }} />
           </View>
         </View>
-        
+
         <View style={styles.permissionDeniedContainer}>
           <Icon name="lock" size={64} color={colors.text.light} />
           <Text style={styles.permissionDeniedTitle}>Información del Negocio</Text>

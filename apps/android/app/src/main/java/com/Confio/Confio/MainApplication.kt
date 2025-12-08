@@ -33,6 +33,7 @@ import com.rt2zz.reactnativecontacts.ReactNativeContacts
 import com.learnium.RNDeviceInfo.RNDeviceInfo
 import com.Confio.Confio.MediaPickerPackage
 import com.proyecto26.inappbrowser.RNInAppBrowserPackage
+import com.reactlibrary.RNInstallReferrerPackage
 
 class MainApplication : Application(), ReactApplication {
 
@@ -64,7 +65,8 @@ class MainApplication : Application(), ReactApplication {
             ReactNativeContacts(),
             RNDeviceInfo(),
             MediaPickerPackage(),
-            RNInAppBrowserPackage()
+            RNInAppBrowserPackage(),
+            RNInstallReferrerPackage()
           )
         }
 

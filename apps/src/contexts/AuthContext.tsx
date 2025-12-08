@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, RefObject, useRef } from 'react';
-import { Alert, AppState } from 'react-native';
+import { Alert, AppState, Platform } from 'react-native';
 import { AuthService } from '../services/authService';
 import { NavigationContainerRef } from '@react-navigation/native';
 import { RootStackParamList } from '../types/navigation';
@@ -469,7 +469,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
               if (!ok) {
                 Alert.alert(
                   'Confirma con biometría',
-                  'Usa Face ID / Touch ID o huella para continuar.'
+                  Platform.OS === 'ios' ? 'Usa Face ID o Touch ID para continuar.' : 'Usa tu huella digital para continuar.'
                 );
                 setIsAuthenticated(false);
                 setProfileData(null);
@@ -519,7 +519,8 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       if (!enabledNow) {
         Alert.alert(
           'Activa tu biometría',
-          'Necesitamos Face ID / Touch ID o huella para proteger tus operaciones críticas (envíos, pagos, retiros).'
+          Platform.OS === 'ios' ? 'Necesitamos Face ID o Touch ID para proteger tus operaciones críticas (envíos, pagos, retiros).' : 'Necesitamos tu huella digital para proteger tus operaciones críticas (envíos, pagos, retiros).',
+          [{ text: 'OK' }]
         );
         return { ok: false, alreadyEnabled: false, didAuthenticate: false };
       }
@@ -530,7 +531,8 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       console.error('[AuthContext] Failed to enforce biometric enrollment:', error);
       Alert.alert(
         'Activa tu biometría',
-        'No pudimos activar la biometría. Inténtalo nuevamente.'
+        'No pudimos activar la biometría. Inténtalo nuevamente.',
+        [{ text: 'OK' }]
       );
       return { ok: false, alreadyEnabled: false, didAuthenticate: false };
     }
@@ -615,7 +617,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   const completeBiometricAndEnter = async (source: 'login' | 'phoneVerification' = 'login'): Promise<boolean> => {
     const supported = await biometricAuthService.isSupported();
     if (!supported) {
-      Alert.alert('Biometría no disponible', 'Este dispositivo no tiene biometría disponible para proteger tu cuenta.');
+      Alert.alert('Biometría no disponible', 'Este dispositivo no tiene biometría disponible para proteger tu cuenta.', [{ text: 'OK' }]);
       return false;
     }
 
@@ -633,7 +635,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
         true
       );
     if (!authOk) {
-      Alert.alert('Biometría requerida', 'Confirma con Face ID / Touch ID o huella para continuar.');
+      Alert.alert('Biometría requerida', Platform.OS === 'ios' ? 'Confirma con Face ID o Touch ID para continuar.' : 'Confirma con tu huella digital para continuar.', [{ text: 'OK' }]);
       return false;
     }
 
@@ -799,7 +801,8 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
             if (!biometricOk) {
               Alert.alert(
                 'Confirma con biometría',
-                'Usa Face ID / Touch ID o huella para continuar de forma segura.'
+                Platform.OS === 'ios' ? 'Usa Face ID o Touch ID para continuar.' : 'Usa tu huella digital para continuar.',
+                [{ text: 'OK' }]
               );
               setIsAuthenticated(false);
               navigateToScreen('Auth');

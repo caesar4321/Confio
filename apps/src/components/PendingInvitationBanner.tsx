@@ -15,16 +15,16 @@ export const PendingInvitationBanner = () => {
   const { data, loading, refetch } = useQuery(GET_MY_INVITATIONS, {
     fetchPolicy: 'cache-and-network',
   });
-  
+
   const [acceptInvitation] = useMutation(ACCEPT_INVITATION);
   const { refreshAccounts } = useAccount();
-  
+
   const invitations = data?.myInvitations || [];
-  
+
   if (loading || invitations.length === 0) {
     return null;
   }
-  
+
   const handleAccept = async (invitation: any) => {
     try {
       const { data } = await acceptInvitation({
@@ -32,7 +32,7 @@ export const PendingInvitationBanner = () => {
           invitationCode: invitation.invitationCode,
         },
       });
-      
+
       if (data?.acceptInvitation?.success) {
         Alert.alert(
           '¡Éxito!',
@@ -50,14 +50,15 @@ export const PendingInvitationBanner = () => {
       } else {
         Alert.alert(
           'Error',
-          data?.acceptInvitation?.errors?.[0] || 'No se pudo aceptar la invitación'
+          data?.acceptInvitation?.errors?.[0] || 'No se pudo aceptar la invitación',
+          [{ text: 'OK' }]
         );
       }
     } catch (error) {
-      Alert.alert('Error', 'Ocurrió un error al aceptar la invitación');
+      Alert.alert('Error', 'Ocurrió un error al aceptar la invitación', [{ text: 'OK' }]);
     }
   };
-  
+
   const getRoleLabel = (role: string) => {
     const roleLabels: { [key: string]: string } = {
       cashier: 'Cajero',
@@ -66,16 +67,16 @@ export const PendingInvitationBanner = () => {
     };
     return roleLabels[role] || role;
   };
-  
+
   // Show only the first invitation as a banner
   const invitation = invitations[0];
-  
+
   return (
     <View style={styles.container}>
       <View style={styles.iconContainer}>
         <Icon name="mail" size={20} color="#fff" />
       </View>
-      
+
       <View style={styles.content}>
         <Text style={styles.title}>Invitación pendiente</Text>
         <Text style={styles.subtitle}>
@@ -87,7 +88,7 @@ export const PendingInvitationBanner = () => {
           </Text>
         )}
       </View>
-      
+
       <View style={styles.actions}>
         <TouchableOpacity
           style={styles.acceptButton}
@@ -95,7 +96,7 @@ export const PendingInvitationBanner = () => {
         >
           <Icon name="check" size={16} color="#fff" />
         </TouchableOpacity>
-        
+
         {invitations.length > 1 && (
           <View style={styles.badge}>
             <Text style={styles.badgeText}>+{invitations.length - 1}</Text>

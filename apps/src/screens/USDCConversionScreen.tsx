@@ -78,16 +78,16 @@ export const USDCConversionScreen = () => {
   const [conversionDirection, setConversionDirection] = useState<'usdc_to_cusd' | 'cusd_to_usdc'>('usdc_to_cusd');
   const [isProcessing, setIsProcessing] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
-  
+
   // USDC opt-in mutation
   const [optInToUsdc] = useMutation(OPT_IN_TO_USDC);
-  
+
   // Query to check opt-in status  
   const { refetch: refetchOptIns } = useQuery(CHECK_ASSET_OPT_INS);
-  
+
   // Animation for loading spinner
   const spinValue = useRef(new Animated.Value(0)).current;
-  
+
   useEffect(() => {
     if (loadingMessage) {
       // Start spinning animation when loading
@@ -104,7 +104,7 @@ export const USDCConversionScreen = () => {
       spinValue.setValue(0);
     }
   }, [loadingMessage]);
-  
+
   const spin = spinValue.interpolate({
     inputRange: [0, 1],
     outputRange: ['0deg', '360deg'],
@@ -117,7 +117,7 @@ export const USDCConversionScreen = () => {
     variables: { tokenType: 'cUSD' },
     pollInterval: 30000, // Poll every 30 seconds
   });
-  
+
   const { data: usdcBalanceData, loading: usdcLoading, refetch: refetchUsdc } = useQuery(GET_ACCOUNT_BALANCE, {
     variables: { tokenType: 'USDC' },
     pollInterval: 30000, // Poll every 30 seconds
@@ -126,7 +126,7 @@ export const USDCConversionScreen = () => {
   // Parse balances from GraphQL data
   const usdcBalance = parseFloat(usdcBalanceData?.accountBalance || '0');
   const cusdBalance = parseFloat(cusdBalanceData?.accountBalance || '0');
-  
+
   // Loading state for balances
   const balancesLoading = cusdLoading || usdcLoading;
 
@@ -137,14 +137,14 @@ export const USDCConversionScreen = () => {
   const handleAmountChange = (value: string) => {
     // Allow only numbers and decimal point
     const numericValue = value.replace(/[^0-9.]/g, '');
-    
+
     // Prevent multiple decimal points
     const parts = numericValue.split('.');
     if (parts.length > 2) return;
-    
+
     // Limit to 2 decimal places
     if (parts[1] && parts[1].length > 2) return;
-    
+
     setAmount(numericValue);
   };
 
@@ -153,7 +153,7 @@ export const USDCConversionScreen = () => {
   };
 
   const switchDirection = () => {
-    setConversionDirection(prev => 
+    setConversionDirection(prev =>
       prev === 'usdc_to_cusd' ? 'cusd_to_usdc' : 'usdc_to_cusd'
     );
     setAmount('');
@@ -162,11 +162,11 @@ export const USDCConversionScreen = () => {
   const validateAmount = () => {
     const numAmount = parseFloat(amount);
     if (isNaN(numAmount) || numAmount <= 0) {
-      Alert.alert('Monto inválido', 'Por favor ingresa un monto válido');
+      Alert.alert('Monto inválido', 'Por favor ingresa un monto válido', [{ text: 'OK' }]);
       return false;
     }
     if (numAmount > sourceBalance) {
-      Alert.alert('Saldo insuficiente', `No tienes suficiente ${sourceCurrency} para esta conversión`);
+      Alert.alert('Saldo insuficiente', `No tienes suficiente ${sourceCurrency} para esta conversión`, [{ text: 'OK' }]);
       return false;
     }
     return true;
@@ -179,34 +179,34 @@ export const USDCConversionScreen = () => {
     try {
       setLoadingMessage('Configurando acceso a USDC...');
       console.log('[USDCConversionScreen] Calling optInToAsset mutation for USDC...');
-      
+
       const { data, errors } = await optInToUsdc({
         variables: { assetType: 'USDC' }
       });
-      
+
       if (errors) {
         console.error('[USDCConversionScreen] GraphQL errors:', errors);
         return false;
       }
-      
+
       console.log('[USDCConversionScreen] USDC opt-in mutation response:', data);
-      
+
       if (data?.optInToAssetByType?.alreadyOptedIn) {
         console.log('[USDCConversionScreen] User already opted in to USDC');
         await refetchOptIns();
         return true;
       }
-      
+
       if (data?.optInToAssetByType?.success && data.optInToAssetByType.requiresUserSignature) {
         const userTxn = data.optInToAssetByType.userTransaction;
         const sponsorTxn = data.optInToAssetByType.sponsorTransaction;
-        
+
         console.log('[USDCConversionScreen] Signing and submitting USDC opt-in...');
         const txId = await algorandService.signAndSubmitSponsoredTransaction(
           userTxn,
           sponsorTxn
         );
-        
+
         if (txId) {
           console.log('[USDCConversionScreen] Successfully opted in to USDC:', txId);
           await refetchOptIns();
@@ -274,7 +274,7 @@ export const USDCConversionScreen = () => {
       'Autoriza esta conversión (operación crítica)'
     );
     if (!bioOk) {
-      Alert.alert('Se requiere biometría', 'Confirma con Face ID / Touch ID o huella para convertir.', [{ text: 'OK' }]);
+      Alert.alert('Se requiere biometría', Platform.OS === 'ios' ? 'Confirma con Face ID o Touch ID para convertir.' : 'Confirma con tu huella digital para convertir.', [{ text: 'OK' }]);
       return;
     }
 
@@ -287,7 +287,7 @@ export const USDCConversionScreen = () => {
       let pack: any;
       let retryCount = 0;
       const maxRetries = 2; // Allow for both cUSD app opt-in and USDC asset opt-in
-      
+
       while (retryCount <= maxRetries) {
         try {
           pack = await ws.prepare({ direction: conversionDirection, amount: amount });
@@ -295,7 +295,7 @@ export const USDCConversionScreen = () => {
         } catch (e: any) {
           const errorMessage = String(e?.message);
           console.log('[USDCConversionScreen] Conversion prepare error:', errorMessage);
-          
+
           if (errorMessage === 'requires_app_optin') {
             // Handle cUSD app opt-in
             try {
@@ -311,7 +311,7 @@ export const USDCConversionScreen = () => {
               const optInResult = await cusdAppOptInService.handleAppOptIn(activeAccount);
               if (!optInResult.success) {
                 setLoadingMessage('');
-                Alert.alert('Error', optInResult.error || 'No se pudo completar la configuración inicial');
+                Alert.alert('Error', optInResult.error || 'No se pudo completar la configuración inicial', [{ text: 'OK' }]);
                 return;
               }
               retryCount++;
@@ -320,7 +320,7 @@ export const USDCConversionScreen = () => {
             } catch (err) {
               setLoadingMessage('');
               console.error('[USDCConversionScreen] App opt-in error', err);
-              Alert.alert('Error', 'No se pudo completar la configuración inicial');
+              Alert.alert('Error', 'No se pudo completar la configuración inicial', [{ text: 'OK' }]);
               return;
             }
           } else if (errorMessage.includes('not opted') || errorMessage.includes('USDC') || errorMessage.includes('asset') || errorMessage.includes('Please opt-in to USDC and cUSD assets first')) {
@@ -346,15 +346,15 @@ export const USDCConversionScreen = () => {
           } else {
             // Other errors - show the original error
             setLoadingMessage('');
-            Alert.alert('Error', String(e?.message || 'No se pudo preparar la conversión'));
+            Alert.alert('Error', String(e?.message || 'No se pudo preparar la conversión'), [{ text: 'OK' }]);
             return;
           }
         }
       }
-      
+
       if (!pack) {
         setLoadingMessage('');
-        Alert.alert('Error', 'No se pudo preparar la conversión después de varios intentos');
+        Alert.alert('Error', 'No se pudo preparar la conversión después de varios intentos', [{ text: 'OK' }]);
         return;
       }
 
@@ -369,7 +369,7 @@ export const USDCConversionScreen = () => {
           const aud = oauthData.provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
           await secureDeterministicWallet.createOrRestoreWallet(iss, oauthData.subject, aud, oauthData.provider, activeAccount?.type || 'personal', activeAccount?.index || 0, activeAccount?.id?.startsWith('business_') ? (activeAccount.id.split('_')[1] || undefined) : undefined);
         }
-      } catch {}
+      } catch { }
 
       // Sign and submit group
       setLoadingMessage('Firmando transacción...');
@@ -390,17 +390,17 @@ export const USDCConversionScreen = () => {
     } catch (error: any) {
       console.error('[USDCConversionScreen] Conversion error:', error);
       const errorMessage = String(error?.message || error);
-      
+
       // Handle opt-in related errors gracefully without showing alerts
-      if (errorMessage.includes('not opted') || 
-          errorMessage.includes('opt-in') || 
-          errorMessage.includes('Please opt-in to USDC and cUSD assets first') ||
-          errorMessage.includes('requires_app_optin')) {
+      if (errorMessage.includes('not opted') ||
+        errorMessage.includes('opt-in') ||
+        errorMessage.includes('Please opt-in to USDC and cUSD assets first') ||
+        errorMessage.includes('requires_app_optin')) {
         console.log('[USDCConversionScreen] Conversion failed due to opt-in issue - handled gracefully');
         // Don't show error alert for opt-in issues - they should be handled automatically
       } else {
         // Show error only for non-opt-in related issues
-        Alert.alert('Error', 'No se pudo completar la conversión. Por favor intenta de nuevo.');
+        Alert.alert('Error', 'No se pudo completar la conversión. Por favor intenta de nuevo.', [{ text: 'OK' }]);
       }
     } finally {
       setIsProcessing(false);
@@ -419,7 +419,7 @@ export const USDCConversionScreen = () => {
         isLight={true}
         showBackButton={true}
       />
-      
+
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.content}
@@ -543,7 +543,7 @@ export const USDCConversionScreen = () => {
           </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
-      
+
       {/* Loading Modal */}
       <Modal
         visible={!!loadingMessage}
@@ -560,10 +560,10 @@ export const USDCConversionScreen = () => {
                 style={styles.loadingLogo}
               />
             </Animated.View>
-            
+
             {/* Loading Message */}
             <Text style={styles.loadingText}>{loadingMessage}</Text>
-            
+
             {/* Progress Dots Animation */}
             <View style={styles.dotsContainer}>
               <View style={[styles.dot, { backgroundColor: colors.accent }]} />

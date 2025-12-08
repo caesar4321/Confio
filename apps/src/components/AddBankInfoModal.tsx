@@ -304,35 +304,35 @@ export const AddBankInfoModal = ({
 
   const validateForm = () => {
     if (!selectedPaymentMethod) {
-      Alert.alert('Error', 'Por favor selecciona un método de pago');
+      Alert.alert('Error', 'Por favor selecciona un método de pago', [{ text: 'OK' }]);
       return false;
     }
 
 
     if (!formData.accountHolderName.trim()) {
-      Alert.alert('Error', 'Por favor ingresa el nombre del titular');
+      Alert.alert('Error', 'Por favor ingresa el nombre del titular', [{ text: 'OK' }]);
       return false;
     }
 
     // Validate required fields based on payment method
     if (selectedPaymentMethod.requiresAccountNumber && !formData.accountNumber.trim()) {
-      Alert.alert('Error', 'Por favor ingresa el número de cuenta');
+      Alert.alert('Error', 'Por favor ingresa el número de cuenta', [{ text: 'OK' }]);
       return false;
     }
 
     if (selectedPaymentMethod.requiresPhone && !formData.phoneNumber.trim()) {
-      Alert.alert('Error', 'Por favor ingresa el número de teléfono');
+      Alert.alert('Error', 'Por favor ingresa el número de teléfono', [{ text: 'OK' }]);
       return false;
     }
 
     if (selectedPaymentMethod.requiresEmail && !formData.email.trim()) {
-      Alert.alert('Error', 'Por favor ingresa el email');
+      Alert.alert('Error', 'Por favor ingresa el email', [{ text: 'OK' }]);
       return false;
     }
 
     // For bank payments, validate ID requirements
     if (selectedPaymentMethod.bank?.country?.requiresIdentification && !formData.identificationNumber.trim()) {
-      Alert.alert('Error', `Por favor ingresa tu ${selectedPaymentMethod.bank.country.identificationName}`);
+      Alert.alert('Error', `Por favor ingresa tu ${selectedPaymentMethod.bank.country.identificationName}`, [{ text: 'OK' }]);
       return false;
     }
 
@@ -414,11 +414,11 @@ export const AddBankInfoModal = ({
           [{ text: 'OK', onPress: onSuccess }]
         );
       } else {
-        Alert.alert('Error', data?.error || 'Error al guardar el método de pago');
+        Alert.alert('Error', data?.error || 'Error al guardar el método de pago', [{ text: 'OK' }]);
       }
     } catch (error) {
       console.error('Error submitting payment method:', error);
-      Alert.alert('Error', 'Error de conexión');
+      Alert.alert('Error', 'Error de conexión', [{ text: 'OK' }]);
     } finally {
       setIsSubmitting(false);
     }

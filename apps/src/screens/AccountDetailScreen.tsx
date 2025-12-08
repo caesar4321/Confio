@@ -33,7 +33,7 @@ import USDCLogo from '../assets/png/USDC.png';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useQuery, useMutation } from '@apollo/client';
 import { GET_UNIFIED_TRANSACTIONS, GET_CURRENT_ACCOUNT_TRANSACTIONS, GET_PRESALE_STATUS, GET_ACCOUNT_BALANCE, GET_MY_BALANCES } from '../apollo/queries';
-import { REFRESH_ACCOUNT_BALANCE } from '../apollo/mutations';
+import { REFRESH_ACCOUNT_BALANCE, SET_REFERRER } from '../apollo/mutations';
 // import { CONVERT_USDC_TO_CUSD, CONVERT_CUSD_TO_USDC } from '../apollo/mutations'; // Removed - handled in USDCConversion screen
 import { TransactionItemSkeleton } from '../components/SkeletonLoader';
 import moment from 'moment';
@@ -43,6 +43,7 @@ import * as Keychain from 'react-native-keychain';
 import { useContactNameSync } from '../hooks/useContactName';
 import { TransactionFilterModal, TransactionFilters } from '../components/TransactionFilterModal';
 import { useAuth } from '../contexts/AuthContext';
+import { deepLinkHandler } from '../utils/deepLinkHandler';
 
 // Color palette
 const colors = {
@@ -96,6 +97,10 @@ interface Transaction {
   secondaryCurrency?: string;
   p2pTradeId?: string;
   isRewardPayout?: boolean;
+  toUsername?: string;
+  payrollRunId?: string;
+  runId?: string;
+  transactionHash?: string;
 }
 
 // Set Spanish locale for moment
@@ -163,6 +168,52 @@ export const AccountDetailScreen = () => {
   const [showHelpModal, setShowHelpModal] = useState(false);
   const [showMoreOptionsModal, setShowMoreOptionsModal] = useState(false);
   const [showFilterModal, setShowFilterModal] = useState(false);
+
+  // Pending referral state (Virtual Balance)
+  const [deferredReferral, setDeferredReferral] = useState<string | null>(null);
+
+  // Check for deferred referral link on mount
+  useEffect(() => {
+    const checkDeferred = async () => {
+      // Only proceed if authenticated and data is loaded
+      if (!isAuthenticated || authLoading) return;
+
+      const link = await deepLinkHandler.getDeferredLink();
+      if (link && link.type === 'referral') {
+        console.log('Found deferred referral:', link.payload);
+        setDeferredReferral(link.payload);
+
+        // Submit to backend
+        try {
+          const { data } = await setReferrerMutation({
+            variables: { referrerIdentifier: link.payload }
+          });
+
+          console.log('Referral submission result:', data);
+
+          if (data?.setReferrer?.success) {
+            // Clear deferred link on success
+            await deepLinkHandler.clearDeferredLink();
+
+            // Refetch balances to show locked reward immediately
+            refetchBalances();
+
+            // Optional: alert user? Or just silently succeed as per design "seamless"
+            // Alert.alert("¡Referido aplicado!", "Has recibido una recompensa por referidos.");
+          } else {
+            console.log('Referral submission returned failure or already claimed:', data?.setReferrer?.error);
+            // If already claimed, maybe clear it too?
+            if (data?.setReferrer?.message?.includes('already')) {
+              await deepLinkHandler.clearDeferredLink();
+            }
+          }
+        } catch (err) {
+          console.error('Failed to submit deferred referral:', err);
+        }
+      }
+    };
+    checkDeferred();
+  }, [isAuthenticated, authLoading]);
   // const [showExchangeModal, setShowExchangeModal] = useState(false); // Removed - using USDCConversion screen directly
   // const [exchangeAmount, setExchangeAmount] = useState(''); // Removed - handled in USDCConversion screen
   // const [conversionDirection, setConversionDirection] = useState<'usdc_to_cusd' | 'cusd_to_usdc'>('usdc_to_cusd'); // Removed - handled in USDCConversion screen
@@ -246,18 +297,23 @@ export const AccountDetailScreen = () => {
 
   // Use real-time balance if available, otherwise fallback to route params
   const confioLive = React.useMemo(() => parseFloat(balancesData?.myBalances?.confio || '0'), [balancesData?.myBalances?.confio]);
-  const confioLocked = React.useMemo(() => (isConfio ? parseFloat(balancesData?.myBalances?.confioPresaleLocked || '0') : 0), [balancesData?.myBalances?.confioPresaleLocked, isConfio]);
+  const confioLocked = React.useMemo(() => (isConfio ? parseFloat(balancesData?.myBalances?.confioLocked || balancesData?.myBalances?.confioPresaleLocked || '0') : 0), [balancesData?.myBalances?.confioLocked, balancesData?.myBalances?.confioPresaleLocked, isConfio]);
   const cusdLive = React.useMemo(() => parseFloat(balancesData?.myBalances?.cusd || '0'), [balancesData?.myBalances?.cusd]);
+
+  // Virtual locked amount from deferred referral (50 CONFIO = $5 USD)
+  const virtualLocked = (isConfio && deferredReferral) ? 50 : 0;
+
   const currentBalance = React.useMemo(() => {
     if (isCusd) {
       const v = cusdLive;
       if (!isFinite(v)) return route.params.accountBalance;
       return v.toFixed(2);
     }
-    const v = confioLive + confioLocked;
+    // Include virtual locked balance
+    const v = confioLive + confioLocked + virtualLocked;
     if (!isFinite(v)) return route.params.accountBalance;
     return v.toFixed(2);
-  }, [isCusd, cusdLive, confioLive, confioLocked, route.params.accountBalance]);
+  }, [isCusd, cusdLive, confioLive, confioLocked, virtualLocked, route.params.accountBalance]);
 
   // Account data from navigation params
   const accountAddress = route.params.accountAddress || '';
@@ -384,6 +440,7 @@ export const AccountDetailScreen = () => {
 
   // Refresh balance mutation for force-refreshing from blockchain
   const [refreshBalanceMutation] = useMutation(REFRESH_ACCOUNT_BALANCE);
+  const [setReferrerMutation] = useMutation(SET_REFERRER);
 
   // Conversion mutations
   // const [convertUsdcToCusd] = useMutation(CONVERT_USDC_TO_CUSD); // Removed - handled in USDCConversion screen
@@ -450,14 +507,7 @@ export const AccountDetailScreen = () => {
     }).start();
   }, [showSearch, searchAnim]);
 
-  // Listen for refresh trigger from navigation params
-  useEffect(() => {
-    // @ts-ignore - route params type
-    if (route.params?.refreshTimestamp) {
-      console.log('AccountDetailScreen - Refresh triggered from navigation');
-      onRefresh();
-    }
-  }, [route.params, onRefresh]);
+
 
   // Pull to refresh handler
   const onRefresh = useCallback(async () => {
@@ -506,7 +556,17 @@ export const AccountDetailScreen = () => {
     } finally {
       setRefreshing(false);
     }
+
   }, [refetchUnified, refetchBalances, activeAccount, route.params.accountType, canQueryTransactions, shouldFetchUSDC, refetchUSDC]);
+
+  // Listen for refresh trigger from navigation params
+  useEffect(() => {
+    // @ts-ignore - route params type
+    if (route.params?.refreshTimestamp) {
+      console.log('AccountDetailScreen - Refresh triggered from navigation');
+      onRefresh();
+    }
+  }, [route.params, onRefresh]);
 
   // NEW: Transform unified transactions into the format expected by the UI
   const formatUnifiedTransactions = () => {
@@ -1458,7 +1518,7 @@ export const AccountDetailScreen = () => {
       setIsProcessingConversion(false);
     }
   };
-  
+   
   const toggleConversionDirection = useCallback(() => {
     setConversionDirection(prev => 
       prev === 'usdc_to_cusd' ? 'cusd_to_usdc' : 'usdc_to_cusd'
@@ -1705,7 +1765,7 @@ export const AccountDetailScreen = () => {
         </View>
 
         {/* Show locked status for CONFIO tokens - only if balance > 0 */}
-        {route.params.accountType === 'confio' && canViewBalance && showBalance && parseFloat(account.balance) > 0 && (
+        {route.params.accountType === 'confio' && canViewBalance && showBalance && (parseFloat(account.balance) > 0 || confioLocked > 0) && (
           <View style={styles.lockedStatusContainer}>
             <View style={styles.lockedStatusRow}>
               <Icon name="lock" size={14} color="#fbbf24" />

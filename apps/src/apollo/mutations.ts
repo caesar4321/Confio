@@ -774,12 +774,24 @@ export const COMPLETE_BUSINESS_OPT_IN = gql`
   }
 `;
 
+
 export const JOIN_PRESALE_WAITLIST = gql`
   mutation JoinPresaleWaitlist {
     joinPresaleWaitlist {
       success
       message
       alreadyJoined
+    }
+  }
+`;
+
+export const SET_REFERRER = gql`
+  mutation SetReferrer($referrerIdentifier: String!) {
+    setReferrer(referrerIdentifier: $referrerIdentifier) {
+      success
+      error
+      referralType
+      message
     }
   }
 `;

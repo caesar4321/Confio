@@ -45,7 +45,7 @@ class MessagingService {
   async initialize(forceTokenRefresh: boolean = false) {
     try {
       console.log(`[MessagingService] Initializing with forceTokenRefresh=${forceTokenRefresh}`);
-      
+
       // Check current permission status
       const authStatus = await messaging().hasPermission();
       const enabled =
@@ -92,11 +92,11 @@ class MessagingService {
     try {
       // Try to get stored device ID from keychain
       const credentials = await Keychain.getInternetCredentials(DEVICE_ID_SERVICE);
-      
+
       if (credentials && credentials.password) {
         return credentials.password;
       }
-      
+
       // Generate new device ID
       const deviceId = await DeviceInfo.getUniqueId();
       await Keychain.setInternetCredentials(
@@ -104,7 +104,7 @@ class MessagingService {
         'device_id',
         deviceId
       );
-      
+
       return deviceId;
     } catch (error) {
       console.error('Error getting device ID:', error);
@@ -131,12 +131,12 @@ class MessagingService {
       } catch (e) {
         // No stored token
       }
-      
+
       // For iOS, we need to register for remote notifications first
       if (Platform.OS === 'ios') {
         await messaging().registerDeviceForRemoteMessages();
       }
-      
+
       // Get APNs token for iOS (required for Firebase to work)
       if (Platform.OS === 'ios') {
         const apnsToken = await messaging().getAPNSToken();
@@ -144,10 +144,10 @@ class MessagingService {
           console.log('Failed to get APNs token - notifications may not work');
         }
       }
-      
+
       // Get current token from Firebase
       const currentToken = await messaging().getToken();
-      
+
       // If token changed or new token, register it
       if (currentToken && currentToken !== storedToken) {
         await this.registerToken(currentToken);
@@ -158,7 +158,7 @@ class MessagingService {
         );
         this.fcmToken = currentToken;
       }
-      
+
       return currentToken;
     } catch (error) {
       console.error('Error getting FCM token:', error);
@@ -175,7 +175,7 @@ class MessagingService {
 
       const deviceName = await DeviceInfo.getDeviceName();
       const appVersion = DeviceInfo.getVersion();
-      
+
       await apolloClient.mutate({
         mutation: REGISTER_FCM_TOKEN,
         variables: {
@@ -186,7 +186,7 @@ class MessagingService {
           appVersion,
         },
       });
-      
+
       console.log('FCM token registered successfully');
     } catch (error) {
       console.error('Error registering FCM token:', error);
@@ -205,10 +205,10 @@ class MessagingService {
           deviceId: this.deviceId,
         },
       });
-      
+
       await Keychain.resetInternetCredentials({ server: FCM_TOKEN_SERVICE });
       this.fcmToken = null;
-      
+
       console.log('FCM token unregistered successfully');
     } catch (error) {
       console.error('Error unregistering FCM token:', error);
@@ -218,7 +218,7 @@ class MessagingService {
   async ensureTokenRegisteredForCurrentUser() {
     try {
       console.log('[MessagingService] Ensuring token is registered for current user...');
-      
+
       // Check if we have permission
       const authStatus = await messaging().hasPermission();
       const enabled =
@@ -245,7 +245,7 @@ class MessagingService {
       // Register the token for the current user
       console.log('[MessagingService] Registering FCM token for current user...');
       await this.registerToken(currentToken);
-      
+
       // Store the token locally
       this.fcmToken = currentToken;
       await Keychain.setInternetCredentials(
@@ -264,10 +264,10 @@ class MessagingService {
 
   private setupMessageHandlers() {
     console.log(`[${this.instanceId}] Setting up message handlers`);
-    
+
     // Always clean up previous handlers first
     this.cleanup();
-    
+
     // Check if another instance already has handlers set up
     if (typeof window !== 'undefined' && (window as any).__activeMessagingInstance) {
       const activeInstance = (window as any).__activeMessagingInstance;
@@ -276,12 +276,12 @@ class MessagingService {
         return;
       }
     }
-    
+
     // Mark this instance as the active one
     if (typeof window !== 'undefined') {
       (window as any).__activeMessagingInstance = this.instanceId;
     }
-    
+
     this.messageHandlersSetup = true;
 
     // Handle messages when app is in foreground
@@ -290,7 +290,7 @@ class MessagingService {
       const messageId = remoteMessage.data?.message_id;
       const notificationId = remoteMessage.data?.notification_id;
       const firebaseMessageId = remoteMessage.messageId; // This is the unique ID from Firebase
-      
+
       console.log(`[${timestamp}] [${this.instanceId}] Foreground message received:`, {
         messageId,
         notificationId,
@@ -299,41 +299,41 @@ class MessagingService {
         sentTime: remoteMessage.sentTime,
         data: remoteMessage.data
       });
-      
+
       // CRITICAL: Use Firebase messageId for deduplication since it's always present
       const deduplicationKey = firebaseMessageId || notificationId || `${timestamp}_${remoteMessage.notification?.title}`;
-      
+
       console.log(`[${timestamp}] [${this.instanceId}] Checking global dedup with key:`, deduplicationKey);
-      
+
       if (notificationDedup.isDuplicate(deduplicationKey, notificationId)) {
         console.log(`[${timestamp}] [${this.instanceId}] Global dedup: Duplicate notification detected, skipping`);
         return;
       }
-      
+
       // Still check local cache as backup
       if (messageId && this.displayedMessageIds.has(messageId)) {
         console.log(`[${timestamp}] Local dedup: Duplicate notification detected with message_id: ${messageId}, skipping`);
         return;
       }
-      
+
       if (notificationId && this.displayedNotificationIds.has(notificationId)) {
         console.log(`[${timestamp}] Local dedup: Duplicate notification detected with notification_id: ${notificationId}, skipping`);
         return;
       }
-      
+
       // Add to local cache as well
       if (messageId) {
         this.displayedMessageIds.add(messageId);
         setTimeout(() => this.displayedMessageIds.delete(messageId), 5 * 60 * 1000);
       }
-      
+
       if (notificationId) {
         this.displayedNotificationIds.add(notificationId);
         setTimeout(() => this.displayedNotificationIds.delete(notificationId), 5 * 60 * 1000);
       }
-      
+
       await this.displayNotification(remoteMessage);
-      
+
       // Trigger notification count update
       this.triggerNotificationCountUpdate();
     });
@@ -375,7 +375,7 @@ class MessagingService {
       console.log('[MessagingService] ===== NOTIFEE FOREGROUND EVENT =====');
       console.log('[MessagingService] Event type:', type);
       console.log('[MessagingService] Event detail:', JSON.stringify(detail, null, 2));
-      
+
       if (type === EventType.PRESS) {
         console.log('[MessagingService] Notifee notification pressed:', detail.notification);
         if (detail.notification?.data) {
@@ -389,7 +389,7 @@ class MessagingService {
     const timestamp = new Date().toISOString();
     const messageId = remoteMessage.data?.message_id;
     const notificationId = remoteMessage.data?.notification_id || messageId || `notif_${Date.now()}`;
-    
+
     console.log(`[${timestamp}] displayNotification called with:`, {
       notificationId,
       messageId,
@@ -405,37 +405,43 @@ class MessagingService {
       });
     }
 
+    // Construct platform-specific config to avoid native type errors
+    const notificationConfig: any = {
+      id: notificationId, // Set explicit ID to prevent duplicates
+      title: remoteMessage.notification?.title || 'Confío',
+      body: remoteMessage.notification?.body || '',
+      data: remoteMessage.data || {}, // Ensure data is an object
+    };
+
+    if (Platform.OS === 'android') {
+      notificationConfig.android = {
+        channelId: 'default',
+        smallIcon: 'ic_stat_ic_notification',
+        // largeIcon: 'ic_launcher', // Temporarily remove to rule out resource issues
+        color: '#8b5cf6',
+        pressAction: {
+          id: 'default',
+          launchActivity: 'default',
+        },
+        groupId: 'confio_notifications',
+        groupSummary: false,
+        tag: notificationId,
+      };
+    } else {
+      notificationConfig.ios = {
+        foregroundPresentationOptions: {
+          badge: true,
+          sound: true,
+          banner: true,
+          list: true,
+        },
+        categoryId: 'default',
+      };
+    }
+
     try {
       // Display the notification
-      await notifee.displayNotification({
-        id: notificationId, // Set explicit ID to prevent duplicates
-        title: remoteMessage.notification?.title || 'Confío',
-        body: remoteMessage.notification?.body || '',
-        data: remoteMessage.data,
-        android: {
-          channelId: 'default',
-          smallIcon: 'ic_stat_ic_notification',
-          largeIcon: 'ic_launcher',
-          color: '#8b5cf6',  // Confío violet accent color
-          pressAction: {
-            id: 'default',
-          },
-          // Group notifications properly
-          groupId: 'confio_notifications',
-          groupSummary: false,  // Individual notifications should not be summaries
-          // Use tag to replace existing notification with same ID
-          tag: notificationId,
-        },
-        ios: {
-          foregroundPresentationOptions: {
-            badge: true,
-            sound: true,
-            banner: true,
-            list: true,
-          },
-          categoryId: 'default',
-        },
-      });
+      await notifee.displayNotification(notificationConfig);
       console.log(`[${timestamp}] Notification displayed successfully with ID: ${notificationId}`);
     } catch (error) {
       console.error(`[${timestamp}] Error displaying notification:`, error);
@@ -468,7 +474,7 @@ class MessagingService {
 
   private async handleNotificationData(data: any, skipAccountCheck: boolean = false) {
     console.log('[MessagingService] handleNotificationData called with:', data, { skipAccountCheck });
-    
+
     // LEGACY FORMAT DETECTION:
     // Handle old push notifications that may have been sent with the previous screen name.
     // Some notifications in the system might still reference 'P2PTradeDetail' which no longer exists.
@@ -481,20 +487,20 @@ class MessagingService {
       delete data.name;
       delete data.params;
     }
-    
+
     // Extract account context from notification data
     const accountContext = data.account_context;
     const businessId = data.business_id;
     const accountType = data.account_type;
     const accountIndex = data.account_index;
-    
+
     console.log('[MessagingService] Account context from notification:', {
       accountContext,
       businessId,
       accountType,
       accountIndex
     });
-    
+
     // For foreground notifications, also defer account switching
     // to avoid conflicts with UI state
     if (accountContext && !skipAccountCheck) {
@@ -503,7 +509,7 @@ class MessagingService {
         const { AuthService } = await import('./authService');
         const { PushNotificationService } = await import('./pushNotificationService');
         const authService = new AuthService();
-        
+
         // Get current active account context
         const currentContext = await authService.getActiveAccountContext();
         console.log('[MessagingService] Current active account context:', {
@@ -511,16 +517,16 @@ class MessagingService {
           index: currentContext?.index,
           businessId: currentContext?.businessId
         });
-        
+
         // Check if we need to switch
         let needSwitch = false;
         let targetAccountId = '';
-        
+
         if (accountContext === 'business' && businessId) {
           // Check if current account is the correct business account
-          needSwitch = currentContext?.type !== 'business' || 
-                      currentContext?.businessId !== businessId;
-                      
+          needSwitch = currentContext?.type !== 'business' ||
+            currentContext?.businessId !== businessId;
+
           if (needSwitch) {
             // Business account ID format: business_{businessId}_0
             targetAccountId = `business_${businessId}_0`;
@@ -529,7 +535,7 @@ class MessagingService {
         } else if (accountContext === 'personal') {
           // Check if current account is a personal account
           needSwitch = currentContext?.type !== 'personal';
-          
+
           if (needSwitch) {
             // Personal account ID format: personal_{index}
             const index = accountIndex || '0';
@@ -537,7 +543,7 @@ class MessagingService {
             console.log('[MessagingService] Need to switch to personal account:', targetAccountId);
           }
         }
-        
+
         // Store the account switch for HomeScreen to handle
         if (needSwitch && targetAccountId) {
           console.log('[MessagingService] Storing pending account switch for HomeScreen:', {
@@ -545,14 +551,14 @@ class MessagingService {
             needSwitch
           });
           PushNotificationService.pendingAccountSwitchGlobal = targetAccountId;
-          
+
           // Store the navigation to execute after account switch
           PushNotificationService.pendingNavigationAfterSwitch = () => {
             console.log('[MessagingService] Executing deferred navigation after account switch');
             // Re-process the notification data for navigation, skipping account check
             this.handleNotificationData(data, true);
           };
-          
+
           // Navigate to HomeScreen first to trigger account switch
           console.log('[MessagingService] Navigating to HomeScreen for account switch');
           if (navigationRef.current && navigationRef.current.isReady()) {
@@ -563,7 +569,7 @@ class MessagingService {
               }
             } as never);
           }
-          
+
           // Don't continue with normal navigation
           return;
         }
@@ -572,7 +578,7 @@ class MessagingService {
         // Continue with navigation even if account check fails
       }
     }
-    
+
     // Navigate based on notification data
     const { action_url, notification_type, related_type, related_id } = data;
 
@@ -584,7 +590,7 @@ class MessagingService {
         transactionData[actualKey] = data[key];
       }
     });
-    
+
     // Also include the notification_type in transaction data for type detection
     if (notification_type) {
       transactionData.notification_type = notification_type;
@@ -645,10 +651,10 @@ class MessagingService {
 
   private navigateToDeepLink(url: string, transactionData?: any) {
     console.log('[MessagingService] navigateToDeepLink called with:', { url, transactionData });
-    
+
     // Parse deep link format: confio://screen/params OR /screen/params
     let path = url;
-    
+
     // Handle confio:// prefix if present
     const confioMatch = url.match(/confio:\/\/(.+)/);
     if (confioMatch) {
@@ -657,10 +663,10 @@ class MessagingService {
       // Handle URLs that start with / (like /transaction/123)
       path = url.substring(1); // Remove leading slash
     }
-    
+
     const parts = path.split('/');
     console.log('[MessagingService] Parsed path parts:', parts);
-    
+
     if (parts.length > 0) {
       switch (parts[0]) {
         case 'verification':
@@ -672,19 +678,19 @@ class MessagingService {
         case 'transaction':
           if (parts[1]) {
             // Navigate with transaction data if available, otherwise minimal data
-            const navData = transactionData && Object.keys(transactionData).length > 0 
-              ? transactionData 
+            const navData = transactionData && Object.keys(transactionData).length > 0
+              ? transactionData
               : { id: parts[1] };
-            
+
             // Determine transaction type
             let transactionType = transactionData?.transaction_type || 'send';
-            
+
             // Check if this is a payment transaction based on notification data
             const notificationType = transactionData?.notification_type;
             if (notificationType === 'PAYMENT_SENT' || notificationType === 'PAYMENT_RECEIVED') {
               transactionType = 'payment';
             }
-            
+
             // Check if this is a USDC transaction
             if (notificationType === 'USDC_DEPOSIT_COMPLETED') {
               transactionType = 'deposit';
@@ -693,17 +699,17 @@ class MessagingService {
             } else if (notificationType === 'CONVERSION_COMPLETED') {
               transactionType = 'conversion';
             }
-            
+
             console.log('[MessagingService] Navigating to TransactionDetail:', {
               transactionType,
               navData,
               notificationType
             });
-            
+
             // Use nested navigation for TransactionDetail
             navigationRef.current?.navigate('Main' as never, {
               screen: 'TransactionDetail',
-              params: { 
+              params: {
                 transactionType,
                 transactionData: navData
               }
@@ -714,9 +720,9 @@ class MessagingService {
           if (parts[1] === 'trade' && parts[2]) {
             navigationRef.current?.navigate('Main' as never, {
               screen: 'ActiveTrade',
-              params: { 
-                trade: { 
-                  id: parts[2] 
+              params: {
+                trade: {
+                  id: parts[2]
                 },
                 // Allow TradeChatScreen to auto-switch context only for push-origin navigation
                 allowAccountSwitch: true
@@ -770,22 +776,22 @@ class MessagingService {
 
   private navigateToRelatedObject(type: string, id: string, transactionData?: any) {
     console.log('[MessagingService] navigateToRelatedObject called with:', { type, id, transactionData });
-    
+
     // Handle legacy P2PTradeDetail navigation (for old notifications)
     if (type === 'P2PTradeDetail') {
       console.log('[MessagingService] Redirecting legacy P2PTradeDetail to ActiveTrade');
       type = 'P2PTrade';
     }
-    
+
     switch (type) {
       case 'SendTransaction':
       case 'PaymentTransaction':
       case 'payment':
         // Navigate with transaction data if available, otherwise minimal data
-        const navData = transactionData && Object.keys(transactionData).length > 0 
-          ? { ...transactionData, id } 
+        const navData = transactionData && Object.keys(transactionData).length > 0
+          ? { ...transactionData, id }
           : { id };
-        
+
         // Determine transaction type
         let transactionType = transactionData?.transaction_type || 'send';
         const notifType = transactionData?.notification_type;
@@ -798,10 +804,10 @@ class MessagingService {
         if (type === 'PaymentTransaction' || type === 'payment') {
           transactionType = 'payment';
         }
-        
+
         navigationRef.current?.navigate('Main' as never, {
           screen: 'TransactionDetail',
-          params: { 
+          params: {
             transactionType,
             transactionData: navData
           }
@@ -810,10 +816,10 @@ class MessagingService {
       case 'P2PTrade':
         navigationRef.current?.navigate('Main' as never, {
           screen: 'ActiveTrade',
-          params: { 
-            trade: { 
-              id: id 
-            } 
+          params: {
+            trade: {
+              id: id
+            }
           }
         } as never);
         break;
@@ -846,7 +852,7 @@ class MessagingService {
   async areNotificationsEnabled(): Promise<boolean> {
     const authStatus = await messaging().hasPermission();
     return authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
-           authStatus === messaging.AuthorizationStatus.PROVISIONAL;
+      authStatus === messaging.AuthorizationStatus.PROVISIONAL;
   }
 
   // Request notification permissions
@@ -873,7 +879,7 @@ class MessagingService {
   private triggerNotificationCountUpdate() {
     try {
       console.log('[MessagingService] Triggering notification count update...');
-      
+
       // Use Apollo Client to refetch the notification count
       apolloClient.refetchQueries({
         include: ['GetUnreadNotificationCount'],
@@ -889,12 +895,12 @@ class MessagingService {
 
   private cleanup() {
     console.log(`[${this.instanceId}] Cleaning up messaging handlers`);
-    
+
     // Clear active instance marker if it's this instance
     if (typeof window !== 'undefined' && (window as any).__activeMessagingInstance === this.instanceId) {
       (window as any).__activeMessagingInstance = null;
     }
-    
+
     this.unsubscribeHandlers.forEach(unsubscribe => {
       try {
         unsubscribe();

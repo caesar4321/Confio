@@ -32,10 +32,10 @@ interface AnalyticsEvent {
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
-    
+
     // Handle apple-app-site-association
-    if (url.pathname === '/.well-known/apple-app-site-association' || 
-        url.pathname === '/apple-app-site-association') {
+    if (url.pathname === '/.well-known/apple-app-site-association' ||
+      url.pathname === '/apple-app-site-association') {
       const appleConfig = {
         applinks: {
           apps: [],
@@ -55,7 +55,7 @@ export default {
           ]
         }
       } as const;
-      
+
       return new Response(JSON.stringify(appleConfig, null, 2), {
         headers: {
           'Content-Type': 'application/json',
@@ -63,23 +63,72 @@ export default {
         }
       });
     }
-    
+
+    // [NEW] Handle Invite Links: /invite/[referralCode]
+    // This logic replaces the separate invite_worker.js
+    if (url.pathname.startsWith('/invite/')) {
+      const referralCode = url.pathname.split('/')[2];
+      if (referralCode) {
+        // Store IP fingerprint for iOS deferred deep linking
+        // We reuse the LINKS KV with a prefix 'ip_ref:' to avoid slug collision
+        const clientIP = request.headers.get('cf-connecting-ip') || 'unknown';
+        if (clientIP !== 'unknown') {
+          // Store with 1 hour TTL
+          await env.LINKS.put(`ip_ref:${clientIP}`, referralCode, { expirationTtl: 3600 });
+        }
+
+        // Detect OS to determine redirect
+        const userAgent = request.headers.get('user-agent') || '';
+        const platform = detectPlatform(userAgent);
+
+        if (platform === 'android') {
+          // Direct Play Store referrer
+          return Response.redirect(`${env.PLAY_STORE_URL}&referrer=${referralCode}`, 302);
+        } else {
+          // iOS / Desktop -> App Store (App will check API via IP)
+          // We should probably check if it is iOS specifically, otherwise fallback to landing
+          if (platform === 'ios') {
+            return Response.redirect(env.APP_STORE_URL, 302);
+          } else {
+            // Desktop fallback
+            return Response.redirect(`${env.LANDING_PAGE_URL}?invite=${referralCode}`, 302);
+          }
+        }
+      }
+    }
+
+    // [NEW] API endpoint to check referral by IP (for iOS deferred deep linking)
+    if (url.pathname === '/api/check-referral') {
+      const clientIP = request.headers.get('cf-connecting-ip') || 'unknown';
+      const code = await env.LINKS.get(`ip_ref:${clientIP}`);
+
+      return new Response(JSON.stringify({
+        code: code || null,
+        type: 'fingerprint'
+      }), {
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        }
+      });
+    }
+
     // Handle API endpoints
     if (url.pathname.startsWith('/api/')) {
       return handleAPI(request, env, url);
     }
-    
+
     // Handle admin UI with obscure URL
     if (url.pathname === '/dashboard-x7k9m2p5' || url.pathname === '/dashboard-x7k9m2p5/') {
       // Check if credentials are configured
       if (!env.ADMIN_USERNAME || !env.ADMIN_PASSWORD) {
         return new Response('Admin panel not configured', { status: 503 });
       }
-      
+
       // Check basic auth
       const authHeader = request.headers.get('Authorization');
       const expectedAuth = 'Basic ' + btoa(`${env.ADMIN_USERNAME}:${env.ADMIN_PASSWORD}`);
-      
+
       if (authHeader !== expectedAuth) {
         return new Response('Unauthorized', {
           status: 401,
@@ -88,7 +137,7 @@ export default {
           }
         });
       }
-      
+
       // Serve admin HTML directly
       const adminHTML = await getAdminHTML();
       return new Response(adminHTML, {
@@ -99,22 +148,22 @@ export default {
         }
       });
     }
-    
+
     // Handle root domain - pass through to origin server
     if (url.pathname === '/' || url.pathname === '') {
       // Pass through to the origin Django server
       return fetch(request);
     }
-    
+
     // Extract slug from path
     const slug = url.pathname.slice(1).split('/')[0];
-    
+
     // Validate slug format (alphanumeric with hyphens, 2-20 chars)
     if (!slug || !/^[a-zA-Z0-9-]{2,20}$/.test(slug)) {
       // Pass through to origin for non-shortlink paths
       return fetch(request);
     }
-    
+
     // Get link data from KV (with safe fallback for some first-party slugs)
     let linkData: LinkData | null = null;
     const linkDataStr = await env.LINKS.get(slug);
@@ -140,11 +189,11 @@ export default {
         return fetch(request);
       }
     }
-    
+
     // Detect platform
     const userAgent = request.headers.get('user-agent') || '';
     const platform = detectPlatform(userAgent);
-    
+
     // Log analytics asynchronously
     ctx.waitUntil(logAnalytics(env, {
       timestamp: new Date().toISOString(),
@@ -155,39 +204,39 @@ export default {
       slug,
       referer: request.headers.get('referer') || undefined
     }));
-    
+
     // Increment click count
     ctx.waitUntil(incrementClicks(env, slug, linkData));
-    
+
     // Generate redirect URL based on platform
     const redirectUrl = getRedirectUrl(platform, linkData, env);
-    
+
     return Response.redirect(redirectUrl, 302);
   },
 };
 
 function detectPlatform(userAgent: string): 'ios' | 'android' | 'desktop' | 'unknown' {
   const ua = userAgent.toLowerCase();
-  
+
   if (/iphone|ipad|ipod/.test(ua)) return 'ios';
   if (/android/.test(ua)) return 'android';
   if (/windows|mac|linux/.test(ua)) return 'desktop';
-  
+
   return 'unknown';
 }
 
 function getRedirectUrl(platform: string, linkData: LinkData, env: Env): string {
   const encodedPayload = encodeURIComponent(linkData.payload);
-  
+
   switch (platform) {
     case 'ios':
       // Send iOS users to App Store
       return `${env.APP_STORE_URL}?referrer=${encodedPayload}`;
-      
+
     case 'android':
       // Android Play Store with referrer parameter
       return `${env.PLAY_STORE_URL}&referrer=${encodedPayload}`;
-      
+
     default:
       // Desktop - redirect to landing page with campaign data
       return `${env.LANDING_PAGE_URL}?c=${encodedPayload}&t=${linkData.type}`;
@@ -208,7 +257,7 @@ async function logAnalytics(env: Env, event: AnalyticsEvent): Promise<void> {
 
 async function handleAPI(request: Request, env: Env, url: URL): Promise<Response> {
   const path = url.pathname;
-  
+
   // CORS headers for API
   const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
@@ -216,21 +265,21 @@ async function handleAPI(request: Request, env: Env, url: URL): Promise<Response
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Content-Type': 'application/json'
   };
-  
+
   // Handle preflight
   if (request.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
-  
+
   // Check authentication for all API endpoints
   const authHeader = request.headers.get('Authorization');
   const expectedAuth = 'Basic ' + btoa(`${env.ADMIN_USERNAME}:${env.ADMIN_PASSWORD}`);
-  
+
   if (authHeader !== expectedAuth) {
     return new Response(
       JSON.stringify({ error: 'Unauthorized' }),
-      { 
-        status: 401, 
+      {
+        status: 401,
         headers: {
           ...corsHeaders,
           'WWW-Authenticate': 'Basic realm="API Access"'
@@ -238,7 +287,7 @@ async function handleAPI(request: Request, env: Env, url: URL): Promise<Response
       }
     );
   }
-  
+
   try {
     // Create link endpoint
     if (path === '/api/links' && request.method === 'POST') {
@@ -248,19 +297,19 @@ async function handleAPI(request: Request, env: Env, url: URL): Promise<Response
         type: LinkData['type'];
         metadata?: Record<string, any>;
       };
-      
+
       // Generate slug if not provided
       const slug = body.slug || generateSlug();
-      
+
       // Validate slug availability
       const existing = await env.LINKS.get(slug);
       if (existing) {
         return new Response(
-          JSON.stringify({ error: 'Slug already exists' }), 
+          JSON.stringify({ error: 'Slug already exists' }),
           { status: 409, headers: corsHeaders }
         );
       }
-      
+
       // Create link data
       const linkData: LinkData = {
         payload: body.payload,
@@ -269,19 +318,19 @@ async function handleAPI(request: Request, env: Env, url: URL): Promise<Response
         clicks: 0,
         metadata: body.metadata
       };
-      
+
       await env.LINKS.put(slug, JSON.stringify(linkData));
-      
+
       return new Response(
-        JSON.stringify({ 
-          slug, 
+        JSON.stringify({
+          slug,
           shortUrl: `https://confio.lat/${slug}`,
-          data: linkData 
-        }), 
+          data: linkData
+        }),
         { status: 201, headers: corsHeaders }
       );
     }
-    
+
     // List all links
     if (path === '/api/links' && request.method === 'GET') {
       const linksList = await env.LINKS.list();
@@ -289,7 +338,7 @@ async function handleAPI(request: Request, env: Env, url: URL): Promise<Response
         linksList.keys.map(async (key) => {
           const dataStr = await env.LINKS.get(key.name);
           if (!dataStr) return null;
-          
+
           const data = JSON.parse(dataStr);
           return {
             slug: key.name,
@@ -298,57 +347,57 @@ async function handleAPI(request: Request, env: Env, url: URL): Promise<Response
           };
         })
       );
-      
+
       return new Response(
-        JSON.stringify({ 
+        JSON.stringify({
           links: links.filter(Boolean),
           total: links.filter(Boolean).length
-        }), 
+        }),
         { headers: corsHeaders }
       );
     }
-    
+
     // Get link stats
     if (path.startsWith('/api/links/') && request.method === 'GET') {
       const slug = path.split('/')[3];
       const linkDataStr = await env.LINKS.get(slug);
-      
+
       if (!linkDataStr) {
         return new Response(
-          JSON.stringify({ error: 'Link not found' }), 
+          JSON.stringify({ error: 'Link not found' }),
           { status: 404, headers: corsHeaders }
         );
       }
-      
+
       const linkData = JSON.parse(linkDataStr);
-      
+
       // Get recent analytics
       const analyticsKeys = await env.ANALYTICS.list({ prefix: `${slug}:` });
       const analytics = await Promise.all(
-        analyticsKeys.keys.slice(0, 100).map(key => 
+        analyticsKeys.keys.slice(0, 100).map(key =>
           env.ANALYTICS.get(key.name).then(data => data ? JSON.parse(data) : null)
         )
       );
-      
+
       return new Response(
-        JSON.stringify({ 
+        JSON.stringify({
           slug,
           shortUrl: `https://confio.lat/${slug}`,
           data: linkData,
           recentClicks: analytics.filter(Boolean)
-        }), 
+        }),
         { headers: corsHeaders }
       );
     }
-    
+
     return new Response(
-      JSON.stringify({ error: 'Not found' }), 
+      JSON.stringify({ error: 'Not found' }),
       { status: 404, headers: corsHeaders }
     );
-    
+
   } catch (error) {
     return new Response(
-      JSON.stringify({ error: 'Internal server error' }), 
+      JSON.stringify({ error: 'Internal server error' }),
       { status: 500, headers: corsHeaders }
     );
   }

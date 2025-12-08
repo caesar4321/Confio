@@ -209,7 +209,7 @@ class UserAchievement(SoftDeleteModel):
     def claim_reward(self):
         """Claim the reward for this achievement"""
         if self.status != 'earned':
-            raise ValidationError("Solo se pueden reclamar logros ganados")
+            raise ValidationError("Solo se pueden desbloquear logros ganados")
         
         if self.claimed_at:
             raise ValidationError("Este logro ya fue reclamado")

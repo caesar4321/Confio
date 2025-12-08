@@ -21,7 +21,7 @@ export const ScanScreen = () => {
   const route = useRoute<ScanScreenRouteProp>();
   const navigation = useNavigation();
   const scanMode = route.params?.mode;
-  
+
   const isBusinessAccount = activeAccount?.type?.toLowerCase() === 'business';
 
   // GraphQL mutations
@@ -77,12 +77,12 @@ export const ScanScreen = () => {
 
   const handleQRCodeScanned = async (scannedData: string) => {
     if (isProcessing) return; // Prevent multiple processing
-    
+
     console.log('QR Code scanned:', scannedData);
-    
+
     // Show success indicator
     setScannedSuccessfully(true);
-    
+
     // Parse the QR code data
     const qrMatch = scannedData.match(/^confio:\/\/pay\/(.+)$/);
     if (!qrMatch || !qrMatch[1]) {
@@ -109,7 +109,7 @@ export const ScanScreen = () => {
 
       if (!invoiceData?.getInvoice?.success) {
         const errors = invoiceData?.getInvoice?.errors || ['Invoice not found'];
-        Alert.alert('Error', errors.join(', '));
+        Alert.alert('Error', errors.join(', '), [{ text: 'OK' }]);
         return;
       }
 
@@ -121,14 +121,14 @@ export const ScanScreen = () => {
       // 2. Invoice hasn't expired (server checks isExpired)
       // 3. Invoice is still in PENDING status
       if (invoice.isExpired) {
-        Alert.alert('Invoice Expired', 'This payment request has expired.');
+        Alert.alert('Invoice Expired', 'This payment request has expired.', [{ text: 'OK' }]);
         return;
       }
 
       // Client-side validations:
       // 1. User isn't paying their own invoice
       if (invoice.createdByUser?.id === activeAccount?.id) {
-        Alert.alert('Cannot Pay Own Invoice', 'You cannot pay your own invoice.');
+        Alert.alert('Cannot Pay Own Invoice', 'You cannot pay your own invoice.', [{ text: 'OK' }]);
         setScannedSuccessfully(false);
         return;
       }
@@ -140,7 +140,7 @@ export const ScanScreen = () => {
 
     } catch (error) {
       console.error('Error processing QR code:', error);
-      Alert.alert('Error', 'Failed to process the QR code. Please try again.');
+      Alert.alert('Error', 'Failed to process the QR code. Please try again.', [{ text: 'OK' }]);
     } finally {
       setIsProcessing(false);
       setScannedSuccessfully(false);
@@ -206,76 +206,76 @@ export const ScanScreen = () => {
         torch={isFlashOn ? 'on' : 'off'}
         enableZoomGesture
       />
-      
+
       {/* Move overlay outside Camera component */}
       <View style={styles.overlayAbsolute}>
-          {/* Top overlay area with integrated header */}
-          <View style={styles.topOverlay}>
-            <View style={styles.headerControls}>
-              <TouchableOpacity style={styles.closeButton} onPress={handleClose}>
-                <Icon name="x" size={24} color="#FFFFFF" />
-              </TouchableOpacity>
-              {isBusinessAccount && scanMode && (
-                <View style={styles.modeIndicator}>
-                  <Text style={styles.modeIndicatorText}>
-                    {scanMode === 'cobrar' ? 'Cobrar' : 'Pagar'}
-                  </Text>
-                </View>
-              )}
-            </View>
-          </View>
-          
-          {/* Middle area with scan frame */}
-          <View style={styles.middleRow}>
-            <View style={styles.sideOverlay} />
-            
-            <View style={styles.scanFrame}>
-              {/* Corner brackets for better visual indication */}
-              <View style={styles.cornerBracket} />
-              <View style={styles.cornerBracketTopRight} />
-              <View style={styles.cornerBracketBottomLeft} />
-              <View style={styles.cornerBracketBottomRight} />
-              
-              {scannedSuccessfully && (
-                <View style={styles.successOverlay}>
-                  <Icon name="check-circle" size={60} color="#10B981" />
-                  <Text style={styles.successText}>Código QR detectado</Text>
-                </View>
-              )}
-            </View>
-            
-            <View style={styles.sideOverlay} />
-          </View>
-          
-          {/* Bottom overlay area */}
-          <View style={styles.bottomOverlay}>
-            {/* Scanning instruction */}
-            <View style={styles.scanInstruction}>
-              <Text style={styles.scanInstructionText}>Posiciona el código QR aquí</Text>
-            </View>
-            
-            <Text style={styles.instructions}>
-              {isProcessing 
-                ? 'Procesando código QR...'
-                : isBusinessAccount 
-                  ? scanMode === 'cobrar' 
-                    ? 'Escanea el código QR del cliente para cobrar'
-                    : 'Escanea el código QR del proveedor para pagar'
-                  : 'Escanea un código QR de pago'
-              }
-            </Text>
-            
-            <TouchableOpacity style={styles.flashButton} onPress={toggleFlash}>
-              <Icon name={isFlashOn ? "zap-off" : "zap"} size={24} color="#FFFFFF" />
+        {/* Top overlay area with integrated header */}
+        <View style={styles.topOverlay}>
+          <View style={styles.headerControls}>
+            <TouchableOpacity style={styles.closeButton} onPress={handleClose}>
+              <Icon name="x" size={24} color="#FFFFFF" />
             </TouchableOpacity>
-            
-            {isProcessing && (
-              <View style={styles.loadingContainer}>
-                <Text style={styles.loadingText}>Procesando...</Text>
+            {isBusinessAccount && scanMode && (
+              <View style={styles.modeIndicator}>
+                <Text style={styles.modeIndicatorText}>
+                  {scanMode === 'cobrar' ? 'Cobrar' : 'Pagar'}
+                </Text>
               </View>
             )}
           </View>
         </View>
+
+        {/* Middle area with scan frame */}
+        <View style={styles.middleRow}>
+          <View style={styles.sideOverlay} />
+
+          <View style={styles.scanFrame}>
+            {/* Corner brackets for better visual indication */}
+            <View style={styles.cornerBracket} />
+            <View style={styles.cornerBracketTopRight} />
+            <View style={styles.cornerBracketBottomLeft} />
+            <View style={styles.cornerBracketBottomRight} />
+
+            {scannedSuccessfully && (
+              <View style={styles.successOverlay}>
+                <Icon name="check-circle" size={60} color="#10B981" />
+                <Text style={styles.successText}>Código QR detectado</Text>
+              </View>
+            )}
+          </View>
+
+          <View style={styles.sideOverlay} />
+        </View>
+
+        {/* Bottom overlay area */}
+        <View style={styles.bottomOverlay}>
+          {/* Scanning instruction */}
+          <View style={styles.scanInstruction}>
+            <Text style={styles.scanInstructionText}>Posiciona el código QR aquí</Text>
+          </View>
+
+          <Text style={styles.instructions}>
+            {isProcessing
+              ? 'Procesando código QR...'
+              : isBusinessAccount
+                ? scanMode === 'cobrar'
+                  ? 'Escanea el código QR del cliente para cobrar'
+                  : 'Escanea el código QR del proveedor para pagar'
+                : 'Escanea un código QR de pago'
+            }
+          </Text>
+
+          <TouchableOpacity style={styles.flashButton} onPress={toggleFlash}>
+            <Icon name={isFlashOn ? "zap-off" : "zap"} size={24} color="#FFFFFF" />
+          </TouchableOpacity>
+
+          {isProcessing && (
+            <View style={styles.loadingContainer}>
+              <Text style={styles.loadingText}>Procesando...</Text>
+            </View>
+          )}
+        </View>
+      </View>
     </View>
   );
 };

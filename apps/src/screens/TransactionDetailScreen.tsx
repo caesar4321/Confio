@@ -31,6 +31,7 @@ import { GET_SEND_TRANSACTION_BY_ID } from '../apollo/queries';
 import { useContactNameSync } from '../hooks/useContactName';
 import { getPreferredDisplayName, getPreferredSecondaryLine } from '../utils/contactDisplay';
 import { SHARE_LINKS } from '../config/shareLinks';
+import { useAuth } from '../contexts/AuthContext';
 
 type TransactionDetailScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 type TransactionDetailScreenRouteProp = RouteProp<MainStackParamList, 'TransactionDetail'>;
@@ -130,6 +131,7 @@ export const TransactionDetailScreen = () => {
   const insets = useSafeAreaInsets();
   const [copied, setCopied] = useState('');
   const [showBlockchainDetails, setShowBlockchainDetails] = useState(false);
+  const { userProfile } = useAuth();
 
   // Define styles early to avoid undefined errors
   const styles = StyleSheet.create({
@@ -2371,7 +2373,13 @@ export const TransactionDetailScreen = () => {
                     const cleanPhone = phoneRaw ? String(phoneRaw).replace(/[^\d]/g, '') : '';
                     const amount = formatAmount(currentTx.amount);
                     const currency = currentTx.currency || 'cUSD';
-                    const message = `¡Hola! Te envié ${amount} ${currency} por Confío. 🎉\n\nTienes 7 días para reclamarlo. Descarga la app y crea tu cuenta:\n\n📲 ${SHARE_LINKS.campaigns.beta}\n\n¡Es gratis y en segundos recibes tu dinero!`;
+
+                    // Generate invite link with uppercase username
+                    const rawUsername = userProfile?.username || '';
+                    const cleanUsername = rawUsername.replace('@', '').toUpperCase();
+                    const inviteLink = `https://confio.lat/invite/${cleanUsername}`;
+
+                    const message = `¡Hola! Te envié ${amount} ${currency} por Confío. 🎉\n\nTienes 7 días para reclamarlo. Descarga la app y crea tu cuenta:\n\n📲 ${inviteLink}\n\n¡Es gratis y en segundos recibes tu dinero!`;
                     const encodedMessage = encodeURIComponent(message);
 
                     if (Platform.OS === 'android') {

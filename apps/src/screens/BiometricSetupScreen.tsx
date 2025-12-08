@@ -88,13 +88,15 @@ export const BiometricSetupScreen = () => {
     setError(null);
     setShowSettingsButton(false);
     setIsProcessing(true);
-    const ok = await completeBiometricAndEnter(origin);
+    const ok = await completeBiometricAndEnter();
     if (!ok) {
-      setError('Activa Face ID / Touch ID o huella en los ajustes del dispositivo y vuelve a intentar.');
+      setError(Platform.OS === 'ios'
+        ? 'Activa Face ID o Touch ID en los ajustes del dispositivo y vuelve a intentar.'
+        : 'Activa tu huella digital en los ajustes del dispositivo y vuelve a intentar.');
       setShowSettingsButton(true);
       setIsProcessing(false);
     }
-  }, [completeBiometricAndEnter, origin, isProcessing]);
+  }, [completeBiometricAndEnter, isProcessing]);
 
   const handleBack = useCallback(() => {
     if (!isProcessing) {
@@ -119,8 +121,10 @@ export const BiometricSetupScreen = () => {
           </View>
           <Text style={styles.heading}>Protege tus operaciones sensibles</Text>
           <Text style={styles.body}>
-            Usaremos Face ID / Touch ID o huella para desbloquear Confío y confirmar envíos, pagos y otros movimientos críticos.
-            Tus datos biométricos nunca salen del dispositivo: iOS/Android solo nos indica si la coincidencia fue exitosa.
+            {Platform.OS === 'ios'
+              ? 'Usaremos Face ID o Touch ID para desbloquear Confío y confirmar envíos, pagos y otros movimientos críticos. Tus datos biométricos nunca salen del dispositivo: iOS solo nos indica si la coincidencia fue exitosa.'
+              : 'Usaremos tu huella digital para desbloquear Confío y confirmar envíos, pagos y otros movimientos críticos. Tus datos biométricos nunca salen del dispositivo: Android solo nos indica si la coincidencia fue exitosa.'
+            }
           </Text>
 
           <View style={styles.list}>
@@ -143,7 +147,10 @@ export const BiometricSetupScreen = () => {
           )}
           {!supportedHint && (
             <Text style={styles.hint}>
-              Si aún no tienes Face ID / Touch ID o huella configurada, actívalo en los ajustes del dispositivo y vuelve a intentar.
+              {Platform.OS === 'ios'
+                ? 'Si aún no tienes Face ID o Touch ID configurado, actívalo en los ajustes del dispositivo y vuelve a intentar.'
+                : 'Si aún no tienes tu huella digital configurada, actívala en los ajustes del dispositivo y vuelve a intentar.'
+              }
             </Text>
           )}
 
@@ -218,7 +225,8 @@ export const BiometricSetupScreen = () => {
                             console.error('[BiometricSetup] Failed to open any settings:', e);
                             Alert.alert(
                               'No se pudo abrir ajustes',
-                              'Por favor abre manualmente los Ajustes del dispositivo > Seguridad > Biometría'
+                              'Por favor abre manualmente los Ajustes del dispositivo > Seguridad > Biometría',
+                              [{ text: 'OK' }]
                             );
                           }
                         }

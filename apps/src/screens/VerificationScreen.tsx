@@ -129,7 +129,7 @@ const VerificationScreen = () => {
   const handleSubmitVerification = async () => {
     try {
       if (!isValidDobStrict(verifiedDob)) {
-        Alert.alert('Fecha inválida', 'Ingresa una fecha de nacimiento válida (AAAA-MM-DD).');
+        Alert.alert('Fecha inválida', 'Ingresa una fecha de nacimiento válida (AAAA-MM-DD).', [{ text: 'OK' }]);
         return;
       }
       if (!frontKey || !selfieKey) {
@@ -589,7 +589,7 @@ const VerificationScreen = () => {
                 if (payoutProofUri && (payoutLabel || '').trim() && isValidDobStrict(verifiedDob)) {
                   goToNextStep();
                 } else {
-                  Alert.alert('Campos incompletos', 'Debes ingresar una fecha de nacimiento válida (AAAA-MM-DD), el nombre del método y subir el comprobante.');
+                  Alert.alert('Campos incompletos', 'Debes ingresar una fecha de nacimiento válida (AAAA-MM-DD), el nombre del método y subir el comprobante.', [{ text: 'OK' }]);
                 }
               }}
               disabled={!(payoutProofUri && (payoutLabel || '').trim() && isValidDobStrict(verifiedDob))}

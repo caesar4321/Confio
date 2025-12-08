@@ -38,13 +38,13 @@ export const usePayrollDelegates = () => {
   const activatePayroll = useCallback(
     async (ownerAddress?: string, delegateAddresses?: string[]) => {
       if (!activeAccount || activeAccount.type !== 'business') {
-        Alert.alert('Solo negocios', 'Cambia a una cuenta de negocio para activar nómina.');
+        Alert.alert('Solo negocios', 'Cambia a una cuenta de negocio para activar nómina.', [{ text: 'OK' }]);
         return { success: false, error: 'Solo negocios' };
       }
       const businessAddr = activeAccount.algorandAddress || (activeAccount as any).address;
       const delegateAddr = activeAccount?.ownerAddress || activeAccount?.algorandAddress || businessAddr;
       if (!businessAddr) {
-        Alert.alert('Dirección faltante', 'No se encontró la dirección de la cuenta de negocio.');
+        Alert.alert('Dirección faltante', 'No se encontró la dirección de la cuenta de negocio.', [{ text: 'OK' }]);
         return { success: false, error: 'Dirección faltante' };
       }
       // Always include business + delegate (personal) so allowlist gets created for payouts

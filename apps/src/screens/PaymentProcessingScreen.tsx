@@ -9,6 +9,7 @@ import {
   BackHandler,
   ScrollView,
   Alert,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
@@ -47,7 +48,7 @@ export const PaymentProcessingScreen = () => {
   const [paymentResponse, setPaymentResponse] = useState<any>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [bioChecked, setBioChecked] = useState(false);
-  
+
   const hasProcessedRef = useRef(false);
   const ranRef = useRef(false);
 
@@ -58,7 +59,7 @@ export const PaymentProcessingScreen = () => {
     if (currency === 'USDC') return 'USDC';
     return currency; // fallback
   };
-  
+
   const { transactionData } = route.params;
   const prepared = (transactionData as any)?.prepared || null;
 
@@ -127,7 +128,7 @@ export const PaymentProcessingScreen = () => {
       if (!ok) {
         Alert.alert(
           'Se requiere biometría',
-          'Confirma con Face ID / Touch ID o huella para continuar.',
+          Platform.OS === 'ios' ? 'Confirma con Face ID o Touch ID para continuar.' : 'Confirma con tu huella digital para continuar.',
           [{ text: 'OK', onPress: () => navigation.goBack() }]
         );
       }
@@ -196,13 +197,13 @@ export const PaymentProcessingScreen = () => {
       hasProcessedRef: hasProcessedRef.current,
       transactionData
     });
-    
+
     if (!isValid || !transactionData.invoiceId || isProcessing || hasProcessedRef.current || !bioChecked) {
       console.log('PaymentProcessingScreen: Returning early from useEffect', {
-        reason: !isValid ? 'not valid' : 
-                !transactionData.invoiceId ? 'no invoiceId' : 
-                isProcessing ? 'already processing' : 
-                !bioChecked ? 'biometric not confirmed' :
+        reason: !isValid ? 'not valid' :
+          !transactionData.invoiceId ? 'no invoiceId' :
+            isProcessing ? 'already processing' :
+              !bioChecked ? 'biometric not confirmed' :
                 'already processed'
       });
       return;
@@ -212,19 +213,19 @@ export const PaymentProcessingScreen = () => {
     if (ranRef.current) return;
     ranRef.current = true;
 
-  const processPaymentWsOnly = async () => {
+    const processPaymentWsOnly = async () => {
       if (isProcessing || hasProcessedRef.current) {
         console.log('PaymentProcessingScreen: Payment already in progress, skipping duplicate request');
         return;
       }
-      
+
       hasProcessedRef.current = true;
       setIsProcessing(true);
-      
+
       try {
         const now = () => (typeof performance !== 'undefined' && (performance as any).now ? (performance as any).now() : Date.now());
         const t0 = now();
-      console.log('PaymentProcessingScreen[WS]: Start', { invoiceId: transactionData.invoiceId, preparedCount: prepared?.transactions?.length || 0 });
+        console.log('PaymentProcessingScreen[WS]: Start', { invoiceId: transactionData.invoiceId, preparedCount: prepared?.transactions?.length || 0 });
 
         // update UI steps
         setCurrentStep(0); // verifying
@@ -241,7 +242,7 @@ export const PaymentProcessingScreen = () => {
           const amt = parseFloat(String(transactionData.amount || '0'));
           const assetType = String(transactionData.currency || 'cUSD').toUpperCase();
           const note = `Invoice ${transactionData.invoiceId}`;
-      console.log('PaymentProcessingScreen[WS]: Calling prepareViaWs', { amt, assetType, note, recipientBusinessId: (transactionData as any).merchantBusinessId });
+          console.log('PaymentProcessingScreen[WS]: Calling prepareViaWs', { amt, assetType, note, recipientBusinessId: (transactionData as any).merchantBusinessId });
           const pack = await prepareViaWs({
             amount: amt,
             assetType,
@@ -257,7 +258,7 @@ export const PaymentProcessingScreen = () => {
             paymentId: (pack as any).paymentId || (pack as any).payment_id || transactionData.invoiceId,
             groupId: (pack as any).groupId || (pack as any).group_id
           } as any;
-        console.log('PaymentProcessingScreen[WS]: Prepared pack received');
+          console.log('PaymentProcessingScreen[WS]: Prepared pack received');
         }
 
         // Sign required transactions
@@ -266,7 +267,7 @@ export const PaymentProcessingScreen = () => {
         const { submitViaWs } = await import('../services/payWs');
 
         const transactions = (wsPack as any).transactions;
-      console.log('PaymentProcessingScreen[WS]: Signing transactions', { count: transactions.length });
+        console.log('PaymentProcessingScreen[WS]: Signing transactions', { count: transactions.length });
         const tSignStart = now();
         const signedTransactions: any[] = [];
         for (let i = 0; i < transactions.length; i++) {
@@ -286,15 +287,15 @@ export const PaymentProcessingScreen = () => {
         }
         const tSignEnd = now();
 
-      const paymentIdForSubmit = ((wsPack as any)?.paymentId as string) || (transactionData.invoiceId as string);
-      console.log('PaymentProcessingScreen[WS]: Submitting via WS', { indexes: signedTransactions.map(t => t.index), paymentIdForSubmit });
-      const wsRes = await submitViaWs(signedTransactions, paymentIdForSubmit);
+        const paymentIdForSubmit = ((wsPack as any)?.paymentId as string) || (transactionData.invoiceId as string);
+        console.log('PaymentProcessingScreen[WS]: Submitting via WS', { indexes: signedTransactions.map(t => t.index), paymentIdForSubmit });
+        const wsRes = await submitViaWs(signedTransactions, paymentIdForSubmit);
         if (!wsRes || (!wsRes.transactionId && !(wsRes as any).transaction_id)) {
           throw new Error('WS submit failed');
         }
         const txid = (wsRes as any).transactionId || (wsRes as any).transaction_id;
         const round = (wsRes as any).confirmedRound || (wsRes as any).confirmed_round;
-      console.log('PaymentProcessingScreen[WS]: Confirmed', { txid, round, sign_ms: Math.round(tSignEnd - tSignStart), total_ms: Math.round(now() - t0) });
+        console.log('PaymentProcessingScreen[WS]: Confirmed', { txid, round, sign_ms: Math.round(tSignEnd - tSignStart), total_ms: Math.round(now() - t0) });
         setIsComplete(true);
         setPaymentResponse({ blockchainTxId: txid, blockchainRound: round });
         return;
@@ -722,9 +723,9 @@ export const PaymentProcessingScreen = () => {
             paymentTransactionId: paymentResponse?.paymentTransaction?.paymentTransactionId || '',
             status,
           };
-          
+
           console.log('PaymentProcessingScreen: Navigating to PaymentSuccess with data:', successData);
-          
+
           (navigation as any).navigate('PaymentSuccess', {
             transactionData: successData
           });
@@ -786,30 +787,30 @@ export const PaymentProcessingScreen = () => {
                   <Animated.View style={[styles.spinner, { transform: [{ rotate: spin }] }]}>
                     <Icon name="loader" size={48} color={colors.primary} />
                   </Animated.View>
-                  <Animated.View 
+                  <Animated.View
                     style={[
-                      styles.pulseEffect, 
-                      { 
+                      styles.pulseEffect,
+                      {
                         backgroundColor: colors.primary,
                         opacity: 0.2,
                         transform: [{ scale: pulseValue }]
                       }
-                    ]} 
+                    ]}
                   />
                 </>
               ) : (
                 <Icon name="check-circle" size={48} color={colors.primary} />
               )}
             </View>
-            
+
             <Text style={styles.headerTitle}>
               {isComplete ? '¡Casi listo!' : transactionData.action}
             </Text>
-            
+
             <Text style={styles.amountText}>
               ${transactionData.amount} {formatCurrency(transactionData.currency)}
             </Text>
-            
+
             <Text style={styles.merchantText}>
               En {transactionData.merchant}
             </Text>
@@ -818,120 +819,120 @@ export const PaymentProcessingScreen = () => {
 
         {/* Processing Steps */}
         <View style={styles.content}>
-        <View style={styles.stepsCard}>
-          <View style={styles.stepsContainer}>
-            {processingSteps.map((step, index) => (
-              <View key={index} style={styles.stepRow}>
-                {/* Step Icon */}
-                <View style={[
-                  styles.stepIcon,
-                  { 
-                    backgroundColor: index <= currentStep ? step.bgColor : '#F3F4F6',
-                    transform: [{ scale: index === currentStep ? 1.1 : 1 }]
-                  }
-                ]}>
-                  <Icon 
-                    name={step.icon as any} 
-                    size={24} 
-                    color={index <= currentStep ? step.color : '#9CA3AF'} 
-                  />
-                </View>
-
-                {/* Step Text */}
-                <View style={styles.stepTextContainer}>
-                  <Text style={[
-                    styles.stepText,
-                    { color: index <= currentStep ? '#1F2937' : '#9CA3AF' }
+          <View style={styles.stepsCard}>
+            <View style={styles.stepsContainer}>
+              {processingSteps.map((step, index) => (
+                <View key={index} style={styles.stepRow}>
+                  {/* Step Icon */}
+                  <View style={[
+                    styles.stepIcon,
+                    {
+                      backgroundColor: index <= currentStep ? step.bgColor : '#F3F4F6',
+                      transform: [{ scale: index === currentStep ? 1.1 : 1 }]
+                    }
                   ]}>
-                    {step.text}
-                  </Text>
-                  {index === currentStep && !isComplete && (
-                    <View style={styles.loadingDots}>
-                      <View style={styles.dot} />
-                      <View style={styles.dot} />
-                      <View style={styles.dot} />
-                    </View>
+                    <Icon
+                      name={step.icon as any}
+                      size={24}
+                      color={index <= currentStep ? step.color : '#9CA3AF'}
+                    />
+                  </View>
+
+                  {/* Step Text */}
+                  <View style={styles.stepTextContainer}>
+                    <Text style={[
+                      styles.stepText,
+                      { color: index <= currentStep ? '#1F2937' : '#9CA3AF' }
+                    ]}>
+                      {step.text}
+                    </Text>
+                    {index === currentStep && !isComplete && (
+                      <View style={styles.loadingDots}>
+                        <View style={styles.dot} />
+                        <View style={styles.dot} />
+                        <View style={styles.dot} />
+                      </View>
+                    )}
+                  </View>
+
+                  {/* Checkmark */}
+                  {index < currentStep && (
+                    <Icon name="check-circle" size={20} color="#22C55E" />
+                  )}
+                  {index === currentStep && isComplete && (
+                    <Icon name="check-circle" size={20} color="#22C55E" />
                   )}
                 </View>
+              ))}
+            </View>
 
-                {/* Checkmark */}
-                {index < currentStep && (
-                  <Icon name="check-circle" size={20} color="#22C55E" />
-                )}
-                {index === currentStep && isComplete && (
-                  <Icon name="check-circle" size={20} color="#22C55E" />
-                )}
+            {/* Progress Bar */}
+            <View style={styles.progressContainer}>
+              <View style={styles.progressBar}>
+                <View
+                  style={[
+                    styles.progressFill,
+                    {
+                      backgroundColor: colors.primary,
+                      width: `${((currentStep + 1) / processingSteps.length) * 100}%`
+                    }
+                  ]}
+                />
               </View>
-            ))}
-          </View>
-
-          {/* Progress Bar */}
-          <View style={styles.progressContainer}>
-            <View style={styles.progressBar}>
-              <View 
-                style={[
-                  styles.progressFill,
-                  { 
-                    backgroundColor: colors.primary,
-                    width: `${((currentStep + 1) / processingSteps.length) * 100}%`
-                  }
-                ]} 
-              />
-            </View>
-            <View style={styles.progressLabels}>
-              <Text style={styles.progressLabel}>0%</Text>
-              <Text style={styles.progressLabel}>50%</Text>
-              <Text style={styles.progressLabel}>100%</Text>
+              <View style={styles.progressLabels}>
+                <Text style={styles.progressLabel}>0%</Text>
+                <Text style={styles.progressLabel}>50%</Text>
+                <Text style={styles.progressLabel}>100%</Text>
+              </View>
             </View>
           </View>
-        </View>
 
-        {/* Security Message */}
-        <View style={styles.securityCard}>
-          <View style={styles.securityContent}>
-            <Icon name="shield" size={20} color={colors.primary} />
-            <Text style={styles.securityText}>
-              <Text style={styles.securityBold}>Transacción segura</Text> • Protegido por blockchain
-            </Text>
-          </View>
-        </View>
-
-        {/* Processing Info */}
-        <View style={styles.infoCard}>
-          <View style={styles.infoContent}>
-            <Icon name="clock" size={16} color="#059669" />
-            <View style={styles.infoTextContainer}>
-              <Text style={styles.infoTitle}>¿Sabías que...?</Text>
-              <Text style={styles.infoText}>
-                Confío cubre las comisiones de red para que puedas transferir dinero completamente gratis. 
-                ¡Apoyamos a la comunidad venezolana! 🇻🇪
+          {/* Security Message */}
+          <View style={styles.securityCard}>
+            <View style={styles.securityContent}>
+              <Icon name="shield" size={20} color={colors.primary} />
+              <Text style={styles.securityText}>
+                <Text style={styles.securityBold}>Transacción segura</Text> • Protegido por blockchain
               </Text>
             </View>
           </View>
-        </View>
 
-        {/* Completion message */}
-        {isComplete && (
-          <View style={styles.completionCard}>
-            <View style={styles.completionContent}>
-              <Icon name="check-circle" size={32} color="#22C55E" />
-              <Text style={styles.completionTitle}>¡Transacción completada!</Text>
-              <Text style={styles.completionText}>Redirigiendo a confirmación...</Text>
+          {/* Processing Info */}
+          <View style={styles.infoCard}>
+            <View style={styles.infoContent}>
+              <Icon name="clock" size={16} color="#059669" />
+              <View style={styles.infoTextContainer}>
+                <Text style={styles.infoTitle}>¿Sabías que...?</Text>
+                <Text style={styles.infoText}>
+                  Confío cubre las comisiones de red para que puedas transferir dinero completamente gratis.
+                  ¡Apoyamos a la comunidad venezolana! 🇻🇪
+                </Text>
+              </View>
             </View>
           </View>
-        )}
 
-        {/* Error message */}
-        {paymentError && (
-          <View style={styles.errorCard}>
-            <View style={styles.errorContent}>
-              <Icon name="alert-circle" size={32} color="#EF4444" />
-              <Text style={styles.errorTitle}>Error en el pago</Text>
-              <Text style={styles.errorText}>{paymentError}</Text>
-              <Text style={styles.errorSubtext}>Redirigiendo de vuelta...</Text>
+          {/* Completion message */}
+          {isComplete && (
+            <View style={styles.completionCard}>
+              <View style={styles.completionContent}>
+                <Icon name="check-circle" size={32} color="#22C55E" />
+                <Text style={styles.completionTitle}>¡Transacción completada!</Text>
+                <Text style={styles.completionText}>Redirigiendo a confirmación...</Text>
+              </View>
             </View>
-          </View>
-        )}
+          )}
+
+          {/* Error message */}
+          {paymentError && (
+            <View style={styles.errorCard}>
+              <View style={styles.errorContent}>
+                <Icon name="alert-circle" size={32} color="#EF4444" />
+                <Text style={styles.errorTitle}>Error en el pago</Text>
+                <Text style={styles.errorText}>{paymentError}</Text>
+                <Text style={styles.errorSubtext}>Redirigiendo de vuelta...</Text>
+              </View>
+            </View>
+          )}
         </View>
       </ScrollView>
     </SafeAreaView>

@@ -8,6 +8,7 @@ import {
   Share,
   Alert,
   Clipboard,
+  Linking,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -47,18 +48,19 @@ export const AchievementsScreen: React.FC = () => {
   const [showReferralModal, setShowReferralModal] = useState(false);
 
   const shareMessage = useMemo(() => {
-    const safeUsername = username || '@tuUsuario';
+    // Generate clean, uppercase username for the link
+    const rawName = (username || 'tuUsuario').replace('@', '');
+    const cleanUsername = rawName.toUpperCase();
+    const inviteLink = `https://confio.lat/invite/${cleanUsername}`;
+
     return [
       'Únete a Confío y gana US$5 en $CONFIO conmigo.',
       '',
-      '1. Descarga Confío: https://confio.lat/wa',
-      `2. En el registro, escribe mi usuario ${safeUsername} en "¿Quién te invitó?"`,
-      '3. Completa tu primera operación válida:',
-      '   • Recarga de dólares digitales (US$20+)',
-      '   • Depósito de USDC + conversión a cUSD (US$20+)',
-      '   • Enviar, pagar o trade P2P',
+      `📲 Descarga la App aquí: ${inviteLink}`,
       '',
-      'Cuando lo hagas, ambos recibimos el equivalente a US$5 en $CONFIO.',
+      `Mi código de invitado es: ${cleanUsername}`,
+      '',
+      'Completa tu primera operación válida (recarga, depósito o P2P) y ambos recibiremos US$5 en $CONFIO.',
     ].join('\n');
   }, [username]);
 
@@ -174,7 +176,7 @@ export const AchievementsScreen: React.FC = () => {
         </View>
 
         <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Cómo reclamar los US$5</Text>
+          <Text style={styles.sectionTitle}>Cómo desbloquear los US$5</Text>
           {steps.map((step, index) => (
             <View key={step.title} style={styles.stepRow}>
               <View style={styles.stepNumberWrap}>
@@ -200,7 +202,7 @@ export const AchievementsScreen: React.FC = () => {
           </View>
           <View style={styles.tipRow}>
             <Icon name="zap" size={18} color={colors.primaryDark} />
-            <Text style={styles.tipText}>Ayúdalo a completar su primera compra o envío para activar la recompensa.</Text>
+            <Text style={styles.tipText}>Ayúdalo a completar su primera compra o envío para desbloquear la recompensa.</Text>
           </View>
         </View>
 

@@ -107,7 +107,7 @@ export const PayrollRunDetailScreen = () => {
       await new Promise(resolve => setTimeout(resolve, 100));
 
       if (!fullRunRef.current) {
-        Alert.alert('Error', 'El comprobante no está listo para exportar.');
+        Alert.alert('Error', 'El comprobante no está listo para exportar.', [{ text: 'OK' }]);
         setCapturingFullRun(false);
         return;
       }
@@ -142,7 +142,7 @@ export const PayrollRunDetailScreen = () => {
       );
     } catch (e: any) {
       console.error('PDF share error', e);
-      Alert.alert('Error', 'No se pudo guardar el comprobante. Verifica los permisos de galería.');
+      Alert.alert('Error', 'No se pudo guardar el comprobante. Verifica los permisos de galería.', [{ text: 'OK' }]);
       setCapturingFullRun(false);
     }
   };
@@ -161,7 +161,7 @@ export const PayrollRunDetailScreen = () => {
 
       const ref = receiptRefs.current[idx];
       if (!ref) {
-        Alert.alert('Error', 'El comprobante no está listo para exportar.');
+        Alert.alert('Error', 'El comprobante no está listo para exportar.', [{ text: 'OK' }]);
         setCapturingIndex(null);
         return;
       }

@@ -280,6 +280,50 @@ class AlgorandClient:
             cache.delete(cache_key)
         return locked_dec
     
+    async def get_reward_claimable_confio(self, address: str, skip_cache: bool = False) -> Decimal:
+        """Get claimable CONFIO amount from the rewards vault (via application box)."""
+        from django.conf import settings
+        from algosdk import encoding
+        import base64
+
+        app_id = getattr(settings, 'ALGORAND_REWARD_APP_ID', 0)
+        if not app_id:
+            return Decimal('0')
+
+        cache_key = f"reward_claimable_confio:{address}:{app_id}"
+        if not skip_cache:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                return cached
+
+        try:
+            # Decode address to bytes for box name
+            addr_bytes = encoding.decode_address(address)
+            
+            # Application boxes are read via algod
+            box = self.algod.application_box_by_name(int(app_id), addr_bytes)
+            value = base64.b64decode(box.get("value", ""))
+            
+            # Parse 'eligible_amount' (uint64 at offset 0)
+            if len(value) >= 8:
+                eligible_micro = int.from_bytes(value[0:8], "big")
+                claimable = Decimal(eligible_micro) / Decimal('1000000')
+            else:
+                claimable = Decimal('0')
+                
+        except Exception as e:
+            # Box not found (404) is normal for users without rewards
+            if "404" not in str(e):
+                logger.error("[reward_claimable] error for %s: %s", address, e)
+            claimable = Decimal('0')
+
+        if not skip_cache:
+            cache.set(cache_key, claimable, 30)
+        else:
+            cache.delete(cache_key)
+            
+        return claimable
+    
     
     # ===== Transaction Building =====
     

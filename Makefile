@@ -41,7 +41,8 @@ runserver-wsgi:
 
 # Run migrations
 migrate:
-	$(PYTHON) manage.py migrate
+	@echo "Starting migrate with CONFIO_ENV=$(CONFIO_ENV)"
+	aws-vault exec Julian -- /bin/sh -c 'cd $(PROJECT_ROOT) && env CONFIO_ENV=$(CONFIO_ENV) $(PYTHON) manage.py migrate'
 
 # Run migrations and mark existing tables as applied (no data loss)
 migrate-fake-initial:
@@ -72,7 +73,13 @@ migrate-reset-history:
 
 # Create new migrations
 makemigrations:
-	$(PYTHON) manage.py makemigrations
+	@echo "Starting makemigrations with CONFIO_ENV=$(CONFIO_ENV)"
+	aws-vault exec Julian -- /bin/sh -c 'cd $(PROJECT_ROOT) && env CONFIO_ENV=$(CONFIO_ENV) $(PYTHON) manage.py makemigrations'
+
+# Merge conflicting migrations
+makemigrations-merge:
+	@echo "Starting makemigrations --merge with CONFIO_ENV=$(CONFIO_ENV)"
+	aws-vault exec Julian -- /bin/sh -c 'cd $(PROJECT_ROOT) && env CONFIO_ENV=$(CONFIO_ENV) $(PYTHON) manage.py makemigrations --merge --noinput'
 
 # Remove all migration files (keep __init__.py) and regenerate 0001s
 reset-migrations:

@@ -1728,7 +1728,7 @@ export const TradeChatScreen: React.FC = () => {
         'Autoriza marcar como pagado (operación crítica)'
       );
       if (!bioOk) {
-        Alert.alert('Se requiere biometría', 'Confirma con Face ID / Touch ID o huella para continuar.', [{ text: 'OK' }]);
+        Alert.alert('Se requiere biometría', Platform.OS === 'ios' ? 'Confirma con Face ID o Touch ID para continuar.' : 'Confirma con tu huella digital para continuar.', [{ text: 'OK' }]);
         return;
       }
 

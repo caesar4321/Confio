@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { ReferralSuccessModal } from './ReferralSuccessModal';
 import {
   View,
   Text,
@@ -66,10 +67,10 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
     setSelectedCountry(defaultCountry);
   }, [defaultCountry]);
   const [showCountryPicker, setShowCountryPicker] = useState(false);
-  
+
   const [checkStatus] = useMutation(CHECK_REFERRAL_STATUS);
   const [setReferrer, { loading }] = useMutation(SET_REFERRER);
-  
+
   const [canSetReferrer, setCanSetReferrer] = useState(true);
   const [existingReferrer, setExistingReferrer] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -81,8 +82,11 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
 
     if (/rate limit/i.test(rawMessage)) {
       const minutesMatch = rawMessage.match(/(\d+)\s*minutes?/i);
-      const minutesText = minutesMatch ? `${minutesMatch[1]} minutos` : 'unos minutos';
-      return `Intentaste demasiadas veces. Intenta de nuevo después de ${minutesText}.`;
+      if (minutesMatch) {
+        const minutes = minutesMatch[1];
+        return `Has intentado demasiadas veces. Por favor espera ${minutes} minuto${minutes === '1' ? '' : 's'} antes de intentar nuevamente.`;
+      }
+      return 'Has intentado demasiadas veces. Por favor espera unos minutos antes de intentar nuevamente.';
     }
 
     if (/suspicious/i.test(rawMessage)) {
@@ -119,12 +123,12 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
     }
 
     let finalIdentifier = referrerInput.trim();
-    
+
     // Add @ prefix for usernames if not present
     if (inputType === 'friend' && !finalIdentifier.startsWith('@')) {
       finalIdentifier = '@' + finalIdentifier;
     }
-    
+
     // Add country code for phone numbers
     if (inputType === 'phone') {
       finalIdentifier = selectedCountry[1] + finalIdentifier.replace(/[^0-9]/g, '');
@@ -142,40 +146,44 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
       if (errors && errors.length > 0) {
         const friendly = formatErrorMessage(errors[0].message);
         setError(friendly);
-        Alert.alert('Aviso', friendly);
+        Alert.alert('Aviso', friendly, [{ text: 'OK' }]);
         return;
       }
 
       if (data?.setReferrer?.success) {
         setShowSuccess(true);
-        setTimeout(() => {
-          onSuccess?.();
-          onClose();
-        }, 2000);
+        // Let the modal auto-close logic handle it, or the user manually closes
+        // Note: ReferralSuccessModal has its own timeout and manual close
       } else {
         const friendly = formatErrorMessage(data?.setReferrer?.error);
         setError(friendly);
-        Alert.alert('Aviso', friendly);
+        Alert.alert('Aviso', friendly, [{ text: 'OK' }]);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Network error:', err);
-      setError('Error de conexión. Intenta de nuevo.');
+
+      // Try to extract a meaningful error message
+      const errorMessage = err?.graphQLErrors?.[0]?.message || err?.message;
+      if (errorMessage) {
+        const friendly = formatErrorMessage(errorMessage);
+        setError(friendly);
+        Alert.alert("Error", friendly, [{ text: 'OK' }]);
+      } else {
+        setError('Error de conexión. Intenta de nuevo.');
+        Alert.alert("Error", "Error de conexión. Intenta de nuevo.", [{ text: 'OK' }]);
+      }
     }
   };
 
   if (showSuccess) {
     return (
-      <Modal visible={visible} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.successCard}>
-            <Text style={styles.successEmoji}>🎉</Text>
-            <Text style={styles.successTitle}>¡Referidor Registrado!</Text>
-            <Text style={styles.successMessage}>
-              Cuando completes tu primera operación válida, ambos recibirán el equivalente a US$5 en $CONFIO.
-            </Text>
-          </View>
-        </View>
-      </Modal>
+      <ReferralSuccessModal
+        visible={visible}
+        onClose={() => {
+          onSuccess?.();
+          onClose();
+        }}
+      />
     );
   }
 
@@ -205,39 +213,39 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
               </Text>
 
               <View style={styles.inputTypeSelector}>
-              <TouchableOpacity
-                style={[
-                  styles.typeButton,
-                  inputType === 'friend' && styles.typeButtonActive,
-                ]}
-                onPress={() => setInputType('friend')}
-              >
-                <Text
+                <TouchableOpacity
                   style={[
-                    styles.typeButtonText,
-                    inputType === 'friend' && styles.typeButtonTextActive,
+                    styles.typeButton,
+                    inputType === 'friend' && styles.typeButtonActive,
                   ]}
+                  onPress={() => setInputType('friend')}
                 >
-                  @Usuario
-                </Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity
-                style={[
-                  styles.typeButton,
-                  inputType === 'phone' && styles.typeButtonActive,
-                ]}
-                onPress={() => setInputType('phone')}
-              >
-                <Text
+                  <Text
+                    style={[
+                      styles.typeButtonText,
+                      inputType === 'friend' && styles.typeButtonTextActive,
+                    ]}
+                  >
+                    @Usuario
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
                   style={[
-                    styles.typeButtonText,
-                    inputType === 'phone' && styles.typeButtonTextActive,
+                    styles.typeButton,
+                    inputType === 'phone' && styles.typeButtonActive,
                   ]}
+                  onPress={() => setInputType('phone')}
                 >
-                  Teléfono
-                </Text>
-              </TouchableOpacity>
+                  <Text
+                    style={[
+                      styles.typeButtonText,
+                      inputType === 'phone' && styles.typeButtonTextActive,
+                    ]}
+                  >
+                    Teléfono
+                  </Text>
+                </TouchableOpacity>
               </View>
 
               {inputType === 'phone' ? (
@@ -329,7 +337,7 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
           )}
         </View>
       </KeyboardAvoidingView>
-      
+
       {/* Country Code Picker Modal */}
       <Modal
         visible={showCountryPicker}

@@ -147,14 +147,14 @@ export const EmployeesScreen = () => {
       const success = result.data?.cancelInvitation?.success;
       const errorMsg = result.data?.cancelInvitation?.errors?.[0];
       if (!success) {
-        Alert.alert('Error', errorMsg || 'No se pudo cancelar la invitación');
+        Alert.alert('Error', errorMsg || 'No se pudo cancelar la invitación', [{ text: 'OK' }]);
         return;
       }
-      Alert.alert('Éxito', 'Invitación cancelada correctamente.');
+      Alert.alert('Éxito', 'Invitación cancelada correctamente.', [{ text: 'OK' }]);
       refetchInvitations();
     } catch (e) {
       console.error('Error canceling invitation:', e);
-      Alert.alert('Error', 'No se pudo cancelar la invitación');
+      Alert.alert('Error', 'No se pudo cancelar la invitación', [{ text: 'OK' }]);
     }
   };
 

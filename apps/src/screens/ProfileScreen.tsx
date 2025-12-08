@@ -76,20 +76,21 @@ export const ProfileScreen = () => {
   const appState = React.useRef(AppState.currentState);
 
   const referralShareMessage = React.useMemo(() => {
-    const safeUsername = username || '@tuUsuario';
+    // Generate clean, uppercase username for the link
+    const rawName = (userProfile?.username || '').replace('@', '');
+    const cleanUsername = rawName.toUpperCase();
+    const inviteLink = `https://confio.lat/invite/${cleanUsername}`;
+
     return [
       'Únete a Confío y gana US$5 en $CONFIO conmigo.',
       '',
-      '1. Descarga Confío: https://confio.lat/wa',
-      `2. En el registro, escribe mi usuario ${safeUsername} en "¿Quién te invitó?"`,
-      '3. Completa tu primera operación válida:',
-      '   • Recarga de dólares digitales (US$20+)',
-      '   • Depósito de USDC + conversión a cUSD (US$20+)',
-      '   • Enviar, pagar o trade P2P',
+      `📲 Descarga la App aquí: ${inviteLink}`,
       '',
-      'Cuando lo hagas, ambos recibimos el equivalente a US$5 en $CONFIO.',
+      `Mi código de invitado es: ${cleanUsername}`,
+      '',
+      'Completa tu primera operación válida (recarga, depósito o P2P) y ambos recibiremos US$5 en $CONFIO.',
     ].join('\n');
-  }, [username]);
+  }, [userProfile?.username]);
 
   const handleShareReferral = React.useCallback(async () => {
     const encodedMessage = encodeURIComponent(referralShareMessage);

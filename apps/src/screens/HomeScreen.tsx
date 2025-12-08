@@ -37,14 +37,17 @@ import { AccountSwitchOverlay } from '../components/AccountSwitchOverlay';
 import { getCountryByIso } from '../utils/countries';
 import { WalletCardSkeleton } from '../components/SkeletonLoader';
 import { useQuery, useMutation, useApolloClient } from '@apollo/client';
-import { GET_PRESALE_STATUS, GET_MY_BALANCES, GET_USER_ACCOUNTS, GET_ACTIVE_PRESALE, GET_ALL_PRESALE_PHASES } from '../apollo/queries';
-import { REFRESH_ACCOUNT_BALANCE } from '../apollo/mutations';
+import { GET_PRESALE_STATUS, GET_MY_BALANCES, GET_USER_ACCOUNTS, GET_ACTIVE_PRESALE, GET_ALL_PRESALE_PHASES, CHECK_REFERRAL_STATUS } from '../apollo/queries';
+import { REFRESH_ACCOUNT_BALANCE, SET_REFERRER } from '../apollo/mutations';
 import { useCountry } from '../contexts/CountryContext';
 import { useCurrency } from '../hooks/useCurrency';
 import { useSelectedCountryRate } from '../hooks/useExchangeRate';
 import { inviteSendService } from '../services/inviteSendService';
 import { GET_PENDING_PAYROLL_ITEMS } from '../apollo/queries';
 import { LoadingOverlay } from '../components/LoadingOverlay';
+import { ReferralInputModal } from '../components/ReferralInputModal';
+import { deepLinkHandler } from '../utils/deepLinkHandler';
+import { TextInput } from 'react-native';
 
 const AUTH_KEYCHAIN_SERVICE = 'com.confio.auth';
 const AUTH_KEYCHAIN_USERNAME = 'auth_tokens';
@@ -94,6 +97,7 @@ interface Account {
     manageEmployees: boolean;
     viewBusinessAddress: boolean;
     viewAnalytics: boolean;
+    manageP2p?: boolean;
   };
 }
 
@@ -128,6 +132,9 @@ export const HomeScreen = () => {
   const [claimInviteError, setClaimInviteError] = useState<string | null>(null);
   const [inviteReceiptId, setInviteReceiptId] = useState<string | undefined>(undefined);
 
+  const [showReferralInput, setShowReferralInput] = useState(false);
+
+
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.95)).current;
@@ -158,6 +165,7 @@ export const HomeScreen = () => {
     notifyOnNetworkStatusChange: true,
   });
   const [refreshAccountBalance] = useMutation(REFRESH_ACCOUNT_BALANCE);
+  const [checkReferralStatus, { data: referralStatusData }] = useMutation(CHECK_REFERRAL_STATUS);
 
   // Check if presale is globally active / claims unlocked
   const { data: presaleStatusData } = useQuery(GET_PRESALE_STATUS, {
@@ -226,18 +234,15 @@ export const HomeScreen = () => {
     }
   }, [isAuthenticated, refreshAccounts]);
 
-  // Log any errors and data for debugging
+  // Check referral status on mount to determine if ghost field should show
   useEffect(() => {
-    console.log('Balance query status:', {
-      isInitialized,
-      loading: myBalancesLoading,
-      data: myBalancesData,
-      error: myBalancesError?.message,
-    });
-    if (myBalancesError) {
-      console.error('Error fetching balances:', myBalancesError);
+    if (isAuthenticated) {
+      checkReferralStatus();
     }
-  }, [isInitialized, myBalancesLoading, myBalancesData, myBalancesError]);
+  }, [isAuthenticated, checkReferralStatus]);
+
+  // Log any errors and data for debugging
+
 
   // Parse balances safely - memoized for performance
   const cUSDBalance = React.useMemo(() =>
@@ -256,22 +261,35 @@ export const HomeScreen = () => {
     parseFloat(myBalancesData?.myBalances?.confioPresaleLocked || '0'),
     [myBalancesData?.myBalances?.confioPresaleLocked]
   );
-  const confioTotal = React.useMemo(() => confioLive + confioPresaleLocked, [confioLive, confioPresaleLocked]);
+
+
+
   const confioPriceUsd = React.useMemo(() => {
     const rawActive = activePresaleData?.activePresalePhase?.pricePerToken;
+    const activeStatus = (activePresaleData?.activePresalePhase?.status || '').toLowerCase();
     const activePrice = rawActive ? parseFloat(rawActive) : NaN;
-    if (Number.isFinite(activePrice) && activePrice > 0) {
+
+    // Only use active presale data if status is valid
+    if (
+      Number.isFinite(activePrice) &&
+      activePrice > 0 &&
+      ['active', 'completed', 'paused', 'coming_soon'].includes(activeStatus)
+    ) {
       return activePrice;
     }
+
     const phases = allPresalePhasesData?.allPresalePhases || [];
+
     if (phases.length) {
       const sorted = [...phases].sort(
         (a, b) => Number(b?.phaseNumber || 0) - Number(a?.phaseNumber || 0),
       );
+
       const lastPhase = sorted.find((phase) => {
         const status = (phase?.status || '').toLowerCase();
-        return ['active', 'completed', 'paused'].includes(status);
+        return ['active', 'completed', 'paused', 'coming_soon'].includes(status);
       });
+
       if (lastPhase?.pricePerToken) {
         const parsed = parseFloat(lastPhase.pricePerToken);
         if (Number.isFinite(parsed) && parsed > 0) {
@@ -281,7 +299,17 @@ export const HomeScreen = () => {
     }
     return 0.2;
   }, [activePresaleData, allPresalePhasesData]);
+
+  const confioLocked = React.useMemo(() =>
+    parseFloat(myBalancesData?.myBalances?.confioLocked || '0'),
+    [myBalancesData?.myBalances?.confioLocked]
+  );
+
+  const confioTotal = React.useMemo(() => confioLive + confioPresaleLocked + confioLocked, [confioLive, confioPresaleLocked, confioLocked]);
+
   const confioUsdValue = React.useMemo(() => confioTotal * confioPriceUsd, [confioTotal, confioPriceUsd]);
+
+
 
   // Display helpers to avoid overstating balances (flooring instead of rounding)
   const floorToDecimals = React.useCallback((value: number, decimals: number) => {
@@ -334,6 +362,19 @@ export const HomeScreen = () => {
   const [isInitialized, setIsInitialized] = useState(false);
   // Only show loading during the initial pass; do not toggle back after first render
   const isLoading = !isInitialized;
+
+  // Log any errors and data for debugging
+  useEffect(() => {
+    console.log('Balance query status:', {
+      isInitialized,
+      loading: myBalancesLoading,
+      data: myBalancesData,
+      error: myBalancesError?.message,
+    });
+    if (myBalancesError) {
+      console.error('Error fetching balances:', myBalancesError);
+    }
+  }, [isInitialized, myBalancesLoading, myBalancesData, myBalancesError]);
 
   // No more mock accounts - we fetch from server
 
@@ -735,7 +776,16 @@ export const HomeScreen = () => {
   const quickActions = React.useMemo(() => {
     // If user is an employee, filter actions based on permissions
     if (activeAccount?.isEmployee) {
-      const permissions = activeAccount.employeePermissions || {};
+      const permissions = activeAccount.employeePermissions || {
+        acceptPayments: false,
+        viewTransactions: false,
+        viewBalance: false,
+        sendFunds: false,
+        manageEmployees: false,
+        viewBusinessAddress: false,
+        viewAnalytics: false,
+        manageP2p: false,
+      };
 
       return quickActionsData.filter(action => {
         switch (action.id) {
@@ -826,6 +876,10 @@ export const HomeScreen = () => {
       cancelled = true;
     };
   }, [userProfile?.phoneNumber, userProfile?.phoneCountry]);
+
+
+
+
 
   // Route hint to surface claim card (e.g., after verification)
   useEffect(() => {
@@ -1205,7 +1259,18 @@ export const HomeScreen = () => {
                   Tus monedas ya están disponibles. Reclámalas en segundos.
                 </Text>
                 <TouchableOpacity
-                  onPress={() => navigation.navigate('ConfioPresale')}
+                  onPress={() => {
+                    const canClaim = (presale?.claimable ?? 0) > 0;
+                    if (!canClaim) {
+                      Alert.alert(
+                        "Aviso",
+                        "No tienes tokens disponibles para reclamar o ya fueron reclamados.",
+                        [{ text: "OK" }]
+                      );
+                      return;
+                    }
+                    navigation.navigate('ConfioPresale');
+                  }}
                   activeOpacity={0.7}
                   style={{ marginTop: 8 }}
                 >
@@ -1419,6 +1484,15 @@ export const HomeScreen = () => {
             </Animated.View>
           )}
         </View>
+
+        {/* Ghost Input for Referral */}
+        {referralStatusData?.checkReferralStatus?.canSetReferrer !== false && (
+          <View style={styles.ghostInputContainer}>
+            <TouchableOpacity onPress={() => setShowReferralInput(true)} style={styles.ghostButton}>
+              <Text style={styles.ghostButtonText}>¿Tienes un código de invitación?</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </ScrollView>
 
       {/* Profile Menu */}
@@ -1435,6 +1509,19 @@ export const HomeScreen = () => {
       <AccountSwitchOverlay
         visible={switchState.isLoading}
         progress={switchState.progress}
+      />
+
+      {/* Referral Input Modal */}
+      <ReferralInputModal
+        visible={showReferralInput}
+        onClose={() => setShowReferralInput(false)}
+        onSuccess={() => {
+          setShowReferralInput(false);
+          // Refresh balances
+          setTimeout(() => {
+            refetchMyBalances();
+          }, 500);
+        }}
       />
 
       <LoadingOverlay
@@ -1598,6 +1685,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 16,
   },
+  ghostInputContainer: {
+    marginHorizontal: 20,
+    marginBottom: 20,
+  },
+  ghostButton: {
+    padding: 12,
+    alignItems: 'center',
+  },
+  ghostButtonText: {
+    color: '#34d399', // Brand green
+    fontWeight: '600',
+  },
+
+
   walletLogo: {
     width: 44,
     height: 44,

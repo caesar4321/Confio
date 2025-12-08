@@ -262,8 +262,8 @@ def notify_referral_joined(referral: UserReferral) -> None:
         create_notification(
             user=referral.referred_user,
             notification_type=NotificationTypeChoices.REFERRAL_ACTION_REMINDER,
-            title="Activa tus recompensas de referido",
-            message="Completa tu primera transacción para reclamar los CONFIO de bienvenida.",
+            title="¡Tienes una recompensa bloqueada!",
+            message="Recibiste US$5 en $CONFIO. Completa tu primera transacción para desbloquearlos.",
             data={
                 'referral_id': referral.id,
                 'referrer_user_id': referral.referrer_user_id,
@@ -282,8 +282,8 @@ def notify_reward_ready(referral: UserReferral, referee_confio: Decimal) -> None
     create_notification(
         user=referral.referred_user,
         notification_type=NotificationTypeChoices.REFERRAL_REWARD_READY,
-        title="Tus $CONFIO están listos",
-        message=f"Reclama {amount_str} $CONFIO del bono por referidos.",
+        title="¡Has desbloqueado tus $CONFIO!",
+        message=f"Tienes {amount_str} $CONFIO desbloqueados de tu bono por referidos. Reclámalos ahora.",
         data={
             "referral_id": referral.id,
             "amount": amount_str,
@@ -383,7 +383,16 @@ def sync_referral_reward_for_event(user, event_ctx: EventContext) -> Optional[Us
         event.save(update_fields=["reward_status", "error", "updated_at"])
         return referral
 
-    service = ConfioRewardsService()
+    try:
+        service = ConfioRewardsService()
+    except Exception as exc:
+        logger.exception("Failed to initialize ConfioRewardsService")
+        event.reward_status = "failed"
+        event.error = f"Service init failed: {str(exc)}"
+        event.save(update_fields=["reward_status", "error", "updated_at"])
+        referral.reward_error = f"Service init failed: {str(exc)}"
+        referral.save(update_fields=["reward_error"])
+        return referral
 
     if reward_cusd and (not referee_confio or referee_confio <= 0):
         try:
@@ -452,81 +461,15 @@ def sync_referral_reward_for_event(user, event_ctx: EventContext) -> Optional[Us
         referral.save(update_fields=["reward_error", "reward_last_attempt_at"])
         return referral
 
-    with transaction.atomic():
-        event.reward_status = "eligible"
-        event.reward_tx_id = result.tx_id
-        event.referee_confio = referee_confio
-        event.referrer_confio = referrer_confio
-        event.error = ""
-        event.save(
-            update_fields=[
-                "reward_status",
-                "reward_tx_id",
-                "referee_confio",
-                "referrer_confio",
-                "error",
-                "updated_at",
-            ]
-        )
-
-        referral.reward_status = "eligible"
-        referral.reward_tx_id = result.tx_id
-        referral.reward_box_name = result.box_name
-        referral.reward_error = ""
-        referral.reward_event = referral.reward_event or event_ctx.event
-        referral.reward_referee_confio = referee_confio
-        referral.reward_referrer_confio = referrer_confio
-        referral.reward_metadata.update(event_ctx.metadata or {})
-        referral.reward_submitted_at = timezone.now()
-        referral.reward_last_attempt_at = referral.reward_submitted_at
-        referral.referee_reward_status = "eligible"
-        if referrer_confio > Decimal("0") and referral.referrer_user:
-            referral.referrer_reward_status = "eligible"
-        referral.save(
-            update_fields=[
-                "reward_status",
-                "reward_tx_id",
-                "reward_box_name",
-                "reward_error",
-                "reward_event",
-                "reward_referee_confio",
-                "reward_referrer_confio",
-                "reward_metadata",
-                "reward_submitted_at",
-                "reward_last_attempt_at",
-                "referee_reward_status",
-                "referrer_reward_status",
-            ]
-        )
-
-        # Ensure the referred user has an actionable reward event even if the sync
-        # was triggered from the referrer's context.
-        if referral.referred_user and event.user_id != referral.referred_user_id:
-            referee_event, _ = ReferralRewardEvent.objects.get_or_create(
-                user=referral.referred_user,
-                trigger=event_ctx.event,
-                defaults={
-                    "actor_role": "referee",
-                    "amount": event_ctx.amount or Decimal("0"),
-                    "transaction_reference": (event_ctx.metadata or {}).get(
-                        "transaction_hash", ""
-                    ),
-                    "occurred_at": event.occurred_at,
-                    "metadata": event_ctx.metadata or {},
-                    "referral": referral,
-                },
-            )
-            metadata = referee_event.metadata or {}
-            metadata.update(event_ctx.metadata or {})
-            referee_event.metadata = metadata
-            referee_event.reward_status = "eligible"
-            referee_event.reward_tx_id = result.tx_id
-            referee_event.referee_confio = referee_confio
-            referee_event.referrer_confio = referrer_confio
-            referee_event.error = ""
-            referee_event.save(
+    try:
+        with transaction.atomic():
+            event.reward_status = "eligible"
+            event.reward_tx_id = result.tx_id
+            event.referee_confio = referee_confio
+            event.referrer_confio = referrer_confio
+            event.error = ""
+            event.save(
                 update_fields=[
-                    "metadata",
                     "reward_status",
                     "reward_tx_id",
                     "referee_confio",
@@ -536,37 +479,124 @@ def sync_referral_reward_for_event(user, event_ctx: EventContext) -> Optional[Us
                 ]
             )
 
-        if referral.referrer_user and referrer_confio > Decimal("0"):
-            ref_event, _ = ReferralRewardEvent.objects.get_or_create(
-                user=referral.referrer_user,
-                trigger="referral_pending",
-                referral=referral,
-                defaults={
-                    "actor_role": "referrer",
-                    "amount": Decimal("0"),
-                    "transaction_reference": event.transaction_reference,
-                    "occurred_at": event.occurred_at,
-                },
-            )
-            metadata = ref_event.metadata or {}
-            metadata.update(event_ctx.metadata or {})
-            ref_event.metadata = metadata
-            ref_event.reward_status = "eligible"
-            ref_event.reward_tx_id = result.tx_id
-            ref_event.referee_confio = referee_confio
-            ref_event.referrer_confio = referrer_confio
-            ref_event.error = ""
-            ref_event.save(
+            referral.reward_status = "eligible"
+            referral.reward_tx_id = result.tx_id
+            referral.reward_box_name = result.box_name
+            referral.reward_error = ""
+            referral.reward_event = referral.reward_event or event_ctx.event
+            referral.reward_referee_confio = referee_confio
+            referral.reward_referrer_confio = referrer_confio
+            
+            # Robust metadata update
+            if referral.reward_metadata is None:
+                referral.reward_metadata = {}
+            referral.reward_metadata.update(event_ctx.metadata or {})
+            
+            referral.reward_submitted_at = timezone.now()
+            referral.reward_last_attempt_at = referral.reward_submitted_at
+            referral.referee_reward_status = "eligible"
+            if referrer_confio > Decimal("0") and referral.referrer_user:
+                referral.referrer_reward_status = "eligible"
+            referral.save(
                 update_fields=[
-                    "metadata",
                     "reward_status",
                     "reward_tx_id",
-                    "referee_confio",
-                    "referrer_confio",
-                    "error",
-                    "updated_at",
+                    "reward_box_name",
+                    "reward_error",
+                    "reward_event",
+                    "reward_referee_confio",
+                    "reward_referrer_confio",
+                    "reward_metadata",
+                    "reward_submitted_at",
+                    "reward_last_attempt_at",
+                    "referee_reward_status",
+                    "referrer_reward_status",
                 ]
             )
+
+            # Ensure the referred user has an actionable reward event even if the sync
+            # was triggered from the referrer's context.
+            if referral.referred_user and event.user_id != referral.referred_user_id:
+                referee_event, _ = ReferralRewardEvent.objects.get_or_create(
+                    user=referral.referred_user,
+                    trigger=event_ctx.event,
+                    defaults={
+                        "actor_role": "referee",
+                        "amount": event_ctx.amount or Decimal("0"),
+                        "transaction_reference": (event_ctx.metadata or {}).get(
+                            "transaction_hash", ""
+                        ),
+                        "occurred_at": event.occurred_at,
+                        "metadata": event_ctx.metadata or {},
+                        "referral": referral,
+                    },
+                )
+                metadata = referee_event.metadata or {}
+                metadata.update(event_ctx.metadata or {})
+                referee_event.metadata = metadata
+                referee_event.reward_status = "eligible"
+                referee_event.reward_tx_id = result.tx_id
+                referee_event.referee_confio = referee_confio
+                referee_event.referrer_confio = referrer_confio
+                referee_event.error = ""
+                referee_event.save(
+                    update_fields=[
+                        "metadata",
+                        "reward_status",
+                        "reward_tx_id",
+                        "referee_confio",
+                        "referrer_confio",
+                        "error",
+                        "updated_at",
+                    ]
+                )
+
+            if referral.referrer_user and referrer_confio > Decimal("0"):
+                ref_event, _ = ReferralRewardEvent.objects.get_or_create(
+                    user=referral.referrer_user,
+                    trigger="referral_pending",
+                    referral=referral,
+                    defaults={
+                        "actor_role": "referrer",
+                        "amount": Decimal("0"),
+                        "transaction_reference": event.transaction_reference,
+                        "occurred_at": event.occurred_at,
+                    },
+                )
+                metadata = ref_event.metadata or {}
+                metadata.update(event_ctx.metadata or {})
+                ref_event.metadata = metadata
+                ref_event.reward_status = "eligible"
+                ref_event.reward_tx_id = result.tx_id
+                ref_event.referee_confio = referee_confio
+                ref_event.referrer_confio = referrer_confio
+                ref_event.error = ""
+                ref_event.save(
+                    update_fields=[
+                        "metadata",
+                        "reward_status",
+                        "reward_tx_id",
+                        "referee_confio",
+                        "referrer_confio",
+                        "error",
+                        "updated_at",
+                    ]
+                )
+
+    except Exception as exc:
+        logger.exception("Failed to save referral reward outcome")
+        # The atomic block rolled back, so 'event' and 'referral' are in previous state.
+        # We need to explicitly fail the event to avoid 'pending' zombie state.
+        try:
+            event.reward_status = "failed"
+            event.error = f"DB Update Failed: {str(exc)}"
+            event.save(update_fields=["reward_status", "error", "updated_at"])
+            
+            referral.reward_error = f"DB Update Failed: {str(exc)}"
+            referral.save(update_fields=["reward_error"])
+        except Exception as e:
+            logger.error(f"FATAL: Could not even save failure state: {e}")
+        return referral
 
     notify_referral_stage(referral, event_ctx)
     notify_reward_ready(referral, referee_confio)

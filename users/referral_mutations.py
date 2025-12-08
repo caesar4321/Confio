@@ -144,7 +144,7 @@ class SetReferrer(graphene.Mutation):
                 return SetReferrer(
                     success=True,
                     referral_type='friend',
-                    message="¡Referidor registrado! Completa tu primera operación válida y ambos recibirán el equivalente a US$5 en $CONFIO."
+                    message="¡Referidor registrado! Tienes US$5 en $CONFIO bloqueados. Completa tu primera operación para desbloquearlos."
                 )
                 
         except Exception:

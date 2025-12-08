@@ -248,6 +248,7 @@ class ConfioRewardsService:
             message = str(exc)
             if (
                 "pc=1135" in message
+                or "pc=1228" in message
                 or "load 8" in message
                 or "box" in message.lower()
             ):
@@ -350,6 +351,18 @@ class ConfioRewardsService:
         if not box:
             return None
         return Decimal(box["eligible_amount"]) / Decimal(1_000_000)
+
+    def get_referrer_claimable_amount(self, referee_address: str) -> Optional[Decimal]:
+        """Return current CONFIO amount available for the referrer on a referee's box."""
+        try:
+            addr_bytes = encoding.decode_address(referee_address)
+        except Exception:
+            return None
+
+        box = self._read_user_box(addr_bytes)
+        if not box:
+            return None
+        return Decimal(box["ref_amount"]) / Decimal(1_000_000)
 
     def has_confio_opt_in(self, user_address: str) -> bool:
         """Return True if the address has opted into the CONFIO ASA."""

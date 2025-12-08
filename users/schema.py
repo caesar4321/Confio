@@ -80,7 +80,18 @@ def _record_referral_claim_payout(*, user, referral, event, claim_amount, tx_id)
 	with db_transaction.atomic():
 		if referral:
 			referral.reward_claimed_at = reward_timestamp
-			actor_role = (getattr(event, "actor_role", "") or "").lower() if event else ""
+			
+			# Robustly determine actor role
+			raw_role = (getattr(event, "actor_role", "") or "")
+			actor_role = raw_role.strip().lower() if raw_role else ""
+			
+			# Fallback: if actor_role missing/invalid, deduce from user IDs
+			if not actor_role and event:
+				if user.id == referral.referred_user_id:
+					actor_role = 'referee'
+				elif referral.referrer_user_id and user.id == referral.referrer_user_id:
+					actor_role = 'referrer'
+
 			if actor_role == 'referee':
 				if (
 					referral.referee_confio_awarded is None
@@ -99,6 +110,7 @@ def _record_referral_claim_payout(*, user, referral, event, claim_amount, tx_id)
 						referral.reward_referrer_confio or claim_amount
 					)
 				referral.referrer_reward_status = 'claimed'
+				
 			if (
 				referral.referee_reward_status == 'claimed'
 				and referral.referrer_reward_status in {'claimed', 'pending', 'failed'}
@@ -124,7 +136,7 @@ def _record_referral_claim_payout(*, user, referral, event, claim_amount, tx_id)
 
 		# Update placeholder events for THIS specific actor role only
 		# to avoid marking the other party's event as claimed
-		actor_role = (getattr(event, "actor_role", "") or "").lower() if event else ""
+		# (We re-derive actor_role from event if needed, but we already have robust actor_role above)
 		placeholder_filters = {
 			"trigger": "referral_pending",
 			"reward_status__in": ["pending", "eligible"],
@@ -134,10 +146,9 @@ def _record_referral_claim_payout(*, user, referral, event, claim_amount, tx_id)
 		else:
 			placeholder_filters["user"] = user
 
-		# CRITICAL: Only update events for the same actor_role to prevent
-		# marking the referrer's event as claimed when referee claims (or vice versa)
+		# CRITICAL: Only update events for the same actor_role
 		if actor_role:
-			placeholder_filters["actor_role"] = actor_role
+			placeholder_filters["actor_role__iexact"] = actor_role
 
 		updated_count = ReferralRewardEvent.objects.filter(**placeholder_filters).update(
 			reward_status='claimed',
@@ -1017,15 +1028,42 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			# Efficient due to single account_info snapshot under the hood.
 			from blockchain.balance_service import BalanceService
 			all_balances = BalanceService.get_all_balances(account, force_refresh=True)
+			
+			# Add pending referral rewards to locked balance (virtual locked)
+			pending_referral_amount = Decimal('0')
+			confio_lock_val = Decimal(all_balances.get('confio_presale', {}).get('amount', 0))
+			
+			if account_type == 'personal':
+				# 1. As Referee: My reward for being invited (if not claimed)
+				referee_pending = UserReferral.objects.filter(
+					referred_user=user,
+					referee_reward_status__in=['pending', 'eligible'],
+					deleted_at__isnull=True
+				).aggregate(total=Sum('reward_referee_confio'))['total'] or Decimal('0')
+
+				# 2. As Referrer: My rewards for inviting others (if not claimed)
+				referrer_pending = UserReferral.objects.filter(
+					referrer_user=user,
+					referrer_reward_status__in=['pending', 'eligible'],
+					deleted_at__isnull=True
+				).aggregate(total=Sum('reward_referrer_confio'))['total'] or Decimal('0')
+				
+				pending_referral_amount = referee_pending + referrer_pending
+
+				if pending_referral_amount > 0:
+					confio_lock_val += pending_referral_amount
+
 			return BalancesType(
 				cusd=f"{all_balances['cusd']['amount']:.2f}",
 				confio=f"{all_balances['confio']['amount']:.2f}",
 				confioPresaleLocked=f"{all_balances.get('confio_presale', {}).get('amount', 0):.2f}",
+				confioLocked=f"{confio_lock_val:.2f}",
+				pendingReferralReward=f"{pending_referral_amount:.2f}",
 				usdc=f"{all_balances['usdc']['amount']:.2f}"
 			)
 		except Exception:
 			# Graceful fallback to zeros to avoid client crashes
-			return BalancesType(cusd="0.00", confio="0.00", confioPresaleLocked="0.00", usdc="0.00")
+			return BalancesType(cusd="0.00", confio="0.00", confioPresaleLocked="0.00", confioLocked="0.00", pendingReferralReward="0.00", usdc="0.00")
 
 	def resolve_stats_summary(self, info):
 		"""Compute small set of aggregates with a short cache TTL."""
@@ -3152,6 +3190,8 @@ class BalancesType(graphene.ObjectType):
     cusd = graphene.String()
     confio = graphene.String()
     confioPresaleLocked = graphene.String()
+    confioLocked = graphene.String()
+    pendingReferralReward = graphene.String()
     usdc = graphene.String()
 
 class RefreshAccountBalance(graphene.Mutation):
@@ -3402,7 +3442,7 @@ class PrepareReferralRewardClaim(graphene.Mutation):
 	def mutate(cls, root, info, event_id):
 		user = getattr(info.context, 'user', None)
 		if not (user and getattr(user, 'is_authenticated', False)):
-			return PrepareReferralRewardClaim(success=False, error="Necesitas iniciar sesión para reclamar.")
+			return PrepareReferralRewardClaim(success=False, error="Necesitas iniciar sesión para desbloquear.")
 
 		try:
 			event = ReferralRewardEvent.objects.select_related('referral').get(id=event_id, user=user)
@@ -3410,7 +3450,7 @@ class PrepareReferralRewardClaim(graphene.Mutation):
 			return PrepareReferralRewardClaim(success=False, error="No encontramos esa recompensa.")
 
 		if event.reward_status != 'eligible':
-			return PrepareReferralRewardClaim(success=False, error="Esta recompensa aún no está lista para reclamar.")
+			return PrepareReferralRewardClaim(success=False, error="Esta recompensa aún no está lista para desbloquear.")
 
 		referral = event.referral
 		# For two-sided referrals, check if this specific actor already claimed their portion
@@ -3423,7 +3463,7 @@ class PrepareReferralRewardClaim(graphene.Mutation):
 
 		user_address = get_primary_algorand_address(user)
 		if not user_address:
-			return PrepareReferralRewardClaim(success=False, error="Necesitas asociar tu billetera Algorand para reclamar $CONFIO.")
+			return PrepareReferralRewardClaim(success=False, error="Necesitas asociar tu billetera Algorand para desbloquear $CONFIO.")
 
 		service = ConfioRewardsService()
 		claim_kind = 'referee'
@@ -3436,7 +3476,7 @@ class PrepareReferralRewardClaim(graphene.Mutation):
 					if role_label == 'referrer':
 						return PrepareReferralRewardClaim(
 							success=False,
-							error="Debes aceptar el token $CONFIO en tu billetera antes de reclamar este bono de referidos.",
+							error="Debes aceptar el token $CONFIO en tu billetera antes de desbloquear este bono de referidos.",
 						)
 					return PrepareReferralRewardClaim(
 						success=False,
@@ -3546,22 +3586,46 @@ class PrepareReferralRewardClaim(graphene.Mutation):
 						error="Este bono pertenece a otro referidor. Debes usar la cuenta que invitó a tu amigo.",
 					)
 				reward_amount_value = Decimal(referee_box["ref_amount"]) / Decimal(1_000_000)
-				group = service.build_referrer_claim_group(
-					referrer_address=user_address,
-					referee_address=referee_address,
-				)
+				if not actor_role or actor_role == 'referrer':
+					# Verify this is a referrer claim
+					if not (referral and referral.referred_user):
+						return PrepareReferralRewardClaim(success=False, error="Referencia inválida.")
+					
+					# Referrer claims from the REFEREE's box
+					box_address = get_primary_algorand_address(referral.referred_user)
+					if not box_address:
+						return PrepareReferralRewardClaim(success=False, error="La cuenta del referido no tiene dirección Algorand.")
+
+					try:
+						claimable_amount = service.get_referrer_claimable_amount(box_address)
+					except Exception as exc:
+						logger.exception("Failed to inspect referrer claimable amount: %s", exc)
+						return PrepareReferralRewardClaim(success=False, error="No pudimos verificar tu bono. Intenta más tarde.")
+
+					if not claimable_amount or claimable_amount <= Decimal('0'):
+						return PrepareReferralRewardClaim(
+							success=False,
+							error="Esta recompensa aún no está lista o ya fue reclamada.",
+						)
+
+					reward_amount_value = claimable_amount
+					group = service.build_referrer_claim_group(
+						referrer_address=user_address,
+						referee_address=box_address,
+					)
+					claim_kind = 'referrer'
+				
 			else:
+				# Referee claim
+				box_address = user_address
 				referrer_address = None
-				if (
-					referral
-					and referral.referrer_user
-					and referral.reward_referrer_confio
-					and referral.reward_referrer_confio > Decimal('0')
-				):
+				if referral and referral.referrer_user:
 					referrer_address = get_primary_algorand_address(referral.referrer_user)
+				
 				opt_in_error = _require_confio_opt_in(user_address, 'referee')
 				if opt_in_error:
 					return opt_in_error
+
 				try:
 					claimable_amount = service.get_claimable_amount(user_address)
 				except Exception as exc:  # pragma: no cover - network call
@@ -3574,19 +3638,25 @@ class PrepareReferralRewardClaim(graphene.Mutation):
 						success=False,
 						error="No pudimos verificar tu bono en la cadena. Intenta nuevamente en unos minutos.",
 					)
+				
 				if not claimable_amount or claimable_amount <= Decimal('0'):
 					return PrepareReferralRewardClaim(
 						success=False,
-						error="Aún no hay CONFIO disponibles para reclamar en esta recompensa.",
+						error="Aún no hay CONFIO disponibles para desbloquear en esta recompensa.",
 					)
+				
 				reward_amount_value = claimable_amount
+				
 				group = service.build_claim_group(
 					user_address=user_address,
 					referrer_address=referrer_address,
 				)
+				claim_kind = 'referee'
 		except Exception as exc:
 			logger.exception("Failed to build referral reward claim group: %s", exc)
 			return PrepareReferralRewardClaim(success=False, error="No pudimos preparar la transacción. Intenta de nuevo en unos minutos.")
+
+		print(f"DEBUG REF CLAIM: kind={claim_kind} amount={reward_amount_value} group={group}")
 
 		token = secrets.token_urlsafe(32)
 		expires_at = timezone.now() + timedelta(seconds=REFERRAL_CLAIM_SESSION_TTL)
@@ -3628,7 +3698,7 @@ class SubmitReferralRewardClaim(graphene.Mutation):
 	def mutate(cls, root, info, claim_token, signed_transaction):
 		user = getattr(info.context, 'user', None)
 		if not (user and getattr(user, 'is_authenticated', False)):
-			return SubmitReferralRewardClaim(success=False, error="Necesitas iniciar sesión para reclamar.")
+			return SubmitReferralRewardClaim(success=False, error="Necesitas iniciar sesión para desbloquear.")
 
 		cache_key = _referral_claim_cache_key(claim_token)
 		session = cache.get(cache_key)

@@ -29,52 +29,53 @@ export const useAtomicAccountSwitch = (): UseAtomicAccountSwitchReturn => {
     error: null,
     progress: '',
   });
-  
+
   // Use a ref to track if switch is in progress to prevent concurrent switches
   const switchInProgressRef = useRef(false);
-  
+
   const apolloClient = useApolloClient();
   const { refreshProfile } = useAuth();
   const { accounts, refreshAccounts } = useAccount();
   const authService = AuthService.getInstance();
   const accountManager = AccountManager.getInstance();
-  
+
   const switchAccount = useCallback(async (accountId: string): Promise<boolean> => {
     // Prevent concurrent account switches
     if (switchInProgressRef.current) {
       console.warn('Account switch already in progress, ignoring request');
       Alert.alert(
         'Cambio en progreso',
-        'Ya hay un cambio de cuenta en progreso. Por favor espera a que termine.'
+        'Ya hay un cambio de cuenta en progreso. Por favor espera a que termine.',
+        [{ text: 'OK' }]
       );
       return false;
     }
-    
+
     switchInProgressRef.current = true;
     setState({ isLoading: true, error: null, progress: 'Iniciando cambio de cuenta...' });
-    
+
     try {
       console.log('🔄 [AtomicAccountSwitch] Starting account switch to:', accountId);
-      
+
       // Step 1: Validate the target account exists
       setState(prev => ({ ...prev, progress: 'Validando cuenta...' }));
       const targetAccount = accounts.find(acc => acc.id === accountId);
       if (!targetAccount) {
         throw new Error('Cuenta no encontrada');
       }
-      
+
       console.log('✅ [AtomicAccountSwitch] Target account found:', {
         id: targetAccount.id,
         type: targetAccount.type,
         name: targetAccount.name,
         businessId: targetAccount.business?.id,
       });
-      
+
       // Step 2: Pause all queries to prevent race conditions
       setState(prev => ({ ...prev, progress: 'Pausando consultas activas...' }));
       apolloClient.stop();
       console.log('⏸️ [AtomicAccountSwitch] Apollo queries paused');
-      
+
       // Step 3: Clear Apollo cache to prevent stale data
       setState(prev => ({ ...prev, progress: 'Limpiando caché...' }));
       try {
@@ -84,7 +85,7 @@ export const useAtomicAccountSwitch = (): UseAtomicAccountSwitchReturn => {
         console.warn('Warning clearing cache:', cacheError);
         // Continue anyway - cache clear is not critical
       }
-      
+
       // Step 4: Update account context in Keychain
       setState(prev => ({ ...prev, progress: 'Actualizando contexto de cuenta...' }));
       const accountContext = {
@@ -92,18 +93,18 @@ export const useAtomicAccountSwitch = (): UseAtomicAccountSwitchReturn => {
         index: targetAccount.index || 0,
         businessId: targetAccount.business?.id,
       };
-      
+
       await accountManager.setActiveAccountContext(accountContext);
       console.log('💾 [AtomicAccountSwitch] Account context saved to Keychain');
-      
+
       // Step 5: Get new JWT token with the updated account context
       setState(prev => ({ ...prev, progress: 'Obteniendo nuevo token de autenticación...' }));
       await authService.switchAccount(accountId, apolloClient);
       console.log('🎫 [AtomicAccountSwitch] New JWT token obtained');
-      
+
       // Step 6: Small delay to ensure token propagation
       await new Promise(resolve => setTimeout(resolve, 300));
-      
+
       // Step 7: Refresh profile with new account context
       setState(prev => ({ ...prev, progress: 'Actualizando perfil...' }));
       try {
@@ -118,17 +119,17 @@ export const useAtomicAccountSwitch = (): UseAtomicAccountSwitchReturn => {
         console.error('Error refreshing profile:', profileError);
         // Continue - profile refresh failure shouldn't break the switch
       }
-      
+
       // Step 8: Refresh accounts to update UI
       setState(prev => ({ ...prev, progress: 'Actualizando lista de cuentas...' }));
       await refreshAccounts();
       console.log('📋 [AtomicAccountSwitch] Accounts list refreshed');
-      
+
       // Step 9: Resume Apollo queries
       setState(prev => ({ ...prev, progress: 'Reiniciando consultas...' }));
       apolloClient.reFetchObservableQueries();
       console.log('▶️ [AtomicAccountSwitch] Apollo queries resumed');
-      
+
       // Step 10: Final validation - ensure everything is in sync
       setState(prev => ({ ...prev, progress: 'Validando sincronización...' }));
       const newContext = await authService.getActiveAccountContext();
@@ -136,45 +137,45 @@ export const useAtomicAccountSwitch = (): UseAtomicAccountSwitchReturn => {
         newContext.type === targetAccount.type &&
         (newContext.businessId || '') === (targetAccount.business?.id || '')
       );
-      
+
       if (!contextMatchesTarget) {
         throw new Error('La sincronización de cuenta falló. Por favor intenta nuevamente.');
       }
-      
+
       console.log('✅ [AtomicAccountSwitch] Account switch completed successfully');
       setState({ isLoading: false, error: null, progress: '' });
       switchInProgressRef.current = false;
-      
+
       return true;
-      
+
     } catch (error) {
       console.error('❌ [AtomicAccountSwitch] Account switch failed:', error);
-      
+
       // Attempt to recover by resuming queries
       try {
         apolloClient.reFetchObservableQueries();
       } catch (recoveryError) {
         console.error('Failed to resume queries:', recoveryError);
       }
-      
+
       const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
-      setState({ 
-        isLoading: false, 
-        error: errorMessage, 
-        progress: '' 
+      setState({
+        isLoading: false,
+        error: errorMessage,
+        progress: ''
       });
-      
+
       Alert.alert(
         'Error al cambiar cuenta',
         `No se pudo cambiar la cuenta: ${errorMessage}`,
         [{ text: 'OK' }]
       );
-      
+
       switchInProgressRef.current = false;
       return false;
     }
   }, [accounts, apolloClient, authService, accountManager, refreshProfile, refreshAccounts]);
-  
+
   return {
     switchAccount,
     state,

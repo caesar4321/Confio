@@ -684,6 +684,7 @@ export const GET_MY_BALANCES = gql`
       cusd
       confio
       confioPresaleLocked
+      confioLocked
       usdc
     }
   }

@@ -53,7 +53,7 @@ const colors = {
 const ChargeScreen = () => {
   const navigation = useNavigation<ChargeScreenNavigationProp>();
   const { activeAccount } = useAccount();
-  
+
   const [mode, setMode] = useState('cobrar');
   const [selectedCurrency, setSelectedCurrency] = useState('cUSD');
   const [amount, setAmount] = useState('');
@@ -66,10 +66,10 @@ const ChargeScreen = () => {
   const [hasNavigatedToSuccess, setHasNavigatedToSuccess] = useState(false);
   const [isOptingIn, setIsOptingIn] = useState(false);
   const [optInMessage, setOptInMessage] = useState('Preparando cuenta empresarial...');
-  
+
   // GraphQL mutations and queries
   const [createInvoice] = useMutation(CREATE_INVOICE);
-  
+
   // Poll for invoice status updates when QR is shown
   const { data: invoiceData, refetch: refetchInvoice } = useQuery(GET_INVOICES, {
     skip: !showQRCode || !invoice,
@@ -83,7 +83,7 @@ const ChargeScreen = () => {
       console.log('ChargeScreen: Checking for payment status updates...');
       console.log('ChargeScreen: Current invoice ID:', invoice.invoiceId);
       console.log('ChargeScreen: Available invoices:', invoiceData.invoices.map((inv: any) => ({ id: inv.invoiceId, status: inv.status })));
-      
+
       const currentInvoice = invoiceData.invoices.find((inv: any) => inv.invoiceId === invoice.invoiceId);
       if (currentInvoice) {
         console.log('ChargeScreen: Found current invoice:', {
@@ -92,7 +92,7 @@ const ChargeScreen = () => {
           paidByUser: currentInvoice.paidByUser,
           transaction: currentInvoice.transaction
         });
-        
+
         // Optimistic: show submitted as soon as the invoice has a SUBMITTED/PENDING_BLOCKCHAIN payment txn
         const hasSubmittedTxn = Array.isArray(currentInvoice.paymentTransactions) && currentInvoice.paymentTransactions.some(
           (pt: any) => pt?.status === 'SUBMITTED' || pt?.status === 'PENDING_BLOCKCHAIN'
@@ -111,7 +111,7 @@ const ChargeScreen = () => {
           console.log('ChargeScreen: Payment confirmed! Navigating to BusinessPaymentSuccess...');
           setPaymentStatus('paid');
           setHasNavigatedToSuccess(true);
-          
+
           // Automatically navigate to business payment success screen
           (navigation as any).navigate('BusinessPaymentSuccess', {
             paymentData: {
@@ -182,14 +182,14 @@ const ChargeScreen = () => {
 
   const handleGenerateQR = async () => {
     console.log('ChargeScreen: handleGenerateQR called');
-    
+
     if (!amount || parseFloat(amount) <= 0) {
-      Alert.alert('Error', 'Por favor ingresa un monto válido');
+      Alert.alert('Error', 'Por favor ingresa un monto válido', [{ text: 'OK' }]);
       return;
     }
 
     if (!activeAccount) {
-      Alert.alert('Error', 'No se encontró la cuenta activa');
+      Alert.alert('Error', 'No se encontró la cuenta activa', [{ text: 'OK' }]);
       return;
     }
 
@@ -205,35 +205,35 @@ const ChargeScreen = () => {
       // For business accounts, ensure opt-ins are complete before generating invoice (blocking)
       if (activeAccount.type === 'business') {
         console.log('ChargeScreen: Business account detected, checking opt-ins...');
-        
+
         try {
           const businessOptInService = await import('../services/businessOptInService').then(m => m.default);
           console.log('ChargeScreen: BusinessOptInService imported successfully');
-          
+
           // Show opt-in modal
           setIsOptingIn(true);
           setOptInMessage('Preparando factura...');
-          
+
           const optInSuccess = await businessOptInService.checkAndHandleOptIns(
             // Progress callback to update modal message
             (message: string) => {
               setOptInMessage(message);
             }
           );
-          
+
           console.log('ChargeScreen: Opt-in check result:', optInSuccess);
-          
+
           // Hide opt-in modal
           setIsOptingIn(false);
-          
+
           if (!optInSuccess) {
             console.error('ChargeScreen: Business opt-in failed, cannot generate invoice');
-            
+
             // Check if this is a non-owner employee who can't opt-in
             const token = await authService.getToken();
             const decoded: any = token ? jwtDecode(token) : {};
             const isNonOwnerEmployee = decoded.business_employee_role && decoded.business_employee_role !== 'owner';
-            
+
             if (isNonOwnerEmployee) {
               Alert.alert(
                 'Acción requerida del dueño',
@@ -265,7 +265,7 @@ const ChargeScreen = () => {
       } else {
         console.log('ChargeScreen: Personal account, skipping opt-in check');
       }
-      
+
       console.log('ChargeScreen: Creating invoice...');
       const { data } = await createInvoice({
         variables: {
@@ -287,14 +287,14 @@ const ChargeScreen = () => {
         // Trigger an immediate fetch so we don't wait for first poll tick
         try {
           await refetchInvoice();
-        } catch (_) {}
+        } catch (_) { }
       } else {
         const errors = data?.createInvoice?.errors || ['Error desconocido'];
-        Alert.alert('Error', errors.join(', '));
+        Alert.alert('Error', errors.join(', '), [{ text: 'OK' }]);
       }
     } catch (error) {
       console.error('Error creating invoice:', error);
-      Alert.alert('Error', 'No se pudo crear la factura. Inténtalo de nuevo.');
+      Alert.alert('Error', 'No se pudo crear la factura. Inténtalo de nuevo.', [{ text: 'OK' }]);
     } finally {
       setIsLoading(false);
     }
@@ -302,7 +302,7 @@ const ChargeScreen = () => {
 
   const handleCopy = (text: string) => {
     Clipboard.setString(text);
-    Alert.alert('Copiado', 'Enlace copiado al portapapeles');
+    Alert.alert('Copiado', 'Enlace copiado al portapapeles', [{ text: 'OK' }]);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -364,7 +364,7 @@ const ChargeScreen = () => {
         transparent={true}
         animationType="fade"
         visible={isOptingIn}
-        onRequestClose={() => {}}
+        onRequestClose={() => { }}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -384,328 +384,328 @@ const ChargeScreen = () => {
       <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={[
-        styles.header,
-        { backgroundColor: mode === 'cobrar' ? currentCurrency.color : colors.primary }
-      ]}>
-        <View style={styles.headerContent}>
-          <View style={styles.qrIconContainer}>
-            <Icon name="maximize" size={32} color={mode === 'cobrar' ? currentCurrency.color : colors.primary} />
+          styles.header,
+          { backgroundColor: mode === 'cobrar' ? currentCurrency.color : colors.primary }
+        ]}>
+          <View style={styles.headerContent}>
+            <View style={styles.qrIconContainer}>
+              <Icon name="maximize" size={32} color={mode === 'cobrar' ? currentCurrency.color : colors.primary} />
+            </View>
+            <Text style={styles.headerTitle}>
+              {mode === 'cobrar' ? 'Cobrar' : 'Pagar'}
+            </Text>
+            <Text style={styles.headerSubtitle}>
+              {mode === 'cobrar'
+                ? 'Genera códigos QR para recibir pagos de tus clientes'
+                : 'Escanea códigos QR para realizar pagos'
+              }
+            </Text>
           </View>
-          <Text style={styles.headerTitle}>
-            {mode === 'cobrar' ? 'Cobrar' : 'Pagar'}
-          </Text>
-          <Text style={styles.headerSubtitle}>
-            {mode === 'cobrar' 
-              ? 'Genera códigos QR para recibir pagos de tus clientes'
-              : 'Escanea códigos QR para realizar pagos'
-            }
-          </Text>
         </View>
-      </View>
 
-      {/* Mode Toggle */}
-      <View style={styles.modeToggleContainer}>
-        <View style={styles.modeToggle}>
-          <TouchableOpacity
-            style={[
-              styles.modeButton,
-              mode === 'cobrar' && { backgroundColor: currentCurrency.color }
-            ]}
-            onPress={() => handleModeSwitch('cobrar')}
-          >
-            <Text style={[
-              styles.modeButtonText,
-              mode === 'cobrar' && styles.modeButtonTextActive
-            ]}>
-              Cobrar
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.modeButton,
-              mode === 'pagar' && { backgroundColor: colors.primary }
-            ]}
-            onPress={() => handleModeSwitch('pagar')}
-          >
-            <Text style={[
-              styles.modeButtonText,
-              mode === 'pagar' && styles.modeButtonTextActive
-            ]}>
-              Pagar
-            </Text>
-          </TouchableOpacity>
+        {/* Mode Toggle */}
+        <View style={styles.modeToggleContainer}>
+          <View style={styles.modeToggle}>
+            <TouchableOpacity
+              style={[
+                styles.modeButton,
+                mode === 'cobrar' && { backgroundColor: currentCurrency.color }
+              ]}
+              onPress={() => handleModeSwitch('cobrar')}
+            >
+              <Text style={[
+                styles.modeButtonText,
+                mode === 'cobrar' && styles.modeButtonTextActive
+              ]}>
+                Cobrar
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.modeButton,
+                mode === 'pagar' && { backgroundColor: colors.primary }
+              ]}
+              onPress={() => handleModeSwitch('pagar')}
+            >
+              <Text style={[
+                styles.modeButtonText,
+                mode === 'pagar' && styles.modeButtonTextActive
+              ]}>
+                Pagar
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
-      </View>
 
-      {/* Content */}
-      <View style={styles.content}>
-        {mode === 'cobrar' ? (
-          <View style={styles.cobrarContent}>
-            {!showQRCode ? (
-              <>
-                {/* Currency Selector */}
-                <View style={styles.card}>
-                  <Text style={styles.cardTitle}>Moneda para cobrar</Text>
-                  <View style={styles.currencyGrid}>
-                    <TouchableOpacity
-                      style={[
-                        styles.currencyButton,
-                        selectedCurrency === 'cUSD' && styles.currencyButtonSelected
-                      ]}
-                      onPress={() => setSelectedCurrency('cUSD')}
-                    >
-                      <View style={styles.currencyContent}>
-                        <View style={styles.currencyIcon}>
-                          <Image source={currencies.cUSD.icon} style={styles.currencyIconImage} />
+        {/* Content */}
+        <View style={styles.content}>
+          {mode === 'cobrar' ? (
+            <View style={styles.cobrarContent}>
+              {!showQRCode ? (
+                <>
+                  {/* Currency Selector */}
+                  <View style={styles.card}>
+                    <Text style={styles.cardTitle}>Moneda para cobrar</Text>
+                    <View style={styles.currencyGrid}>
+                      <TouchableOpacity
+                        style={[
+                          styles.currencyButton,
+                          selectedCurrency === 'cUSD' && styles.currencyButtonSelected
+                        ]}
+                        onPress={() => setSelectedCurrency('cUSD')}
+                      >
+                        <View style={styles.currencyContent}>
+                          <View style={styles.currencyIcon}>
+                            <Image source={currencies.cUSD.icon} style={styles.currencyIconImage} />
+                          </View>
+                          <View style={styles.currencyInfo}>
+                            <Text style={[
+                              styles.currencyName,
+                              selectedCurrency === 'cUSD' && styles.currencyNameSelected
+                            ]}>
+                              {currencies.cUSD.name}
+                            </Text>
+                            <Text style={[
+                              styles.currencySymbol,
+                              selectedCurrency === 'cUSD' && styles.currencySymbolSelected
+                            ]}>
+                              ${currencies.cUSD.symbol}
+                            </Text>
+                          </View>
                         </View>
-                        <View style={styles.currencyInfo}>
-                          <Text style={[
-                            styles.currencyName,
-                            selectedCurrency === 'cUSD' && styles.currencyNameSelected
-                          ]}>
-                            {currencies.cUSD.name}
-                          </Text>
-                          <Text style={[
-                            styles.currencySymbol,
-                            selectedCurrency === 'cUSD' && styles.currencySymbolSelected
-                          ]}>
-                            ${currencies.cUSD.symbol}
-                          </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[
+                          styles.currencyButton,
+                          selectedCurrency === 'CONFIO' && styles.currencyButtonSelected
+                        ]}
+                        onPress={() => setSelectedCurrency('CONFIO')}
+                      >
+                        <View style={styles.currencyContent}>
+                          <View style={styles.currencyIcon}>
+                            <Image source={currencies.CONFIO.icon} style={styles.currencyIconImage} />
+                          </View>
+                          <View style={styles.currencyInfo}>
+                            <Text style={[
+                              styles.currencyName,
+                              selectedCurrency === 'CONFIO' && styles.currencyNameSelected
+                            ]}>
+                              {currencies.CONFIO.name}
+                            </Text>
+                            <Text style={[
+                              styles.currencySymbol,
+                              selectedCurrency === 'CONFIO' && styles.currencySymbolSelected
+                            ]}>
+                              ${currencies.CONFIO.symbol}
+                            </Text>
+                          </View>
                         </View>
-                      </View>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[
-                        styles.currencyButton,
-                        selectedCurrency === 'CONFIO' && styles.currencyButtonSelected
-                      ]}
-                      onPress={() => setSelectedCurrency('CONFIO')}
-                    >
-                      <View style={styles.currencyContent}>
-                        <View style={styles.currencyIcon}>
-                          <Image source={currencies.CONFIO.icon} style={styles.currencyIconImage} />
-                        </View>
-                        <View style={styles.currencyInfo}>
-                          <Text style={[
-                            styles.currencyName,
-                            selectedCurrency === 'CONFIO' && styles.currencyNameSelected
-                          ]}>
-                            {currencies.CONFIO.name}
-                          </Text>
-                          <Text style={[
-                            styles.currencySymbol,
-                            selectedCurrency === 'CONFIO' && styles.currencySymbolSelected
-                          ]}>
-                            ${currencies.CONFIO.symbol}
-                          </Text>
-                        </View>
-                      </View>
-                    </TouchableOpacity>
+                      </TouchableOpacity>
+                    </View>
                   </View>
-                </View>
 
-                {/* Payment Request Form */}
-                <View style={styles.card}>
-                  <Text style={styles.cardTitle}>Solicitar Pago</Text>
-                  
-                  <View style={styles.inputContainer}>
-                    <Text style={styles.inputLabel}>Monto a cobrar</Text>
-                    <View style={styles.amountInputContainer}>
-                      <Icon name="dollar-sign" size={20} color="#9ca3af" style={styles.amountInputIcon} />
+                  {/* Payment Request Form */}
+                  <View style={styles.card}>
+                    <Text style={styles.cardTitle}>Solicitar Pago</Text>
+
+                    <View style={styles.inputContainer}>
+                      <Text style={styles.inputLabel}>Monto a cobrar</Text>
+                      <View style={styles.amountInputContainer}>
+                        <Icon name="dollar-sign" size={20} color="#9ca3af" style={styles.amountInputIcon} />
+                        <TextInput
+                          style={styles.amountInput}
+                          value={amount}
+                          onChangeText={setAmount}
+                          placeholder="0.00"
+                          keyboardType="numeric"
+                          placeholderTextColor="#9ca3af"
+                        />
+                        <Text style={[styles.currencyLabel, { color: currentCurrency.color }]}>
+                          {currentCurrency.symbol}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.inputContainer}>
+                      <Text style={styles.inputLabel}>Descripción (opcional)</Text>
                       <TextInput
-                        style={styles.amountInput}
-                        value={amount}
-                        onChangeText={setAmount}
-                        placeholder="0.00"
-                        keyboardType="numeric"
-                        placeholderTextColor="#9ca3af"
+                        style={styles.descriptionInput}
+                        value={description}
+                        onChangeText={setDescription}
+                        placeholder="Ej: Almuerzo, Corte de cabello, Mesa 5..."
+                        maxLength={50}
                       />
-                      <Text style={[styles.currencyLabel, { color: currentCurrency.color }]}>
-                        {currentCurrency.symbol}
+                      <Text style={styles.characterCount}>
+                        {description.length}/50 caracteres
                       </Text>
                     </View>
+
+                    {/* Quick Amount Buttons */}
+                    <View style={styles.quickAmountsContainer}>
+                      <Text style={styles.quickAmountsLabel}>Montos rápidos:</Text>
+                      <View style={styles.quickAmountsGrid}>
+                        {quickAmounts.map((quickAmount) => (
+                          <TouchableOpacity
+                            key={quickAmount}
+                            style={styles.quickAmountButton}
+                            onPress={() => setAmount(quickAmount)}
+                          >
+                            <Text style={styles.quickAmountText}>${quickAmount}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </View>
+
+                    <TouchableOpacity
+                      style={[
+                        styles.generateButton,
+                        { backgroundColor: currentCurrency.color },
+                        isLoading && styles.generateButtonDisabled
+                      ]}
+                      onPress={handleGenerateQR}
+                      disabled={isLoading}
+                    >
+                      <Text style={styles.generateButtonText}>
+                        {isLoading ? 'Generando...' : 'Generar Código QR'}
+                      </Text>
+                    </TouchableOpacity>
                   </View>
 
-                  <View style={styles.inputContainer}>
-                    <Text style={styles.inputLabel}>Descripción (opcional)</Text>
-                    <TextInput
-                      style={styles.descriptionInput}
-                      value={description}
-                      onChangeText={setDescription}
-                      placeholder="Ej: Almuerzo, Corte de cabello, Mesa 5..."
-                      maxLength={50}
-                    />
-                    <Text style={styles.characterCount}>
-                      {description.length}/50 caracteres
-                    </Text>
-                  </View>
-
-                  {/* Quick Amount Buttons */}
-                  <View style={styles.quickAmountsContainer}>
-                    <Text style={styles.quickAmountsLabel}>Montos rápidos:</Text>
-                    <View style={styles.quickAmountsGrid}>
-                      {quickAmounts.map((quickAmount) => (
-                        <TouchableOpacity
-                          key={quickAmount}
-                          style={styles.quickAmountButton}
-                          onPress={() => setAmount(quickAmount)}
-                        >
-                          <Text style={styles.quickAmountText}>${quickAmount}</Text>
-                        </TouchableOpacity>
-                      ))}
+                  {/* Info Card */}
+                  <View style={[styles.card, styles.infoCard]}>
+                    <View style={styles.infoContent}>
+                      <Icon name="info" size={20} color={currentCurrency.color} style={styles.infoIcon} />
+                      <View style={styles.infoText}>
+                        <Text style={styles.infoTitle}>¿Cómo funciona?</Text>
+                        <Text style={styles.infoDescription}>
+                          Genera un código QR único para cada pago. Tu cliente escanea el código y confirma el pago. Recibirás una notificación inmediata cuando se complete la transacción.
+                        </Text>
+                      </View>
                     </View>
                   </View>
+                </>
+              ) : (
+                <>
+                  {/* QR Code Display with Real-time Status */}
+                  <View style={styles.card}>
+                    <Text style={styles.qrTitle}>Código QR de Pago</Text>
+                    <Text style={styles.qrSubtitle}>
+                      Comparte este código con tu cliente para recibir el pago
+                    </Text>
+
+                    {/* Real-time Status Badge */}
+                    <View style={[styles.statusBadge, { backgroundColor: statusInfo.bgColor }]}>
+                      <Icon name={statusInfo.icon as any} size={16} color={statusInfo.color} style={styles.statusIcon} />
+                      <Text style={[styles.statusText, { color: statusInfo.color }]}>
+                        {statusInfo.text}
+                      </Text>
+                    </View>
+
+                    <View style={styles.qrCodeContainer}>
+                      <QRCode
+                        value={invoice?.qrCodeData || `confio://pay/${Date.now()}`}
+                        size={200}
+                        color="#000000"
+                        backgroundColor="#FFFFFF"
+                      />
+                    </View>
+
+                    <Text style={styles.qrCodeText}>
+                      ID: {invoice?.invoiceId || 'Generando...'}
+                    </Text>
+
+                    <View style={[styles.paymentDetails, { backgroundColor: currentCurrency.color + '10' }]}>
+                      <Text style={[styles.paymentAmount, { color: currentCurrency.color }]}>
+                        ${invoice?.amount || amount} {formatCurrency(invoice?.tokenType || selectedCurrency)}
+                      </Text>
+                      <Text style={styles.paymentDescription}>
+                        {invoice?.description || description || 'Sin descripción'}
+                      </Text>
+                      <Text style={styles.paymentId}>
+                        Válido por 24 horas
+                      </Text>
+                    </View>
+
+                    <View style={styles.actionButtons}>
+                      <TouchableOpacity
+                        style={styles.actionButton}
+                        onPress={() => handleCopy(invoice?.qrCodeData || `confio://pay/${Date.now()}`)}
+                      >
+                        <Icon name={copied ? "check-circle" : "copy"} size={16} color="#374151" />
+                        <Text style={styles.actionButtonText}>
+                          {copied ? 'Copiado' : 'Copiar enlace de pago'}
+                        </Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity style={styles.actionButton}>
+                        <Icon name="share" size={16} color="#374151" />
+                        <Text style={styles.actionButtonText}>Compartir código QR</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity style={styles.actionButton}>
+                        <Icon name="download" size={16} color="#374151" />
+                        <Text style={styles.actionButtonText}>Descargar imagen</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  {/* New Payment Button */}
+                  <TouchableOpacity
+                    style={[styles.newPaymentButton, { backgroundColor: currentCurrency.color }]}
+                    onPress={() => {
+                      setShowQRCode(false);
+                      setAmount('');
+                      setDescription('');
+                      setInvoice(null);
+                      setPaymentStatus('pending');
+                    }}
+                  >
+                    <Icon name="plus" size={16} color="white" />
+                    <Text style={styles.newPaymentButtonText}>Crear nuevo cobro</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+          ) : (
+            <View style={styles.pagarContent}>
+              {activeAccount?.isEmployee && !activeAccount?.employeePermissions?.sendFunds ? (
+                <View style={styles.card}>
+                  <Icon name="lock" size={48} color={colors.primaryText} style={{ alignSelf: 'center', marginBottom: 16 }} />
+                  <Text style={[styles.cardTitle, { textAlign: 'center' }]}>Función No Disponible</Text>
+                  <Text style={[styles.cardSubtitle, { textAlign: 'center' }]}>
+                    No tienes permisos para realizar pagos desde esta cuenta empresarial.
+                  </Text>
+                </View>
+              ) : (
+                <View style={styles.card}>
+                  <Text style={styles.cardTitle}>Escanear Código QR para Pagar</Text>
+                  <Text style={styles.cardSubtitle}>
+                    Escanea el código QR de un negocio para realizar un pago de forma rápida y segura
+                  </Text>
 
                   <TouchableOpacity
-                    style={[
-                      styles.generateButton,
-                      { backgroundColor: currentCurrency.color },
-                      isLoading && styles.generateButtonDisabled
-                    ]}
-                    onPress={handleGenerateQR}
-                    disabled={isLoading}
+                    style={[styles.scanButton, { backgroundColor: colors.primary, marginTop: 24 }]}
+                    onPress={() => navigation.navigate('Scan', { mode: 'pagar' })}
                   >
-                    <Text style={styles.generateButtonText}>
-                      {isLoading ? 'Generando...' : 'Generar Código QR'}
-                    </Text>
+                    <Icon name="camera" size={20} color="white" style={{ marginRight: 8 }} />
+                    <Text style={styles.scanButtonText}>Abrir Escáner QR</Text>
                   </TouchableOpacity>
                 </View>
+              )}
 
-                {/* Info Card */}
-                <View style={[styles.card, styles.infoCard]}>
-                  <View style={styles.infoContent}>
-                    <Icon name="info" size={20} color={currentCurrency.color} style={styles.infoIcon} />
-                    <View style={styles.infoText}>
-                      <Text style={styles.infoTitle}>¿Cómo funciona?</Text>
-                      <Text style={styles.infoDescription}>
-                        Genera un código QR único para cada pago. Tu cliente escanea el código y confirma el pago. Recibirás una notificación inmediata cuando se complete la transacción.
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-              </>
-            ) : (
-              <>
-                {/* QR Code Display with Real-time Status */}
-                <View style={styles.card}>
-                  <Text style={styles.qrTitle}>Código QR de Pago</Text>
-                  <Text style={styles.qrSubtitle}>
-                    Comparte este código con tu cliente para recibir el pago
-                  </Text>
-                  
-                  {/* Real-time Status Badge */}
-                  <View style={[styles.statusBadge, { backgroundColor: statusInfo.bgColor }]}>
-                    <Icon name={statusInfo.icon as any} size={16} color={statusInfo.color} style={styles.statusIcon} />
-                    <Text style={[styles.statusText, { color: statusInfo.color }]}>
-                      {statusInfo.text}
-                    </Text>
-                  </View>
-
-                  <View style={styles.qrCodeContainer}>
-                    <QRCode
-                      value={invoice?.qrCodeData || `confio://pay/${Date.now()}`}
-                      size={200}
-                      color="#000000"
-                      backgroundColor="#FFFFFF"
-                    />
-                  </View>
-                  
-                  <Text style={styles.qrCodeText}>
-                    ID: {invoice?.invoiceId || 'Generando...'}
-                  </Text>
-
-                  <View style={[styles.paymentDetails, { backgroundColor: currentCurrency.color + '10' }]}>
-                    <Text style={[styles.paymentAmount, { color: currentCurrency.color }]}>
-                      ${invoice?.amount || amount} {formatCurrency(invoice?.tokenType || selectedCurrency)}
-                    </Text>
-                    <Text style={styles.paymentDescription}>
-                      {invoice?.description || description || 'Sin descripción'}
-                    </Text>
-                    <Text style={styles.paymentId}>
-                      Válido por 24 horas
-                    </Text>
-                  </View>
-
-                  <View style={styles.actionButtons}>
-                    <TouchableOpacity 
-                      style={styles.actionButton}
-                      onPress={() => handleCopy(invoice?.qrCodeData || `confio://pay/${Date.now()}`)}
-                    >
-                      <Icon name={copied ? "check-circle" : "copy"} size={16} color="#374151" />
-                      <Text style={styles.actionButtonText}>
-                        {copied ? 'Copiado' : 'Copiar enlace de pago'}
-                      </Text>
-                    </TouchableOpacity>
-                    
-                    <TouchableOpacity style={styles.actionButton}>
-                      <Icon name="share" size={16} color="#374151" />
-                      <Text style={styles.actionButtonText}>Compartir código QR</Text>
-                    </TouchableOpacity>
-                    
-                    <TouchableOpacity style={styles.actionButton}>
-                      <Icon name="download" size={16} color="#374151" />
-                      <Text style={styles.actionButtonText}>Descargar imagen</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-
-                {/* New Payment Button */}
-                <TouchableOpacity
-                  style={[styles.newPaymentButton, { backgroundColor: currentCurrency.color }]}
-                  onPress={() => {
-                    setShowQRCode(false);
-                    setAmount('');
-                    setDescription('');
-                    setInvoice(null);
-                    setPaymentStatus('pending');
-                  }}
-                >
-                  <Icon name="plus" size={16} color="white" />
-                  <Text style={styles.newPaymentButtonText}>Crear nuevo cobro</Text>
-                </TouchableOpacity>
-              </>
-            )}
-          </View>
-        ) : (
-          <View style={styles.pagarContent}>
-            {activeAccount?.isEmployee && !activeAccount?.employeePermissions?.sendFunds ? (
               <View style={styles.card}>
-                <Icon name="lock" size={48} color={colors.primaryText} style={{ alignSelf: 'center', marginBottom: 16 }} />
-                <Text style={[styles.cardTitle, { textAlign: 'center' }]}>Función No Disponible</Text>
-                <Text style={[styles.cardSubtitle, { textAlign: 'center' }]}>
-                  No tienes permisos para realizar pagos desde esta cuenta empresarial.
-                </Text>
-              </View>
-            ) : (
-              <View style={styles.card}>
-                <Text style={styles.cardTitle}>Escanear Código QR para Pagar</Text>
+                <Text style={styles.cardTitle}>¿Cómo funciona?</Text>
                 <Text style={styles.cardSubtitle}>
-                  Escanea el código QR de un negocio para realizar un pago de forma rápida y segura
+                  • El negocio te mostrará un código QR{'\n'}
+                  • Presiona "Abrir Escáner QR" arriba{'\n'}
+                  • Apunta la cámara al código QR{'\n'}
+                  • Confirma el pago en la siguiente pantalla
                 </Text>
-                
-                <TouchableOpacity
-                  style={[styles.scanButton, { backgroundColor: colors.primary, marginTop: 24 }]}
-                  onPress={() => navigation.navigate('Scan', { mode: 'pagar' })}
-                >
-                  <Icon name="camera" size={20} color="white" style={{ marginRight: 8 }} />
-                  <Text style={styles.scanButtonText}>Abrir Escáner QR</Text>
-                </TouchableOpacity>
               </View>
-            )}
-            
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>¿Cómo funciona?</Text>
-              <Text style={styles.cardSubtitle}>
-                • El negocio te mostrará un código QR{'\n'}
-                • Presiona "Abrir Escáner QR" arriba{'\n'}
-                • Apunta la cámara al código QR{'\n'}
-                • Confirma el pago en la siguiente pantalla
-              </Text>
             </View>
-          </View>
-        )}
-      </View>
-    </ScrollView>
+          )}
+        </View>
+      </ScrollView>
     </>
   );
 };
@@ -1099,13 +1099,13 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#374151',
   },
-  
+
   cardSubtitle: {
     fontSize: 14,
     color: '#6b7280',
     lineHeight: 20,
   },
-  
+
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1122,7 +1122,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  
+
   // Opt-in Modal Styles
   modalOverlay: {
     flex: 1,

@@ -53,9 +53,9 @@ export const ShareAchievementModal: React.FC<ShareAchievementModalProps> = ({
       // Special message for sharing referral link (before earning the achievement)
       return `💚 ¡Únete a Confío con mi invitación!\n\n🎁 Ambos ganaremos ${achievement.confioReward} $CONFIO cuando te registres y hagas tu primera transacción.\n\n📱 Descarga la app aquí:\n${SHARE_LINKS.campaigns.referral}\n\n¡La mejor forma de enviar dólares en Venezuela! 🚀\n\n${SHARE_LINKS.hashtags}`;
     }
-    
+
     const baseMessage = `🎉 ¡Acabo de ganar ${achievement.confioReward} $CONFIO en la app Confío!`;
-    
+
     const categoryMessages = {
       bienvenida: `${baseMessage}\n\n🚀 Me uní a la app que está cambiando como enviamos dólares en LATAM`,
       verificacion: `${baseMessage}\n\n✅ Mi cuenta está verificada y lista para enviar dólares`,
@@ -66,18 +66,18 @@ export const ShareAchievementModal: React.FC<ShareAchievementModalProps> = ({
 
     const message = categoryMessages[achievement.category] || baseMessage;
     const link = achievement.category === 'viral' ? SHARE_LINKS.campaigns.tiktok : SHARE_LINKS.campaigns.beta;
-    
+
     return `${message}\n\n📱 Descarga Confío y empieza a ganar:\n${link}\n\n${SHARE_LINKS.hashtags}`;
   };
 
   const handleWhatsAppShare = () => {
     const message = getShareMessage();
     const url = `whatsapp://send?text=${encodeURIComponent(message)}`;
-    
+
     Linking.openURL(url).catch(() => {
-      Alert.alert('Error', 'No se pudo abrir WhatsApp');
+      Alert.alert('Error', 'No se pudo abrir WhatsApp', [{ text: 'OK' }]);
     });
-    
+
     onClose();
   };
 
@@ -98,14 +98,14 @@ export const ShareAchievementModal: React.FC<ShareAchievementModalProps> = ({
 
   const submitTikTokUrl = async () => {
     if (!tiktokUrl.trim()) {
-      Alert.alert('Error', 'Por favor ingresa el link de tu TikTok');
+      Alert.alert('Error', 'Por favor ingresa el link de tu TikTok', [{ text: 'OK' }]);
       return;
     }
 
     // Basic TikTok URL validation
     const tiktokRegex = /^https?:\/\/(www\.)?(tiktok\.com|vm\.tiktok\.com)/;
     if (!tiktokRegex.test(tiktokUrl)) {
-      Alert.alert('Error', 'Por favor ingresa un link válido de TikTok');
+      Alert.alert('Error', 'Por favor ingresa un link válido de TikTok', [{ text: 'OK' }]);
       return;
     }
 
@@ -126,10 +126,10 @@ export const ShareAchievementModal: React.FC<ShareAchievementModalProps> = ({
         setTiktokUrl('');
         setShowTikTokForm(false);
       } else {
-        Alert.alert('Error', data?.trackTikTokShare?.error || 'No se pudo registrar tu video');
+        Alert.alert('Error', data?.trackTikTokShare?.error || 'No se pudo registrar tu video', [{ text: 'OK' }]);
       }
     } catch (error) {
-      Alert.alert('Error', 'Ocurrió un error al registrar tu video');
+      Alert.alert('Error', 'Ocurrió un error al registrar tu video', [{ text: 'OK' }]);
     }
   };
 
@@ -148,7 +148,7 @@ export const ShareAchievementModal: React.FC<ShareAchievementModalProps> = ({
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Comparte en TikTok</Text>
-            
+
             <View style={styles.instructionsContainer}>
               <Text style={styles.instructionTitle}>🎬 Crea tu TikTok:</Text>
               <Text style={styles.instruction}>1. Cuenta tu historia usando Confío</Text>

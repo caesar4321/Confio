@@ -55,7 +55,7 @@ export const TransactionProcessingScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
   // const insets = useSafeAreaInsets();
-  
+
   const transactionData: TransactionData = (route.params as any)?.transactionData || {
     type: 'sent',
     amount: '125.50',
@@ -80,10 +80,10 @@ export const TransactionProcessingScreen = () => {
   // GraphQL mutations
   const [payInvoice] = useMutation(PAY_INVOICE);
   // Removed GraphQL send mutations to enforce WS-only for Send
-  
+
   // Ref to prevent duplicate transaction processing within this session
   const hasProcessedRef = useRef(false);
-  
+
   // Use idempotency key from transactionData, or generate one as fallback
   const idempotencyKey = transactionData.idempotencyKey || (() => {
     // Fallback: generate idempotency key if not provided
@@ -155,7 +155,7 @@ export const TransactionProcessingScreen = () => {
       const timer = setTimeout(() => {
         try {
           console.log('TransactionProcessingScreen: Navigating to TransactionSuccess (send/payment)');
-        } catch {}
+        } catch { }
         (navigation as any).replace('TransactionSuccess', { transactionData });
       }, delayMs);
       return () => clearTimeout(timer);
@@ -179,7 +179,7 @@ export const TransactionProcessingScreen = () => {
       if (!ok) {
         Alert.alert(
           'Se requiere biometría',
-          'Confirma con Face ID / Touch ID o huella para continuar.',
+          Platform.OS === 'ios' ? 'Confirma con Face ID o Touch ID para continuar.' : 'Confirma con tu huella digital para continuar.',
           [{ text: 'OK', onPress: () => navigation.goBack() }]
         );
         return;
@@ -206,17 +206,17 @@ export const TransactionProcessingScreen = () => {
     console.log('TransactionProcessingScreen: useEffect triggered, hasProcessedRef.current:', hasProcessedRef.current);
     console.log('TransactionProcessingScreen: transactionData:', transactionData);
     console.log('TransactionProcessingScreen: Generated idempotencyKey:', idempotencyKey);
-    
+
     // Prevent duplicate processing within this screen session
     if (hasProcessedRef.current) {
       console.log('TransactionProcessingScreen: Transaction already processed in this session, skipping');
       return;
     }
-    
+
     const initializeProcessing = async () => {
       try {
         hasProcessedRef.current = true;
-        
+
         if (transactionData.type === 'payment' && transactionData.invoiceId) {
           console.log('TransactionProcessingScreen: Starting payment processing');
           await processPayment();
@@ -239,7 +239,7 @@ export const TransactionProcessingScreen = () => {
     const processPayment = async () => {
       try {
         console.log('TransactionProcessingScreen: Processing payment for invoice:', transactionData.invoiceId);
-        
+
         // Debug: Check current active account context before payment
         try {
           const accountManager = AccountManager.getInstance();
@@ -252,19 +252,19 @@ export const TransactionProcessingScreen = () => {
         } catch (error) {
           console.log('TransactionProcessingScreen - Could not get active account context:', error);
         }
-        
+
         // Step 1: Verifying transaction
         setCurrentStep(0);
         await new Promise(resolve => setTimeout(resolve, 1000));
-        
+
         // Step 2: Processing in blockchain
         setCurrentStep(1);
         await new Promise(resolve => setTimeout(resolve, 1000));
-        
+
         // Step 3: Call the actual payment mutation with security checks
         setCurrentStep(2);
         console.log('TransactionProcessingScreen: Calling payInvoice mutation with security checks and idempotency key:', idempotencyKey);
-        
+
         // Perform payment operation
         const { data } = await payInvoice({
           variables: {
@@ -274,7 +274,7 @@ export const TransactionProcessingScreen = () => {
         });
 
         console.log('TransactionProcessingScreen: Payment mutation response:', data);
-        
+
         if (data?.payInvoice?.success) {
           console.log('TransactionProcessingScreen: Payment successful');
           setTransactionSuccess(true);
@@ -294,7 +294,7 @@ export const TransactionProcessingScreen = () => {
     const processSend = async () => {
       try {
         console.log('TransactionProcessingScreen: Processing send transaction to:', transactionData.recipient);
-        
+
         // All sends now go through the same mutation
         console.log('TransactionProcessingScreen: Processing unified send');
         await processUnifiedSend();
@@ -305,20 +305,20 @@ export const TransactionProcessingScreen = () => {
       }
     };
 
-  const processAlgorandSponsoredSend = async () => {
-    try {
-      const withTimeout = async <T,>(promise: Promise<T>, ms: number, label: string): Promise<T> => {
-        return await Promise.race([
-          promise,
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error(`timeout:${label}`)), ms)
-          )
-        ]);
-      };
+    const processAlgorandSponsoredSend = async () => {
+      try {
+        const withTimeout = async <T,>(promise: Promise<T>, ms: number, label: string): Promise<T> => {
+          return await Promise.race([
+            promise,
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error(`timeout:${label}`)), ms)
+            )
+          ]);
+        };
 
-      // Prefer WebSocket prepare/submit for lower latency
-      setCurrentStep(1);
-      console.log('TransactionProcessingScreen: Creating Algorand sponsored transaction (WS-first)...');
+        // Prefer WebSocket prepare/submit for lower latency
+        setCurrentStep(1);
+        console.log('TransactionProcessingScreen: Creating Algorand sponsored transaction (WS-first)...');
 
         // Build variables based on what recipient info we have
         const variables: any = {
@@ -326,7 +326,7 @@ export const TransactionProcessingScreen = () => {
           assetType: (transactionData.tokenType || transactionData.currency || 'CUSD').toUpperCase(),
           note: transactionData.memo || undefined
         };
-        
+
         // Add recipient identification based on what's available
         if (transactionData.recipientUserId) {
           variables.recipientUserId = transactionData.recipientUserId;
@@ -343,7 +343,7 @@ export const TransactionProcessingScreen = () => {
           setIsComplete(true);
           return;
         }
-        
+
         try {
           console.log('TransactionProcessingScreen: Calling algorandSponsoredSend', {
             hasRecipientUserId: !!variables.recipientUserId,
@@ -352,8 +352,8 @@ export const TransactionProcessingScreen = () => {
             amount: variables.amount,
             assetType: variables.assetType
           });
-        } catch {}
-        
+        } catch { }
+
         let userTransaction: string | null = null;
         let sponsorTransaction: string | null = null;
         // Use prepared pack if provided by the confirm screen
@@ -367,7 +367,7 @@ export const TransactionProcessingScreen = () => {
           if (userTransaction && sponsorTransaction) {
             console.log('TransactionProcessingScreen: Using pre-prepared WS pack from confirm screen');
           }
-        } catch {}
+        } catch { }
         try {
           if (!(userTransaction && sponsorTransaction)) {
             const { SendWsSession } = await import('../services/sendWs');
@@ -387,7 +387,7 @@ export const TransactionProcessingScreen = () => {
               userTransaction = txs.find((t: any) => t.index === 1)?.transaction || null;
               console.log('TransactionProcessingScreen: WS prepare OK');
             } finally {
-              try { session.close(); } catch {}
+              try { session.close(); } catch { }
             }
           }
         } catch (wsErr) {
@@ -405,7 +405,7 @@ export const TransactionProcessingScreen = () => {
         // Step 3: Sign the user transaction with Algorand wallet
         setCurrentStep(2);
         console.log('TransactionProcessingScreen: Signing Algorand transaction...');
-        
+
         // Load the stored wallet if not already loaded
         let currentAccount = algorandService.getCurrentAccount();
         if (!currentAccount) {
@@ -419,14 +419,14 @@ export const TransactionProcessingScreen = () => {
           }
           currentAccount = algorandService.getCurrentAccount();
         }
-        
+
         if (!currentAccount) {
           console.error('TransactionProcessingScreen: Failed to load Algorand account');
           setTransactionError('Failed to load Algorand wallet. Please try again.');
           setIsComplete(true);
           return;
         }
-        
+
         // Decode user transaction (base64 -> bytes)
         const userTxnBytes = Uint8Array.from(Buffer.from(userTransaction, 'base64'));
 
@@ -457,7 +457,7 @@ export const TransactionProcessingScreen = () => {
         }
         try {
           console.log('TransactionProcessingScreen: Submit result received', { hasTxId: !!transactionId, confirmedRound });
-        } catch {}
+        } catch { }
 
         // Store lightweight transaction details for success screen
         if (transactionData) {
@@ -470,7 +470,7 @@ export const TransactionProcessingScreen = () => {
         // Mark as successful and let confirmation complete in background
         setTransactionSuccess(true);
         setIsComplete(true);
-        
+
       } catch (error) {
         console.error('TransactionProcessingScreen: Error processing Algorand sponsored send:', error);
         setTransactionError('Failed to process Algorand transaction. Please try again.');
@@ -519,7 +519,7 @@ export const TransactionProcessingScreen = () => {
         // Step 1: Verifying transaction
         setCurrentStep(0);
         await new Promise(resolve => setTimeout(resolve, 1000));
-        
+
         // If recipient is not on Confío and we have a phone, route to Invite flow
         if (transactionData.isOnConfio === false && transactionData.recipientPhone) {
           console.log('TransactionProcessingScreen: Processing InviteSend flow for non-Confío friend');
@@ -537,7 +537,7 @@ export const TransactionProcessingScreen = () => {
           graphQLErrors: error.graphQLErrors,
           stack: error.stack
         });
-        
+
         setTransactionError('No se pudo conectar con el servidor. Por favor, verifica tu conexión e inténtalo de nuevo.');
         setIsComplete(true);
       }
@@ -592,7 +592,7 @@ export const TransactionProcessingScreen = () => {
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
       {/* Processing Header */}
-      <View style={[styles.header, { backgroundColor: colors.primary, paddingTop: 8 }]}> 
+      <View style={[styles.header, { backgroundColor: colors.primary, paddingTop: 8 }]}>
         <View style={styles.headerContent}>
           {/* Processing Animation */}
           <View style={styles.processingCircle}>
@@ -605,17 +605,17 @@ export const TransactionProcessingScreen = () => {
               <Icon name="check-circle" size={48} color={colors.primary} />
             )}
           </View>
-          
+
           <Text style={styles.headerTitle}>
             {isComplete ? '¡Casi listo!' : transactionData.action}
           </Text>
-          
+
           <Text style={styles.headerAmount}>
             ${transactionData.amount} {transactionData.currency}
           </Text>
-          
+
           <Text style={styles.headerSubtitle}>
-            {transactionData.type === 'sent' 
+            {transactionData.type === 'sent'
               ? `Para ${transactionData.recipient}`
               : `En ${transactionData.merchant}`
             }
@@ -632,28 +632,28 @@ export const TransactionProcessingScreen = () => {
               {index === currentStep && !isComplete ? (
                 <Animated.View style={[
                   styles.stepIcon,
-                  { 
+                  {
                     backgroundColor: index <= currentStep ? step.bgColor : '#F3F4F6',
                     transform: [{ scale: pulseAnim }]
                   }
                 ]}>
-                  <Icon 
-                    name={step.icon as any} 
-                    size={24} 
-                    color={index <= currentStep ? step.color : '#9CA3AF'} 
+                  <Icon
+                    name={step.icon as any}
+                    size={24}
+                    color={index <= currentStep ? step.color : '#9CA3AF'}
                   />
                 </Animated.View>
               ) : (
                 <View style={[
                   styles.stepIcon,
-                  { 
+                  {
                     backgroundColor: index <= currentStep ? step.bgColor : '#F3F4F6'
                   }
                 ]}>
-                  <Icon 
-                    name={step.icon as any} 
-                    size={24} 
-                    color={index <= currentStep ? step.color : '#9CA3AF'} 
+                  <Icon
+                    name={step.icon as any}
+                    size={24}
+                    color={index <= currentStep ? step.color : '#9CA3AF'}
                   />
                 </View>
               )}
@@ -674,10 +674,12 @@ export const TransactionProcessingScreen = () => {
                         style={[
                           styles.dot,
                           {
-                            transform: [{ translateY: anim.interpolate({
-                              inputRange: [0, 1],
-                              outputRange: [0, -8]
-                            }) }]
+                            transform: [{
+                              translateY: anim.interpolate({
+                                inputRange: [0, 1],
+                                outputRange: [0, -8]
+                              })
+                            }]
                           }
                         ]}
                       />
@@ -700,7 +702,7 @@ export const TransactionProcessingScreen = () => {
         {/* Progress Bar */}
         <View style={styles.progressContainer}>
           <View style={styles.progressBar}>
-            <View 
+            <View
               style={[
                 styles.progressFill,
                 { width: `${((currentStep + 1) / processingSteps.length) * 100}%` }
@@ -731,7 +733,7 @@ export const TransactionProcessingScreen = () => {
             <View style={styles.infoTextContainer}>
               <Text style={styles.infoTitle}>¿Sabías que...?</Text>
               <Text style={styles.infoText}>
-                Confío cubre las comisiones de red para que puedas transferir dinero completamente gratis. 
+                Confío cubre las comisiones de red para que puedas transferir dinero completamente gratis.
                 ¡Apoyamos a la comunidad venezolana! 🇻🇪
               </Text>
             </View>

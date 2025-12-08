@@ -1,4 +1,5 @@
 import * as Keychain from 'react-native-keychain';
+import { Platform } from 'react-native';
 
 const BIOMETRIC_SECRET_SERVICE = 'com.confio.biometric.guard';
 const BIOMETRIC_PREFS_SERVICE = 'com.confio.biometric.prefs';
@@ -85,7 +86,9 @@ class BiometricAuthService {
         {
           service: BIOMETRIC_SECRET_SERVICE,
           accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED,
-          accessControl: Keychain.ACCESS_CONTROL.BIOMETRY_CURRENT_SET,
+          accessControl: Platform.OS === 'android'
+            ? Keychain.ACCESS_CONTROL.BIOMETRY_ANY
+            : Keychain.ACCESS_CONTROL.BIOMETRY_CURRENT_SET,
           authenticationType: Keychain.AUTHENTICATION_TYPE.BIOMETRICS,
           securityLevel: Keychain.SECURITY_LEVEL.SECURE_SOFTWARE,
           storage: Keychain.STORAGE_TYPE.AUTOMATIC,
@@ -180,11 +183,13 @@ class BiometricAuthService {
         service: BIOMETRIC_SECRET_SERVICE,
         authenticationPrompt: {
           title: 'Confirma con biometría',
-          subtitle: reason || 'Face ID / Touch ID o huella para proteger tus operaciones',
+          subtitle: reason || (Platform.OS === 'ios' ? 'Face ID o Touch ID para proteger tus operaciones' : 'Huella digital para proteger tus operaciones'),
           // Keep description short to avoid cramped Android prompt layout
           description: 'Requerido para envíos y pagos',
         },
-        accessControl: Keychain.ACCESS_CONTROL.BIOMETRY_CURRENT_SET,
+        accessControl: Platform.OS === 'android'
+          ? Keychain.ACCESS_CONTROL.BIOMETRY_ANY
+          : Keychain.ACCESS_CONTROL.BIOMETRY_CURRENT_SET,
         authenticationType: Keychain.AUTHENTICATION_TYPE.BIOMETRICS,
         storage: Keychain.STORAGE_TYPE.AUTOMATIC,
       });
@@ -202,11 +207,11 @@ class BiometricAuthService {
     } catch (error: any) {
       // Do not allow device passcode fallback; fail closed
       console.warn('[BiometricAuthService] Biometric auth error:', error?.message || error);
-       const msg = typeof error?.message === 'string' ? error.message : '';
-       const lower = msg.toLowerCase();
-       const lockout = lower.includes('lockout') || lower.includes('locked out') || lower.includes('biometry is locked') || lower.includes('lockedout');
-       this.lastError = msg || 'Biometric authentication failed';
-       this.lastLockout = lockout;
+      const msg = typeof error?.message === 'string' ? error.message : '';
+      const lower = msg.toLowerCase();
+      const lockout = lower.includes('lockout') || lower.includes('locked out') || lower.includes('biometry is locked') || lower.includes('lockedout');
+      this.lastError = msg || 'Biometric authentication failed';
+      this.lastLockout = lockout;
       return false;
     } finally {
       this.isAuthenticating = false;
