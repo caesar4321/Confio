@@ -811,7 +811,8 @@
                             {{ dispute.get_status_display }}
                         </span>
                     </td>
-                    <td>{% if dispute.priority == 3 %}🔴 High{% elif dispute.priority == 2 %}🟡 Medium{% else %}🟢 Low{% endif %}</td>
+                    <td>{% if dispute.priority == 3 %}🔴 High{% elif dispute.priority == 2 %}🟡 Medium{% else %}🟢 Low{%
+                        endif %}</td>
                     <td>{{ dispute.evidence_count }}</td>
                     <td>{{ dispute.opened_at|timesince }} ago</td>
                 </tr>
@@ -861,7 +862,8 @@
                     </td>
                     <td>{{ v.obj.created_at|timesince }} ago</td>
                     <td>{% if v.obj.id %}<a class="action-button secondary"
-                            href="/admin/security/identityverification/{{ v.obj.id }}/change/">Review</a>{% else %}-{% endif %}</td>
+                            href="/admin/security/identityverification/{{ v.obj.id }}/change/">Review</a>{% else %}-{%
+                        endif %}</td>
                 </tr>
                 {% endfor %}
                 {% else %}
