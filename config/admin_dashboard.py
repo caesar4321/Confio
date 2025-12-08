@@ -828,6 +828,12 @@ from usdc_transactions.admin import UnifiedUSDCTransactionAdmin
 confio_admin_site.register(UnifiedTransactionTable, UnifiedTransactionAdmin)
 confio_admin_site.register(UnifiedUSDCTransactionTable, UnifiedUSDCTransactionAdmin)
 
+# Analytics models
+from users.models_analytics import DailyMetrics, CountryMetrics
+from users.admin_analytics import DailyMetricsAdmin, CountryMetricsAdmin
+confio_admin_site.register(DailyMetrics, DailyMetricsAdmin)
+confio_admin_site.register(CountryMetrics, CountryMetricsAdmin)
+
 # P2P models
 from p2p_exchange.models import (
     P2PPaymentMethod, P2POffer, P2PTrade, P2PMessage, 
