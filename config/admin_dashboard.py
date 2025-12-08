@@ -74,6 +74,38 @@ class ConfioAdminSite(admin.AdminSite):
         context['new_users_last_7_days'] = User.objects.filter(created_at__gte=last_7_start).count()
         context['verified_users'] = IdentityVerification.objects.filter(status='verified').count()
         
+        # Historical metrics from snapshots
+        from users.models_analytics import DailyMetrics, CountryMetrics
+        
+        # Get latest snapshot for growth indicators
+        latest_snapshot = DailyMetrics.objects.order_by('-date').first()
+        if latest_snapshot:
+            context['latest_snapshot_date'] = latest_snapshot.date
+            context['snapshot_dau'] = latest_snapshot.dau
+            context['snapshot_wau'] = latest_snapshot.wau
+            context['snapshot_mau'] = latest_snapshot.mau
+            context['snapshot_dau_mau_ratio'] = latest_snapshot.dau_mau_ratio
+            
+            # Growth rates
+            context['mau_growth_7d'] = latest_snapshot.get_growth_rate(days_back=7)
+            context['mau_growth_30d'] = latest_snapshot.get_growth_rate(days_back=30)
+        
+        # Last 30 days trend for charts
+        thirty_days_ago = now.date() - timedelta(days=30)
+        context['metrics_trend'] = list(
+            DailyMetrics.objects.filter(date__gte=thirty_days_ago)
+            .order_by('date')
+            .values('date', 'dau', 'wau', 'mau', 'new_users_today')
+        )
+        
+        # Country breakdown (top 5 by MAU from latest snapshot)
+        if latest_snapshot:
+            context['top_countries_metrics'] = list(
+                CountryMetrics.objects.filter(date=latest_snapshot.date)
+                .order_by('-mau')[:5]
+                .values('country_code', 'dau', 'wau', 'mau', 'total_users')
+            )
+        
         # Account metrics
         context['total_accounts'] = Account.objects.count()
         context['business_accounts'] = Account.objects.filter(account_type='business').count()

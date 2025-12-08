@@ -144,3 +144,101 @@ def achievement_stats_report():
     except Exception as e:
         logger.error(f"Error generating achievement stats: {str(e)}")
         raise
+
+
+@shared_task(name='users.capture_daily_metrics')
+@ensure_db_connection_closed
+def capture_daily_metrics():
+    """
+    Capture daily DAU/WAU/MAU metrics snapshot
+    
+    This task should be scheduled to run daily at 3:00 AM UTC:
+    
+    CELERY_BEAT_SCHEDULE = {
+        'capture-daily-metrics': {
+            'task': 'users.capture_daily_metrics',
+            'schedule': crontab(hour=3, minute=0),  # Daily at 3:00 AM UTC
+        },
+    }
+    
+    The task captures metrics for yesterday (the most recently completed day).
+    """
+    from users.analytics import snapshot_daily_metrics
+    from datetime import timedelta
+    
+    try:
+        # Capture metrics for yesterday (most recently completed day)
+        target_date = (timezone.now() - timedelta(days=1)).date()
+        
+        logger.info(f"Starting daily metrics capture for {target_date}")
+        snapshot = snapshot_daily_metrics(target_date)
+        
+        logger.info(
+            f"Successfully captured daily metrics for {target_date}: "
+            f"DAU={snapshot.dau:,}, WAU={snapshot.wau:,}, MAU={snapshot.mau:,}, "
+            f"Total Users={snapshot.total_users:,}, New Users={snapshot.new_users_today:,}"
+        )
+        
+        return {
+            'date': str(target_date),
+            'dau': snapshot.dau,
+            'wau': snapshot.wau,
+            'mau': snapshot.mau,
+            'total_users': snapshot.total_users,
+            'new_users_today': snapshot.new_users_today,
+        }
+        
+    except Exception as e:
+        logger.error(f"Error capturing daily metrics: {str(e)}", exc_info=True)
+        raise
+
+
+@shared_task(name='users.capture_country_metrics')
+@ensure_db_connection_closed
+def capture_country_metrics():
+    """
+    Capture country-specific DAU/WAU/MAU metrics snapshots
+    
+    This task should be scheduled to run daily at 3:15 AM UTC:
+    
+    CELERY_BEAT_SCHEDULE = {
+        'capture-country-metrics': {
+            'task': 'users.capture_country_metrics',
+            'schedule': crontab(hour=3, minute=15),  # Daily at 3:15 AM UTC
+        },
+    }
+    
+    The task captures metrics for yesterday (the most recently completed day).
+    """
+    from users.analytics import snapshot_country_metrics
+    from datetime import timedelta
+    
+    try:
+        # Capture metrics for yesterday (most recently completed day)
+        target_date = (timezone.now() - timedelta(days=1)).date()
+        
+        logger.info(f"Starting country metrics capture for {target_date}")
+        snapshots = snapshot_country_metrics(target_date)
+        
+        # Log summary
+        country_summary = {}
+        for snapshot in snapshots:
+            country_summary[snapshot.country_code] = {
+                'dau': snapshot.dau,
+                'mau': snapshot.mau,
+            }
+        
+        logger.info(
+            f"Successfully captured country metrics for {target_date}: "
+            f"{len(snapshots)} countries tracked"
+        )
+        
+        return {
+            'date': str(target_date),
+            'countries_tracked': len(snapshots),
+            'summary': country_summary,
+        }
+        
+    except Exception as e:
+        logger.error(f"Error capturing country metrics: {str(e)}", exc_info=True)
+        raise

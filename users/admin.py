@@ -9,6 +9,9 @@ import secrets
 from .models import User, Account, Business, Country, Bank, BankInfo, WalletPepper, WalletDerivationPepper
 from .models_unified import UnifiedTransactionTable
 from .models_employee import BusinessEmployee, EmployeeInvitation
+from .models_analytics import DailyMetrics, CountryMetrics
+# Import analytics admin classes (they auto-register via decorators)
+from .admin_analytics import DailyMetricsAdmin, CountryMetricsAdmin
 
 @admin.register(User)
 class UserAdmin(admin.ModelAdmin):
