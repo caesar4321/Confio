@@ -169,51 +169,6 @@ export const AccountDetailScreen = () => {
   const [showMoreOptionsModal, setShowMoreOptionsModal] = useState(false);
   const [showFilterModal, setShowFilterModal] = useState(false);
 
-  // Pending referral state (Virtual Balance)
-  const [deferredReferral, setDeferredReferral] = useState<string | null>(null);
-
-  // Check for deferred referral link on mount
-  useEffect(() => {
-    const checkDeferred = async () => {
-      // Only proceed if authenticated and data is loaded
-      if (!isAuthenticated || authLoading) return;
-
-      const link = await deepLinkHandler.getDeferredLink();
-      if (link && link.type === 'referral') {
-        console.log('Found deferred referral:', link.payload);
-        setDeferredReferral(link.payload);
-
-        // Submit to backend
-        try {
-          const { data } = await setReferrerMutation({
-            variables: { referrerIdentifier: link.payload }
-          });
-
-          console.log('Referral submission result:', data);
-
-          if (data?.setReferrer?.success) {
-            // Clear deferred link on success
-            await deepLinkHandler.clearDeferredLink();
-
-            // Refetch balances to show locked reward immediately
-            refetchBalances();
-
-            // Optional: alert user? Or just silently succeed as per design "seamless"
-            // Alert.alert("¡Referido aplicado!", "Has recibido una recompensa por referidos.");
-          } else {
-            console.log('Referral submission returned failure or already claimed:', data?.setReferrer?.error);
-            // If already claimed, maybe clear it too?
-            if (data?.setReferrer?.message?.includes('already')) {
-              await deepLinkHandler.clearDeferredLink();
-            }
-          }
-        } catch (err) {
-          console.error('Failed to submit deferred referral:', err);
-        }
-      }
-    };
-    checkDeferred();
-  }, [isAuthenticated, authLoading]);
   // const [showExchangeModal, setShowExchangeModal] = useState(false); // Removed - using USDCConversion screen directly
   // const [exchangeAmount, setExchangeAmount] = useState(''); // Removed - handled in USDCConversion screen
   // const [conversionDirection, setConversionDirection] = useState<'usdc_to_cusd' | 'cusd_to_usdc'>('usdc_to_cusd'); // Removed - handled in USDCConversion screen
@@ -300,20 +255,16 @@ export const AccountDetailScreen = () => {
   const confioLocked = React.useMemo(() => (isConfio ? parseFloat(balancesData?.myBalances?.confioLocked || balancesData?.myBalances?.confioPresaleLocked || '0') : 0), [balancesData?.myBalances?.confioLocked, balancesData?.myBalances?.confioPresaleLocked, isConfio]);
   const cusdLive = React.useMemo(() => parseFloat(balancesData?.myBalances?.cusd || '0'), [balancesData?.myBalances?.cusd]);
 
-  // Virtual locked amount from deferred referral (50 CONFIO = $5 USD)
-  const virtualLocked = (isConfio && deferredReferral) ? 50 : 0;
-
   const currentBalance = React.useMemo(() => {
     if (isCusd) {
       const v = cusdLive;
       if (!isFinite(v)) return route.params.accountBalance;
       return v.toFixed(2);
     }
-    // Include virtual locked balance
-    const v = confioLive + confioLocked + virtualLocked;
+    const v = confioLive + confioLocked;
     if (!isFinite(v)) return route.params.accountBalance;
     return v.toFixed(2);
-  }, [isCusd, cusdLive, confioLive, confioLocked, virtualLocked, route.params.accountBalance]);
+  }, [isCusd, cusdLive, confioLive, confioLocked, route.params.accountBalance]);
 
   // Account data from navigation params
   const accountAddress = route.params.accountAddress || '';

@@ -45,14 +45,8 @@ export class DeepLinkHandler {
               payload: referralCode,
               timestamp: Date.now()
             };
-            // If user is not logged in, store it
-            const isLoggedIn = await this.checkUserLoggedIn();
-            if (!isLoggedIn) {
-              await this.storeDeferredLink(linkData);
-            } else {
-              // If logged in, process it (e.g. claim reward)
-              await this.processDeepLink(linkData);
-            }
+            // Always store referral links as deferred so HomeScreen can handle the mutation
+            await this.storeDeferredLink(linkData);
           }
         }
       }
@@ -68,6 +62,12 @@ export class DeepLinkHandler {
   }
 
   private async checkReferralStrategies(): Promise<string | null> {
+    /* MOCK FOR TESTING - UNCOMMENT TO USE
+    console.log('[DeepLink] Using MOCKED Play Store referrer value');
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    return 'JULIANMOONLUNA';
+    */
+
     // 1. Check Install Referrer (Android only)
     if (Platform.OS === 'android') {
       try {
@@ -90,6 +90,7 @@ export class DeepLinkHandler {
 
     // 2. Check IP Fingerprint (Fallback for Android, Primary for iOS)
     try {
+      console.log('[DeepLink] Checking IP fingerprint for referral code...');
       // Use a short timeout to not block app startup too long
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 3000);
@@ -99,14 +100,20 @@ export class DeepLinkHandler {
       });
       clearTimeout(timeoutId);
 
+      console.log('[DeepLink] IP fingerprint response status:', response.status);
+
       if (response.ok) {
         const data = await response.json();
+        console.log('[DeepLink] IP fingerprint data:', data);
         if (data.code) {
+          console.log('[DeepLink] Found referral code via IP fingerprint:', data.code);
           return data.code;
+        } else {
+          console.log('[DeepLink] No referral code found for this IP');
         }
       }
     } catch (e) {
-      console.log('IP Fingerprint check failed:', e);
+      console.log('[DeepLink] IP Fingerprint check failed:', e);
     }
 
     return null;
@@ -141,14 +148,18 @@ export class DeepLinkHandler {
           timestamp: Date.now()
         };
 
-        // If user is not logged in, store as deferred link
+        // For referral links, always store as deferred so HomeScreen can handle the mutation
+        if (type === 'referral' || type === 'influencer') {
+          await this.storeDeferredLink(linkData);
+          return;
+        }
+
+        // For other link types, process immediately if logged in
         const isLoggedIn = await this.checkUserLoggedIn();
         if (!isLoggedIn) {
           await this.storeDeferredLink(linkData);
           return;
         }
-
-        // Process immediately if logged in
         await this.processDeepLink(linkData);
       }
 
@@ -161,13 +172,8 @@ export class DeepLinkHandler {
           timestamp: Date.now()
         };
 
-        const isLoggedIn = await this.checkUserLoggedIn();
-        if (!isLoggedIn) {
-          await this.storeDeferredLink(linkData);
-          return;
-        }
-
-        await this.processDeepLink(linkData);
+        // Always store referral links as deferred so HomeScreen can handle the mutation
+        await this.storeDeferredLink(linkData);
       }
     } catch (error) {
       console.error('Error handling deep link:', error);
@@ -272,7 +278,11 @@ export class DeepLinkHandler {
   public async getDeferredLink(): Promise<DeepLinkData | null> {
     try {
       const credentials = await Keychain.getInternetCredentials(DEFERRED_LINK_KEY);
-      return credentials ? JSON.parse(credentials.password) : null;
+      // Check for explicit 'null' string which we use to soft-clear the link
+      if (!credentials || credentials.password === 'null') {
+        return null;
+      }
+      return JSON.parse(credentials.password);
     } catch (error) {
       console.error('Error getting deferred link:', error);
       return null;
@@ -281,7 +291,15 @@ export class DeepLinkHandler {
 
   public async clearDeferredLink() {
     try {
-      await Keychain.resetInternetCredentials(DEFERRED_LINK_KEY);
+      // WORKAROUND: resetInternetCredentials checks arguments as array of maps on some Android versions
+      // causing ClassCastException: String cannot be cast to ReadableNativeMap
+      // Instead, we overwrite with "null" string which getDeferredLink handles.
+      console.log('[DeepLink] Soft-clearing deferred link via setInternetCredentials');
+      await Keychain.setInternetCredentials(
+        DEFERRED_LINK_KEY,
+        'deferred_link',
+        'null'
+      );
     } catch (error) {
       console.error('Error clearing deferred link:', error);
     }

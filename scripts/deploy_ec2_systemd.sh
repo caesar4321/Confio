@@ -136,6 +136,16 @@ elif [[ -d "$LEGACY_VENV" && -d "$VENV_DIR" && "$LEGACY_VENV" != "$VENV_DIR" ]];
   sudo rm -rf "$LEGACY_VENV"
 fi
 
+echo "==> Fix file ownership and permissions"
+# Ensure ec2-user owns all files to prevent permission errors
+sudo chown -R ec2-user:ec2-user "$APP_DIR"
+# Set proper permissions (755 for directories, 644 for files)
+sudo find "$APP_DIR" -type d -exec chmod 755 {} \;
+sudo find "$APP_DIR" -type f -exec chmod 644 {} \;
+# Make scripts executable
+sudo chmod +x "$APP_DIR/manage.py" || true
+sudo chmod +x "$VENV_DIR/bin/"* || true
+
 echo "==> Python venv and requirements"
 if ! command -v python3 >/dev/null 2>&1; then
   echo "python3 not found; installing"

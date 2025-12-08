@@ -46,6 +46,7 @@ import { inviteSendService } from '../services/inviteSendService';
 import { GET_PENDING_PAYROLL_ITEMS } from '../apollo/queries';
 import { LoadingOverlay } from '../components/LoadingOverlay';
 import { ReferralInputModal } from '../components/ReferralInputModal';
+import { ReferralSuccessModal } from '../components/ReferralSuccessModal';
 import { deepLinkHandler } from '../utils/deepLinkHandler';
 import { TextInput } from 'react-native';
 
@@ -166,6 +167,7 @@ export const HomeScreen = () => {
   });
   const [refreshAccountBalance] = useMutation(REFRESH_ACCOUNT_BALANCE);
   const [checkReferralStatus, { data: referralStatusData }] = useMutation(CHECK_REFERRAL_STATUS);
+  const [setReferrerMutation] = useMutation(SET_REFERRER);
 
   // Check if presale is globally active / claims unlocked
   const { data: presaleStatusData } = useQuery(GET_PRESALE_STATUS, {
@@ -233,6 +235,115 @@ export const HomeScreen = () => {
       return () => clearTimeout(t);
     }
   }, [isAuthenticated, refreshAccounts]);
+
+  // State for deferred referral success modal
+  const [showDeferredReferralSuccess, setShowDeferredReferralSuccess] = useState(false);
+
+  // Helper function to format error messages (same as ReferralInputModal)
+  const formatReferralErrorMessage = (rawMessage: string | undefined): string => {
+    if (!rawMessage) {
+      return 'Error al registrar referidor';
+    }
+
+    if (/rate limit/i.test(rawMessage)) {
+      const minutesMatch = rawMessage.match(/(\d+)\s*minutes?/i);
+      if (minutesMatch) {
+        const minutes = minutesMatch[1];
+        return `Has intentado demasiadas veces. Por favor espera ${minutes} minuto${minutes === '1' ? '' : 's'} antes de intentar nuevamente.`;
+      }
+      return 'Has intentado demasiadas veces. Por favor espera unos minutos antes de intentar nuevamente.';
+    }
+
+    if (/suspicious/i.test(rawMessage)) {
+      return 'Detectamos actividad inusual. Por favor contacta a soporte.';
+    }
+
+    return rawMessage;
+  };
+
+  // Check for deferred referral link and register automatically
+  useEffect(() => {
+    const checkDeferredReferral = async () => {
+      if (!isAuthenticated) return;
+
+      try {
+        const link = await deepLinkHandler.getDeferredLink();
+        if (link && link.type === 'referral') {
+          console.log('[HomeScreen] Found deferred referral:', link.payload);
+
+          // Submit to backend
+          const { data, errors } = await setReferrerMutation({
+            variables: { referrerIdentifier: link.payload }
+          });
+
+          console.log('[HomeScreen] Referral submission result:', data);
+
+          // Handle GraphQL errors
+          if (errors && errors.length > 0) {
+            const friendly = formatReferralErrorMessage(errors[0].message);
+            console.log('[HomeScreen] Referral GraphQL error:', friendly);
+            Alert.alert('Aviso', friendly, [{ text: 'OK' }]);
+            // Don't clear deferred link on error, user might want to try again
+            return;
+          }
+
+          if (data?.setReferrer?.success) {
+            // Clear the deferred link after successful submission
+            await deepLinkHandler.clearDeferredLink();
+            // Refetch balances to show the locked reward
+            refetchMyBalances();
+            checkReferralStatus();
+            // Show success modal
+            setShowDeferredReferralSuccess(true);
+          } else {
+            // Ensure friendly message is a string
+            const friendly = String(formatReferralErrorMessage(data?.setReferrer?.error) || 'Error desconocido');
+            console.log('[HomeScreen] Referral submission failed:', friendly);
+
+            // Check if already registered/claimed or suspicious - clear silently without showing alert
+            const shouldSuppressError =
+              data?.setReferrer?.message?.includes('already') ||
+              data?.setReferrer?.message?.includes('Ya registraste') ||
+              data?.setReferrer?.error?.includes('already') ||
+              data?.setReferrer?.error?.includes('Ya registraste') ||
+              /suspicious/i.test(data?.setReferrer?.error || '') ||
+              /suspicious/i.test(data?.setReferrer?.message || '');
+
+            console.log('[HomeScreen] Should suppress error?', shouldSuppressError);
+
+            if (shouldSuppressError) {
+              console.log('[HomeScreen] Suppressing error, attempting to clear link...');
+              // Clear the deferred link silently - user already has a referrer or flagged as suspicious
+              try {
+                await deepLinkHandler.clearDeferredLink();
+                console.log('[HomeScreen] Cleared deferred link successfully');
+              } catch (clearErr) {
+                console.error('[HomeScreen] Failed to clear deferred link:', clearErr);
+              }
+            } else {
+              console.log('[HomeScreen] Not suppressing error, showing alert...');
+              // Show alert for other errors with explicit button object
+              Alert.alert('Aviso', friendly, [{ text: 'OK', onPress: () => console.log('OK Pressed') }]);
+              console.log('[HomeScreen] Alert shown');
+            }
+          }
+        }
+      } catch (err: any) {
+        console.error('[HomeScreen] Failed to submit deferred referral:', err);
+
+        // Try to extract a meaningful error message
+        const errorMessage = err?.graphQLErrors?.[0]?.message || err?.message;
+        if (errorMessage) {
+          const friendly = String(formatReferralErrorMessage(errorMessage) || 'Error desconocido');
+          Alert.alert('Error', friendly, [{ text: 'OK', onPress: () => { } }]);
+        } else {
+          Alert.alert('Error', 'Error de conexión. Intenta de nuevo.', [{ text: 'OK', onPress: () => { } }]);
+        }
+      }
+    };
+
+    checkDeferredReferral();
+  }, [isAuthenticated, setReferrerMutation, refetchMyBalances, checkReferralStatus]);
 
   // Check referral status on mount to determine if ghost field should show
   useEffect(() => {
@@ -1017,7 +1128,7 @@ export const HomeScreen = () => {
       Alert.alert(
         'Error',
         'No se pudo cambiar la cuenta. Por favor intenta nuevamente.',
-        [{ text: 'OK' }]
+        [{ text: 'OK', onPress: () => { } }]
       );
       return false;
     }
@@ -1265,7 +1376,7 @@ export const HomeScreen = () => {
                       Alert.alert(
                         "Aviso",
                         "No tienes tokens disponibles para reclamar o ya fueron reclamados.",
-                        [{ text: "OK" }]
+                        [{ text: "OK", onPress: () => { } }]
                       );
                       return;
                     }
@@ -1527,6 +1638,12 @@ export const HomeScreen = () => {
       <LoadingOverlay
         visible={claimingInvite}
         message="Reclamando tu invitación..."
+      />
+
+      {/* Success modal for automatic deferred referral registration */}
+      <ReferralSuccessModal
+        visible={showDeferredReferralSuccess}
+        onClose={() => setShowDeferredReferralSuccess(false)}
       />
     </View>
   );

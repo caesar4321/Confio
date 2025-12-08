@@ -40,11 +40,11 @@ export default function AuthScreenWeb3() {
 
   const handleGoogleSignIn = async () => {
     if (isLoading) return;
-    
+
     setIsLoading(true);
     try {
       const userInfo = await authServiceWeb3.signInWithGoogle();
-      
+
       if (userInfo) {
         Alert.alert(
           'Welcome to Web3!',
@@ -61,7 +61,7 @@ export default function AuthScreenWeb3() {
       console.error('Google Sign-In Error:', error);
       Alert.alert(
         'Sign In Failed',
-        error.message || 'Failed to sign in with Google. Please try again.'
+        String(error.message || 'Failed to sign in with Google. Please try again.')
       );
     } finally {
       setIsLoading(false);
@@ -73,13 +73,13 @@ export default function AuthScreenWeb3() {
       Alert.alert('Not Available', 'Apple Sign In is only available on iOS devices');
       return;
     }
-    
+
     if (isLoading) return;
-    
+
     setIsLoading(true);
     try {
       const userInfo = await authServiceWeb3.signInWithApple();
-      
+
       if (userInfo) {
         Alert.alert(
           'Welcome to Web3!',
@@ -115,14 +115,14 @@ export default function AuthScreenWeb3() {
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.header}>
-          <Image 
-            source={require('../assets/logo.png')} 
+          <Image
+            source={require('../assets/logo.png')}
             style={styles.logo}
             resizeMode="contain"
           />
           <Text style={styles.title}>Welcome to Confio</Text>
           <Text style={styles.subtitle}>
-            {authMode === 'web3' 
+            {authMode === 'web3'
               ? 'Sign in with Web3Auth and get your Algorand wallet'
               : 'Sign in with traditional authentication'}
           </Text>
@@ -136,7 +136,7 @@ export default function AuthScreenWeb3() {
             </View>
           ) : (
             <>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={[styles.authButton, styles.googleButton]}
                 onPress={handleGoogleSignIn}
                 disabled={isLoading}
@@ -146,7 +146,7 @@ export default function AuthScreenWeb3() {
               </TouchableOpacity>
 
               {Platform.OS === 'ios' && (
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={[styles.authButton, styles.appleButton]}
                   onPress={handleAppleSignIn}
                   disabled={isLoading}
@@ -181,7 +181,7 @@ export default function AuthScreenWeb3() {
                 </View>
               </View>
 
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.switchModeButton}
                 onPress={toggleAuthMode}
               >
