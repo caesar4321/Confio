@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, Animated, Dimensions, Easing, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Animated, Dimensions, Easing, ActivityIndicator, Alert, Platform, ScrollView } from 'react-native';
 import LoadingOverlay from '../components/LoadingOverlay';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { appleAuth } from '@invertase/react-native-apple-authentication';
@@ -10,6 +10,7 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { AuthStackParamList } from '../types/navigation';
 import { useAuth } from '../contexts/AuthContext';
+
 import Svg, { Defs, LinearGradient as SvgLinearGradient, Stop, Text as SvgText, RadialGradient, Ellipse } from 'react-native-svg';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
@@ -42,7 +43,7 @@ export const AuthScreen = () => {
         console.error('AuthScreen - Failed to initialize auth service:', error);
       }
     };
-    
+
     initializeAuthService();
   }, []);
 
@@ -63,7 +64,7 @@ export const AuthScreen = () => {
   const handleGoogleSignIn = async () => {
     try {
       console.log('AuthScreen - Starting Google Sign-In...');
-      
+
       // Don't show loading during Google modal
       const result = await authService.signInWithGoogle((message) => {
         // Only show loading AFTER Google sign-in completes
@@ -72,16 +73,16 @@ export const AuthScreen = () => {
         }
         setLoadingMessage(message);
       });
-      
+
       // Ensure loading is shown if not already
       if (!isLoading) {
         setIsLoading(true);
         setLoadingMessage('¡Casi listo! Finalizando configuración...');
       }
-      
+
       console.log('Google Sign-In result:', result);
       console.log('Phone verification status:', result.walletData?.isPhoneVerified);
-      
+
       await handleSuccessfulLogin(result.walletData?.isPhoneVerified || false);
     } catch (error) {
       console.error('Google Sign-In failed:', error);
@@ -98,7 +99,7 @@ export const AuthScreen = () => {
   const handleAppleSignIn = async () => {
     try {
       console.log('AuthScreen - Starting Apple Sign-In...');
-      
+
       // Don't show loading during Apple modal
       const result = await authService.signInWithApple((message) => {
         // Only show loading AFTER Apple sign-in completes
@@ -107,16 +108,16 @@ export const AuthScreen = () => {
         }
         setLoadingMessage(message);
       });
-      
+
       // Ensure loading is shown if not already
       if (!isLoading) {
         setIsLoading(true);
         setLoadingMessage('¡Casi listo! Finalizando configuración...');
       }
-      
+
       console.log('Apple Sign-In result:', result);
       console.log('Phone verification status:', result.walletData?.isPhoneVerified);
-      
+
       await handleSuccessfulLogin(result.walletData?.isPhoneVerified || false);
     } catch (error) {
       console.error('Apple Sign-In Error:', error);
@@ -219,16 +220,16 @@ export const AuthScreen = () => {
 
         <Text style={styles.subtitle}>La manera más fácil y segura de enviar, pagar, y ahorrar en dólares digitales</Text>
         <View style={styles.buttonGroup}>
-          <TouchableOpacity 
-            style={styles.googleButton} 
+          <TouchableOpacity
+            style={styles.googleButton}
             onPress={handleGoogleSignIn}
           >
             <GoogleLogo width={24} height={24} style={{ marginRight: 8 }} />
             <Text style={styles.googleButtonText}>Continuar con Google</Text>
           </TouchableOpacity>
           {appleAuth.isSupported && (
-            <TouchableOpacity 
-              style={styles.appleButton} 
+            <TouchableOpacity
+              style={styles.appleButton}
               onPress={handleAppleSignIn}
             >
               <AppleLogo width={24} height={24} style={{ marginRight: 8 }} fill="#fff" />
@@ -245,8 +246,10 @@ export const AuthScreen = () => {
           </Text>
         </View>
       </View>
-      
+
       <LoadingOverlay visible={isLoading} message={loadingMessage} />
+
+
     </View>
   );
 };

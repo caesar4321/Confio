@@ -438,7 +438,7 @@ export const ProfileScreen = () => {
               ]}
               onPress={() => navigation.navigate('ReferralRewardClaim' as never)}
             >
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
                 {referralStats.claimable > 0 ? (
                   <Text style={{ marginRight: 8 }}>🟢</Text>
                 ) : referralStats.pending > 0 ? (

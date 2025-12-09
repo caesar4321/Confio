@@ -2,7 +2,8 @@ import { Linking, Platform } from 'react-native';
 import Keychain from 'react-native-keychain';
 import { NavigationContainerRef } from '@react-navigation/native';
 // @ts-ignore
-import InstallReferrer from 'react-native-install-referrer';
+import { PlayInstallReferrer } from 'react-native-play-install-referrer';
+import 'react-native-url-polyfill/auto';
 
 const DEFERRED_LINK_KEY = 'confio_deferred_link';
 const AUTH_TOKEN_KEY = 'confio_auth_token';
@@ -61,6 +62,8 @@ export class DeepLinkHandler {
     }
   }
 
+
+
   private async checkReferralStrategies(): Promise<string | null> {
     /* MOCK FOR TESTING - UNCOMMENT TO USE
     console.log('[DeepLink] Using MOCKED Play Store referrer value');
@@ -71,20 +74,85 @@ export class DeepLinkHandler {
     // 1. Check Install Referrer (Android only)
     if (Platform.OS === 'android') {
       try {
-        const referrerData = await InstallReferrer.getReferrer();
-        if (referrerData && referrerData.referrer) {
-          console.log('Install Referrer raw:', referrerData.referrer);
+        console.log('[DeepLink] Checking Play Install Referrer (New Lib)...');
+
+        const referrerInfo = await new Promise((resolve, reject) => {
+          PlayInstallReferrer.getInstallReferrerInfo((value: any, error: any) => {
+            if (error) {
+              reject(error);
+            } else {
+              resolve(value);
+            }
+          });
+        }) as any;
+
+        console.log(`[DeepLink] Install Referrer raw data: ${JSON.stringify(referrerInfo)}`);
+
+        if (referrerInfo && referrerInfo.installReferrer) {
+          let ref = referrerInfo.installReferrer;
+          console.log(`[DeepLink] Raw referrer string: ${ref}`);
+
+
           // Ignore standard google play params if they don't look like our code
-          // Simple heuristic: if it contains "utm_", it might be garbage, unless we use utm_content for code
+          // Heuristic:
+          // 1. If it's a naked code (no utm_), accept it.
+          // 2. If it contains utm_, look for 'utm_content' or 'utm_campaign' which might hold our code.
+
+          let potentialCode = ref;
+
+          // Attempt to handle double-encoded strings
+          if (ref.includes('%')) {
+            try {
+              const decoded = decodeURIComponent(ref);
+              if (decoded !== ref) {
+                console.log(`[DeepLink] Decoded referrer: ${decoded}`);
+                ref = decoded;
+                potentialCode = decoded;
+              }
+            } catch (e) {
+              // ignore decoding errors
+            }
+          }
+
+          if (ref.includes('utm_')) {
+            // Parse query string style 'key=value&key2=value2'
+            // We use new URLSearchParams which handles = and & automatically
+            const params = new URLSearchParams(ref);
+            const content = params.get('utm_content');
+            const campaign = params.get('utm_campaign');
+            const source = params.get('utm_source');
+
+            console.log(`[DeepLink] Parsed UTMs - content: ${content}, campaign: ${campaign}, source: ${source}`);
+
+            if (content && !content.includes('google')) {
+              potentialCode = content;
+              console.log(`[DeepLink] Extracted potential code from utm_content: ${potentialCode}`);
+            } else if (campaign && !campaign.includes('google-play')) {
+              potentialCode = campaign;
+              console.log(`[DeepLink] Extracted potential code from utm_campaign: ${potentialCode}`);
+            } else {
+              // Checking for "organic"
+              if (ref.includes('medium=organic') || (source && source.includes('google-play'))) {
+                console.log(`[DeepLink] Ignored organic/play-store install (no custom referrer params)`);
+                // Keep potentialCode as is, it will likely be rejected below
+              }
+            }
+          }
+
           // But our worker sets `referrer=CODE`. 
           // If the code is simple (alphanumeric), we take it.
-          const ref = referrerData.referrer;
-          if (!ref.includes('utm_source') && !ref.includes('gclid')) {
-            return ref;
+          // We fail if it STILL looks like a url param string (contains =) or is one of the restricted keywords
+          if (!potentialCode.includes('utm_source') && !potentialCode.includes('gclid') && !potentialCode.includes('=')) {
+            console.log(`[DeepLink] Accepting referrer string: ${potentialCode}`);
+            return potentialCode;
+          } else {
+            console.log(`[DeepLink] Rejected referrer string (contains utm/gclid or format invalid): ${potentialCode}`);
           }
+        } else {
+          console.log('[DeepLink] Install Referrer returned no referrer property');
         }
-      } catch (e) {
-        console.log('Install Referrer check failed:', e);
+      } catch (e: any) {
+        console.log(`[DeepLink] Install Referrer check failed or threw error: ${e?.message || e}`);
       }
     }
 
@@ -100,20 +168,20 @@ export class DeepLinkHandler {
       });
       clearTimeout(timeoutId);
 
-      console.log('[DeepLink] IP fingerprint response status:', response.status);
+      console.log(`[DeepLink] IP fingerprint response status: ${response.status}`);
 
       if (response.ok) {
         const data = await response.json();
-        console.log('[DeepLink] IP fingerprint data:', data);
+        console.log(`[DeepLink] IP fingerprint data: ${JSON.stringify(data)}`);
         if (data.code) {
-          console.log('[DeepLink] Found referral code via IP fingerprint:', data.code);
+          console.log(`[DeepLink] Found referral code via IP fingerprint: ${data.code}`);
           return data.code;
         } else {
           console.log('[DeepLink] No referral code found for this IP');
         }
       }
-    } catch (e) {
-      console.log('[DeepLink] IP Fingerprint check failed:', e);
+    } catch (e: any) {
+      console.log(`[DeepLink] IP Fingerprint check failed: ${e?.message || e}`);
     }
 
     return null;
