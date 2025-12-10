@@ -87,14 +87,15 @@ export const ProfileScreen = () => {
     return [
       'Te envié un regalo de US$5 en $CONFIO 🎁',
       '',
-      'Estoy usando Confío para ahorrar en dólares sin restricciones. Es como una bóveda digital personal.',
+      'Estoy usando Confío para guardar dólares sin bancos y sin restricciones.',
+      'Es como una bóveda digital personal 💰✨',
       '',
-      `👇 Reclama tu regalo aquí:`,
+      '👇 Reclamá tu regalo acá:',
       inviteLink,
       '',
-      `*Código: ${cleanUsername}*`,
+      `Código: ${cleanUsername}`,
       '',
-      '(El bono se desbloquea al cargar tus primeros 20 USDC)',
+      '(El regalo se activa cuando cargues tus primeros 20 USDC y los pases a cUSD)',
     ].join('\n');
   }, [userProfile?.username]);
 
@@ -416,9 +417,9 @@ export const ProfileScreen = () => {
                 <Icon name="lock" size={20} color="#FFFFFF" />
               </View>
               <View style={styles.referralHeaderText}>
-                <Text style={styles.referralTitle}>Gana US$5 en $CONFIO por cada amigo</Text>
+                <Text style={styles.referralTitle}>Regalá US$5 en $CONFIO y recibí US$5 vos también</Text>
                 <Text style={styles.referralSubtitle}>
-                  Tú y tus amigos reciben US$5 en $CONFIO (bloqueados) cuando se registran con tu link. Se desbloquean cuando hacen su primera recarga de 20 USDC.
+                  Tu amigo se crea la cuenta con tu link. Listo: ambos reciben 5 $CONFIO (se activan cuando cargan sus primeros 20 USDC y los pasan a cUSD).
                 </Text>
               </View>
             </View>
@@ -426,7 +427,7 @@ export const ProfileScreen = () => {
             <View style={styles.referralActions}>
               <TouchableOpacity style={styles.referralShareButton} onPress={handleShareReferral}>
                 <WhatsAppLogo width={20} height={20} style={{ marginRight: 8 }} />
-                <Text style={styles.referralShareText}>Regala US$5 en WhatsApp</Text>
+                <Text style={styles.referralShareText}>Enviar regalo por WhatsApp</Text>
               </TouchableOpacity>
             </View>
 
@@ -476,16 +477,16 @@ export const ProfileScreen = () => {
                 onPress={() => navigation.navigate('Achievements' as never)}
               >
                 <Icon name="user-plus" size={16} color="#047857" />
-                <Text style={styles.referralUpdateUsernameText}>¿Te invitaron? Ingresa código</Text>
+                <Text style={styles.referralUpdateUsernameText}>¿Te invitó alguien? Poné su código</Text>
                 <Icon name="chevron-right" size={16} color="#047857" />
               </TouchableOpacity>
             )}
 
             <View style={styles.referralCriteria}>
               <Text style={styles.referralCriteriaTitle}>¿Cómo funciona el desbloqueo?</Text>
-              <Text style={styles.referralCriteriaItem}>1. Tu amigo se registra con tu link (ambos reciben US$5 en $CONFIO bloqueados).</Text>
-              <Text style={styles.referralCriteriaItem}>2. Recarga 20 USDC o más.</Text>
-              <Text style={styles.referralCriteriaItem}>3. ¡Listo! El bono se desbloquea para ambos.</Text>
+              <Text style={styles.referralCriteriaItem}>1. Compartí tu link.</Text>
+              <Text style={styles.referralCriteriaItem}>2. Tu amigo se crea la cuenta (recibe 5 $CONFIO que se activan luego).</Text>
+              <Text style={styles.referralCriteriaItem}>3. Carga 20 USDC, pásalos a cUSD y se activan los US$5 en $CONFIO para los dos.</Text>
 
               <TouchableOpacity onPress={() => navigation.navigate('Achievements' as never)}>
                 <Text style={[styles.referralCriteriaItem, { color: '#3B82F6', marginTop: 4, fontWeight: '600' }]}>

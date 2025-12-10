@@ -94,9 +94,9 @@ export default {
   <meta charset="utf-8">
   <title>Regalo de Confío</title>
   <meta property="og:type" content="website">
-  <meta property="og:title" content="Te envié un regalo de US$5 en $CONFIO 🎁">
-  <meta property="og:description" content="Estoy usando Confío para ahorrar en dólares sin restricciones. Reclama tu regalo aquí.">
-  <meta property="og:image" content="https://confio.lat/WhatsApp_og_card.jpeg">
+  <meta property="og:title" content="Recibí US$5 por activar tu Confío Wallet">
+  <meta property="og:description" content="Digital Dollar sin bancos. Gratis y en 1 minuto.">
+  <meta property="og:image" content="https://confio.lat/WhatsApp_og_card_v2.jpeg">
   <meta property="og:url" content="${url.href}">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">

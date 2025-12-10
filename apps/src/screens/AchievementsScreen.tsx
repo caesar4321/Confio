@@ -57,31 +57,32 @@ export const AchievementsScreen: React.FC = () => {
     return [
       'Te envié un regalo de US$5 en $CONFIO 🎁',
       '',
-      'Estoy usando Confío para ahorrar en dólares sin restricciones. Es como una bóveda digital personal.',
+      'Estoy usando Confío para guardar dólares sin bancos y sin restricciones.',
+      'Es como una bóveda digital personal 💰✨',
       '',
-      `👇 Reclama tu regalo aquí:`,
+      '👇 Reclamá tu regalo acá:',
       inviteLink,
       '',
-      `*Código: ${cleanUsername}*`,
+      `Código: ${cleanUsername}`,
       '',
-      '(El bono se desbloquea al cargar tus primeros 20 USDC)',
+      '(El regalo se activa cuando cargues tus primeros 20 USDC y los pases a cUSD)',
     ].join('\n');
   }, [username]);
 
   const steps: Step[] = useMemo(
     () => [
       {
-        title: 'Envía tu enlace invitación',
-        description: 'Toca "Compartir por WhatsApp" y elige a tus amigos. El mensaje incluye tu link único.',
+        title: 'Compartí tu link',
+        description: 'Toca "Enviar regalo por WhatsApp" y elige a tus amigos. El mensaje incluye tu link único.',
       },
       {
-        title: 'Tu amigo se registra',
-        description: 'Al crear su cuenta usando tu enlace, recibe automáticamente US$5 en $CONFIO bloqueados.',
+        title: 'Tu amigo se crea la cuenta',
+        description: 'Al crear su cuenta usando tu enlace, recibe automáticamente US$5 en $CONFIO (se activan luego).',
       },
       {
-        title: 'Desbloqueo del bono',
+        title: 'Carga 20 USDC, pásalos a cUSD y se activan los US$5 en $CONFIO',
         description:
-          'Cuando tu amigo recarga 20 USDC o más, el bono se desbloquea y activan los US$5 en $CONFIO para ambos.',
+          'Cuando tu amigo carga 20 USDC y los pasa a cUSD, se activan los US$5 en $CONFIO para los dos.',
       },
       {
         title: '¡Ganen sin límites!',
@@ -133,9 +134,10 @@ export const AchievementsScreen: React.FC = () => {
 
         <View style={styles.heroCard}>
           <Text style={styles.heroEyebrow}>Programa de referidos Confío</Text>
-          <Text style={styles.heroTitle}>Regala US$5 en $CONFIO a tus amigos</Text>
+          <Text style={styles.heroTitle}>Regalá US$5 en $CONFIO y recibí US$5 vos también</Text>
           <Text style={styles.heroSubtitle}>
-            Comparte tu link. Tus amigos reciben US$5 en $CONFIO (bloqueados) al registrarse. Se desbloquean cuando hacen su primera recarga de 20 USDC.
+            Tu amigo se crea la cuenta con tu link.{'\n'}
+            Listo: ambos reciben 5 $CONFIO (se activan cuando cargan sus primeros 20 USDC y los pasan a cUSD).
           </Text>
 
           <View style={styles.usernamePill}>
@@ -155,7 +157,7 @@ export const AchievementsScreen: React.FC = () => {
             </TouchableOpacity>
             <TouchableOpacity style={styles.shareButton} onPress={handleShare}>
               <WhatsAppLogo width={18} height={18} style={{ marginRight: 8 }} />
-              <Text style={styles.shareButtonText}>Compartir por WhatsApp</Text>
+              <Text style={styles.shareButtonText}>Enviar regalo por WhatsApp</Text>
             </TouchableOpacity>
           </View>
           {needsFriendlyUsername && (
@@ -168,9 +170,9 @@ export const AchievementsScreen: React.FC = () => {
         </View>
 
         <View style={styles.referrerCard}>
-          <Text style={styles.referrerTitle}>¿Quién te invitó a Confío?</Text>
+          <Text style={styles.referrerTitle}>¿Te invitó alguien?</Text>
           <Text style={styles.referrerSubtitle}>
-            Si aún no registraste a la persona que te invitó, ingresa su @usuario o número de teléfono para que también reciba el bono.
+            Poné su @usuario o número así también recibe su regalo.
           </Text>
           <TouchableOpacity style={styles.referrerButton} onPress={() => setShowReferralModal(true)}>
             <Icon name="user-plus" size={18} color={colors.primaryDark} />
@@ -307,12 +309,7 @@ const styles = StyleSheet.create({
     color: colors.primaryDark,
     lineHeight: 18,
   },
-  usernameHint: {
-    marginTop: 6,
-    fontSize: 12,
-    color: colors.primaryDark,
-    lineHeight: 18,
-  },
+
   heroActions: {
     flexDirection: 'row',
     marginTop: 24,
