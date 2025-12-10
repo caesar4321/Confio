@@ -28,10 +28,10 @@ type ConfioTokenomicsScreenNavigationProp = NativeStackNavigationProp<MainStackP
 export const ConfioTokenomicsScreen = () => {
   const navigation = useNavigation<ConfioTokenomicsScreenNavigationProp>();
   const { selectedCountry } = useCountry();
-  
+
   // Use the app's selected country for formatting, fallback to Venezuela
   const countryCode = selectedCountry?.[2] || 'VE';
-  const formatWithLocale = (num: number, options = {}) => 
+  const formatWithLocale = (num: number, options = {}) =>
     formatNumber(num, countryCode, { minimumFractionDigits: 0, maximumFractionDigits: 0, ...options });
 
   const totalSupply = 1000000000; // 1 billion
@@ -78,7 +78,7 @@ export const ConfioTokenomicsScreen = () => {
       tokens: culturalTokens,
       percentage: pct(culturalTokens),
       description:
-        '1.5% (hasta 2.5% opcional) para agradecer apoyos reales 2023–2026. Bloqueo total hasta el final de fase 3 y el listado; luego 50% inmediato y 50% liberado de forma gradual en 3 meses.',
+        '1.5% (hasta 2.5% opcional) para agradecer apoyos reales 2023–2026. Bloqueo total hasta el final de fase 3 y el listado; luego liberado de forma gradual en 3 meses.',
       color: '#f59e0b',
       icon: 'heart',
     },
@@ -140,8 +140,8 @@ export const ConfioTokenomicsScreen = () => {
         {/* Hero Section */}
         <View style={styles.heroSection}>
           <View style={styles.tokenIcon}>
-            <Image 
-              source={CONFIOLogo} 
+            <Image
+              source={CONFIOLogo}
               style={styles.tokenImage}
               resizeMode="contain"
             />
@@ -164,7 +164,7 @@ export const ConfioTokenomicsScreen = () => {
         {/* Distribution */}
         <View style={styles.distributionSection}>
           <Text style={styles.sectionTitle}>Distribución de Monedas</Text>
-          
+
           {tokenomicsData.map((item, index) => (
             <View key={index} style={styles.distributionCard}>
               <View style={styles.distributionHeader}>
@@ -199,8 +199,8 @@ export const ConfioTokenomicsScreen = () => {
             <Icon name="heart" size={24} color={colors.secondary} />
             <Text style={styles.philosophyTitle}>La Primera Oportunidad Real para Ti</Text>
             <Text style={styles.philosophyDescription}>
-              Por primera vez en la historia, puedes invertir en un proyecto prometedor sin ser millonario, 
-              sin entender tecnología complicada, y sin conexiones especiales. 
+              Por primera vez en la historia, puedes invertir en un proyecto prometedor sin ser millonario,
+              sin entender tecnología complicada, y sin conexiones especiales.
               Solo necesitas creer en el futuro financiero de nuestra gente.
             </Text>
           </View>
@@ -209,7 +209,7 @@ export const ConfioTokenomicsScreen = () => {
         {/* Comparison Section */}
         <View style={styles.comparisonSection}>
           <Text style={styles.sectionTitle}>¿Por Qué la Gente Común Nunca Puede Invertir?</Text>
-          
+
           {comparisonData.map((comparison, index) => (
             <View key={index} style={styles.comparisonCard}>
               <View style={styles.comparisonHeader}>
@@ -223,14 +223,14 @@ export const ConfioTokenomicsScreen = () => {
                   </Text>
                 </View>
               </View>
-              
+
               <View style={styles.comparisonList}>
                 {(comparison.problems || comparison.benefits)?.map((item, idx) => (
                   <View key={idx} style={styles.comparisonItem}>
-                    <Icon 
-                      name={comparison.benefits ? "check" : "x"} 
-                      size={16} 
-                      color={comparison.color} 
+                    <Icon
+                      name={comparison.benefits ? "check" : "x"}
+                      size={16}
+                      color={comparison.color}
                     />
                     <Text style={styles.comparisonText}>{item}</Text>
                   </View>
@@ -245,15 +245,15 @@ export const ConfioTokenomicsScreen = () => {
           <Text style={styles.sectionTitle}>Distribución Justa y Transparente</Text>
           <View style={styles.futureCard}>
             <Icon name="shield" size={24} color={colors.accent} />
-          <Text style={styles.futureTitle}>Resumen rápido</Text>
-          <Text style={styles.futureDescription}>
-            - Suministro total: {formatWithLocale(totalSupply)} CONFIO.{'\n'}
-            - Preventa: 74M CONFIO (7.4%) en 5 fases ($0.20–$1.00), desbloqueo total al cerrar fase 3 y listar.{'\n'}
-            - Fundador y equipo: 90.36% como reserva típica de fundador para operar y expandir. Bloqueo total hasta fase 3/listado; luego se libera mes a mes durante 36 meses. Incluye 1% para equipo clave que se libera en partes iguales durante 24 meses tras listado.{'\n'}
-            - Cultura LATAM: 1.5% de agradecimiento. Bloqueo total hasta fase 3/listado; luego 50% inmediato y 50% liberado gradualmente en 3 meses.{'\n'}
-            - Recompensas: 7.4M CONFIO on-chain en la primera transacción real, calculadas al precio de la fase vigente.{'\n'}
-            - Sin VCs ni pools ocultos. Todo está documentado y visible.
-          </Text>
+            <Text style={styles.futureTitle}>Resumen rápido</Text>
+            <Text style={styles.futureDescription}>
+              - Suministro total: {formatWithLocale(totalSupply)} CONFIO.{'\n'}
+              - Preventa: 74M CONFIO (7.4%) en 5 fases ($0.20–$1.00), desbloqueo total al cerrar fase 3 y listar.{'\n'}
+              - Fundador y equipo: 90.36% como reserva típica de fundador para operar y expandir. Bloqueo total hasta fase 3/listado; luego se libera mes a mes durante 36 meses. Incluye 1% para equipo clave que se libera en partes iguales durante 24 meses tras listado.{'\n'}
+              - Cultura LATAM: 1.5% de agradecimiento. Bloqueo total hasta fase 3/listado; luego liberado gradualmente en 3 meses.{'\n'}
+              - Recompensas: 7.4M CONFIO on-chain en la primera transacción real, calculadas al precio de la fase vigente.{'\n'}
+              - Sin VCs ni pools ocultos. Todo está documentado y visible.
+            </Text>
             <TouchableOpacity
               style={styles.linkButton}
               onPress={() =>
