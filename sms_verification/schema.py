@@ -18,6 +18,7 @@ from blockchain.invite_send_mutations import ClaimInviteForPhone
 from users.review_numbers import (
     is_review_test_phone_key,
     review_test_pairs,
+    find_matching_review_number,
 )
 
 logger = logging.getLogger(__name__)
@@ -106,7 +107,12 @@ class InitiateSMSVerification(graphene.Mutation):
         if not _validate_country_iso(country_code):
             return InitiateSMSVerification(success=False, error="Invalid country code")
 
-        phone_e164 = _format_e164(phone_number, country_code)
+        # Fuzzy match review number override (handles wrong country selection)
+        review_override = find_matching_review_number(phone_number)
+        if review_override:
+            phone_e164 = review_override
+        else:
+            phone_e164 = _format_e164(phone_number, country_code)
         ttl_sec = getattr(settings, 'SMS_CODE_TTL_SECONDS', 600)
 
         try:
@@ -173,7 +179,12 @@ class VerifySMSCode(graphene.Mutation):
         if not _validate_country_iso(country_code):
             return VerifySMSCode(success=False, error="Invalid country code")
 
-        phone_e164 = _format_e164(phone_number, country_code)
+        # Fuzzy match review number override
+        review_override = find_matching_review_number(phone_number)
+        if review_override:
+            phone_e164 = review_override
+        else:
+            phone_e164 = _format_e164(phone_number, country_code)
         ver = SMSVerification.objects.filter(
             user=user,
             phone_number=phone_e164,

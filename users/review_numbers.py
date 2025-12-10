@@ -67,3 +67,38 @@ def is_review_test_phone_e164(phone_e164: str | None) -> bool:
 	if not normalized:
 		return False
 	return normalized in _review_phone_keys()
+
+
+def find_matching_review_number(phone_input: str) -> str | None:
+	"""
+	Fuzzy match the input phone string against configured review numbers.
+	
+	If the digits of `phone_input` exactly match or are a suffix of a configured
+	review number (and satisfy minimal length), return the configured E.164 number.
+	This handles cases where the user/reviewer selects the wrong country code
+	but enters the correct test digits.
+	"""
+	import re
+	if not phone_input:
+		return None
+		
+	# extract all digits
+	input_digits = re.sub(r'\D', '', phone_input)
+	if not input_digits:
+		return None
+		
+	for review_phone, _ in review_test_pairs():
+		# review_phone is expected to be E.164 (e.g. +12025550123)
+		review_digits = re.sub(r'\D', '', review_phone)
+		
+		# 1. Exact digit match
+		if input_digits == review_digits:
+			return review_phone
+			
+		# 2. Suffix match (Input is missing country code, but reviewer entered the full national number)
+		# We require at least 10 digits to avoid false positives.
+		# The test number is 12025550123 (11 digits).
+		if len(input_digits) >= 10 and review_digits.endswith(input_digits):
+			return review_phone
+			
+	return None

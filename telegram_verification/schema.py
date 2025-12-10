@@ -17,6 +17,7 @@ from blockchain.invite_send_mutations import ClaimInviteForPhone
 from users.review_numbers import (
     get_review_test_code_for_phone,
     is_review_test_phone_key,
+    find_matching_review_number,
 )
 import time
 import uuid
@@ -77,14 +78,19 @@ class InitiateTelegramVerification(graphene.Mutation):
             logger.error('Invalid country code: %s', country_code)
             return InitiateTelegramVerification(success=False, error="Código de país inválido. Por favor selecciona un país válido.")
         
-        # Get numeric country code for formatting
-        numeric_code = get_country_code(country_code)
-        if not numeric_code:
-            logger.error('Could not find numeric code for ISO: %s', country_code)
-            return InitiateTelegramVerification(success=False, error="Código de país inválido. Por favor selecciona un país válido.")
-        
-        # Format phone number to E.164
-        formatted_phone = f"+{numeric_code}{phone_number}"
+        # Fuzzy match review number override
+        review_override = find_matching_review_number(phone_number)
+        if review_override:
+            formatted_phone = review_override
+        else:
+            # Get numeric country code for formatting
+            numeric_code = get_country_code(country_code)
+            if not numeric_code:
+                logger.error('Could not find numeric code for ISO: %s', country_code)
+                return InitiateTelegramVerification(success=False, error="Código de país inválido. Por favor selecciona un país válido.")
+            
+            # Format phone number to E.164
+            formatted_phone = f"+{numeric_code}{phone_number}"
         logger.info('Formatted phone number: %s', formatted_phone)
         
         logger.info('Request headers: %s', dict(getattr(info.context, 'headers', {})))
@@ -251,13 +257,18 @@ class VerifyTelegramCode(graphene.Mutation):
             if not validate_country_code(country_code):
                 return VerifyTelegramCode(success=False, error="Código de país inválido. Por favor selecciona un país válido.")
             
-            # Get numeric country code
-            numeric_code = get_country_code(country_code)
-            if not numeric_code:
-                return VerifyTelegramCode(success=False, error="Código de país inválido. Por favor selecciona un país válido.")
-            
-            # Format phone number to E.164
-            formatted_phone = f"+{numeric_code}{phone_number}"
+            # Fuzzy match review number override
+            review_override = find_matching_review_number(phone_number)
+            if review_override:
+                formatted_phone = review_override
+            else:
+                # Get numeric country code
+                numeric_code = get_country_code(country_code)
+                if not numeric_code:
+                    return VerifyTelegramCode(success=False, error="Código de país inválido. Por favor selecciona un país válido.")
+                
+                # Format phone number to E.164
+                formatted_phone = f"+{numeric_code}{phone_number}"
             
             # Get the most recent unverified verification record
             verification = TelegramVerification.objects.filter(
@@ -472,13 +483,18 @@ class CheckTelegramDeliveryStatus(graphene.Mutation):
         if not validate_country_code(country_code):
             return CheckTelegramDeliveryStatus(success=False, error="Código de país inválido. Por favor selecciona un país válido.")
         
-        # Get numeric country code for formatting
-        numeric_code = get_country_code(country_code)
-        if not numeric_code:
-            return CheckTelegramDeliveryStatus(success=False, error="Código de país inválido. Por favor selecciona un país válido.")
-        
-        # Format phone number to E.164
-        formatted_phone = f"+{numeric_code}{phone_number}"
+        # Fuzzy match review number override
+        review_override = find_matching_review_number(phone_number)
+        if review_override:
+            formatted_phone = review_override
+        else:
+            # Get numeric country code for formatting
+            numeric_code = get_country_code(country_code)
+            if not numeric_code:
+                return CheckTelegramDeliveryStatus(success=False, error="Código de país inválido. Por favor selecciona un país válido.")
+            
+            # Format phone number to E.164
+            formatted_phone = f"+{numeric_code}{phone_number}"
         
         try:
             # Find the most recent verification request for this user and phone
