@@ -419,7 +419,7 @@ export const ProfileScreen = () => {
               <View style={styles.referralHeaderText}>
                 <Text style={styles.referralTitle}>Regalá US$5 en $CONFIO y recibí US$5 vos también</Text>
                 <Text style={styles.referralSubtitle}>
-                  Tu amigo se crea la cuenta con tu link. Listo: ambos reciben 5 $CONFIO (se activan cuando cargan sus primeros 20 USDC y los pasan a cUSD).
+                  Tu amigo se crea la cuenta con tu link. Listo: ambos reciben US$5 en $CONFIO (se activan cuando cargan sus primeros 20 USDC y los pasan a cUSD).
                 </Text>
               </View>
             </View>
@@ -485,7 +485,7 @@ export const ProfileScreen = () => {
             <View style={styles.referralCriteria}>
               <Text style={styles.referralCriteriaTitle}>¿Cómo funciona el desbloqueo?</Text>
               <Text style={styles.referralCriteriaItem}>1. Compartí tu link.</Text>
-              <Text style={styles.referralCriteriaItem}>2. Tu amigo se crea la cuenta (recibe 5 $CONFIO que se activan luego).</Text>
+              <Text style={styles.referralCriteriaItem}>2. Tu amigo se crea la cuenta (recibe US$5 en $CONFIO que se activan luego).</Text>
               <Text style={styles.referralCriteriaItem}>3. Carga 20 USDC, pásalos a cUSD y se activan los US$5 en $CONFIO para los dos.</Text>
 
               <TouchableOpacity onPress={() => navigation.navigate('Achievements' as never)}>

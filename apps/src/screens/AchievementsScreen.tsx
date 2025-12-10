@@ -137,7 +137,7 @@ export const AchievementsScreen: React.FC = () => {
           <Text style={styles.heroTitle}>Regalá US$5 en $CONFIO y recibí US$5 vos también</Text>
           <Text style={styles.heroSubtitle}>
             Tu amigo se crea la cuenta con tu link.{'\n'}
-            Listo: ambos reciben 5 $CONFIO (se activan cuando cargan sus primeros 20 USDC y los pasan a cUSD).
+            Listo: ambos reciben US$5 en $CONFIO (se activan cuando cargan sus primeros 20 USDC y los pasan a cUSD).
           </Text>
 
           <View style={styles.usernamePill}>
@@ -219,7 +219,7 @@ export const AchievementsScreen: React.FC = () => {
           </Text>
           <View style={styles.criteria}>
             <Text style={styles.criteriaTitle}>Operaciones para desbloquear el bono:</Text>
-            <Text style={styles.criteriaItem}>• Primera recarga de al menos 20 USDC</Text>
+            <Text style={styles.criteriaItem}>• Primera recarga de al menos 20 USDC (y pasarlos a cUSD)</Text>
             <Text style={styles.criteriaItem}>• Primer depósito de USDC convertido a cUSD (≥ 20 USDC)</Text>
             <Text style={styles.criteriaNote}>El bono se acredita en $CONFIO automáticamente.</Text>
           </View>
