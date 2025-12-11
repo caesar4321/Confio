@@ -51,7 +51,7 @@ def calculate_dau(target_date=None):
     # end_time is end of target_date in Argentina
     naive_end = datetime.combine(target_date, datetime.max.time())
     end_time_arg = tz.localize(naive_end)
-    end_time = end_time_arg.astimezone(timezone.utc)
+    end_time = end_time_arg.astimezone(pytz.UTC)
     
     start_time = end_time - timedelta(days=1)
     
@@ -93,7 +93,7 @@ def calculate_wau(target_date=None):
     # Convert date to datetime range in Argentina time
     naive_end = datetime.combine(target_date, datetime.max.time())
     end_time_arg = tz.localize(naive_end)
-    end_time = end_time_arg.astimezone(timezone.utc)
+    end_time = end_time_arg.astimezone(pytz.UTC)
     
     start_time = end_time - timedelta(days=7)
     
@@ -135,7 +135,7 @@ def calculate_mau(target_date=None):
     # Convert date to datetime range in Argentina time
     naive_end = datetime.combine(target_date, datetime.max.time())
     end_time_arg = tz.localize(naive_end)
-    end_time = end_time_arg.astimezone(timezone.utc)
+    end_time = end_time_arg.astimezone(pytz.UTC)
     
     start_time = end_time - timedelta(days=30)
     
@@ -271,7 +271,7 @@ def snapshot_daily_metrics(target_date=None):
     # end_time is end of target_date in Argentina, converted to UTC
     naive_end = datetime.combine(target_date, datetime.max.time())
     end_time_arg = tz.localize(naive_end)
-    end_time = end_time_arg.astimezone(timezone.utc)
+    end_time = end_time_arg.astimezone(pytz.UTC)
     
     total_users = User.objects.filter(phone_number__isnull=False, created_at__lte=end_time).count()
     

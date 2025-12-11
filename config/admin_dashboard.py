@@ -459,7 +459,7 @@ class ConfioAdminSite(admin.AdminSite):
         # Calculate start date in Argentina time (midnight 30 days ago)
         now_arg = timezone.now().astimezone(tz)
         start_date_arg = (now_arg - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
-        start_date_utc = start_date_arg.astimezone(timezone.utc)
+        start_date_utc = start_date_arg.astimezone(pytz.UTC)
         
         daily_signups = User.objects.filter(
             phone_number__isnull=False,
