@@ -211,6 +211,16 @@ export const ConfioPresaleParticipateScreen = () => {
   };
 
   const handleSwap = async () => {
+    const iso = selectedCountry?.[2];
+    if (iso === 'US') {
+      Alert.alert('Restricción', 'Lo sentimos, los residentes de Estados Unidos no pueden participar en la preventa.');
+      return;
+    }
+    if (iso === 'KR') {
+      Alert.alert('Restricción', 'Lo sentimos, los ciudadanos/residentes de Corea del Sur no pueden participar en la preventa.');
+      return;
+    }
+
     if (!isValidAmount) {
       Alert.alert('Error', `Monto debe estar entre ${minAmount} y ${formatWithLocale(maxAmount)} cUSD`);
       return;

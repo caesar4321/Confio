@@ -239,6 +239,12 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
 
         user = self.scope.get("user")
 
+        # Geo-blocking check
+        from .geo_utils import check_presale_eligibility
+        is_eligible, error_msg = check_presale_eligibility(user)
+        if not is_eligible:
+            return {"success": False, "error": error_msg}
+
         # Validate presale is active and find phase
         settings_obj = PresaleSettings.get_settings()
         if not settings_obj.is_presale_active:

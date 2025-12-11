@@ -204,6 +204,15 @@ class JoinPresaleWaitlist(graphene.Mutation):
     @login_required
     def mutate(self, info):
         user = info.context.user
+        
+        from .geo_utils import check_presale_eligibility
+        is_eligible, error_msg = check_presale_eligibility(user)
+        if not is_eligible:
+            return JoinPresaleWaitlist(
+                success=False,
+                message=error_msg,
+                already_joined=False
+            )
 
         # Check if user already joined
         existing = PresaleWaitlist.objects.filter(user=user).first()

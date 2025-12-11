@@ -40,7 +40,7 @@ export const ConfioPresaleScreen = () => {
   const { data, loading, error } = useQuery(GET_ALL_PRESALE_PHASES, {
     fetchPolicy: 'cache-and-network',
   });
-  
+
   // Also fetch active presale to check if any phase is active
   const { data: activePresaleData } = useQuery(GET_ACTIVE_PRESALE, {
     fetchPolicy: 'cache-and-network',
@@ -67,7 +67,7 @@ export const ConfioPresaleScreen = () => {
   })) : [];
 
   const getStatusColor = (status: string) => {
-    switch(status) {
+    switch (status) {
       case 'coming_soon': return colors.secondary;
       case 'active': return colors.primary;
       case 'upcoming': return colors.accent;
@@ -78,7 +78,7 @@ export const ConfioPresaleScreen = () => {
   };
 
   const getStatusText = (status: string) => {
-    switch(status) {
+    switch (status) {
       case 'coming_soon': return 'Próximamente';
       case 'active': return 'Activa';
       case 'upcoming': return 'Siguiente';
@@ -88,7 +88,22 @@ export const ConfioPresaleScreen = () => {
     }
   };
 
+  const checkEligibility = () => {
+    const iso = selectedCountry?.[2];
+    if (iso === 'US') {
+      Alert.alert('Restricción', 'Lo sentimos, los residentes de Estados Unidos no pueden participar en la preventa.');
+      return false;
+    }
+    if (iso === 'KR') {
+      Alert.alert('Restricción', 'Lo sentimos, los ciudadanos/residentes de Corea del Sur no pueden participar en la preventa.');
+      return false;
+    }
+    return true;
+  };
+
   const handleJoinWaitlist = async () => {
+    if (!checkEligibility()) return;
+
     try {
       const { data } = await apollo.mutate({
         mutation: gql`
@@ -109,17 +124,18 @@ export const ConfioPresaleScreen = () => {
           [{ text: 'Entendido', style: 'default' }]
         );
       } else {
+        // If server blocked it (double hardening), show the message
         Alert.alert(
-          'Error',
-          'No se pudo unir a la lista de espera. Por favor intenta nuevamente.',
+          'Aviso',
+          data?.joinPresaleWaitlist?.message || 'No se pudo unir a la lista de espera.',
           [{ text: 'OK', style: 'default' }]
         );
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error joining waitlist:', error);
       Alert.alert(
         'Error',
-        'No se pudo unir a la lista de espera. Por favor intenta nuevamente.',
+        error.message || 'No se pudo unir a la lista de espera. Por favor intenta nuevamente.',
         [{ text: 'OK', style: 'default' }]
       );
     }
@@ -212,8 +228,8 @@ export const ConfioPresaleScreen = () => {
         {/* Hero Section */}
         <View style={styles.heroSection}>
           <View style={styles.tokenIcon}>
-            <Image 
-              source={CONFIOLogo} 
+            <Image
+              source={CONFIOLogo}
               style={styles.tokenImage}
               resizeMode="contain"
             />
@@ -356,17 +372,21 @@ export const ConfioPresaleScreen = () => {
           <Text style={styles.ctaSubtitle}>
             {isClaimsUnlocked ? 'Reclama las monedas que compraste en la preventa' : 'Únete a miles de personas que ya creen en un futuro financiero mejor'}
           </Text>
-          
+
           {!isClaimsUnlocked && activePresaleData?.activePresalePhase ? (
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.ctaButton}
-              onPress={() => navigation.navigate('ConfioPresaleParticipate')}
+              onPress={() => {
+                if (checkEligibility()) {
+                  navigation.navigate('ConfioPresaleParticipate');
+                }
+              }}
             >
               <Icon name="star" size={20} color="#fff" />
               <Text style={styles.ctaButtonText}>Participar en la Preventa</Text>
             </TouchableOpacity>
           ) : (!isClaimsUnlocked ? (
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.ctaButton}
               onPress={handleJoinWaitlist}
             >
@@ -374,9 +394,9 @@ export const ConfioPresaleScreen = () => {
               <Text style={styles.ctaButtonText}>Notificar</Text>
             </TouchableOpacity>
           ) : null)}
-          
+
           {isClaimsUnlocked && (
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[
                 styles.ctaButton,
                 { backgroundColor: '#10b981', marginTop: 12 },
@@ -393,17 +413,17 @@ export const ConfioPresaleScreen = () => {
           {isClaimsUnlocked && claimNotice ? (
             <Text style={styles.claimNoticeText}>{claimNotice}</Text>
           ) : null}
-          
+
           {!isClaimsUnlocked && (
             <>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.secondaryButton}
                 onPress={() => navigation.navigate('ConfioTokenInfo')}
               >
                 <Text style={styles.secondaryButtonText}>Ver el Futuro de $CONFIO</Text>
                 <Icon name="arrow-right" size={16} color={colors.secondary} />
               </TouchableOpacity>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.tokenomicsButton}
                 onPress={() => navigation.navigate('ConfioTokenomics')}
               >
