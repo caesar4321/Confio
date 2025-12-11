@@ -149,10 +149,10 @@ class DailyMetricsAdmin(admin.ModelAdmin):
             icon = '➡️'
         
         return format_html(
-            '<span style="color: {};">{} {:+.1f}%</span>',
+            '<span style="color: {};">{} {}%</span>',
             color,
             icon,
-            growth
+            f"{growth:+.1f}"
         )
     growth_indicator.short_description = 'WoW Growth'
     
