@@ -449,14 +449,23 @@ class ConfioAdminSite(admin.AdminSite):
         )
         
         # User growth by day
+        from django.db.models.functions import TruncDate
+        import pytz
+
+        # User growth by day (Argentina Time)
+        tz = pytz.timezone('America/Argentina/Buenos_Aires')
         days = int(request.GET.get('days', 30))
-        start_date = timezone.now() - timedelta(days=days)
+        
+        # Calculate start date in Argentina time (midnight 30 days ago)
+        now_arg = timezone.now().astimezone(tz)
+        start_date_arg = (now_arg - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
+        start_date_utc = start_date_arg.astimezone(timezone.utc)
         
         daily_signups = User.objects.filter(
             phone_number__isnull=False,
-            created_at__gte=start_date
-        ).extra(
-            select={'day': 'date(users_user.created_at)'}
+            created_at__gte=start_date_utc
+        ).annotate(
+            day=TruncDate('created_at', tzinfo=tz)
         ).values('day').annotate(
             count=Count('id')
         ).order_by('day')
