@@ -102,7 +102,7 @@ class ConfioAdminSite(admin.AdminSite):
         if latest_snapshot:
             context['top_countries_metrics'] = list(
                 CountryMetrics.objects.filter(date=latest_snapshot.date)
-                .order_by('-mau')[:5]
+                .order_by('-mau')[:10]
                 .values('country_code', 'dau', 'wau', 'mau', 'total_users')
             )
         

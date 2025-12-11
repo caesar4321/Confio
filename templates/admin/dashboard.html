@@ -812,8 +812,10 @@
             <tbody>
                 {% for dispute in ongoing_disputes %}
                 <tr>
-                    <td><a href="{% url 'confio_admin:p2p_exchange_p2pdispute_change' dispute.id %}">#{{ dispute.id}}</a></td>
-                    <td><a href="{% url 'confio_admin:p2p_exchange_p2ptrade_change' dispute.trade.id %}">Trade #{{ dispute.trade.id }}</a></td>
+                    <td><a href="{% url 'confio_admin:p2p_exchange_p2pdispute_change' dispute.id %}">#{{
+                            dispute.id}}</a></td>
+                    <td><a href="{% url 'confio_admin:p2p_exchange_p2ptrade_change' dispute.trade.id %}">Trade #{{
+                            dispute.trade.id }}</a></td>
                     <td>
                         {% if dispute.initiator_business %}🏢 {{ dispute.initiator_business.name }}
                         {% elif dispute.initiator_user %}👤 {{ dispute.initiator_user.username }}
@@ -825,7 +827,8 @@
                             {{ dispute.get_status_display }}
                         </span>
                     </td>
-                    <td>{% if dispute.priority == 3 %}🔴 High{% elif dispute.priority == 2 %}🟡 Medium{% else %}🟢 Low{% endif %}</td>
+                    <td>{% if dispute.priority == 3 %}🔴 High{% elif dispute.priority == 2 %}🟡 Medium{% else %}🟢 Low{%
+                        endif %}</td>
                     <td>{{ dispute.evidence_count }}</td>
                     <td>{{ dispute.opened_at|timesince }} ago</td>
                 </tr>
@@ -855,11 +858,13 @@
                 {% if recent_verifications %}
                 {% for v in recent_verifications %}
                 <tr>
-                    <td>{% if v.obj.id %}<a href="/admin/security/identityverification/{{ v.obj.id }}/change/">#{{ v.obj.id }}</a>{% else %}-{% endif %}</td>
+                    <td>{% if v.obj.id %}<a href="/admin/security/identityverification/{{ v.obj.id }}/change/">#{{
+                            v.obj.id }}</a>{% else %}-{% endif %}</td>
                     <td><a href="{% url 'confio_admin:users_user_change' v.obj.user.id %}">{{ v.obj.user.username }}</a>
                     </td>
                     <td>{% if v.context == 'business' %}Business{% else %}Personal{% endif %}</td>
-                    <td>{% if v.business %}<a href="{% url 'confio_admin:users_business_change' v.business.id %}">{{ v.business.name }}</a>{% else %}-{% endif %}</td>
+                    <td>{% if v.business %}<a href="{% url 'confio_admin:users_business_change' v.business.id %}">{{
+                            v.business.name }}</a>{% else %}-{% endif %}</td>
                     <td>
                         {% if v.obj.status == 'pending' %}
                         <span class="status-badge pending">Pending</span>
@@ -873,7 +878,8 @@
                     </td>
                     <td>{{ v.obj.created_at|timesince }} ago</td>
                     <td>{% if v.obj.id %}<a class="action-button secondary"
-                            href="/admin/security/identityverification/{{ v.obj.id }}/change/">Review</a>{% else %}-{% endif %}</td>
+                            href="/admin/security/identityverification/{{ v.obj.id }}/change/">Review</a>{% else %}-{%
+                        endif %}</td>
                 </tr>
                 {% endfor %}
                 {% else %}
@@ -942,7 +948,10 @@ document.addEventListener('DOMContentLoaded', function() {
         labels: [{% for c in top_countries_metrics %}"{{ c.country_code }}",{% endfor %}],
         datasets: [{
             data: [{% for c in top_countries_metrics %}{{ c.mau }},{% endfor %}],
-            backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6']
+            backgroundColor: [
+                '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', 
+                '#ec4899', '#6366f1', '#14b8a6', '#f97316', '#a855f7'
+            ]
         }]
     };
     new Chart(countryCtx, {
