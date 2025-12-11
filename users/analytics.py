@@ -45,6 +45,7 @@ def calculate_dau(target_date=None):
     start_time = end_time - timedelta(days=1)
     
     dau = User.objects.filter(
+        phone_number__isnull=False,
         last_activity_at__gte=start_time,
         last_activity_at__lte=end_time
     ).count()
@@ -77,6 +78,7 @@ def calculate_wau(target_date=None):
     start_time = end_time - timedelta(days=7)
     
     wau = User.objects.filter(
+        phone_number__isnull=False,
         last_activity_at__gte=start_time,
         last_activity_at__lte=end_time
     ).count()
@@ -109,6 +111,7 @@ def calculate_mau(target_date=None):
     start_time = end_time - timedelta(days=30)
     
     mau = User.objects.filter(
+        phone_number__isnull=False,
         last_activity_at__gte=start_time,
         last_activity_at__lte=end_time
     ).count()
@@ -229,13 +232,14 @@ def snapshot_daily_metrics(target_date=None):
     wau = calculate_wau(target_date)
     mau = calculate_mau(target_date)
     
-    # Calculate total users as of target date
+    # Calculate total users as of target date (Real Users only)
     end_time = timezone.make_aware(datetime.combine(target_date, datetime.max.time()))
-    total_users = User.objects.filter(created_at__lte=end_time).count()
+    total_users = User.objects.filter(phone_number__isnull=False, created_at__lte=end_time).count()
     
     # Calculate new users on target date
     start_time = end_time - timedelta(days=1)
     new_users_today = User.objects.filter(
+        phone_number__isnull=False,
         created_at__gte=start_time,
         created_at__lte=end_time
     ).count()

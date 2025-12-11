@@ -69,9 +69,9 @@ class ConfioAdminSite(admin.AdminSite):
         # User metrics
         # DAU/MAU now uses centralized last_activity_at field (single source of truth)
         # See users/activity_tracking.py for activity tracking implementation
-        context['total_users'] = User.objects.count()
-        context['active_users_today'] = User.objects.filter(last_activity_at__gte=last_24h).count()
-        context['new_users_last_7_days'] = User.objects.filter(created_at__gte=last_7_start).count()
+        context['total_users'] = User.objects.filter(phone_number__isnull=False).count()
+        context['active_users_today'] = User.objects.filter(phone_number__isnull=False, last_activity_at__gte=last_24h).count()
+        context['new_users_last_7_days'] = User.objects.filter(phone_number__isnull=False, created_at__gte=last_7_start).count()
         context['verified_users'] = IdentityVerification.objects.filter(status='verified').count()
         
         # Historical metrics from snapshots
