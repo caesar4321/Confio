@@ -453,6 +453,7 @@ class ConfioAdminSite(admin.AdminSite):
         start_date = timezone.now() - timedelta(days=days)
         
         daily_signups = User.objects.filter(
+            phone_number__isnull=False,
             created_at__gte=start_date
         ).extra(
             select={'day': 'date(users_user.created_at)'}
@@ -463,7 +464,7 @@ class ConfioAdminSite(admin.AdminSite):
         context['daily_signups'] = list(daily_signups)
         
         # Verification funnel
-        context['users_total'] = User.objects.count()
+        context['users_total'] = User.objects.filter(phone_number__isnull=False).count()
         context['users_with_verification'] = IdentityVerification.objects.values(
             'user'
         ).distinct().count()
@@ -492,7 +493,7 @@ class ConfioAdminSite(admin.AdminSite):
         activity_metrics = []
         for label, days in active_ranges:
             cutoff = timezone.now() - timedelta(days=days)
-            count = User.objects.filter(last_activity_at__gte=cutoff).count()
+            count = User.objects.filter(phone_number__isnull=False, last_activity_at__gte=cutoff).count()
             activity_metrics.append({
                 'label': label,
                 'count': count,
