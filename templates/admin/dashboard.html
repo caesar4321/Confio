@@ -447,8 +447,7 @@
                             style="background: #8b5cf6; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">UPCOMING</span>
                         {% else %}
                         <span
-                            style="background: #6b7280; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">{{
-                            phase.status|upper }}</span>
+                            style="background: #6b7280; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">{{ phase.status|upper }}</span>
                         {% endif %}
                     </td>
                     <td style="padding: 12px; text-align: right;">${{ phase.total_raised|floatformat:2|intcomma }}</td>
@@ -812,10 +811,8 @@
             <tbody>
                 {% for dispute in ongoing_disputes %}
                 <tr>
-                    <td><a href="{% url 'confio_admin:p2p_exchange_p2pdispute_change' dispute.id %}">#{{
-                            dispute.id}}</a></td>
-                    <td><a href="{% url 'confio_admin:p2p_exchange_p2ptrade_change' dispute.trade.id %}">Trade #{{
-                            dispute.trade.id }}</a></td>
+                    <td><a href="{% url 'confio_admin:p2p_exchange_p2pdispute_change' dispute.id %}">#{{ dispute.id}}</a></td>
+                    <td><a href="{% url 'confio_admin:p2p_exchange_p2ptrade_change' dispute.trade.id %}">Trade #{{ dispute.trade.id }}</a></td>
                     <td>
                         {% if dispute.initiator_business %}🏢 {{ dispute.initiator_business.name }}
                         {% elif dispute.initiator_user %}👤 {{ dispute.initiator_user.username }}
@@ -827,8 +824,7 @@
                             {{ dispute.get_status_display }}
                         </span>
                     </td>
-                    <td>{% if dispute.priority == 3 %}🔴 High{% elif dispute.priority == 2 %}🟡 Medium{% else %}🟢 Low{%
-                        endif %}</td>
+                    <td>{% if dispute.priority == 3 %}🔴 High{% elif dispute.priority == 2 %}🟡 Medium{% else %}🟢 Low{% endif %}</td>
                     <td>{{ dispute.evidence_count }}</td>
                     <td>{{ dispute.opened_at|timesince }} ago</td>
                 </tr>
@@ -858,13 +854,11 @@
                 {% if recent_verifications %}
                 {% for v in recent_verifications %}
                 <tr>
-                    <td>{% if v.obj.id %}<a href="/admin/security/identityverification/{{ v.obj.id }}/change/">#{{
-                            v.obj.id }}</a>{% else %}-{% endif %}</td>
+                    <td>{% if v.obj.id %}<a href="/admin/security/identityverification/{{ v.obj.id }}/change/">#{{ v.obj.id }}</a>{% else %}-{% endif %}</td>
                     <td><a href="{% url 'confio_admin:users_user_change' v.obj.user.id %}">{{ v.obj.user.username }}</a>
                     </td>
                     <td>{% if v.context == 'business' %}Business{% else %}Personal{% endif %}</td>
-                    <td>{% if v.business %}<a href="{% url 'confio_admin:users_business_change' v.business.id %}">{{
-                            v.business.name }}</a>{% else %}-{% endif %}</td>
+                    <td>{% if v.business %}<a href="{% url 'confio_admin:users_business_change' v.business.id %}">{{ v.business.name }}</a>{% else %}-{% endif %}</td>
                     <td>
                         {% if v.obj.status == 'pending' %}
                         <span class="status-badge pending">Pending</span>
