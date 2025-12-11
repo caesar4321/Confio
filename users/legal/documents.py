@@ -5,7 +5,7 @@ Each document is a dictionary with sections, where each section has a title and 
 
 TERMS = {
     'title': 'Términos de Servicio',
-    'version': '1.0.0',
+    'version': '1.1.0',
     'last_updated': '2025-12-11',
     'is_legally_binding': True,
     'sections': [
@@ -19,7 +19,7 @@ TERMS = {
                 {'term': 'Confío', 'definition': 'La plataforma y servicios proporcionados por Confío.'},
                 {'term': 'Usuario', 'definition': 'Cualquier persona que utilice nuestros servicios.'},
                 {'term': 'Servicios', 'definition': 'Incluye la billetera, transferencias y cualquier otra funcionalidad ofrecida por Confío.'},
-                {'term': 'Tokens', 'definition': 'Incluye cUSD, CONFIO y cualquier otro token soportado.'}
+                {'term': 'Monedas', 'definition': 'Incluye cUSD, CONFIO y cualquier otra moneda soportada.'}
             ]
         },
         {
@@ -31,11 +31,11 @@ TERMS = {
             ]
         },
         {
-            'title': '4. Transacciones y Tokens',
+            'title': '4. Transacciones y Monedas',
             'content': [
                 'Irreversibles una vez confirmadas en la blockchain',
                 'Sin cargo de gas para el usuario final',
-                'Procesadas a través de la blockchain Sui'
+                'Procesadas a través de la blockchain Algorand'
             ]
         },
         {
@@ -43,37 +43,36 @@ TERMS = {
             'content': [
                 'Pérdidas debido a errores del usuario',
                 'Problemas de conectividad',
-                'Fluctuaciones en el valor de los tokens',
+                'Fluctuaciones en el valor de las monedas',
                 'Acciones de terceros'
             ]
         },
         {
-            'title': '6. Modificaciones',
+            'title': '6. Restricciones Geográficas',
+            'content': [
+                'La participación en la preventa de monedas y ciertos servicios financieros de Confío está estrictamente prohibida para:',
+                'Residentes o ciudadanos de los Estados Unidos de América (US)',
+                'Residentes o ciudadanos de Corea del Sur (KR)'
+            ]
+        },
+        {
+            'title': '7. Modificaciones',
             'content': 'Nos reservamos el derecho de modificar estos términos en cualquier momento. Los cambios entrarán en vigor al publicarlos en nuestro sitio web.'
         },
         {
-            'title': '7. Contacto',
+            'title': '8. Contacto',
             'content': {
                 'email': 'legal@confio.lat',
                 'telegram': 'https://t.me/confio4world'
             }
-        },
-        {
-            'title': '8. Restricciones Geográficas',
-            'content': [
-                'La participación en la preventa de tokens y ciertos servicios financieros de Confío está estrictamente prohibida para:',
-                'Residentes o ciudadanos de los Estados Unidos de América (US)',
-                'Residentes o ciudadanos de Corea del Sur (KR)',
-                'El uso de VPNs u otros métodos para eludir estas restricciones resultará en el bloqueo inmediato de la cuenta.'
-            ]
         }
     ]
 }
 
 PRIVACY = {
     'title': 'Política de Privacidad',
-    'version': '1.0.0',
-    'last_updated': '2025-05-02',
+    'version': '1.1.0',
+    'last_updated': '2025-12-11',
     'is_legally_binding': True,
     'sections': [
         {
@@ -81,15 +80,15 @@ PRIVACY = {
             'content': {
                 'personal_info': [
                     'Nombre completo',
-                    'Fecha de nacimiento',
-                    'Número de identificación (cédula, DNI, pasaporte)',
-                    'Fotografía de documento de identidad',
                     'Dirección de correo electrónico',
                     'Número de teléfono',
                     'Direcciones de billetera',
                     'Información de transacciones'
                 ],
                 'kyc_info': [
+                    'Fecha de nacimiento',
+                    'Número de identificación (cédula, DNI, pasaporte)',
+                    'Fotografía de documento de identidad',
                     'Documento de identidad escaneado o fotografiado',
                     'Selfie con documento de identidad',
                     'Información de dirección residencial',
