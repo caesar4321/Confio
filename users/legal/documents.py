@@ -6,7 +6,7 @@ Each document is a dictionary with sections, where each section has a title and 
 TERMS = {
     'title': 'Términos de Servicio',
     'version': '1.0.0',
-    'last_updated': '2025-05-02',
+    'last_updated': '2025-12-11',
     'is_legally_binding': True,
     'sections': [
         {
@@ -57,6 +57,15 @@ TERMS = {
                 'email': 'legal@confio.lat',
                 'telegram': 'https://t.me/confio4world'
             }
+        },
+        {
+            'title': '8. Restricciones Geográficas',
+            'content': [
+                'La participación en la preventa de tokens y ciertos servicios financieros de Confío está estrictamente prohibida para:',
+                'Residentes o ciudadanos de los Estados Unidos de América (US)',
+                'Residentes o ciudadanos de Corea del Sur (KR)',
+                'El uso de VPNs u otros métodos para eludir estas restricciones resultará en el bloqueo inmediato de la cuenta.'
+            ]
         }
     ]
 }
