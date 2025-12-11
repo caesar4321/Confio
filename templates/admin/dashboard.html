@@ -827,8 +827,7 @@
                             {{ dispute.get_status_display }}
                         </span>
                     </td>
-                    <td>{% if dispute.priority == 3 %}🔴 High{% elif dispute.priority == 2 %}🟡 Medium{% else %}🟢 Low{%
-                        endif %}</td>
+                    <td>{% if dispute.priority == 3 %}🔴 High{% elif dispute.priority == 2 %}🟡 Medium{% else %}🟢 Low{% endif %}</td>
                     <td>{{ dispute.evidence_count }}</td>
                     <td>{{ dispute.opened_at|timesince }} ago</td>
                 </tr>
@@ -878,8 +877,7 @@
                     </td>
                     <td>{{ v.obj.created_at|timesince }} ago</td>
                     <td>{% if v.obj.id %}<a class="action-button secondary"
-                            href="/admin/security/identityverification/{{ v.obj.id }}/change/">Review</a>{% else %}-{%
-                        endif %}</td>
+                            href="/admin/security/identityverification/{{ v.obj.id }}/change/">Review</a>{% else %}-{% endif %}</td>
                 </tr>
                 {% endfor %}
                 {% else %}
@@ -894,28 +892,28 @@
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@2.9.4/dist/Chart.min.js"></script>
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    // Growth Trend Chart
-    var growthCtx = document.getElementById('growthChart').getContext('2d');
-    var growthData = {
-        labels: [{% for m in metrics_trend %}"{{ m.date|date:'M d' }}",{% endfor %}],
+    document.addEventListener('DOMContentLoaded', function () {
+        // Growth Trend Chart
+        var growthCtx = document.getElementById('growthChart').getContext('2d');
+        var growthData = {
+            labels: [{% for m in metrics_trend %}"{{ m.date|date:'M d' }}", {% endfor %}],
         datasets: [
-            {
-                label: 'DAU',
-                borderColor: '#8b5cf6',
-                backgroundColor: 'rgba(139, 92, 246, 0.1)',
-                data: [{% for m in metrics_trend %}{{ m.dau }},{% endfor %}],
-                pointRadius: 2,
-                fill: true
+        {
+            label: 'DAU',
+            borderColor: '#8b5cf6',
+            backgroundColor: 'rgba(139, 92, 246, 0.1)',
+            data: [{% for m in metrics_trend %}{{ m.dau }}, {% endfor %}],
+        pointRadius: 2,
+        fill: true
             },
-            {
-                label: 'MAU',
-                borderColor: '#10b981',
-                backgroundColor: 'transparent',
-                borderDash: [5, 5],
-                data: [{% for m in metrics_trend %}{{ m.mau }},{% endfor %}],
-                pointRadius: 0,
-                fill: false
+        {
+            label: 'MAU',
+            borderColor: '#10b981',
+            backgroundColor: 'transparent',
+            borderDash: [5, 5],
+            data: [{% for m in metrics_trend %}{{ m.mau }}, {% endfor %}],
+        pointRadius: 0,
+        fill: false
             }
         ]
     };
@@ -945,13 +943,13 @@ document.addEventListener('DOMContentLoaded', function() {
     // Country Chart
     var countryCtx = document.getElementById('countryChart').getContext('2d');
     var countryData = {
-        labels: [{% for c in top_countries_metrics %}"{{ c.country_code }}",{% endfor %}],
-        datasets: [{
-            data: [{% for c in top_countries_metrics %}{{ c.mau }},{% endfor %}],
-            backgroundColor: [
-                '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', 
-                '#ec4899', '#6366f1', '#14b8a6', '#f97316', '#a855f7'
-            ]
+        labels: [{% for c in top_countries_metrics %}"{{ c.country_code }}", {% endfor %}],
+    datasets: [{
+        data: [{% for c in top_countries_metrics %}{{ c.mau }}, {% endfor %}],
+        backgroundColor: [
+            '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
+            '#ec4899', '#6366f1', '#14b8a6', '#f97316', '#a855f7'
+        ]
         }]
     };
     new Chart(countryCtx, {
