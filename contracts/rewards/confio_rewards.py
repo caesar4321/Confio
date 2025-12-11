@@ -167,7 +167,12 @@ def confio_rewards_app() -> Expr:
         user_box = App.box_get(user_addr.load())
 
         return Seq(
-            assert_admin(),
+            Assert(
+                Or(
+                    Txn.sender() == App.globalGet(ADMIN),
+                    Txn.sender() == App.globalGet(SPONSOR),
+                )
+            ),
             Assert(App.globalGet(PAUSED) == Int(0)),
             Assert(Txn.application_args.length() >= Int(3)),
 

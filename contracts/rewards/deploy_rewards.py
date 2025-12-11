@@ -571,7 +571,7 @@ def main() -> None:
 
     user_key, user_addr = create_and_fund_user(client, accounts.sponsor_addr, accounts.sponsor_signer, confio_asset_id)
 
-    set_price_override(client, app_id, accounts, price=250_000, round_id=1)
+    set_price_override(client, app_id, accounts, price=200_000, round_id=1)
     mark_user_eligible(
         client,
         app_id,
