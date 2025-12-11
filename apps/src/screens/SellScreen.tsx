@@ -28,6 +28,7 @@ import { getCountryByIso } from '../utils/countries';
 import { createGuardarianTransaction, fetchGuardarianFiatCurrencies, GuardarianFiatCurrency } from '../services/guardarianService';
 import { getFlagForCurrency } from '../utils/currencyFlags';
 import USDCLogo from '../assets/png/USDC.png';
+import { GuardarianModal } from '../components/GuardarianModal';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'Sell'>;
 
@@ -60,6 +61,7 @@ export const SellScreen = () => {
     const [payoutFiats, setPayoutFiats] = useState<string[]>([]);
     const [fiatLoading, setFiatLoading] = useState(false);
     const [fiatError, setFiatError] = useState<string | null>(null);
+    const [showGuardarianModal, setShowGuardarianModal] = useState(false);
 
     // Order state
     const [orderCreated, setOrderCreated] = useState(false);
@@ -73,10 +75,10 @@ export const SellScreen = () => {
     const isCountrySupportedForSell = SELL_SUPPORTED.includes(derivedCurrencyCode);
 
     useEffect(() => {
-    const pickDefaultPayout = (): { code: string; fallback: boolean } => {
-        if (SELL_SUPPORTED.includes(derivedCurrencyCode)) return { code: derivedCurrencyCode, fallback: false };
-        return { code: 'EUR', fallback: true };
-    };
+        const pickDefaultPayout = (): { code: string; fallback: boolean } => {
+            if (SELL_SUPPORTED.includes(derivedCurrencyCode)) return { code: derivedCurrencyCode, fallback: false };
+            return { code: 'EUR', fallback: true };
+        };
 
         const loadFiats = async () => {
             setFiatLoading(true);
@@ -112,6 +114,13 @@ export const SellScreen = () => {
             return;
         }
 
+        // Show modal instruction first
+        setShowGuardarianModal(true);
+    };
+
+    const handleProceedToGuardarian = async () => {
+        setShowGuardarianModal(false);
+        const parsedAmount = parseFloat(amount);
         setLoading(true);
         try {
             const tx = await createGuardarianTransaction({
@@ -352,6 +361,13 @@ export const SellScreen = () => {
                 </View>
 
             </ScrollView>
+
+            <GuardarianModal
+                visible={showGuardarianModal}
+                type="sell"
+                onClose={() => setShowGuardarianModal(false)}
+                onContinue={handleProceedToGuardarian}
+            />
         </SafeAreaView>
     );
 };

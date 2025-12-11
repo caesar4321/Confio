@@ -33,6 +33,7 @@ import { useCurrencyByCode } from '../hooks/useCurrency';
 import { getFlagForCurrency } from '../utils/currencyFlags';
 import { useMutation, gql } from '@apollo/client';
 import algorandService from '../services/algorandService';
+import { GuardarianModal } from '../components/GuardarianModal';
 
 // GraphQL mutation for USDC opt-in
 const OPT_IN_TO_USDC = gql`
@@ -86,6 +87,7 @@ const TopUpScreen = () => {
   const [fiatError, setFiatError] = useState<string | null>(null);
   const [showCurrencyNotAvailableHint, setShowCurrencyNotAvailableHint] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
+  const [showGuardarianModal, setShowGuardarianModal] = useState(false);
 
   // USDC opt-in mutation
   const [optInToUsdc] = useMutation(OPT_IN_TO_USDC);
@@ -294,7 +296,15 @@ const TopUpScreen = () => {
       return;
     }
 
+    // Show the modal instruction instead of proceeding directly
+    setShowGuardarianModal(true);
+  };
+
+  const handleProceedToGuardarian = async () => {
+    setShowGuardarianModal(false);
     setLoading(true);
+    const parsedAmount = parseAmount(amount);
+
     try {
       const tx = await createGuardarianTransaction({
         amount: parsedAmount,
@@ -523,6 +533,14 @@ const TopUpScreen = () => {
           </View>
         </View>
       </Modal>
+
+      <GuardarianModal
+        visible={showGuardarianModal}
+        type="buy"
+        address={algorandAddress}
+        onClose={() => setShowGuardarianModal(false)}
+        onContinue={handleProceedToGuardarian}
+      />
 
     </SafeAreaView>
   );

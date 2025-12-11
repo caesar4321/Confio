@@ -8,12 +8,12 @@ import { getGenericPassword, setGenericPassword } from 'react-native-keychain';
 import DeviceInfo from 'react-native-device-info';
 
 class DeviceFingerprint {
-  
+
   static async generateFingerprint() {
     try {
       // Get the stable device ID directly
       const deviceId = await this.getStableDeviceId();
-      
+
       // Return ONLY the deviceId - nothing else matters for fingerprinting
       return {
         deviceId: deviceId
@@ -33,7 +33,7 @@ class DeviceFingerprint {
       }
     }
   }
-  
+
   static async getStableDeviceId() {
     try {
       // For Android, use Android ID which is stable until factory reset
@@ -43,29 +43,31 @@ class DeviceFingerprint {
           return androidId;
         }
       }
-      
+
       // For iOS or if Android ID fails, create a stable ID from device characteristics
-      const deviceId = await DeviceInfo.getDeviceId(); // e.g., "iPhone7,2" or "SM-G935F"
+      // IMPORTANT: Use getUniqueId() which returns IDFV on iOS / AndroidID on Android
+      // getDeviceId() returns the MODEL (e.g. iPhone13,2) which is NOT unique!
+      const deviceId = await DeviceInfo.getUniqueId();
       const brand = await DeviceInfo.getBrand(); // e.g., "Apple" or "Samsung"
       const systemVersion = await DeviceInfo.getSystemVersion(); // e.g., "13.0"
-      
+
       // Try to get a persistent ID from keychain
       const stored = await getGenericPassword({ service: 'confio_persistent_device_id' });
       if (stored && stored.password) {
         return stored.password;
       }
-      
+
       // Generate a new persistent ID based on device characteristics
       const baseString = `${Platform.OS}_${deviceId}_${brand}`;
       const persistentId = this.simpleHash(baseString);
-      
+
       // Store it for future use
       await setGenericPassword(
         'persistent_id',
         persistentId,
         { service: 'confio_persistent_device_id' }
       );
-      
+
       return persistentId;
     } catch (error) {
       console.error('Error getting stable device ID:', error);
@@ -148,7 +150,7 @@ class DeviceFingerprint {
     try {
       const screen = Dimensions.get('screen');
       const window = Dimensions.get('window');
-      
+
       return {
         screenWidth: screen.width,
         screenHeight: screen.height,
@@ -220,7 +222,7 @@ class DeviceFingerprint {
   static async getLocaleInfo() {
     try {
       const now = new Date();
-      
+
       // Get available locale info - not all methods exist in react-native-device-info
       const localeInfo = {
         // Use JavaScript to get timezone info
@@ -279,7 +281,7 @@ class DeviceFingerprint {
     try {
       // Use keychain for secure storage of behavioral data
       let behavioralData = {};
-      
+
       try {
         const stored = await getGenericPassword({ service: 'confio_behavioral_data' });
         if (stored && stored.password) {
@@ -291,7 +293,7 @@ class DeviceFingerprint {
 
       const now = new Date().toISOString();
       const currentLaunchCount = (behavioralData.appLaunchCount || 0) + 1;
-      
+
       // Update behavioral data
       const updatedData = {
         firstInstallTime: behavioralData.firstInstallTime || now,
@@ -303,7 +305,7 @@ class DeviceFingerprint {
 
       // Store updated data
       await setGenericPassword(
-        'behavioral_data', 
+        'behavioral_data',
         JSON.stringify(updatedData),
         { service: 'confio_behavioral_data' }
       );
@@ -322,7 +324,7 @@ class DeviceFingerprint {
     const now = new Date();
     const hour = now.getHours();
     const dayOfWeek = now.getDay();
-    
+
     // Keep only last 20 sessions
     const pattern = existingPattern.slice(-19);
     pattern.push({
@@ -330,7 +332,7 @@ class DeviceFingerprint {
       dayOfWeek,
       timestamp: now.toISOString()
     });
-    
+
     return pattern;
   }
 
@@ -338,21 +340,21 @@ class DeviceFingerprint {
     try {
       // Try to get existing persistent ID from keychain
       const stored = await getGenericPassword({ service: 'confio_device_id' });
-      
+
       if (stored && stored.password) {
         return stored.password;
       }
 
       // Generate new persistent ID based on stable device characteristics
       const stableId = await this.generateStableDeviceId();
-      
+
       // Store in keychain for faster access
       await setGenericPassword(
-        'device_id', 
+        'device_id',
         stableId,
         { service: 'confio_device_id' }
       );
-      
+
       return stableId;
     } catch (error) {
       console.error('Error getting persistent ID:', error);
@@ -366,15 +368,15 @@ class DeviceFingerprint {
       const deviceInfo = await this.getBasicDeviceInfo();
       const systemInfo = await this.getSystemInfo();
       const screenInfo = this.getScreenInfo();
-      
+
       // Collect all stable identifiers available
       const stableComponents = [];
-      
+
       // Android ID is stable across app reinstalls (until factory reset)
       if (systemInfo.androidId && systemInfo.androidId !== 'unknown') {
         stableComponents.push(`aid:${systemInfo.androidId}`);
       }
-      
+
       // Device model and manufacturer are stable
       if (systemInfo.model) {
         stableComponents.push(`model:${systemInfo.model}`);
@@ -385,29 +387,31 @@ class DeviceFingerprint {
       if (systemInfo.brand) {
         stableComponents.push(`brand:${systemInfo.brand}`);
       }
-      
+
       // Screen characteristics are stable
       stableComponents.push(`screen:${screenInfo.screenWidth}x${screenInfo.screenHeight}@${screenInfo.pixelRatio}`);
-      
+
       // Device type and platform
       if (deviceInfo.deviceType) {
         stableComponents.push(`type:${deviceInfo.deviceType}`);
       }
       stableComponents.push(`os:${deviceInfo.platform}-${systemInfo.systemVersion || Platform.Version}`);
-      
+
       // iOS specific stable identifiers
       if (Platform.OS === 'ios' && deviceInfo.deviceId) {
         stableComponents.push(`did:${deviceInfo.deviceId}`);
       }
-      
+
       // Create a stable hash from these components
       const stableString = stableComponents.join('|');
-      
+
       // If we have Android ID or iOS device ID, use it as primary identifier
       if (systemInfo.androidId && systemInfo.androidId !== 'unknown') {
         return `cfio_android_${systemInfo.androidId}_${this.simpleHash(stableString)}`;
-      } else if (Platform.OS === 'ios' && deviceInfo.deviceId) {
-        return `cfio_ios_${deviceInfo.deviceId}_${this.simpleHash(stableString)}`;
+      } else if (Platform.OS === 'ios') {
+        // Use getUniqueId for iOS (IDFV)
+        const uniqueId = await DeviceInfo.getUniqueId();
+        return `cfio_ios_${uniqueId}_${this.simpleHash(stableString)}`;
       } else {
         // Fallback to hash-based ID
         return `cfio_device_${this.simpleHash(stableString)}`;
@@ -428,7 +432,7 @@ class DeviceFingerprint {
       screen.height,
       screen.scale
     ].join('-');
-    
+
     return `cfio_fallback_${this.simpleHash(fallbackString)}`;
   }
 
@@ -446,11 +450,11 @@ class DeviceFingerprint {
   static async getHardwareInfo() {
     try {
       const screen = Dimensions.get('screen');
-      
+
       // Calculate approximate hardware specs based on screen
       const pixelCount = screen.width * screen.height * screen.scale * screen.scale;
       const hardwareClass = this.getHardwareClass(pixelCount, screen.scale);
-      
+
       const hardwareInfo = {
         screenPixelCount: pixelCount,
         hardwareClass,
@@ -497,7 +501,7 @@ class DeviceFingerprint {
 
   static getScreenSizeCategory(width, height, scale) {
     const diagonalDp = Math.sqrt(width * width + height * height);
-    
+
     if (diagonalDp > 900) return 'tablet';
     if (diagonalDp > 700) return 'large-phone';
     if (diagonalDp > 500) return 'normal-phone';
@@ -556,11 +560,11 @@ class DeviceFingerprint {
       // Check for common native modules
       const modules = {};
       const commonModules = ['KeychainModule', 'RNCNetInfo', 'RNGestureHandlerModule'];
-      
+
       commonModules.forEach(moduleName => {
         modules[moduleName] = NativeModules[moduleName] !== undefined;
       });
-      
+
       return modules;
     } catch (error) {
       return {};
@@ -587,7 +591,7 @@ class DeviceFingerprint {
         // Create a SHA-256-like hash of the device ID for consistency
         return this.simpleHash(fingerprint.deviceId);
       }
-      
+
       // Fallback to hashing the entire fingerprint
       const fingerprintString = JSON.stringify(fingerprint, Object.keys(fingerprint).sort());
       return this.simpleHash(fingerprintString);
@@ -603,7 +607,7 @@ class DeviceFingerprint {
       const screen = Dimensions.get('screen');
       const stored = await getGenericPassword({ service: 'confio_device_id' });
       const persistentId = stored ? stored.password : 'no-id';
-      
+
       return {
         persistentId,
         platform: Platform.OS,
@@ -627,7 +631,7 @@ class DeviceFingerprint {
     try {
       // Note: This won't clear the persistent ID to maintain device tracking
       await setGenericPassword(
-        'behavioral_data', 
+        'behavioral_data',
         JSON.stringify({}),
         { service: 'confio_behavioral_data' }
       );

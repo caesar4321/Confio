@@ -194,28 +194,32 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           fetchPolicy: 'network-only',
         });
 
-        // Check phone verification status from server
-        const serverPhoneVerified = data?.me?.phoneNumber && data?.me?.phoneCountry;
-        console.log('Profile refresh - Server phone verification status:', serverPhoneVerified);
+        // Check phone verification status from server ONLY if we got a valid profile
+        // If data.me is null (e.g. auth error), we should NOT assume phone is unverified
+        // Instead, we let the auth error handlers/checkAuthState deal with the invalid session
+        if (data?.me) {
+          const serverPhoneVerified = data.me.phoneNumber && data.me.phoneCountry;
+          console.log('Profile refresh - Server phone verification status:', serverPhoneVerified);
 
-        // If phone verification was lost on server but user is authenticated, require re-verification
-        if (!serverPhoneVerified && isAuthenticated) {
-          console.log('Profile refresh - Phone verification lost on server, requiring re-verification');
-          setIsAuthenticated(false);
-          if (isNavigationReady && navigationRef.current) {
-            navigationRef.current.reset({
-              index: 0,
-              routes: [
-                {
-                  name: 'Auth',
-                  params: {
-                    screen: 'PhoneVerification',
+          // If phone verification was lost on server but user is authenticated, require re-verification
+          if (!serverPhoneVerified && isAuthenticated) {
+            console.log('Profile refresh - Phone verification lost on server, requiring re-verification');
+            setIsAuthenticated(false);
+            if (isNavigationReady && navigationRef.current) {
+              navigationRef.current.reset({
+                index: 0,
+                routes: [
+                  {
+                    name: 'Auth',
+                    params: {
+                      screen: 'PhoneVerification',
+                    },
                   },
-                },
-              ],
-            });
+                ],
+              });
+            }
+            return; // Exit early to prevent setting profile data
           }
-          return; // Exit early to prevent setting profile data
         }
 
         setProfileData({

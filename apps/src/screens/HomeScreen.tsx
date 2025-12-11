@@ -280,10 +280,42 @@ export const HomeScreen = () => {
 
           // Handle GraphQL errors
           if (errors && errors.length > 0) {
-            const friendly = formatReferralErrorMessage(errors[0].message);
+            const errorMessage = errors[0].message;
+            const friendly = formatReferralErrorMessage(errorMessage);
             console.log('[HomeScreen] Referral GraphQL error:', friendly);
+
+            // 1. Rate Limits: KEEP link, SHOW alert
+            const isRateLimit = /rate limit/i.test(errorMessage) || /demasiadas veces/i.test(friendly);
+            if (isRateLimit) {
+              Alert.alert('Aviso', friendly, [{ text: 'OK' }]);
+              return;
+            }
+
+            // 2. Suspicious/Abuse: CLEAR link, SILENCE alert (to avoid loop)
+            const isSuspicious = /suspicious/i.test(errorMessage) || /unusual/i.test(friendly) || /inusual/i.test(friendly);
+            if (isSuspicious) {
+              console.log('[HomeScreen] Suspicious activity detected, silently clearing deferred link');
+              await deepLinkHandler.clearDeferredLink();
+              return;
+            }
+
+            // 3. Logic Errors (Self-referral, Invalid code, Already has referrer): CLEAR link, SHOW alert
+            // These are permanent errors, so we must clear the link to stop the loop.
+            const isLogicError =
+              /own referrer/i.test(errorMessage) || /propio referidor/i.test(friendly) ||
+              /not found/i.test(errorMessage) || /no encontrado/i.test(friendly) ||
+              /invalid/i.test(errorMessage) || /inválido/i.test(friendly) ||
+              /already/i.test(errorMessage) || /ya tienes/i.test(friendly) || /registrado/i.test(friendly);
+
+            if (isLogicError) {
+              console.log('[HomeScreen] Permanent logic error, clearing deferred link:', friendly);
+              await deepLinkHandler.clearDeferredLink();
+              Alert.alert('Aviso', friendly, [{ text: 'OK' }]);
+              return;
+            }
+
+            // 4. Unknown/Network Errors: KEEP link, SHOW alert (user might retry)
             Alert.alert('Aviso', friendly, [{ text: 'OK' }]);
-            // Don't clear deferred link on error, user might want to try again
             return;
           }
 
@@ -1371,7 +1403,8 @@ export const HomeScreen = () => {
                 </Text>
                 <TouchableOpacity
                   onPress={() => {
-                    const canClaim = (presale?.claimable ?? 0) > 0;
+                    // Use confioPresaleLocked to check if user has anything to claim
+                    const canClaim = confioPresaleLocked > 0;
                     if (!canClaim) {
                       Alert.alert(
                         "Aviso",
