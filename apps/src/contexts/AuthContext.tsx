@@ -212,7 +212,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
                   {
                     name: 'Auth',
                     params: {
-                      screen: 'PhoneVerification',
+                      screen: 'Login',
                     },
                   },
                 ],

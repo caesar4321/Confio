@@ -605,7 +605,7 @@ export const ProfileScreen = () => {
           <View style={styles.cardHeader}>
             <View style={styles.cardTitleRow}>
               <Icon name="users" size={20} color="#6B7280" />
-              <Text style={styles.cardTitle}>Comunidad</Text>
+              <Text style={styles.cardTitle}>Comunidad & Soporte</Text>
             </View>
           </View>
           <View style={styles.cardOptions}>

@@ -349,6 +349,14 @@ export const SellScreen = () => {
                     )}
                 </TouchableOpacity>
 
+                <TouchableOpacity
+                    style={styles.supportButton}
+                    onPress={() => Linking.openURL('https://t.me/confio4world')}
+                >
+                    <Icon name="help-circle" size={16} color="#4B5563" />
+                    <Text style={styles.supportButtonText}>¿Estás perdido? ¡Pide ayuda en soporte!</Text>
+                </TouchableOpacity>
+
                 {/* Powered by Guardarian */}
                 <View style={styles.poweredByContainer}>
                     <Text style={styles.poweredByLabel}>En alianza con</Text>
@@ -704,5 +712,23 @@ const styles = StyleSheet.create({
         flex: 1,
         fontSize: 14,
         color: '#92400E',
+    },
+    supportButton: {
+        marginTop: 24,
+        marginBottom: 16,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#F3F4F6',
+        paddingVertical: 10,
+        paddingHorizontal: 16,
+        borderRadius: 20,
+        alignSelf: 'center',
+        gap: 8,
+    },
+    supportButtonText: {
+        fontSize: 14,
+        color: '#4B5563',
+        fontWeight: '600',
     },
 });

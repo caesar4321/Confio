@@ -119,6 +119,7 @@ export async function createGuardarianTransaction(
   }
 
   if (email) {
+    body.email = email;
     body.customer = {
       contact_info: {
         email,
@@ -127,6 +128,7 @@ export async function createGuardarianTransaction(
   }
 
   if (payoutAddress) {
+    body.payout_address = payoutAddress;
     body.payout_info = {
       payout_address: payoutAddress,
       skip_choose_payout_address: true,

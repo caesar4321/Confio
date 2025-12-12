@@ -7,6 +7,7 @@ import {
     TouchableOpacity,
     Dimensions,
     Clipboard,
+    Linking,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 
@@ -70,7 +71,7 @@ export const GuardarianModal: React.FC<GuardarianModalProps> = ({
                     <Text style={styles.description}>
                         {type === 'buy'
                             ? 'Cuando Guardarian te pida la dirección de billetera, pega la dirección que verás a continuación.'
-                            : 'Al finalizar la venta en Guardarian, deberás enviar tus USDC manualmente desde el menú "Retirar" en Confío.'}
+                            : 'Al finalizar la venta en Guardarian, regresa a Confío y utiliza la opción "Retirar USDC a Algorand" para enviar tus USDC manualmente a la dirección que te indicaron.'}
                     </Text>
 
                     {type === 'buy' && address && (
@@ -102,6 +103,14 @@ export const GuardarianModal: React.FC<GuardarianModalProps> = ({
                             size={20}
                             color={isContinueDisabled ? '#9CA3AF' : '#fff'}
                         />
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                        style={styles.supportButton}
+                        onPress={() => Linking.openURL('https://t.me/confio4world')}
+                    >
+                        <Icon name="help-circle" size={16} color="#6B7280" />
+                        <Text style={styles.supportButtonText}>¿Estás perdido? ¡Pide ayuda en soporte!</Text>
                     </TouchableOpacity>
                 </View>
             </View>
@@ -222,5 +231,21 @@ const styles = StyleSheet.create({
     },
     ctaButtonTextDisabled: {
         color: '#9CA3AF',
+    },
+    supportButton: {
+        marginTop: 16,
+        paddingVertical: 10,
+        paddingHorizontal: 16,
+        backgroundColor: '#F3F4F6',
+        borderRadius: 20,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+    },
+    supportButtonText: {
+        fontSize: 14,
+        color: '#4B5563',
+        fontWeight: '600',
     },
 });

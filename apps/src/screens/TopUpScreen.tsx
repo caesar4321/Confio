@@ -33,7 +33,8 @@ import { useCurrencyByCode } from '../hooks/useCurrency';
 import { getFlagForCurrency } from '../utils/currencyFlags';
 import { useMutation, gql } from '@apollo/client';
 import algorandService from '../services/algorandService';
-import { GuardarianModal } from '../components/GuardarianModal';
+// GuardarianModal removed as per UX requirement
+
 
 // GraphQL mutation for USDC opt-in
 const OPT_IN_TO_USDC = gql`
@@ -87,7 +88,7 @@ const TopUpScreen = () => {
   const [fiatError, setFiatError] = useState<string | null>(null);
   const [showCurrencyNotAvailableHint, setShowCurrencyNotAvailableHint] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
-  const [showGuardarianModal, setShowGuardarianModal] = useState(false);
+  // const [showGuardarianModal, setShowGuardarianModal] = useState(false); // Removed
 
   // USDC opt-in mutation
   const [optInToUsdc] = useMutation(OPT_IN_TO_USDC);
@@ -296,12 +297,12 @@ const TopUpScreen = () => {
       return;
     }
 
-    // Show the modal instruction instead of proceeding directly
-    setShowGuardarianModal(true);
+    // Proceed directly to Guardarian logic (skipping modal)
+    await handleProceedToGuardarian();
   };
 
   const handleProceedToGuardarian = async () => {
-    setShowGuardarianModal(false);
+    // setShowGuardarianModal(false);
     setLoading(true);
     const parsedAmount = parseAmount(amount);
 
@@ -492,12 +493,22 @@ const TopUpScreen = () => {
           )}
         </TouchableOpacity>
 
+        <TouchableOpacity
+          style={styles.supportButton}
+          onPress={() => Linking.openURL('https://t.me/confio4world')}
+        >
+          <Icon name="help-circle" size={16} color="#4B5563" />
+          <Text style={styles.supportButtonText}>¿Estás perdido? ¡Pide ayuda en soporte!</Text>
+        </TouchableOpacity>
+
         {/* Powered by Guardarian */}
         <View style={styles.poweredByContainer}>
+
           <Text style={styles.poweredByLabel}>En alianza con</Text>
           <View style={styles.guardarianLogoContainer}>
             <GuardarianLogo width={217} height={24} />
           </View>
+
           <Text style={styles.legalText}>
             Guardance UAB es una empresa registrada en Lituania (código de registro: 306353686), con dirección en Zalgirio St. 90-100, Vilnius, Lituania. Está registrada bajo el número 306353686 por el Centro Estatal de Registros de la República de Lituania como Operador de Intercambio de Moneda Virtual.
           </Text>
@@ -534,13 +545,7 @@ const TopUpScreen = () => {
         </View>
       </Modal>
 
-      <GuardarianModal
-        visible={showGuardarianModal}
-        type="buy"
-        address={algorandAddress}
-        onClose={() => setShowGuardarianModal(false)}
-        onContinue={handleProceedToGuardarian}
-      />
+      {/* GuardarianModal removed from TopUpScreen */}
 
     </SafeAreaView>
   );
@@ -874,6 +879,24 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
+  },
+  supportButton: {
+    marginTop: 24,
+    marginBottom: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F3F4F6',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    alignSelf: 'center',
+    gap: 8,
+  },
+  supportButtonText: {
+    fontSize: 14,
+    color: '#4B5563',
+    fontWeight: '600',
   },
 });
 

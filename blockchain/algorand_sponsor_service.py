@@ -561,6 +561,22 @@ class AlgorandSponsorService:
             msg = str(e)
             logger.error(f"Error submitting sponsored group: {msg}")
             # Idempotency: treat duplicate/already-opted-in app calls as success
+            if 'transaction already in ledger' in msg:
+                logger.warning(f"Transaction already in ledger (idempotent success): {msg}")
+                # Try to extract txid from message if present, e.g. "transaction already in ledger: <txid>"
+                parts = msg.split(':')
+                tx_id = parts[-1].strip() if len(parts) > 1 else None
+                
+                return {
+                    'success': True,
+                    'tx_id': tx_id,
+                    'confirmed_round': None,
+                    'sponsored': True,
+                    'fees_saved': 0.0,
+                    'already_in_ledger': True,
+                    'pending': False,
+                }
+
             if (
                 'has already opted in to app' in msg
                 or 'already opted in' in msg.lower()

@@ -274,9 +274,11 @@ def guardarian_transaction_proxy(request):
                 'email': request_email or user.email or '',
             }
         }
+        # Flat email just in case, as some integrations use it
+        guardarian_payload['email'] = request_email or user.email or ''
 
     # Log the payload for debugging
-    logger.info(f'Guardarian transaction request for user {user_id}: '
+    logger.debug(f'Guardarian transaction request for user {user_id}: '
                 f'amount={amount}, currency={from_currency}, '
                 f'email={bool(user.email)}, address={bool(payout_address)}')
     logger.debug(f'Guardarian payload: {json.dumps(guardarian_payload, indent=2)}')
@@ -308,19 +310,29 @@ def guardarian_transaction_proxy(request):
                 from urllib.parse import urlencode
                 
                 params = {}
-                # Email prefill (Confirmed supported)
                 if request_email or user.email:
                     params['email'] = request_email or user.email
-                
+
                 # Address prefill (Attempting as fallback)
                 if payout_address:
                     params['payout_address'] = payout_address
                     params['default_payout_address'] = payout_address
                     params['skip_choose_payout_address'] = 'true'
+                    params['read_only_payout_address'] = 'true'
 
                 if params:
-                    separator = '&' if '?' in redirect_url else '?'
-                    redirect_url = f"{redirect_url}{separator}{urlencode(params)}"
+                    # Parse existing query params from redirect_url to avoid duplication/errors
+                    from urllib.parse import urlparse, parse_qs, urlunparse
+                    
+                    url_parts = list(urlparse(redirect_url))
+                    query = dict(parse_qs(url_parts[4]))
+                    
+                    # Merge our params into existing query
+                    query.update(params)
+                    
+                    # Re-encode
+                    url_parts[4] = urlencode(query, doseq=True)
+                    redirect_url = urlunparse(url_parts)
                     data['redirect_url'] = redirect_url
 
             logger.debug(f'Guardarian redirect_url: {data.get("redirect_url", "No URL")}')
