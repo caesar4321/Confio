@@ -204,26 +204,28 @@ def guardarian_transaction_proxy(request):
     if amount is None:
         amount = body.get('from_amount')
     from_currency = body.get('from_currency') or body.get('fromCurrency')
-    payout_address = body.get('payout_address') or body.get('payoutAddress')
-    request_email = body.get('email') or body.get('customer_email') or body.get('customerEmail')
+    # Priority Logic: Server (DB) > Client Request
+    # We want the database to be the single source of truth for the address and email.
+    
+    # 1. Address Lookup
+    db_payout_address = None
+    try:
+        account_type = payload.get('account_type', 'personal')
+        account_index = payload.get('account_index', 0)
+        account = user.accounts.filter(account_type=account_type, account_index=account_index).first()
+        if account and account.algorand_address:
+            db_payout_address = account.algorand_address
+            logger.info(f"Using DB address (Server Priority) for user {user_id}: {db_payout_address}")
+    except Exception as e:
+        logger.warning(f"DB address lookup error: {e}")
 
-    # Server-Side Fallback: If payout_address is missing, try to fetch it from the DB
-    # using account info from JWT payload
-    if not payout_address:
-        try:
-            account_type = payload.get('account_type', 'personal')
-            account_index = payload.get('account_index', 0)
-            # Find the specific account
-            account = user.accounts.filter(
-                account_type=account_type, 
-                account_index=account_index
-            ).first()
-            
-            if account and account.algorand_address:
-                payout_address = account.algorand_address
-                logger.info(f"Using DB address for user {user_id} account {account_index}: {payout_address}")
-        except Exception as e:
-            logger.warning(f"Failed to lookup address from DB for prefill: {e}")
+    client_payout_address = body.get('payout_address') or body.get('payoutAddress')
+    payout_address = db_payout_address or client_payout_address
+
+    # 2. Email Lookup
+    client_email = body.get('email') or body.get('customer_email') or body.get('customerEmail')
+    # Use user.email from DB if available, otherwise fall back to client
+    final_email = user.email or client_email
 
     if amount is None or from_currency is None:
         return JsonResponse({'error': 'amount and from_currency are required'}, status=400)
@@ -286,14 +288,15 @@ def guardarian_transaction_proxy(request):
         guardarian_payload['skip_payout_address_selection'] = True
 
     # Add customer info if email is present
-    if request_email or user.email:
+    # Add customer info if email is present
+    if final_email:
         guardarian_payload['customer'] = {
             'contact_info': {
-                'email': request_email or user.email or '',
+                'email': final_email,
             }
         }
         # Flat email just in case, as some integrations use it
-        guardarian_payload['email'] = request_email or user.email or ''
+        guardarian_payload['email'] = final_email
 
     # Log the payload for debugging
     logger.debug(f'Guardarian transaction request for user {user_id}: '
@@ -328,8 +331,8 @@ def guardarian_transaction_proxy(request):
                 from urllib.parse import urlencode
                 
                 params = {}
-                if request_email or user.email:
-                    params['email'] = request_email or user.email
+                if final_email:
+                    params['email'] = final_email
 
                 # Address prefill (Attempting as fallback)
                 if payout_address:
