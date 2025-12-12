@@ -218,7 +218,7 @@ def handle_usdc_deposit_save(sender, instance, created, **kwargs):
     if (
         just_completed
         and instance.actor_user_id
-        and instance.amount >= Decimal("20")
+        and instance.amount >= Decimal("19")
     ):
         logger.info(
             "Referral top_up checkpoint: user=%s deposit=%s amount=%s",
