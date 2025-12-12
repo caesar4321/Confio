@@ -207,6 +207,24 @@ def guardarian_transaction_proxy(request):
     payout_address = body.get('payout_address') or body.get('payoutAddress')
     request_email = body.get('email') or body.get('customer_email') or body.get('customerEmail')
 
+    # Server-Side Fallback: If payout_address is missing, try to fetch it from the DB
+    # using account info from JWT payload
+    if not payout_address:
+        try:
+            account_type = payload.get('account_type', 'personal')
+            account_index = payload.get('account_index', 0)
+            # Find the specific account
+            account = user.accounts.filter(
+                account_type=account_type, 
+                account_index=account_index
+            ).first()
+            
+            if account and account.algorand_address:
+                payout_address = account.algorand_address
+                logger.info(f"Using DB address for user {user_id} account {account_index}: {payout_address}")
+        except Exception as e:
+            logger.warning(f"Failed to lookup address from DB for prefill: {e}")
+
     if amount is None or from_currency is None:
         return JsonResponse({'error': 'amount and from_currency are required'}, status=400)
 
