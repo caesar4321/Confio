@@ -383,12 +383,29 @@ def scan_inbound_deposits():
             sponsor_sender = sponsor_address and sender == sponsor_address
 
             if confio_sender and not sponsor_sender:
-                # Internal transfer; treat as non-deposit for inbound notification
-                logger.info(
-                    f"[IndexerScan] skip internal tx: sender={sender} to={to_addr} sponsor={sponsor_address}"
-                )
-                skipped += 1
-                return
+                # Internal transfer
+                # Fix: Check if this is a P2P withdrawal (USDC) that lacks a SendTransaction.
+                # If so, we MUST process it as a deposit so the recipient gets notified.
+                is_usdc = (xaid == USDC_ID)
+                has_send_tx = False
+                
+                if is_usdc:
+                    # Check if a SendTransaction exists for this hash
+                    # If it exists, the notifications are handled by scan_outbound_confirmations
+                    has_send_tx = SendTransaction.objects.filter(transaction_hash=txid).exists()
+
+                if is_usdc and not has_send_tx:
+                    # Allow it to proceed (User A -> User B via Withdrawal)
+                    logger.info(
+                        f"[IndexerScan] detecting P2P withdrawal (internal USDC): {txid} from {sender} to {to_addr}. Processing as deposit."
+                    )
+                else:
+                    # Standard skip for other assets or if SendTransaction exists
+                    logger.info(
+                        f"[IndexerScan] skip internal tx: sender={sender} to={to_addr} sponsor={sponsor_address} is_usdc={is_usdc} has_send={has_send_tx}"
+                    )
+                    skipped += 1
+                    return
             elif sponsor_sender:
                 logger.info(
                     f"[IndexerScan] sponsor deposit: sender={sender} to={to_addr}"
