@@ -2285,46 +2285,7 @@ export const AccountDetailScreen = () => {
               <Text style={styles.moreOptionsItemText}>Historial de conversiones</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.moreOptionsItem}
-              onPress={() => {
-                setShowMoreOptionsModal(false);
-                Alert.alert(
-                  'Tutorial de USDC ↔ cUSD',
-                  'Mira nuestro video tutorial sobre cómo convertir entre USDC y cUSD en Confío',
-                  [
-                    {
-                      text: 'Cancelar',
-                      style: 'cancel',
-                    },
-                    {
-                      text: 'Ver tutorial',
-                      onPress: async () => {
-                        try {
-                          const videoId = 'WCpoBZzgMyY';
-                          const appUrl = `youtube://watch?v=${videoId}`; // iOS YouTube URL scheme
-                          const webUrl = 'https://www.youtube.com/watch?v=WCpoBZzgMyY';
-                          const appSupported = await Linking.canOpenURL(appUrl);
-                          if (appSupported) {
-                            await Linking.openURL(appUrl);
-                            return;
-                          }
-                          await Linking.openURL(webUrl);
-                        } catch (e) {
-                          Alert.alert(
-                            'Error',
-                            'No se pudo abrir el video tutorial. Copia y pega: https://youtu.be/WCpoBZzgMyY'
-                          );
-                        }
-                      },
-                    },
-                  ]
-                );
-              }}
-            >
-              <Icon name="play-circle" size={20} color="#1f2937" />
-              <Text style={styles.moreOptionsItemText}>Ver tutorial</Text>
-            </TouchableOpacity>
+
 
             <TouchableOpacity
               style={[styles.moreOptionsItem, styles.moreOptionsCancelItem]}

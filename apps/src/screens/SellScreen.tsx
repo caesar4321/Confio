@@ -28,7 +28,7 @@ import { getCountryByIso } from '../utils/countries';
 import { createGuardarianTransaction, fetchGuardarianFiatCurrencies, GuardarianFiatCurrency } from '../services/guardarianService';
 import { getFlagForCurrency } from '../utils/currencyFlags';
 import USDCLogo from '../assets/png/USDC.png';
-import { GuardarianModal } from '../components/GuardarianModal';
+import PreFlightModal from '../components/PreFlightModal';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'Sell'>;
 
@@ -61,7 +61,7 @@ export const SellScreen = () => {
     const [payoutFiats, setPayoutFiats] = useState<string[]>([]);
     const [fiatLoading, setFiatLoading] = useState(false);
     const [fiatError, setFiatError] = useState<string | null>(null);
-    const [showGuardarianModal, setShowGuardarianModal] = useState(false);
+    const [showPreFlightModal, setShowPreFlightModal] = useState(false);
 
     // Order state
     const [orderCreated, setOrderCreated] = useState(false);
@@ -115,11 +115,11 @@ export const SellScreen = () => {
         }
 
         // Show modal instruction first
-        setShowGuardarianModal(true);
+        setShowPreFlightModal(true);
     };
 
     const handleProceedToGuardarian = async () => {
-        setShowGuardarianModal(false);
+        setShowPreFlightModal(false);
         const parsedAmount = parseFloat(amount);
         setLoading(true);
         try {
@@ -370,10 +370,10 @@ export const SellScreen = () => {
 
             </ScrollView>
 
-            <GuardarianModal
-                visible={showGuardarianModal}
+            <PreFlightModal
+                visible={showPreFlightModal}
                 type="sell"
-                onClose={() => setShowGuardarianModal(false)}
+                onCancel={() => setShowPreFlightModal(false)}
                 onContinue={handleProceedToGuardarian}
             />
         </SafeAreaView>

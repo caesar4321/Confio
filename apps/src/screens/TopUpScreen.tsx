@@ -33,7 +33,7 @@ import { useCurrencyByCode } from '../hooks/useCurrency';
 import { getFlagForCurrency } from '../utils/currencyFlags';
 import { useMutation, gql } from '@apollo/client';
 import algorandService from '../services/algorandService';
-// GuardarianModal removed as per UX requirement
+import PreFlightModal from '../components/PreFlightModal';
 
 
 // GraphQL mutation for USDC opt-in
@@ -88,7 +88,7 @@ const TopUpScreen = () => {
   const [fiatError, setFiatError] = useState<string | null>(null);
   const [showCurrencyNotAvailableHint, setShowCurrencyNotAvailableHint] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
-  // const [showGuardarianModal, setShowGuardarianModal] = useState(false); // Removed
+  const [showPreFlightModal, setShowPreFlightModal] = useState(false);
 
   // USDC opt-in mutation
   const [optInToUsdc] = useMutation(OPT_IN_TO_USDC);
@@ -297,12 +297,12 @@ const TopUpScreen = () => {
       return;
     }
 
-    // Proceed directly to Guardarian logic (skipping modal)
-    await handleProceedToGuardarian();
+    // Show PreFlightModal instead of proceeding directly
+    setShowPreFlightModal(true);
   };
 
   const handleProceedToGuardarian = async () => {
-    // setShowGuardarianModal(false);
+    setShowPreFlightModal(false);
     setLoading(true);
     const parsedAmount = parseAmount(amount);
 
@@ -545,7 +545,12 @@ const TopUpScreen = () => {
         </View>
       </Modal>
 
-      {/* GuardarianModal removed from TopUpScreen */}
+      <PreFlightModal
+        visible={showPreFlightModal}
+        type="buy"
+        onContinue={handleProceedToGuardarian}
+        onCancel={() => setShowPreFlightModal(false)}
+      />
 
     </SafeAreaView>
   );
