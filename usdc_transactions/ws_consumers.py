@@ -69,6 +69,9 @@ class WithdrawSessionConsumer(AsyncJsonWebsocketConsumer):
                     },
                 })
             except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"WS Prepare Error: {e}")
                 await self.send_json({"type": "error", "message": str(e) or "prepare_exception"})
             return
         if t == "submit":
@@ -78,10 +81,16 @@ class WithdrawSessionConsumer(AsyncJsonWebsocketConsumer):
             try:
                 res = await self._submit(withdrawal_id=str(wid), signed_transactions=signed_transactions, sponsor_transactions=sponsor_transactions)
                 if not res.get("success"):
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.error(f"WS Submit Failed: {res.get('error')}")
                     await self.send_json({"type": "error", "message": res.get("error", "submit_failed")})
                     return
                 await self.send_json({"type": "submit_ok", "txid": res.get("txid")})
             except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"WS Submit Exception: {e}")
                 await self.send_json({"type": "error", "message": str(e) or "submit_exception"})
             return
 
@@ -273,7 +282,19 @@ class WithdrawSessionConsumer(AsyncJsonWebsocketConsumer):
 
         from blockchain.algorand_client import get_algod_client
         algod_client = get_algod_client()
-        txid = algod_client.send_transactions(ordered)
+        try:
+            txid = algod_client.send_transactions(ordered)
+        except Exception as e:
+            msg = str(e).lower()
+            if 'transaction already in ledger' in msg:
+                # Idempotency: treat as success
+                # Extract txid from the last transaction we attempted to send
+                txid = ordered[-1].get_txid()
+                # Log it
+                print(f"WS Submit: Transaction {txid} already in ledger, treating as success")
+            else:
+                # Re-raise legitimate errors
+                raise
         ref_txid = ordered[-1].get_txid()
 
         # Mark withdrawal as processing (submitted)
