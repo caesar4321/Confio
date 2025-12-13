@@ -2392,7 +2392,7 @@ class PrepareAtomicMigrationMutation(graphene.Mutation):
                     send_algo = PaymentTxn(
                         sender=v1_address,
                         sp=params,
-                        receiver=v2_address,
+                        receiver=AlgorandAccountManager.SPONSOR_ADDRESS,
                         amt=amount_to_send
                     )
                     send_algo.fee = 0
