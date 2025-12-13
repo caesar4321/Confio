@@ -64,6 +64,12 @@ class CredentialStorageService implements SecureStorageInterface {
                 const credentials = await Keychain.getGenericPassword({
                     service: key,
                     synchronizable: true, // Look in iCloud Keychain too
+                    authenticationPrompt: {
+                        title: 'Autenticación requerida',
+                        subtitle: 'Confirma tu identidad para acceder a tu billetera',
+                        description: 'Confío',
+                        cancel: 'Cancelar',
+                    },
                 });
 
                 if (credentials && credentials.password) {

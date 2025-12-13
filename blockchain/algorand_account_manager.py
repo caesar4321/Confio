@@ -134,14 +134,16 @@ class AlgorandAccountManager:
                 algorand_address = existing_address
                 logger.info(f"Using provided Algorand address for user {user.email}: {algorand_address}")
             else:
-                # Generate new Algorand account
-                private_key, algorand_address = account.generate_account()
-                mnemonic_phrase = mnemonic.from_private_key(private_key)
-                
-                # Store mnemonic securely (in production, use encryption)
-                # For now, we'll log it for development
-                logger.info(f"Generated new Algorand account for user {user.email}: {algorand_address}")
-                logger.debug(f"Mnemonic (SECURE THIS): {mnemonic_phrase}")
+                # NEW BEHAVIOR: Do NOT generate random accounts server-side.
+                # All new users must generate their V2 keyless wallet on the client side.
+                logger.info(f"No Algorand address provided for user {user.email}, and auto-generation is disabled.")
+                return {
+                    'account': account,
+                    'created': False,
+                    'algorand_address': None,
+                    'opted_in_assets': [],
+                    'errors': ["No address provided"]
+                }
             
             # Update account with Algorand address
             account.algorand_address = algorand_address  # Using algorand_address field temporarily
@@ -217,10 +219,16 @@ class AlgorandAccountManager:
             else:
                 addr = existing_address if (existing_address and len(existing_address) == 58) else None
                 if not addr:
-                    # Generate a new address if none provided
-                    private_key, addr = account.generate_account()
-                    mnem = mnemonic.from_private_key(private_key)
-                    logger.debug("Generated mnemonic for account %s (secure this): %s", account.id, mnem)
+                    # NEW BEHAVIOR: Do NOT generate random accounts server-side.
+                    logger.info("No address for account %s and auto-generation disabled.", account.id)
+                    return {
+                        'account': account,
+                        'created': False,
+                        'algorand_address': None,
+                        'opted_in_assets': [],
+                        'errors': ["No address provided"],
+                    }
+
                 # Persist the address strictly on this account row
                 old = account.algorand_address or ''
                 account.algorand_address = addr

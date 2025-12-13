@@ -17,6 +17,7 @@ import * as nacl from 'tweetnacl';
 // algosdk will be required at runtime to avoid RN bundler issues
 import { jwtDecode } from 'jwt-decode';
 import * as Keychain from 'react-native-keychain';
+import { Platform } from 'react-native';
 import { apolloClient, AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME } from '../apollo/client';
 import { gql } from '@apollo/client';
 import { randomBytes } from '@noble/hashes/utils';
@@ -440,6 +441,17 @@ export async function getOrCreateMasterSecret(userSub: string, accessToken?: str
         // If found locally, we should UPLOAD it to Drive (Sync UP)
         const localSecret = await credentialStorage.retrieveSecret(alias);
         if (localSecret) {
+          // --- ACL MIGRATION FIX (Sync Path) ---
+          if (Platform.OS === 'ios') {
+            const ACL_FLAG_KEY = 'v2_acl_migration_complete_v1';
+            const currentFlag = await credentialStorage.retrieveSecret(ACL_FLAG_KEY);
+            if (!currentFlag) {
+              console.log('[MasterSecret] iOS ACL Migration (Sync): Re-writing secret to relax security policy...');
+              await credentialStorage.storeSecret(alias, localSecret);
+              await credentialStorage.storeSecret(ACL_FLAG_KEY, new Uint8Array([1]));
+            }
+          }
+          // ------------------------------------
           console.log('[MasterSecret] Found Local Secret. Uploading to Drive (Sync UP / Encrypted)...');
           const secretBase64 = bytesToBase64(localSecret);
 
@@ -464,6 +476,19 @@ export async function getOrCreateMasterSecret(userSub: string, accessToken?: str
     const existingSecret = await credentialStorage.retrieveSecret(alias);
     if (existingSecret) {
       console.log(`[MasterSecret] Found existing namespaced secret (Length=${existingSecret.length})`);
+
+      // --- ACL MIGRATION FIX (Standard Path) ---
+      if (Platform.OS === 'ios') {
+        const ACL_FLAG_KEY = 'v2_acl_migration_complete_v1';
+        const currentFlag = await credentialStorage.retrieveSecret(ACL_FLAG_KEY);
+        if (!currentFlag) {
+          console.log('[MasterSecret] iOS ACL Migration (Standard): Re-writing secret to relax security policy...');
+          await credentialStorage.storeSecret(alias, existingSecret);
+          await credentialStorage.storeSecret(ACL_FLAG_KEY, new Uint8Array([1]));
+        }
+      }
+      // ----------------------------------------
+
       // If we are here and have accessToken, it means Sync UP might have failed previously or Drive was unreachable.
       // We could try async background upload here, but for now just return.
       return existingSecret;
