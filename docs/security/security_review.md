@@ -23,7 +23,10 @@ A static database leak exposes the "Server Share" (Peppers) and User Emails.
 **Analysis**:
 - **Apple**: The OAuth `sub` is **App-Scoped** (unique to Team ID + Bundle ID). There is no mechanism for an attacker to derive or lookup an Apple `sub` from an email address.
 - **Google**: While account-scoped, Google **does not provide APIs** to resolve an email address to a `sub` ("Subject ID"). The `sub` is only revealed upon successful user authentication.
-**Conclusion**: An attacker possessing the database (Peppers + Emails) **cannot** reconstruct user keys because they cannot obtain the required `sub` input via OSINT or APIs. The system is secure against static data breaches.
+**Conclusion**: An attacker possessing the database (Peppers + Emails) **cannot** reconstruct user keys because:
+1.  **Missing User Share**: They cannot obtain the required `sub` input via OSINT or APIs.
+2.  **Encryption at Rest**: The peppers themselves are encrypted with a key managed by AWS KMS, meaning the attacker would also need to compromise the production AWS environment (KMS/SSM permissions) to even decrypt the "Server Share".
+The system is secure against static data breaches.
 
 ### 3. Immutable Security Parameters (Architectural Constraint)
 The `DerivationPepper` is non-rotating to ensure deterministic address generation.

@@ -11,7 +11,7 @@ Confío uses a "Keyless Self-Custody" model.
 2.  **Phone Verification**: Required for enhanced security in LATAM; utilizes a Telegram-based verification system.
 3.  **Key Derivation**:
     *   **User Share**: Derived from the OAuth identity (specifically the stable `sub` claim).
-    *   **Server Share**: A high-entropy "pepper" stored on the server.
+    *   **Server Share**: A high-entropy "pepper" stored **encrypted** on the server (using AWS KMS-backed application-level encryption).
     *   **Result**: The client combines these locally to derive the private key. **The server never sees the private key.**
 
 ## 2. Multi-Account System

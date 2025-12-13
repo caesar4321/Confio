@@ -30,7 +30,8 @@ The user's private key is derived deterministically on the client device using t
     *   **Role**: proves "Who I am" (Identity).
 
 2.  **Server Share (Derivation Pepper)**
-    *   **Source**: Confío Secure Server (Database/HSM).
+    *   **Source**: Confío Secure Server (Database).
+    *   **Encryption**: AES-256 (Fernet) encrypted at rest using a master key stored in **AWS SSM Parameter Store**, protected by **AWS KMS**.
     *   **Nature**: High-entropy 32-byte secret, unique per account, non-rotating.
     *   **Role**: Enforces "Authorized Access" and acts as a cryptographic blinder against `sub` discovery.
 
