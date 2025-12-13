@@ -14,16 +14,21 @@ import BottomTabNavigator from './src/navigation/BottomTabNavigator';
 import { RootStackParamList } from './src/types/navigation';
 import { Text } from 'react-native';
 
+import { MigrationModal } from './src/components/MigrationModal';
+
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function App() {
   return (
-    <NavigationContainer>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="Auth" component={AuthScreen} />
-        <Stack.Screen name="PhoneVerification" component={PhoneVerificationScreen} />
-        <Stack.Screen name="Main" component={BottomTabNavigator} />
-      </Stack.Navigator>
-    </NavigationContainer>
+    <>
+      <NavigationContainer>
+        <Stack.Navigator screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="Auth" component={AuthScreen} />
+          <Stack.Screen name="PhoneVerification" component={PhoneVerificationScreen} />
+          <Stack.Screen name="Main" component={BottomTabNavigator} />
+        </Stack.Navigator>
+      </NavigationContainer>
+      <MigrationModal />
+    </>
   );
 }

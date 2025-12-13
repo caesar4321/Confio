@@ -5,4 +5,7 @@ declare module '@env' {
   export const API_URL: string;
   export const API_URL_DEV: string;
   export const API_URL_IOS_SIMULATOR_DEV: string;
+  export const ALGORAND_CONFIO_ASSET_ID: string;
+  export const ALGORAND_CUSD_ASSET_ID: string;
+  export const ALGORAND_USDC_ASSET_ID: string;
 } 

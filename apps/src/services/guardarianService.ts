@@ -32,7 +32,10 @@ export interface GuardarianFiatCurrency {
 }
 
 const deriveApiBase = () => {
-  const url = getApiUrl();
+  const url = getApiUrl() || '';
+  if (!url) {
+    console.warn('API_URL is missing! Guardarian service will fail.');
+  }
   // Strip trailing graphql/ or graphql
   return url.replace(/graphql\/?$/i, '');
 };

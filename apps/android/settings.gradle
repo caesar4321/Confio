@@ -93,10 +93,12 @@ project(':react-native-device-info').projectDir = new File(rootProject.projectDi
 include ':notifee_react-native'
 project(':notifee_react-native').projectDir = new File(rootProject.projectDir, '../node_modules/@notifee/react-native/android')
 
-include ':react-native-inappbrowser-reborn'
-project(':react-native-inappbrowser-reborn').projectDir = new File(rootProject.projectDir, '../node_modules/react-native-inappbrowser-reborn/android')
 
 include ':react-native-play-install-referrer'
 project(':react-native-play-install-referrer').projectDir = new File(rootProject.projectDir, '../node_modules/react-native-play-install-referrer/android')
+include ':react-native-block-store'
+project(':react-native-block-store').projectDir = new File(rootProject.projectDir, '../node_modules/react-native-block-store/android')
+
+
 
 

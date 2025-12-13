@@ -7366,11 +7366,6 @@ open@^7.0.3, open@^7.4.2:
     is-docker "^2.0.0"
     is-wsl "^2.1.1"
 
-opencollective-postinstall@^2.0.3:
-  version "2.0.3"
-  resolved "https://registry.npmjs.org/opencollective-postinstall/-/opencollective-postinstall-2.0.3.tgz"
-  integrity sha512-8AV/sCtuzUeTo8gQK5qDZzARrulB3egtLzFgteqB2tcT4Mw7B8Kt7JcDHmltjz6FOAHsvTevk70gZEbhM4ZS9Q==
-
 optimism@^0.18.0:
   version "0.18.1"
   resolved "https://registry.npmjs.org/optimism/-/optimism-0.18.1.tgz"
@@ -7828,6 +7823,11 @@ react-is@^19.1.0:
   resolved "https://registry.npmjs.org/react-is/-/react-is-19.1.0.tgz"
   integrity sha512-Oe56aUPnkHyyDxxkvqtd7KkdQP5uIUfHxd5XTb3wE9d/kRnZLmKbDB0GWk919tdQ+mxxPtG6EAs6RMT6i1qtHg==
 
+react-native-block-store@^0.1.1:
+  version "0.1.1"
+  resolved "https://registry.npmjs.org/react-native-block-store/-/react-native-block-store-0.1.1.tgz"
+  integrity sha512-pE7EYWILKNZptd5ZtdPir4pt3LOG3PXZ6OVvuX7KvY9lUE3I9yn9qDqjAsFM0MxnSSRK2q2e1/MHef2j38RKrg==
+
 react-native-buffer@^6.0.3:
   version "6.0.3"
   resolved "https://registry.npmjs.org/react-native-buffer/-/react-native-buffer-6.0.3.tgz"
@@ -7864,14 +7864,6 @@ react-native-get-random-values@^1.9.0:
   integrity sha512-4BTbDbRmS7iPdhYLRcz3PGFIpFJBwNZg9g42iwa2P6FOv9vZj/xJc678RZXnLNZzd0qd7Q3CCF6Yd+CU2eoXKQ==
   dependencies:
     fast-base64-decode "^1.0.0"
-
-react-native-inappbrowser-reborn@^3.7.0:
-  version "3.7.0"
-  resolved "https://registry.npmjs.org/react-native-inappbrowser-reborn/-/react-native-inappbrowser-reborn-3.7.0.tgz"
-  integrity sha512-Ia53jYNtFcbNaX5W3QfOmN25I7bcvuDiQmSY5zABXjy4+WI20bPc9ua09li55F8yDCjv3C99jX6vKms68mBV7g==
-  dependencies:
-    invariant "^2.2.4"
-    opencollective-postinstall "^2.0.3"
 
 react-native-is-edge-to-edge@^1.2.1:
   version "1.2.1"

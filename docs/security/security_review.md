@@ -1,56 +1,69 @@
-# Security Review: Keyless Self-Custody Implementation
+# Security Review V2: Keyless Self-Custody & Cloud Backup
 
-## Executive Summary
+## 1. Executive Summary
 
-**Architecture:** Keyless Self-Custody with Server-Assisted Deterministic Recovery (2-of-2).
-**Verdict:** The system implements a **robust permissionless wallet** suitable for the target LATAM demographic. It provides high resistance to both server compromise and database leaks due to the non-discoverability of user components.
+**Architecture:** V2 Random Wallet with Cloud Backup (Google Drive/iCloud).
+**Custody Model:** Strict Non-Custodial (Server has 0 knowledge of keys).
+**Verdict:** The V2 system significantly improves upon V1 by removing the server from the key derivation loop completely. Security now relies entirely on the user's device security (Biometrics) and their cloud provider account (Google/Apple).
 
-## Risk Assessment
+## 2. Threat Model & Risks
 
-### 1. Server-Assisted Key Derivation (Privileged Access Risk)
-The wallet generation relies on two inputs:
-- **User Share**: Derived from the OAuth identity (`sub`, `iss`, `aud` in `firebase_id_token`).
-- **Server Share**: A high-entropy 32-byte pepper stored in the server database.
+### 2.1. Cloud Account Compromise (Primary Risk)
+In the V2 model, the user's Master Secret is backed up to Google Drive (AppData folder) or iCloud.
+*   **Risk**: If an attacker gains full access to the user's Google Account, they can download the backup file.
+*   **Mitigation**:
+    *   **File Encryption**: The backup file is AES-256 encrypted before upload.
+    *   **Weakness**: The encryption key is embedded in the application source code. A sophisticated attacker who reverse-engineers the app AND compromises the Google Account can decrypt the wallet.
+    *   **Context**: This encryption is intended as obfuscation against casual access and accidental exposure, not as a substitute for a user-held encryption password. It does not provide protection against a fully compromised client environment, which is an accepted trade-off to preserve usability.
+    *   **Defense in Depth**: Users are encouraged to use 2FA on their Google Accounts. Furthermore, Firebase Authentication tokens do not grant access to Google Drive APIs and are never used for key storage or recovery. Only the specific Google OAuth Access Token (requested explicitly) can access the Drive AppData folder. **Crucially, this Access Token is consumed exclusively on the client device and is NEVER transmitted to the Confío backend servers.**
 
-**Risk**: An attacker with full Remote Code Execution (RCE) *during* a user's active login session could theoretically intercept the User Share and combine it with the stored Server Share.
-**Mitigation**:
-- Server memory is volatile; User Shares are never persisted.
-- The server does not sign transactions.
-- Requires active, sophisticated compromise of the running application, not just a static data breach.
+### 2.2. Local Device Compromise (Theft)
+*   **Risk**: User's phone is stolen while unlocked.
+*   **Defense**:
+    *   **Biometric Gate**: Critical actions (backup export, secret reveal, large transfers) require Biometric Authentication.
+    *   **Secure Storage**: Keys are stored in Hardware-backed Keystore/Keychain.
+    *   **Result**: Even with the phone, the attacker cannot extract the private key without the user's fingerprint/face.
 
-### 2. Database Leak Scenarios (Negligible Risk)
-A static database leak exposes the "Server Share" (Peppers) and User Emails.
-**Analysis**:
-- **Apple**: The OAuth `sub` is **App-Scoped** (unique to Team ID + Bundle ID). There is no mechanism for an attacker to derive or lookup an Apple `sub` from an email address.
-- **Google**: While account-scoped, Google **does not provide APIs** to resolve an email address to a `sub` ("Subject ID"). The `sub` is only revealed upon successful user authentication.
-**Conclusion**: An attacker possessing the database (Peppers + Emails) **cannot** reconstruct user keys because:
-1.  **Missing User Share**: They cannot obtain the required `sub` input via OSINT or APIs.
-2.  **Encryption at Rest**: The peppers themselves are encrypted with a key managed by AWS KMS, meaning the attacker would also need to compromise the production AWS environment (KMS/SSM permissions) to even decrypt the "Server Share".
-The system is secure against static data breaches.
+### 2.3. Server Compromise
+*   **Risk**: Attacker gains full control of Confío servers (EC2, RDS).
+*   **Impact**:
+    *   **Funds**: **Zero Access**. The server stores no keys, no peppers (for V2), and no backup files.
+    *   **Data**: Attacker can see transaction history and user contacts.
+    *   **Service**: Attacker can disrupt service (DoS).
 
-### 3. Immutable Security Parameters (Architectural Constraint)
-The `DerivationPepper` is non-rotating to ensure deterministic address generation.
-**Constraint**: Key rotation involves fund transfer to a new address.
-**Operational Requirement**: Strict access controls around the `WalletPepper` table remain a best practice for defense-in-depth.
+## 3. Implementation Security
 
-### 4. Information Disclosure via Logging (Remediated)
-**Finding**: The React Native application logs the full Google Sign-In response object to the device console.
-- **Location**: `apps/src/services/authService.ts`.
-- **Status**: **Remediated**. Console logs have been updated to redact sensitive token information.
-- **Recommendation**: Ensure future logging statements sanitize PII.
+### 3.1. Master Secret Handling
+*   **Generation**: Uses `react-native-get-random-values` (CSPRNG).
+*   **Lifecycle**:
+    1.  Generated in memory.
+    2.  Written to Secure Storage (Keychain).
+    3.  Encrypted & Uploaded to Drive.
+    4.  Wiped from memory.
 
-## Security Classification
+### 3.2. Biometric Integration
+*   **Library**: `react-native-keychain`.
+*   **Config**:
+    *   **iOS**: `kSecAccessControlUserPresence`. Keys are bound to the device passcode/biometrics.
+    *   **Android**: `BiometricPrompt`.
+*   **Edge Case**: "Passcode Fallback". On iOS, we allow passcode fallback if biometrics fail, to prevent lockout. On Android, we enforce strong biometrics where available.
 
-| Feature | Classification |
-| :--- | :--- |
-| **Custody** | **Non-Custodial** (Server cannot sign, keys not persisted) |
-| **Trust Model** | **Permissionless / Semi-Trusted** (Server assistance required for recovery, but cannot act alone) |
-| **Data Breach Resilience** | **High** (Database leak does not compromise funds due to undiscoverable User Share) |
-| **Recovery** | **Identity-Based** (Zero-knowledge of seed phrases required) |
+### 3.3. Google Drive Scope
+*   **Minimization**: We request `drive.appdata` scope.
+*   **Effect**: The app can ONLY access files it created in the hidden App Data folder. It cannot read the user's documents, photos, or other app data.
+*   **Privacy**: High.
 
-## Recommendations
+## 4. Recommendations
 
-1.  **Remediation**: Remove sensitive `console.log` statements in `authService.ts` immediately.
-2.  **Log Hardening**: Ensure `firebase_id_token` and decoded claims (especially `sub`) are *never* logged to application logs to prevent inadvertent persistence of the User Share.
-3.  **Access Control**: Isolate the database credentials used by the web application.
-4.  **Transparency**: Communicate clearly that wallet security relies on the integrity of the Google/Apple account, which users are already accustomed to protecting.
+1.  **Monitor Supply Chain**: Ensure `react-native-keychain` and google sign-in libraries are kept up to date to avoid native vulnerability exploits.
+2.  **Biometric Hardening**: Consider implementing "Strict Mode" where we detect if new biometrics were enrolled (Android `KeyPermanentlyInvalidatedException`) and force a specific re-auth flow, though this risks user lockout.
+3.  **App Key Obfuscation**: While not a silver bullet, using ProGuard/R8 (Android) and symbol stripping (iOS) makes extracting the backup encryption key slightly harder for script kiddies.
+
+## 5. Security Classification
+
+| Feature | Status | Notes |
+| :--- | :--- | :--- |
+| **Server Access** | **Zero Knowledge** | Server cannot sign or see keys. |
+| **User Access** | **Full Control** | User owns the keys via Device + Cloud Account. |
+| **Recovery** | **Cloud-Based** | Relies on Google/Apple account access. |
+| **Platform Lock-in** | **Mitigated** | Cross-platform migration supported via manual roaming. |

@@ -541,7 +541,7 @@ class AccountType(DjangoObjectType):
 	
 	class Meta:
 		model = Account
-		fields = ('id', 'user', 'account_type', 'account_index', 'business', 'created_at', 'last_login_at', 'algorand_address')
+		fields = ('id', 'user', 'account_type', 'account_index', 'business', 'created_at', 'last_login_at', 'algorand_address', 'is_keyless_migrated')
 		# Note: algorand_address added back for payroll delegate matching
 	
 	@classmethod

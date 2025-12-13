@@ -11,9 +11,11 @@ import { getCountryByIso } from '../utils/countries';
 import { usePushNotificationPrompt } from '../hooks/usePushNotificationPrompt';
 import { PushNotificationModal } from '../components/PushNotificationModal';
 import { ReferralInputModal } from '../components/ReferralInputModal';
+import { BackupConsentModal } from '../components/BackupConsentModal';
 import { useQuery } from '@apollo/client';
 import { GET_MY_REFERRALS } from '../apollo/queries';
 import { biometricAuthService } from '../services/biometricAuthService';
+import authService from '../services/authService';
 
 // Utility function to format phone number with country code
 const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string => {
@@ -71,6 +73,8 @@ export const ProfileScreen = () => {
     return false;
   }, [rawUsername]);
   const [showReferralModal, setShowReferralModal] = React.useState(false);
+  const [showBackupModal, setShowBackupModal] = React.useState(false);
+  const [driveBackupEnabled, setDriveBackupEnabled] = React.useState(false);
   const [biometricAvailable, setBiometricAvailable] = React.useState(false);
   const [biometricEnabled, setBiometricEnabled] = React.useState(false);
   const [biometricLoading, setBiometricLoading] = React.useState(true);
@@ -198,6 +202,16 @@ export const ProfileScreen = () => {
     };
   }, [checkBiometricSupport]);
 
+  // Handle Backup Press with Biometric Check
+  const handleBackupPress = async () => {
+    // Require biometric authentication if available and enabled
+    if (biometricAvailable && biometricEnabled) {
+      const bioSuccess = await biometricAuthService.authenticate('Autoriza el respaldo en Google Drive');
+      if (!bioSuccess) return;
+    }
+    setShowBackupModal(true);
+  };
+
   const handleBiometricUpdate = React.useCallback(async () => {
     if (biometricLoading || biometricActionLoading) return;
     setBiometricError(null);
@@ -235,6 +249,11 @@ export const ProfileScreen = () => {
       // Re-check biometric availability when screen comes into focus
       setBiometricLoading(true);
       checkBiometricSupport();
+
+      // Check Drive status
+      authService.checkDriveBackupEnabled().then(enabled => {
+        setDriveBackupEnabled(enabled);
+      });
 
       // Reset the check flag when screen loses focus
       return () => {
@@ -597,6 +616,23 @@ export const ProfileScreen = () => {
                 <Icon name="chevron-right" size={16} color="#9CA3AF" />
               )}
             </TouchableOpacity>
+
+            {/* Google Drive Backup Option */}
+            <TouchableOpacity
+              style={styles.cardOption}
+              onPress={handleBackupPress}
+            >
+              <Icon name="cloud" size={18} color={driveBackupEnabled ? "#10B981" : "#6B7280"} />
+              <View style={styles.biometricTextContainer}>
+                <Text style={styles.biometricTitle}>Respaldo en la Nube</Text>
+                {driveBackupEnabled ? (
+                  <Text style={styles.biometricStatusActive}>Activa</Text>
+                ) : (
+                  <Text style={styles.biometricStatusText}>Toca para activar</Text>
+                )}
+              </View>
+              <Icon name="chevron-right" size={16} color="#9CA3AF" />
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -715,6 +751,25 @@ export const ProfileScreen = () => {
         onAllow={handleAllow}
         onDeny={handleDeny}
         needsSettings={needsSettings}
+      />
+
+      {/* Google Drive Backup Modal */}
+      <BackupConsentModal
+        visible={showBackupModal}
+        onContinue={async () => {
+          setShowBackupModal(false);
+          try {
+            // Logic to enable drive: trigger sign-in with scope
+            const success = await authService.enableDriveBackup();
+            if (success) {
+              setDriveBackupEnabled(true);
+              Alert.alert('Respaldo Activado', 'Tu copia de seguridad en Google Drive está activa y sincronizada.');
+            }
+          } catch (e) {
+            console.error(e);
+          }
+        }}
+        onCancel={() => setShowBackupModal(false)}
       />
     </>
   );

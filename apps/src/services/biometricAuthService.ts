@@ -182,10 +182,12 @@ class BiometricAuthService {
       const authResult = await Keychain.getGenericPassword({
         service: BIOMETRIC_SECRET_SERVICE,
         authenticationPrompt: {
-          title: 'Confirma con biometría',
-          subtitle: reason || (Platform.OS === 'ios' ? 'Face ID o Touch ID para proteger tus operaciones' : 'Huella digital para proteger tus operaciones'),
-          // Keep description short to avoid cramped Android prompt layout
-          description: 'Requerido para envíos y pagos',
+          title: 'Confirma tu identidad',
+          subtitle: reason || (Platform.OS === 'ios'
+            ? 'Usa Face ID o Touch ID para firmar de forma segura'
+            : 'Usa tu huella digital para firmar de forma segura'),
+          // More security-focused description
+          description: 'Protege tus fondos',
         },
         accessControl: Platform.OS === 'android'
           ? Keychain.ACCESS_CONTROL.BIOMETRY_ANY

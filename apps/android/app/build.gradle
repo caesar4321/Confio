@@ -80,8 +80,8 @@ android {
         applicationId "com.Confio.Confio"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 32
-        versionName "1.5.1"
+        versionCode 33
+        versionName "2.0.0"
         buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", rootProject.ext.newArchEnabled.toString()
         if (rootProject.ext.newArchEnabled) {
             buildConfigField "boolean", "IS_TURBOMODULE_ENABLED", "true"
@@ -206,8 +206,9 @@ dependencies {
     implementation project(':react-native-worklets-core')
     implementation project(':react-native-device-info')
     implementation project(':notifee_react-native')
-    implementation project(':react-native-inappbrowser-reborn')
+
     implementation project(':react-native-play-install-referrer')
+    implementation project(':react-native-block-store')
 
     // Add Google Sign-In dependencies
     implementation 'com.google.android.gms:play-services-auth:20.7.0'

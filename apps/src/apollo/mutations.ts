@@ -18,6 +18,7 @@ export const WEB3AUTH_LOGIN = gql`
       refreshToken
       needsOptIn
       optInTransactions
+      isKeylessMigrated
       user {
         id
         email

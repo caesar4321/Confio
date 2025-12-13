@@ -17,7 +17,6 @@ import {
   StatusBar,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
-import InAppBrowser from 'react-native-inappbrowser-reborn';
 import { Linking } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -328,45 +327,9 @@ const TopUpScreen = () => {
       console.log(checkoutUrl);
       console.log('==============================');
 
-      // Simplify options to minimize conflicts
-      const options = {
-        // iOS Properties
-        dismissButtonStyle: 'done',
-        preferredBarTintColor: '#72D9BC',
-        preferredControlTintColor: 'white',
-        readerMode: false,
-        animated: true,
-        modalPresentationStyle: 'fullScreen',
-        modalTransitionStyle: 'coverVertical',
-        modalEnabled: true,
-        enableBarCollapsing: false,
-        // Android Properties
-        showTitle: true,
-        toolbarColor: '#72D9BC',
-        secondaryToolbarColor: 'white',
-        navigationBarColor: 'white',
-        navigationBarDividerColor: 'white',
-        enableUrlBarHiding: true,
-        enableDefaultShare: false,
-        forceCloseOnRedirection: false,
-        // Specify full options to be safe
-        hasBackButton: true,
-        browserPackage: undefined,
-        showInRecents: false
-      };
+      // Open directly in external browser
+      await Linking.openURL(checkoutUrl);
 
-      try {
-        if (await InAppBrowser.isAvailable()) {
-          await InAppBrowser.open(checkoutUrl, options);
-        } else {
-          console.warn('[TopUp] InAppBrowser not available, using Linking');
-          await Linking.openURL(checkoutUrl);
-        }
-      } catch (browserErr: any) {
-        console.warn('InAppBrowser open failed, falling back to Linking', browserErr);
-        Alert.alert('Aviso', `No pudimos abrir el navegador interno (${browserErr.message || 'Error desconocido'}). Intentaremos abrir el navegador externo.`);
-        await Linking.openURL(checkoutUrl);
-      }
     } catch (err: any) {
       console.error('Guardarian top-up error', err);
       const errorMessage = translateGuardarianError(err?.message || 'Error desconocido');

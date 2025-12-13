@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, Animated, Dimensions, Easing, ActivityIndicator, Alert, Platform, ScrollView } from 'react-native';
 import LoadingOverlay from '../components/LoadingOverlay';
+import { BackupConsentModal } from '../components/BackupConsentModal';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { appleAuth } from '@invertase/react-native-apple-authentication';
 import authService, { AccountDeactivatedError } from '../services/authService';
@@ -30,6 +31,7 @@ export const AuthScreen = () => {
   const { handleSuccessfulLogin } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
+  const [showBackupModal, setShowBackupModal] = useState(false);
   const rotateAnim = useRef(new Animated.Value(0)).current;
 
   // Initialize auth service when component mounts
@@ -61,9 +63,19 @@ export const AuthScreen = () => {
     }
   }, [isLoading]);
 
-  const handleGoogleSignIn = async () => {
+  // Google Sign-In Flow
+  // 1. Triggered by button
+  const handleGoogleSignInPress = () => {
+    // Show Backup Modal for ALL platforms (iOS & Android)
+    // allowing users to opt-in to Drive Roaming across ecosystems.
+    setShowBackupModal(true);
+  };
+
+  // 2. Confirmed or Cancelled from Modal (or called directly on iOS)
+  const proceedWithGoogleSignIn = async (enableDrive: boolean) => {
+    setShowBackupModal(false);
     try {
-      console.log('AuthScreen - Starting Google Sign-In...');
+      console.log(`AuthScreen - Starting Google Sign-In (Drive: ${enableDrive})...`);
 
       // Don't show loading during Google modal
       const result = await authService.signInWithGoogle((message) => {
@@ -72,7 +84,7 @@ export const AuthScreen = () => {
           setIsLoading(true);
         }
         setLoadingMessage(message);
-      });
+      }, enableDrive); // Pass preference to service
 
       // Ensure loading is shown if not already
       if (!isLoading) {
@@ -222,7 +234,7 @@ export const AuthScreen = () => {
         <View style={styles.buttonGroup}>
           <TouchableOpacity
             style={styles.googleButton}
-            onPress={handleGoogleSignIn}
+            onPress={handleGoogleSignInPress}
           >
             <GoogleLogo width={24} height={24} style={{ marginRight: 8 }} />
             <Text style={styles.googleButtonText}>Continuar con Google</Text>
@@ -248,6 +260,12 @@ export const AuthScreen = () => {
       </View>
 
       <LoadingOverlay visible={isLoading} message={loadingMessage} />
+
+      <BackupConsentModal
+        visible={showBackupModal}
+        onContinue={() => proceedWithGoogleSignIn(true)} // Drive Enabled
+        onCancel={() => proceedWithGoogleSignIn(false)} // Drive Disabled (Local Only)
+      />
 
 
     </View>

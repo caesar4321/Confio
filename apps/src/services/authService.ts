@@ -100,14 +100,41 @@ export class AuthService {
     }
   }
 
-  private async configureGoogleSignIn() {
+  private async configureGoogleSignIn(enableDrive: boolean = false) {
+    // perfLog is not defined here, it's defined within signInWithGoogle.
+    // If perfLog is needed here, it should be passed as an argument or defined globally.
+    // For now, removing the perfLog call as it would cause a lint error.
+    // perfLog('Before GoogleSignin.configure()');
     try {
+      // Build scopes dynamically based on user backup preference
+      // NOTE: post_refund_status scope was removed as it was causing ApiException 12500
+      const scopes = [
+        'email',
+        'profile',
+      ];
+
+      // Only add Drive scope if user consented to backup
+      if (enableDrive) {
+        scopes.push('https://www.googleapis.com/auth/drive.appdata');
+        console.log('[AuthService] Drive scope ADDED to configuration');
+      } else {
+        console.log('[AuthService] Drive scope SKIPPED (user rejected backup)');
+      }
+
       const clientIds = GOOGLE_CLIENT_IDS[__DEV__ ? 'development' : 'production'];
-      const config = {
-        webClientId: clientIds.web,
+
+      const config: any = {
+        scopes: scopes,
+        webClientId: clientIds.web, // ALWAYS use the Web Client ID for Backend Verification
         offlineAccess: true,
-        scopes: ['profile', 'email']
+        forceCodeForRefreshToken: true,
       };
+
+      // Only add optional params if they are defined/needed
+      // Empty strings can cause 'A non-recoverable sign in failure occurred' (12500) on Android
+      // config.hostedDomain = ''; 
+      // config.loginHint = '';
+      // config.accountName = '';
 
       await GoogleSignin.configure(config);
       console.log('Google Sign-In configuration successful');
@@ -117,28 +144,58 @@ export class AuthService {
     }
   }
 
-  async signInWithGoogle(onProgress?: (message: string) => void) {
+  /**
+   * Check if the user has granted Google Drive backup permission (scope).
+   */
+  async checkDriveBackupEnabled(): Promise<boolean> {
+    try {
+      const tokens = await GoogleSignin.getTokens();
+      // On Android, scopes might not be directly inspectable from tokens in all versions,
+      // but let's check current user scopes if available or assume based on successful configure.
+      // A more reliable way is to check the currentUser object from GoogleSignin
+      const currentUser = await GoogleSignin.getCurrentUser();
+      if (currentUser && currentUser.scopes) {
+        return currentUser.scopes.includes('https://www.googleapis.com/auth/drive.appdata');
+      }
+      return false;
+    } catch (error) {
+      console.warn('[AuthService] Failed to check Drive status', error);
+      return false;
+    }
+  }
+
+  /**
+   * Trigger the Google Sign-In flow specifically to enable Drive backup (add scope).
+   */
+  async enableDriveBackup(): Promise<boolean> {
+    try {
+      // Re-run sign in process with enableDrive=true
+      // This will trigger the consent screen for the new scope
+      await this.signInWithGoogle(undefined, true);
+      return true;
+    } catch (error) {
+      console.error('[AuthService] Failed to enable Drive backup:', error);
+      return false;
+    }
+  }
+
+  async signInWithGoogle(onProgress?: (message: string) => void, enableDrive: boolean = true) {
     const startTime = Date.now();
     const perfLog = (step: string) => {
       console.log(`[PERF] ${step}: ${Date.now() - startTime}ms`);
     };
 
     try {
-      console.log('Starting Google Sign-In process...');
+      console.log(`Starting Google Sign-In process (Drive Scope: ${enableDrive})...`);
+
+      // Configure with appropriate scopes based on user's backup choice
+      // NOTE: This is safe now that we removed the post_refund_status scope
+      await this.configureGoogleSignIn(enableDrive);
+
       perfLog('Start');
       // Don't show progress during Google modal
 
-      // Sign out first to force account selection
-      try {
-        // Check if the method exists before calling (compatibility issue)
-        if (GoogleSignin.signOut) {
-          await GoogleSignin.signOut();
-          console.log('Signed out from Google to force account selection');
-        }
-      } catch (error) {
-        // Ignore sign-out errors - not critical
-        console.log('Sign-out skipped:', error.message);
-      }
+
 
       // 1) Sign in with Google first
       console.log('Checking Play Services...');
@@ -161,10 +218,17 @@ export class AuthService {
       perfLog('Google Sign-In complete');
       // NOW show loading - Google modal is closed
       onProgress?.('Verificando tu cuenta...');
-      console.log('Getting Google ID token...');
-      const { idToken } = await GoogleSignin.getTokens();
-      console.log('Got ID token:', idToken ? 'Token received' : 'No token');
-      perfLog('Got Google ID token');
+      console.log('Getting Google ID/Access tokens...');
+      const { idToken, accessToken } = await GoogleSignin.getTokens();
+      console.log('Got tokens:', {
+        hasIdToken: !!idToken,
+        hasAccessToken: !!accessToken
+      });
+      perfLog('Got Google ID/Access token');
+
+      // Use the accessToken for Drive sync if user chose "Accept"
+      const driveAccessToken = enableDrive ? accessToken : undefined;
+      console.log(`[AuthService] enableDrive=${enableDrive}, driveAccessToken=${driveAccessToken ? 'obtained' : 'skipped'}`);
 
       // Debug: Check what's in the userInfo from Google Sign-In
       console.log('[AuthService] Google Sign-In userInfo - parsed:', {
@@ -208,22 +272,43 @@ export class AuthService {
         // Continue without fingerprint rather than failing authentication
       }
 
-      // 5) Generate Algorand wallet first
+      // 5) Generate/Sync Algorand wallet (V2 Master Secret)
+      // CRITICAL: This ensures roaming works. We fetch from Drive (Android) or Keychain (iOS).
+      console.log('Ensuring Master Secret exists (Syncing if needed)...');
+      perfLog('Start Master Secret Sync');
+
+      const googleSubject = userInfo?.data?.user?.id;
+      if (!googleSubject) {
+        throw new Error('No OAuth subject found in Google sign-in response.');
+      }
+
+      try {
+        const { getOrCreateMasterSecret } = await import('./secureDeterministicWallet');
+        // Inject Access Token for Drive Sync (Android AND iOS for roaming)
+        // iOS will first check Keychain, but if empty, it needs this token to check Drive.
+        const tokenForDrive = enableDrive ? driveAccessToken : undefined;
+
+        console.log(`[AuthService] Calling getOrCreateMasterSecret with:`, {
+          platform: Platform.OS,
+          enableDrive,
+          hasAccessToken: !!driveAccessToken,
+          tokenForDriveProvided: !!tokenForDrive
+        });
+
+        await getOrCreateMasterSecret(googleSubject, tokenForDrive || undefined);
+        console.log('Master Secret synced/verified successfully.');
+      } catch (walletErr) {
+        console.error('Failed to sync Master Secret:', walletErr);
+        // We do NOT block login here, but wallet creation might fail later.
+        // Ideally we should block if critical, but for now log.
+      }
+      perfLog('End Master Secret Sync');
+
       console.log('Store OAuth subject for later wallet derivation');
       perfLog('Store OAuth subject for later wallet derivation');
 
       // Use OAuth subject directly from Google Sign-In response
-      // The structure is userInfo.data.user.id based on the actual response
-      const googleSubject = userInfo?.data?.user?.id;
-      if (!googleSubject) {
-        console.error('Failed to get Google subject. userInfo structure:', {
-          hasData: !!userInfo?.data,
-          hasUser: !!userInfo?.data?.user,
-          hasUserId: !!userInfo?.data?.user?.id,
-          fullUserInfo: JSON.stringify(userInfo)
-        });
-        throw new Error('No OAuth subject found in Google sign-in response. Check console for userInfo structure.');
-      }
+      // (googleSubject is already retrieved and verified above)
 
       // Store OAuth subject securely for future account switching
       const { oauthStorage } = await import('./oauthStorageService');
@@ -253,6 +338,30 @@ export class AuthService {
         }
         throw new Error(backendError);
       }
+
+      // ----------------------------------------------------------------------
+      // NATIVE V2 CHECK:
+      // If the backend says this user is V2 Native (e.g. New User or Migrated),
+      // we MUST ensure the V2 Master Secret exists locally.
+      // If it's missing (New Device / New User), we generate/restore it here
+      // so that deriveWalletV2 is used instead of Legacy V1 fallback.
+      // ----------------------------------------------------------------------
+      if (authData.isKeylessMigrated) {
+        console.log('[AuthService] ⚡️ User is V2 Native (Flag=True). Verifying Master Secret...');
+        try {
+          const { getOrCreateMasterSecret } = await import('./secureDeterministicWallet');
+          // This call will Retrieve OR Generate (if missing).
+          // For NEW users -> Generates Random.
+          // For RESTORING users -> Checks storage (if missing -> Generates NEW, handling backup loss scenario by resetting).
+          // Now passing googleSubject to namespace the secret properly
+          await getOrCreateMasterSecret(googleSubject);
+          console.log('[AuthService] ✅ V2 Master Secret verified/created.');
+        } catch (v2Err) {
+          console.error('[AuthService] ⚠️ Failed to verify V2 Master Secret:', v2Err);
+          // We continue, but createOrRestoreWallet might fall back to V1 or fail.
+        }
+      }
+      // ----------------------------------------------------------------------
 
       // Store Django JWT tokens for authenticated requests using Keychain (store BEFORE any further GraphQL)
       if (authData.accessToken) {
@@ -831,6 +940,16 @@ export class AuthService {
     } catch (error) {
       console.error('❌ Error storing Algorand address:', error);
     }
+  }
+
+  /**
+   * Force update the local stored Algorand address for synchronization with backend.
+   */
+  public async forceUpdateLocalAlgorandAddress(address: string, accountContext: AccountContext): Promise<void> {
+    await this.storeAlgorandAddress(address, accountContext);
+    const { DeviceEventEmitter } = require('react-native');
+    DeviceEventEmitter.emit('ALGORAND_ADDRESS_UPDATED', address);
+    console.log('📢 Emitted ALGORAND_ADDRESS_UPDATED event');
   }
 
   private async getStoredAlgorandAddress(accountContext: AccountContext): Promise<string | null> {

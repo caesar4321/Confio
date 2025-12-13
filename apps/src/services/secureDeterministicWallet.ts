@@ -80,10 +80,10 @@ function makeScope(
 function makeCacheKey(accountType: string, accountIndex: number, businessId?: string): { server: string; username: string } {
   // Use a consistent server name like other services in the codebase
   // Create a unique identifier based on account context
-  const accountId = businessId 
+  const accountId = businessId
     ? `${accountType}_${businessId}_${accountIndex}`
     : `${accountType}_${accountIndex}`;
-  
+
   return {
     server: 'wallet.confio.app',
     username: accountId.replace(/[^a-zA-Z0-9_]/g, '_')
@@ -129,13 +129,13 @@ function deriveKEK(
   const x_c = sha256(utf8ToBytes(
     `${canonicalize(iss)}|${sub}|${canonicalize(aud)}`
   ));
-  
+
   // Salt includes server pepper for 2-of-2 security
   const salt = sha256(utf8ToBytes(`${CONFIO_DERIVATION_SPEC.kekSalt}|${serverPepper ?? ''}`));
-  
+
   // Info includes scope for domain separation
   const info = utf8ToBytes(`${CONFIO_DERIVATION_SPEC.kekInfo}|${scope}`);
-  
+
   return hkdf(sha256, x_c, salt, info, 32);
 }
 
@@ -150,7 +150,7 @@ function wrapSeed(
 ): string {
   const nonce = randomBytes(24);
   const ciphertext = nacl.secretbox(seed32, nonce, kek32);
-  
+
   const blob = {
     v: '1',
     alg: 'xsalsa20poly1305',
@@ -163,7 +163,7 @@ function wrapSeed(
     scope: meta?.scope || null,
     sf: meta?.saltFingerprint || null
   };
-  
+
   // Encode to base64 without relying on Buffer
   return bytesToBase64(stringToUtf8Bytes(JSON.stringify(blob)));
 }
@@ -171,9 +171,9 @@ function wrapSeed(
 /**
  * Parse the encrypted blob to get metadata (without decrypting)
  */
-function parseSeedBlob(blobB64: string): { 
-  pepperVersion: number; 
-  nonce: string; 
+function parseSeedBlob(blobB64: string): {
+  pepperVersion: number;
+  nonce: string;
   ct: string;
   createdAt?: string;
   dp?: string | null;
@@ -200,12 +200,12 @@ function unwrapSeed(blobB64: string, kek32: Uint8Array): Uint8Array {
     const blob = parseSeedBlob(blobB64);
     const nonce = hexToBytes(blob.nonce);
     const ciphertext = hexToBytes(blob.ct);
-    
+
     const seed = nacl.secretbox.open(ciphertext, nonce, kek32);
     if (!seed) {
       throw new Error('Failed to decrypt seed - invalid KEK or corrupted data');
     }
-    
+
     return seed;
   } catch (error) {
     // Don't log as error since this is expected when cache is invalid
@@ -230,11 +230,11 @@ export function generateClientSalt(
   // Canonicalize issuer and audience for consistency
   const canonicalIssuer = canonicalize(issuer);
   const canonicalAudience = canonicalize(audience);
-  
+
   // Use the exact formula from README.md with underscore separators
   // Special handling: if no business_id, we need to ensure only one underscore between account_type and account_index
   let saltInput: string;
-  
+
   if (businessId) {
     // Business account: issuer_subject_audience_account_type_business_id_account_index
     saltInput = `${canonicalIssuer}_${subject}_${canonicalAudience}_${accountType}_${businessId}_${accountIndex}`;
@@ -243,7 +243,7 @@ export function generateClientSalt(
     // (no double underscore where business_id would be)
     saltInput = `${canonicalIssuer}_${subject}_${canonicalAudience}_${accountType}_${accountIndex}`;
   }
-  
+
   const saltBytes = sha256(utf8ToBytes(saltInput));
   return bytesToHex(saltBytes);
 }
@@ -259,11 +259,11 @@ export function generateClientSalt(
  */
 export function deriveDeterministicAlgorandKey(opts: DeriveWalletOptions): DerivedWallet {
   const { clientSalt, derivationPepper, provider, accountType, accountIndex, businessId } = opts;
-  
+
   // The clientSalt already contains the hash of the OAuth claims
   // It was generated using generateClientSalt with the real OAuth issuer, subject, and audience
   // So we just need to use it directly in our key derivation
-  
+
 
   // Create input key material
   // Since clientSalt already contains the hash of OAuth claims, we'll use it as part of the IKM
@@ -305,7 +305,7 @@ export function deriveDeterministicAlgorandKey(opts: DeriveWalletOptions): Deriv
 
   // Generate ed25519 keypair for Algorand
   const keyPair = nacl.sign.keyPair.fromSeed(seed32);
-  
+
   // Encode Algorand address from public key (runtime require to avoid RN issues)
   const algosdk = require('algosdk');
   const address = algosdk.encodeAddress(keyPair.publicKey);
@@ -313,7 +313,362 @@ export function deriveDeterministicAlgorandKey(opts: DeriveWalletOptions): Deriv
   // Debug: show derived address summary
   console.log('[Derive][DEBUG] Derived Algorand address:', address);
 
-  // Return the derived wallet
+  return {
+    address,
+    privSeedHex: bytesToHex(seed32),
+    publicKey: keyPair.publicKey
+  };
+}
+
+// ============================================================================
+// V2 CLIENT SECRET MANAGEMENT
+// CRITICAL: Random ONCE + Persist + NEVER Overwrite
+// ============================================================================
+
+// Mutex to prevent race conditions during secret creation
+let v2SecretMutex: Promise<void> = Promise.resolve();
+
+/**
+ * Generate a random V2 client secret using CSPRNG.
+ * INTERNAL USE ONLY
+ */
+function generateRandomSecret(): Uint8Array {
+  return randomBytes(32);
+}
+
+/**
+ * Get-or-Create Master Secret.
+ * 
+ * ALIAS: confio_master_secret_{hash(userId)}
+ * 
+ * LOGIC:
+ * 1. PERSISTENCE: Tries to read existing namespaced secret.
+ * 2. MIGRATION: If missing, checks legacy global key. If found, copies it to namespaced key.
+ * 3. GENERATION: If neither, generates 32 bytes of CSPRNG entropy (Random).
+ * 4. SAFETY: Read-after-Write verification ensures persistence.
+ * 
+ * @param userSub - Unique user identifier (OAuth Subject) to namespace the secret
+ * @returns The master secret (32 bytes)
+ */
+export async function getOrCreateMasterSecret(userSub: string, accessToken?: string): Promise<Uint8Array> {
+  if (!userSub) {
+    throw new Error('[MasterSecret] User Sub (OAuth ID) is required to secure the master secret.');
+  }
+
+  // Namespace the key for multi-user safety
+  const safeSub = bytesToHex(sha256(utf8ToBytes(userSub)));
+  // ROTATION: Using 'v2' suffix to obtain the CLEAN, ISOLATED key (ignoring previous corrupted state)
+  const alias = `confio_master_secret_v2_${safeSub}`;
+  const driveFilename = `confio_master_secret_v2_${safeSub}.json`; // JSON for drive
+  const legacyAlias = 'confio_master_secret';
+
+  console.log(`[MasterSecret] UserHash=${safeSub.substring(0, 8)}... Alias=${alias}`);
+
+  // Mutex: wait for any in-progress creation to avoid race conditions
+  await v2SecretMutex;
+
+  let resolveCurrentMutex: () => void;
+  v2SecretMutex = new Promise(resolve => { resolveCurrentMutex = resolve; });
+
+  try {
+    const { credentialStorage } = await import('./credentialStorage');
+    const { googleDriveStorage } = await import('./googleDriveStorage');
+    const AES = require('crypto-js/aes');
+    const Utf8 = require('crypto-js/enc-utf8');
+
+    // SECURITY: App-Side Encryption Key (Obfuscation Layer)
+    // Prevents "Casual Snooping" or accidental modification in Drive UI.
+    // NOTE: This is "Security by Obfuscation" as the key is in the app, but protects against server-side peeking.
+    const APP_BACKUP_KEY = 'ConfioWallet_Backup_Key_v1_DoNotShare';
+
+    // HEADER: Warning message strictly for human readers opening the file in Drive UI
+    const DRIVE_SECURITY_HEADER = 'ADVERTENCIA DE SEGURIDAD: NUNCA COMPARTAS ESTA CLAVE CON NADIE, NI SIQUIERA CON SOPORTE. CONFÍO NUNCA TE PEDIRÁ ESTA CLAVE.';
+
+    // =================================================================================
+    // HYBRID CLOUD LOGIC (Android & iOS - Roaming/Multi-User)
+    // Master Source: Google Drive (Encrypted)
+    // Slave Source: Local Storage (BlockStore/Keychain)
+    // =================================================================================
+    if (accessToken) {
+      console.log('[MasterSecret] AccessToken detected. Attempting Drive Sync...');
+      try {
+        // 1. Try to fetch from Drive (The Master Source)
+        const files = await googleDriveStorage.listFiles(accessToken, driveFilename);
+
+        if (files.length > 0) {
+          console.log('[MasterSecret] Found backup in Drive! Downloading...');
+          const fileId = files[0].id;
+          const encryptedContent = await googleDriveStorage.downloadFile(accessToken, fileId);
+
+          if (encryptedContent && encryptedContent.length > 10) {
+            try {
+              // DECRYPT: App Key
+              console.log('[MasterSecret] Decrypting backup...');
+
+              // PARSE: Strip header if present (Take the last non-empty line)
+              // The file might contain the Security Warning on the first line.
+              let contentToDecrypt = encryptedContent.trim();
+              if (contentToDecrypt.includes('ADVERTENCIA') || contentToDecrypt.includes('\n')) {
+                const lines = contentToDecrypt.split('\n');
+                // The secret is the Encrypted Base64 string, usually the last line.
+                contentToDecrypt = lines[lines.length - 1].trim();
+              }
+
+              const bytes = AES.decrypt(contentToDecrypt, APP_BACKUP_KEY);
+              const originalSecretBase64 = bytes.toString(Utf8);
+
+              if (!originalSecretBase64) throw new Error('Decryption resulted in empty string');
+
+              const secretBytes = base64ToBytes(originalSecretBase64);
+
+              // Sync DOWN to Local Cache
+              console.log('[MasterSecret] Syncing Drive (Decrypted) -> Local Storage...');
+              await credentialStorage.storeSecret(alias, secretBytes);
+              return secretBytes;
+            } catch (decryptErr) {
+              console.error('[MasterSecret] Decryption Failed! Key mismatch or corrupted file.', decryptErr);
+              // If decryption fails, we CANNOT use this file. We must fallback to local or user is stuck.
+              // Dangerous to overwrite local if Drive is corrupt. 
+              // We fall through to check local.
+            }
+          }
+        } else {
+          console.log('[MasterSecret] No backup in Drive.');
+        }
+
+        // 2. If not in Drive (or Decrypt Failed), check Local Cache
+        // If found locally, we should UPLOAD it to Drive (Sync UP)
+        const localSecret = await credentialStorage.retrieveSecret(alias);
+        if (localSecret) {
+          console.log('[MasterSecret] Found Local Secret. Uploading to Drive (Sync UP / Encrypted)...');
+          const secretBase64 = bytesToBase64(localSecret);
+
+          // ENCRYPT: App Key
+          const encryptedBody = AES.encrypt(secretBase64, APP_BACKUP_KEY).toString();
+          // HEADER: Add warning for humans
+          const finalContent = `${DRIVE_SECURITY_HEADER}\n${encryptedBody}`;
+
+          await googleDriveStorage.createFile(accessToken, driveFilename, finalContent);
+          console.log('[MasterSecret] Sync UP Complete (Encrypted).');
+          return localSecret;
+        }
+
+      } catch (driveErr) {
+        console.warn('[MasterSecret] Drive Sync Failed (Network/Auth):', driveErr);
+        // Fallthrough to Local Logic (Offline Mode)
+      }
+    }
+    // =================================================================================
+
+    // Step 1: Try to retrieve existing NAMESPACED secret FIRST (Local)
+    const existingSecret = await credentialStorage.retrieveSecret(alias);
+    if (existingSecret) {
+      console.log(`[MasterSecret] Found existing namespaced secret (Length=${existingSecret.length})`);
+      // If we are here and have accessToken, it means Sync UP might have failed previously or Drive was unreachable.
+      // We could try async background upload here, but for now just return.
+      return existingSecret;
+    } else {
+      console.log('[MasterSecret] No existing secret found at alias:', alias);
+    }
+
+    // Step 1.5: Check LEGACY global secret (Migration Path)
+    // If we have a legacy secret but no namespaced one, we migrate it.
+    console.log('[MasterSecret] Namespaced secret missing. Checking legacy global secret...');
+    const legacySecret = await credentialStorage.retrieveSecret(legacyAlias);
+
+    // Only accept 32-byte secrets. This filters out tombstones or corrupted data.
+    if (legacySecret && legacySecret.length === 32) {
+      console.log('[MasterSecret] Found legacy global secret. Migrating to namespaced key...');
+      // Copy legacy secret to new alias
+      await credentialStorage.storeSecret(alias, legacySecret);
+
+      // Verify persistence of migration
+      const verifiedMigration = await credentialStorage.retrieveSecret(alias);
+      if (!verifiedMigration) {
+        throw new Error('[MasterSecret] Migration failed: Could not read back migrated secret.');
+      }
+
+      // CRITICAL: Poison AND Delete legacy secret.
+      // 1. Overwrite with tombstone to ensure even if delete fails, next read gets invalid data.
+      await credentialStorage.storeSecret(legacyAlias, utf8ToBytes('MIGRATED_TOMBSTONE'));
+      // 2. Delete it.
+      await credentialStorage.deleteSecret(legacyAlias);
+      console.log('[MasterSecret] Legacy global secret POISONED and DELETED from shared storage.');
+
+      return legacySecret;
+    } else if (legacySecret) {
+      console.warn('[MasterSecret] Found legacy secret but invalid length (Tombstone?). Ignoring.');
+    }
+
+    // Step 2: No existing secret (Namespace or Legacy) - generate new random one
+    console.log('[MasterSecret] No existing secret. Generating NEW random CSPRNG secret...');
+    const newSecret = generateRandomSecret();
+
+    // Step 3: Store it
+    await credentialStorage.storeSecret(alias, newSecret);
+
+    // HYBRID CLOUD SYNC: New Secret Created -> Upload to Drive
+    // (Encrypted with App Key)
+    if (accessToken) {
+      try {
+        console.log('[MasterSecret] New secret generated. Uploading to Drive (Sync UP / Encrypted)...');
+        const secretBase64 = bytesToBase64(newSecret);
+
+        // ENCRYPT: App Key
+        const encryptedBody = AES.encrypt(secretBase64, APP_BACKUP_KEY).toString();
+        // HEADER: Add warning for humans
+        const finalContent = `${DRIVE_SECURITY_HEADER}\n${encryptedBody}`;
+
+        await googleDriveStorage.createFile(accessToken, driveFilename, finalContent);
+        console.log('[MasterSecret] Drive Upload Complete (Encrypted).');
+      } catch (upErr) {
+        console.warn('[MasterSecret] Failed to upload new secret to Drive:', upErr);
+        // Non-fatal: Local storage succeeded, so we continue. Future launches will retry Sync UP.
+      }
+    }
+
+    // Step 4: Verify read-after-write (Critical Safety Guard)
+    const verifySecret = await credentialStorage.retrieveSecret(alias);
+
+    if (!verifySecret) {
+      throw new Error('[MasterSecret] CRITICAL: Persistence failed. Read returned null after write.');
+    }
+
+    // Verify bytes match exactly
+    if (verifySecret.length !== newSecret.length) {
+      throw new Error('[MasterSecret] CRITICAL: Read-after-write length mismatch!');
+    }
+    for (let i = 0; i < newSecret.length; i++) {
+      if (verifySecret[i] !== newSecret[i]) {
+        throw new Error('[MasterSecret] CRITICAL: Read-after-write byte mismatch!');
+      }
+    }
+
+    console.log('[MasterSecret] New secret generated, stored, and verified.');
+
+    // CLEANUP: Attempt to remove the corrupted/deprecated V1 namespaced key if it exists
+    // This cleans up the "Shared Key" artifacts from previous failed migration attempts.
+    try {
+      const corruptedV1Key = `confio_master_secret_${safeSub}`;
+      await credentialStorage.deleteSecret(corruptedV1Key);
+      // Also try to delete the tombstone if it exists on legacy (optional, but keeps things tidy)
+      // await credentialStorage.deleteSecret(legacyAlias); // Already handled above
+    } catch (e) {
+      // Ignore cleanup errors
+    }
+
+    return newSecret;
+
+  } finally {
+    resolveCurrentMutex!();
+  }
+}
+
+/**
+ * Legacy aliases - Deprecated
+ */
+export async function retrieveClientSecret(): Promise<Uint8Array | null> {
+  console.warn('[V2] retrieveClientSecret is deprecated. Use getOrCreateMasterSecret()');
+  return null;
+}
+
+export async function storeClientSecret(secret: Uint8Array): Promise<void> {
+  console.warn('[V2] storeClientSecret is deprecated. Use getOrCreateMasterSecret()');
+}
+
+export async function generateClientSecret(): Promise<Uint8Array> {
+  throw new Error('[V2] generateClientSecret is deprecated. Use getOrCreateMasterSecret()');
+}
+
+export async function getOrCreateSecret(): Promise<Uint8Array> {
+  throw new Error('[V2] getOrCreateSecret is deprecated. Use getOrCreateMasterSecret()');
+}
+
+/**
+ * DEV TOOL: Enumerate possible old aliases to search for lost secrets.
+ * This checks various historical key names that might have been used.
+ */
+export async function enumerateV2Aliases(): Promise<{ alias: string; found: boolean; hasValue: boolean }[]> {
+  const { credentialStorage } = await import('./credentialStorage');
+
+  // Historical aliases that might have stored secrets
+  const possibleAliases = [
+    'confio_v2_secret',
+    'v2_client_secret',
+    'client_secret',
+    'confio_secret',
+    'wallet_secret',
+    'CONFIO_V2_SECRET',
+  ];
+
+  const results: { alias: string; found: boolean; hasValue: boolean }[] = [];
+
+  for (const alias of possibleAliases) {
+    try {
+      // Temporarily override the key
+      const secret = await credentialStorage.retrieveSecret(alias);
+      results.push({
+        alias,
+        found: true,
+        hasValue: secret !== null && secret.length > 0
+      });
+    } catch (e) {
+      results.push({
+        alias,
+        found: false,
+        hasValue: false
+      });
+    }
+  }
+
+  console.log('[V2AliasEnum] Results:', results);
+  return results;
+}
+
+/**
+ * Derive V2 Wallet from Client Secret
+ * Key = HKDF(ClientSecret, Salt=UserContext)
+ */
+export function deriveWalletV2(
+  clientSecret: Uint8Array,
+  opts: {
+    // Identity context is ignored for V2 derivation (relies on MasterSecret uniqueness)
+    iss?: string,
+    sub?: string,
+    aud?: string,
+    accountType: string,
+    accountIndex: number,
+    businessId?: string
+  }
+): DerivedWallet {
+  // Master Secret is already unique per-user (Random ONCE + Persist)
+  // We use Info/Salt for domain separation between accounts (Personal vs Business)
+
+  // Create salt from account context
+  let saltInput: string;
+  if (opts.businessId) {
+    saltInput = `confio_v2_salt_${opts.accountType}_${opts.businessId}_${opts.accountIndex}`;
+  } else {
+    saltInput = `confio_v2_salt_${opts.accountType}_${opts.accountIndex}`;
+  }
+  const salt = sha256(utf8ToBytes(saltInput));
+
+  // IKM = Client Secret (Master Secret)
+  const ikm = clientSecret;
+
+  // Info = Domain Separation
+  const info = utf8ToBytes(`confio|v2|derived|${saltInput}`);
+
+  // Derive Seed (HKDF-SHA256)
+  const seed32 = hkdf(sha256, ikm, salt, info, 32);
+
+  // Generate Keypair
+  const keyPair = nacl.sign.keyPair.fromSeed(seed32);
+  const algosdk = require('algosdk');
+  const address = algosdk.encodeAddress(keyPair.publicKey);
+
+  console.log('[DeriveV2] Wallet derived:', address);
+
   return {
     address,
     privSeedHex: bytesToHex(seed32),
@@ -333,9 +688,9 @@ export class SecureDeterministicWalletService {
   // Peppers are per-account. Never cache globally across contexts.
   private cachedDerivationPepperByContext: Map<string, string> = new Map();
   private cachedKekPepperByCtxAndVersion: Map<string, string> = new Map();
-  
-  private constructor() {}
-  
+
+  private constructor() { }
+
   public static getInstance(): SecureDeterministicWalletService {
     if (!SecureDeterministicWalletService.instance) {
       SecureDeterministicWalletService.instance = new SecureDeterministicWalletService();
@@ -382,8 +737,8 @@ export class SecureDeterministicWalletService {
     }
   }
 
-  async getKekPepper(requestVersion?: number, opts?: { accountType?: string; accountIndex?: number; businessId?: string }): Promise<{ 
-    pepper: string | undefined; 
+  async getKekPepper(requestVersion?: number, opts?: { accountType?: string; accountIndex?: number; businessId?: string }): Promise<{
+    pepper: string | undefined;
     version: number;
     isRotated?: boolean;
     gracePeriodUntil?: string;
@@ -432,6 +787,35 @@ export class SecureDeterministicWalletService {
   }
 
   /**
+   * Explicitly restore a Legacy V1 wallet.
+   * This forces the V1 derivation logic (HKDF using Server Pepper + Client Salt).
+   * Used during migration to access old funds.
+   */
+  async restoreLegacyV1Wallet(
+    iss: string,
+    sub: string,
+    aud: string,
+    provider: 'google' | 'apple',
+    accountType: 'personal' | 'business',
+    accountIndex: number,
+    businessId?: string
+  ): Promise<DerivedWallet> {
+    console.log('[WalletService] Explicitly restoring Legacy V1 Wallet');
+    const { pepper: derivationPepper } = await this.getDerivationPepper({ accountType, accountIndex, businessId });
+    const salt = generateClientSalt(iss, sub, aud, accountType, accountIndex, businessId);
+
+    // Explicitly use V1 logic
+    return deriveDeterministicAlgorandKey({
+      clientSalt: salt,
+      derivationPepper: derivationPepper || '',
+      provider,
+      accountType,
+      accountIndex,
+      businessId
+    });
+  }
+
+  /**
    * Get or prompt for recovery secret
    * This allows wallet recovery on new devices
    */
@@ -441,11 +825,11 @@ export class SecureDeterministicWalletService {
       const credentials = await Keychain.getInternetCredentials(
         `wallet.recovery.${firebaseUid}`
       );
-      
+
       if (credentials && credentials.password) {
         return credentials.password;
       }
-      
+
       // For new users, we could prompt them to set one
       // Or use a default (less secure but simpler UX)
       return undefined;
@@ -473,26 +857,68 @@ export class SecureDeterministicWalletService {
     const perfLog = (step: string) => {
       console.log(`[WALLET-PERF] ${step}: ${Date.now() - startTime}ms`);
     };
-    
+
     try {
       console.log(`Creating/restoring ${provider} wallet for account ${accountType}_${accountIndex}`);
       perfLog('Start');
-      
+
       // Use the OAuth subject for deterministic derivation
       const scope = makeScope(provider, sub, accountType, accountIndex, businessId);
       const cacheKey = makeCacheKey(accountType, accountIndex, businessId);
-      
+
+      // ----------------------------------------------------------------------
+      // V2 MIGRATION CHECK:
+      // If a V2 Master Secret exists, use it immediately (Random ONCE + Persist).
+      // This bypasses all legacy V1 overhead (Peppers, KEKs, Caching).
+      // ----------------------------------------------------------------------
+      try {
+        const { credentialStorage } = await import('./credentialStorage');
+
+        // Namespace the key by User ID (sub) to support multi-user devices
+        // Use SHA256 of subject for privacy and safe key characters
+        const safeSub = bytesToHex(sha256(utf8ToBytes(sub)));
+        // ROTATION: Using 'v2' suffix to obtain the CLEAN, ISOLATED key (ignoring previous corrupted state)
+        const namespacedKey = `confio_master_secret_v2_${safeSub}`;
+
+        const masterSecret = await credentialStorage.retrieveSecret(namespacedKey);
+
+        // NOTE: We do NOT fallback to legacy global key here. 
+        // Migration from Legacy -> V2 Namespaced is handled exclusively by 'getOrCreateMasterSecret'.
+        // If masterSecret is missing here, we fall back to V1 (Pepper/Salt) logic below.
+
+        if (masterSecret) {
+          console.log('[WalletService] ⚡️ V2 Master Secret found. Deriving V2 Wallet...');
+          const wallet = deriveWalletV2(masterSecret, {
+            iss, sub, aud, accountType, accountIndex, businessId
+          });
+
+          // Store seed in memory for session
+          const memKey = scope;
+          this.inMemSeeds.set(memKey, wallet.privSeedHex);
+          this.currentScope.set('current', scope);
+
+          console.log(`[WalletService] ✅ V2 Wallet restored: ${wallet.address}`);
+          perfLog('Total wallet generation time (V2)');
+          return wallet;
+        } else {
+          console.log('[WalletService] No V2 Master Secret found. Proceeding with Legacy V1 restoration...');
+        }
+      } catch (checkErr) {
+        console.warn('[WalletService] Error checking V2 secret:', checkErr);
+      }
+      // ----------------------------------------------------------------------
+
       // Store current scope for this session
       this.currentScope.set('current', scope);
-      
+
       // Get derivation pepper (REQUIRED for derivation salt)
       perfLog('Before derivation pepper');
-          const { pepper: derivPepper } = await this.getDerivationPepper({
-            firebaseIdToken,
-            accountType,
-            accountIndex,
-            businessId
-          });
+      const { pepper: derivPepper } = await this.getDerivationPepper({
+        firebaseIdToken,
+        accountType,
+        accountIndex,
+        businessId
+      });
       perfLog('Got derivation pepper');
       if (!derivPepper) {
         throw new Error('Missing derivation pepper: cannot derive wallet without pepper. Ensure authentication and network are available.');
@@ -500,17 +926,17 @@ export class SecureDeterministicWalletService {
 
       // Get KEK pepper (for encryption)
       perfLog('Before KEK pepper');
-          const { pepper: kekPepper, version: pepperVersion } = await this.getKekPepper(undefined, {
-            firebaseIdToken,
-            accountType,
-            accountIndex,
-            businessId
-          });
+      const { pepper: kekPepper, version: pepperVersion } = await this.getKekPepper(undefined, {
+        firebaseIdToken,
+        accountType,
+        accountIndex,
+        businessId
+      });
       perfLog('Got KEK pepper');
-      
+
       // Derive KEK for encryption
       const kek = deriveKEK(iss, sub, aud, kekPepper, scope);
-      
+
       // Prepare fingerprints to validate cache correctness
       const canonicalIssuer = canonicalize(iss);
       const canonicalAudience = canonicalize(aud);
@@ -523,24 +949,24 @@ export class SecureDeterministicWalletService {
       let wallet: DerivedWallet | null = null;
       const currentScope = scope;
       const derivPepperHash = bytesToHex(sha256(utf8ToBytes(String(derivPepper))));
-      
+
       try {
         perfLog('Checking cache');
         const credentials = await Keychain.getInternetCredentials(cacheKey.server);
         if (credentials && credentials.username === cacheKey.username && credentials.password) {
           console.log('Found cached encrypted seed, checking version...');
-          
+
           // Parse blob to get the pepper version it was encrypted with
           const blobMeta = parseSeedBlob(credentials.password);
           const storedPepperVersion = blobMeta.pepperVersion;
           const storedDerivPepperHash = blobMeta.dp || null;
           const storedScope = blobMeta.scope || null;
           const storedSaltFingerprint = blobMeta.sf || null;
-          
+
           // If stored version differs from current, get the appropriate pepper
           let kekToUse = kek;
           let needsReWrap = false;
-          
+
           if (storedPepperVersion !== pepperVersion) {
             console.log(`Stored pepper v${storedPepperVersion} differs from current v${pepperVersion}`);
             const { pepper: oldPepper } = await this.getKekPepper(storedPepperVersion, {
@@ -548,7 +974,7 @@ export class SecureDeterministicWalletService {
               accountIndex,
               businessId
             });
-            
+
             if (oldPepper) {
               // Derive KEK with the old pepper version
               kekToUse = deriveKEK(iss, sub, aud, oldPepper, scope);
@@ -557,7 +983,7 @@ export class SecureDeterministicWalletService {
               throw new Error(`Could not get pepper for version ${storedPepperVersion} - grace period may have expired`);
             }
           }
-          
+
           // Decrypt with appropriate KEK
           const seed = unwrapSeed(credentials.password, kekToUse);
 
@@ -575,7 +1001,7 @@ export class SecureDeterministicWalletService {
             derivationMatches = false;
             console.log('Salt fingerprint mismatch or missing; will derive fresh');
           }
-          
+
           if (derivationMatches) {
             // Recreate wallet from cached seed
             const keyPair = nacl.sign.keyPair.fromSeed(seed);
@@ -592,14 +1018,14 @@ export class SecureDeterministicWalletService {
             // Treat as cache miss
             throw new Error('Stale derivation cache');
           }
-          
+
           // Re-wrap with new pepper if needed
           if (needsReWrap) {
             console.log(`Re-wrapping seed with new pepper v${pepperVersion}...`);
             const newEncryptedBlob = wrapSeed(seed, kek, pepperVersion, { derivationPepperHash: derivPepperHash, scope: currentScope, saltFingerprint });
             await Keychain.setInternetCredentials(
-              cacheKey.server, 
-              cacheKey.username, 
+              cacheKey.server,
+              cacheKey.username,
               newEncryptedBlob,
               {
                 accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY
@@ -612,15 +1038,15 @@ export class SecureDeterministicWalletService {
         // This is expected behavior when cache is invalid or KEK has changed
         console.log('Cache miss or decryption failed, will derive fresh:', cacheError?.message || cacheError);
       }
-      
+
       // If cache miss or failed, derive fresh (slow path ~5s)
       if (!wallet) {
         perfLog('Cache miss - deriving fresh');
         console.log('Deriving wallet from OAuth claims (this may take a few seconds)...');
-        
+
         // Use the OAuth claims directly
-        
-      // Generate client-controlled salt using the exact formula from README.md (no pepper inside)
+
+        // Generate client-controlled salt using the exact formula from README.md (no pepper inside)
         console.log('[SecureDeterministicWallet] Salt generation inputs:', {
           platform: require('react-native').Platform.OS,
           iss,
@@ -630,9 +1056,9 @@ export class SecureDeterministicWalletService {
           accountIndex,
           businessId: businessId || 'none'
         });
-        
+
         console.log('[SecureDeterministicWallet] Calling generateClientSalt with business_id:', businessId || 'undefined');
-        
+
         const clientSalt = generateClientSalt(
           iss,        // OAuth issuer
           sub,        // OAuth subject
@@ -641,17 +1067,17 @@ export class SecureDeterministicWalletService {
           accountIndex,
           businessId
         );
-        
+
         console.log('[SecureDeterministicWallet] Generated client salt:', {
           saltPrefix: clientSalt.substring(0, 20) + '...',
           accountType,
           accountIndex,
           businessId: businessId || 'none',
-          saltInputWouldBe: businessId 
+          saltInputWouldBe: businessId
             ? `${iss}_${sub}_${aud}_${accountType}_${businessId}_${accountIndex}`
             : `${iss}_${sub}_${aud}_${accountType}_${accountIndex}`
         });
-        
+
         // Derive deterministic wallet
         perfLog('Starting key derivation');
         wallet = deriveDeterministicAlgorandKey({
@@ -662,15 +1088,15 @@ export class SecureDeterministicWalletService {
           accountIndex,
           businessId
         });
-        
+
         perfLog('Key derivation complete');
         console.log('Wallet derived successfully:', wallet.address);
-        
+
         // Encrypt and cache the seed for next time
         perfLog('Encrypting for cache');
         const seed = hexToBytes(wallet.privSeedHex);
         const encryptedBlob = wrapSeed(seed, kek, pepperVersion, { derivationPepperHash: derivPepperHash, scope: currentScope, saltFingerprint });
-        
+
         await Keychain.setInternetCredentials(
           cacheKey.server,
           cacheKey.username,
@@ -679,16 +1105,16 @@ export class SecureDeterministicWalletService {
             accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY
           }
         );
-        
+
         console.log('Encrypted seed cached for fast future access');
       }
-      
+
       // Store the seed in memory-only cache for this session (no plaintext keychain!)
       const memKey = scope; // Just use scope as the key, no user ID needed
       this.inMemSeeds.set(memKey, wallet.privSeedHex);
       this.currentScope.set('current', scope); // Track current scope
       console.log(`Seed stored in memory cache with scope: ${scope}`);
-      
+
       perfLog('Total wallet generation time');
       return wallet;
     } catch (error) {
@@ -819,30 +1245,30 @@ export class SecureDeterministicWalletService {
       if (!currentScope) {
         throw new Error('No active wallet scope. Please switch to an account first.');
       }
-      
+
       const seedHex = this.inMemSeeds.get(currentScope);
       if (!seedHex) {
         throw new Error('No wallet seed in memory. Please re-login to restore wallet.');
       }
-      
+
       // Recreate keypair from seed
       const seed = hexToBytes(seedHex);
       const keyPair = nacl.sign.keyPair.fromSeed(seed);
-      
+
       // Algorand's secret key format is specific: seed (32 bytes) + public key (32 bytes)
       // nacl.sign.keyPair.fromSeed returns secretKey which is already 64 bytes in this format
       // However, we need to ensure it's properly constructed for algosdk
-      
+
       // Construct the Algorand secret key manually to ensure compatibility
       const sk = new Uint8Array(64);
       sk.set(seed, 0); // First 32 bytes: the seed
       sk.set(keyPair.publicKey, 32); // Last 32 bytes: the public key
-      
+
       // Validate the secret key is 64 bytes as expected
       if (sk.length !== 64) {
         throw new Error(`Invalid secret key length: ${sk.length}, expected 64`);
       }
-      
+
       // Handle both Transaction objects and raw bytes
       let txn: any;
       if (txnOrBytes instanceof Uint8Array) {
@@ -852,7 +1278,7 @@ export class SecureDeterministicWalletService {
         // Regular Transaction object
         txn = txnOrBytes;
       }
-      
+
       // IMPORTANT: For sponsored transactions (txnOrBytes instanceof Uint8Array),
       // we CANNOT decode and re-encode because algosdk's decode/encode doesn't
       // preserve all fields correctly (especially boxes). Instead, we must sign
@@ -959,20 +1385,20 @@ export class SecureDeterministicWalletService {
   async clearWallet(): Promise<void> {
     try {
       console.log('Clearing ALL wallet data from memory and keychain...');
-      
+
       // Clear ALL in-memory seeds (no multi-user support)
       this.inMemSeeds.clear();
-      
+
       // Clear ALL scope tracking
       this.currentScope.clear();
-      
+
       // Clear ALL user tracking
       this.cacheKeysPerUser.clear();
 
       // Clear pepper caches
       this.cachedDerivationPepperByContext.clear();
       this.cachedKekPepperByCtxAndVersion.clear();
-      
+
       // Clear ALL encrypted cache from keychain
       // Since all wallets for this app use the same server 'wallet.confio.app',
       // calling resetInternetCredentials will clear ALL wallet entries at once
@@ -983,7 +1409,7 @@ export class SecureDeterministicWalletService {
         // Server might not have any entries, which is fine
         console.log('Could not clear wallet.confio.app:', err?.message || err);
       }
-      
+
       console.log('ALL wallet data cleared from memory and keychain');
     } catch (error) {
       console.error('Error clearing wallet:', error);

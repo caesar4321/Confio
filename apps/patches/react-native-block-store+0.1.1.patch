@@ -1,0 +1,714 @@
+diff --git a/node_modules/react-native-block-store/android/build/.transforms/9d35ac1bcd23bcfedd2d48b68a4e9d38/results.bin b/node_modules/react-native-block-store/android/build/.transforms/9d35ac1bcd23bcfedd2d48b68a4e9d38/results.bin
+new file mode 100644
+index 0000000..7ed749e
+--- /dev/null
++++ b/node_modules/react-native-block-store/android/build/.transforms/9d35ac1bcd23bcfedd2d48b68a4e9d38/results.bin
+@@ -0,0 +1 @@
++o/bundleLibRuntimeToDirDebug
+diff --git a/node_modules/react-native-block-store/android/build/.transforms/9d35ac1bcd23bcfedd2d48b68a4e9d38/transformed/bundleLibRuntimeToDirDebug/bundleLibRuntimeToDirDebug_dex/com/blockstore/BlockStoreModule$Companion.dex b/node_modules/react-native-block-store/android/build/.transforms/9d35ac1bcd23bcfedd2d48b68a4e9d38/transformed/bundleLibRuntimeToDirDebug/bundleLibRuntimeToDirDebug_dex/com/blockstore/BlockStoreModule$Companion.dex
+new file mode 100644
+index 0000000..6f6f6d8
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/.transforms/9d35ac1bcd23bcfedd2d48b68a4e9d38/transformed/bundleLibRuntimeToDirDebug/bundleLibRuntimeToDirDebug_dex/com/blockstore/BlockStoreModule$Companion.dex differ
+diff --git a/node_modules/react-native-block-store/android/build/.transforms/9d35ac1bcd23bcfedd2d48b68a4e9d38/transformed/bundleLibRuntimeToDirDebug/bundleLibRuntimeToDirDebug_dex/com/blockstore/BlockStoreModule.dex b/node_modules/react-native-block-store/android/build/.transforms/9d35ac1bcd23bcfedd2d48b68a4e9d38/transformed/bundleLibRuntimeToDirDebug/bundleLibRuntimeToDirDebug_dex/com/blockstore/BlockStoreModule.dex
+new file mode 100644
+index 0000000..92b316e
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/.transforms/9d35ac1bcd23bcfedd2d48b68a4e9d38/transformed/bundleLibRuntimeToDirDebug/bundleLibRuntimeToDirDebug_dex/com/blockstore/BlockStoreModule.dex differ
+diff --git a/node_modules/react-native-block-store/android/build/.transforms/9d35ac1bcd23bcfedd2d48b68a4e9d38/transformed/bundleLibRuntimeToDirDebug/bundleLibRuntimeToDirDebug_dex/com/blockstore/BlockStorePackage.dex b/node_modules/react-native-block-store/android/build/.transforms/9d35ac1bcd23bcfedd2d48b68a4e9d38/transformed/bundleLibRuntimeToDirDebug/bundleLibRuntimeToDirDebug_dex/com/blockstore/BlockStorePackage.dex
+new file mode 100644
+index 0000000..cd74b03
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/.transforms/9d35ac1bcd23bcfedd2d48b68a4e9d38/transformed/bundleLibRuntimeToDirDebug/bundleLibRuntimeToDirDebug_dex/com/blockstore/BlockStorePackage.dex differ
+diff --git a/node_modules/react-native-block-store/android/build/.transforms/9d35ac1bcd23bcfedd2d48b68a4e9d38/transformed/bundleLibRuntimeToDirDebug/bundleLibRuntimeToDirDebug_dex/com/blockstore/BlockStoreSpec.dex b/node_modules/react-native-block-store/android/build/.transforms/9d35ac1bcd23bcfedd2d48b68a4e9d38/transformed/bundleLibRuntimeToDirDebug/bundleLibRuntimeToDirDebug_dex/com/blockstore/BlockStoreSpec.dex
+new file mode 100644
+index 0000000..91cebf7
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/.transforms/9d35ac1bcd23bcfedd2d48b68a4e9d38/transformed/bundleLibRuntimeToDirDebug/bundleLibRuntimeToDirDebug_dex/com/blockstore/BlockStoreSpec.dex differ
+diff --git a/node_modules/react-native-block-store/android/build/.transforms/9d35ac1bcd23bcfedd2d48b68a4e9d38/transformed/bundleLibRuntimeToDirDebug/bundleLibRuntimeToDirDebug_dex/com/blockstore/BuildConfig.dex b/node_modules/react-native-block-store/android/build/.transforms/9d35ac1bcd23bcfedd2d48b68a4e9d38/transformed/bundleLibRuntimeToDirDebug/bundleLibRuntimeToDirDebug_dex/com/blockstore/BuildConfig.dex
+new file mode 100644
+index 0000000..1ba191c
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/.transforms/9d35ac1bcd23bcfedd2d48b68a4e9d38/transformed/bundleLibRuntimeToDirDebug/bundleLibRuntimeToDirDebug_dex/com/blockstore/BuildConfig.dex differ
+diff --git a/node_modules/react-native-block-store/android/build/.transforms/9d35ac1bcd23bcfedd2d48b68a4e9d38/transformed/bundleLibRuntimeToDirDebug/desugar_graph.bin b/node_modules/react-native-block-store/android/build/.transforms/9d35ac1bcd23bcfedd2d48b68a4e9d38/transformed/bundleLibRuntimeToDirDebug/desugar_graph.bin
+new file mode 100644
+index 0000000..601f245
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/.transforms/9d35ac1bcd23bcfedd2d48b68a4e9d38/transformed/bundleLibRuntimeToDirDebug/desugar_graph.bin differ
+diff --git a/node_modules/react-native-block-store/android/build/.transforms/bf54b128951098df15f86abd8895311c/results.bin b/node_modules/react-native-block-store/android/build/.transforms/bf54b128951098df15f86abd8895311c/results.bin
+new file mode 100644
+index 0000000..0d259dd
+--- /dev/null
++++ b/node_modules/react-native-block-store/android/build/.transforms/bf54b128951098df15f86abd8895311c/results.bin
+@@ -0,0 +1 @@
++o/classes
+diff --git a/node_modules/react-native-block-store/android/build/.transforms/bf54b128951098df15f86abd8895311c/transformed/classes/classes_dex/classes.dex b/node_modules/react-native-block-store/android/build/.transforms/bf54b128951098df15f86abd8895311c/transformed/classes/classes_dex/classes.dex
+new file mode 100644
+index 0000000..4a5e3c3
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/.transforms/bf54b128951098df15f86abd8895311c/transformed/classes/classes_dex/classes.dex differ
+diff --git a/node_modules/react-native-block-store/android/build/generated/source/buildConfig/debug/com/blockstore/BuildConfig.java b/node_modules/react-native-block-store/android/build/generated/source/buildConfig/debug/com/blockstore/BuildConfig.java
+new file mode 100644
+index 0000000..60206e0
+--- /dev/null
++++ b/node_modules/react-native-block-store/android/build/generated/source/buildConfig/debug/com/blockstore/BuildConfig.java
+@@ -0,0 +1,12 @@
++/**
++ * Automatically generated file. DO NOT MODIFY
++ */
++package com.blockstore;
++
++public final class BuildConfig {
++  public static final boolean DEBUG = Boolean.parseBoolean("true");
++  public static final String LIBRARY_PACKAGE_NAME = "com.blockstore";
++  public static final String BUILD_TYPE = "debug";
++  // Field from default config.
++  public static final boolean IS_NEW_ARCHITECTURE_ENABLED = false;
++}
+diff --git a/node_modules/react-native-block-store/android/build/intermediates/aapt_friendly_merged_manifests/debug/processDebugManifest/aapt/AndroidManifest.xml b/node_modules/react-native-block-store/android/build/intermediates/aapt_friendly_merged_manifests/debug/processDebugManifest/aapt/AndroidManifest.xml
+new file mode 100644
+index 0000000..aca770c
+--- /dev/null
++++ b/node_modules/react-native-block-store/android/build/intermediates/aapt_friendly_merged_manifests/debug/processDebugManifest/aapt/AndroidManifest.xml
+@@ -0,0 +1,7 @@
++<?xml version="1.0" encoding="utf-8"?>
++<manifest xmlns:android="http://schemas.android.com/apk/res/android"
++    package="com.blockstore" >
++
++    <uses-sdk android:minSdkVersion="24" />
++
++</manifest>
+\ No newline at end of file
+diff --git a/node_modules/react-native-block-store/android/build/intermediates/aapt_friendly_merged_manifests/debug/processDebugManifest/aapt/output-metadata.json b/node_modules/react-native-block-store/android/build/intermediates/aapt_friendly_merged_manifests/debug/processDebugManifest/aapt/output-metadata.json
+new file mode 100644
+index 0000000..d6f7f55
+--- /dev/null
++++ b/node_modules/react-native-block-store/android/build/intermediates/aapt_friendly_merged_manifests/debug/processDebugManifest/aapt/output-metadata.json
+@@ -0,0 +1,18 @@
++{
++  "version": 3,
++  "artifactType": {
++    "type": "AAPT_FRIENDLY_MERGED_MANIFESTS",
++    "kind": "Directory"
++  },
++  "applicationId": "com.blockstore",
++  "variantName": "debug",
++  "elements": [
++    {
++      "type": "SINGLE",
++      "filters": [],
++      "attributes": [],
++      "outputFile": "AndroidManifest.xml"
++    }
++  ],
++  "elementType": "File"
++}
+\ No newline at end of file
+diff --git a/node_modules/react-native-block-store/android/build/intermediates/aar_metadata/debug/writeDebugAarMetadata/aar-metadata.properties b/node_modules/react-native-block-store/android/build/intermediates/aar_metadata/debug/writeDebugAarMetadata/aar-metadata.properties
+new file mode 100644
+index 0000000..1211b1e
+--- /dev/null
++++ b/node_modules/react-native-block-store/android/build/intermediates/aar_metadata/debug/writeDebugAarMetadata/aar-metadata.properties
+@@ -0,0 +1,6 @@
++aarFormatVersion=1.0
++aarMetadataVersion=1.0
++minCompileSdk=1
++minCompileSdkExtension=0
++minAndroidGradlePluginVersion=1.0.0
++coreLibraryDesugaringEnabled=false
+diff --git a/node_modules/react-native-block-store/android/build/intermediates/annotation_processor_list/debug/javaPreCompileDebug/annotationProcessors.json b/node_modules/react-native-block-store/android/build/intermediates/annotation_processor_list/debug/javaPreCompileDebug/annotationProcessors.json
+new file mode 100644
+index 0000000..9e26dfe
+--- /dev/null
++++ b/node_modules/react-native-block-store/android/build/intermediates/annotation_processor_list/debug/javaPreCompileDebug/annotationProcessors.json
+@@ -0,0 +1 @@
++{}
+\ No newline at end of file
+diff --git a/node_modules/react-native-block-store/android/build/intermediates/compile_library_classes_jar/debug/bundleLibCompileToJarDebug/classes.jar b/node_modules/react-native-block-store/android/build/intermediates/compile_library_classes_jar/debug/bundleLibCompileToJarDebug/classes.jar
+new file mode 100644
+index 0000000..fca853c
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/intermediates/compile_library_classes_jar/debug/bundleLibCompileToJarDebug/classes.jar differ
+diff --git a/node_modules/react-native-block-store/android/build/intermediates/compile_r_class_jar/debug/generateDebugRFile/R.jar b/node_modules/react-native-block-store/android/build/intermediates/compile_r_class_jar/debug/generateDebugRFile/R.jar
+new file mode 100644
+index 0000000..9a57dad
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/intermediates/compile_r_class_jar/debug/generateDebugRFile/R.jar differ
+diff --git a/node_modules/react-native-block-store/android/build/intermediates/compile_symbol_list/debug/generateDebugRFile/R.txt b/node_modules/react-native-block-store/android/build/intermediates/compile_symbol_list/debug/generateDebugRFile/R.txt
+new file mode 100644
+index 0000000..e69de29
+diff --git a/node_modules/react-native-block-store/android/build/intermediates/incremental/debug/packageDebugResources/compile-file-map.properties b/node_modules/react-native-block-store/android/build/intermediates/incremental/debug/packageDebugResources/compile-file-map.properties
+new file mode 100644
+index 0000000..ba240d9
+--- /dev/null
++++ b/node_modules/react-native-block-store/android/build/intermediates/incremental/debug/packageDebugResources/compile-file-map.properties
+@@ -0,0 +1 @@
++#Sat Dec 13 12:03:54 AST 2025
+diff --git a/node_modules/react-native-block-store/android/build/intermediates/incremental/debug/packageDebugResources/merger.xml b/node_modules/react-native-block-store/android/build/intermediates/incremental/debug/packageDebugResources/merger.xml
+new file mode 100644
+index 0000000..4d0822e
+--- /dev/null
++++ b/node_modules/react-native-block-store/android/build/intermediates/incremental/debug/packageDebugResources/merger.xml
+@@ -0,0 +1,2 @@
++<?xml version="1.0" encoding="utf-8"?>
++<merger version="3"><dataSet aapt-namespace="http://schemas.android.com/apk/res-auto" config="main$Generated" generated="true" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/julian/Confio/apps/node_modules/react-native-block-store/android/src/main/res"/></dataSet><dataSet aapt-namespace="http://schemas.android.com/apk/res-auto" config="main" generated-set="main$Generated" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/julian/Confio/apps/node_modules/react-native-block-store/android/src/main/res"/></dataSet><dataSet aapt-namespace="http://schemas.android.com/apk/res-auto" config="debug$Generated" generated="true" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/julian/Confio/apps/node_modules/react-native-block-store/android/src/debug/res"/></dataSet><dataSet aapt-namespace="http://schemas.android.com/apk/res-auto" config="debug" generated-set="debug$Generated" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/julian/Confio/apps/node_modules/react-native-block-store/android/src/debug/res"/></dataSet><dataSet aapt-namespace="http://schemas.android.com/apk/res-auto" config="generated$Generated" generated="true" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/julian/Confio/apps/node_modules/react-native-block-store/android/build/generated/res/resValues/debug"/></dataSet><dataSet aapt-namespace="http://schemas.android.com/apk/res-auto" config="generated" generated-set="generated$Generated" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/julian/Confio/apps/node_modules/react-native-block-store/android/build/generated/res/resValues/debug"/></dataSet><mergedItems/></merger>
+\ No newline at end of file
+diff --git a/node_modules/react-native-block-store/android/build/intermediates/incremental/mergeDebugJniLibFolders/merger.xml b/node_modules/react-native-block-store/android/build/intermediates/incremental/mergeDebugJniLibFolders/merger.xml
+new file mode 100644
+index 0000000..0ca7fb6
+--- /dev/null
++++ b/node_modules/react-native-block-store/android/build/intermediates/incremental/mergeDebugJniLibFolders/merger.xml
+@@ -0,0 +1,2 @@
++<?xml version="1.0" encoding="utf-8"?>
++<merger version="3"><dataSet config="main" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/julian/Confio/apps/node_modules/react-native-block-store/android/src/main/jniLibs"/></dataSet><dataSet config="debug" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/julian/Confio/apps/node_modules/react-native-block-store/android/src/debug/jniLibs"/></dataSet></merger>
+\ No newline at end of file
+diff --git a/node_modules/react-native-block-store/android/build/intermediates/incremental/mergeDebugShaders/merger.xml b/node_modules/react-native-block-store/android/build/intermediates/incremental/mergeDebugShaders/merger.xml
+new file mode 100644
+index 0000000..1307041
+--- /dev/null
++++ b/node_modules/react-native-block-store/android/build/intermediates/incremental/mergeDebugShaders/merger.xml
+@@ -0,0 +1,2 @@
++<?xml version="1.0" encoding="utf-8"?>
++<merger version="3"><dataSet config="main" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/julian/Confio/apps/node_modules/react-native-block-store/android/src/main/shaders"/></dataSet><dataSet config="debug" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/julian/Confio/apps/node_modules/react-native-block-store/android/src/debug/shaders"/></dataSet></merger>
+\ No newline at end of file
+diff --git a/node_modules/react-native-block-store/android/build/intermediates/incremental/packageDebugAssets/merger.xml b/node_modules/react-native-block-store/android/build/intermediates/incremental/packageDebugAssets/merger.xml
+new file mode 100644
+index 0000000..c3cab54
+--- /dev/null
++++ b/node_modules/react-native-block-store/android/build/intermediates/incremental/packageDebugAssets/merger.xml
+@@ -0,0 +1,2 @@
++<?xml version="1.0" encoding="utf-8"?>
++<merger version="3"><dataSet config="main" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/julian/Confio/apps/node_modules/react-native-block-store/android/src/main/assets"/></dataSet><dataSet config="debug" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/julian/Confio/apps/node_modules/react-native-block-store/android/src/debug/assets"/></dataSet><dataSet config="generated" ignore_pattern="!.svn:!.git:!.ds_store:!*.scc:.*:&lt;dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"><source path="/Users/julian/Confio/apps/node_modules/react-native-block-store/android/build/intermediates/shader_assets/debug/compileDebugShaders/out"/></dataSet></merger>
+\ No newline at end of file
+diff --git a/node_modules/react-native-block-store/android/build/intermediates/java_res/debug/processDebugJavaRes/out/META-INF/react-native-block-store_debug.kotlin_module b/node_modules/react-native-block-store/android/build/intermediates/java_res/debug/processDebugJavaRes/out/META-INF/react-native-block-store_debug.kotlin_module
+new file mode 100644
+index 0000000..c998a4c
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/intermediates/java_res/debug/processDebugJavaRes/out/META-INF/react-native-block-store_debug.kotlin_module differ
+diff --git a/node_modules/react-native-block-store/android/build/intermediates/javac/debug/compileDebugJavaWithJavac/classes/com/blockstore/BuildConfig.class b/node_modules/react-native-block-store/android/build/intermediates/javac/debug/compileDebugJavaWithJavac/classes/com/blockstore/BuildConfig.class
+new file mode 100644
+index 0000000..f31c252
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/intermediates/javac/debug/compileDebugJavaWithJavac/classes/com/blockstore/BuildConfig.class differ
+diff --git a/node_modules/react-native-block-store/android/build/intermediates/local_only_symbol_list/debug/parseDebugLocalResources/R-def.txt b/node_modules/react-native-block-store/android/build/intermediates/local_only_symbol_list/debug/parseDebugLocalResources/R-def.txt
+new file mode 100644
+index 0000000..78ac5b8
+--- /dev/null
++++ b/node_modules/react-native-block-store/android/build/intermediates/local_only_symbol_list/debug/parseDebugLocalResources/R-def.txt
+@@ -0,0 +1,2 @@
++R_DEF: Internal format may change without notice
++local
+diff --git a/node_modules/react-native-block-store/android/build/intermediates/manifest_merge_blame_file/debug/processDebugManifest/manifest-merger-blame-debug-report.txt b/node_modules/react-native-block-store/android/build/intermediates/manifest_merge_blame_file/debug/processDebugManifest/manifest-merger-blame-debug-report.txt
+new file mode 100644
+index 0000000..969eab9
+--- /dev/null
++++ b/node_modules/react-native-block-store/android/build/intermediates/manifest_merge_blame_file/debug/processDebugManifest/manifest-merger-blame-debug-report.txt
+@@ -0,0 +1,7 @@
++1<?xml version="1.0" encoding="utf-8"?>
++2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
++3    package="com.blockstore" >
++4
++5    <uses-sdk android:minSdkVersion="24" />
++6
++7</manifest>
+diff --git a/node_modules/react-native-block-store/android/build/intermediates/merged_manifest/debug/processDebugManifest/AndroidManifest.xml b/node_modules/react-native-block-store/android/build/intermediates/merged_manifest/debug/processDebugManifest/AndroidManifest.xml
+new file mode 100644
+index 0000000..aca770c
+--- /dev/null
++++ b/node_modules/react-native-block-store/android/build/intermediates/merged_manifest/debug/processDebugManifest/AndroidManifest.xml
+@@ -0,0 +1,7 @@
++<?xml version="1.0" encoding="utf-8"?>
++<manifest xmlns:android="http://schemas.android.com/apk/res/android"
++    package="com.blockstore" >
++
++    <uses-sdk android:minSdkVersion="24" />
++
++</manifest>
+\ No newline at end of file
+diff --git a/node_modules/react-native-block-store/android/build/intermediates/navigation_json/debug/extractDeepLinksDebug/navigation.json b/node_modules/react-native-block-store/android/build/intermediates/navigation_json/debug/extractDeepLinksDebug/navigation.json
+new file mode 100644
+index 0000000..0637a08
+--- /dev/null
++++ b/node_modules/react-native-block-store/android/build/intermediates/navigation_json/debug/extractDeepLinksDebug/navigation.json
+@@ -0,0 +1 @@
++[]
+\ No newline at end of file
+diff --git a/node_modules/react-native-block-store/android/build/intermediates/nested_resources_validation_report/debug/generateDebugResources/nestedResourcesValidationReport.txt b/node_modules/react-native-block-store/android/build/intermediates/nested_resources_validation_report/debug/generateDebugResources/nestedResourcesValidationReport.txt
+new file mode 100644
+index 0000000..08f4ebe
+--- /dev/null
++++ b/node_modules/react-native-block-store/android/build/intermediates/nested_resources_validation_report/debug/generateDebugResources/nestedResourcesValidationReport.txt
+@@ -0,0 +1 @@
++0 Warning/Error
+\ No newline at end of file
+diff --git a/node_modules/react-native-block-store/android/build/intermediates/runtime_library_classes_dir/debug/bundleLibRuntimeToDirDebug/META-INF/react-native-block-store_debug.kotlin_module b/node_modules/react-native-block-store/android/build/intermediates/runtime_library_classes_dir/debug/bundleLibRuntimeToDirDebug/META-INF/react-native-block-store_debug.kotlin_module
+new file mode 100644
+index 0000000..c998a4c
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/intermediates/runtime_library_classes_dir/debug/bundleLibRuntimeToDirDebug/META-INF/react-native-block-store_debug.kotlin_module differ
+diff --git a/node_modules/react-native-block-store/android/build/intermediates/runtime_library_classes_dir/debug/bundleLibRuntimeToDirDebug/com/blockstore/BlockStoreModule$Companion.class b/node_modules/react-native-block-store/android/build/intermediates/runtime_library_classes_dir/debug/bundleLibRuntimeToDirDebug/com/blockstore/BlockStoreModule$Companion.class
+new file mode 100644
+index 0000000..0fe76c3
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/intermediates/runtime_library_classes_dir/debug/bundleLibRuntimeToDirDebug/com/blockstore/BlockStoreModule$Companion.class differ
+diff --git a/node_modules/react-native-block-store/android/build/intermediates/runtime_library_classes_dir/debug/bundleLibRuntimeToDirDebug/com/blockstore/BlockStoreModule.class b/node_modules/react-native-block-store/android/build/intermediates/runtime_library_classes_dir/debug/bundleLibRuntimeToDirDebug/com/blockstore/BlockStoreModule.class
+new file mode 100644
+index 0000000..2e29268
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/intermediates/runtime_library_classes_dir/debug/bundleLibRuntimeToDirDebug/com/blockstore/BlockStoreModule.class differ
+diff --git a/node_modules/react-native-block-store/android/build/intermediates/runtime_library_classes_dir/debug/bundleLibRuntimeToDirDebug/com/blockstore/BlockStorePackage.class b/node_modules/react-native-block-store/android/build/intermediates/runtime_library_classes_dir/debug/bundleLibRuntimeToDirDebug/com/blockstore/BlockStorePackage.class
+new file mode 100644
+index 0000000..1f2e0af
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/intermediates/runtime_library_classes_dir/debug/bundleLibRuntimeToDirDebug/com/blockstore/BlockStorePackage.class differ
+diff --git a/node_modules/react-native-block-store/android/build/intermediates/runtime_library_classes_dir/debug/bundleLibRuntimeToDirDebug/com/blockstore/BlockStoreSpec.class b/node_modules/react-native-block-store/android/build/intermediates/runtime_library_classes_dir/debug/bundleLibRuntimeToDirDebug/com/blockstore/BlockStoreSpec.class
+new file mode 100644
+index 0000000..2066790
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/intermediates/runtime_library_classes_dir/debug/bundleLibRuntimeToDirDebug/com/blockstore/BlockStoreSpec.class differ
+diff --git a/node_modules/react-native-block-store/android/build/intermediates/runtime_library_classes_dir/debug/bundleLibRuntimeToDirDebug/com/blockstore/BuildConfig.class b/node_modules/react-native-block-store/android/build/intermediates/runtime_library_classes_dir/debug/bundleLibRuntimeToDirDebug/com/blockstore/BuildConfig.class
+new file mode 100644
+index 0000000..f31c252
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/intermediates/runtime_library_classes_dir/debug/bundleLibRuntimeToDirDebug/com/blockstore/BuildConfig.class differ
+diff --git a/node_modules/react-native-block-store/android/build/intermediates/runtime_library_classes_jar/debug/bundleLibRuntimeToJarDebug/classes.jar b/node_modules/react-native-block-store/android/build/intermediates/runtime_library_classes_jar/debug/bundleLibRuntimeToJarDebug/classes.jar
+new file mode 100644
+index 0000000..5a6e288
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/intermediates/runtime_library_classes_jar/debug/bundleLibRuntimeToJarDebug/classes.jar differ
+diff --git a/node_modules/react-native-block-store/android/build/intermediates/symbol_list_with_package_name/debug/generateDebugRFile/package-aware-r.txt b/node_modules/react-native-block-store/android/build/intermediates/symbol_list_with_package_name/debug/generateDebugRFile/package-aware-r.txt
+new file mode 100644
+index 0000000..7b509c3
+--- /dev/null
++++ b/node_modules/react-native-block-store/android/build/intermediates/symbol_list_with_package_name/debug/generateDebugRFile/package-aware-r.txt
+@@ -0,0 +1 @@
++com.blockstore
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab
+new file mode 100644
+index 0000000..b355ac5
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.keystream b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.keystream
+new file mode 100644
+index 0000000..c74eb83
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.keystream differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.keystream.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.keystream.len
+new file mode 100644
+index 0000000..cdd419d
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.keystream.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.len
+new file mode 100644
+index 0000000..a9f80ae
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.values.at b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.values.at
+new file mode 100644
+index 0000000..99789e9
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab.values.at differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab_i b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab_i
+new file mode 100644
+index 0000000..a937f6d
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab_i differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab_i.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/inputs/source-to-output.tab_i.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab
+new file mode 100644
+index 0000000..78861f6
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.keystream b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.keystream
+new file mode 100644
+index 0000000..3a9f8a4
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.keystream differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.keystream.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.keystream.len
+new file mode 100644
+index 0000000..babac56
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.keystream.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.len
+new file mode 100644
+index 0000000..93a595b
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.values.at b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.values.at
+new file mode 100644
+index 0000000..8f28327
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab.values.at differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab_i b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab_i
+new file mode 100644
+index 0000000..c596c77
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab_i differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab_i.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-attributes.tab_i.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab
+new file mode 100644
+index 0000000..36b57e0
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.keystream b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.keystream
+new file mode 100644
+index 0000000..3a9f8a4
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.keystream differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.keystream.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.keystream.len
+new file mode 100644
+index 0000000..babac56
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.keystream.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.len
+new file mode 100644
+index 0000000..93a595b
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.values.at b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.values.at
+new file mode 100644
+index 0000000..2db3417
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab.values.at differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab_i b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab_i
+new file mode 100644
+index 0000000..c596c77
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab_i differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab_i.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/class-fq-name-to-source.tab_i.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab
+new file mode 100644
+index 0000000..bdf584a
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.keystream b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.keystream
+new file mode 100644
+index 0000000..4138f89
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.keystream differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.keystream.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.keystream.len
+new file mode 100644
+index 0000000..5f1f7d5
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.keystream.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.len
+new file mode 100644
+index 0000000..2a17e6e
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.values.at b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.values.at
+new file mode 100644
+index 0000000..da4197e
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab.values.at differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab_i b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab_i
+new file mode 100644
+index 0000000..578c615
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab_i differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab_i.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/constants.tab_i.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab
+new file mode 100644
+index 0000000..36b57e0
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.keystream b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.keystream
+new file mode 100644
+index 0000000..6d3285b
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.keystream differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.keystream.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.keystream.len
+new file mode 100644
+index 0000000..babac56
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.keystream.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.len
+new file mode 100644
+index 0000000..93a595b
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.values.at b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.values.at
+new file mode 100644
+index 0000000..2db3417
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab.values.at differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab_i b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab_i
+new file mode 100644
+index 0000000..9609c3e
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab_i differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab_i.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/internal-name-to-source.tab_i.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab
+new file mode 100644
+index 0000000..73298a3
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.keystream b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.keystream
+new file mode 100644
+index 0000000..33e59d5
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.keystream differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.keystream.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.keystream.len
+new file mode 100644
+index 0000000..5c0a864
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.keystream.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.len
+new file mode 100644
+index 0000000..ec8f944
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.values.at b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.values.at
+new file mode 100644
+index 0000000..2122b64
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab.values.at differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab_i b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab_i
+new file mode 100644
+index 0000000..fc8da67
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab_i differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab_i.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/proto.tab_i.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab
+new file mode 100644
+index 0000000..20eeaf7
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.keystream b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.keystream
+new file mode 100644
+index 0000000..c74eb83
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.keystream differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.keystream.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.keystream.len
+new file mode 100644
+index 0000000..cdd419d
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.keystream.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.len
+new file mode 100644
+index 0000000..a9f80ae
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.values.at b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.values.at
+new file mode 100644
+index 0000000..ece8d2f
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab.values.at differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab_i b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab_i
+new file mode 100644
+index 0000000..a937f6d
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab_i differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab_i.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/source-to-classes.tab_i.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab
+new file mode 100644
+index 0000000..cded7f9
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.keystream b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.keystream
+new file mode 100644
+index 0000000..8d4610f
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.keystream differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.keystream.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.keystream.len
+new file mode 100644
+index 0000000..e5009a4
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.keystream.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.len
+new file mode 100644
+index 0000000..a9f80ae
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.values.at b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.values.at
+new file mode 100644
+index 0000000..ec92069
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab.values.at differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab_i b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab_i
+new file mode 100644
+index 0000000..564a970
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab_i differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab_i.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/subtypes.tab_i.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab
+new file mode 100644
+index 0000000..8e36d03
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.keystream b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.keystream
+new file mode 100644
+index 0000000..6fc08d5
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.keystream differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.keystream.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.keystream.len
+new file mode 100644
+index 0000000..1e42780
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.keystream.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.len
+new file mode 100644
+index 0000000..a9f80ae
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.values.at b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.values.at
+new file mode 100644
+index 0000000..e9ef8c6
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab.values.at differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab_i b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab_i
+new file mode 100644
+index 0000000..a58324e
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab_i differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab_i.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/jvm/kotlin/supertypes.tab_i.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/counters.tab b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/counters.tab
+new file mode 100644
+index 0000000..c393a51
+--- /dev/null
++++ b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/counters.tab
+@@ -0,0 +1,2 @@
++3
++0
+\ No newline at end of file
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab
+new file mode 100644
+index 0000000..fb213ee
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.keystream b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.keystream
+new file mode 100644
+index 0000000..c74eb83
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.keystream differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.keystream.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.keystream.len
+new file mode 100644
+index 0000000..cdd419d
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.keystream.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.len
+new file mode 100644
+index 0000000..a9f80ae
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.values.at b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.values.at
+new file mode 100644
+index 0000000..9f383b5
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab.values.at differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab_i b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab_i
+new file mode 100644
+index 0000000..a937f6d
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab_i differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab_i.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/file-to-id.tab_i.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab
+new file mode 100644
+index 0000000..663b116
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.keystream b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.keystream
+new file mode 100644
+index 0000000..636f34a
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.keystream differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.keystream.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.keystream.len
+new file mode 100644
+index 0000000..29ce11c
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.keystream.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.len
+new file mode 100644
+index 0000000..a9f80ae
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.values.at b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.values.at
+new file mode 100644
+index 0000000..f81cd7d
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab.values.at differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab_i b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab_i
+new file mode 100644
+index 0000000..e9905b3
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab_i differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab_i.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/id-to-file.tab_i.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab
+new file mode 100644
+index 0000000..30371df
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab.keystream b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab.keystream
+new file mode 100644
+index 0000000..944f0a2
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab.keystream differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab.keystream.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab.keystream.len
+new file mode 100644
+index 0000000..d7b995c
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab.keystream.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab.len
+new file mode 100644
+index 0000000..0b5aa37
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab.values.at b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab.values.at
+new file mode 100644
+index 0000000..780a0b5
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab.values.at differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab_i b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab_i
+new file mode 100644
+index 0000000..b213332
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab_i differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab_i.len b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab_i.len
+new file mode 100644
+index 0000000..131e265
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/caches-jvm/lookups/lookups.tab_i.len differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/last-build.bin b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/last-build.bin
+new file mode 100644
+index 0000000..adc0208
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/cacheable/last-build.bin differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/classpath-snapshot/shrunk-classpath-snapshot.bin b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/classpath-snapshot/shrunk-classpath-snapshot.bin
+new file mode 100644
+index 0000000..b7ff404
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/classpath-snapshot/shrunk-classpath-snapshot.bin differ
+diff --git a/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/local-state/build-history.bin b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/local-state/build-history.bin
+new file mode 100644
+index 0000000..5d63203
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/kotlin/compileDebugKotlin/local-state/build-history.bin differ
+diff --git a/node_modules/react-native-block-store/android/build/outputs/logs/manifest-merger-debug-report.txt b/node_modules/react-native-block-store/android/build/outputs/logs/manifest-merger-debug-report.txt
+new file mode 100644
+index 0000000..0793502
+--- /dev/null
++++ b/node_modules/react-native-block-store/android/build/outputs/logs/manifest-merger-debug-report.txt
+@@ -0,0 +1,17 @@
++-- Merging decision tree log ---
++manifest
++ADDED from /Users/julian/Confio/apps/node_modules/react-native-block-store/android/src/main/AndroidManifest.xml:1:1-4:12
++INJECTED from /Users/julian/Confio/apps/node_modules/react-native-block-store/android/src/main/AndroidManifest.xml:1:1-4:12
++	package
++		ADDED from /Users/julian/Confio/apps/node_modules/react-native-block-store/android/src/main/AndroidManifest.xml:2:11-35
++		INJECTED from /Users/julian/Confio/apps/node_modules/react-native-block-store/android/src/main/AndroidManifest.xml
++	xmlns:android
++		ADDED from /Users/julian/Confio/apps/node_modules/react-native-block-store/android/src/main/AndroidManifest.xml:1:11-69
++uses-sdk
++INJECTED from /Users/julian/Confio/apps/node_modules/react-native-block-store/android/src/main/AndroidManifest.xml reason: use-sdk injection requested
++INJECTED from /Users/julian/Confio/apps/node_modules/react-native-block-store/android/src/main/AndroidManifest.xml
++INJECTED from /Users/julian/Confio/apps/node_modules/react-native-block-store/android/src/main/AndroidManifest.xml
++	android:targetSdkVersion
++		INJECTED from /Users/julian/Confio/apps/node_modules/react-native-block-store/android/src/main/AndroidManifest.xml
++	android:minSdkVersion
++		INJECTED from /Users/julian/Confio/apps/node_modules/react-native-block-store/android/src/main/AndroidManifest.xml
+diff --git a/node_modules/react-native-block-store/android/build/tmp/compileDebugJavaWithJavac/previous-compilation-data.bin b/node_modules/react-native-block-store/android/build/tmp/compileDebugJavaWithJavac/previous-compilation-data.bin
+new file mode 100644
+index 0000000..b7b8ce8
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/tmp/compileDebugJavaWithJavac/previous-compilation-data.bin differ
+diff --git a/node_modules/react-native-block-store/android/build/tmp/kotlin-classes/debug/META-INF/react-native-block-store_debug.kotlin_module b/node_modules/react-native-block-store/android/build/tmp/kotlin-classes/debug/META-INF/react-native-block-store_debug.kotlin_module
+new file mode 100644
+index 0000000..c998a4c
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/tmp/kotlin-classes/debug/META-INF/react-native-block-store_debug.kotlin_module differ
+diff --git a/node_modules/react-native-block-store/android/build/tmp/kotlin-classes/debug/com/blockstore/BlockStoreModule$Companion.class b/node_modules/react-native-block-store/android/build/tmp/kotlin-classes/debug/com/blockstore/BlockStoreModule$Companion.class
+new file mode 100644
+index 0000000..0fe76c3
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/tmp/kotlin-classes/debug/com/blockstore/BlockStoreModule$Companion.class differ
+diff --git a/node_modules/react-native-block-store/android/build/tmp/kotlin-classes/debug/com/blockstore/BlockStoreModule.class b/node_modules/react-native-block-store/android/build/tmp/kotlin-classes/debug/com/blockstore/BlockStoreModule.class
+new file mode 100644
+index 0000000..2e29268
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/tmp/kotlin-classes/debug/com/blockstore/BlockStoreModule.class differ
+diff --git a/node_modules/react-native-block-store/android/build/tmp/kotlin-classes/debug/com/blockstore/BlockStorePackage.class b/node_modules/react-native-block-store/android/build/tmp/kotlin-classes/debug/com/blockstore/BlockStorePackage.class
+new file mode 100644
+index 0000000..1f2e0af
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/tmp/kotlin-classes/debug/com/blockstore/BlockStorePackage.class differ
+diff --git a/node_modules/react-native-block-store/android/build/tmp/kotlin-classes/debug/com/blockstore/BlockStoreSpec.class b/node_modules/react-native-block-store/android/build/tmp/kotlin-classes/debug/com/blockstore/BlockStoreSpec.class
+new file mode 100644
+index 0000000..2066790
+Binary files /dev/null and b/node_modules/react-native-block-store/android/build/tmp/kotlin-classes/debug/com/blockstore/BlockStoreSpec.class differ
+diff --git a/node_modules/react-native-block-store/android/src/main/java/com/blockstore/BlockStoreModule.kt b/node_modules/react-native-block-store/android/src/main/java/com/blockstore/BlockStoreModule.kt
+index 80abbb0..06fd677 100644
+--- a/node_modules/react-native-block-store/android/src/main/java/com/blockstore/BlockStoreModule.kt
++++ b/node_modules/react-native-block-store/android/src/main/java/com/blockstore/BlockStoreModule.kt
+@@ -46,7 +46,20 @@ class BlockStoreModule internal constructor(context: ReactApplicationContext) :
+ 
+     blockStoreClient.retrieveBytes(retrieveRequest)
+       .addOnSuccessListener {
+-        promise.resolve(if (it.blockstoreDataMap.containsKey(key)) it.blockstoreDataMap[key] else null)
++        val dataMap = it.blockstoreDataMap
++        if (dataMap.containsKey(key)) {
++            val data = dataMap[key]
++            if (data != null) {
++                // Fix: Convert BlockstoreData to String before resolving
++                val bytes = data.bytes
++                val strValue = String(bytes, Charsets.UTF_8)
++                promise.resolve(strValue)
++            } else {
++                promise.resolve(null)
++            }
++        } else {
++            promise.resolve(null)
++        }
+       }
+       .addOnFailureListener {
+         promise.resolve(null)
+diff --git a/node_modules/react-native-block-store/android/src/oldarch/BlockStoreSpec.kt b/node_modules/react-native-block-store/android/src/oldarch/BlockStoreSpec.kt
+index 52d0c1d..da3d9a0 100644
+--- a/node_modules/react-native-block-store/android/src/oldarch/BlockStoreSpec.kt
++++ b/node_modules/react-native-block-store/android/src/oldarch/BlockStoreSpec.kt
+@@ -7,9 +7,9 @@ import com.facebook.react.bridge.Promise
+ abstract class BlockStoreSpec internal constructor(context: ReactApplicationContext) :
+   ReactContextBaseJavaModule(context) {
+ 
+-  abstract fun save(key: String, value: String, shouldBackupToCloud: boolean, promise: Promise);
++  abstract fun save(key: String, value: String, shouldBackupToCloud: Boolean, promise: Promise)
+ 
+-  abstract fun retrieve(key: String, promise: Promise);
++  abstract fun retrieve(key: String, promise: Promise)
+ 
+-  abstract fun remove(key: String, promise: Promise);
++  abstract fun remove(key: String, promise: Promise)
+ }

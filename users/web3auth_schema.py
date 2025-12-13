@@ -60,6 +60,7 @@ class Web3AuthLoginMutation(graphene.Mutation):
     user = graphene.Field(Web3AuthUserType)
     needs_opt_in = graphene.List(graphene.String)  # Asset IDs that need opt-in (use String to avoid 32-bit Int limits)
     opt_in_transactions = graphene.JSONString()  # Unsigned transactions for opt-in
+    is_keyless_migrated = graphene.Boolean()  # True if user is V2 Native (Random Secret)
     
     @classmethod
     def mutate(cls, root, info, firebase_id_token, algorand_address=None, device_fingerprint=None):
@@ -238,10 +239,12 @@ class Web3AuthLoginMutation(graphene.Mutation):
                 except Exception as e:
                     logger.warning(f"Could not determine Algorand address from account: {e}")
 
-            # Create/update Algorand account using existing stored address only (ignore client-provided to prevent misuse)
-            algorand_address = None
-
+            # Create/update Algorand account
+            # NOTE: usage of client-provided 'algorand_address' is restricted to NEW accounts only
+            # to prevent existing users from accidentally overwriting their address or hijacking.
+            
             # Prefer existing personal account address if present
+            existing_account = None
             try:
                 existing_account = Account.objects.filter(
                     user=user,
@@ -249,23 +252,45 @@ class Web3AuthLoginMutation(graphene.Mutation):
                     account_index=0
                 ).first()
                 if existing_account and existing_account.algorand_address:
+                    # EXISTING USER: Enforce stored address (ignore client input)
                     algorand_address = existing_account.algorand_address
             except Exception:
-                existing_account = None
+                pass
 
+            # NATIVE V2: If user was JUST created, we want them to use V2 (random secret).
+            # The frontend needs to know this to generate the secret.
+            # We determine this status *before* creating the account to set flags correctly.
+            is_keyless_migrated_status = False
+
+            if created:
+                 # New User -> V2 Native
+                 is_keyless_migrated_status = True
+            elif existing_account:
+                 # Existing User -> Use stored status
+                 is_keyless_migrated_status = existing_account.is_keyless_migrated
+            
             if algorand_address:
                 # Use AlgorandAccountManager to ensure auto opt-ins happen
                 from blockchain.algorand_account_manager import AlgorandAccountManager
                 
-                # Ensure an account exists and matches stored address
-                account = existing_account
-                if not account:
-                    return cls(success=False, error='Algorand address not found for account; ownership verification required')
-
-                # For existing accounts, check and perform missing opt-ins
-                logger.info(f"Checking opt-ins for existing account: {algorand_address}")
+                # If this is a NEW account creation with a client-supplied address (Native V2)
+                if created and not existing_account:
+                    logger.info(f"Creating Native V2 account for {user.email} with address {algorand_address}")
+                    # We pass the address to get_or_create, which will create the Account object
+                
+                # Check and perform/create account
                 result = AlgorandAccountManager.get_or_create_algorand_account(user, algorand_address)
                 account = result['account']
+                
+                # If this was a fresh creation with a specific address, mark as migrated (Native V2)
+                # OR if it's a new user who is defaulting to V2
+                if created:
+                   account.is_keyless_migrated = True
+                   account.save(update_fields=['is_keyless_migrated'])
+                   logger.info(f"Marked new user {user.id} as optimized V2 (Native Keyless)")
+                   is_keyless_migrated_status = True
+
+                opted_in_assets = result.get('opted_in_assets', [])
                 opted_in_assets = result.get('opted_in_assets', [])
                 opt_in_errors = result.get('errors', [])
                 
@@ -428,7 +453,8 @@ class Web3AuthLoginMutation(graphene.Mutation):
                 refresh_token=refresh_token,
                 user=user,
                 needs_opt_in=[str(a) for a in assets_to_opt_in],
-                opt_in_transactions=opt_in_transactions
+                opt_in_transactions=opt_in_transactions,
+                is_keyless_migrated=is_keyless_migrated_status
             )
             
         except Exception as e:
@@ -977,6 +1003,84 @@ class OptInToUSDCMutation(graphene.Mutation):
             return cls(success=False, error=str(e))
 
 
+
+class MarkWalletMigratedMutation(graphene.Mutation):
+    """
+    Mark the user's account as successfully migrated to V2 (Native Keyless).
+    This stops the app from checking for V1->V2 migration on every launch.
+    """
+    class Arguments:
+        new_address = graphene.String(required=False)  # The new V2 address
+        
+    success = graphene.Boolean()
+    error = graphene.String()
+    
+    @classmethod
+    def mutate(cls, root, info, new_address=None):
+        try:
+            user = info.context.user
+            if not user.is_authenticated:
+                return cls(success=False, error='Not authenticated')
+            
+            # Get JWT context
+            from .jwt_context import get_jwt_business_context_with_validation
+            jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+            
+            # Default to personal account index 0 if no context (common during migration flows)
+            account_type = 'personal'
+            account_index = 0
+            business_id = None
+            
+            if jwt_context:
+                account_type = jwt_context.get('account_type', 'personal')
+                account_index = jwt_context.get('account_index', 0)
+                business_id = jwt_context.get('business_id')
+            
+            # Find the account
+            from .models import Account
+            account = None
+            
+            if account_type == 'business' and business_id:
+                account = Account.objects.filter(
+                    account_type='business',
+                    business_id=business_id,
+                    deleted_at__isnull=True
+                ).order_by('account_index').first() # Use first business account if index unclear
+            else:
+                account = Account.objects.filter(
+                    user=user,
+                    account_type='personal',
+                    account_index=account_index,
+                    deleted_at__isnull=True
+                ).first()
+                
+            if not account:
+                return cls(success=False, error='Account not found')
+            
+            update_fields = ['is_keyless_migrated']
+            account.is_keyless_migrated = True
+
+            if new_address:
+                # Validate format
+                if len(new_address) == 58:
+                    old_address = account.algorand_address
+                    account.algorand_address = new_address
+                    update_fields.append('algorand_address')
+                    logger.info(f"Updating address for migration: {old_address} -> {new_address}")
+                else:
+                    logger.warning(f"Invalid new address format provided for migration: {new_address}")
+
+            account.save(update_fields=update_fields)
+            
+            logger.info(f"Marked account {account.id} (User {user.id}) as migrated to V2")
+            
+            return cls(success=True)
+            
+        except Exception as e:
+            logger.error(f"Error marking wallet migrated: {e}")
+            return cls(success=False, error=str(e))
+
+
 class Web3AuthMutation(graphene.ObjectType):
     web3_auth_login = Web3AuthLoginMutation.Field()
     add_algorand_wallet = AddAlgorandWalletMutation.Field()
@@ -987,6 +1091,7 @@ class Web3AuthMutation(graphene.ObjectType):
     rotate_kek_pepper = RotateKekPepperMutation.Field()
     get_derivation_pepper = GetDerivationPepperMutation.Field()
     opt_in_to_usdc = OptInToUSDCMutation.Field()
+    mark_wallet_migrated = MarkWalletMigratedMutation.Field()
 
 
 class Web3AuthQuery(graphene.ObjectType):
@@ -1033,3 +1138,17 @@ class Web3AuthQuery(graphene.ObjectType):
         except Exception as e:
             logger.error(f'Get Algorand transactions error: {str(e)}')
             return []
+
+
+
+
+class Mutation(graphene.ObjectType):
+    web3auth_login = Web3AuthLoginMutation.Field()
+    add_algorand_wallet = AddAlgorandWalletMutation.Field()
+    update_algorand_address = UpdateAlgorandAddressMutation.Field()
+    verify_algorand_ownership = VerifyAlgorandOwnershipMutation.Field()
+    create_algorand_transaction = CreateAlgorandTransactionMutation.Field()
+    get_kek_pepper = GetKekPepperMutation.Field()
+    rotate_kek_pepper = RotateKekPepperMutation.Field()
+    get_derivation_pepper = GetDerivationPepperMutation.Field()
+    mark_wallet_migrated = MarkWalletMigratedMutation.Field()

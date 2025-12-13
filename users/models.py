@@ -355,6 +355,10 @@ class Account(SoftDeleteModel):
     # audit‑style timestamps
     # —————————————————————————————
     last_login_at = models.DateTimeField(null=True, blank=True)
+    is_keyless_migrated = models.BooleanField(
+        default=False,
+        help_text="Whether this account has migrated to V2 keyless wallet (server-side tracking)"
+    )
 
     class Meta:
         unique_together = ['user', 'account_type', 'account_index']

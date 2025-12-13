@@ -8,6 +8,7 @@ import { MainStackParamList } from '../types/navigation';
 import { useMutation, useQuery } from '@apollo/client';
 import { UPDATE_USER_PROFILE, UPDATE_USERNAME, GET_ME, GET_MY_PERSONAL_KYC_STATUS, GET_MY_PERSONAL_VERIFIED_KYC } from '../apollo/queries';
 import { getCountryByIso } from '../utils/countries';
+import { biometricAuthService } from '../services/biometricAuthService';
 
 // Colors from the design
 const colors = {
@@ -29,7 +30,7 @@ type EditProfileScreenNavigationProp = NativeStackNavigationProp<MainStackParamL
 // Utility function to format phone number with country code
 const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string => {
   if (!phoneNumber) return '';
-  
+
   // If we have a country code, format it
   if (phoneCountry) {
     const country = getCountryByIso(phoneCountry);
@@ -38,14 +39,14 @@ const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string 
       return `${countryCode} ${phoneNumber}`;
     }
   }
-  
+
   return phoneNumber;
 };
 
 export const EditProfileScreen = () => {
   const { userProfile, isUserProfileLoading, refreshProfile } = useAuth();
   const navigation = useNavigation<EditProfileScreenNavigationProp>();
-  
+
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [username, setUsername] = useState('');
@@ -71,15 +72,6 @@ export const EditProfileScreen = () => {
   }, [userProfile]);
 
   const handleSave = async () => {
-    if (isVerified) {
-      Alert.alert(
-        'No se puede editar', 
-        'Tu identidad ya ha sido verificada. No puedes cambiar tu nombre legal.',
-        [{ text: 'OK' }]
-      );
-      return;
-    }
-
     if (!firstName.trim()) {
       Alert.alert('Error', 'El nombre es requerido');
       return;
@@ -99,24 +91,36 @@ export const EditProfileScreen = () => {
 
     setIsSaving(true);
     try {
-      // Update profile (first name and last name)
-      const profileResult = await updateProfile({
-        variables: {
-          firstName: firstName.trim(),
-          lastName: lastName.trim(),
-        },
-      });
+      let profileSuccess = true;
+      let profileError = null;
 
-      // Update username
+      // Only update profile (names) if NOT verified
+      if (!isVerified) {
+        const profileResult = await updateProfile({
+          variables: {
+            firstName: firstName.trim(),
+            lastName: lastName.trim(),
+          },
+        });
+        profileSuccess = profileResult.data?.updateUserProfile?.success;
+        profileError = profileResult.data?.updateUserProfile?.error;
+      }
+
+      // Always allow username update (unless we decide otherwise, but typically username is changeable)
+      // Note: If you want to lock username for verified users, wrap this too. 
+      // Assuming username is changable for now as prompt focused on Phone Number.
       const usernameResult = await updateUsername({
         variables: {
           username: username.trim(),
         },
       });
 
-      if (profileResult.data?.updateUserProfile?.success && usernameResult.data?.updateUsername?.success) {
+      const usernameSuccess = usernameResult.data?.updateUsername?.success;
+      const usernameErrorMsg = usernameResult.data?.updateUsername?.error;
+
+      if (profileSuccess && usernameSuccess) {
         Alert.alert(
-          'Éxito', 
+          'Éxito',
           'Perfil actualizado correctamente',
           [
             {
@@ -129,10 +133,7 @@ export const EditProfileScreen = () => {
           ]
         );
       } else {
-        const profileError = profileResult.data?.updateUserProfile?.error;
-        const usernameError = usernameResult.data?.updateUsername?.error;
-        
-        if (usernameError && usernameError.includes('ya está en uso')) {
+        if (usernameErrorMsg && usernameErrorMsg.includes('ya está en uso')) {
           const suggestions = getUsernameSuggestions(username.trim());
           const suggestionsText = suggestions.map(s => '• ' + s).join('\n');
           Alert.alert(
@@ -146,7 +147,7 @@ export const EditProfileScreen = () => {
             ]
           );
         } else {
-          const errorMessage = profileError || usernameError || 'Error desconocido';
+          const errorMessage = profileError || usernameErrorMsg || 'Error desconocido';
           Alert.alert('Error', errorMessage);
         }
       }
@@ -162,7 +163,20 @@ export const EditProfileScreen = () => {
     navigation.goBack();
   };
 
-  const handleChangePhoneNumber = () => {
+  const handleChangePhoneNumber = async () => {
+    if (isVerified) {
+      try {
+        const authenticated = await biometricAuthService.authenticate(
+          'Verifica tu identidad para cambiar tu número de teléfono'
+        );
+        if (!authenticated) {
+          return;
+        }
+      } catch (error) {
+        console.error('Biometric auth failed', error);
+        return;
+      }
+    }
     navigation.navigate('PhoneVerification');
   };
 
@@ -196,7 +210,7 @@ export const EditProfileScreen = () => {
   const handleUsernameChange = (text: string) => {
     setUsername(text);
     setUsernameError(null); // Clear previous errors
-    
+
     if (text.trim()) {
       const validation = validateUsername(text);
       if (validation) {
@@ -222,54 +236,11 @@ export const EditProfileScreen = () => {
     );
   }
 
-  // If user is verified, show a different screen
-  if (isVerified) {
-    const meLast = meData?.me?.lastVerifiedDate || null;
-    const kycLast = personalKycData?.myPersonalKycStatus?.verifiedAt || null;
-    const kycVerifiedLast = personalVerifiedKycData?.myPersonalVerifiedKyc?.verifiedAt || null;
-    const verifiedDateIso = meLast || kycVerifiedLast || kycLast || null;
-    console.log('[EditProfile] Verified status; personal dates', { meLast, kycVerifiedLast, kycLast });
-    return (
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={handleCancel}>
-            <Icon name="arrow-left" size={24} color="#fff" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Editar Perfil</Text>
-          <View style={styles.placeholder} />
-        </View>
-
-        <View style={styles.verifiedContainer}>
-          <View style={styles.verifiedIcon}>
-            <Text style={styles.verifiedIconText}>✓</Text>
-          </View>
-          <Text style={styles.verifiedTitle}>Identidad Verificada</Text>
-          <Text style={styles.verifiedDescription}>
-            Tu identidad ha sido verificada. Tu nombre legal no puede ser modificado.
-          </Text>
-          
-          <View style={styles.currentInfoContainer}>
-            <Text style={styles.currentInfoLabel}>Nombre verificado:</Text>
-            <Text style={styles.currentInfoText}>
-              {userProfile?.firstName} {userProfile?.lastName}
-            </Text>
-            {!!verifiedDateIso && (
-              <>
-                <Text style={styles.currentInfoLabel}>Verificado el:</Text>
-                <Text style={styles.currentInfoText}>
-                  {new Date(verifiedDateIso).toLocaleDateString('es-ES', {
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric'
-                  })}
-                </Text>
-              </>
-            )}
-          </View>
-        </View>
-      </View>
-    );
-  }
+  // Get verification dates for display if needed
+  const meLast = meData?.me?.lastVerifiedDate || null;
+  const kycLast = personalKycData?.myPersonalKycStatus?.verifiedAt || null;
+  const kycVerifiedLast = personalVerifiedKycData?.myPersonalVerifiedKyc?.verifiedAt || null;
+  const verifiedDateIso = meLast || kycVerifiedLast || kycLast || null;
 
   return (
     <View style={styles.container}>
@@ -279,8 +250,8 @@ export const EditProfileScreen = () => {
           <Icon name="arrow-left" size={24} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Editar Perfil</Text>
-        <TouchableOpacity 
-          style={[styles.saveButton, isSaving && styles.saveButtonDisabled]} 
+        <TouchableOpacity
+          style={[styles.saveButton, isSaving && styles.saveButtonDisabled]}
           onPress={handleSave}
           disabled={isSaving}
         >
@@ -291,36 +262,65 @@ export const EditProfileScreen = () => {
       </View>
 
       {/* Form */}
-      <ScrollView 
+      <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.formContainer}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
+        {isVerified && (
+          <View style={styles.verifiedBanner}>
+            <View style={styles.verifiedHeader}>
+              <Icon name="check-circle" size={20} color="#047857" />
+              <Text style={styles.verifiedBannerTitle}>Identidad Verificada</Text>
+            </View>
+            <Text style={styles.verifiedBannerText}>
+              Tu nombre legal ya no puede ser modificado.
+              {verifiedDateIso && ` Verificado el ${new Date(verifiedDateIso).toLocaleDateString('es-ES', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+              })}.`}
+            </Text>
+          </View>
+        )}
+
         <View style={styles.inputGroup}>
           <Text style={styles.inputLabel}>Nombre</Text>
           <TextInput
-            style={styles.textInput}
+            style={[styles.textInput, isVerified && styles.disabledInput]}
             value={firstName}
             onChangeText={setFirstName}
             placeholder="Ingresa tu nombre"
             placeholderTextColor="#9CA3AF"
             autoCapitalize="words"
             autoCorrect={false}
+            editable={!isVerified}
           />
+          {isVerified && (
+            <Text style={styles.inputSubtext}>
+              <Icon name="lock" size={10} color="#6B7280" /> No editable por verificación de identidad
+            </Text>
+          )}
         </View>
 
         <View style={styles.inputGroup}>
           <Text style={styles.inputLabel}>Apellido</Text>
           <TextInput
-            style={styles.textInput}
+            style={[styles.textInput, isVerified && styles.disabledInput]}
             value={lastName}
             onChangeText={setLastName}
             placeholder="Ingresa tu apellido"
             placeholderTextColor="#9CA3AF"
             autoCapitalize="words"
             autoCorrect={false}
+            editable={!isVerified}
           />
+          {isVerified && (
+            <Text style={styles.inputSubtext}>
+              <Icon name="lock" size={10} color="#6B7280" /> No editable por verificación de identidad
+            </Text>
+          )}
         </View>
 
         <View style={styles.inputGroup}>
@@ -352,14 +352,14 @@ export const EditProfileScreen = () => {
 
         <View style={styles.inputGroup}>
           <Text style={styles.inputLabel}>Número de teléfono</Text>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.phoneInputContainer}
             onPress={handleChangePhoneNumber}
             activeOpacity={0.7}
           >
             <View style={styles.phoneInputContent}>
               <Text style={styles.phoneInputText}>
-                {userProfile?.phoneNumber && userProfile?.phoneCountry 
+                {userProfile?.phoneNumber && userProfile?.phoneCountry
                   ? formatPhoneNumber(userProfile.phoneNumber, userProfile.phoneCountry)
                   : 'No configurado'
                 }
@@ -368,7 +368,10 @@ export const EditProfileScreen = () => {
             </View>
           </TouchableOpacity>
           <Text style={styles.phoneInputSubtext}>
-            Toca para cambiar tu número de teléfono
+            {isVerified
+              ? 'Toca para cambiar tu número (requiere biometría)'
+              : 'Toca para cambiar tu número de teléfono'
+            }
           </Text>
         </View>
 
@@ -456,6 +459,35 @@ const styles = StyleSheet.create({
     color: '#1F2937',
     backgroundColor: '#F9FAFB',
   },
+  disabledInput: {
+    backgroundColor: '#E5E7EB',
+    color: '#6B7280',
+    borderColor: '#E5E7EB',
+  },
+  verifiedBanner: {
+    backgroundColor: '#ECFDF5',
+    borderColor: '#10B981',
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 24,
+  },
+  verifiedHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  verifiedBannerTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#047857',
+    marginLeft: 8,
+  },
+  verifiedBannerText: {
+    fontSize: 14,
+    color: '#065F46',
+    lineHeight: 20,
+  },
   inputSubtext: {
     fontSize: 12,
     color: '#6B7280',
@@ -523,6 +555,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 12,
     marginTop: 16,
+    marginBottom: 32,
   },
   infoText: {
     fontSize: 14,
@@ -530,55 +563,5 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     flex: 1,
     lineHeight: 20,
-  },
-  verifiedContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 32,
-  },
-  verifiedIcon: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#10B981',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  verifiedIconText: {
-    fontSize: 40,
-    color: '#fff',
-    fontWeight: 'bold',
-  },
-  verifiedTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#1F2937',
-    marginBottom: 16,
-    textAlign: 'center',
-  },
-  verifiedDescription: {
-    fontSize: 16,
-    color: '#6B7280',
-    textAlign: 'center',
-    lineHeight: 24,
-    marginBottom: 32,
-  },
-  currentInfoContainer: {
-    backgroundColor: '#F3F4F6',
-    padding: 20,
-    borderRadius: 12,
-    width: '100%',
-  },
-  currentInfoLabel: {
-    fontSize: 14,
-    color: '#6B7280',
-    marginBottom: 8,
-  },
-  currentInfoText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#1F2937',
   },
 }); 

@@ -275,6 +275,11 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
         if not account or not account.algorand_address or len(account.algorand_address) != 58:
             return {"success": False, "error": "no_algorand_address"}
 
+        # BLOCK V1 USERS: require updated app (Keyless V2 migration)
+        if not getattr(account, 'is_keyless_migrated', False):
+            return {"success": False, "error": "Actualiza tu app para participar en la preventa."}
+
+
         # Compute CONFIO amount (phase pricing uses cUSD per token)
         confio_amount = (cusd_amount / phase.price_per_token).quantize(Decimal('0.000001'))
         cusd_base = int(cusd_amount * 10**6)

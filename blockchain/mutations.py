@@ -2168,3 +2168,282 @@ class CompleteBusinessOptInMutation(graphene.Mutation):
         except Exception as e:
             logger.error(f'Error completing business opt-in: {str(e)}')
             return cls(success=False, error=str(e))
+
+class PrepareAtomicMigrationMutation(graphene.Mutation):
+    """
+    Generate a complete atomic migration group:
+    1. Sponsor -> V2 (Fund MBR for opt-ins)
+    2. Sponsor -> V1 (Fund fees for closures)
+    3. V2 -> Opt in to assets
+    4. V1 -> Close assets to V2
+    5. V1 -> Close Algo to V2
+    
+    Returns the group with signed sponsor txns and unsigned user txns.
+    """
+    
+    class Arguments:
+        v1_address = graphene.String(required=True)
+        v2_address = graphene.String(required=True)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    transactions = graphene.JSONString()
+    
+    @classmethod
+    def mutate(cls, root, info, v1_address, v2_address):
+        try:
+            user = info.context.user
+            if not user.is_authenticated:
+                return cls(success=False, error='Not authenticated')
+            
+            # 1. Validate Addresses
+            if len(v1_address) != 58 or len(v2_address) != 58:
+                return cls(success=False, error='Invalid Algorand address format')
+
+            from algosdk.v2client import algod
+            from algosdk.transaction import AssetTransferTxn, PaymentTxn, calculate_group_id
+            from blockchain.algorand_client import get_algod_client
+            from blockchain.algorand_account_manager import AlgorandAccountManager
+            import base64
+            import msgpack
+            from algosdk import encoding as algo_encoding
+            
+            algod_client = get_algod_client()
+            params = algod_client.suggested_params()
+            
+            # 2. Analyze V1 Account (What to sweep)
+            try:
+                v1_info = algod_client.account_info(v1_address)
+            except Exception:
+                # If V1 doesn't exist on chain, nothing to migrate
+                return cls(success=False, error='V1 account not found on chain')
+
+            v1_assets = v1_info.get('assets', [])
+            v1_algo_balance = v1_info.get('amount', 0)
+            
+            # Determine which assets to migrate (Strict Whitelist + USDC if present)
+            # CONFIO/cUSD are mandatory if system configured, USDC if user has it
+            
+            # Determine which assets to migrate (Strict Whitelist + USDC if present)
+            # Also detect if there are leftover "junk" assets that prevent account closure
+            assets_to_migrate = []
+            has_leftover_assets = False
+            
+            # Helper to check if asset ID is relevant
+            def is_relevant_asset(aid):
+                relevant_ids = [
+                    AlgorandAccountManager.CONFIO_ASSET_ID,
+                    AlgorandAccountManager.CUSD_ASSET_ID,
+                    AlgorandAccountManager.USDC_ASSET_ID
+                ]
+                # Filter out None values in case settings are missing
+                return aid in [r for r in relevant_ids if r is not None]
+
+            for asset in v1_assets:
+                aid = asset['asset-id']
+                amount = asset['amount']
+                if is_relevant_asset(aid):
+                    assets_to_migrate.append(aid)
+                else:
+                    # If irrelevant asset has balance, we can't easily close it
+                    if amount > 0:
+                        has_leftover_assets = True
+                        logger.warning(f"V1 {v1_address} has leftover asset {aid} with amount {amount}. Cannot fully close account.")
+                    # If amount is 0, we could technically opt-out, but for safety we'll just leave it if it's not whitelisted
+                    else:
+                        # Optional: Could add logic to close 0-balance spam assets here
+                         has_leftover_assets = True # Treat as leftover for now to be safe
+            
+            # Also ensure we target CONFIO/cUSD for V2 opt-in even if V1 doesn't have them yet
+            # (To ensure V2 is fully setup for the future)
+            target_v2_opt_ins = set(assets_to_migrate)
+            if AlgorandAccountManager.CONFIO_ASSET_ID:
+                target_v2_opt_ins.add(AlgorandAccountManager.CONFIO_ASSET_ID)
+            if AlgorandAccountManager.CUSD_ASSET_ID:
+                target_v2_opt_ins.add(AlgorandAccountManager.CUSD_ASSET_ID)
+            
+            target_v2_opt_ins_list = sorted(list(target_v2_opt_ins))
+
+            # 3. Check V2 State (What opt-ins are needed)
+            try:
+                v2_info = algod_client.account_info(v2_address)
+                v2_existing_assets = set(a['asset-id'] for a in v2_info.get('assets', []))
+                v2_balance = v2_info.get('amount', 0)
+                v2_min_balance = v2_info.get('min-balance', 0)
+            except Exception:
+                # V2 might be new
+                v2_existing_assets = set()
+                v2_balance = 0
+                v2_min_balance = 0
+
+            # Determine actual opt-ins needed for V2
+            needed_opt_ins = [aid for aid in target_v2_opt_ins_list if aid not in v2_existing_assets]
+            
+            # 4. Construct Transaction List
+            txns = []
+            
+            # --- MBR Calculation ---
+            # Each ASSET opt-in costs 0.1 ALGO (100,000 microAlgo) MBR increase
+            # Only fund MBR for NEW opt-ins
+            mbr_per_asset = 100_000
+            total_mbr_increase = len(needed_opt_ins) * mbr_per_asset
+            
+            # Check if V2 needs funding for MBR
+            # Available balance = Balance - MinBalance
+            # We need Available >= 0 AFTER opt-ins
+            # So: (Balance + Funding) - (MinBalance + Increase) >= 0
+            # Funding >= MinBalance + Increase - Balance
+            
+            funding_needed_v2 = 0
+            if v2_balance < (v2_min_balance + total_mbr_increase):
+                funding_needed_v2 = (v2_min_balance + total_mbr_increase) - v2_balance
+                # Add a small buffer just in case (e.g. 1000 microAlgo)
+                funding_needed_v2 += 1000
+            
+            # --- Fee Calculation ---
+            # Sponsor pays for EVERYTHING.
+            # Operations count:
+            # 1. Sponsor MBR Fund (Sponsor -> V2)
+            # 2. V2 Opt-Ins (N * Axfer)
+            # 3. V1 Asset Closes (M * Axfer)
+            # 4. V1 Close Algo (1 * Pay) - OR - V1 Max Send (1 * Pay)
+            
+            op_count = 1 + len(needed_opt_ins) + len(assets_to_migrate) + 1
+            min_fee = 1000
+            total_group_fee = op_count * min_fee
+            
+            # Txn 1: Sponsor Funding V2 (MBR) + Paying Request Group Fee
+            sponsor_txn = PaymentTxn(
+                sender=AlgorandAccountManager.SPONSOR_ADDRESS,
+                sp=params,
+                receiver=v2_address,
+                amt=funding_needed_v2, 
+                note=b"Atomic Migration: V2 MBR Funding"
+            )
+            sponsor_txn.fee = total_group_fee 
+            txns.append({'txn': sponsor_txn, 'signer': 'sponsor', 'desc': 'Sponsor MBR Fund + Fees'})
+            
+            # Txn Group 2: V2 Opt-Ins
+            for aid in needed_opt_ins:
+                opt_in = AssetTransferTxn(
+                    sender=v2_address,
+                    sp=params,
+                    receiver=v2_address,
+                    amt=0,
+                    index=aid
+                )
+                opt_in.fee = 0
+                txns.append({'txn': opt_in, 'signer': 'v2', 'desc': f'Opt-in {aid}'})
+                
+            # Txn Group 3: V1 Asset Closes
+            for aid in assets_to_migrate:
+                # Use close_assets_to to empty and close the asset
+                close_asset = AssetTransferTxn(
+                    sender=v1_address,
+                    sp=params,
+                    receiver=v2_address,
+                    close_assets_to=v2_address,
+                    amt=0,
+                    index=aid
+                )
+                close_asset.fee = 0
+                txns.append({'txn': close_asset, 'signer': 'v1', 'desc': f'Migrate Asset {aid}'})
+                
+            # Txn Group 4: V1 Algo Transfer (Close or Max Send)
+            if not has_leftover_assets:
+                # Clean sweep: Close account because no assets remain
+                close_algo = PaymentTxn(
+                    sender=v1_address,
+                    sp=params,
+                    receiver=AlgorandAccountManager.SPONSOR_ADDRESS,
+                    close_remainder_to=AlgorandAccountManager.SPONSOR_ADDRESS,
+                    amt=0
+                )
+                close_algo.fee = 0
+                txns.append({'txn': close_algo, 'signer': 'v1', 'desc': 'Migrate ALGO (Close)'})
+            else:
+                # Dirty sweep: Cannot close account due to spam assets
+                # Send Max ALGO (Balance - MinBalance - Fee)
+                # Fee is 0 (sponsored), so Balance - MinBalance
+                # We need to recalculate MinBalance based on REMAINING assets
+                # V1 Min Balance = 100,000 (Base) + 100,000 * len(Assets)
+                # Assets count = Total Assets - Migrated Assets
+                
+                remaining_assets_count = len(v1_assets) - len(assets_to_migrate)
+                # Ensure count is non-negative
+                remaining_assets_count = max(0, remaining_assets_count)
+                
+                required_min_balance = 100_000 + (remaining_assets_count * 100_000)
+                
+                # Check for other apps (schema) - simplified assumption: no apps or extra cost
+                # If they have apps, they need more min balance.
+                # Safer: Trust the node's `min-balance` reported earlier, 
+                # but subtract the MBR of the assets we ARE closing.
+                
+                current_min = v1_info.get('min-balance', 100000)
+                freed_mbr = len(assets_to_migrate) * 100_000
+                new_v1_min_balance = max(100_000, current_min - freed_mbr)
+                
+                amount_to_send = max(0, v1_algo_balance - new_v1_min_balance)
+                
+                logger.info(f"V1 has leftover assets. Skipping close. Sending {amount_to_send} ALGO. Keeping {new_v1_min_balance} MBR.")
+                
+                if amount_to_send > 0:
+                    send_algo = PaymentTxn(
+                        sender=v1_address,
+                        sp=params,
+                        receiver=v2_address,
+                        amt=amount_to_send
+                    )
+                    send_algo.fee = 0
+                    txns.append({'txn': send_algo, 'signer': 'v1', 'desc': 'Migrate ALGO (Partial)'})
+            
+            # 5. Group ID Assignment
+            raw_txns = [t['txn'] for t in txns]
+            gid = calculate_group_id(raw_txns)
+            for t in raw_txns:
+                t.group = gid
+                
+            # 6. Process Output
+            output_txns = []
+            
+            # Sign Sponsor Txn
+            signed_sponsor_txn = AlgorandAccountManager.SIGNER.sign_transaction(sponsor_txn)
+            sponsor_txn_b64 = algo_encoding.msgpack_encode(signed_sponsor_txn)
+            
+            # Add to output
+            output_txns.append({
+                'type': 'sponsor',
+                'description': 'Fees & MBR Funding',
+                'transaction': sponsor_txn_b64, # Already signed
+                'signed': True,
+                'signer': 'sponsor'
+            })
+            
+            # Add others as unsigned
+            for i, t_info in enumerate(txns):
+                if i == 0: continue # Skip sponsor txn we just handled
+                
+                txn_obj = t_info['txn']
+                unsigned_b64 = base64.b64encode(
+                    msgpack.packb(txn_obj.dictify(), use_bin_type=True)
+                ).decode()
+                
+                output_txns.append({
+                    'type': t_info['signer'], # 'v1' or 'v2'
+                    'description': t_info['desc'],
+                    'transaction': unsigned_b64,
+                    'signed': False,
+                    'signer': t_info['signer']
+                })
+                
+            logger.info(f"Generated atomic migration group {gid} with {len(output_txns)} ops")
+            
+            return cls(
+                success=True,
+                transactions=output_txns
+            )
+            
+        except Exception as e:
+            logger.error(f'Error preparing atomic migration: {str(e)}')
+            return cls(success=False, error=str(e))

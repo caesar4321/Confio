@@ -68,6 +68,8 @@ import PayrollRecipientsManageScreen from '../screens/PayrollRecipientsManageScr
 import PayrollDelegatesManageScreen from '../screens/PayrollDelegatesManageScreen';
 // import NotificationSettingsScreen from '../screens/NotificationSettingsScreen'; // Hidden: Notifications mandatory
 
+import { MigrationModal } from '../components/MigrationModal';
+
 console.log('MainNavigator: TransactionProcessingScreen imported:', !!TransactionProcessingScreen);
 console.log('MainNavigator: TransactionSuccessScreen imported:', !!TransactionSuccessScreen);
 
@@ -77,387 +79,391 @@ export const MainNavigator = () => {
   console.log('MainNavigator: Component rendering at:', new Date().toISOString());
 
   return (
-    <Stack.Navigator
-      screenOptions={{
-        headerShown: false,
-        animation: 'none',
-        detachInactiveScreens: true,
-      }}
-    >
-      <Stack.Screen name="BottomTabs" component={BottomTabNavigator} />
-      <Stack.Screen
-        name="LegalDocument"
-        component={LegalDocumentScreen}
-        options={{
+    <>
+      <Stack.Navigator
+        screenOptions={{
           headerShown: false,
+          animation: 'none',
+          detachInactiveScreens: true,
         }}
-      />
-      <Stack.Screen
-        name="Verification"
-        component={VerificationScreen}
-        options={{
-          headerShown: false,
-        }}
-      />
-      <Stack.Screen
-        name="BankInfo"
-        component={BankInfoScreen}
-        options={{
-          headerShown: false,
-        }}
-      />
-      <Stack.Screen
-        name="ConfioAddress"
-        component={ConfioAddressScreen}
-        options={{
-          headerShown: false,
-        }}
-      />
-      <Stack.Screen
-        name="Notification"
-        component={NotificationScreen}
-        options={{
-          headerShown: false,
-        }}
-      />
-      <Stack.Screen
-        name="CreateBusiness"
-        component={CreateBusinessScreen}
-        options={{
-          headerShown: false,
-        }}
-      />
-      <Stack.Screen
-        name="EditBusiness"
-        component={EditBusinessScreen}
-        options={{
-          headerShown: false,
-        }}
-      />
-      <Stack.Screen
-        name="EditProfile"
-        component={EditProfileScreen}
-        options={{
-          headerShown: false,
-        }}
-      />
-      <Stack.Screen
-        name="UpdateUsername"
-        component={UpdateUsernameScreen}
-        options={{
-          headerShown: false,
-        }}
-      />
-      <Stack.Screen
-        name="PhoneVerification"
-        component={PhoneVerificationScreen}
-        options={{
-          headerShown: false,
-        }}
-      />
-      <Stack.Screen
-        name="TraderProfile"
-        component={TraderProfileScreen}
-        options={{
-          headerShown: false,
-        }}
-      />
-      <Stack.Screen
-        name="TradeConfirm"
-        component={TradeConfirmScreen}
-        options={{
-          headerShown: false,
-        }}
-      />
-      <Stack.Screen
-        name="TradeChat"
-        component={TradeChatScreen}
-        options={{
-          headerShown: false,
-        }}
-      />
-      <Stack.Screen
-        name="AccountDetail"
-        component={AccountDetailScreen}
-        options={{
-          headerShown: false,
-        }}
-      />
-      <Stack.Screen
-        name="TopUp"
-        component={TopUpScreen}
-        options={{
-          headerShown: false,
-        }}
-      />
-      <Stack.Screen
-        name="Sell"
-        component={SellScreen}
-        options={{
-          headerShown: false,
-        }}
-      />
-      <Stack.Screen
-        name="USDCDeposit"
-        component={DepositScreen}
-        options={{
-          headerShown: false,
-        }}
-      />
-      <Stack.Screen
-        name="USDCManage"
-        component={USDCManageScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="USDCWithdraw"
-        component={USDCWithdrawScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="USDCHistory"
-        component={USDCHistoryScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="USDCConversion"
-        component={USDCConversionScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="SendWithAddress"
-        component={SendWithAddressScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="SendToFriend"
-        component={SendToFriendScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="FriendDetail"
-        component={FriendDetailScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="EmployeeDetail"
-        component={EmployeeDetailScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="EmployeeEdit"
-        component={EmployeeEditScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="PayeeDetail"
-        component={PayeeDetailScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="PayrollHistory"
-        component={PayrollHistoryScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="PayrollRunsHistory"
-        component={PayrollRunsHistoryScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="PayrollRun"
-        component={PayrollRunScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="TransactionDetail"
-        component={TransactionDetailScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="TransactionProcessing"
-        component={TransactionProcessingScreen}
-        options={{
-          headerShown: false,
-          gestureEnabled: false, // Prevent back gesture
-          animation: 'slide_from_right'
-        }}
-        listeners={{
-          focus: () => console.log('MainNavigator: TransactionProcessing screen focused'),
-        }}
-      />
-      <Stack.Screen
-        name="TransactionSuccess"
-        component={TransactionSuccessScreen}
-        options={{
-          headerShown: false,
-          gestureEnabled: false, // Prevent back gesture
-          animation: 'slide_from_right'
-        }}
-        listeners={{
-          focus: () => console.log('MainNavigator: TransactionSuccess screen focused'),
-        }}
-      />
-      <Stack.Screen
-        name="PaymentConfirmation"
-        component={PaymentConfirmationScreen}
-        options={{
-          headerShown: false,
-          animation: 'slide_from_bottom'
-        }}
-      />
-      <Stack.Screen
-        name="PaymentProcessing"
-        component={PaymentProcessingScreen}
-        options={{
-          headerShown: false,
-          gestureEnabled: false, // Prevent back gesture
-          animation: 'slide_from_right',
-          presentation: 'modal' // Ensure it's treated as a modal
-        }}
-        listeners={{
-          focus: () => console.log('MainNavigator: PaymentProcessing screen focused'),
-          beforeRemove: (e) => {
-            console.log('MainNavigator: PaymentProcessing screen being removed');
-          }
-        }}
-      />
-      <Stack.Screen
-        name="PaymentSuccess"
-        component={PaymentSuccessScreen}
-        options={{
-          headerShown: false,
-          gestureEnabled: false, // Prevent back gesture
-          animation: 'slide_from_right'
-        }}
-      />
-      <Stack.Screen
-        name="ActiveTrade"
-        component={ActiveTradeScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="TraderRating"
-        component={TraderRatingScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="BusinessPaymentSuccess"
-        component={BusinessPaymentSuccessScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="Scan"
-        component={ScanScreen}
-        options={{ headerShown: false, freezeOnBlur: true }}
-      />
-      <Stack.Screen
-        name="CreateOffer"
-        component={CreateOfferScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="Achievements"
-        component={AchievementsScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="ConfioTokenInfo"
-        component={ConfioTokenInfoScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="ConfioPresale"
-        component={ConfioPresaleScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="ConfioPresaleParticipate"
-        component={ConfioPresaleParticipateScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="ConfioTokenomics"
-        component={ConfioTokenomicsScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="MiProgresoViral"
-        component={MiProgresoViralScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="ViralTemplates"
-        component={ViralTemplatesScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="ReferralFriendJoined"
-        component={ReferralFriendJoinedScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="ReferralActionPrompt"
-        component={ReferralActionPromptScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="ReferralEventDetail"
-        component={ReferralEventDetailScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="ReferralRewardClaim"
-        component={ReferralRewardClaimScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="PayrollPending"
-        component={PayrollPendingScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="PayrollTopUp"
-        component={PayrollTopUpScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="PayrollHome"
-        component={PayrollHomeScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="PayrollRunDetail"
-        component={PayrollRunDetailScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="PayrollReceipt"
-        component={PayrollReceiptScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="PayrollSetupWizard"
-        component={PayrollSetupWizard}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="PayrollRecipientsManage"
-        component={PayrollRecipientsManageScreen}
-        options={{ headerShown: false }}
-      />
-      <Stack.Screen
-        name="PayrollDelegatesManage"
-        component={PayrollDelegatesManageScreen}
-        options={{ headerShown: false }}
-      />
-      {/* Hidden: Notifications are mandatory for financial apps
+      >
+        <Stack.Screen name="BottomTabs" component={BottomTabNavigator} />
+        {/* ... existing screens ... */}
+        <Stack.Screen
+          name="LegalDocument"
+          component={LegalDocumentScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="Verification"
+          component={VerificationScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="BankInfo"
+          component={BankInfoScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="ConfioAddress"
+          component={ConfioAddressScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="Notification"
+          component={NotificationScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="CreateBusiness"
+          component={CreateBusinessScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="EditBusiness"
+          component={EditBusinessScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="EditProfile"
+          component={EditProfileScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="UpdateUsername"
+          component={UpdateUsernameScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="PhoneVerification"
+          component={PhoneVerificationScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="TraderProfile"
+          component={TraderProfileScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="TradeConfirm"
+          component={TradeConfirmScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="TradeChat"
+          component={TradeChatScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="AccountDetail"
+          component={AccountDetailScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="TopUp"
+          component={TopUpScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="Sell"
+          component={SellScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="USDCDeposit"
+          component={DepositScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="USDCManage"
+          component={USDCManageScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="USDCWithdraw"
+          component={USDCWithdrawScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="USDCHistory"
+          component={USDCHistoryScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="USDCConversion"
+          component={USDCConversionScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="SendWithAddress"
+          component={SendWithAddressScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="SendToFriend"
+          component={SendToFriendScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="FriendDetail"
+          component={FriendDetailScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="EmployeeDetail"
+          component={EmployeeDetailScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="EmployeeEdit"
+          component={EmployeeEditScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="PayeeDetail"
+          component={PayeeDetailScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="PayrollHistory"
+          component={PayrollHistoryScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="PayrollRunsHistory"
+          component={PayrollRunsHistoryScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="PayrollRun"
+          component={PayrollRunScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="TransactionDetail"
+          component={TransactionDetailScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="TransactionProcessing"
+          component={TransactionProcessingScreen}
+          options={{
+            headerShown: false,
+            gestureEnabled: false, // Prevent back gesture
+            animation: 'slide_from_right'
+          }}
+          listeners={{
+            focus: () => console.log('MainNavigator: TransactionProcessing screen focused'),
+          }}
+        />
+        <Stack.Screen
+          name="TransactionSuccess"
+          component={TransactionSuccessScreen}
+          options={{
+            headerShown: false,
+            gestureEnabled: false, // Prevent back gesture
+            animation: 'slide_from_right'
+          }}
+          listeners={{
+            focus: () => console.log('MainNavigator: TransactionSuccess screen focused'),
+          }}
+        />
+        <Stack.Screen
+          name="PaymentConfirmation"
+          component={PaymentConfirmationScreen}
+          options={{
+            headerShown: false,
+            animation: 'slide_from_bottom'
+          }}
+        />
+        <Stack.Screen
+          name="PaymentProcessing"
+          component={PaymentProcessingScreen}
+          options={{
+            headerShown: false,
+            gestureEnabled: false, // Prevent back gesture
+            animation: 'slide_from_right',
+            presentation: 'modal' // Ensure it's treated as a modal
+          }}
+          listeners={{
+            focus: () => console.log('MainNavigator: PaymentProcessing screen focused'),
+            beforeRemove: (e) => {
+              console.log('MainNavigator: PaymentProcessing screen being removed');
+            }
+          }}
+        />
+        <Stack.Screen
+          name="PaymentSuccess"
+          component={PaymentSuccessScreen}
+          options={{
+            headerShown: false,
+            gestureEnabled: false, // Prevent back gesture
+            animation: 'slide_from_right'
+          }}
+        />
+        <Stack.Screen
+          name="ActiveTrade"
+          component={ActiveTradeScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="TraderRating"
+          component={TraderRatingScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="BusinessPaymentSuccess"
+          component={BusinessPaymentSuccessScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="Scan"
+          component={ScanScreen}
+          options={{ headerShown: false, freezeOnBlur: true }}
+        />
+        <Stack.Screen
+          name="CreateOffer"
+          component={CreateOfferScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="Achievements"
+          component={AchievementsScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="ConfioTokenInfo"
+          component={ConfioTokenInfoScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="ConfioPresale"
+          component={ConfioPresaleScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="ConfioPresaleParticipate"
+          component={ConfioPresaleParticipateScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="ConfioTokenomics"
+          component={ConfioTokenomicsScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="MiProgresoViral"
+          component={MiProgresoViralScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="ViralTemplates"
+          component={ViralTemplatesScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="ReferralFriendJoined"
+          component={ReferralFriendJoinedScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="ReferralActionPrompt"
+          component={ReferralActionPromptScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="ReferralEventDetail"
+          component={ReferralEventDetailScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="ReferralRewardClaim"
+          component={ReferralRewardClaimScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="PayrollPending"
+          component={PayrollPendingScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="PayrollTopUp"
+          component={PayrollTopUpScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="PayrollHome"
+          component={PayrollHomeScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="PayrollRunDetail"
+          component={PayrollRunDetailScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="PayrollReceipt"
+          component={PayrollReceiptScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="PayrollSetupWizard"
+          component={PayrollSetupWizard}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="PayrollRecipientsManage"
+          component={PayrollRecipientsManageScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="PayrollDelegatesManage"
+          component={PayrollDelegatesManageScreen}
+          options={{ headerShown: false }}
+        />
+        {/* Hidden: Notifications are mandatory for financial apps
       <Stack.Screen
         name="NotificationSettings"
         component={NotificationSettingsScreen}
         options={{ headerShown: false }}
       />
       */}
-    </Stack.Navigator>
+      </Stack.Navigator>
+      <MigrationModal />
+    </>
   );
-}; 
+};

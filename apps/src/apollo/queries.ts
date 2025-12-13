@@ -678,6 +678,18 @@ export const GET_ACCOUNT_BALANCE = gql`
   }
 `;
 
+export const GET_MY_MIGRATION_STATUS = gql`
+  query GetMyMigrationStatus {
+    userAccounts {
+      id
+      accountType
+      accountIndex
+      algorandAddress
+      isKeylessMigrated
+    }
+  }
+`;
+
 export const GET_MY_BALANCES = gql`
   query GetMyBalances {
     myBalances {

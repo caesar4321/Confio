@@ -1,72 +1,102 @@
-# Confío Security Architecture: Keyless Self-Custody
+# Confío Security Architecture V2: Enhanced Keyless Self-Custody
 
-## Execution Summary
+## 1. Executive Summary
 
-Confío utilizes a **Keyless Self-Custody** model with **Server-Assisted Deterministic Recovery**. 
+Confío operates on a **Non-Custodial, Mobile-First** security model. 
 
-This architecture is designed to address the specific constraints of the Latin American mass market:
-1.  **Zero-Friction Onboarding**: No passwords, seed phrases, or specialized hardware required.
-2.  **Device Independence**: Users frequently lose devices, change SIM cards, and share phones. Wallets must be recovering using only a standard OAuth login (Google/Apple).
-3.  **Non-Custodial Integrity**: The server never stores user private keys at rest and cannot sign transactions on behalf of users.
+In the **V2 Architecture (Current)**, we moved from deterministic key generation to **Randomly Generated Master Secrets** backed up securely to the user's personal cloud storage (Google Drive / iCloud). This ensures true device independence ("Roaming"), resilience against OAuth claim instability, and complete user sovereignty over their assets.
 
-## Architectural Definition
+## 2. Wallet Architecture (V2)
 
-**"Keyless Self-Custody with Server-Assisted Deterministic Recovery"**
+### 2.1. Master Secret Generation
+- **Method**: Unpredictable Randomness (via `react-native-get-random-values` / `tweetnacl`).
+- **Secret**: 32-byte high-entropy Master Secret.
+- **Derivation Path**: Chain-specific derivation using the native SDK (Ethereum: BIP-44, Algorand: Ed25519 direct derivation).
 
-We define our security model based on the industry standard for "Non-Custodial" services (similar to remote-prover zkLogin implementations or early OAuth-based keyless wallets):
+### 2.2. Hybrid Storage Strategy
+To support seamless roaming between iOS and Android while maintaining high security, we use a hybrid storage approach:
 
-> **A service is Non-Custodial if the server cannot sign transactions on behalf of the user and does not persist the private key.**
+1.  **Local Hardware Storage (Hot Wallet)**
+    *   **iOS**: iCloud Keychain (`react-native-keychain`).
+    *   **Android**: Encrypted SharedPreferences / BlockStore.
+    *   **Security**: Protects the active key for signing daily transactions.
 
-### 2-of-2 Component Split
+2.  **Cloud Backup (Cold Storage / Recovery)**
+    *   **Android**: **Google Drive AppData Folder** (Hidden from user view).
+    *   **iOS**: **iCloud Keychain** (Synced via Apple ID) + **Google Drive Fallback**.
+    *   **Encryption**: The Master Secret is **AES-Encrypted** with a static application key before being uploaded to Google Drive.
+        *   *Note*: This encryption is intended as obfuscation against casual access and accidental exposure. It does not provide protection against a fully compromised client environment (RCE), which is an accepted trade-off to preserve usability (no backup password).
+    *   **Scope**: Uses `https://www.googleapis.com/auth/drive.appdata` to isolate data from other apps.
+    *   **Token Isolation**: The Google Drive OAuth Access Token is retained strictly within the mobile client memory and is **never** sent to the application server.
 
-The user's private key is derived deterministically on the client device using two components. Neither component alone can derive the key.
+### 2.3. Cross-Platform Roaming
+A unique feature of Confío V2 is **optional cross-platform roaming**, enabled through explicit user-consented cloud backup.
 
-1.  **User Share (OAuth Context)**
-    *   **Source**: Authenticated Google/Apple Identity Token.
-    *   **Derivation**: `SHA256(Issuer | Subject | Audience | AccountContext)`.
-    *   **Privacy**: 
-        *   **Apple**: The Subject (`sub`) is App-Scoped and private to the developer team. It acts as a private user identifier.
-        *   **Google**: The Subject (`sub`) is only provided upon successful authentication. There is no public API to resolve email addresses to Subject IDs.
-    *   **Role**: proves "Who I am" (Identity).
+*Note: Cross-platform restoration requires explicit user action. Automatic synchronization between Apple iCloud and Google Drive is not assumed.*
 
-2.  **Server Share (Derivation Pepper)**
-    *   **Source**: Confío Secure Server (Database).
-    *   **Encryption**: AES-256 (Fernet) encrypted at rest using a master key stored in **AWS SSM Parameter Store**, protected by **AWS KMS**.
-    *   **Nature**: High-entropy 32-byte secret, unique per account, non-rotating.
-    *   **Role**: Enforces "Authorized Access" and acts as a cryptographic blinder against `sub` discovery.
+1.  **Android -> iOS**: When logging in on iOS, the user can restore a wallet if they previously enabled Google Drive backup on Android.
+2.  **iOS -> Android**: Keys generated on iOS are strictly in iCloud by default. To roam to Android, the user must explicit enable "Respaldo en la Nube" (Google Drive Backup) in the iOS app settings, secured by biometrics.
 
-### Key Derivation Process
+## 3. Legacy Architecture (V1) & Migration
 
-```typescript
-// Happens ONLY in Client Memory
-Seed = HKDF(
-    IKM = UserShare (OAuth Claims),
-    Salt = ServerShare (Derivation Pepper),
-    Info = Context
-)
-Keypair = Ed25519(Seed)
-```
+*Ref: `architecture_whitepaper_v1_legacy.md`*
 
-## Security Guarantees & Trade-offs
+### 3.1. V1 Design (Deprecated)
+The V1 system generated keys deterministically combining:
+*   **User Share**: OAuth `sub` claim (Google/Apple ID).
+*   **Server Share**: A database-stored high-entropy "pepper".
+*   **Weakness**: Relied on server uptime for the pepper and consistent OAuth claim formats. Lack of portability between providers.
 
-### 1. Resilience to Database Leaks (High)
-A critical feature of this architecture is its resilience to server-side static data breaches.
-*   **Leak**: Attacker gains `WalletDerivationPepper` and `Email` from the database.
-*   **Requirement**: Attacker needs the `UserShare` (specifically the OAuth `Subject`) to derive the key.
-*   **Defense**: The `Subject` is **undetectable via OSINT**.
-    *   **Apple**: Impossible to derive `sub` from Email (App-Scoped).
-    *   **Google**: No API exists to convert Email to `sub` without user authentication.
-*   **Result**: The stolen database information is useless for key derivation without the User Share, which remains protected by the Identity Provider's authentication barrier.
+### 3.2. Migration Process
+When a V1 user logs in to the V2 app:
+1.  **Detection**: App detects `legacy` wallet existence.
+2.  **Generation**: App generates a NEW V2 (Random) Master Secret.
+3.  **Sweep**: App constructs a transaction to send ALL assets from V1 Address -> V2 Address.
+4.  **Finalize**: User footprint is now fully V2.
 
-### 2. Non-Custodial Properties
-*   **No Private Key Storage**: The Confío server **never** persists the derived private key or seed using disk storage. It exists only momentarily in the client's volatile memory.
-*   **No Server-Side Signing**: The server does not possess the logic or capability to sign transactions. All signing happens on the client device (React Native).
+## 4. Authentication & Access Control
 
-### 3. Server-Assisted Recovery (The Trade-off)
-To enable "Device-Independent Recovery", we accept a specific trade-off:
-*   **Theoretical Reconstruction**: If an attacker gains full Remote Code Execution (RCE) *during* a user's active login, they could intercept the token and pepper to reconstruct the key.
-*   **Justification**: This "Active Compromise" risk is significantly lower than the "Passive Data Breach" risk (which we have mitigated) and the "User Error/Loss" risk (which we have eliminated).
+### 4.1. Identity Providers
+*   **Google Sign-In**: Primary identity provider.
+*   **Apple Sign-In**: iOS alternative.
+*   **JWT**: We use Firebase Authentication to verify identity, then issue a custom **Confío JWT** for API access.
 
-## Conclusion
+### 4.2. API Security
+*   **Token**: Short-lived (15 min) Access Token.
+*   **Refresh**: Secure HttpOnly cookie refresh token flow.
+*   **Context**: The JWT embeds the specific `account_id` (Personal vs Business) to prevent IDOR at the gateway level.
 
-Confío's model properly balances mass-market UX with robust security. By leveraging the **non-discoverability of OAuth Subjects** and combining it with a **Server Pepper**, we achieve a practical "2-of-2" security split where a database breach does *not* result in fund loss, fulfilling the core promise of non-custodial security without the burden of seed phrase management.
+### 4.3. Biometric Layer
+*   **Implementation**: `react-native-keychain`.
+*   **Policy**:
+    *   **iOS**: `kSecAccessControlUserPresence` (or `AfterFirstUnlock` for better UX). Secure Enclave protected.
+    *   **Android**: Biometric Prompt required for sensitive info retrieval.
+*   **Usage**: Required for:
+    *   Enabling/Disabling Cloud Backup.
+    *   High-value transactions (configurable).
+
+## 5. Threat Model & Mitigations
+
+| Threat | Risk Level | Mitigation |
+| :--- | :--- | :--- |
+| **Server Database Leak** | Low | V2 Private Keys are **never** stored on the server. An attacker with the database gets 0 user funds. |
+| **Google Drive Compromise** | Medium | The backup file in Drive is AES-Encrypted with a separate application key. Raw JSON access is insufficient to steal funds without the app/encryption logic. |
+| **Lost Device** | Medium | User can restore wallet on a new device by logging into their Cloud Account (Google/Apple). Biometrics prevent thief from accessing wallet on the lost device. |
+| **Simulated Biometrics** | Low | We use hardware-backed Keystore/Keychain which requires cryptographic proof of biometric auth, not just a UI flag. |
+| **Malicious Update** | High | Standard supply chain risk. Mitigated by App Store reviews and code signing. |
+
+## 6. Smart Contract Security
+
+*   **Platform**: Algorand Virtual Machine (AVM / TEAL).
+*   **Admin Control**: Critical contracts (USDC, Rewards) are managed by a **Multi-Signature Account (3-of-5)**.
+*   **Assets**:
+    *   **USDC**: Standard Circle USDC (ASA).
+    *   **cUSD**: Confío Dollar (ASA). 1:1 backed by USDC.
+    *   **CONFIO**: Utility/Reward Token (ASA).
+*   **Permissions**: Contracts utilize `LogicSig` (Stateless Smart Contracts) for delegated signing and `Application` (Stateful) for logic.
+
+## 7. Operational Security
+
+*   **Logs**: No PII or Key material in logs.
+*   **Infrastructure**: AWS (EC2/RDS) inside VPC.
+*   **Secrets**: AWS Secrets Manager / Parameter Store.

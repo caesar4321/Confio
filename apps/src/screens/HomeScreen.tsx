@@ -1086,6 +1086,40 @@ export const HomeScreen = () => {
     }
   }, [currentAccount, setCurrentAccountAvatar, userProfile]);
 
+  // FIX: Refresh Algorand address when active account changes (critical for post-migration update)
+  useEffect(() => {
+    let mounted = true;
+    const { DeviceEventEmitter } = require('react-native');
+
+    const fetchAddress = async () => {
+      const authService = AuthService.getInstance();
+      try {
+        const address = await authService.getAlgorandAddress();
+        if (mounted) {
+          console.log('HomeScreen - Refreshed Algorand address:', address);
+          setAlgorandAddress(address);
+        }
+      } catch (e) {
+        console.error('HomeScreen - Error refreshing address:', e);
+      }
+    };
+
+    fetchAddress();
+
+    // Listen for direct address updates (e.g. from migration)
+    const subscription = DeviceEventEmitter.addListener('ALGORAND_ADDRESS_UPDATED', (newAddress: string) => {
+      console.log('HomeScreen - Received ALGORAND_ADDRESS_UPDATED event:', newAddress);
+      if (mounted) {
+        setAlgorandAddress(newAddress);
+      }
+    });
+
+    return () => {
+      mounted = false;
+      subscription.remove();
+    };
+  }, [activeAccount?.id, activeAccount?.type, activeAccount?.index]);
+
   // Debug log when showProfileMenu changes
   useEffect(() => {
     console.log('showProfileMenu changed to:', profileMenu.showProfileMenu);
@@ -1101,9 +1135,10 @@ export const HomeScreen = () => {
       accountName: 'Confío Dollar',
       accountSymbol: '$cUSD',
       accountBalance: cUSDBalance.toFixed(2),
-      accountAddress: activeAccount?.algorandAddress || ''
+      // Fix: Use local state algorandAddress if available, fall back to context
+      accountAddress: algorandAddress || activeAccount?.algorandAddress || ''
     });
-  }, [navigation, cUSDBalance, activeAccount?.algorandAddress]);
+  }, [navigation, cUSDBalance, activeAccount?.algorandAddress, algorandAddress]);
 
   const navigateToConfioAccount = useCallback(() => {
     navigation.navigate('AccountDetail', {
@@ -1111,9 +1146,10 @@ export const HomeScreen = () => {
       accountName: 'Confío',
       accountSymbol: '$CONFIO',
       accountBalance: confioTotal.toFixed(2),
-      accountAddress: activeAccount?.algorandAddress || ''
+      // Fix: Use local state algorandAddress if available, fall back to context
+      accountAddress: algorandAddress || activeAccount?.algorandAddress || ''
     });
-  }, [navigation, confioTotal, activeAccount?.algorandAddress]);
+  }, [navigation, confioTotal, activeAccount?.algorandAddress, algorandAddress]);
 
   useFocusEffect(
     React.useCallback(() => {
