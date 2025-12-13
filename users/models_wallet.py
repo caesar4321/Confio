@@ -4,7 +4,7 @@ Wallet-related models for secure key derivation
 from django.db import models
 from django.utils import timezone
 from datetime import timedelta
-
+from .fields import EncryptedCharField
 
 class WalletPepper(models.Model):
     """
@@ -21,6 +21,13 @@ class WalletPepper(models.Model):
     pepper = models.CharField(
         max_length=64,  # 32 bytes as hex = 64 chars
         help_text='Random pepper for additional entropy'
+    )
+
+    encrypted_pepper = EncryptedCharField(
+        max_length=512, # Base64 ciphertext is longer
+        blank=True,
+        null=True,
+        help_text='Encrypted version of the pepper (migration phase)'
     )
     
     version = models.IntegerField(
@@ -98,6 +105,13 @@ class WalletDerivationPepper(models.Model):
     pepper = models.CharField(
         max_length=64,  # 32 bytes hex
         help_text='Non-rotating pepper for derivation; changing it changes addresses'
+    )
+
+    encrypted_pepper = EncryptedCharField(
+        max_length=512, 
+        blank=True,
+        null=True,
+        help_text='Encrypted version of the pepper (migration phase)'
     )
 
     created_at = models.DateTimeField(auto_now_add=True)

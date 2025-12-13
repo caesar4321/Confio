@@ -729,6 +729,7 @@ class GetKekPepperMutation(graphene.Mutation):
                     account_key=pepper_key,
                     defaults={
                         'pepper': secrets.token_hex(32),  # 32 bytes -> 64 char hex
+                        'encrypted_pepper': secrets.token_hex(32), # Dual write for safety
                         'version': 1
                     }
                 )
@@ -759,7 +760,7 @@ class GetKekPepperMutation(graphene.Mutation):
             # Return current pepper
             return cls(
                 success=True,
-                pepper=pepper_obj.pepper,
+                pepper=pepper_obj.encrypted_pepper or pepper_obj.pepper,
                 version=pepper_obj.version,
                 is_rotated=bool(pepper_obj.rotated_at),
                 grace_period_until=pepper_obj.grace_period_until.isoformat() if pepper_obj.grace_period_until else None
@@ -840,7 +841,7 @@ class RotateKekPepperMutation(graphene.Mutation):
                         account_key=pepper_key
                     )
                     old_version = pepper_obj.version
-                    old_pepper = pepper_obj.pepper
+                    old_pepper = pepper_obj.encrypted_pepper or pepper_obj.pepper
                     
                     # Rotate: save previous pepper for grace period (7 days)
                     pepper_obj.previous_pepper = old_pepper
@@ -850,7 +851,9 @@ class RotateKekPepperMutation(graphene.Mutation):
                     
                     # Set new pepper and increment version
                     pepper_obj.version += 1
-                    pepper_obj.pepper = secrets.token_hex(32)  # New 32-byte pepper
+                    new_val = secrets.token_hex(32)
+                    pepper_obj.pepper = new_val
+                    pepper_obj.encrypted_pepper = new_val
                     pepper_obj.rotated_at = timezone.now()
                     pepper_obj.save()
                     
@@ -858,22 +861,24 @@ class RotateKekPepperMutation(graphene.Mutation):
                     
                     return cls(
                         success=True,
-                        pepper=pepper_obj.pepper,
+                        pepper=pepper_obj.encrypted_pepper or pepper_obj.pepper,
                         version=pepper_obj.version,
                         old_version=old_version
                     )
                     
                 except WalletPepper.DoesNotExist:
                     # No existing pepper, create one
+                    val = secrets.token_hex(32)
                     pepper_obj = WalletPepper.objects.create(
                         account_key=pepper_key,
-                        pepper=secrets.token_hex(32),
+                        pepper=val,
+                        encrypted_pepper=val,
                         version=1
                     )
                     logger.info(f'Created initial KEK pepper during rotation for account {pepper_key}')
                     return cls(
                         success=True,
-                        pepper=pepper_obj.pepper,
+                        pepper=pepper_obj.encrypted_pepper or pepper_obj.pepper,
                         version=1,
                         old_version=0
                     )
@@ -918,7 +923,8 @@ class GetDerivationPepperMutation(graphene.Mutation):
                 deriv, created = WalletDerivationPepper.objects.get_or_create(
                     account_key=pepper_key,
                     defaults={
-                        'pepper': secrets.token_hex(32)
+                        'pepper': secrets.token_hex(32),
+                        'encrypted_pepper': secrets.token_hex(32)
                     }
                 )
             if created:
@@ -932,7 +938,7 @@ class GetDerivationPepperMutation(graphene.Mutation):
                     f'user_id={user.id} account_type={account_type} account_index={account_index} business_id={business_id}'
                 )
 
-            return cls(success=True, pepper=deriv.pepper)
+            return cls(success=True, pepper=deriv.encrypted_pepper or deriv.pepper)
         except Exception as e:
             logger.error(f'Get derivation pepper error: {str(e)}')
             return cls(success=False, error=str(e))
