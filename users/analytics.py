@@ -179,6 +179,9 @@ def calculate_country_metrics(target_date=None):
         }
     """
     from users.models import User
+    import pytz
+    
+    tz = pytz.timezone('America/Argentina/Buenos_Aires')
     
     if target_date is None:
         target_date = (timezone.now() - timedelta(days=1)).date()
