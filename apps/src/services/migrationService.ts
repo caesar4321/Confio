@@ -145,14 +145,29 @@ class WalletMigrationService {
 
             const balance = v1Info.amount;
             const assets = v1Info.assets || [];
-            // Check if any assets exist (even with 0 balance, they consume MBR and need closing)
-            const hasAssets = assets.length > 0;
+            // Filter for relevant assets only (CONFIO, CUSD, USDC)
+            // This prevents "Junk Assets" (airdrops/spam) from triggering infinite migration loops
+            const relevantAssets = assets.filter((a: any) => {
+                const aid = a['asset-id'];
+                return (
+                    aid === CONFIO_ASSET_ID ||
+                    aid === CUSD_ASSET_ID ||
+                    aid === USDC_ASSET_ID
+                );
+            });
 
-            // If V1 is practically empty (only min balance or less, and no assets)
+            const hasRelevantAssets = relevantAssets.length > 0;
+
+            // If V1 is practically empty (only min balance or less, and no RELEVANT assets)
             // We consider it "migrated" or "empty"
-            if (balance === 0 && !hasAssets) {
-                // Empty V1 wallet
-                return { needsMigration: false, v1Address, v1Balance: 0 };
+            // We ignore junk assets - they will be abandoned in the legacy wallet
+            if (!hasRelevantAssets) {
+                // Check if there's significant Algo balance worth sweeping (e.g. > 1 Algo)
+                // Otherwise, we abandon the dust/min-balance locked by junk assets
+                if (balance < 1000000) { // < 1 Algo
+                    console.log('[MigrationService] V1 has only junk assets/dust. Marking as done.');
+                    return { needsMigration: false, v1Address, v1Balance: 0 };
+                }
             }
 
             // V1 has contents.
