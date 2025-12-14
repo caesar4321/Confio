@@ -21,7 +21,7 @@ To support seamless roaming between iOS and Android while maintaining high secur
     *   **Android**: Encrypted SharedPreferences / BlockStore.
     *   **Security**: Protects the active key for signing daily transactions.
 
-2.  **Cloud Backup (Cold Storage / Recovery)**
+2.  **Cloud Backup (Encrypted Backup / Recovery)**
     *   **Android**: **Google Drive AppData Folder** (Hidden from user view).
     *   **iOS**: **iCloud Keychain** (Synced via Apple ID) + **Google Drive Fallback**.
     *   **Encryption**: The Master Secret is **AES-Encrypted** with a static application key before being uploaded to Google Drive.
@@ -67,10 +67,10 @@ When a V1 user logs in to the V2 app:
 *   **Context**: The JWT embeds the specific `account_id` (Personal vs Business) to prevent IDOR at the gateway level.
 
 ### 4.3. Biometric Layer
-*   **Implementation**: `react-native-keychain`.
-*   **Policy**:
-    *   **iOS**: `kSecAccessControlUserPresence` (or `AfterFirstUnlock` for better UX). Secure Enclave protected.
-    *   **Android**: Biometric Prompt required for sensitive info retrieval.
+*   **Implementation**: `react-native-keychain` + `LocalAuthentication`.
+*   **Strategy**: **Application-Level Enforcement**.
+    *   **Storage (iOS)**: Keys stored with `kSecAttrAccessibleAfterFirstUnlock` to allow background signing (e.g. while receiving notifications) without prompting the user every time.
+    *   **Authorization**: Sensitive actions (Backup toggle, etc.) trigger an explicit `LocalAuthentication` prompt via the App logic.
 *   **Usage**: Required for:
     *   Enabling/Disabling Cloud Backup.
     *   High-value transactions (configurable).
@@ -84,6 +84,12 @@ When a V1 user logs in to the V2 app:
 | **Lost Device** | Medium | User can restore wallet on a new device by logging into their Cloud Account (Google/Apple). Biometrics prevent thief from accessing wallet on the lost device. |
 | **Simulated Biometrics** | Low | We use hardware-backed Keystore/Keychain which requires cryptographic proof of biometric auth, not just a UI flag. |
 | **Malicious Update** | High | Standard supply chain risk. Mitigated by App Store reviews and code signing. |
+
+### 5.1. Residual Risks & Limitations
+*   **Encrypted Backup Weakness**: The "Encrypted Backup" uses a static application key (`APP_BACKUP_KEY`) for obfuscation.
+    *   **Risk**: If a user's Google/Apple Account is compromised **AND** the attacker extracts the key from the app binary, the backup can be decrypted.
+    *   **Dependence**: Security of the backup ultimately relies on the User's Cloud Account security (Strong Password + 2FA).
+*   **Rooted/Jailbroken Devices**: On devices where the user has granted root access, OS-level protections (Keychain/BlockStore) can be bypassed by malicious apps. We assume a standard, non-rooted security environment.
 
 ## 6. Smart Contract Security
 

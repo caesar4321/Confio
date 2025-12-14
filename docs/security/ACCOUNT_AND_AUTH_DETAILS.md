@@ -10,15 +10,20 @@ Confío uses a "Keyless Self-Custody" model (V2).
 1.  **Social Sign-In**: Users sign in via Google or Apple. Firebase Authentication handles the OAuth flow and token exchange.
 2.  **Master Secret Retrieval**:
     *   **iOS**:
-        1.  Check **iCloud Keychain** (`confio_master_secret`).
-        2.  If missing, check **Google Drive** (App Data Folder) via OAuth Access Token.
-        3.  If found in Drive -> Sync to Keychain.
-        4.  If not found -> Generate **New Random** Secret -> Save to Keychain & Drive.
+        *   **Google Sign-In**:
+            1.  **Check Google Drive** (App Data Folder) via OAuth Access Token.
+            2.  If found in Drive -> Sync to Keychain.
+            3.  If missing, check **iCloud Keychain** (`confio_master_secret`).
+        *   **Apple Sign-In**:
+            1.  **Check iCloud Keychain** (`confio_master_secret`).
+            2.  Drive check is skipped (No Access Token).
+            3.  If missing -> Generate **New Random** Secret -> Save to Keychain.
     *   **Android**:
-        1.  Check **Encrypted BlockStore** / SharedPreferences.
-        2.  If missing, check **Google Drive** (App Data Folder).
-        3.  If found -> Sync to Local.
-        4.  If not found -> Generate **New Random** Secret -> Save to Local & Drive.
+        1.  **Check Google Drive** (App Data Folder).
+        2.  If found -> Sync to Local.
+        3.  If missing, check **Encrypted BlockStore** / SharedPreferences.
+        4.  If found locally -> Sync Up to Drive.
+        5.  If not found -> Generate **New Random** Secret -> Save to Local & Drive.
 3.  **Session & JWT**:
     *   Once the Master Secret is secured locally, the app proceeds to authenticated API requests using the Firebase ID Token (exchanged for a Confío Session Cookie/JWT).
 
@@ -41,7 +46,7 @@ Unlike V1 (Identity-based), V2 uses a **Master Secret** + **HKDF** derivation.
 **Algorithm:**
 ```typescript
 // 1. Generate Contextual Salt
-ValidationSalt = SHA256("confio_v2_salt_" + context_string)
+ValidationSalt = SHA256(context_string)
 
 // 2. HKDF Key Derivation
 DerivedSeed = HKDF_SHA256(

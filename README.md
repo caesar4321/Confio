@@ -31,11 +31,11 @@ Confío helps people access stable dollars, send remittances, and pay each other
 
 ## 🔒 Security Architecture
 
-Confío utilizes a **Keyless Self-Custody** model with **Server-Assisted Deterministic Recovery**.
-
-*   **Non-Custodial**: We never store your private keys. You own your funds.
-*   **2-of-2 Security**: Your key is derived from your OAuth login + a server security token. Neither Google/Apple nor Confío can access your wallet alone.
-*   **Multisig Protection**: Critical smart contracts are governed by a 3-of-5 multisig setup for maximum safety.
+Confío utilizes a **Cloud-Native Self-Custody** model.
+ 
+ *   **Non-Custodial**: We never store your private keys. You own your funds.
+ *   **Device-Generated**: Your key is generated on your device and encrypted in your personal cloud (Google Drive / iCloud). Only you have access.
+ *   **Multisig Protection**: Critical smart contracts are governed by a 3-of-5 multisig setup for maximum safety.
 
 > 📚 **Deep Dive**: [Account & Authentication Details](docs/security/ACCOUNT_AND_AUTH_DETAILS.md)
 
