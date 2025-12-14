@@ -206,10 +206,16 @@ class AlgorandAccountManager:
             }
 
     @classmethod
-    def ensure_account_ready(cls, account: Account, *, existing_address: Optional[str] = None) -> Dict:
+    def ensure_account_ready(cls, account: Account, *, existing_address: Optional[str] = None, fund_and_opt_in: bool = True) -> Dict:
         """Ensure the provided Account row (personal or business) has an Algorand address and basic opt-ins.
 
         This method operates ONLY on the given account, preventing accidental updates to other rows.
+        
+        Args:
+            account: The account model instance
+            existing_address: Optional existing address to associate
+            fund_and_opt_in: If True, automatically fund and opt-in to default assets.
+                             Set to False if client is handling atomic opt-ins (prevents duplicate MBR funding).
         """
         try:
             user = getattr(account, 'user', None)
@@ -234,6 +240,16 @@ class AlgorandAccountManager:
                 account.algorand_address = addr
                 account.save(update_fields=['algorand_address'])
                 logger.info("Updated account %s (%s/%s) address %s -> %s", account.id, account.account_type, account.account_index, old, addr)
+
+            # Skip funding/opt-ins if explicitly requested (e.g. client handling atomic opt-in)
+            if not fund_and_opt_in:
+                return {
+                    'account': account,
+                    'created': False,
+                    'algorand_address': addr,
+                    'opted_in_assets': [],  # Didn't check/perform opt-ins
+                    'errors': [],
+                }
 
             from blockchain.algorand_client import get_algod_client
             algod_client = get_algod_client()

@@ -211,7 +211,8 @@ class EnsureAlgorandReadyMutation(graphene.Mutation):
             if account_id:
                 from users.jwt_context import resolve_account_for_write
                 acc = resolve_account_for_write(info, account_id=account_id)
-                result = AlgorandAccountManager.ensure_account_ready(acc)
+                # Client handles atomic opt-in/funding, so disable server-side auto-funding
+                result = AlgorandAccountManager.ensure_account_ready(acc, fund_and_opt_in=False)
             else:
                 # Backward-compatible path
                 result = AlgorandAccountManager.ensure_user_algorand_ready(user)
