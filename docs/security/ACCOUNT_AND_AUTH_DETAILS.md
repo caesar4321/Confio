@@ -13,9 +13,9 @@ Confío uses a "Keyless Self-Custody" model (V2).
         *   **Google Sign-In**:
             1.  **Check Google Drive** (App Data Folder) via OAuth Access Token.
             2.  If found in Drive -> Sync to Keychain.
-            3.  If missing, check **iCloud Keychain** (`confio_master_secret`).
+            3.  If missing, check **iCloud Keychain** (may sync via Apple ID where available).
         *   **Apple Sign-In**:
-            1.  **Check iCloud Keychain** (`confio_master_secret`).
+            1.  **Check iCloud Keychain** (may sync via Apple ID based on user settings).
             2.  Drive check is skipped (No Access Token).
             3.  If missing -> Generate **New Random** Secret -> Save to Keychain.
     *   **Android**:
@@ -86,10 +86,9 @@ A "negative-check" system is used. If a permission is not explicitly granted, it
 
 ### 3.2. Security Pattern
 *   All operations verify access via `User -> BusinessEmployee` relation in Postgres.
-*   The crypto wallet signing happens **Client-Side**. The employee's app derives the business wallet address using the Business Owner's Master Secret? **NO.**
-*   **Correction**: Business Wallets in V2 for *Employees* are Multi-Sig or Permissioned via Smart Contract?
-    *   *Current Implementation*: Employees act on behalf of the business via **API Permissions** (Off-chain ledger) for fiat/internal transfers.
-    *   For on-chain operations, the Owner's device signs. Employees do not hold the business private key.
+*   **Employees never possess business signing keys**.
+    *   **Off-Chain Actions**: Employees act via **API Permissions** (Postgres-verified) for internal transfers/fiat operations.
+    *   **On-Chain Actions**: All on-chain asset movements require the **Owner's device signature**. Employees cannot initiate blockchain transactions independently in the current V2 architecture.
 
 ## 4. Atomic Account Switching
 
@@ -103,7 +102,7 @@ To prevent race conditions where the UI might show one account while the backend
 ## 5. Security Architecture Highlights (V2)
 
 ### 5.1. Token Isolation
-*   **Firebase ID Token**: Sent to Server. Used for API Authentication. **Cannot** access Google Drive.
+*   **Firebase ID Token**: Sent to Server. Used for API Authentication. It is **NOT** a Google API OAuth token and **cannot** access Google Drive APIs.
 *   **Google OAuth Access Token**: **NEVER** sent to Server. Used strictly on Client to access Google Drive AppData for wallet backup.
 
 ### 5.2. Storage Hierarchy

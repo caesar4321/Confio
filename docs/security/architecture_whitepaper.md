@@ -6,6 +6,10 @@ Confío operates on a **Non-Custodial, Mobile-First** security model.
 
 In the **V2 Architecture (Current)**, we moved from deterministic key generation to **Randomly Generated Master Secrets** backed up securely to the user's personal cloud storage (Google Drive / iCloud). This ensures true device independence ("Roaming"), resilience against OAuth claim instability, and complete user sovereignty over their assets.
 
+> **Note on Terminology**: "Keyless" in Confío refers to a **UX-level concept** where the user is not required to view, write down, or manually manage private keys. Cryptographic keys **do** exist and are generated client-side, securely stored in OS-level secure storage, and never exposed to the user or server.
+
+**Critical Security Guarantee**: The Confío backend **cannot** initiate on-chain transfers because it never possesses user signing material; all signatures are produced exclusively on the client device.
+
 ## 2. Wallet Architecture (V2)
 
 ### 2.1. Master Secret Generation
@@ -59,7 +63,7 @@ When a V1 user logs in to the V2 app:
 ### 4.1. Identity Providers
 *   **Google Sign-In**: Primary identity provider.
 *   **Apple Sign-In**: iOS alternative.
-*   **JWT**: We use Firebase Authentication to verify identity, then issue a custom **Confío JWT** for API access.
+*   **Firebase ID Token**: Sent to Server. Used for API Authentication. It is **NOT** a Google API OAuth token and **cannot** access Google Drive APIs.
 
 ### 4.2. API Security
 *   **Token**: Short-lived (15 min) Access Token.
