@@ -51,7 +51,7 @@ export const ConfioTokenomicsScreen = () => {
       tokens: founderAndTeamTokens,
       percentage: pct(founderAndTeamTokens),
       description:
-        'Reserva del fundador (como en cualquier startup que inicia con 100%) para operar y escalar: nómina, expansión y cumplimiento. Bloqueo total hasta fase 3/listado; luego se libera mes a mes durante 36 meses. Incluye el 1% destinado al equipo clave, que se libera por partes iguales durante 24 meses tras el listado.',
+        'Reserva del fundador (como en cualquier startup que inicia con 100%) para operar y escalar: nómina, expansión y cumplimiento. Bloqueo total hasta fase 3/lanzamiento en DEX; luego se libera mes a mes durante 36 meses. Incluye el 1% destinado al equipo clave, que se libera por partes iguales durante 24 meses tras el lanzamiento en DEX.',
       color: colors.secondary,
       icon: 'shield',
     },
@@ -60,7 +60,7 @@ export const ConfioTokenomicsScreen = () => {
       tokens: presaleTokens,
       percentage: pct(presaleTokens),
       description:
-        'Tres microfases fundacionales ($0.20 / $0.25 / $0.30) y dos fases de expansión ($0.50 / $1.00). Se emiten 74M CONFIO (~$61M meta) y se liberan 100% al cerrar la fase 3 y listar.',
+        'Tres microfases fundacionales ($0.20 / $0.25 / $0.30) y dos fases de expansión ($0.50 / $1.00). Se emiten 74M CONFIO (~$61M meta) y se liberan 100% al cerrar la fase 3 y lanzar en DEX.',
       color: colors.primary,
       icon: 'users',
     },
@@ -78,7 +78,7 @@ export const ConfioTokenomicsScreen = () => {
       tokens: culturalTokens,
       percentage: pct(culturalTokens),
       description:
-        '1.5% (hasta 2.5% opcional) para agradecer apoyos reales 2023–2026. Bloqueo total hasta el final de fase 3 y el listado; luego liberado de forma gradual en 3 meses.',
+        '1.5% (hasta 2.5% opcional) para agradecer apoyos reales 2023–2026. Bloqueo total hasta el final de fase 3 y el lanzamiento en DEX; luego liberado de forma gradual en 3 meses.',
       color: '#f59e0b',
       icon: 'heart',
     },
@@ -248,9 +248,9 @@ export const ConfioTokenomicsScreen = () => {
             <Text style={styles.futureTitle}>Resumen rápido</Text>
             <Text style={styles.futureDescription}>
               - Suministro total: {formatWithLocale(totalSupply)} CONFIO.{'\n'}
-              - Preventa: 74M CONFIO (7.4%) en 5 fases ($0.20–$1.00), desbloqueo total al cerrar fase 3 y listar.{'\n'}
-              - Fundador y equipo: 90.36% como reserva típica de fundador para operar y expandir. Bloqueo total hasta fase 3/listado; luego se libera mes a mes durante 36 meses. Incluye 1% para equipo clave que se libera en partes iguales durante 24 meses tras listado.{'\n'}
-              - Cultura LATAM: 1.5% de agradecimiento. Bloqueo total hasta fase 3/listado; luego liberado gradualmente en 3 meses.{'\n'}
+              - Preventa: 74M CONFIO (7.4%) en 5 fases ($0.20–$1.00), desbloqueo total al cerrar fase 3 y lanzar en DEX.{'\n'}
+              - Fundador y equipo: 90.36% como reserva típica de fundador para operar y expandir. Bloqueo total hasta fase 3/lanzamiento en DEX; luego se libera mes a mes durante 36 meses. Incluye 1% para equipo clave que se libera en partes iguales durante 24 meses tras lanzamiento en DEX.{'\n'}
+              - Cultura LATAM: 1.5% de agradecimiento. Bloqueo total hasta fase 3/lanzamiento en DEX; luego liberado gradualmente en 3 meses.{'\n'}
               - Recompensas: 7.4M CONFIO on-chain en la primera transacción real, calculadas al precio de la fase vigente.{'\n'}
               - Sin VCs ni pools ocultos. Todo está documentado y visible.
             </Text>
