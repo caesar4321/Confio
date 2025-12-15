@@ -1355,56 +1355,27 @@ class OptInToAssetByTypeMutation(graphene.Mutation):
                 funding_needed,
             )
 
-            # If balance is insufficient, fund the difference
-            if funding_needed > 0:
-                logger.info(
-                    "Funding account %s with %s microAlgos before USDC opt-in",
-                    sender_address,
-                    funding_needed,
+            # Execute opt-in with atomic funding if needed
+            logger.info(
+                "Executing opt-in for %s (asset %s) with funding=%s",
+                sender_address,
+                asset_id,
+                funding_needed
+            )
+            
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            try:
+                result = loop.run_until_complete(
+                    algorand_sponsor_service.execute_server_side_opt_in(
+                        user_address=sender_address,
+                        asset_id=asset_id,
+                        funding_amount=funding_needed
+                    )
                 )
-                
-                # Fund the account with the needed amount
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                
-                try:
-                    # First fund the account
-                    funding_result = loop.run_until_complete(
-                        algorand_sponsor_service.fund_account(
-                            sender_address,
-                            funding_needed
-                        )
-                    )
-                    
-                    if not funding_result.get('success'):
-                        logger.error(f"Failed to fund account: {funding_result.get('error')}")
-                        return cls(success=False, error='Failed to fund account for opt-in')
-                    
-                    logger.info(f"Successfully funded account with {funding_needed / 1_000_000} ALGO")
-                    
-                    # Now execute the opt-in
-                    result = loop.run_until_complete(
-                        algorand_sponsor_service.execute_server_side_opt_in(
-                            user_address=sender_address,
-                            asset_id=asset_id
-                        )
-                    )
-                finally:
-                    loop.close()
-            else:
-                # Account has sufficient balance, proceed with opt-in
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                
-                try:
-                    result = loop.run_until_complete(
-                        algorand_sponsor_service.execute_server_side_opt_in(
-                            user_address=sender_address,
-                            asset_id=asset_id
-                        )
-                    )
-                finally:
-                    loop.close()
+            finally:
+                loop.close()
             
             if not result['success']:
                 return cls(success=False, error=result.get('error', 'Failed to create opt-in transaction'))
@@ -1714,10 +1685,9 @@ class AlgorandSponsoredOptInMutation(graphene.Mutation):
             asyncio.set_event_loop(loop)
             
             try:
-                if current_balance < target_balance:
-                    funding_needed = target_balance - current_balance
-                    logger.info(
-                        "Funding account %s with %s microAlgos before asset %s opt-in "
+                if funding_needed > 0:
+                     logger.info(
+                        "Funding account %s with %s microAlgos via atomic funding for asset %s opt-in "
                         "(current: %s, required: %s, buffer: %s)",
                         user_account.algorand_address,
                         funding_needed,
@@ -1726,25 +1696,12 @@ class AlgorandSponsoredOptInMutation(graphene.Mutation):
                         required_balance,
                         buffer,
                     )
-                    funding_result = loop.run_until_complete(
-                        algorand_sponsor_service.fund_account(
-                            user_account.algorand_address,
-                            funding_needed
-                        )
-                    )
-                    if not funding_result.get('success'):
-                        logger.error(
-                            "Failed to fund account %s for asset %s opt-in: %s",
-                            user_account.algorand_address,
-                            asset_id_int,
-                            funding_result.get('error'),
-                        )
-                        return cls(success=False, error='Failed to fund account for opt-in')
-            
+
                 result = loop.run_until_complete(
                     algorand_sponsor_service.execute_server_side_opt_in(
                         user_address=user_account.algorand_address,
-                        asset_id=asset_id_int
+                        asset_id=asset_id_int,
+                        funding_amount=funding_needed
                     )
                 )
             finally:

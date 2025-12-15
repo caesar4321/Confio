@@ -632,7 +632,8 @@ class AlgorandSponsorService:
     async def create_sponsored_opt_in(
         self,
         user_address: str,
-        asset_id: int
+        asset_id: int,
+        funding_amount: int = 0
     ) -> Dict[str, Any]:
         """
         Create a sponsored opt-in transaction for an asset.
@@ -640,6 +641,7 @@ class AlgorandSponsorService:
         Args:
             user_address: Address of the user opting in
             asset_id: Asset ID to opt into
+            funding_amount: Optional amount (microAlgos) to fund the account with (for MBR)
             
         Returns:
             Dict with transaction result or error
@@ -675,8 +677,8 @@ class AlgorandSponsorService:
                 sender=self.sponsor_address,
                 sp=params,
                 receiver=user_address,
-                amt=0,  # No ALGO transfer, just paying fees
-                note=b"Opt-in fee sponsorship"
+                amt=funding_amount,  # MBR funding if needed
+                note=b"Sponsored opt-in with MBR funding" if funding_amount > 0 else b"Opt-in fee sponsorship"
             )
             fee_payment_txn.fee = total_fee  # Sponsor pays all fees
             
@@ -723,7 +725,8 @@ class AlgorandSponsorService:
     async def execute_server_side_opt_in(
         self,
         user_address: str,
-        asset_id: int
+        asset_id: int,
+        funding_amount: int = 0
     ) -> Dict[str, Any]:
         """
         Execute a fully server-side sponsored opt-in without requiring user signature.
@@ -748,7 +751,7 @@ class AlgorandSponsorService:
                 logger.warning(f"Could not check opt-in status: {e}")
             
             # Create sponsored opt-in
-            opt_in_result = await self.create_sponsored_opt_in(user_address, asset_id)
+            opt_in_result = await self.create_sponsored_opt_in(user_address, asset_id, funding_amount=funding_amount)
             
             if not opt_in_result['success']:
                 return opt_in_result
