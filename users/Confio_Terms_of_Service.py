@@ -1,8 +1,8 @@
 data = {
-	"en": {
+	"en_legacy": {
 		"articles": [
 			{
-				"header": "Confío Terms of Service",
+				"header": "Confío Terms of Service (Legacy)",
 				"paragraphs": [
 					"Welcome to Confío!",
 					"Confío is a cryptocurrency and e-commerce platform that enables everyone to easily use cryptocurrencies in their everyday life. Our mission is to give people the power to take control of their finance. To push forward our mission, we provide various services through websites, or software applications(together, the 'Confío Services’ or ‘Services’)",
