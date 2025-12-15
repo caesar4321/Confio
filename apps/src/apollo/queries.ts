@@ -413,8 +413,8 @@ export const CREATE_BUSINESS = gql`
 `;
 
 export const UPDATE_ACCOUNT_ALGORAND_ADDRESS = gql`
-  mutation UpdateAccountAlgorandAddress($algorandAddress: String!) {
-    updateAccountAlgorandAddress(algorandAddress: $algorandAddress) {
+  mutation UpdateAccountAlgorandAddress($algorandAddress: String!, $isV2Wallet: Boolean) {
+    updateAccountAlgorandAddress(algorandAddress: $algorandAddress, isV2Wallet: $isV2Wallet) {
       account {
         id
         accountId

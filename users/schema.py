@@ -2515,6 +2515,7 @@ class UpdateBusiness(graphene.Mutation):
 class UpdateAccountAlgorandAddress(graphene.Mutation):
     class Arguments:
         algorand_address = graphene.String(required=True)
+        is_v2_wallet = graphene.Boolean(required=False, description="Set to true if client is using V2 architecture (master secret)")
 
     success = graphene.Boolean()
     error = graphene.String()
@@ -2524,7 +2525,7 @@ class UpdateAccountAlgorandAddress(graphene.Mutation):
     opt_in_transactions = graphene.JSONString()
 
     @classmethod
-    def mutate(cls, root, info, algorand_address):
+    def mutate(cls, root, info, algorand_address, is_v2_wallet=None):
         user = getattr(info.context, 'user', None)
         if not (user and getattr(user, 'is_authenticated', False)):
             return UpdateAccountAlgorandAddress(success=False, error="Authentication required")
@@ -2585,6 +2586,12 @@ class UpdateAccountAlgorandAddress(graphene.Mutation):
 
             # Update the Algorand address
             account.algorand_address = algorand_address
+            
+            # If client indicates V2 wallet, mark as migrated
+            if is_v2_wallet:
+                account.is_keyless_migrated = True
+                logger.info(f"Marking account {account.id} (user {user.id}) as V2 migrated")
+            
             account.save()
 
             # After setting address, check/fund and prepare asset opt-ins for CONFIO and cUSD
