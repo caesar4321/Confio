@@ -35,7 +35,7 @@ class OAuthStorageService {
     const deviceId = DeviceInfo.getUniqueId();
     const bundleId = DeviceInfo.getBundleId();
     const deviceName = DeviceInfo.getDeviceName();
-    
+
     // Create a deterministic but device-specific key
     return CryptoJS.SHA256(`${deviceId}-${bundleId}-${deviceName}-confio-oauth`).toString();
   }
@@ -104,14 +104,14 @@ class OAuthStorageService {
       const deviceKey = this.getDeviceKey();
       const decryptedBytes = CryptoJS.AES.decrypt(credentials.password, deviceKey);
       const decryptedData = decryptedBytes.toString(CryptoJS.enc.Utf8);
-      
+
       if (!decryptedData) {
         console.error('OAuthStorage - Failed to decrypt OAuth subject');
         return null;
       }
 
       const data: StoredOAuthData = JSON.parse(decryptedData);
-      
+
       // Validate the data
       if (!data.subject || !data.provider) {
         console.error('OAuthStorage - Invalid OAuth data structure');

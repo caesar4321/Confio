@@ -96,7 +96,8 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
             return
         if t == "optin_prepare":
             try:
-                pack = await self._optin_prepare()
+                platform = content.get("platform", "")
+                pack = await self._optin_prepare(platform)
                 if not pack.get("success"):
                     await self.send_json({"type": "error", "message": pack.get("error", "optin_prepare_failed")})
                     return
@@ -127,11 +128,12 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
         if t == "prepare_request":
             try:
                 amount = content.get("amount")
+                platform = content.get("platform", "")
                 try:
-                    logging.getLogger(__name__).info(f"[PRESALE][WS] prepare_request amount={amount}")
+                    logging.getLogger(__name__).info(f"[PRESALE][WS] prepare_request amount={amount} platform={platform}")
                 except Exception:
                     pass
-                pack = await self._prepare(amount)
+                pack = await self._prepare(amount, platform)
                 if not pack.get("success"):
                     # Special hint: presale app opt-in required
                     if pack.get('error') == 'requires_presale_app_optin':
@@ -229,7 +231,7 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
         return account
 
     @database_sync_to_async
-    def _prepare(self, amount):
+    def _prepare(self, amount, platform: str = ""):
         from decimal import Decimal
         from django.utils import timezone
         from presale.models import PresalePhase, PresalePurchase, UserPresaleLimit, PresaleSettings
@@ -278,6 +280,15 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
         # BLOCK V1 USERS: require updated app (Keyless V2 migration)
         if not getattr(account, 'is_keyless_migrated', False):
             return {"success": False, "error": "Actualiza tu app para participar en la preventa."}
+
+        # BLOCK ANDROID WITHOUT GOOGLE DRIVE BACKUP (Safety Check)
+        # Uses Platform.OS sent from client for reliable device detection
+        is_android = str(platform).lower() == 'android'
+        if getattr(user, 'backup_provider', '') != 'google_drive' and is_android:
+            return {
+                "success": False, 
+                "error": "Por favor, realiza un respaldo en Google Drive para proteger tu cuenta antes de participar."
+            }
 
 
         # Compute CONFIO amount (phase pricing uses cUSD per token)
@@ -398,7 +409,7 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
         }
 
     @database_sync_to_async
-    def _optin_prepare(self):
+    def _optin_prepare(self, platform: str = ""):
         from users.models import Account
         from blockchain.presale_transaction_builder import PresaleTransactionBuilder
         from blockchain.algorand_account_manager import AlgorandAccountManager
@@ -411,6 +422,26 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
         account = self._get_active_account()
         if not account or not account.algorand_address or len(account.algorand_address) != 58:
             return {"success": False, "error": "no_algorand_address"}
+
+        # BLOCK V1 USERS: require updated app (Keyless V2 migration)
+        if not getattr(account, 'is_keyless_migrated', False):
+            return {"success": False, "error": "Actualiza tu app para participar en la preventa."}
+
+        # BLOCK ANDROID WITHOUT GOOGLE DRIVE BACKUP (Safety Check)
+        # Uses Platform.OS sent from client for reliable device detection
+        backup_provider = getattr(user, 'backup_provider', '')
+        is_android = str(platform).lower() == 'android'
+        _log.getLogger(__name__).info(
+            f"[PRESALE][WS][OPTIN_PREPARE] Backup check: backup_provider={backup_provider}, platform={platform}, is_android={is_android}"
+        )
+        if backup_provider != 'google_drive' and is_android:
+            _log.getLogger(__name__).warning(
+                f"[PRESALE][WS][OPTIN_PREPARE] BLOCKED: Android user without Google Drive backup"
+            )
+            return {
+                "success": False, 
+                "error": "Por favor, realiza un respaldo en Google Drive para proteger tu cuenta antes de participar."
+            }
 
         # Ensure user's ALGO balance can cover app opt-in MBR; top-up if needed (standalone)
         try:

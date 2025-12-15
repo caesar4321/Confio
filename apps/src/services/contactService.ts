@@ -58,12 +58,12 @@ export class ContactService {
       const keychainStart = Date.now();
       const arrayCredentials = await Keychain.getInternetCredentials(CONTACTS_KEYCHAIN_SERVICE + '_array');
       console.log(`[PERF] Keychain read took: ${Date.now() - keychainStart}ms`);
-      
+
       if (arrayCredentials && arrayCredentials.username === CONTACTS_KEYCHAIN_KEY) {
         const parseStart = Date.now();
         const contactsArray = JSON.parse(arrayCredentials.password);
         console.log(`[PERF] JSON parse took: ${Date.now() - parseStart}ms`);
-        
+
         if (Array.isArray(contactsArray)) {
           this.contactsArray = contactsArray;
           console.log(`[PERF] Preloaded ${contactsArray.length} contacts in ${Date.now() - startTime}ms`);
@@ -190,31 +190,31 @@ export class ContactService {
    */
   async checkConfioUsers(phoneNumbers: string[], apolloClient?: any): Promise<Map<string, any>> {
     const confioUsersMap = new Map<string, any>();
-    
+
     if (!apolloClient || phoneNumbers.length === 0) {
       return confioUsersMap;
     }
-    
+
     try {
       // Import the query dynamically to avoid circular dependencies
       const { CHECK_USERS_BY_PHONES } = await import('../apollo/queries');
-      
+
       // Query the server in batches of 50 phone numbers
       const batchSize = 50;
       const totalBatches = Math.ceil(phoneNumbers.length / batchSize);
       console.log(`[SYNC] Will check users in ${totalBatches} batches`);
-      
+
       for (let i = 0; i < phoneNumbers.length; i += batchSize) {
         const batch = phoneNumbers.slice(i, i + batchSize);
         const batchNum = Math.floor(i / batchSize) + 1;
         console.log(`[SYNC] Checking batch ${batchNum}/${totalBatches} with ${batch.length} phone numbers`);
-        
+
         const result = await apolloClient.query({
           query: CHECK_USERS_BY_PHONES,
           variables: { phoneNumbers: batch },
           fetchPolicy: 'network-only'
         });
-        
+
         if (result.data?.checkUsersByPhones) {
           result.data.checkUsersByPhones.forEach((userInfo: any) => {
             if (userInfo.isOnConfio) {
@@ -230,7 +230,7 @@ export class ContactService {
     } catch (error) {
       console.error('Error checking Confío users:', error);
     }
-    
+
     return confioUsersMap;
   }
 
@@ -248,34 +248,34 @@ export class ContactService {
 
       // Get all contacts from device
       const contacts = await Contacts.getAll();
-      
+
       if (!contacts || contacts.length === 0) {
         console.log('No contacts found');
         return true; // Return true as sync was successful, just no contacts
       }
-      
+
       // Process and normalize contacts
       const contactMap: ContactMap = {};
       const allPhoneNumbers: string[] = [];
-      
+
       for (const contact of contacts) {
         if (!contact || !contact.phoneNumbers || contact.phoneNumbers.length === 0) {
           continue; // Skip contacts without phone numbers
         }
-        
-        const name = `${contact.givenName || ''} ${contact.familyName || ''}`.trim() || 
-                     contact.displayName || 
-                     'Unknown';
-        
+
+        const name = `${contact.givenName || ''} ${contact.familyName || ''}`.trim() ||
+          contact.displayName ||
+          'Unknown';
+
         const phones: string[] = [];
         const normalizedPhones: string[] = [];
-        
+
         // Process all phone numbers
         contact.phoneNumbers.forEach(phoneObj => {
           const phone = phoneObj.number;
           phones.push(phone);
           allPhoneNumbers.push(phone); // Collect all phone numbers for batch checking
-          
+
           // Try to normalize the phone number
           try {
             const parsed = parsePhoneNumber(phone, 'VE'); // Default to Venezuela
@@ -317,7 +317,7 @@ export class ContactService {
           });
         }
       }
-      
+
       // Check which contacts are Confío users
       let canUpload = true;
       if (Platform.OS === 'ios') {
@@ -332,7 +332,7 @@ export class ContactService {
         const startCheck = Date.now();
         const confioUsersMap = await this.checkConfioUsers(allPhoneNumbers, apolloClient);
         console.log(`[SYNC] Checked users in ${Date.now() - startCheck}ms`);
-        
+
         // Update contacts with Confío user information
         confioUsersMap.forEach((userInfo, phoneNumber) => {
           // Find all contacts that match this phone number
@@ -343,13 +343,13 @@ export class ContactService {
               contact.confioUserId = userInfo.userId;
               contact.confioUsername = userInfo.username;
               contact.confioAlgorandAddress = userInfo.algorandAddress;
-              
+
               // Keep the local contact name - don't replace with Confío user's profile name
               // Users should see the names they have saved in their contacts
             }
           });
         });
-        
+
         console.log(`Found ${confioUsersMap.size} Confío users among contacts`);
       }
 
@@ -376,10 +376,10 @@ export class ContactService {
           }
         });
       }
-      
+
       // Store as array for faster loading
       this.contactsArray = Array.from(uniqueContactsMap.values());
-      
+
       // Also store the array format in keychain for next app launch
       const arrayData = JSON.stringify(this.contactsArray);
       await Keychain.setInternetCredentials(
@@ -419,7 +419,7 @@ export class ContactService {
    */
   async getAllContacts(): Promise<StoredContact[]> {
     const startTime = Date.now();
-    
+
     // Return immediately if contacts are already in memory
     if (this.contactsArray && this.contactsArray.length > 0) {
       console.log(`[PERF] getAllContacts returned ${this.contactsArray.length} contacts from memory in ${Date.now() - startTime}ms`);
@@ -427,7 +427,7 @@ export class ContactService {
     }
 
     console.log(`[PERF] getAllContacts - no contacts in memory, returning empty`);
-    
+
     // If no contacts in memory, return empty array immediately
     // and trigger background load
     if (!this.contactsArray) {
@@ -465,11 +465,11 @@ export class ContactService {
       }
 
       const contactsData = JSON.parse(credentials.password);
-      
+
       // Old format: convert map to array
       if (contactsData && typeof contactsData === 'object') {
         const uniqueContacts = new Map<string, StoredContact>();
-        
+
         Object.values(contactsData).forEach((contact: any) => {
           if (contact && contact.name && contact.phoneNumbers && contact.phoneNumbers.length > 0) {
             const key = `${contact.name}_${contact.phoneNumbers[0]}`;
@@ -478,9 +478,9 @@ export class ContactService {
             }
           }
         });
-        
+
         this.contactsArray = Array.from(uniqueContacts.values());
-        
+
         // Save in array format for next time
         const arrayData = JSON.stringify(this.contactsArray);
         await Keychain.setInternetCredentials(
@@ -511,13 +511,13 @@ export class ContactService {
       for (const phone of phoneNumbers) {
         // Direct phone number
         cache[phone] = contact;
-        
+
         // Cleaned version
         const cleaned = phone.replace(/\D/g, '');
         if (cleaned) {
           cache[cleaned] = contact;
         }
-        
+
         // Try to parse and add variations
         try {
           const parsed = parsePhoneNumber(phone, 'VE');
@@ -531,7 +531,7 @@ export class ContactService {
           // Parsing failed, continue
         }
       }
-      
+
       // Also add normalized phones for better matching
       if (contact.normalizedPhones) {
         for (const phone of contact.normalizedPhones) {
@@ -564,12 +564,12 @@ export class ContactService {
     const countryCodeMatch = phoneNumber.match(/^([A-Z]{2})(.+)$/);
     if (countryCodeMatch) {
       const [, countryCode, phoneWithoutCountry] = countryCodeMatch;
-      
+
       // Try lookup with just the phone number part
       if (this.contactsCache[phoneWithoutCountry]) {
         return this.contactsCache[phoneWithoutCountry];
       }
-      
+
       // Map country codes to dialing codes
       const countryDialingCodes: Record<string, string> = {
         'DO': '1809', // Dominican Republic
@@ -585,14 +585,14 @@ export class ContactService {
         'EC': '593',
         // Add more as needed
       };
-      
+
       const dialingCode = countryDialingCodes[countryCode];
       if (dialingCode) {
         // Try various formats
         const withDialingCode = dialingCode + phoneWithoutCountry;
         const withPlus = '+' + dialingCode + phoneWithoutCountry;
         const justDialingWithoutCountry = '+' + phoneWithoutCountry;
-        
+
         if (this.contactsCache[withDialingCode]) {
           return this.contactsCache[withDialingCode];
         }
@@ -602,7 +602,7 @@ export class ContactService {
         if (this.contactsCache[justDialingWithoutCountry]) {
           return this.contactsCache[justDialingWithoutCountry];
         }
-        
+
         // For countries like DO that share +1, try without area code
         if (dialingCode.startsWith('1')) {
           const withJust1 = '1' + phoneWithoutCountry;
@@ -629,7 +629,7 @@ export class ContactService {
       if (parsed && parsed.isValid()) {
         const e164 = parsed.format('E.164');
         const withoutPlus = e164.substring(1);
-        
+
         if (this.contactsCache[e164]) {
           return this.contactsCache[e164];
         }
@@ -676,7 +676,7 @@ export class ContactService {
         if (parsed && parsed.isValid()) {
           const e164 = parsed.format('E.164');
           const withoutPlus = e164.substring(1);
-          
+
           if (this.contactsCache[e164]) {
             return this.contactsCache[e164];
           }
@@ -781,10 +781,10 @@ export class ContactService {
       Object.values(this.contactsCache).forEach(contact => {
         if (!processedIds.has(contact.id)) {
           // Check if any of the contact's normalized phones match Confío users
-          const isConfioUser = contact.normalizedPhones.some(phone => 
+          const isConfioUser = contact.normalizedPhones.some(phone =>
             confioPhoneSet.has(phone)
           );
-          
+
           if (isConfioUser) {
             confioContacts.push(contact);
             processedIds.add(contact.id);

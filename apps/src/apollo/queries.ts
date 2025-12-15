@@ -14,6 +14,7 @@ export const GET_ME = gql`
       isIdentityVerified
       lastVerifiedDate
       verificationStatus
+      backupProvider
     }
   }
 `;
@@ -441,6 +442,16 @@ export const UPDATE_BUSINESS = gql`
         createdAt
         updatedAt
       }
+      success
+      error
+    }
+  }
+`;
+
+// Google Drive Backup Status Reporting
+export const REPORT_BACKUP_STATUS = gql`
+  mutation ReportBackupStatus($provider: String!, $device_name: String, $isVerified: Boolean!) {
+    reportBackupStatus(provider: $provider, deviceName: $device_name, isVerified: $isVerified) {
       success
       error
     }

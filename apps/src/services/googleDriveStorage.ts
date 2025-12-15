@@ -7,6 +7,7 @@ const DRIVE_API_URL = 'https://www.googleapis.com/drive/v3/files';
 export interface DriveFile {
     id: string;
     name: string;
+    modifiedTime?: string;
 }
 
 /**
@@ -20,17 +21,18 @@ export const googleDriveStorage = {
      * List files in the AppData folder.
      * @param accessToken - Valid Google OAuth Access Token
      * @param filename - Optional filename to filter by
+     * @param trashed - Optional boolean to search trashed files (default false)
      */
-    async listFiles(accessToken: string, filename?: string): Promise<DriveFile[]> {
+    async listFiles(accessToken: string, filename?: string, trashed: boolean = false): Promise<DriveFile[]> {
         try {
             // Build query - don't include 'spaces' here, it's a separate URL param
-            let query = "trashed=false";
+            let query = `trashed=${trashed}`;
             if (filename) {
                 query += ` and name='${filename}'`;
             }
 
             const response = await fetch(
-                `${DRIVE_API_URL}?spaces=appDataFolder&q=${encodeURIComponent(query)}&fields=files(id,name)`,
+                `${DRIVE_API_URL}?spaces=appDataFolder&q=${encodeURIComponent(query)}&fields=files(id,name,modifiedTime)`,
                 {
                     method: 'GET',
                     headers: {
@@ -56,10 +58,17 @@ export const googleDriveStorage = {
      * Download file content.
      * @param accessToken - Valid Google OAuth Access Token
      * @param fileId - ID of the file to download
+     * @param revisionId - Optional revision ID to download a specific version
      */
-    async downloadFile(accessToken: string, fileId: string): Promise<string> {
+    async downloadFile(accessToken: string, fileId: string, revisionId?: string): Promise<string> {
         try {
-            const response = await fetch(`${DRIVE_API_URL}/${fileId}?alt=media`, {
+            let url = `${DRIVE_API_URL}/${fileId}`;
+            if (revisionId) {
+                url += `/revisions/${revisionId}`;
+            }
+            url += '?alt=media';
+
+            const response = await fetch(url, {
                 method: 'GET',
                 headers: {
                     Authorization: `Bearer ${accessToken}`,
@@ -75,6 +84,31 @@ export const googleDriveStorage = {
         } catch (error) {
             console.warn('[GoogleDrive] Download failed:', error);
             throw error;
+        }
+    },
+
+    /**
+     * List revisions of a file
+     */
+    async listRevisions(accessToken: string, fileId: string): Promise<any[]> {
+        try {
+            const response = await fetch(
+                `${DRIVE_API_URL}/${fileId}/revisions?fields=revisions(id,modifiedTime,keepForever,size)`,
+                {
+                    method: 'GET',
+                    headers: {
+                        Authorization: `Bearer ${accessToken}`,
+                    }
+                }
+            );
+
+            if (!response.ok) return [];
+
+            const data = await response.json();
+            return data.revisions || [];
+        } catch (e) {
+            console.warn('[GoogleDrive] Failed to list revisions', e);
+            return [];
         }
     },
 

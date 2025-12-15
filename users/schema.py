@@ -26,6 +26,7 @@ from .phone_utils import normalize_phone
 from .review_numbers import is_review_test_phone_key
 from graphql_jwt.utils import jwt_encode, jwt_decode
 from graphql_jwt.shortcuts import create_refresh_token
+from graphql_jwt.decorators import login_required
 from datetime import datetime, timedelta
 from django.utils import timezone
 import logging
@@ -341,7 +342,7 @@ class UserType(DjangoObjectType):
 	
 	class Meta:
 		model = User
-		fields = ('id', 'username', 'email', 'first_name', 'last_name', 'phone_country', 'phone_number')
+		fields = ('id', 'username', 'email', 'first_name', 'last_name', 'phone_country', 'phone_number', 'backup_provider')
 	
 	def resolve_is_identity_verified(self, info):
 		return self.is_identity_verified
@@ -4320,52 +4321,182 @@ class RequestPremiumUpgrade(graphene.Mutation):
 			return RequestPremiumUpgrade(success=False, error=str(e), verification_level=0)
 
 
-class Mutation(EmployeeMutations, graphene.ObjectType):
-	update_phone_number = UpdatePhoneNumber.Field()
-	update_username = UpdateUsername.Field()
-	update_user_profile = UpdateUserProfile.Field()
-	invalidate_auth_tokens = InvalidateAuthTokens.Field()
-	refresh_token = RefreshToken.Field()
-	switch_account_token = SwitchAccountToken.Field()
-	submit_identity_verification = SubmitIdentityVerification.Field()
-	request_identity_upload = RequestIdentityUpload.Field()
-	submit_identity_verification_s3 = SubmitIdentityVerificationS3.Field()
-    # BankInfo proof uploads removed; use integrated payout proof in ID verification
-	approve_identity_verification = ApproveIdentityVerification.Field()
-	reject_identity_verification = RejectIdentityVerification.Field()
-	create_business = CreateBusiness.Field()
-	update_business = UpdateBusiness.Field()
-	update_account_algorand_address = UpdateAccountAlgorandAddress.Field()
-	
-	# Bank info mutations
-	create_bank_info = CreateBankInfo.Field()
-	update_bank_info = UpdateBankInfo.Field()
-	delete_bank_info = DeleteBankInfo.Field()
-	set_default_bank_info = SetDefaultBankInfo.Field()
-	
-	# Blockchain mutations
-	refresh_account_balance = graphene.Field(
-		lambda: RefreshAccountBalance,
-		description="Force refresh balance from blockchain"
-	)
-	# Removed send_tokens - all sends now go through createSendTransaction
-	
-	# Test mutations (only in DEBUG mode)
-	# Test user mutations removed
-	
-	# Achievement system mutations
-	claim_achievement_reward = ClaimAchievementReward.Field()
-	track_tiktok_share = TrackTikTokShare.Field()
-	create_influencer_referral = CreateInfluencerReferral.Field()
-	submit_tiktok_share = SubmitTikTokShare.Field()
-	verify_tiktok_share = VerifyTikTokShare.Field()
-	update_influencer_status = UpdateInfluencerStatus.Field()
-	
-	# Unified referral system mutations
-	set_referrer = SetReferrer.Field()
-	check_referral_status = CheckReferralStatus.Field()
-	prepare_referral_reward_claim = PrepareReferralRewardClaim.Field()
-	submit_referral_reward_claim = SubmitReferralRewardClaim.Field()
+class ReportBackupStatus(graphene.Mutation):
+    """
+    Report the status of a wallet backup to the server for safety tracking.
+    Called when:
+    1. iOS user logs in (Provider='icloud') [Implicit]
+    2. Any user successfully uploads to Drive (Provider='google_drive') [Explicit]
+    """
+    success = graphene.Boolean()
+    error = graphene.String()
 
-	# Trader Premium upgrade (verification level 2) — camelCase only
-	requestPremiumUpgrade = RequestPremiumUpgrade.Field()
+    class Arguments:
+        provider = graphene.String(required=True)  # 'google_drive' | 'icloud'
+        device_name = graphene.String(required=False)
+        is_verified = graphene.Boolean(required=True)
+
+    def mutate(self, info, provider, is_verified, device_name=None):
+        user = info.context.user
+        if not user.is_authenticated:
+            return ReportBackupStatus(success=False, error="Authentication required")
+
+        try:
+            # Validate provider
+            if provider not in ['google_drive', 'icloud']:
+                return ReportBackupStatus(success=False, error="Invalid provider")
+
+            update_fields = []
+            
+            # Logic: We overwrite provider only if it's newor if switching to Drive (explicit > implicit)
+            # But the user requirements say just track status.
+            # Simple logic: Always update last verification.
+            
+            if is_verified:
+                # PRIORITY: google_drive (explicit user action) > icloud (implicit)
+                # - google_drive can overwrite icloud or null
+                # - icloud can only set if currently null/empty
+                should_update_provider = False
+                if not user.backup_provider:
+                    # No provider set, allow any
+                    should_update_provider = True
+                elif provider == 'google_drive' and user.backup_provider == 'icloud':
+                    # Explicit Drive backup overwrites implicit iCloud
+                    should_update_provider = True
+                # iCloud cannot overwrite google_drive (implicit cannot replace explicit)
+                
+                if should_update_provider:
+                    user.backup_provider = provider
+                    update_fields.append('backup_provider')
+                    logger.info(u"Backup provider set for user %s: %s", user.id, provider)
+                
+                # Always update the last verification timestamp and device name
+                user.backup_verified_at = timezone.now()
+                update_fields.append('backup_verified_at')
+                
+                if device_name:
+                    user.backup_device_name = device_name
+                    update_fields.append('backup_device_name')
+                
+                if update_fields:
+                    user.save(update_fields=update_fields)
+
+            return ReportBackupStatus(success=True)
+        except Exception as e:
+            logger.error(u"Error reporting backup status: %s", str(e))
+            return ReportBackupStatus(success=False, error=str(e))
+
+class MarkWalletMigrated(graphene.Mutation):
+    """
+    Mark the user's wallet as migrated to the V2 architecture (Manifest + UUID).
+    This indicates the user has successfully created or imported a wallet using the new system.
+    """
+    success = graphene.Boolean()
+    error = graphene.String()
+
+    @login_required
+    def mutate(self, info):
+        user = info.context.user
+        try:
+            # Get the active account from JWT context
+            from users.models import Account
+            account_type = getattr(info.context, 'account_type', 'personal')
+            account_index = getattr(info.context, 'account_index', 0)
+            business_id = getattr(info.context, 'business_id', None)
+            
+            # Find the active account
+            account = Account.objects.filter(
+                user=user,
+                account_type=account_type,
+                account_index=account_index
+            ).first()
+            
+            if not account:
+                logger.error("No account found for user %s with type=%s, index=%s", user.id, account_type, account_index)
+                return MarkWalletMigrated(success=False, error="Account not found")
+            
+            account.is_keyless_migrated = True
+            account.save(update_fields=['is_keyless_migrated'])
+            
+            logger.info("Account %s (user %s) marked as migrated to V2 architecture", account.id, user.id)
+            return MarkWalletMigrated(success=True)
+        except Exception as e:
+            logger.error("Error marking wallet migrated: %s", str(e))
+            return MarkWalletMigrated(success=False, error=str(e))
+
+from notifications.schema import UpdateNotificationPreferences
+
+class Mutation(EmployeeMutations, graphene.ObjectType):
+    report_backup_status = ReportBackupStatus.Field()
+
+    update_phone_number = UpdatePhoneNumber.Field()
+    update_username = UpdateUsername.Field()
+    update_user_profile = UpdateUserProfile.Field()
+    invalidate_auth_tokens = InvalidateAuthTokens.Field()
+    refresh_token = RefreshToken.Field()
+    switch_account_token = SwitchAccountToken.Field()
+    submit_identity_verification = SubmitIdentityVerification.Field()
+    request_identity_upload = RequestIdentityUpload.Field()
+    submit_identity_verification_s3 = SubmitIdentityVerificationS3.Field()
+    # BankInfo proof uploads removed; use integrated payout proof in ID verification
+    approve_identity_verification = ApproveIdentityVerification.Field()
+    reject_identity_verification = RejectIdentityVerification.Field()
+    create_business = CreateBusiness.Field()
+    update_business = UpdateBusiness.Field()
+    update_account_algorand_address = UpdateAccountAlgorandAddress.Field()
+    
+    # Bank info mutations
+    create_bank_info = CreateBankInfo.Field()
+    update_bank_info = UpdateBankInfo.Field()
+    delete_bank_info = DeleteBankInfo.Field()
+    set_default_bank_info = SetDefaultBankInfo.Field()
+
+    mark_wallet_migrated = MarkWalletMigrated.Field()
+    
+    # Unified send transaction (supports both internal and blockchain sends)
+    # send_transaction = SendTransaction.Field()
+    
+    # Notification preferences
+    update_notification_preferences = UpdateNotificationPreferences.Field()
+    
+    # Referral rewards
+    # claim_referral_reward = ClaimReferralReward.Field() # Deprecated/Removed for auto-claim
+    
+    # Business Employee Management
+    # create_employee_invitation = CreateEmployeeInvitation.Field()
+    # cancel_employee_invitation = CancelEmployeeInvitation.Field()
+    # accept_employee_invitation = AcceptEmployeeInvitation.Field() # Public endpoint
+    # update_employee_role = UpdateEmployeeRole.Field()
+    # deactivate_employee = DeactivateEmployee.Field()
+    # reactivate_employee = ReactivateEmployee.Field()
+    # leave_business = LeaveBusiness.Field()
+    
+    # Phone Verification
+    # verify_phone_code = VerifyPhoneCode.Field()
+    
+    # Blockchain mutations
+    refresh_account_balance = graphene.Field(
+        lambda: RefreshAccountBalance,
+        description="Force refresh balance from blockchain"
+    )
+    # Removed send_tokens - all sends now go through createSendTransaction
+    
+    # Test mutations (only in DEBUG mode)
+    # Test user mutations removed
+    
+    # Achievement system mutations
+    claim_achievement_reward = ClaimAchievementReward.Field()
+    track_tiktok_share = TrackTikTokShare.Field()
+    create_influencer_referral = CreateInfluencerReferral.Field()
+    submit_tiktok_share = SubmitTikTokShare.Field()
+    verify_tiktok_share = VerifyTikTokShare.Field()
+    update_influencer_status = UpdateInfluencerStatus.Field()
+    
+    # Unified referral system mutations
+    set_referrer = SetReferrer.Field()
+    check_referral_status = CheckReferralStatus.Field()
+    prepare_referral_reward_claim = PrepareReferralRewardClaim.Field()
+    submit_referral_reward_claim = SubmitReferralRewardClaim.Field()
+
+    # Trader Premium upgrade (verification level 2) — camelCase only
+    requestPremiumUpgrade = RequestPremiumUpgrade.Field()

@@ -3,6 +3,7 @@ apply plugin: "com.android.application"
 apply plugin: "com.facebook.react"          // ← must come *before* your `react {}` block
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.google.gms.google-services"
+apply plugin: "com.google.firebase.crashlytics"
 apply from: "../../node_modules/react-native-vector-icons/fonts.gradle"
 
 // 2) point at your JS root (where apps/node_modules & package.json live)
@@ -80,8 +81,8 @@ android {
         applicationId "com.Confio.Confio"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 34
-        versionName "2.0.0"
+        versionCode 35
+        versionName "2.1.0"
         buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", rootProject.ext.newArchEnabled.toString()
         if (rootProject.ext.newArchEnabled) {
             buildConfigField "boolean", "IS_TURBOMODULE_ENABLED", "true"
@@ -206,6 +207,8 @@ dependencies {
     implementation project(':react-native-worklets-core')
     implementation project(':react-native-device-info')
     implementation project(':notifee_react-native')
+    implementation project(':@react-native-firebase_analytics')
+    implementation project(':@react-native-firebase_crashlytics')
 
     implementation project(':react-native-play-install-referrer')
     implementation project(':react-native-block-store')

@@ -12,10 +12,12 @@ import { usePushNotificationPrompt } from '../hooks/usePushNotificationPrompt';
 import { PushNotificationModal } from '../components/PushNotificationModal';
 import { ReferralInputModal } from '../components/ReferralInputModal';
 import { BackupConsentModal } from '../components/BackupConsentModal';
+import { ExistingBackupModal } from '../components/ExistingBackupModal';
 import { useQuery } from '@apollo/client';
 import { GET_MY_REFERRALS } from '../apollo/queries';
 import { biometricAuthService } from '../services/biometricAuthService';
 import authService from '../services/authService';
+import { AnalyticsService } from '../services/analyticsService';
 
 // Utility function to format phone number with country code
 const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string => {
@@ -75,6 +77,9 @@ export const ProfileScreen = () => {
   const [showReferralModal, setShowReferralModal] = React.useState(false);
   const [showBackupModal, setShowBackupModal] = React.useState(false);
   const [driveBackupEnabled, setDriveBackupEnabled] = React.useState(false);
+  const [showExistingBackupModal, setShowExistingBackupModal] = React.useState(false);
+  const [existingBackupEntries, setExistingBackupEntries] = React.useState<any[]>([]);
+  const [hasLegacyBackup, setHasLegacyBackup] = React.useState(false);
   const [biometricAvailable, setBiometricAvailable] = React.useState(false);
   const [biometricEnabled, setBiometricEnabled] = React.useState(false);
   const [biometricLoading, setBiometricLoading] = React.useState(true);
@@ -147,6 +152,25 @@ export const ProfileScreen = () => {
       isLoading: accountsLoading
     });
   }, [activeAccount, accountsLoading]);
+
+  // Track if user has manually enabled backup during this session
+  const driveBackupManuallyEnabled = React.useRef(false);
+
+  // Initialize Google Drive backup switch from user profile
+  // Only set to true on initial load, don't reset after user manually enables
+  React.useEffect(() => {
+    const backupProvider = (userProfile as any)?.backupProvider?.toLowerCase();
+    console.log('[ProfileScreen] backupProvider from profile:', backupProvider, 'manuallyEnabled:', driveBackupManuallyEnabled.current);
+
+    // Show as active if ANY backup is enabled (iCloud OR Google Drive)
+    if (backupProvider === 'google_drive' || backupProvider === 'icloud') {
+      setDriveBackupEnabled(true);
+    } else if (!driveBackupManuallyEnabled.current) {
+      // Only set to false if user hasn't manually enabled this session
+      // This prevents userProfile refetch from resetting the switch
+      setDriveBackupEnabled(false);
+    }
+  }, [userProfile]);
 
   // Helper function to check biometric support
   const checkBiometricSupport = React.useCallback(async () => {
@@ -250,10 +274,16 @@ export const ProfileScreen = () => {
       setBiometricLoading(true);
       checkBiometricSupport();
 
-      // Check Drive status
-      authService.checkDriveBackupEnabled().then(enabled => {
-        setDriveBackupEnabled(enabled);
-      });
+      // Check Drive status (but don't overwrite if manually enabled or userProfile says enabled)
+      const backupProvider = (userProfile as any)?.backupProvider?.toLowerCase();
+      const hasAnyBackup = backupProvider === 'google_drive' || backupProvider === 'icloud';
+      if (!driveBackupManuallyEnabled.current && !hasAnyBackup) {
+        authService.checkDriveBackupEnabled().then(enabled => {
+          if (!driveBackupManuallyEnabled.current) {
+            setDriveBackupEnabled(enabled);
+          }
+        });
+      }
 
       // Reset the check flag when screen loses focus
       return () => {
@@ -760,16 +790,84 @@ export const ProfileScreen = () => {
           setShowBackupModal(false);
           try {
             // Logic to enable drive: trigger sign-in with scope
-            const success = await authService.enableDriveBackup();
-            if (success) {
+            AnalyticsService.logBackupAttempt('google_drive');
+            const result = await authService.enableDriveBackup();
+
+            if (result.success) {
+              driveBackupManuallyEnabled.current = true;
               setDriveBackupEnabled(true);
               Alert.alert('Respaldo Activado', 'Tu copia de seguridad en Google Drive está activa y sincronizada.');
+            } else if (result.existingBackups?.entriesToShow && result.existingBackups.entriesToShow.length > 0) {
+              // Show modal with all backup entries (cross-platform or multiple entries)
+              setExistingBackupEntries(result.existingBackups.entriesToShow);
+              setHasLegacyBackup(result.existingBackups.hasLegacy);
+              setShowExistingBackupModal(true);
+            } else if (result.error) {
+              Alert.alert('Error', result.error);
             }
           } catch (e) {
             console.error(e);
           }
         }}
         onCancel={() => setShowBackupModal(false)}
+      />
+
+      {/* Cross-Platform Backup Detection Modal */}
+      <ExistingBackupModal
+        visible={showExistingBackupModal}
+        entries={existingBackupEntries}
+        hasLegacy={hasLegacyBackup}
+        onRestore={async (entry) => {
+          // User chose to restore from a specific backup
+          setShowExistingBackupModal(false);
+          try {
+            console.log('[ProfileScreen] Restoring from backup entry:', entry);
+
+            const walletId = entry?.id || existingBackupEntries[0]?.id;
+            const lastBackupAt = entry?.lastBackupAt || existingBackupEntries[0]?.lastBackupAt;
+
+            // Actually restore the wallet from Drive backup
+            // Pass timestamp to help identify file if ID is null
+            const result = await authService.restoreFromDriveBackup(walletId, lastBackupAt);
+
+            if (result.success) {
+              driveBackupManuallyEnabled.current = true;
+              setDriveBackupEnabled(true);
+
+              // Force global account refresh to update UI immediately (e.g. DepositScreen)
+              await refreshAccounts();
+
+              Alert.alert(
+                'Billetera Restaurada',
+                'Tu billetera ha sido restaurada correctamente.',
+                [{ text: 'OK', onPress: () => { } }]
+              );
+            } else if (result.error) {
+              Alert.alert('Error', result.error);
+            }
+          } catch (e) {
+            console.error(e);
+            Alert.alert('Error', 'No se pudo restaurar');
+          }
+        }}
+        onUseCurrentWallet={async () => {
+          // User chose to use current wallet and add to Drive
+          setShowExistingBackupModal(false);
+          try {
+            const result = await authService.enableDriveBackup(true);
+            if (result.success) {
+              driveBackupManuallyEnabled.current = true;
+              setDriveBackupEnabled(true);
+              Alert.alert('Respaldo Activado', 'Se creó un nuevo respaldo en Google Drive.');
+            } else if (result.error) {
+              Alert.alert('Error', result.error);
+            }
+          } catch (e) {
+            console.error(e);
+            Alert.alert('Error', 'No se pudo crear el respaldo');
+          }
+        }}
+        onCancel={() => setShowExistingBackupModal(false)}
       />
     </>
   );

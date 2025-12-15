@@ -105,6 +105,20 @@ To prevent race conditions where the UI might show one account while the backend
 *   **Firebase ID Token**: Sent to Server. Used for API Authentication. It is **NOT** a Google API OAuth token and **cannot** access Google Drive APIs.
 *   **Google OAuth Access Token**: **NEVER** sent to Server. Used strictly on Client to access Google Drive AppData for wallet backup.
 
+### 3. Google Drive Backup Strategy (Manifest + UUID)
+V2 implements a robust **Manifest-Based** backup strategy to safely support cross-platform roaming and multi-wallet management in a single Drive account without overwrite risks.
+
+- **Architecture**:
+    - **Manifest (Index)**: `confio_wallet_manifest_v2.json`
+        - A JSON list tracking all known wallets: `[{ id: UUID, device: "iPhone 15 Pro (ios)", created: Date }, ...]`.
+    - **Backup Files**: `confio_wallet_v2_{UUID}.enc`
+        - Each wallet is stored in an immutable, unique file.
+- **Logic**:
+    - **Restore**: The app reads the Manifest.
+        - If multiple wallets are found, the user is **PROMPTED** to select which wallet to restore (e.g., "Restore iPhone 15 Wallet" or "Create New").
+    - **Backup**: New wallets generate a random UUID and add a new entry to the Manifest, ensuring no collisions with existing backups.
+- **Legacy Support**: If the Manifest is empty, the app checks for legacy dynamic filenames (`v2_{hash}`) and auto-migrates them to the new UUID-based system.
+
 ### 5.2. Storage Hierarchy
 1.  **RAM (Memory)**: Decrypted Master Secret (Milliseconds duration during signing).
 2.  **Secure Hardware (Keychain/Keystore)**: Encrypted Master Secret (At Rest on Device).

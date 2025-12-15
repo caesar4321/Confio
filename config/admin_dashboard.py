@@ -74,6 +74,39 @@ class ConfioAdminSite(admin.AdminSite):
         context['new_users_last_7_days'] = User.objects.filter(phone_number__isnull=False, created_at__gte=last_7_start).count()
         context['verified_users'] = IdentityVerification.objects.filter(status='verified').count()
         
+        # V2 Migration & Backup Security Metrics
+        # Uses Account model for migration status (per-account tracking)
+        from users.models import Account
+        total_active_for_stats = context['active_users_today'] if context['active_users_today'] > 0 else 1
+        drive_users = User.objects.filter(phone_number__isnull=False, backup_provider='google_drive').count()
+        migrated_accounts = Account.objects.filter(is_keyless_migrated=True).count()
+        # For safe V2 users, count users with both backup verified AND at least one migrated account
+        safe_v2_users = User.objects.filter(
+            phone_number__isnull=False, 
+            backup_verified_at__isnull=False,
+            accounts__is_keyless_migrated=True
+        ).distinct().count()
+        
+        context['security_stats'] = {
+            'drive_count': drive_users,
+            'drive_pct': (drive_users / context['total_users'] * 100) if context['total_users'] else 0,
+            'migrated_count': migrated_accounts,
+            'migrated_pct': (migrated_accounts / context['total_users'] * 100) if context['total_users'] else 0,
+            'safe_v2_count': safe_v2_users,
+            'safe_v2_pct': (safe_v2_users / context['total_users'] * 100) if context['total_users'] else 0,
+        }
+        
+        # OS Stats (Explicit from Login)
+        ios_users = User.objects.filter(platform_os='ios').count()
+        android_users = User.objects.filter(platform_os='android').count()
+        
+        context['os_stats'] = {
+            'ios_count': ios_users,
+            'ios_pct': (ios_users / context['total_users'] * 100) if context['total_users'] else 0,
+            'android_count': android_users,
+            'android_pct': (android_users / context['total_users'] * 100) if context['total_users'] else 0,
+        }
+        
         # Historical metrics from snapshots
         from users.models_analytics import DailyMetrics, CountryMetrics
         

@@ -6,11 +6,13 @@ export const WEB3AUTH_LOGIN = gql`
     $firebaseIdToken: String!
     $algorandAddress: String
     $deviceFingerprint: JSONString
+    $platformOs: String
   ) {
     web3AuthLogin(
       firebaseIdToken: $firebaseIdToken
       algorandAddress: $algorandAddress
       deviceFingerprint: $deviceFingerprint
+      platformOs: $platformOs
     ) {
       success
       error

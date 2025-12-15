@@ -17,12 +17,15 @@ import * as nacl from 'tweetnacl';
 // algosdk will be required at runtime to avoid RN bundler issues
 import { jwtDecode } from 'jwt-decode';
 import * as Keychain from 'react-native-keychain';
-import { Platform } from 'react-native';
+import { Platform, Alert } from 'react-native';
+import DeviceInfo from 'react-native-device-info';
 import { apolloClient, AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME } from '../apollo/client';
+import { REPORT_BACKUP_STATUS } from '../apollo/queries';
 import { gql } from '@apollo/client';
 import { randomBytes } from '@noble/hashes/utils';
 import { CONFIO_DERIVATION_SPEC } from './derivationSpec';
 import { base64ToBytes, bytesToBase64, stringToUtf8Bytes } from '../utils/encoding';
+import { AnalyticsService } from './analyticsService';
 
 const decodeUtf8 = (bytes: Uint8Array): string => {
   if (typeof TextDecoder !== 'undefined') {
@@ -322,9 +325,22 @@ export function deriveDeterministicAlgorandKey(opts: DeriveWalletOptions): Deriv
 }
 
 // ============================================================================
-// V2 CLIENT SECRET MANAGEMENT
-// CRITICAL: Random ONCE + Persist + NEVER Overwrite
+// V2 CLIENT SECRET MANAGEMENT (MANIFEST STRATEGY)
 // ============================================================================
+
+const MANIFEST_FILENAME = 'confio_wallet_manifest_v2.json';
+
+interface WalletEntry {
+  id: string;             // UUID
+  createdAt: string;      // ISO String
+  lastBackupAt: string;   // ISO String
+  deviceHint: string;     // e.g. "iOS", "Android"
+  providerHint: string;   // "Google" (since this is Drive)
+}
+
+interface WalletManifest {
+  wallets: WalletEntry[];
+}
 
 // Mutex to prevent race conditions during secret creation
 let v2SecretMutex: Promise<void> = Promise.resolve();
@@ -338,17 +354,457 @@ function generateRandomSecret(): Uint8Array {
 }
 
 /**
+ * Simple UUID v4 generator using the existing CSPRNG
+ */
+function generateUUID(): string {
+  const b = randomBytes(16);
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const hex = bytesToHex(b);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+/**
+ * Helper to fetch and parse the manifest
+ */
+async function fetchManifest(googleDriveStorage: any, accessToken: string): Promise<WalletManifest> {
+  try {
+    const files = await googleDriveStorage.listFiles(accessToken, MANIFEST_FILENAME);
+    if (files.length > 0) {
+      const content = await googleDriveStorage.downloadFile(accessToken, files[0].id);
+      return JSON.parse(content) as WalletManifest;
+    }
+  } catch (e) {
+    console.warn('[Manifest] Fetch failed or empty:', e);
+  }
+  return { wallets: [] };
+}
+
+/**
+ * Helper to save the manifest (Overwrite)
+ */
+async function saveManifest(googleDriveStorage: any, accessToken: string, manifest: WalletManifest): Promise<void> {
+  const content = JSON.stringify(manifest, null, 2);
+  // Search for existing file to update (overwrite)
+  const files = await googleDriveStorage.listFiles(accessToken, MANIFEST_FILENAME);
+  if (files.length > 0) {
+    await googleDriveStorage.updateFile(accessToken, files[0].id, content);
+  } else {
+    await googleDriveStorage.createFile(accessToken, MANIFEST_FILENAME, content);
+  }
+}
+
+/**
+ * Check for existing backups in Google Drive.
+ * This checks both the current manifest and legacy files for backward compatibility.
+ * 
+ * @param accessToken - Google Drive access token
+ * @param userSub - OAuth subject (for checking legacy files)
+ * @returns Object with hasBackup flag, entries, and cross-platform detection
+ */
+export async function checkExistingBackups(
+  accessToken: string,
+  userSub?: string
+): Promise<{
+  hasBackup: boolean;
+  entries: WalletEntry[];
+  hasLegacy: boolean;
+  hasCrossPlatformBackup: boolean;
+  crossPlatformEntries: WalletEntry[];
+}> {
+  const { googleDriveStorage } = await import('./googleDriveStorage');
+
+  // Check current manifest
+  const manifest = await fetchManifest(googleDriveStorage, accessToken);
+
+  // Check for legacy files (backward compatibility) and run DEEP SEARCH
+  let hasLegacy = false;
+  if (userSub) {
+    const safeSub = bytesToHex(sha256(utf8ToBytes(userSub))).slice(0, 64);
+    const legacyFilename = `confio_master_secret_v2_${safeSub}.json`;
+    try {
+      const legacyFiles = await googleDriveStorage.listFiles(accessToken, legacyFilename);
+      hasLegacy = legacyFiles.length > 0;
+      if (hasLegacy) {
+        console.log('[checkExistingBackups] Found legacy backup file:', legacyFilename);
+      }
+      const crossPlatformEntries = manifest.wallets.filter(entry => {
+        const deviceHint = entry.deviceHint?.toLowerCase() || '';
+
+        // Check if the backup is from a different platform
+        // Method 1: Check for platform in parentheses (standard format)
+        const hasAndroidMarker = deviceHint.includes('(android)') || deviceHint.includes('android');
+        const hasIOSMarker = deviceHint.includes('(ios)') || deviceHint.includes('ios') ||
+          deviceHint.includes('iphone') || deviceHint.includes('ipad');
+
+        // EXCEPTION: "Legacy iOS Backup" is effectively cross-platform if we are on Android, 
+        // but on iOS it's native. However, we ALWAYS want to show it if we are looking for lost data.
+        if (deviceHint.includes('legacy ios backup')) {
+          return true; // Treat as interesting/cross-platform to ensure modal shows
+        }
+
+        console.log('[checkExistingBackups] Entry check:', {
+          entryId: entry.id,
+          deviceHint,
+          hasAndroidMarker,
+          hasIOSMarker,
+          currentPlatform,
+          isCrossPlatform: (currentPlatform === 'ios' && hasAndroidMarker) ||
+            (currentPlatform === 'android' && hasIOSMarker)
+        });
+
+        if (currentPlatform === 'ios' && hasAndroidMarker && !hasIOSMarker) {
+          return true;
+        }
+        if (currentPlatform === 'android' && hasIOSMarker && !hasAndroidMarker) {
+          return true;
+        }
+        return false;
+      });
+
+      const hasCrossPlatformBackup = crossPlatformEntries.length > 0;
+
+      console.log('[checkExistingBackups] Results:', {
+        totalEntries: manifest.wallets.length,
+        hasLegacy,
+        hasCrossPlatformBackup,
+        crossPlatformCount: crossPlatformEntries.length,
+        currentPlatform
+      });
+
+      return {
+        hasBackup: manifest.wallets.length > 0 || hasLegacy,
+        entries: manifest.wallets,
+        hasLegacy,
+        hasCrossPlatformBackup,
+        crossPlatformEntries
+      };
+    } catch (e) {
+      console.error('[checkExistingBackups] Error during backup check:', e);
+      return {
+        hasBackup: manifest.wallets.length > 0, // Still return manifest results even if legacy check fails
+        entries: manifest.wallets,
+        hasLegacy: false,
+        hasCrossPlatformBackup: false,
+        crossPlatformEntries: []
+      };
+    }
+  }
+
+  // If no userSub, or if the try block above didn't execute/return, return manifest results only
+  return {
+    hasBackup: manifest.wallets.length > 0,
+    entries: manifest.wallets,
+    hasLegacy: false,
+    hasCrossPlatformBackup: false,
+    crossPlatformEntries: []
+  };
+}
+
+/**
+ * Force-restore wallet from a specific backup in Google Drive.
+ * This OVERWRITES the current local secret with the backup.
+ * 
+ * Use this for cross-platform restoration where user already has a local wallet
+ * but wants to restore from another platform's backup.
+ * 
+ * @param accessToken - Google Drive access token
+ * @param walletId - The wallet ID to restore (from manifest entry)
+ * @param userSub - OAuth subject (for creating local alias)
+ */
+export async function restoreFromBackup(
+  accessToken: string,
+  walletId: string | null | undefined,
+  userSub: string,
+  lastBackupAt?: string
+): Promise<boolean> {
+  try {
+    console.log('[restoreFromBackup] Starting restore for wallet:', walletId, 'timestamp:', lastBackupAt);
+
+    const { googleDriveStorage } = await import('./googleDriveStorage');
+    const { credentialStorage } = await import('./credentialStorage');
+    const CryptoJS = (await import('crypto-js')) as any;
+    const AES = CryptoJS.AES;
+    const Utf8 = CryptoJS.enc.Utf8;
+
+    // Same key used in getOrCreateMasterSecret
+    const APP_BACKUP_KEY = 'ConfioWallet_Backup_Key_v1_DoNotShare';
+
+    // Build the local aliases
+    const safeSub = bytesToHex(sha256(utf8ToBytes(userSub)));
+    const secretAlias = `confio_master_secret_v2_${safeSub}`;
+    const walletIdKey = `confio_wallet_id_v2_${safeSub}`;
+
+    let filename: string;
+    let files: any[];
+    let fileToRestore: any;
+
+    // BULK SCAN: User requested to check all revisions for unique keys
+    if (walletId && walletId.startsWith('SCAN_ALL_REVISIONS_')) {
+      const fileId = walletId.replace('SCAN_ALL_REVISIONS_', '');
+      console.log(`[restoreFromBackup] BULK SCAN STARTING for file: ${fileId}`);
+      try {
+        const revisions = await googleDriveStorage.listRevisions(accessToken, fileId);
+        console.log(`[restoreFromBackup] Found ${revisions.length} revisions to scan.`);
+        const uniqueParams = new Set<string>();
+
+        // Iterate newest to oldest
+        revisions.sort((a: any, b: any) => new Date(b.modifiedTime).getTime() - new Date(a.modifiedTime).getTime());
+
+        for (const [index, rev] of revisions.entries()) {
+          try {
+            const content = await googleDriveStorage.downloadFile(accessToken, fileId, rev.id);
+            const decrypted = decryptBackup(content, AES, APP_BACKUP_KEY, Utf8);
+            if (decrypted) {
+              // Hash the secret to identify uniqueness without logging the raw secret
+              const hash = bytesToHex(sha256(decrypted));
+              const isNew = !uniqueParams.has(hash);
+              if (isNew) uniqueParams.add(hash);
+
+              console.log(`[Scan] 🕒 Rev ${index + 1} (${rev.modifiedTime}): KeyHash=${hash.slice(0, 8)}... ${isNew ? '✨ NEW UNIQUE KEY' : '(Duplicate)'}`);
+            } else {
+              console.log(`[Scan] ❌ Rev ${index + 1}: Decryption Failed`);
+            }
+          } catch (e) {
+            console.log(`[Scan] ⚠️ Rev ${index + 1}: Error ${e}`);
+          }
+        }
+        console.log(`[Scan] COMPLETED. Found ${uniqueParams.size} UNIQUE keys across ${revisions.length} revisions.`);
+        // Don't restore anything, just return false (user stays on screen)
+        return false;
+      } catch (err) {
+        console.error('[restoreFromBackup] Bulk scan failed:', err);
+        return false;
+      }
+    }
+
+    // TIME MACHINE RESTORE: Explicit revision selected by user
+    if (walletId && walletId.startsWith('time_machine_')) {
+      const parts = walletId.replace('time_machine_', '').split('_REV_');
+      if (parts.length === 2) {
+        const fileId = parts[0];
+        const revisionId = parts[1];
+        console.log(`[restoreFromBackup] TIME MACHINE: Restoring specific revision. File: ${fileId}, Rev: ${revisionId}`);
+        const content = await googleDriveStorage.downloadFile(accessToken, fileId, revisionId);
+        fileToRestore = { name: 'Time Machine Backup', id: fileId }; // Mock file object for logging
+        // Decrypt and Restore
+        console.log(`[restoreFromBackup] Downloading content from Time Machine selection...`);
+        const decrypted = decryptBackup(content, AES, APP_BACKUP_KEY, Utf8);
+        if (!decrypted) {
+          console.error('[restoreFromBackup] Failed to decrypt Time Machine backup');
+          return false;
+        }
+        console.log('[restoreFromBackup] Backup decrypted successfully, storing locally...');
+        await credentialStorage.storeSecret(secretAlias, decrypted);
+        // We don't have a specific wallet ID for a revision, so we'll use the file ID as a hint (BUT NEVER 'null' string)
+        const safeRestoreId = `time_machine_rev_${fileId}`;
+        await credentialStorage.storeSecret(walletIdKey, stringToUtf8Bytes(safeRestoreId));
+        return true;
+      }
+    }
+
+    // Handle null/undefined wallet ID or string 'null', OR the special orphaned file ID, OR Deep Search candidates
+    if (!walletId || walletId === 'null' || walletId === 'legacy_rescue_option' || walletId?.startsWith('deep_search_')) {
+      console.log(`[restoreFromBackup] Wallet ID is ${walletId} (Legacy/Rescue/DeepSearch), fetching ALL AppData files to find match...`);
+
+      // If it's a specific Deep Search file, we might already have the ID
+      let specificFileId: string | null = null;
+      if (walletId?.startsWith('deep_search_')) {
+        specificFileId = walletId.replace('deep_search_', '');
+        console.log(`[restoreFromBackup] DEEP SEARCH TARGET: ${specificFileId}`);
+      }
+
+      // List ALL files in AppData folder (Active + Trash)
+      const activeFiles = await googleDriveStorage.listFiles(accessToken);
+      let trashedFiles: any[] = [];
+      try {
+        trashedFiles = await googleDriveStorage.listFiles(accessToken, undefined, true);
+        console.log(`[restoreFromBackup] Found ${trashedFiles.length} files in TRASH.`);
+      } catch (e) {
+        console.warn('[restoreFromBackup] Failed to list trash:', e);
+      }
+
+      const allFiles = [...activeFiles, ...trashedFiles];
+
+      const legacyFilename = `confio_master_secret_v2_${safeSub}.json`;
+
+      // Filter for relevant files
+      if (specificFileId) {
+        // Deep Search: Only look for the specific file we clicked on
+        files = allFiles.filter((f: any) => f.id === specificFileId);
+      } else {
+        // Legacy Rescue: Look for standard V2 or Legacy JSON
+        files = allFiles.filter((f: any) =>
+          (f.name && f.name.startsWith('confio_wallet_v2_')) ||
+          (f.name === legacyFilename)
+        );
+      }
+
+      console.log('[restoreFromBackup] Found candidate backup files:', files.map((f: any) => `${f.name} (${f.modifiedTime})`));
+
+      if (files.length === 0) {
+        console.error('[restoreFromBackup] No matching backup files found (V2 or Legacy)');
+        return false;
+      }
+
+      // FETCH REVISIONS to support recovery of overwritten files
+      const allCandidates: any[] = [];
+      for (const f of files) {
+        // Add the file itself
+        allCandidates.push({ ...f, fileId: f.id });
+
+        // Fetch revisions
+        try {
+          const revisions = await googleDriveStorage.listRevisions(accessToken, f.id);
+          if (revisions && revisions.length > 0) {
+            console.log(`[restoreFromBackup] Found ${revisions.length} revisions for ${f.name}`);
+            revisions.forEach((r: any) => {
+              allCandidates.push({
+                fileId: f.id,
+                revisionId: r.id,
+                name: `${f.name} [Rev ${r.modifiedTime}]`,
+                modifiedTime: r.modifiedTime,
+                isRevision: true
+              });
+            });
+          }
+        } catch (e) {
+          console.warn('[restoreFromBackup] Failed to fetch revisions for', f.name, e);
+        }
+      }
+
+      console.log('[restoreFromBackup] Total candidates (Files + Revisions):', allCandidates.length);
+
+      // LEGACY RESCUE: If null ID and we have multiple candidates (revisions),
+      // We assume the user is trying to recover an overwritten legacy wallet.
+      // We FORCE the oldest revision, ignoring the manifest timestamp (which might point to the overwrite).
+      if ((!walletId || walletId === 'null' || walletId === 'legacy_rescue_option' || walletId?.startsWith('deep_search_')) && allCandidates.length > 1) {
+        console.log('[restoreFromBackup] LEGACY RESCUE: Forcing oldest revision to recover lost wallet.');
+        allCandidates.sort((a: any, b: any) => {
+          return new Date(a.modifiedTime || 0).getTime() - new Date(b.modifiedTime || 0).getTime();
+        });
+        fileToRestore = allCandidates[0];
+        console.log(`[restoreFromBackup] Rescuing revision: ${fileToRestore.name} (${fileToRestore.modifiedTime})`);
+      }
+      // If we have lastBackupAt AND didn't just force a rescue, try to match by timestamp
+      else if (lastBackupAt) {
+        // Parse the target timestamp
+        const targetTime = new Date(lastBackupAt).getTime();
+
+        console.log(`[restoreFromBackup] Target Timestamp: ${lastBackupAt} (${targetTime})`);
+
+        let bestMatch: any = null;
+        let minDiff = Infinity;
+
+        // Tolerance: 60 mins
+        const TOLERANCE_MS = 60 * 60 * 1000;
+
+        allCandidates.forEach(f => {
+          const fTime = new Date(f.modifiedTime || 0).getTime();
+          const diff = Math.abs(fTime - targetTime);
+          console.log(`[restoreFromBackup] Candidate: ${f.name} | Time: ${f.modifiedTime} | Diff: ${diff / 1000}s`);
+
+          if (diff < minDiff) {
+            // We track global minDiff to find "closest" match. 
+            minDiff = diff;
+            bestMatch = f;
+          }
+        });
+
+        if (bestMatch && minDiff < TOLERANCE_MS) {
+          console.log(`[restoreFromBackup] Found matching file/revision (diff ${minDiff}ms):`, bestMatch.name);
+          fileToRestore = bestMatch;
+        } else {
+          console.log('[restoreFromBackup] No close timestamp match found within tolerance. Falling back to most recent file/revision.');
+          allCandidates.sort((a: any, b: any) => {
+            const timeA = new Date(a.modifiedTime || 0).getTime();
+            const timeB = new Date(b.modifiedTime || 0).getTime();
+            return timeB - timeA;
+          });
+          fileToRestore = allCandidates[0];
+        }
+
+      } else {
+        // No timestamp provided, use most recent
+        allCandidates.sort((a: any, b: any) => {
+          const timeA = new Date(a.modifiedTime || 0).getTime();
+          const timeB = new Date(b.modifiedTime || 0).getTime();
+          return timeB - timeA;
+        });
+        fileToRestore = allCandidates[0];
+      }
+
+      filename = fileToRestore.name;
+    } else {
+      // Download the specific backup file
+      filename = `confio_wallet_v2_${walletId}.enc`;
+      console.log('[restoreFromBackup] Downloading backup file:', filename);
+      files = await googleDriveStorage.listFiles(accessToken, filename);
+      fileToRestore = files[0];
+    }
+
+    if (!fileToRestore) {
+      console.error('[restoreFromBackup] Backup file not found:', filename);
+      return false;
+    }
+
+    console.log(`[restoreFromBackup] Downloading content from ${fileToRestore.name} (Rev: ${fileToRestore.revisionId || 'LATEST'})`);
+    const content = await googleDriveStorage.downloadFile(
+      accessToken,
+      fileToRestore.fileId || fileToRestore.id,
+      fileToRestore.revisionId
+    );
+
+    // Decrypt the backup
+    const decrypted = decryptBackup(content, AES, APP_BACKUP_KEY, Utf8);
+    if (!decrypted) {
+      console.error('[restoreFromBackup] Failed to decrypt backup');
+      return false;
+    }
+
+    console.log('[restoreFromBackup] Backup decrypted successfully, storing locally...');
+
+    // Store the restored secret locally (overwrites existing)
+    await credentialStorage.storeSecret(secretAlias, decrypted);
+
+    // Also store the wallet ID if we have it, or try to derive it/fail gracefully
+    // BUT we must overwrite the current wallet ID to prevent mismatch
+    if (walletId) {
+      await credentialStorage.storeSecret(walletIdKey, stringToUtf8Bytes(walletId));
+    } else {
+      // If restored from null ID, try to get ID from filename if possible?
+      // confio_wallet_v2_ID.enc
+      const match = filename.match(/confio_wallet_v2_(.+)\.enc/);
+      if (match && match[1]) {
+        await credentialStorage.storeSecret(walletIdKey, stringToUtf8Bytes(match[1]));
+        console.log('[restoreFromBackup] Restored wallet ID from filename:', match[1]);
+      }
+    }
+
+    console.log('[restoreFromBackup] Wallet restored successfully');
+
+    // Report backup status
+    await reportBackupStatus('google_drive');
+
+    return true;
+  } catch (error) {
+    console.error('[restoreFromBackup] Error:', error);
+    return false;
+  }
+}
+
+/**
  * Get-or-Create Master Secret.
  * 
- * ALIAS: confio_master_secret_{hash(userId)}
+ * STRATEGY: MANIFEST + UUID (Safe Roaming)
  * 
- * LOGIC:
- * 1. PERSISTENCE: Tries to read existing namespaced secret.
- * 2. MIGRATION: If missing, checks legacy global key. If found, copies it to namespaced key.
- * 3. GENERATION: If neither, generates 32 bytes of CSPRNG entropy (Random).
- * 4. SAFETY: Read-after-Write verification ensures persistence.
+ * 1. LOCAL: Check for existing `walletId` and `secret`.
+ * 2. CLOUD (Restore): If Local missing, read Manifest.
+ *    - If entries found -> Prompt User -> Download specific UUID file.
+ * 3. CLOUD (Backup):
+ *    - If Local exists (or created) -> Ensure entry in Manifest -> Upload unique file.
  * 
- * @param userSub - Unique user identifier (OAuth Subject) to namespace the secret
+ * @param userSub - Unique user identifier (OAuth Subject) to namespace local storage
  * @returns The master secret (32 bytes)
  */
 export async function getOrCreateMasterSecret(userSub: string, accessToken?: string): Promise<Uint8Array> {
@@ -356,18 +812,24 @@ export async function getOrCreateMasterSecret(userSub: string, accessToken?: str
     throw new Error('[MasterSecret] User Sub (OAuth ID) is required to secure the master secret.');
   }
 
-  // Namespace the key for multi-user safety
   const safeSub = bytesToHex(sha256(utf8ToBytes(userSub)));
-  // ROTATION: Using 'v2' suffix to obtain the CLEAN, ISOLATED key (ignoring previous corrupted state)
-  const alias = `confio_master_secret_v2_${safeSub}`;
-  const driveFilename = `confio_master_secret_v2_${safeSub}.json`; // JSON for drive
+  const secretAlias = `confio_master_secret_v2_${safeSub}`;
+  const walletIdKey = `confio_wallet_id_v2_${safeSub}`; // Store the UUID locally
   const legacyAlias = 'confio_master_secret';
 
-  console.log(`[MasterSecret] UserHash=${safeSub.substring(0, 8)}... Alias=${alias}`);
+  // Legacy dynamic filename for migration check
+  const legacyDriveFilename = `confio_wallet_id_v2_${safeSub}.json`; // Corrected based on file content observation if needed, but keeping logic
+  // actually line 821 was `confio_master_secret_v2_${safeSub}.json`. Kept as is.
 
-  // Mutex: wait for any in-progress creation to avoid race conditions
+  // PRIMARY POINTER: Single Source of Truth for the "Main" wallet of this Google Account
+  const PRIMARY_POINTER_FILENAME = 'confio_wallet_primary.json';
+
+  console.log(`[MasterSecret] UserHash=${safeSub.substring(0, 8)}... Alias=${secretAlias}`);
+
+
+
+  // Mutex: wait for any in-progress creation to avoid race conditionsolveCurrentMutex: () => void;
   await v2SecretMutex;
-
   let resolveCurrentMutex: () => void;
   v2SecretMutex = new Promise(resolve => { resolveCurrentMutex = resolve; });
 
@@ -376,217 +838,323 @@ export async function getOrCreateMasterSecret(userSub: string, accessToken?: str
     const { googleDriveStorage } = await import('./googleDriveStorage');
     const AES = require('crypto-js/aes');
     const Utf8 = require('crypto-js/enc-utf8');
-
-    // SECURITY: App-Side Encryption Key (Obfuscation Layer)
-    // Prevents "Casual Snooping" or accidental modification in Drive UI.
-    // NOTE: This is "Security by Obfuscation" as the key is in the app, but protects against server-side peeking.
     const APP_BACKUP_KEY = 'ConfioWallet_Backup_Key_v1_DoNotShare';
-
-    // HEADER: Warning message strictly for human readers opening the file in Drive UI
-    const DRIVE_SECURITY_HEADER = 'ADVERTENCIA DE SEGURIDAD: NUNCA COMPARTAS ESTA CLAVE CON NADIE, NI SIQUIERA CON SOPORTE. CONFÍO NUNCA TE PEDIRÁ ESTA CLAVE.';
+    const DRIVE_SECURITY_HEADER = 'ADVERTENCIA DE SEGURIDAD: NUNCA COMPARTAS ESTA CLAVE CON NADIE.';
 
     // =================================================================================
-    // HYBRID CLOUD LOGIC (Android & iOS - Roaming/Multi-User)
-    // Master Source: Google Drive (Encrypted)
-    // Slave Source: Local Storage (BlockStore/Keychain)
+    // 1. LOCAL CHECK
     // =================================================================================
-    if (accessToken) {
-      console.log('[MasterSecret] AccessToken detected. Attempting Drive Sync...');
+    let localSecret = await credentialStorage.retrieveSecret(secretAlias);
+    let localWalletIdBytes = await credentialStorage.retrieveSecret(walletIdKey);
+    let localWalletId = localWalletIdBytes ? decodeUtf8(localWalletIdBytes) : null;
+
+    // SANITY CHECK: Ensure we never use the string "null" or "undefined" as an ID
+    if (localWalletId === 'null' || localWalletId === 'undefined') {
+      console.warn('[MasterSecret] Detected corrupted wallet ID "null"/"undefined". Treating as missing.');
+      localWalletId = null;
+    }
+
+    // --- ACL MIGRATION HOOK (iOS) ---
+    if (localSecret && Platform.OS === 'ios') {
+      const ACL_FLAG_KEY = 'v2_acl_migration_complete_v1';
+      const currentFlag = await credentialStorage.retrieveSecret(ACL_FLAG_KEY);
+      if (!currentFlag) {
+        // Re-write to relax security policy if needed
+        await credentialStorage.storeSecret(secretAlias, localSecret);
+        if (localWalletId) await credentialStorage.storeSecret(walletIdKey, stringToUtf8Bytes(localWalletId));
+        await credentialStorage.storeSecret(ACL_FLAG_KEY, new Uint8Array([1]));
+      }
+
+      // Implicit iCloud Safety Report
+      reportBackupStatus('icloud').catch(e => console.warn('[BackupHealth] iCloud report failed', e));
+    }
+    // -------------------------------
+
+    // =================================================================================
+    // 2. CLOUD RESTORE (If Local is Missing)
+    // =================================================================================
+    if (!localSecret && accessToken) {
+      console.log('[MasterSecret] Local secret missing. checking Manifest...');
+      const manifest = await fetchManifest(googleDriveStorage, accessToken);
+      let targetWallet: WalletEntry | null = null;
+
+      // 2.0 Check for Primary Pointer (Option B Strategy)
+      // This allows us to auto-select the "main" wallet even if multiple exist in manifest
       try {
-        // 1. Try to fetch from Drive (The Master Source)
-        const files = await googleDriveStorage.listFiles(accessToken, driveFilename);
-
-        if (files.length > 0) {
-          console.log('[MasterSecret] Found backup in Drive! Downloading...');
-          const fileId = files[0].id;
-          const encryptedContent = await googleDriveStorage.downloadFile(accessToken, fileId);
-
-          if (encryptedContent && encryptedContent.length > 10) {
-            try {
-              // DECRYPT: App Key
-              console.log('[MasterSecret] Decrypting backup...');
-
-              // PARSE: Strip header if present (Take the last non-empty line)
-              // The file might contain the Security Warning on the first line.
-              let contentToDecrypt = encryptedContent.trim();
-              if (contentToDecrypt.includes('ADVERTENCIA') || contentToDecrypt.includes('\n')) {
-                const lines = contentToDecrypt.split('\n');
-                // The secret is the Encrypted Base64 string, usually the last line.
-                contentToDecrypt = lines[lines.length - 1].trim();
-              }
-
-              const bytes = AES.decrypt(contentToDecrypt, APP_BACKUP_KEY);
-              const originalSecretBase64 = bytes.toString(Utf8);
-
-              if (!originalSecretBase64) throw new Error('Decryption resulted in empty string');
-
-              const secretBytes = base64ToBytes(originalSecretBase64);
-
-              // Sync DOWN to Local Cache
-              console.log('[MasterSecret] Syncing Drive (Decrypted) -> Local Storage...');
-              await credentialStorage.storeSecret(alias, secretBytes);
-              return secretBytes;
-            } catch (decryptErr) {
-              console.error('[MasterSecret] Decryption Failed! Key mismatch or corrupted file.', decryptErr);
-              // If decryption fails, we CANNOT use this file. We must fallback to local or user is stuck.
-              // Dangerous to overwrite local if Drive is corrupt. 
-              // We fall through to check local.
+        const primaryFiles = await googleDriveStorage.listFiles(accessToken, PRIMARY_POINTER_FILENAME);
+        if (primaryFiles.length > 0) {
+          const primaryContent = await googleDriveStorage.downloadFile(accessToken, primaryFiles[0].id);
+          const primaryJson = JSON.parse(primaryContent);
+          if (primaryJson && primaryJson.primary_wallet_id) {
+            console.log('[MasterSecret] Found Primary Wallet Pointer:', primaryJson.primary_wallet_id);
+            const primaryMatch = manifest.wallets.find(w => w.id === primaryJson.primary_wallet_id);
+            if (primaryMatch) {
+              console.log('[MasterSecret] Primary wallet found in manifest. Auto-selecting.');
+              targetWallet = primaryMatch;
+            } else {
+              console.warn('[MasterSecret] Primary wallet ID pointer exists, but not found in manifest? Strange.');
             }
           }
+        }
+      } catch (e) {
+        console.warn('[MasterSecret] Failed to check primary pointer:', e);
+      }
+
+      if (targetWallet) {
+        // Already found via Primacy Check
+      } else if (manifest.wallets.length === 0) {
+        // 2a. Check Legacy Migration
+        console.log('[MasterSecret] Manifest empty. Checking Legacy Backup...');
+        const legacyFiles = await googleDriveStorage.listFiles(accessToken, legacyDriveFilename);
+        if (legacyFiles.length > 0) {
+          console.log('[MasterSecret] Found Legacy Backup. Importing...');
+          // Download Legacy
+          const content = await googleDriveStorage.downloadFile(accessToken, legacyFiles[0].id);
+          // Decrypt logic (shared)
+          const decrypted = decryptBackup(content, AES, APP_BACKUP_KEY, Utf8);
+          if (decrypted) {
+            // Generate New UUID for it
+            const newId = generateUUID();
+            const now = new Date().toISOString();
+
+            // Save Local
+            await credentialStorage.storeSecret(secretAlias, decrypted);
+            await credentialStorage.storeSecret(walletIdKey, stringToUtf8Bytes(newId));
+
+            localSecret = decrypted;
+            localWalletId = newId;
+
+            // Add to Manifest (Will be saved in Step 3)
+            const deviceName = await DeviceInfo.getDeviceName();
+            manifest.wallets.push({
+              id: newId,
+              createdAt: now,
+              lastBackupAt: now,
+              deviceHint: `${deviceName} (${Platform.OS})`, // "iPhone 15 (ios)"
+              providerHint: 'Google'
+            });
+            // Mark as dirty to ensure upload happen in Step 3
+          }
+        }
+      } else if (manifest.wallets.length === 1) {
+        // 2b. Single Wallet - Auto Restore
+        console.log('[MasterSecret] Single wallet found. Auto-restoring...');
+        targetWallet = manifest.wallets[0];
+      } else {
+        // 2c. Multiple Wallets - Prompt User
+        console.log('[MasterSecret] Multiple wallets found. Prompting...');
+        const choice = await promptUserForWalletSelection(manifest.wallets);
+        if (choice === 'new') {
+          // Proceed to Generate New
         } else {
-          console.log('[MasterSecret] No backup in Drive.');
+          targetWallet = manifest.wallets.find(w => w.id === choice) || null;
         }
+      }
 
-        // 2. If not in Drive (or Decrypt Failed), check Local Cache
-        // If found locally, we should UPLOAD it to Drive (Sync UP)
-        const localSecret = await credentialStorage.retrieveSecret(alias);
-        if (localSecret) {
-          // --- ACL MIGRATION FIX (Sync Path) ---
-          if (Platform.OS === 'ios') {
-            const ACL_FLAG_KEY = 'v2_acl_migration_complete_v1';
-            const currentFlag = await credentialStorage.retrieveSecret(ACL_FLAG_KEY);
-            if (!currentFlag) {
-              console.log('[MasterSecret] iOS ACL Migration (Sync): Re-writing secret to relax security policy...');
-              await credentialStorage.storeSecret(alias, localSecret);
-              await credentialStorage.storeSecret(ACL_FLAG_KEY, new Uint8Array([1]));
-            }
+      // Execute Restore if Target Selected
+      if (targetWallet) {
+        const filename = `confio_wallet_v2_${targetWallet.id}.enc`;
+        const files = await googleDriveStorage.listFiles(accessToken, filename);
+        if (files.length > 0) {
+          const content = await googleDriveStorage.downloadFile(accessToken, files[0].id);
+          const decrypted = decryptBackup(content, AES, APP_BACKUP_KEY, Utf8);
+          if (decrypted) {
+            await credentialStorage.storeSecret(walletIdKey, stringToUtf8Bytes(targetWallet.id));
+            localSecret = decrypted;
+            localWalletId = targetWallet.id;
+
+            // Drive Restore Report
+            reportBackupStatus('google_drive').catch(e => console.warn('[BackupHealth] Drive restore report failed', e));
           }
-          // ------------------------------------
-          console.log('[MasterSecret] Found Local Secret. Uploading to Drive (Sync UP / Encrypted)...');
-          const secretBase64 = bytesToBase64(localSecret);
-
-          // ENCRYPT: App Key
-          const encryptedBody = AES.encrypt(secretBase64, APP_BACKUP_KEY).toString();
-          // HEADER: Add warning for humans
-          const finalContent = `${DRIVE_SECURITY_HEADER}\n${encryptedBody}`;
-
-          await googleDriveStorage.createFile(accessToken, driveFilename, finalContent);
-          console.log('[MasterSecret] Sync UP Complete (Encrypted).');
-          return localSecret;
         }
-
-      } catch (driveErr) {
-        console.warn('[MasterSecret] Drive Sync Failed (Network/Auth):', driveErr);
-        // Fallthrough to Local Logic (Offline Mode)
       }
     }
+
     // =================================================================================
-
-    // Step 1: Try to retrieve existing NAMESPACED secret FIRST (Local)
-    const existingSecret = await credentialStorage.retrieveSecret(alias);
-    if (existingSecret) {
-      console.log(`[MasterSecret] Found existing namespaced secret (Length=${existingSecret.length})`);
-
-      // --- ACL MIGRATION FIX (Standard Path) ---
-      if (Platform.OS === 'ios') {
-        const ACL_FLAG_KEY = 'v2_acl_migration_complete_v1';
-        const currentFlag = await credentialStorage.retrieveSecret(ACL_FLAG_KEY);
-        if (!currentFlag) {
-          console.log('[MasterSecret] iOS ACL Migration (Standard): Re-writing secret to relax security policy...');
-          await credentialStorage.storeSecret(alias, existingSecret);
-          await credentialStorage.storeSecret(ACL_FLAG_KEY, new Uint8Array([1]));
-        }
-      }
-      // ----------------------------------------
-
-      // If we are here and have accessToken, it means Sync UP might have failed previously or Drive was unreachable.
-      // We could try async background upload here, but for now just return.
-      return existingSecret;
-    } else {
-      console.log('[MasterSecret] No existing secret found at alias:', alias);
-    }
-
-    // Step 1.5: Check LEGACY global secret (Migration Path)
-    // If we have a legacy secret but no namespaced one, we migrate it.
-    console.log('[MasterSecret] Namespaced secret missing. Checking legacy global secret...');
-    const legacySecret = await credentialStorage.retrieveSecret(legacyAlias);
-
-    // Only accept 32-byte secrets. This filters out tombstones or corrupted data.
-    if (legacySecret && legacySecret.length === 32) {
-      console.log('[MasterSecret] Found legacy global secret. Migrating to namespaced key...');
-      // Copy legacy secret to new alias
-      await credentialStorage.storeSecret(alias, legacySecret);
-
-      // Verify persistence of migration
-      const verifiedMigration = await credentialStorage.retrieveSecret(alias);
-      if (!verifiedMigration) {
-        throw new Error('[MasterSecret] Migration failed: Could not read back migrated secret.');
+    // 3. GENERATION (If still missing)
+    // =================================================================================
+    if (!localSecret) {
+      // Check Legacy Local (Migration from V1 Global)
+      const legacyGlobalSecret = await credentialStorage.retrieveSecret(legacyAlias);
+      if (legacyGlobalSecret && legacyGlobalSecret.length === 32) {
+        console.log('[MasterSecret] Migrating Local Legacy Secret...');
+        localSecret = legacyGlobalSecret;
+        // Poison old
+        await credentialStorage.storeSecret(legacyAlias, utf8ToBytes('MIGRATED_TOMBSTONE'));
+        await credentialStorage.deleteSecret(legacyAlias);
+      } else {
+        console.log('[MasterSecret] Generating NEW Secret...');
+        localSecret = generateRandomSecret();
       }
 
-      // CRITICAL: Poison AND Delete legacy secret.
-      // 1. Overwrite with tombstone to ensure even if delete fails, next read gets invalid data.
-      await credentialStorage.storeSecret(legacyAlias, utf8ToBytes('MIGRATED_TOMBSTONE'));
-      // 2. Delete it.
-      await credentialStorage.deleteSecret(legacyAlias);
-      console.log('[MasterSecret] Legacy global secret POISONED and DELETED from shared storage.');
-
-      return legacySecret;
-    } else if (legacySecret) {
-      console.warn('[MasterSecret] Found legacy secret but invalid length (Tombstone?). Ignoring.');
+      // Assign New UUID
+      localWalletId = generateUUID();
+      await credentialStorage.storeSecret(secretAlias, localSecret);
+      await credentialStorage.storeSecret(walletIdKey, stringToUtf8Bytes(localWalletId));
     }
 
-    // Step 2: No existing secret (Namespace or Legacy) - generate new random one
-    console.log('[MasterSecret] No existing secret. Generating NEW random CSPRNG secret...');
-    const newSecret = generateRandomSecret();
+    // Ensure ID exists if we have a secret but no ID (e.g. after Legacy Restore)
+    if (localSecret && !localWalletId) {
+      console.log('[MasterSecret] Local secret exists but ID missing (Legacy Migration). Generating new ID...');
+      localWalletId = generateUUID();
+      await credentialStorage.storeSecret(walletIdKey, stringToUtf8Bytes(localWalletId));
+    }
 
-    // Step 3: Store it
-    await credentialStorage.storeSecret(alias, newSecret);
+    // Local vars guaranteed populated now
+    const finalSecret = localSecret!;
+    const finalId = localWalletId!;
 
-    // HYBRID CLOUD SYNC: New Secret Created -> Upload to Drive
-    // (Encrypted with App Key)
+    // =================================================================================
+    // 4. CLOUD SYNC (BACKUP)
+    // =================================================================================
     if (accessToken) {
+      AnalyticsService.logBackupAttempt('google_drive');
       try {
-        console.log('[MasterSecret] New secret generated. Uploading to Drive (Sync UP / Encrypted)...');
-        const secretBase64 = bytesToBase64(newSecret);
+        // Refresh Manifest to get latest state
+        const manifest = await fetchManifest(googleDriveStorage, accessToken);
+        const existingEntryIndex = manifest.wallets.findIndex(w => w.id === finalId);
+        const now = new Date().toISOString();
 
-        // ENCRYPT: App Key
+        // 4a. Upload Encrypted File (Unique Name)
+        // CRITICAL SAFEGUARD: Never overwrite the legacy/null file
+        if (!finalId || finalId === 'null' || finalId === 'undefined') {
+          throw new Error('[MasterSecret] CRITICAL: Attempted to save backup with invalid ID. Aborting to protect legacy data.');
+        }
+
+        const filename = `confio_wallet_v2_${finalId}.enc`;
+
+        // DOUBLE CHECK: Explicitly block the known legacy filename
+        if (filename === 'confio_wallet_v2_null.enc') {
+          throw new Error('[MasterSecret] CRITICAL: Attempted to overwrite legacy backup file. Aborting.');
+        }
+
+        const secretBase64 = bytesToBase64(finalSecret);
         const encryptedBody = AES.encrypt(secretBase64, APP_BACKUP_KEY).toString();
-        // HEADER: Add warning for humans
         const finalContent = `${DRIVE_SECURITY_HEADER}\n${encryptedBody}`;
 
-        await googleDriveStorage.createFile(accessToken, driveFilename, finalContent);
-        console.log('[MasterSecret] Drive Upload Complete (Encrypted).');
-      } catch (upErr) {
-        console.warn('[MasterSecret] Failed to upload new secret to Drive:', upErr);
-        // Non-fatal: Local storage succeeded, so we continue. Future launches will retry Sync UP.
+        // Always overwrite/update the specific file for *this* wallet ID
+        // (Safe because ID is unique to this wallet lineage)
+        const fileList = await googleDriveStorage.listFiles(accessToken, filename);
+        if (fileList.length > 0) {
+          await googleDriveStorage.updateFile(accessToken, fileList[0].id, finalContent);
+        } else {
+          await googleDriveStorage.createFile(accessToken, filename, finalContent);
+        }
+
+        // 4b. Update Manifest
+        const deviceName = await DeviceInfo.getDeviceName();
+
+        const currentDeviceHint = `${deviceName} (${Platform.OS})`; // e.g. "Pixel 8 (android)"
+
+        // DEDUPLICATION: Check if we already have a backup for THIS device
+        // If so, we overwrite that entry instead of creating a huge list of duplicates.
+        // We match by deviceHint (which includes Model + OS).
+        const existingDeviceIndex = manifest.wallets.findIndex(w => w.deviceHint === currentDeviceHint);
+
+        // Determine which index to update (ID match takes precedence, then Device match)
+        let indexToUpdate = existingEntryIndex;
+        if (indexToUpdate === -1 && existingDeviceIndex >= 0) {
+          console.log(`[MasterSecret] Found existing backup slot for device '${currentDeviceHint}'. Updating it.`);
+          indexToUpdate = existingDeviceIndex;
+        }
+
+        const entry: WalletEntry = {
+          id: finalId,
+          // If we are updating an existing slot, keep its creation date to show history?
+          // actually, if it's a NEW wallet ID (re-install), it's effectively a new wallet.
+          // Let's rely on 'now' for simplicity unless it's strictly the same wallet ID.
+          createdAt: existingEntryIndex >= 0 ? manifest.wallets[existingEntryIndex].createdAt : now,
+          lastBackupAt: now,
+          deviceHint: currentDeviceHint,
+          providerHint: 'Google'
+        };
+
+        // 4c. Update Primary Pointer (If missing)
+        try {
+          const primaryFiles = await googleDriveStorage.listFiles(accessToken, PRIMARY_POINTER_FILENAME);
+          if (primaryFiles.length === 0) {
+            console.log('[MasterSecret] No Primary Pointer found. Setting THIS wallet as Primary:', finalId);
+            const primaryContent = JSON.stringify({
+              primary_wallet_id: finalId,
+              created_at: now,
+              device_hint: currentDeviceHint
+            });
+            await googleDriveStorage.createFile(accessToken, PRIMARY_POINTER_FILENAME, primaryContent);
+          } else {
+            console.log('[MasterSecret] Primary Pointer already exists. Respecting existing primary.');
+            // OPTIONAL: If we want to support "Switch Primary", we'd update it here.
+            // For now, "First Come First Served" (Option B).
+          }
+        } catch (e) {
+          console.warn('[MasterSecret] Failed to update primary pointer:', e);
+        }
+
+        if (indexToUpdate >= 0) {
+          manifest.wallets[indexToUpdate] = entry;
+        } else {
+          manifest.wallets.push(entry);
+        }
+
+        await saveManifest(googleDriveStorage, accessToken, manifest);
+        console.log(`[MasterSecret] Encrypted Backup Synced (ID: ${finalId})`);
+
+        // Drive Backup Report
+        reportBackupStatus('google_drive').catch(e => console.warn('[BackupHealth] Drive backup report failed', e));
+
+      } catch (syncErr: any) {
+        AnalyticsService.logBackupFailed('google_drive', syncErr?.message || 'Unknown sync error');
+        console.warn('[MasterSecret] Sync failed:', syncErr);
       }
     }
 
-    // Step 4: Verify read-after-write (Critical Safety Guard)
-    const verifySecret = await credentialStorage.retrieveSecret(alias);
-
-    if (!verifySecret) {
-      throw new Error('[MasterSecret] CRITICAL: Persistence failed. Read returned null after write.');
-    }
-
-    // Verify bytes match exactly
-    if (verifySecret.length !== newSecret.length) {
-      throw new Error('[MasterSecret] CRITICAL: Read-after-write length mismatch!');
-    }
-    for (let i = 0; i < newSecret.length; i++) {
-      if (verifySecret[i] !== newSecret[i]) {
-        throw new Error('[MasterSecret] CRITICAL: Read-after-write byte mismatch!');
-      }
-    }
-
-    console.log('[MasterSecret] New secret generated, stored, and verified.');
-
-    // CLEANUP: Attempt to remove the corrupted/deprecated V1 namespaced key if it exists
-    // This cleans up the "Shared Key" artifacts from previous failed migration attempts.
-    try {
-      const corruptedV1Key = `confio_master_secret_${safeSub}`;
-      await credentialStorage.deleteSecret(corruptedV1Key);
-      // Also try to delete the tombstone if it exists on legacy (optional, but keeps things tidy)
-      // await credentialStorage.deleteSecret(legacyAlias); // Already handled above
-    } catch (e) {
-      // Ignore cleanup errors
-    }
-
-    return newSecret;
+    return finalSecret;
 
   } finally {
     resolveCurrentMutex!();
   }
+}
+
+// Helper: Decryption Logic
+function decryptBackup(content: string, AES: any, key: string, Utf8: any): Uint8Array | null {
+  try {
+    let clean = content.trim();
+    if (clean.includes('ADVERTENCIA') || clean.includes('\n')) {
+      clean = clean.split('\n').pop()!.trim();
+    }
+    const bytes = AES.decrypt(clean, key);
+    const b64 = bytes.toString(Utf8);
+    if (!b64) return null;
+    return base64ToBytes(b64);
+  } catch (e) {
+    console.warn('Decryption failed:', e);
+    return null;
+  }
+}
+
+// Helper: User Prompt
+async function promptUserForWalletSelection(wallets: WalletEntry[]): Promise<string> {
+  return new Promise((resolve) => {
+    // Sort by lastBackup (newest first)
+    const sorted = [...wallets].sort((a, b) => new Date(b.lastBackupAt).getTime() - new Date(a.lastBackupAt).getTime());
+
+    // Take top 2 for display, plus 'New'
+    const options = sorted.slice(0, 2).map(w => ({
+      text: `${w.deviceHint} (${w.createdAt.substring(0, 10)})`,
+      onPress: () => resolve(w.id)
+    }));
+
+    options.push({
+      text: 'Crear Nueva (Separada)',
+      onPress: () => resolve('new')
+    });
+
+    Alert.alert(
+      'Multiples Billeteras',
+      'Encontramos varias copias de seguridad. ¿Cual quieres restaurar?',
+      options,
+      { cancelable: false }
+    );
+  });
 }
 
 /**
@@ -864,6 +1432,8 @@ export class SecureDeterministicWalletService {
     }
   }
 
+
+
   /**
    * Create or restore wallet for a user with encrypted caching
    * Server will get user context from JWT token
@@ -905,6 +1475,8 @@ export class SecureDeterministicWalletService {
         // ROTATION: Using 'v2' suffix to obtain the CLEAN, ISOLATED key (ignoring previous corrupted state)
         const namespacedKey = `confio_master_secret_v2_${safeSub}`;
 
+
+
         const masterSecret = await credentialStorage.retrieveSecret(namespacedKey);
 
         // NOTE: We do NOT fallback to legacy global key here. 
@@ -939,7 +1511,6 @@ export class SecureDeterministicWalletService {
       // Get derivation pepper (REQUIRED for derivation salt)
       perfLog('Before derivation pepper');
       const { pepper: derivPepper } = await this.getDerivationPepper({
-        firebaseIdToken,
         accountType,
         accountIndex,
         businessId
@@ -952,7 +1523,6 @@ export class SecureDeterministicWalletService {
       // Get KEK pepper (for encryption)
       perfLog('Before KEK pepper');
       const { pepper: kekPepper, version: pepperVersion } = await this.getKekPepper(undefined, {
-        firebaseIdToken,
         accountType,
         accountIndex,
         businessId
@@ -1444,3 +2014,26 @@ export class SecureDeterministicWalletService {
 
 // Export singleton instance
 export const secureDeterministicWallet = SecureDeterministicWalletService.getInstance();
+
+
+/**
+ * Reports backup status to the server.
+ */
+export const reportBackupStatus = async (provider: 'google_drive' | 'icloud') => {
+  try {
+    const deviceName = await DeviceInfo.getDeviceName();
+    await apolloClient.mutate({
+      mutation: REPORT_BACKUP_STATUS,
+      variables: {
+        provider,
+        device_name: deviceName,
+        isVerified: true
+      },
+      context: { skipAuth: false }
+    });
+    console.log(`[BackupHealth] Reported safe via ${provider}`);
+    AnalyticsService.logBackupSuccess(provider, deviceName);
+  } catch (e) {
+    console.warn('[BackupHealth] Failed to report status:', e);
+  }
+};

@@ -15,8 +15,8 @@ from .admin_analytics import DailyMetricsAdmin, CountryMetricsAdmin
 
 @admin.register(User)
 class UserAdmin(admin.ModelAdmin):
-    list_display = ('username', 'email', 'firebase_uid', 'phone_display', 'phone_key', 'verification_status_display', 'accounts_count', 'employment_status', 'soft_delete_status', 'is_staff', 'created_at')
-    list_filter = ('is_staff', 'is_superuser', 'phone_country', 'created_at', 'deleted_at')
+    list_display = ('username', 'email', 'firebase_uid', 'phone_display', 'verification_status_display', 'backup_provider', 'accounts_count', 'is_staff', 'created_at')
+    list_filter = ('backup_provider', 'is_staff', 'is_superuser', 'phone_country', 'created_at')
     search_fields = ('username', 'email', 'firebase_uid', 'first_name', 'last_name', 'phone_number', 'phone_key')
     readonly_fields = ('firebase_uid', 'auth_token_version', 'created_at', 'updated_at')
     actions = ('soft_delete_selected',)
@@ -117,6 +117,33 @@ class UserAdmin(admin.ModelAdmin):
         else:
             self.message_user(request, "No users were soft-deleted (they may already be deleted).", level=messages.INFO)
     soft_delete_selected.short_description = "Soft delete selected users"
+
+    def changelist_view(self, request, extra_context=None):
+        try:
+            # Calculate KPIs for Dashboard
+            from users.models import Account
+            total_active = self.model.objects.filter(is_active=True).count() or 1
+            drive_users = self.model.objects.filter(is_active=True, backup_provider='google_drive').count()
+            migrated_accounts = Account.objects.filter(is_keyless_migrated=True).count()
+            # Safety Score V2: Users who have at least one migrated account AND have a verified backup
+            safe_v2_users = self.model.objects.filter(is_active=True, backup_verified_at__isnull=False, accounts__is_keyless_migrated=True).distinct().count()
+            
+            drive_pct = (drive_users / total_active) * 100
+            migrated_pct = (migrated_accounts / total_active) * 100
+            safety_v2_pct = (safe_v2_users / total_active) * 100
+            
+            msg = format_html(
+                "<strong>📊 KPIs:</strong> &nbsp;&nbsp; "
+                "☁️ Drive: <strong>{:.1f}%</strong> &nbsp;|&nbsp; "
+                "🚀 V2 Migrated: <strong>{:.1f}%</strong> &nbsp;|&nbsp; "
+                "🛡️ V2 Safe (Migrated+BackedUp): <strong>{:.1f}%</strong>",
+                drive_pct, migrated_pct, safety_v2_pct
+            )
+            self.message_user(request, msg, level=messages.INFO)
+        except Exception:
+            pass
+            
+        return super().changelist_view(request, extra_context=extra_context)
 
 @admin.register(Account)
 class AccountAdmin(admin.ModelAdmin):

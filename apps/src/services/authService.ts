@@ -165,17 +165,195 @@ export class AuthService {
   }
 
   /**
-   * Trigger the Google Sign-In flow specifically to enable Drive backup (add scope).
+   * Get a Google Drive access token WITHOUT signing into Firebase.
+   * This is used when an Apple Sign-In user wants to backup to Google Drive.
+   * It gets the Drive access token but preserves the existing user's JWT.
    */
-  async enableDriveBackup(): Promise<boolean> {
+  async getDriveAccessTokenOnly(): Promise<string | null> {
     try {
-      // Re-run sign in process with enableDrive=true
-      // This will trigger the consent screen for the new scope
-      await this.signInWithGoogle(undefined, true);
-      return true;
+      console.log('[AuthService] Getting Drive access token only (preserving current user)...');
+
+      // Configure Google Sign-In with Drive scope
+      await this.configureGoogleSignIn(true);
+
+      // Check Play Services
+      await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+
+      // Sign in with Google to get Drive access (this doesn't affect Firebase/backend auth)
+      await GoogleSignin.signIn();
+
+      // Get the access token for Drive
+      const { accessToken } = await GoogleSignin.getTokens();
+
+      console.log('[AuthService] Got Drive access token:', accessToken ? 'obtained' : 'failed');
+
+      // Sign out from Google to clean up (we only needed the token)
+      // This does NOT affect our Firebase auth or backend JWT
+      try {
+        await GoogleSignin.signOut();
+      } catch (e) {
+        // Ignore sign out errors
+      }
+
+      return accessToken || null;
     } catch (error) {
+      console.error('[AuthService] Failed to get Drive access token:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Enable Google Drive backup for the CURRENT user (works for Apple Sign-In users too).
+   * This gets a Drive access token, syncs the master secret to Drive, and reports the backup
+   * status to the CURRENT user (not a new Google user).
+   * 
+   * @param forceBackup - If true, skip the existing backup check and proceed
+   * @returns Object with success, existingBackups info, or error
+   */
+  async enableDriveBackup(forceBackup: boolean = false): Promise<{
+    success: boolean;
+    existingBackups?: {
+      hasBackup: boolean;
+      entries: any[];
+      hasLegacy: boolean;
+      hasCrossPlatformBackup: boolean;
+      crossPlatformEntries: any[];
+      entriesToShow?: any[]; // All entries to display in modal
+    };
+    error?: string;
+  }> {
+    try {
+      console.log('[AuthService] Enabling Drive backup for current user...');
+
+      // Get Drive access token without changing current user
+      const accessToken = await this.getDriveAccessTokenOnly();
+
+      if (!accessToken) {
+        console.error('[AuthService] Failed to get Drive access token');
+        return { success: false, error: 'No se pudo obtener acceso a Google Drive' };
+      }
+
+      // Get the stored OAuth subject (from Apple or Google sign-in)
+      const { oauthStorage } = await import('./oauthStorageService');
+      const oauthData = await oauthStorage.getOAuthSubject();
+      if (!oauthData?.subject) {
+        console.error('[AuthService] No OAuth subject found for backup');
+        return { success: false, error: 'No se encontró información de la cuenta' };
+      }
+
+      // Check for existing backups (unless forceBackup is true)
+      // Show modal if there are multiple entries OR any cross-platform backup
+      if (!forceBackup) {
+        const { checkExistingBackups } = await import('./secureDeterministicWallet');
+        const existingBackups = await checkExistingBackups(accessToken, oauthData.subject);
+
+        // Show modal if:
+        // 1. Multiple backup entries exist (user can choose which to restore)
+        // 2. OR any cross-platform backup exists
+        const hasMultipleEntries = existingBackups.entries.length > 1;
+        if (existingBackups.hasCrossPlatformBackup || hasMultipleEntries) {
+          console.log('[AuthService] Existing backups found, showing modal:', {
+            totalEntries: existingBackups.entries.length,
+            hasCrossPlatform: existingBackups.hasCrossPlatformBackup
+          });
+          // Return all entries so user can choose any of them
+          return {
+            success: false,
+            existingBackups: {
+              ...existingBackups,
+              // Use all entries for the modal, not just cross-platform
+              entriesToShow: existingBackups.entries
+            }
+          };
+        }
+        // Single same-platform backup proceeds automatically (no prompt needed)
+      }
+
+      // Sync to Drive using the access token
+      const { getOrCreateMasterSecret, reportBackupStatus } = await import('./secureDeterministicWallet');
+      await getOrCreateMasterSecret(oauthData.subject, accessToken);
+      console.log('[AuthService] Master secret synced to Drive');
+
+      // Report backup status for the CURRENT user (uses existing JWT)
+      await reportBackupStatus('google_drive');
+      console.log('[AuthService] Backup status reported for current user');
+
+      return { success: true };
+    } catch (error: any) {
       console.error('[AuthService] Failed to enable Drive backup:', error);
-      return false;
+      return { success: false, error: error?.message || 'Error desconocido' };
+    }
+  }
+
+  /**
+   * Restore wallet from a specific backup in Google Drive.
+   * This OVERWRITES the current local wallet with the backup.
+   * 
+   * @param walletId - The wallet ID to restore (from manifest entry)
+   * @param lastBackupAt - Optional timestamp to help identify file if ID is null
+   * @returns Object with success flag or error
+   */
+  async restoreFromDriveBackup(walletId?: string, lastBackupAt?: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      console.log('[AuthService] Restoring from Drive backup:', walletId, 'timestamp:', lastBackupAt);
+
+      // Get Drive access token
+      const accessToken = await this.getDriveAccessTokenOnly();
+      if (!accessToken) {
+        return { success: false, error: 'No se pudo obtener acceso a Google Drive' };
+      }
+
+      // Get OAuth subject
+      const { oauthStorage } = await import('./oauthStorageService');
+      const oauthData = await oauthStorage.getOAuthSubject();
+      if (!oauthData?.subject) {
+        return { success: false, error: 'No se encontró información de la cuenta' };
+      }
+
+      // Restore from backup
+      const { restoreFromBackup } = await import('./secureDeterministicWallet');
+      const success = await restoreFromBackup(accessToken, walletId, oauthData.subject, lastBackupAt);
+
+      if (success) {
+        console.log('[AuthService] Wallet restored successfully');
+
+        // AUTO-RELOAD: Force the wallet service to refresh its memory cache
+        // This prevents the user from needing to restart the app or re-login
+        try {
+          // 4. Update Local Address Cache & Backend
+          // We use computeAndStoreAlgorandAddress because it:
+          // A) Re-derives the wallet (updating in-memory seeds)
+          // B) Updates the Backend (UPDATE_ACCOUNT_ALGORAND_ADDRESS)
+          // C) KEYCHAIN CACHE: Updates the stored address cache (Fixes DepositScreen stale data)
+          const { AccountManager } = await import('../utils/accountManager');
+          const accountManager = AccountManager.getInstance();
+          const context = await accountManager.getActiveAccountContext();
+
+          console.log('[AuthService] Restore complete. auto-refreshing address cache for context:', context);
+          await this.computeAndStoreAlgorandAddress(context);
+
+          console.log('[AuthService] Wallet restore & address sync complete.');
+        } catch (reloadErr) {
+          console.warn('[AuthService] Failed to auto-reload wallet state:', reloadErr);
+          // Non-fatal, user might just need to restart if this fails
+        }
+
+        // Report backup status to track in dashboard
+        try {
+          const { reportBackupStatus } = await import('./secureDeterministicWallet');
+          await reportBackupStatus('google_drive');
+          console.log('[AuthService] Backup status reported for restored user');
+        } catch (reportErr) {
+          console.warn('[AuthService] Failed to report backup status:', reportErr);
+        }
+
+        return { success: true };
+      } else {
+        return { success: false, error: 'No se pudo restaurar la billetera' };
+      }
+    } catch (error: any) {
+      console.error('[AuthService] Failed to restore from Drive backup:', error);
+      return { success: false, error: error?.message || 'Error desconocido' };
     }
   }
 
@@ -282,6 +460,7 @@ export class AuthService {
         throw new Error('No OAuth subject found in Google sign-in response.');
       }
 
+      let driveSyncSucceeded = false;
       try {
         const { getOrCreateMasterSecret } = await import('./secureDeterministicWallet');
         // Inject Access Token for Drive Sync (Android AND iOS for roaming)
@@ -297,10 +476,14 @@ export class AuthService {
 
         await getOrCreateMasterSecret(googleSubject, tokenForDrive || undefined);
         console.log('Master Secret synced/verified successfully.');
+        driveSyncSucceeded = true;
+
+        // Report backup status if Drive was used (after backend auth completes below)
       } catch (walletErr) {
         console.error('Failed to sync Master Secret:', walletErr);
         // We do NOT block login here, but wallet creation might fail later.
         // Ideally we should block if critical, but for now log.
+        driveSyncSucceeded = false;
       }
       perfLog('End Master Secret Sync');
 
@@ -324,7 +507,8 @@ export class AuthService {
         variables: {
           firebaseIdToken: firebaseToken,
           algorandAddress: null,
-          deviceFingerprint: deviceFingerprint ? JSON.stringify(deviceFingerprint) : null
+          deviceFingerprint: deviceFingerprint ? JSON.stringify(deviceFingerprint) : null,
+          platformOs: Platform.OS
         }
       });
       console.log('Backend authentication response:', authData ? 'Data received' : 'No data');
@@ -513,6 +697,18 @@ export class AuthService {
       };
       perfLog('Total sign-in time');
       console.log('Sign-in process completed successfully:', result);
+
+      // Report backup status only if Drive was enabled AND sync actually succeeded
+      if (enableDrive && driveSyncSucceeded) {
+        try {
+          const { reportBackupStatus } = await import('./secureDeterministicWallet');
+          await reportBackupStatus('google_drive');
+          console.log('[AuthService] Backup status reported for Google sign-in');
+        } catch (e) {
+          console.warn('[AuthService] Failed to report backup status:', e);
+        }
+      }
+
       return result;
     } catch (error) {
       console.error('Error signing in with Google:', error);
@@ -592,7 +788,8 @@ export class AuthService {
         variables: {
           firebaseIdToken: firebaseToken,
           algorandAddress: null,
-          deviceFingerprint: deviceFingerprint ? JSON.stringify(deviceFingerprint) : null
+          deviceFingerprint: deviceFingerprint ? JSON.stringify(deviceFingerprint) : null,
+          platformOs: Platform.OS
         }
       });
 
@@ -728,6 +925,18 @@ export class AuthService {
         algorandAddress: algorandAddress // Also store at top level for compatibility
       };
       console.log('Apple sign-in process completed successfully:', result);
+
+      // Report iCloud backup status for iOS users (Apple Sign-In uses iCloud Keychain)
+      if (Platform.OS === 'ios') {
+        try {
+          const { reportBackupStatus } = await import('./secureDeterministicWallet');
+          await reportBackupStatus('icloud');
+          console.log('[AuthService] iCloud backup status reported for Apple sign-in');
+        } catch (e) {
+          console.warn('[AuthService] Failed to report iCloud backup status:', e);
+        }
+      }
+
       return result;
     } catch (error) {
       console.error('Apple Sign In Error:', error);

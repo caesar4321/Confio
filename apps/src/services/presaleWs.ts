@@ -1,5 +1,7 @@
 /* WebSocket client for Presale (prepare + submit + app opt-in) */
 
+import { Platform } from 'react-native';
+
 type PreparePurchasePack = {
   purchase_id?: string;
   transactions?: any[]; // objects: {index,type,transaction,signed,needs_signature}
@@ -25,7 +27,7 @@ async function getJwtToken(): Promise<string | null> {
       const tokens = JSON.parse(credentials.password);
       return tokens.accessToken || null;
     }
-  } catch (e) {}
+  } catch (e) { }
   return null;
 }
 
@@ -55,7 +57,7 @@ export class PresaleWsSession {
             if (msg.type === 'prepare_ready') this.resolve('prepare', msg.pack);
             else if (msg.type === 'submit_ok') this.resolve('submit', msg);
             else if (msg.type === 'error') this.rejectAll(new Error(msg.message || 'ws_error'));
-          } catch {}
+          } catch { }
         };
       } catch (e) { reject(e); }
     });
@@ -70,7 +72,7 @@ export class PresaleWsSession {
     return new Promise((resolve, reject) => {
       this.resolvers['prepare'] = resolve as any; this.rejectors['prepare'] = reject as any;
       const t = setTimeout(() => { if (this.rejectors['prepare']) { this.rejectors['prepare'](new Error('prepare_timeout')); delete this.rejectors['prepare']; delete this.resolvers['prepare']; } }, timeout);
-      try { this.ws!.send(JSON.stringify({ type: 'prepare_request', amount: String(amount) })); } catch (e) { clearTimeout(t); reject(e); }
+      try { this.ws!.send(JSON.stringify({ type: 'prepare_request', amount: String(amount), platform: Platform.OS })); } catch (e) { clearTimeout(t); reject(e); }
     });
   }
 
@@ -91,7 +93,7 @@ export class PresaleWsSession {
     return new Promise((resolve, reject) => {
       this.resolvers['prepare'] = resolve as any; this.rejectors['prepare'] = reject as any;
       const t = setTimeout(() => { if (this.rejectors['prepare']) { this.rejectors['prepare'](new Error('prepare_timeout')); delete this.rejectors['prepare']; delete this.resolvers['prepare']; } }, timeout);
-      try { this.ws!.send(JSON.stringify({ type: 'optin_prepare' })); } catch (e) { clearTimeout(t); reject(e); }
+      try { this.ws!.send(JSON.stringify({ type: 'optin_prepare', platform: Platform.OS })); } catch (e) { clearTimeout(t); reject(e); }
     });
   }
 

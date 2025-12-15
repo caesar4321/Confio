@@ -84,24 +84,26 @@ export const ConfioPresaleParticipateScreen = () => {
   const exceedsBalance = !balancesLoading && parsedAmount > availableCusd;
 
   // Ensure user is opted into the presale app (explicit opt-in on enter and before swap)
-  const ensureOptedIn = async (session?: any) => {
-    try {
-      const s = session || new PresaleWsSession();
-      if (!session) await s.open();
-      const pack = await s.optinPrepare();
-      const txns = Array.isArray(pack?.transactions) ? pack.transactions : [];
-      if (txns.length === 0) return true; // already opted in
-      const user = txns.find((t: any) => t?.index === 1 && !t?.signed);
-      if (!user) return true; // nothing to sign
-      const userTxnBytes = Buffer.from(user.transaction, 'base64');
-      const signed = await algorandService.signTransactionBytes(userTxnBytes);
-      const userSignedB64 = Buffer.from(signed).toString('base64');
-      await s.optinSubmit(userSignedB64, pack.sponsor_transactions || []);
-      return true;
-    } catch (e) {
-      console.log('[Presale] opt-in ensure failed', e);
-      return false;
+  // Throws an error if the server returns an error message (e.g., backup check failure)
+  const ensureOptedIn = async (session?: any): Promise<boolean> => {
+    const s = session || new PresaleWsSession();
+    if (!session) await s.open();
+    const pack = await s.optinPrepare();
+
+    // Check for server-side error in response
+    if (pack && !pack.transactions && pack.error) {
+      throw new Error(pack.error);
     }
+
+    const txns = Array.isArray(pack?.transactions) ? pack.transactions : [];
+    if (txns.length === 0) return true; // already opted in
+    const user = txns.find((t: any) => t?.index === 1 && !t?.signed);
+    if (!user) return true; // nothing to sign
+    const userTxnBytes = Buffer.from(user.transaction, 'base64');
+    const signed = await algorandService.signTransactionBytes(userTxnBytes);
+    const userSignedB64 = Buffer.from(signed).toString('base64');
+    await s.optinSubmit(userSignedB64, pack.sponsor_transactions || []);
+    return true;
   };
 
   const [initializing, setInitializing] = React.useState(true);
@@ -113,8 +115,16 @@ export const ConfioPresaleParticipateScreen = () => {
         const s = new PresaleWsSession();
         await s.open();
         await ensureOptedIn(s);
-      } catch (e) {
-        console.log('[Presale] initial opt-in skipped', e);
+      } catch (e: any) {
+        console.log('[Presale] initial opt-in error', e);
+        // Show the error message from server (e.g., backup check failure)
+        const errorMessage = e?.message || 'Error al preparar la preventa';
+        Alert.alert(
+          'No disponible',
+          errorMessage,
+          [{ text: 'OK', onPress: () => navigation.goBack() }]
+        );
+        return; // Don't complete initialization
       } finally {
         setInitializing(false);
         setLoadingMessage('');

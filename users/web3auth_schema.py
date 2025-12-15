@@ -52,7 +52,8 @@ class Web3AuthLoginMutation(graphene.Mutation):
         firebase_id_token = graphene.String(required=True)  # Firebase ID token containing all user info
         algorand_address = graphene.String(required=False)  # Client-generated Algorand address (optional at login)
         device_fingerprint = graphene.JSONString()  # Device fingerprint data
-    
+        platform_os = graphene.String(required=False)  # 'ios' or 'android' explicitly from client
+
     success = graphene.Boolean()
     error = graphene.String()
     access_token = graphene.String()
@@ -63,7 +64,7 @@ class Web3AuthLoginMutation(graphene.Mutation):
     is_keyless_migrated = graphene.Boolean()  # True if user is V2 Native (Random Secret)
     
     @classmethod
-    def mutate(cls, root, info, firebase_id_token, algorand_address=None, device_fingerprint=None):
+    def mutate(cls, root, info, firebase_id_token, algorand_address=None, device_fingerprint=None, platform_os=None):
         try:
             from django.contrib.auth import get_user_model
             from graphql_jwt.utils import jwt_encode
@@ -104,7 +105,7 @@ class Web3AuthLoginMutation(graphene.Mutation):
                 logger.warning("Login blocked for soft-deleted user %s", firebase_uid)
                 return cls(
                     success=False,
-                error="Tu cuenta fue desactivada por nuestro equipo. Contáctanos si crees que es un error.",
+                    error="Tu cuenta fue desactivada por nuestro equipo. Contáctanos si crees que es un error.",
                     access_token=None,
                     refresh_token=None,
                     user=None,
@@ -120,6 +121,7 @@ class Web3AuthLoginMutation(graphene.Mutation):
                     'first_name': first_name,
                     'last_name': last_name,
                     'username': generate_compliant_username(email or firebase_uid),
+                    'platform_os': platform_os  # Save OS for new users
                 }
             )
             if not created:
@@ -140,6 +142,12 @@ class Web3AuthLoginMutation(graphene.Mutation):
                 if last_name and user.last_name != last_name:
                     user.last_name = last_name
                     updated = True
+                # WRITE-ONCE: Only set OS if it's currently null/empty
+                # Once a user's primary OS is set, we don't overwrite it
+                if platform_os and not user.platform_os:
+                    user.platform_os = platform_os
+                    updated = True
+                
                 # Update last login timestamp
                 user.last_login = timezone.now()
                 if updated or user.last_login:

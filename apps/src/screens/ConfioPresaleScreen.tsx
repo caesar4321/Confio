@@ -375,15 +375,38 @@ export const ConfioPresaleScreen = () => {
 
           {!isClaimsUnlocked && activePresaleData?.activePresalePhase ? (
             <TouchableOpacity
-              style={styles.ctaButton}
-              onPress={() => {
-                if (checkEligibility()) {
+              style={[styles.ctaButton, busy && styles.ctaButtonDisabled]}
+              disabled={busy}
+              onPress={async () => {
+                if (!checkEligibility()) return;
+
+                // Check presale eligibility via WebSocket (backup check, V1 migration, etc.)
+                try {
+                  setBusy(true);
+                  const { PresaleWsSession } = await import('../services/presaleWs');
+                  const session = new PresaleWsSession();
+                  await session.open();
+                  const pack = await session.optinPrepare();
+                  setBusy(false);
+
+                  // If no transactions, user is eligible - proceed with navigation
                   navigation.navigate('ConfioPresaleParticipate');
+                } catch (e: any) {
+                  setBusy(false);
+                  // Server returned an error (e.g., backup check failure)
+                  const errorMessage = e?.message || 'No se pudo verificar elegibilidad';
+                  Alert.alert('No disponible', errorMessage);
                 }
               }}
             >
-              <Icon name="star" size={20} color="#fff" />
-              <Text style={styles.ctaButtonText}>Participar en la Preventa</Text>
+              {busy ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <>
+                  <Icon name="star" size={20} color="#fff" />
+                  <Text style={styles.ctaButtonText}>Participar en la Preventa</Text>
+                </>
+              )}
             </TouchableOpacity>
           ) : (!isClaimsUnlocked ? (
             <TouchableOpacity

@@ -87,6 +87,36 @@ class User(AbstractUser, SoftDeleteModel):
     phone_number = models.CharField(max_length=15, blank=True, null=True, help_text="User's phone number without country code")
     # Canonical normalized phone key: "callingcode:digits" (e.g., "1:9293993619")
     phone_key = models.CharField(max_length=32, blank=True, null=True, help_text="Canonical phone key for uniqueness across ISO variations")
+    
+    # Backup Tracking Fields (Added for KPI & Safety Monitoring)
+    backup_provider = models.CharField(
+        max_length=20, 
+        blank=True, 
+        null=True, 
+        choices=[('google_drive', 'Google Drive'), ('icloud', 'iCloud')],
+        help_text="Provider where the wallet backup was last verified"
+    )
+    backup_verified_at = models.DateTimeField(
+        null=True, 
+        blank=True, 
+        help_text="Timestamp of the last successful backup verification (Response 200 OK)"
+    )
+    backup_device_name = models.CharField(
+        max_length=100, 
+        blank=True, 
+        null=True, 
+        help_text="Name of the device that performed the backup (e.g. iPhone 15)"
+    )
+    
+    # OS Tracking for Dashboard Stats
+    platform_os = models.CharField(
+        max_length=20,
+        blank=True,
+        null=True,
+        choices=[('ios', 'iOS'), ('android', 'Android'), ('web', 'Web')],
+        help_text="Operating System of the user's primary device"
+    )
+
     auth_token_version = models.IntegerField(default=1, help_text="Version number for JWT tokens. Incrementing this invalidates all existing tokens.")
     groups = models.ManyToManyField(
         'auth.Group',

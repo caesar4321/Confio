@@ -36,6 +36,7 @@ interface UserProfile {
   isIdentityVerified?: boolean;
   lastVerifiedDate?: string;
   verificationStatus?: string;
+  backupProvider?: string; // 'google_drive' | 'icloud' | null
 }
 
 interface BusinessProfile {
@@ -613,6 +614,15 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       // Don't block login even if backend reports expired credentials; let user proceed
     }
 
+
+
+    // On iOS, Implicitly Report Safety (iCloud Keychain is auto-synced)
+    if (Platform.OS === 'ios') {
+      import('../services/secureDeterministicWallet').then(({ reportBackupStatus }) => {
+        reportBackupStatus('icloud').catch(err => console.warn('[Auth] Failed implicit iCloud report:', err));
+      });
+    }
+
     try { signalAuthReady(); } catch { }
     prefetchUserAccounts(`post-${source}`);
     navigateToScreen('Main');
@@ -916,6 +926,8 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       console.error('Error completing phone verification:', error);
     }
   };
+
+
 
   return (
     <AuthContext.Provider value={{

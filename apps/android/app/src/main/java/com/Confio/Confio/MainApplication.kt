@@ -18,6 +18,8 @@ import com.reactnativecommunity.cameraroll.CameraRollPackage
 import io.invertase.firebase.app.ReactNativeFirebaseAppPackage
 import io.invertase.firebase.auth.ReactNativeFirebaseAuthPackage
 import io.invertase.firebase.messaging.ReactNativeFirebaseMessagingPackage
+import io.invertase.firebase.analytics.ReactNativeFirebaseAnalyticsPackage
+import io.invertase.firebase.crashlytics.ReactNativeFirebaseCrashlyticsPackage
 import com.reactnativegooglesignin.RNGoogleSigninPackage
 import org.linusu.RNGetRandomValuesPackage
 import com.oblador.keychain.KeychainPackage
@@ -52,6 +54,8 @@ class MainApplication : Application(), ReactApplication {
             ReactNativeFirebaseAppPackage(),
             ReactNativeFirebaseAuthPackage(),
             ReactNativeFirebaseMessagingPackage(),
+            ReactNativeFirebaseAnalyticsPackage(),
+            ReactNativeFirebaseCrashlyticsPackage(),
             RNGoogleSigninPackage(),
             RNGetRandomValuesPackage(),
             KeychainPackage(),
