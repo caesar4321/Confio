@@ -71,8 +71,8 @@ TERMS = {
 
 PRIVACY = {
     'title': 'Política de Privacidad',
-    'version': '1.1.0',
-    'last_updated': '2025-12-11',
+    'version': '1.2.0',
+    'last_updated': '2025-12-14',
     'is_legally_binding': True,
     'sections': [
         {
@@ -93,6 +93,16 @@ PRIVACY = {
                     'Selfie con documento de identidad',
                     'Información de dirección residencial',
                     'Información de fuente de fondos'
+                ],
+                'device_info': [
+                    'Sistema operativo',
+                    'Versiones de software y hardware',
+                    'Dirección IP',
+                    'Ubicación',
+                    'ID del dispositivo',
+                    'ID de Publicidad (Advertising ID)',
+                    'Configuración de notificaciones',
+                    'Última hora activa y registros de actividad'
                 ]
             }
         },
@@ -103,6 +113,7 @@ PRIVACY = {
                 'Procesar transacciones',
                 'Enviar actualizaciones importantes',
                 'Mejorar nuestros servicios',
+                'Análisis estadístico para mejorar la experiencia del usuario',
                 'Cumplir con obligaciones legales y regulatorias',
                 'Verificar su identidad y prevenir fraudes',
                 'Cumplir con requisitos de KYC/AML'
@@ -115,6 +126,7 @@ PRIVACY = {
                 'Para proteger nuestros derechos',
                 'Con su consentimiento explícito',
                 'Con proveedores de servicios de verificación KYC',
+                'Con proveedores de servicios de análisis (como Firebase Analytics de Google) para entender el uso de la aplicación y mejorar nuestros servicios',
                 'Con autoridades regulatorias cuando sea necesario'
             ]
         },
