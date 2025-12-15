@@ -386,7 +386,7 @@ class GenerateOptInTransactionsMutation(graphene.Mutation):
                 sp=params,
                 receiver=account.algorand_address,
                 amt=funding_needed,  # Fund exact MBR increase needed
-                note=b"Sponsored asset opt-ins with MBR funding"
+                note=b"Sponsored opt-in with MBR funding"
             )
             fee_payment_txn.fee = total_fee  # Sponsor pays all fees
             
@@ -1333,7 +1333,7 @@ class OptInToAssetByTypeMutation(graphene.Mutation):
             # The actual minimum balance increases by more than just 100k due to
             # schema changes and other factors, so we use a generous buffer
             ASSET_OPT_IN_MBR = 100_000  # Base asset opt-in cost
-            SAFETY_BUFFER = 250_000     # Safety margin for edge cases and fees
+            SAFETY_BUFFER = 100_000     # Safety margin (0.1 ALGO)
 
             required_balance = current_min_balance + ASSET_OPT_IN_MBR
             target_balance = required_balance + SAFETY_BUFFER
@@ -1540,7 +1540,7 @@ class GenerateAppOptInTransactionMutation(graphene.Mutation):
                 receiver=account.algorand_address,
                 amt=funding_needed,  # Fund the MBR increase + buffer for fees
                 sp=sponsor_params,
-                note=b"Sponsored app opt-in MBR funding"
+                note=b"Sponsored opt-in with MBR funding"
             )
             
             # Transaction 1: User app opt-in (0 fee)
