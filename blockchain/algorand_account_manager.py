@@ -154,9 +154,16 @@ class AlgorandAccountManager:
             algod_client = get_algod_client()
             
             # Fund the account
-            funded = cls._fund_account(algod_client, algorand_address)
-            if not funded:
-                errors.append("Failed to fund account with ALGO")
+            # ONLY fund if we created the account server-side (V1 legacy).
+            # If `existing_address` was provided (V2), we assume Client/V2 handles funding via sponsored opt-in.
+            funded = False
+            if not existing_address:
+                funded = cls._fund_account(algod_client, algorand_address)
+                if not funded:
+                    errors.append("Failed to fund account with ALGO")
+            else:
+                logger.info(f"Skipping server-side funding for V2 account {algorand_address} (client handles funding)")
+
             
             # Auto opt-in to CONFIO
             if cls.CONFIO_ASSET_ID:
@@ -361,7 +368,7 @@ class AlgorandAccountManager:
                     funding_needed = target_balance - current_balance
                     logger.info(
                         "Account %s requires %s microAlgos to meet min balance for asset %s opt-in "
-                        "(current: %s, required: %s, buffer: %s)",
+                        "(current: %s, required: %s, buffer: %s). Skipping server-side funding (V2 flow).",
                         address,
                         funding_needed,
                         asset_id,
@@ -369,23 +376,29 @@ class AlgorandAccountManager:
                         required_balance,
                         buffer,
                     )
-                    funding_result = loop.run_until_complete(
-                        algorand_sponsor_service.fund_account(address, funding_needed)
-                    )
-                    if not funding_result.get('success'):
-                        logger.warning(
-                            "Failed to fund account %s for asset %s opt-in: %s",
-                            address,
-                            asset_id,
-                            funding_result.get('error'),
-                        )
-                        return False, False
-                    logger.info(
-                        "Funded account %s with %.6f ALGO for asset %s opt-in",
-                        address,
-                        funding_result.get('amount_algo'),
-                        asset_id,
-                    )
+                    # V2 CHANGE: Do NOT fund here. Let the client handle it via `GenerateOptInTransactionsMutation`.
+                    # If we fund here, we get double funding (one here, one in the sponsored group).
+                    # Since we can't complete the opt-in server-side (needs user sig), this funding is wasted if we do it here.
+                    return False, False
+
+                    # PREVIOUS LOGIC (Disabled):
+                    # funding_result = loop.run_until_complete(
+                    #     algorand_sponsor_service.fund_account(address, funding_needed)
+                    # )
+                    # if not funding_result.get('success'):
+                    #     logger.warning(
+                    #         "Failed to fund account %s for asset %s opt-in: %s",
+                    #         address,
+                    #         asset_id,
+                    #         funding_result.get('error'),
+                    #     )
+                    #     return False, False
+                    # logger.info(
+                    #     "Funded account %s with %.6f ALGO for asset %s opt-in",
+                    #     address,
+                    #     funding_result.get('amount_algo'),
+                    #     asset_id,
+                    # )
 
                 result = loop.run_until_complete(
                     algorand_sponsor_service.execute_server_side_opt_in(address, asset_id)
