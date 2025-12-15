@@ -24,21 +24,21 @@ const FriendlyAssets = () => {
         { label: t('Respaldado por', 'Backed by', '지원'), value: '100% USDC' },
         { label: t('Uso principal', 'Main use', '주요 용도'), value: t('Medio de pago y ahorro dentro del ecosistema Confío.', 'Payment and savings rail inside the Confío ecosystem.', 'Confío 생태계에서 결제 및 저축 수단으로 사용됩니다.') },
         { label: t('Valor', 'Value', '가치'), value: t('Estable (1:1 con USDC)', 'Stable (1:1 with USDC)', '안정적 (USDC와 1:1)') },
-        { 
-          label: t('ID del Activo', 'Asset ID', '자산 ID'), 
+        {
+          label: t('ID del Activo', 'Asset ID', '자산 ID'),
           value: (
             <a href="https://explorer.perawallet.app/asset/3198259450/" target="_blank" rel="noopener noreferrer" className={styles.detailLink}>
               3198259450
             </a>
-          ) 
+          )
         },
-        { 
-          label: t('Explorador', 'Explorer', '탐색기'), 
+        {
+          label: t('Explorador', 'Explorer', '탐색기'),
           value: (
             <a href="https://explorer.perawallet.app/asset/3198259450/" target="_blank" rel="noopener noreferrer" className={styles.detailLink}>
               {t('Ver en Pera Explorer', 'View on Pera Explorer', 'Pera Explorer에서 보기')}
             </a>
-          ) 
+          )
         }
       ],
       highlight: {
@@ -138,9 +138,9 @@ const FriendlyAssets = () => {
           transition={{ duration: 0.6, delay: 0.5 }}
           className={styles.documents}
         >
-          <a href="https://medium.com/confio4world/duende-cryptocurrency-and-its-exclusive-payment-platform-to-facilitate-cryptocurrency-mass-c0a7499d0e81" target="_blank" rel="noopener noreferrer" className={styles.documentLink}>
+          <a href={t('https://medium.com/confio4world/la-visión-de-confío-db2416ae3025', 'https://medium.com/confio4world/duende-cryptocurrency-and-its-exclusive-payment-platform-to-facilitate-cryptocurrency-mass-c0a7499d0e81', 'https://medium.com/confio4world/confío-중남미를-위한-디지털-달러-플랫폼-570adde1dfe3')} target="_blank" rel="noopener noreferrer" className={styles.documentLink}>
             <span className={styles.documentIcon}>📄</span>
-            <span>Whitepaper</span>
+            <span>{t('Whitepaper', 'Whitepaper', '백서')}</span>
           </a>
           <a href="https://medium.com/confio4world/tokenomics-oficial-de-confío-versión-2025-comunidad-latam-152815f9bcc9" target="_blank" rel="noopener noreferrer" className={styles.documentLink}>
             <span className={styles.documentIcon}>📘</span>
@@ -150,13 +150,9 @@ const FriendlyAssets = () => {
             <span className={styles.documentIcon}>📗</span>
             <span>{t('Tokenomics 2025 (EN)', 'Tokenomics 2025 (EN)', '토크노믹스 2025 (EN)')}</span>
           </a>
-          <a href="https://docs.google.com/presentation/d/1wRK7VE90fOZT8rqx2My61GKYJt7SPtum9ZMO2F1CK1Q/edit?usp=sharing" target="_blank" rel="noopener noreferrer" className={styles.documentLink}>
+          <a href={t('https://docs.google.com/presentation/d/1qL-_xQGm5Wbnjfp367lPZuadCwMkLsgfReDwjp_ja7A/edit?usp=sharing', 'https://docs.google.com/presentation/d/1sGTJWHKmgme415_eQ_rOe2BzQNxmTWPwkZl3vb-Bdog/edit?usp=sharing', 'https://docs.google.com/presentation/d/1sGTJWHKmgme415_eQ_rOe2BzQNxmTWPwkZl3vb-Bdog/edit?usp=sharing')} target="_blank" rel="noopener noreferrer" className={styles.documentLink}>
             <span className={styles.documentIcon}>📊</span>
-            <span>Pitchdeck</span>
-          </a>
-          <a href="https://docs.google.com/presentation/d/1usRBC1eONOszQ-fJ871R-Z6grFDUTf1MpHt3DRHMSkE/edit?usp=sharing" target="_blank" rel="noopener noreferrer" className={styles.documentLink}>
-            <span className={styles.documentIcon}>🇦🇷</span>
-            <span>{t('Pitchdeck Argentina-first', 'Argentina-first Pitchdeck', '아르헨티나 우선 피치덱')}</span>
+            <span>{t('Presentación de Confío', 'Pitch Deck', '피치덱')}</span>
           </a>
           <a href="https://github.com/caesar4321/Confio" target="_blank" rel="noopener noreferrer" className={styles.documentLink}>
             <span className={styles.documentIcon}>💻</span>
