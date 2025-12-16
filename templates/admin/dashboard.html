@@ -541,14 +541,14 @@
             <div class="metric-card">
                 <div class="metric-label">New Referrals (7d)</div>
                 <div class="metric-value">{{ referral_stats.new_week|default:"0"|intcomma }}</div>
-                <div class="metric-change">Converted (7d): {{ referral_stats.converted_week|default:"0"|intcomma
-                    }}</div>
+                <div class="metric-change">Converted (7d): {{ referral_stats.converted_week|default:"0"|intcomma }}
+                </div>
             </div>
             <div class="metric-card">
                 <div class="metric-label">Avg Reward / Converted</div>
                 <div class="metric-value">{{ referral_stats.avg_rewards_per_converted|floatformat:2 }}</div>
-                <div class="metric-change">Eligible rewards: {{
-                    referral_stats.eligible_events|default:"0"|intcomma }}</div>
+                <div class="metric-change">Eligible rewards: {{ referral_stats.eligible_events|default:"0"|intcomma }}
+                </div>
             </div>
         </div>
         <p style="font-size: 13px; color: #4b5563; margin: -10px 0 30px;">
@@ -575,8 +575,7 @@
 
         {% if presale_active %}
         <!-- Active Presale Phase -->
-        <h3 style="font-size: 20px; color: #1f2937; margin-bottom: 16px;">📊 Active Phase {{ presale_phase }}:
-            {{
+        <h3 style="font-size: 20px; color: #1f2937; margin-bottom: 16px;">📊 Active Phase {{ presale_phase }}: {{
             presale_name }}</h3>
         <div class="metrics-grid">
             <div class="metric-card">
@@ -668,8 +667,8 @@
                                 phase.status|upper }}</span>
                             {% endif %}
                         </td>
-                        <td style="padding: 12px; text-align: right;">${{
-                            phase.total_raised|floatformat:2|intcomma }}</td>
+                        <td style="padding: 12px; text-align: right;">${{ phase.total_raised|floatformat:2|intcomma }}
+                        </td>
                         <td style="padding: 12px; text-align: right;">{{ phase.total_participants|intcomma }}
                         </td>
                     </tr>
@@ -735,525 +734,521 @@
             <div class="metric-card">
                 <div class="metric-label">Available for Withdrawal</div>
                 <div class="metric-value" style="color: #16a34a;">{{
-                    fraud_stats.available_total|default:"0"|floatformat:2}}
-                    CONFIO</div>
-                <div class="metric-change">Withdrawn to date: {{
-                    fraud_stats.total_withdrawn|default:"0"|floatformat:2 }}
-                    CONFIO</div>
+                    fraud_stats.available_total|default:"0"|floatformat:2}} CONFIO</div>
+                <div class="metric-change">Withdrawn to date: {{ fraud_stats.total_withdrawn|default:"0"|floatformat:2
+                    }} CONFIO</div>
             </div>
 
             <div class="metric-card">
                 <div class="metric-label">Withdrawal Velocity</div>
                 <div class="metric-value" style="color: #2563eb;">{{
-                    fraud_stats.daily_withdrawn|default:"0"|floatformat:2}}
+                    fraud_stats.daily_withdrawn|default:"0"|floatformat:2}} CONFIO</div>
+                <div class="metric-change">Last 7 days: {{ fraud_stats.weekly_withdrawn|default:"0"|floatformat:2 }}
                     CONFIO</div>
-                <div class="metric-change">Last 7 days: {{
-                    fraud_stats.weekly_withdrawn|default:"0"|floatformat:2 }} CONFIO
-                </div>
-            </div>
-
-            <div class="metric-card">
-                <div class="metric-label">Reviews & High Value</div>
-                <div class="metric-value" style="color: #dc2626;">{{ fraud_stats.pending_review|default:"0" }}
-                </div>
-                <div class="metric-change">High-value (&gt;500 CONFIO): {{ fraud_stats.high_value|default:"0" }}
-                </div>
-            </div>
-
-            <div class="metric-card">
-                <div class="metric-label">Unique Referrers</div>
-                <div class="metric-value">{{ fraud_stats.unique_users|default:"0"|intcomma }}</div>
-                <div class="metric-change">With referral withdrawals</div>
-            </div>
-
-            <div class="metric-card">
-                <div class="metric-label">Device Watchlist</div>
-                <div class="metric-value" style="color: #f59e0b;">{{
-                    fraud_stats.multi_user_devices|default:"0"|intcomma }}
-                </div>
-                <div class="metric-change">Devices with multiple referral accounts</div>
             </div>
         </div>
 
-        {% if fraud_stats.pending_review > 0 %}
-        <div class="alert-box" style="margin-bottom: 20px;">
-            <span class="alert-icon">⚠️</span>
-            <div>
-                <strong>Review queue:</strong>
-                {{ fraud_stats.pending_review }} withdrawal{{ fraud_stats.pending_review|pluralize }} awaiting
-                manual
-                verification.
+        <div class="metric-card">
+            <div class="metric-label">Reviews & High Value</div>
+            <div class="metric-value" style="color: #dc2626;">{{ fraud_stats.pending_review|default:"0" }}
             </div>
-        </div>
-        {% endif %}
-
-        <!-- Reward Security Actions -->
-        <div style="margin-bottom: 20px;">
-            <a href="{% url 'confio_admin:achievements_userachievement_fraud_dashboard' %}" class="action-button"
-                style="margin-right: 10px;">🔍 Reward Security Dashboard</a>
-            <a href="{% url 'confio_admin:achievements_userachievement_changelist' %}?fraud_status=multi_device"
-                class="action-button secondary" style="margin-right: 10px;">Device Flags</a>
-            <a href="{% url 'confio_admin:achievements_referralwithdrawallog_changelist' %}"
-                class="action-button secondary">Withdrawal Log</a>
-        </div>
-        {% endif %}
-
-        <!-- P2P Trading Volume -->
-        <h2 class="section-title">P2P Trading Volume (This Month)</h2>
-        <div class="metrics-grid">
-            <div class="metric-card">
-                <div class="metric-label">cUSD Volume</div>
-                <div class="metric-value">${{ monthly_cusd_volume|floatformat:0|intcomma }}</div>
-                <div class="metric-change">{{ trades_this_month }} trades</div>
-            </div>
-
-            <div class="metric-card">
-                <div class="metric-label">CONFIO Volume</div>
-                <div class="metric-value">{{ monthly_confio_volume|floatformat:0|intcomma }}</div>
-                <div class="metric-change">CONFIO tokens</div>
-            </div>
-
-            <div class="metric-card">
-                <div class="metric-label">Send Transactions</div>
-                <div class="metric-value">{{ send_transactions_today }}</div>
-                <div class="metric-change">Today</div>
-            </div>
-
-            <div class="metric-card">
-                <div class="metric-label">Payment Transactions</div>
-                <div class="metric-value">{{ payment_transactions_today }}</div>
-                <div class="metric-change">Today</div>
+            <div class="metric-change">High-value (&gt;500 CONFIO): {{ fraud_stats.high_value|default:"0" }}
             </div>
         </div>
 
-        <!-- Conversion Volume -->
-        <h2 class="section-title">USDC ↔ cUSD Conversions</h2>
-        <div class="metrics-grid">
-            <div class="metric-card">
-                <div class="metric-label">USDC → cUSD Volume</div>
-                <div class="metric-value">${{ usdc_to_cusd_volume|floatformat:0|intcomma }}</div>
-                <div class="metric-change">This month</div>
-            </div>
-
-            <div class="metric-card">
-                <div class="metric-label">Net USDC Inflow</div>
-                <div class="metric-value {% if net_usdc_inflow < 0 %}negative{% endif %}">
-                    {% if net_usdc_inflow >= 0 %}+{% endif %}${{ net_usdc_inflow|floatformat:0|intcomma }}
-                </div>
-                <div class="metric-change">
-                    {% if net_usdc_inflow >= 0 %}
-                    More USDC → cUSD
-                    {% else %}
-                    More cUSD → USDC
-                    {% endif %}
-                </div>
-            </div>
-
-            <div class="metric-card">
-                <div class="metric-label">Circulating cUSD</div>
-                <div class="metric-value">${{ circulating_cusd|floatformat:0|intcomma }}</div>
-                <div class="metric-change">Total supply</div>
-            </div>
-
-            <div class="metric-card">
-                <div class="metric-label">Conversions Today</div>
-                <div class="metric-value">{{ conversions_today|intcomma }}</div>
-                <div class="metric-change">{{ conversions_last_7_days }} last 7 days</div>
-            </div>
-
-            <div class="metric-card">
-                <div class="metric-label">Notifications Today</div>
-                <div class="metric-value">{{ notifications_sent_today|intcomma }}</div>
-                <div class="metric-change">{{ push_notifications_today }} push sent</div>
-            </div>
-
-            <div class="metric-card">
-                <div class="metric-label">Active Devices</div>
-                <div class="metric-value">{{ active_fcm_tokens|intcomma }}</div>
-                <div class="metric-change">Ready for push</div>
-            </div>
+        <div class="metric-card">
+            <div class="metric-label">Unique Referrers</div>
+            <div class="metric-value">{{ fraud_stats.unique_users|default:"0"|intcomma }}</div>
+            <div class="metric-change">With referral withdrawals</div>
         </div>
 
-        <!-- Blockchain Integration -->
-        <h2 class="section-title">Blockchain Integration</h2>
-        <div class="metrics-grid">
-            <div class="metric-card">
-                <div class="metric-label">Cached Balances</div>
-                <div class="metric-value">{{ cached_balances|intcomma }}</div>
-                <div class="metric-change">{{ balance_cache_health.stale_percentage|floatformat:1 }}% stale
-                </div>
+        <div class="metric-card">
+            <div class="metric-label">Device Watchlist</div>
+            <div class="metric-value" style="color: #f59e0b;">{{ fraud_stats.multi_user_devices|default:"0"|intcomma }}
             </div>
-
-            <div class="metric-card">
-                <div class="metric-label">Last Blockchain Sync</div>
-                <div class="metric-value" style="font-size: 16px;">
-                    {% if last_blockchain_sync %}
-                    {{ last_blockchain_sync|timesince }} ago
-                    {% else %}
-                    Never
-                    {% endif %}
-                </div>
-                <div class="metric-change">Balance reconciliation</div>
-            </div>
-        </div>
-
-        <!-- Top Countries -->
-        <h2 class="section-title">Top P2P Countries</h2>
-        <div class="data-table">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Country</th>
-                        <th>Active Offers</th>
-                        <th>Details</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for country in top_countries %}
-                    <tr>
-                        <td>
-                            <span class="country-flag">
-                                {% if country.country_code == 'VE' %}🇻🇪
-                                {% elif country.country_code == 'CO' %}🇨🇴
-                                {% elif country.country_code == 'AR' %}🇦🇷
-                                {% elif country.country_code == 'MX' %}🇲🇽
-                                {% elif country.country_code == 'PE' %}🇵🇪
-                                {% elif country.country_code == 'CL' %}🇨🇱
-                                {% elif country.country_code == 'BR' %}🇧🇷
-                                {% else %}🌐{% endif %}
-                            </span>
-                            {{ country.country_code }}
-                        </td>
-                        <td>{{ country.count }}</td>
-                        <td>{{ country.count }} offers</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-
-        <!-- Recent Trades -->
-        <h2 class="section-title">Recent P2P Trades</h2>
-        <div class="data-table">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Trade ID</th>
-                        <th>Amount</th>
-                        <th>Participants</th>
-                        <th>Status</th>
-                        <th>Created</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for trade in recent_trades %}
-                    <tr>
-                        <td>
-                            <a href="{% url 'confio_admin:p2p_exchange_p2ptrade_change' trade.id %}">
-                                #{{ trade.id }}
-                            </a>
-                        </td>
-                        <td>
-                            <span class="amount-display">
-                                {{ trade.crypto_amount|floatformat:2 }}
-                                {% if trade.offer.token_type == 'cUSD' %}cUSD{% else %}CONFIO{% endif %}
-                            </span>
-                        </td>
-                        <td>
-                            {{ trade.buyer_display_name }} → {{ trade.seller_display_name }}
-                        </td>
-                        <td>
-                            <span
-                                class="status-badge {% if trade.status == 'COMPLETED' %}completed{% elif trade.status == 'DISPUTED' %}disputed{% else %}pending{% endif %}">
-                                {{ trade.get_status_display }}
-                            </span>
-                        </td>
-                        <td>{{ trade.created_at|timesince }} ago</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-
-        <!-- Recent Disputes -->
-        {% if recent_disputes %}
-        <h2 class="section-title">Recent Disputes</h2>
-        <div class="data-table">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Dispute ID</th>
-                        <th>Trade</th>
-                        <th>Reason</th>
-                        <th>Status</th>
-                        <th>Priority</th>
-                        <th>Opened</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for dispute in recent_disputes %}
-                    <tr>
-                        <td>
-                            <a href="{% url 'confio_admin:p2p_exchange_p2pdispute_change' dispute.id %}">
-                                #{{ dispute.id }}
-                            </a>
-                        </td>
-                        <td>
-                            <a href="{% url 'confio_admin:p2p_exchange_p2ptrade_change' dispute.trade.id %}">
-                                Trade #{{ dispute.trade.id }}
-                            </a>
-                        </td>
-                        <td>{{ dispute.reason|truncatewords:10 }}</td>
-                        <td>
-                            <span
-                                class="status-badge {% if dispute.status == 'ESCALATED' %}disputed{% elif dispute.status == 'RESOLVED' %}completed{% else %}pending{% endif %}">
-                                {{ dispute.get_status_display }}
-                            </span>
-                        </td>
-                        <td>
-                            {% if dispute.priority == 3 %}🔴 High
-                            {% elif dispute.priority == 2 %}🟡 Medium
-                            {% else %}🟢 Low{% endif %}
-                        </td>
-                        <td>{{ dispute.opened_at|timesince }} ago</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% endif %}
-
-        <!-- Ongoing Disputes -->
-        {% if ongoing_disputes %}
-        <h2 class="section-title">Ongoing Disputes</h2>
-        <div class="data-table">
-            <table>
-                <thead>
-                    <tr>
-                        <th>ID</th>
-                        <th>Trade</th>
-                        <th>Initiator</th>
-                        <th>Status</th>
-                        <th>Priority</th>
-                        <th>Evidence</th>
-                        <th>Opened</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for dispute in ongoing_disputes %}
-                    <tr>
-                        <td><a href="{% url 'confio_admin:p2p_exchange_p2pdispute_change' dispute.id %}">#{{
-                                dispute.id
-                                }}</a></td>
-                        <td><a href="{% url 'confio_admin:p2p_exchange_p2ptrade_change' dispute.trade.id %}">Trade
-                                #{{
-                                dispute.trade.id }}</a></td>
-                        <td>
-                            {% if dispute.initiator_business %}🏢 {{ dispute.initiator_business.name }}
-                            {% elif dispute.initiator_user %}👤 {{ dispute.initiator_user.username }}
-                            {% else %}-{% endif %}
-                        </td>
-                        <td>
-                            <span
-                                class="status-badge {% if dispute.status == 'ESCALATED' %}disputed{% elif dispute.status == 'RESOLVED' %}completed{% else %}pending{% endif %}">
-                                {{ dispute.get_status_display }}
-                            </span>
-                        </td>
-                        <td>
-                            {% if dispute.priority == 3 %}🔴 High
-                            {% elif dispute.priority == 2 %}🟡 Medium
-                            {% else %}🟢 Low
-                            {% endif %}
-                        </td>
-                        <td>{{ dispute.evidence_count }}</td>
-                        <td>{{ dispute.opened_at|timesince }} ago</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% endif %}
-
-        <!-- New ID Verification Submissions -->
-        <h2 class="section-title">New ID Verifications{% if pending_verifications_count %} ({{
-            pending_verifications_count
-            }} pending){% endif %}</h2>
-        <div class="data-table">
-            <table>
-                <thead>
-                    <tr>
-                        <th>ID</th>
-                        <th>User</th>
-                        <th>Context</th>
-                        <th>Business</th>
-                        <th>Status</th>
-                        <th>Submitted</th>
-                        <th>Action</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% if recent_verifications %}
-                    {% for v in recent_verifications %}
-                    <tr>
-                        <td>{% if v.obj.id %}<a href="/admin/security/identityverification/{{ v.obj.id }}/change/">#{{
-                                v.obj.id
-                                }}</a>{% else %}-{% endif %}</td>
-                        <td><a href="{% url 'confio_admin:users_user_change' v.obj.user.id %}">{{
-                                v.obj.user.username }}</a>
-                        </td>
-                        <td>{% if v.context == 'business' %}Business{% else %}Personal{% endif %}</td>
-                        <td>{% if v.business %}<a href="{% url 'confio_admin:users_business_change' v.business.id %}">{{
-                                v.business.name }}</a>{% else %}-{% endif %}</td>
-                        <td>
-                            {% if v.obj.status == 'pending' %}
-                            <span class="status-badge pending">Pending</span>
-                            {% elif v.obj.status == 'verified' %}
-                            <span class="status-badge completed">Verified</span>
-                            {% elif v.obj.status == 'rejected' %}
-                            <span class="status-badge disputed">Rejected</span>
-                            {% else %}
-                            <span class="status-badge">{{ v.obj.get_status_display }}</span>
-                            {% endif %}
-                        </td>
-                        <td>{{ v.obj.created_at|timesince }} ago</td>
-                        <td>
-                            {% if v.obj.id %}
-                            <a class="action-button secondary"
-                                href="/admin/security/identityverification/{{ v.obj.id }}/change/">Review</a>
-                            {% else %}-
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                    {% else %}
-                    <tr>
-                        <td colspan="5">No recent ID verifications.</td>
-                    </tr>
-                    {% endif %}
-                </tbody>
-            </table>
+            <div class="metric-change">Devices with multiple referral accounts</div>
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@2.9.4/dist/Chart.min.js"></script>
-    <script>
-        document.addEventListener('DOMContentLoaded', function () {
-            // Growth Trend Chart
-            var growthCtx = document.getElementById('growthChart').getContext('2d');
-            var growthData = {
-                labels: [{% for m in metrics_trend %}"{{ m.date|date:'M d' }}", {% endfor %}],
-            datasets: [
-            {
-                label: 'DAU',
-                borderColor: '#8b5cf6',
-                backgroundColor: 'rgba(139, 92, 246, 0.1)',
-                data: [{% for m in metrics_trend %}{{ m.dau }}, {% endfor %}],
-            pointRadius: 2,
-            fill: true
+    {% if fraud_stats.pending_review > 0 %}
+    <div class="alert-box" style="margin-bottom: 20px;">
+        <span class="alert-icon">⚠️</span>
+        <div>
+            <strong>Review queue:</strong>
+            {{ fraud_stats.pending_review }} withdrawal{{ fraud_stats.pending_review|pluralize }} awaiting
+            manual
+            verification.
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Reward Security Actions -->
+    <div style="margin-bottom: 20px;">
+        <a href="{% url 'confio_admin:achievements_userachievement_fraud_dashboard' %}" class="action-button"
+            style="margin-right: 10px;">🔍 Reward Security Dashboard</a>
+        <a href="{% url 'confio_admin:achievements_userachievement_changelist' %}?fraud_status=multi_device"
+            class="action-button secondary" style="margin-right: 10px;">Device Flags</a>
+        <a href="{% url 'confio_admin:achievements_referralwithdrawallog_changelist' %}"
+            class="action-button secondary">Withdrawal Log</a>
+    </div>
+    {% endif %}
+
+    <!-- P2P Trading Volume -->
+    <h2 class="section-title">P2P Trading Volume (This Month)</h2>
+    <div class="metrics-grid">
+        <div class="metric-card">
+            <div class="metric-label">cUSD Volume</div>
+            <div class="metric-value">${{ monthly_cusd_volume|floatformat:0|intcomma }}</div>
+            <div class="metric-change">{{ trades_this_month }} trades</div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">CONFIO Volume</div>
+            <div class="metric-value">{{ monthly_confio_volume|floatformat:0|intcomma }}</div>
+            <div class="metric-change">CONFIO tokens</div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">Send Transactions</div>
+            <div class="metric-value">{{ send_transactions_today }}</div>
+            <div class="metric-change">Today</div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">Payment Transactions</div>
+            <div class="metric-value">{{ payment_transactions_today }}</div>
+            <div class="metric-change">Today</div>
+        </div>
+    </div>
+
+    <!-- Conversion Volume -->
+    <h2 class="section-title">USDC ↔ cUSD Conversions</h2>
+    <div class="metrics-grid">
+        <div class="metric-card">
+            <div class="metric-label">USDC → cUSD Volume</div>
+            <div class="metric-value">${{ usdc_to_cusd_volume|floatformat:0|intcomma }}</div>
+            <div class="metric-change">This month</div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">Net USDC Inflow</div>
+            <div class="metric-value {% if net_usdc_inflow < 0 %}negative{% endif %}">
+                {% if net_usdc_inflow >= 0 %}+{% endif %}${{ net_usdc_inflow|floatformat:0|intcomma }}
+            </div>
+            <div class="metric-change">
+                {% if net_usdc_inflow >= 0 %}
+                More USDC → cUSD
+                {% else %}
+                More cUSD → USDC
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">Circulating cUSD</div>
+            <div class="metric-value">${{ circulating_cusd|floatformat:0|intcomma }}</div>
+            <div class="metric-change">Total supply</div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">Conversions Today</div>
+            <div class="metric-value">{{ conversions_today|intcomma }}</div>
+            <div class="metric-change">{{ conversions_last_7_days }} last 7 days</div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">Notifications Today</div>
+            <div class="metric-value">{{ notifications_sent_today|intcomma }}</div>
+            <div class="metric-change">{{ push_notifications_today }} push sent</div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">Active Devices</div>
+            <div class="metric-value">{{ active_fcm_tokens|intcomma }}</div>
+            <div class="metric-change">Ready for push</div>
+        </div>
+    </div>
+
+    <!-- Blockchain Integration -->
+    <h2 class="section-title">Blockchain Integration</h2>
+    <div class="metrics-grid">
+        <div class="metric-card">
+            <div class="metric-label">Cached Balances</div>
+            <div class="metric-value">{{ cached_balances|intcomma }}</div>
+            <div class="metric-change">{{ balance_cache_health.stale_percentage|floatformat:1 }}% stale
+            </div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">Last Blockchain Sync</div>
+            <div class="metric-value" style="font-size: 16px;">
+                {% if last_blockchain_sync %}
+                {{ last_blockchain_sync|timesince }} ago
+                {% else %}
+                Never
+                {% endif %}
+            </div>
+            <div class="metric-change">Balance reconciliation</div>
+        </div>
+    </div>
+
+    <!-- Top Countries -->
+    <h2 class="section-title">Top P2P Countries</h2>
+    <div class="data-table">
+        <table>
+            <thead>
+                <tr>
+                    <th>Country</th>
+                    <th>Active Offers</th>
+                    <th>Details</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for country in top_countries %}
+                <tr>
+                    <td>
+                        <span class="country-flag">
+                            {% if country.country_code == 'VE' %}🇻🇪
+                            {% elif country.country_code == 'CO' %}🇨🇴
+                            {% elif country.country_code == 'AR' %}🇦🇷
+                            {% elif country.country_code == 'MX' %}🇲🇽
+                            {% elif country.country_code == 'PE' %}🇵🇪
+                            {% elif country.country_code == 'CL' %}🇨🇱
+                            {% elif country.country_code == 'BR' %}🇧🇷
+                            {% else %}🌐{% endif %}
+                        </span>
+                        {{ country.country_code }}
+                    </td>
+                    <td>{{ country.count }}</td>
+                    <td>{{ country.count }} offers</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Recent Trades -->
+    <h2 class="section-title">Recent P2P Trades</h2>
+    <div class="data-table">
+        <table>
+            <thead>
+                <tr>
+                    <th>Trade ID</th>
+                    <th>Amount</th>
+                    <th>Participants</th>
+                    <th>Status</th>
+                    <th>Created</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for trade in recent_trades %}
+                <tr>
+                    <td>
+                        <a href="{% url 'confio_admin:p2p_exchange_p2ptrade_change' trade.id %}">
+                            #{{ trade.id }}
+                        </a>
+                    </td>
+                    <td>
+                        <span class="amount-display">
+                            {{ trade.crypto_amount|floatformat:2 }}
+                            {% if trade.offer.token_type == 'cUSD' %}cUSD{% else %}CONFIO{% endif %}
+                        </span>
+                    </td>
+                    <td>
+                        {{ trade.buyer_display_name }} → {{ trade.seller_display_name }}
+                    </td>
+                    <td>
+                        <span
+                            class="status-badge {% if trade.status == 'COMPLETED' %}completed{% elif trade.status == 'DISPUTED' %}disputed{% else %}pending{% endif %}">
+                            {{ trade.get_status_display }}
+                        </span>
+                    </td>
+                    <td>{{ trade.created_at|timesince }} ago</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Recent Disputes -->
+    {% if recent_disputes %}
+    <h2 class="section-title">Recent Disputes</h2>
+    <div class="data-table">
+        <table>
+            <thead>
+                <tr>
+                    <th>Dispute ID</th>
+                    <th>Trade</th>
+                    <th>Reason</th>
+                    <th>Status</th>
+                    <th>Priority</th>
+                    <th>Opened</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for dispute in recent_disputes %}
+                <tr>
+                    <td>
+                        <a href="{% url 'confio_admin:p2p_exchange_p2pdispute_change' dispute.id %}">
+                            #{{ dispute.id }}
+                        </a>
+                    </td>
+                    <td>
+                        <a href="{% url 'confio_admin:p2p_exchange_p2ptrade_change' dispute.trade.id %}">
+                            Trade #{{ dispute.trade.id }}
+                        </a>
+                    </td>
+                    <td>{{ dispute.reason|truncatewords:10 }}</td>
+                    <td>
+                        <span
+                            class="status-badge {% if dispute.status == 'ESCALATED' %}disputed{% elif dispute.status == 'RESOLVED' %}completed{% else %}pending{% endif %}">
+                            {{ dispute.get_status_display }}
+                        </span>
+                    </td>
+                    <td>
+                        {% if dispute.priority == 3 %}🔴 High
+                        {% elif dispute.priority == 2 %}🟡 Medium
+                        {% else %}🟢 Low{% endif %}
+                    </td>
+                    <td>{{ dispute.opened_at|timesince }} ago</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <!-- Ongoing Disputes -->
+    {% if ongoing_disputes %}
+    <h2 class="section-title">Ongoing Disputes</h2>
+    <div class="data-table">
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Trade</th>
+                    <th>Initiator</th>
+                    <th>Status</th>
+                    <th>Priority</th>
+                    <th>Evidence</th>
+                    <th>Opened</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for dispute in ongoing_disputes %}
+                <tr>
+                    <td><a href="{% url 'confio_admin:p2p_exchange_p2pdispute_change' dispute.id %}">#{{
+                            dispute.id
+                            }}</a></td>
+                    <td><a href="{% url 'confio_admin:p2p_exchange_p2ptrade_change' dispute.trade.id %}">Trade
+                            #{{
+                            dispute.trade.id }}</a></td>
+                    <td>
+                        {% if dispute.initiator_business %}🏢 {{ dispute.initiator_business.name }}
+                        {% elif dispute.initiator_user %}👤 {{ dispute.initiator_user.username }}
+                        {% else %}-{% endif %}
+                    </td>
+                    <td>
+                        <span
+                            class="status-badge {% if dispute.status == 'ESCALATED' %}disputed{% elif dispute.status == 'RESOLVED' %}completed{% else %}pending{% endif %}">
+                            {{ dispute.get_status_display }}
+                        </span>
+                    </td>
+                    <td>
+                        {% if dispute.priority == 3 %}🔴 High
+                        {% elif dispute.priority == 2 %}🟡 Medium
+                        {% else %}🟢 Low
+                        {% endif %}
+                    </td>
+                    <td>{{ dispute.evidence_count }}</td>
+                    <td>{{ dispute.opened_at|timesince }} ago</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <!-- New ID Verification Submissions -->
+    <h2 class="section-title">New ID Verifications{% if pending_verifications_count %} ({{
+        pending_verifications_count
+        }} pending){% endif %}</h2>
+    <div class="data-table">
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>User</th>
+                    <th>Context</th>
+                    <th>Business</th>
+                    <th>Status</th>
+                    <th>Submitted</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% if recent_verifications %}
+                {% for v in recent_verifications %}
+                <tr>
+                    <td>{% if v.obj.id %}<a href="/admin/security/identityverification/{{ v.obj.id }}/change/">#{{
+                            v.obj.id
+                            }}</a>{% else %}-{% endif %}</td>
+                    <td><a href="{% url 'confio_admin:users_user_change' v.obj.user.id %}">{{
+                            v.obj.user.username }}</a>
+                    </td>
+                    <td>{% if v.context == 'business' %}Business{% else %}Personal{% endif %}</td>
+                    <td>{% if v.business %}<a href="{% url 'confio_admin:users_business_change' v.business.id %}">{{
+                            v.business.name }}</a>{% else %}-{% endif %}</td>
+                    <td>
+                        {% if v.obj.status == 'pending' %}
+                        <span class="status-badge pending">Pending</span>
+                        {% elif v.obj.status == 'verified' %}
+                        <span class="status-badge completed">Verified</span>
+                        {% elif v.obj.status == 'rejected' %}
+                        <span class="status-badge disputed">Rejected</span>
+                        {% else %}
+                        <span class="status-badge">{{ v.obj.get_status_display }}</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ v.obj.created_at|timesince }} ago</td>
+                    <td>
+                        {% if v.obj.id %}
+                        <a class="action-button secondary"
+                            href="/admin/security/identityverification/{{ v.obj.id }}/change/">Review</a>
+                        {% else %}-
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+                {% else %}
+                <tr>
+                    <td colspan="5">No recent ID verifications.</td>
+                </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@2.9.4/dist/Chart.min.js"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        // Growth Trend Chart
+        var growthCtx = document.getElementById('growthChart').getContext('2d');
+        var growthData = {
+            labels: [{% for m in metrics_trend %}"{{ m.date|date:'M d' }}", {% endfor %}],
+        datasets: [
+        {
+            label: 'DAU',
+            borderColor: '#8b5cf6',
+            backgroundColor: 'rgba(139, 92, 246, 0.1)',
+            data: [{% for m in metrics_trend %}{{ m.dau }}, {% endfor %}],
+        pointRadius: 2,
+        fill: true
                     },
-            {
-                label: 'MAU',
-                borderColor: '#10b981',
-                backgroundColor: 'transparent',
-                borderDash: [5, 5],
-                data: [{% for m in metrics_trend %}{{ m.mau }}, {% endfor %}],
-            pointRadius: 0,
-            fill: false
+        {
+            label: 'MAU',
+            borderColor: '#10b981',
+            backgroundColor: 'transparent',
+            borderDash: [5, 5],
+            data: [{% for m in metrics_trend %}{{ m.mau }}, {% endfor %}],
+        pointRadius: 0,
+        fill: false
                     }
                 ]
             };
-        new Chart(growthCtx, {
-            type: 'line',
-            data: growthData,
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                tooltips: {
-                    mode: 'index',
-                    intersect: false,
-                },
-                scales: {
-                    yAxes: [{
-                        ticks: { beginAtZero: true },
-                        gridLines: { color: "rgba(0, 0, 0, 0.05)" }
-                    }],
-                    xAxes: [{
-                        gridLines: { display: false },
-                        ticks: { maxTicksLimit: 10 }
-                    }]
-                }
+    new Chart(growthCtx, {
+        type: 'line',
+        data: growthData,
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            tooltips: {
+                mode: 'index',
+                intersect: false,
+            },
+            scales: {
+                yAxes: [{
+                    ticks: { beginAtZero: true },
+                    gridLines: { color: "rgba(0, 0, 0, 0.05)" }
+                }],
+                xAxes: [{
+                    gridLines: { display: false },
+                    ticks: { maxTicksLimit: 10 }
+                }]
             }
-        });
+        }
+    });
 
-        // Country Chart
-        var countryCtx = document.getElementById('countryChart').getContext('2d');
-        var countryData = {
-            labels: [{% for c in top_countries_metrics %}"{{ c.country_code }}", {% endfor %}],
+    // Country Chart
+    var countryCtx = document.getElementById('countryChart').getContext('2d');
+    var countryData = {
+        labels: [{% for c in top_countries_metrics %}"{{ c.country_code }}", {% endfor %}],
+    datasets: [{
+        data: [{% for c in top_countries_metrics %}{{ c.mau }}, {% endfor %}],
+        backgroundColor: [
+            '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
+            '#ec4899', '#6366f1', '#14b8a6', '#f97316', '#a855f7'
+        ]
+                }]
+            };
+    new Chart(countryCtx, {
+        type: 'doughnut',
+        data: countryData,
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            legend: {
+                position: 'bottom',
+                labels: { boxWidth: 12 }
+            }
+        }
+    });
+
+    // OS Distribution Chart
+    var osCtx = document.getElementById('osChart').getContext('2d');
+    var osData = {
+        labels: ['iOS', 'Android'],
         datasets: [{
-            data: [{% for c in top_countries_metrics %}{{ c.mau }}, {% endfor %}],
-            backgroundColor: [
-                '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
-                '#ec4899', '#6366f1', '#14b8a6', '#f97316', '#a855f7'
-            ]
+            data: [{{ os_stats.ios_count }}, {{ os_stats.android_count }}],
+        backgroundColor: ['#007AFF', '#3DDC84']
                 }]
             };
-        new Chart(countryCtx, {
-            type: 'doughnut',
-            data: countryData,
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                legend: {
-                    position: 'bottom',
-                    labels: { boxWidth: 12 }
-                }
+    new Chart(osCtx, {
+        type: 'doughnut',
+        data: osData,
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            legend: {
+                position: 'bottom',
+                labels: { boxWidth: 12 }
             }
-        });
+        }
+    });
 
-        // OS Distribution Chart
-        var osCtx = document.getElementById('osChart').getContext('2d');
-        var osData = {
-            labels: ['iOS', 'Android'],
-            datasets: [{
-                data: [{{ os_stats.ios_count }}, {{ os_stats.android_count }}],
-            backgroundColor: ['#007AFF', '#3DDC84']
-                }]
-            };
-        new Chart(osCtx, {
-            type: 'doughnut',
-            data: osData,
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                legend: {
-                    position: 'bottom',
-                    labels: { boxWidth: 12 }
-                }
+    // V2 Safety Score Chart
+    var safetyCtx = document.getElementById('safetyChart').getContext('2d');
+    var safetyPct = {{ security_stats.safe_v2_pct|default: "0" }};
+    var safetyData = {
+        labels: ['Safe (V2)', 'At Risk'],
+        datasets: [{
+            data: [safetyPct, 100 - safetyPct],
+            backgroundColor: ['#10b981', '#ef4444']
+        }]
+    };
+    new Chart(safetyCtx, {
+        type: 'doughnut',
+        data: safetyData,
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            legend: {
+                position: 'bottom',
+                labels: { boxWidth: 12 }
             }
+        }
+    });
         });
-
-        // V2 Safety Score Chart
-        var safetyCtx = document.getElementById('safetyChart').getContext('2d');
-        var safetyPct = {{ security_stats.safe_v2_pct|default:"0" }};
-        var safetyData = {
-            labels: ['Safe (V2)', 'At Risk'],
-            datasets: [{
-                data: [safetyPct, 100 - safetyPct],
-                backgroundColor: ['#10b981', '#ef4444']
-            }]
-        };
-        new Chart(safetyCtx, {
-            type: 'doughnut',
-            data: safetyData,
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                legend: {
-                    position: 'bottom',
-                    labels: { boxWidth: 12 }
-                }
-            }
-        });
-        });
-    </script>
-    {% endblock %}
+</script>
+{% endblock %}
