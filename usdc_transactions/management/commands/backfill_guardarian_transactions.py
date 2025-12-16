@@ -116,11 +116,14 @@ class Command(BaseCommand):
 
         # Link User
         user_email = data.get('email') or (data.get('customer') or {}).get('contact_info', {}).get('email')
+        self.stdout.write(f"  Debug {g_id}: API Email='{user_email}'")
         
         if user_email and not tx.user:
              user = User.objects.filter(email__iexact=user_email).first()
              if user:
                  tx.user = user
+             else:
+                 self.stdout.write(f"  Debug {g_id}: No user found for '{user_email}'")
         
         # Match OnChain Deposit
         if tx.user and tx.status == 'finished' and not tx.onchain_deposit:
