@@ -120,7 +120,7 @@ class Command(BaseCommand):
         
         self.stdout.write(f"  Debug {g_id}: API Email='{user_email}' Type={type(user_email)} (Raw='{raw_email}')")
         
-        if user_email and not tx.user:
+        if user_email and not tx.user_id:
              user = User.objects.filter(email__iexact=user_email).first()
              if user:
                  tx.user = user
@@ -133,16 +133,21 @@ class Command(BaseCommand):
                      self.stdout.write(f"    -> Direct DB check for 'placidocastellanos@hotmail.com': {x}")
         
         # Match OnChain Deposit
-        if tx.user and tx.status == 'finished' and not tx.onchain_deposit:
-            self.match_onchain_deposit(tx)
+        # Safely check for user
+        has_user = False
+        try:
+             if tx.user: has_user = True
+        except Exception: pass
+
+        if has_user and tx.status == 'finished' and not tx.onchain_deposit:
+             self.match_onchain_deposit(tx)
             
-        if tx.user:
+        if has_user:
             tx.save()
             self.stdout.write(f"  {action} {g_id}: {tx.status} ({user_email})")
         else:
             self.stdout.write(self.style.WARNING(f"  Skipped {g_id} (No User Matched: '{user_email}')"))
             # Optional: Print why?
-            if user_email:
                  # Check partial match?
                  pass
 
