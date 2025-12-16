@@ -372,8 +372,7 @@
         <div class="metric-card">
             <div class="metric-label">On-chain Completion Rate</div>
             <div class="metric-value" style="color: #10b981;">{{ guardarian_stats.onchain_rate|floatformat:1 }}%</div>
-            <div class="metric-change">{{ guardarian_stats.onchain_completed }} / {{ guardarian_stats.provider_completed
-                }} Finished</div>
+            <div class="metric-change">{{ guardarian_stats.onchain_completed }} / {{ guardarian_stats.provider_completed }} Finished</div>
         </div>
 
         <div class="metric-card">
@@ -575,8 +574,7 @@
 
         {% if presale_active %}
         <!-- Active Presale Phase -->
-        <h3 style="font-size: 20px; color: #1f2937; margin-bottom: 16px;">📊 Active Phase {{ presale_phase }}: {{
-            presale_name }}</h3>
+        <h3 style="font-size: 20px; color: #1f2937; margin-bottom: 16px;">📊 Active Phase {{ presale_phase }}: {{ presale_name }}</h3>
         <div class="metrics-grid">
             <div class="metric-card">
                 <div class="metric-label">Total Raised</div>
@@ -663,8 +661,7 @@
                                 style="background: #8b5cf6; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">UPCOMING</span>
                             {% else %}
                             <span
-                                style="background: #6b7280; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">{{
-                                phase.status|upper }}</span>
+                                style="background: #6b7280; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">{{ phase.status|upper }}</span>
                             {% endif %}
                         </td>
                         <td style="padding: 12px; text-align: right;">${{ phase.total_raised|floatformat:2|intcomma }}
@@ -733,16 +730,13 @@
 
             <div class="metric-card">
                 <div class="metric-label">Available for Withdrawal</div>
-                <div class="metric-value" style="color: #16a34a;">{{
-                    fraud_stats.available_total|default:"0"|floatformat:2}} CONFIO</div>
-                <div class="metric-change">Withdrawn to date: {{ fraud_stats.total_withdrawn|default:"0"|floatformat:2
-                    }} CONFIO</div>
+                <div class="metric-value" style="color: #16a34a;">{{ fraud_stats.available_total|default:"0"|floatformat:2}} CONFIO</div>
+                <div class="metric-change">Withdrawn to date: {{ fraud_stats.total_withdrawn|default:"0"|floatformat:2 }} CONFIO</div>
             </div>
 
             <div class="metric-card">
                 <div class="metric-label">Withdrawal Velocity</div>
-                <div class="metric-value" style="color: #2563eb;">{{
-                    fraud_stats.daily_withdrawn|default:"0"|floatformat:2}} CONFIO</div>
+                <div class="metric-value" style="color: #2563eb;">{{ fraud_stats.daily_withdrawn|default:"0"|floatformat:2}} CONFIO</div>
                 <div class="metric-change">Last 7 days: {{ fraud_stats.weekly_withdrawn|default:"0"|floatformat:2 }}
                     CONFIO</div>
             </div>
@@ -1037,12 +1031,9 @@
             <tbody>
                 {% for dispute in ongoing_disputes %}
                 <tr>
-                    <td><a href="{% url 'confio_admin:p2p_exchange_p2pdispute_change' dispute.id %}">#{{
-                            dispute.id
-                            }}</a></td>
+                    <td><a href="{% url 'confio_admin:p2p_exchange_p2pdispute_change' dispute.id %}">#{{ dispute.id }}</a></td>
                     <td><a href="{% url 'confio_admin:p2p_exchange_p2ptrade_change' dispute.trade.id %}">Trade
-                            #{{
-                            dispute.trade.id }}</a></td>
+                            #{{ dispute.trade.id }}</a></td>
                     <td>
                         {% if dispute.initiator_business %}🏢 {{ dispute.initiator_business.name }}
                         {% elif dispute.initiator_user %}👤 {{ dispute.initiator_user.username }}
@@ -1070,9 +1061,7 @@
     {% endif %}
 
     <!-- New ID Verification Submissions -->
-    <h2 class="section-title">New ID Verifications{% if pending_verifications_count %} ({{
-        pending_verifications_count
-        }} pending){% endif %}</h2>
+    <h2 class="section-title">New ID Verifications{% if pending_verifications_count %} ({{ pending_verifications_count }} pending){% endif %}</h2>
     <div class="data-table">
         <table>
             <thead>
@@ -1090,15 +1079,11 @@
                 {% if recent_verifications %}
                 {% for v in recent_verifications %}
                 <tr>
-                    <td>{% if v.obj.id %}<a href="/admin/security/identityverification/{{ v.obj.id }}/change/">#{{
-                            v.obj.id
-                            }}</a>{% else %}-{% endif %}</td>
-                    <td><a href="{% url 'confio_admin:users_user_change' v.obj.user.id %}">{{
-                            v.obj.user.username }}</a>
+                    <td>{% if v.obj.id %}<a href="/admin/security/identityverification/{{ v.obj.id }}/change/">#{{ v.obj.id }}</a>{% else %}-{% endif %}</td>
+                    <td><a href="{% url 'confio_admin:users_user_change' v.obj.user.id %}">{{ v.obj.user.username }}</a>
                     </td>
                     <td>{% if v.context == 'business' %}Business{% else %}Personal{% endif %}</td>
-                    <td>{% if v.business %}<a href="{% url 'confio_admin:users_business_change' v.business.id %}">{{
-                            v.business.name }}</a>{% else %}-{% endif %}</td>
+                    <td>{% if v.business %}<a href="{% url 'confio_admin:users_business_change' v.business.id %}">{{ v.business.name }}</a>{% else %}-{% endif %}</td>
                     <td>
                         {% if v.obj.status == 'pending' %}
                         <span class="status-badge pending">Pending</span>
