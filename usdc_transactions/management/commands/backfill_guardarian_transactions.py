@@ -135,16 +135,23 @@ class Command(BaseCommand):
         # Update fields
         tx.status = data.get('status', 'waiting')
         
-        if data.get('from_amount'):
+        if data.get('from_amount') is not None:
             tx.from_amount = Decimal(str(data.get('from_amount')))
+        else:
+            if created:
+                tx.from_amount = Decimal('0')
+                
         if data.get('to_amount'):
             tx.to_amount_actual = Decimal(str(data.get('to_amount')))
         if data.get('expected_to_amount'):
              tx.to_amount_estimated = Decimal(str(data.get('expected_to_amount')))
 
         tx.from_currency = data.get('from_currency')
-        tx.to_currency = data.get('to_currency')
-        tx.network = data.get('to_network')
+        if not tx.from_currency and created:
+            tx.from_currency = 'USD' # Default
+            
+        tx.to_currency = data.get('to_currency') or 'USDC'
+        tx.network = data.get('to_network') or 'ALGO'
         
         if data.get('external_partner_link_id'):
             tx.external_id = data.get('external_partner_link_id')
