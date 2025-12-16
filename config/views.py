@@ -206,20 +206,31 @@ def guardarian_transaction_proxy(request):
     if amount is None:
         amount = body.get('from_amount')
     from_currency = body.get('from_currency') or body.get('fromCurrency')
+
+    # Determine if this is a buy (fiat-to-crypto) or sell (crypto-to-fiat) transaction
+    to_currency_raw = body.get('to_currency') or body.get('toCurrency')
+    to_currency_clean = (to_currency_raw or 'USDC').strip().upper()
+    
+    # Common fiat currencies (sell destination). If not sure, treat as buy (crypto destination).
+    fiat_currencies = ['USD', 'EUR', 'GBP', 'BRL', 'ARS', 'MXN', 'COP', 'CLP', 'PEN', 'CAD', 'AUD', 'JPY', 'CHF']
+    is_sell_transaction = to_currency_clean in fiat_currencies
+
     # Priority Logic: Server (DB) > Client Request
     # We want the database to be the single source of truth for the address and email.
     
-    # 1. Address Lookup
+    # 1. Address Lookup - ONLY for Buy transactions (Crypto destination)
+    # For Sell transactions (Fiat destination), we do NOT want to inject a crypto address as payout_address
     db_payout_address = None
-    try:
-        account_type = payload.get('account_type', 'personal')
-        account_index = payload.get('account_index', 0)
-        account = user.accounts.filter(account_type=account_type, account_index=account_index).first()
-        if account and account.algorand_address:
-            db_payout_address = account.algorand_address
-            logger.info(f"Using DB address (Server Priority) for user {user_id}: {db_payout_address}")
-    except Exception as e:
-        logger.warning(f"DB address lookup error: {e}")
+    if not is_sell_transaction:
+        try:
+            account_type = payload.get('account_type', 'personal')
+            account_index = payload.get('account_index', 0)
+            account = user.accounts.filter(account_type=account_type, account_index=account_index).first()
+            if account and account.algorand_address:
+                db_payout_address = account.algorand_address
+                logger.info(f"Using DB address (Server Priority) for user {user_id}: {db_payout_address}")
+        except Exception as e:
+            logger.warning(f"DB address lookup error: {e}")
 
     client_payout_address = body.get('payout_address') or body.get('payoutAddress')
     payout_address = db_payout_address or client_payout_address
@@ -232,15 +243,8 @@ def guardarian_transaction_proxy(request):
     if amount is None or from_currency is None:
         return JsonResponse({'error': 'amount and from_currency are required'}, status=400)
 
-    # Determine if this is a buy (fiat-to-crypto) or sell (crypto-to-fiat) transaction
-    to_currency_raw = body.get('to_currency') or body.get('toCurrency')
-    to_currency_clean = (to_currency_raw or 'USDC').strip().upper()
     from_network = (body.get('from_network') or body.get('fromNetwork') or '').strip().upper() or None
     to_network = (body.get('to_network') or body.get('toNetwork') or '').strip().upper() or None
-    
-    # Common fiat currencies (sell destination). If not sure, treat as buy (crypto destination).
-    fiat_currencies = ['USD', 'EUR', 'GBP', 'BRL', 'ARS', 'MXN', 'COP', 'CLP', 'PEN', 'CAD', 'AUD', 'JPY', 'CHF']
-    is_sell_transaction = to_currency_clean in fiat_currencies
     
     guardarian_payload = {
         'from_amount': float(amount),
