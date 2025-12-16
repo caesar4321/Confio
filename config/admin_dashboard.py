@@ -452,7 +452,11 @@ class ConfioAdminSite(admin.AdminSite):
         hold_count = GuardarianTransaction.objects.filter(status='hold').count()
 
         # Rates
-        onchain_rate = (onchain_completed_count / guardarian_total * 100) if guardarian_total > 0 else 0
+        # KPI 1: On-chain Rate = How many "Finished" transactions actually arrived?
+        # Target: 100%
+        onchain_rate = (onchain_completed_count / provider_completed_count * 100) if provider_completed_count > 0 else 0
+        
+        # KPI 2: Provider Rate = How many sessions finished?
         provider_rate = (provider_completed_count / guardarian_total * 100) if guardarian_total > 0 else 0
         
         context['guardarian_stats'] = {
