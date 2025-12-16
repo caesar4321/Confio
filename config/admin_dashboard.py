@@ -415,10 +415,10 @@ class ConfioAdminSite(admin.AdminSite):
         # Guardarian Metrics
         from usdc_transactions.models import GuardarianTransaction
         
-        # Volume (Successful only)
+        # Volume (Successful only - USDC)
         guardarian_volume = GuardarianTransaction.objects.filter(
             status='finished'
-        ).aggregate(total=Sum('from_amount'))['total'] or Decimal('0')
+        ).aggregate(total=Sum('to_amount_actual'))['total'] or Decimal('0')
         
         # Transaction Counts
         guardarian_total = GuardarianTransaction.objects.count()
