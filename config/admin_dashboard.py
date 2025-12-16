@@ -412,6 +412,47 @@ class ConfioAdminSite(admin.AdminSite):
         else:
             context['presale_active'] = False
         
+        # Guardarian Metrics
+        from usdc_transactions.models import GuardarianTransaction
+        
+        # Volume (Successful only)
+        guardarian_volume = GuardarianTransaction.objects.filter(
+            status='finished'
+        ).aggregate(total=Sum('from_amount'))['total'] or Decimal('0')
+        
+        # Transaction Counts
+        guardarian_total = GuardarianTransaction.objects.count()
+        guardarian_finished = GuardarianTransaction.objects.filter(status='finished').count()
+        guardarian_success_rate = (guardarian_finished / guardarian_total * 100) if guardarian_total > 0 else 0
+        
+        context['guardarian_stats'] = {
+            'volume': guardarian_volume,
+            'total_count': guardarian_total,
+            'finished_count': guardarian_finished,
+            'success_rate': guardarian_success_rate,
+            'waiting_count': GuardarianTransaction.objects.filter(status='waiting').count(),
+        }
+        
+        # Top Currencies (Successful only)
+        context['guardarian_currencies'] = GuardarianTransaction.objects.filter(
+            status='finished'
+        ).values('from_currency').annotate(
+            volume=Sum('from_amount'),
+            count=Count('id')
+        ).order_by('-volume')[:5]
+        
+        # Top Countries (by User count)
+        context['guardarian_countries'] = GuardarianTransaction.objects.values(
+            'user__phone_country'
+        ).annotate(
+            count=Count('id')
+        ).order_by('-count')[:5]
+
+        # Recent Transactions
+        context['guardarian_recent'] = GuardarianTransaction.objects.select_related(
+            'user'
+        ).order_by('-created_at')[:10]
+
         return render(request, 'admin/dashboard.html', context)
     
     def p2p_analytics_view(self, request):
