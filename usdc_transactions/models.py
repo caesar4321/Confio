@@ -248,6 +248,76 @@ class USDCWithdrawal(models.Model):
         self.save()
 
 
+class GuardarianTransaction(models.Model):
+    """Model to track Guardarian Top-Up attempts and outcomes"""
+    
+    STATUS_CHOICES = [
+        ('waiting', 'Waiting'),       # Initial state
+        ('pending', 'Pending'),       # Payment started
+        ('confirmed', 'Confirmed'),   # Payment confirmed
+        ('exchanging', 'Exchanging'), # Crypto exchange in progress
+        ('sending', 'Sending'),       # Sending to user wallet
+        ('finished', 'Finished'),     # Completed successfully
+        ('failed', 'Failed'),         # Failed
+        ('refunded', 'Refunded'),     # Refunded
+        ('hold', 'Hold'),             # KYC/AML Hold
+        ('expired', 'Expired'),         # Time expired
+    ]
+    
+    # Guardarian specific fields
+    guardarian_id = models.CharField(max_length=100, unique=True, help_text='Guardarian Transaction ID')
+    external_id = models.CharField(max_length=100, blank=True, null=True, help_text='Our generic external tracking ID')
+    
+    # User link
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='guardarian_transactions',
+        help_text='User who initiated the top-up'
+    )
+    
+    # Transaction Details
+    from_currency = models.CharField(max_length=20, help_text='Fiat currency (e.g., USD, EUR)')
+    from_amount = models.DecimalField(max_digits=19, decimal_places=6, help_text='Fiat amount sent')
+    to_currency = models.CharField(max_length=20, default='USDC', help_text='Crypto currency received')
+    to_amount_estimated = models.DecimalField(max_digits=19, decimal_places=6, null=True, blank=True, help_text='Estimated crypto amount')
+    to_amount_actual = models.DecimalField(max_digits=19, decimal_places=6, null=True, blank=True, help_text='Actual crypto amount received')
+    
+    network = models.CharField(max_length=20, default='ALGO', help_text='Network (ALGO)')
+    
+    # Status
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='waiting')
+    status_details = models.TextField(blank=True, null=True, help_text='Additional status info or error message')
+    
+    # Link to on-chain deposit if matched
+    onchain_deposit = models.OneToOneField(
+        USDCDeposit,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='guardarian_source',
+        help_text='Matched on-chain deposit'
+    )
+    
+    # Timestamps
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+        db_table = 'guardarian_transactions'
+        verbose_name = 'Guardarian Transaction'
+        verbose_name_plural = 'Guardarian Transactions'
+        indexes = [
+            models.Index(fields=['user', 'status']),
+            models.Index(fields=['guardarian_id']),
+            models.Index(fields=['external_id']),
+            models.Index(fields=['created_at']),
+        ]
+        
+    def __str__(self):
+        return f"Guardarian {self.guardarian_id} ({self.status}) - {self.from_amount} {self.from_currency}"
+
+
 # Import new table models
 from .models_unified import UnifiedUSDCTransactionTable
-

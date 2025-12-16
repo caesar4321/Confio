@@ -1,7 +1,7 @@
 {
   "files": {
     "main.css": "/static/css/main.12edfc5a.css",
-    "main.js": "/static/js/main.638215ea.js",
+    "main.js": "/static/js/main.6c5abc59.js",
     "static/media/JulianMoon_Founder.jpeg": "/static/media/JulianMoon_Founder.77611b65ceb3c7457238.jpeg",
     "static/media/cUSD.png": "/static/media/cUSD.661eddfa58b01fe037d4.png",
     "static/media/TikTok.png": "/static/media/TikTok.c0aae623631b10c441d6.png",
@@ -9,10 +9,10 @@
     "static/media/ConfioApp.png": "/static/media/ConfioApp.751f5fd28f52567e4290.png",
     "index.html": "/index.html",
     "main.12edfc5a.css.map": "/static/css/main.12edfc5a.css.map",
-    "main.638215ea.js.map": "/static/js/main.638215ea.js.map"
+    "main.6c5abc59.js.map": "/static/js/main.6c5abc59.js.map"
   },
   "entrypoints": [
     "static/css/main.12edfc5a.css",
-    "static/js/main.638215ea.js"
+    "static/js/main.6c5abc59.js"
   ]
 }

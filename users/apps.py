@@ -9,7 +9,7 @@ class UsersConfig(AppConfig):
         import users.payroll_sync
         
         # Eagerly load the encryption master key on startup
-        # This ensures the application fails fast if the key is missing or inaccessible
+        # Initialize encryption key manager early to fail fast if keys are missing
         from .encryption import GlobalKeyManager
         try:
             GlobalKeyManager.get_instance()

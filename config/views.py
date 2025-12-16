@@ -5,6 +5,8 @@ from django.http import HttpResponse, JsonResponse
 import logging
 import os
 import json
+import uuid
+from decimal import Decimal
 from django.conf import settings
 from django.views.decorators.csrf import csrf_exempt
 import requests
@@ -272,10 +274,11 @@ def guardarian_transaction_proxy(request):
     if customer_country:
         guardarian_payload['customer_country'] = customer_country
 
-    # Add external ID for tracking
+    # Add external ID for tracking or generate one
     external_id = body.get('external_partner_link_id') or body.get('externalId')
-    if external_id:
-        guardarian_payload['external_partner_link_id'] = external_id
+    if not external_id:
+        external_id = str(uuid.uuid4())
+    guardarian_payload['external_partner_link_id'] = external_id
 
     # Add payout info - this should pre-fill the address
     if payout_address:
@@ -325,6 +328,24 @@ def guardarian_transaction_proxy(request):
     try:
         data = resp.json()
         if resp.ok:
+            g_id = data.get('id')
+            if g_id:
+                try:
+                    from usdc_transactions.models import GuardarianTransaction
+                    GuardarianTransaction.objects.create(
+                        guardarian_id=str(g_id),
+                        external_id=external_id,
+                        user=user,
+                        from_amount=Decimal(str(guardarian_payload['from_amount'])),
+                        from_currency=guardarian_payload['from_currency'],
+                        to_currency=guardarian_payload['to_currency'],
+                        network=guardarian_payload.get('to_network', 'ALGO'),
+                        status=data.get('status', 'waiting'),
+                        to_amount_estimated=Decimal(str(data.get('estimated_exchange_amount'))) if data.get('estimated_exchange_amount') else None
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to save GuardarianTransaction: {e}")
+
             redirect_url = data.get("redirect_url")
             if redirect_url:
                 # Append query parameters to prefill data (Backend fallback)

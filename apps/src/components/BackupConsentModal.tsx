@@ -39,7 +39,7 @@ export const BackupConsentModal: React.FC<BackupConsentModalProps> = ({ visible,
                         </View>
                         <View style={styles.bulletRow}>
                             <Icon name="check-circle" size={20} color="#10B981" style={styles.bulletIcon} />
-                            <Text style={styles.bulletText}>Recupera tu wallet automáticamente si cambias de teléfono.</Text>
+                            <Text style={styles.bulletText}>Recupera tu billetera automáticamente si cambias de teléfono.</Text>
                         </View>
                         <View style={styles.bulletRow}>
                             <Icon name="shield-check" size={20} color="#10B981" style={styles.bulletIcon} />

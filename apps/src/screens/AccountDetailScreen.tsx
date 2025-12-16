@@ -2042,6 +2042,10 @@ export const AccountDetailScreen = () => {
                       <Icon name="more-horizontal" size={20} color="#6b7280" />
                     </TouchableOpacity>
                   </View>
+
+                  <Text style={styles.usdcDisclaimer}>
+                    Para usuarios avanzados • Requiere conocimiento de billeteras Algorand
+                  </Text>
                 </View>
               </View>
             )}

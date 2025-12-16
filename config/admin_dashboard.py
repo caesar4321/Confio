@@ -917,10 +917,11 @@ confio_admin_site.register(ExchangeRate, ExchangeRateAdmin)
 confio_admin_site.register(RateFetchLog, RateFetchLogAdmin)
 
 # USDC Transaction models
-from usdc_transactions.models import USDCDeposit, USDCWithdrawal
-from usdc_transactions.admin import USDCDepositAdmin, USDCWithdrawalAdmin
+from usdc_transactions.models import USDCDeposit, USDCWithdrawal, GuardarianTransaction
+from usdc_transactions.admin import USDCDepositAdmin, USDCWithdrawalAdmin, GuardarianTransactionAdmin
 confio_admin_site.register(USDCDeposit, USDCDepositAdmin)
 confio_admin_site.register(USDCWithdrawal, USDCWithdrawalAdmin)
+confio_admin_site.register(GuardarianTransaction, GuardarianTransactionAdmin)
 
 # Presale models
 from presale.models import PresalePhase, PresalePurchase, PresaleStats, UserPresaleLimit, PresaleSettings, PresaleWaitlist

@@ -247,6 +247,64 @@ def handle_usdc_deposit_save(sender, instance, created, **kwargs):
             instance.amount,
         )
 
+    # --- Guardarian Matching Logic ---
+    # When a deposit is completed, check if it matches a pending Guardarian transaction
+    if instance.status == 'COMPLETED' and instance.actor_user and not hasattr(instance, 'guardarian_source'):
+        try:
+            from .models import GuardarianTransaction
+            from datetime import timedelta
+            
+            # Look for pending Guardarian transactions for this user created in the last 48 hours
+            # that don't have an on-chain deposit linked yet.
+            recent_time = timezone.now() - timedelta(hours=48)
+            
+            # Find candidate: Same user, created recently, status is confirmed/exchanging/sending/finished
+            # Note: Guardarian status might be 'sending' or 'finished' when deposit hits.
+            candidates = GuardarianTransaction.objects.filter(
+                user=instance.actor_user,
+                created_at__gte=recent_time,
+                onchain_deposit__isnull=True
+            ).exclude(
+                status__in=['failed', 'refunded', 'expired']
+            )
+            
+            matched_tx = None
+            
+            # Strategy 1: Exact match on to_amount_actual (best)
+            matched_tx = candidates.filter(to_amount_actual=instance.amount).first()
+            
+            # Strategy 2: If no exact match, try fuzzy match on estimated amount (within 1%)
+            # Only if to_amount_actual is missing
+            if not matched_tx:
+                for tx in candidates:
+                    if tx.to_amount_actual:
+                        continue # Should have matched above if amount was exact
+                        
+                    # Use estimated amount
+                    if tx.to_amount_estimated:
+                        # 5% tolerance (rates vary by country)
+                        tolerance = tx.to_amount_estimated * Decimal('0.05')
+                        diff = abs(tx.to_amount_estimated - instance.amount)
+                        if diff <= tolerance:
+                            matched_tx = tx
+                            break
+            
+            if matched_tx:
+                logger.info(f"Matched On-Chain Deposit {instance.deposit_id} to Guardarian Tx {matched_tx.guardarian_id}")
+                
+                # Link them
+                matched_tx.onchain_deposit = instance
+                
+                # If Guardarian status is not yet 'finished', mark it related?
+                # Actually, if on-chain is confirmed, we can consider the flow complete from our side.
+                # But we should respect Guardarian's own status for that field.
+                # We just link them for now.
+                
+                matched_tx.save()
+                
+        except Exception as e:
+            logger.error(f"Error matching Guardarian transaction: {e}")
+
 
 @receiver(post_save, sender=USDCWithdrawal)
 def handle_usdc_withdrawal_save(sender, instance, created, **kwargs):

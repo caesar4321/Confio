@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.utils.html import format_html
 from django.urls import reverse
-from .models import USDCDeposit, USDCWithdrawal
+from .models import USDCDeposit, USDCWithdrawal, GuardarianTransaction
 from .models_unified import UnifiedUSDCTransactionTable
 
 
@@ -59,6 +59,57 @@ class USDCWithdrawalAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         })
     )
+
+
+@admin.register(GuardarianTransaction)
+class GuardarianTransactionAdmin(admin.ModelAdmin):
+    list_display = ['guardarian_id', 'user', 'amount_display', 'status_display', 'created_at', 'external_id']
+    list_filter = ['status', 'from_currency', 'to_currency', 'created_at']
+    search_fields = ['guardarian_id', 'external_id', 'user__email', 'user__name']
+    readonly_fields = ['guardarian_id', 'external_id', 'created_at', 'updated_at']
+    ordering = ['-created_at']
+    
+    fieldsets = (
+        ('Transaction Info', {
+            'fields': ('guardarian_id', 'external_id', 'status', 'status_details')
+        }),
+        ('User Info', {
+            'fields': ('user',)
+        }),
+        ('Amounts', {
+            'fields': ('from_amount', 'from_currency', 'to_amount_estimated', 'to_amount_actual', 'to_currency', 'network')
+        }),
+        ('Linking', {
+            'fields': ('onchain_deposit',)
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at')
+        })
+    )
+
+    def amount_display(self, obj):
+        return f"{obj.from_amount} {obj.from_currency} -> {obj.to_amount_actual or obj.to_amount_estimated or '?'} {obj.to_currency}"
+    amount_display.short_description = "Conversion"
+
+    def status_display(self, obj):
+        colors = {
+            'waiting': 'gray',
+            'pending': 'orange',
+            'confirmed': 'blue',
+            'exchanging': 'purple',
+            'sending': 'teal',
+            'finished': 'green',
+            'failed': 'red',
+            'refunded': 'brown',
+            'hold': 'red',
+            'expired': 'black',
+        }
+        return format_html(
+            '<span style="color: {}; font-weight: bold;">{}</span>',
+            colors.get(obj.status, 'black'),
+            obj.status.upper()
+        )
+    status_display.short_description = "Status"
 
 
 @admin.register(UnifiedUSDCTransactionTable)
