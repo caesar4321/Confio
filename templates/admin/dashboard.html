@@ -528,7 +528,8 @@
 
     {% if presale_active %}
     <!-- Active Presale Phase -->
-    <h3 style="font-size: 20px; color: #1f2937; margin-bottom: 16px;">📊 Active Phase {{ presale_phase }}: {{ presale_name }}</h3>
+    <h3 style="font-size: 20px; color: #1f2937; margin-bottom: 16px;">📊 Active Phase {{ presale_phase }}: {{
+        presale_name }}</h3>
     <div class="metrics-grid">
         <div class="metric-card">
             <div class="metric-label">Total Raised</div>
@@ -610,7 +611,8 @@
                             style="background: #8b5cf6; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">UPCOMING</span>
                         {% else %}
                         <span
-                            style="background: #6b7280; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">{{ phase.status|upper }}</span>
+                            style="background: #6b7280; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">{{
+                            phase.status|upper }}</span>
                         {% endif %}
                     </td>
                     <td style="padding: 12px; text-align: right;">${{ phase.total_raised|floatformat:2|intcomma }}</td>
@@ -976,7 +978,8 @@
                 <tr>
                     <td><a href="{% url 'confio_admin:p2p_exchange_p2pdispute_change' dispute.id %}">#{{ dispute.id
                             }}</a></td>
-                    <td><a href="{% url 'confio_admin:p2p_exchange_p2ptrade_change' dispute.trade.id %}">Trade #{{ dispute.trade.id }}</a></td>
+                    <td><a href="{% url 'confio_admin:p2p_exchange_p2ptrade_change' dispute.trade.id %}">Trade #{{
+                            dispute.trade.id }}</a></td>
                     <td>
                         {% if dispute.initiator_business %}🏢 {{ dispute.initiator_business.name }}
                         {% elif dispute.initiator_user %}👤 {{ dispute.initiator_user.username }}
@@ -1023,11 +1026,13 @@
                 {% if recent_verifications %}
                 {% for v in recent_verifications %}
                 <tr>
-                    <td>{% if v.obj.id %}<a href="/admin/security/identityverification/{{ v.obj.id }}/change/">#{{ v.obj.id }}</a>{% else %}-{% endif %}</td>
+                    <td>{% if v.obj.id %}<a href="/admin/security/identityverification/{{ v.obj.id }}/change/">#{{
+                            v.obj.id }}</a>{% else %}-{% endif %}</td>
                     <td><a href="{% url 'confio_admin:users_user_change' v.obj.user.id %}">{{ v.obj.user.username }}</a>
                     </td>
                     <td>{% if v.context == 'business' %}Business{% else %}Personal{% endif %}</td>
-                    <td>{% if v.business %}<a href="{% url 'confio_admin:users_business_change' v.business.id %}">{{ v.business.name }}</a>{% else %}-{% endif %}</td>
+                    <td>{% if v.business %}<a href="{% url 'confio_admin:users_business_change' v.business.id %}">{{
+                            v.business.name }}</a>{% else %}-{% endif %}</td>
                     <td>
                         {% if v.obj.status == 'pending' %}
                         <span class="status-badge pending">Pending</span>
@@ -1158,7 +1163,7 @@
 
     // V2 Safety Score Chart
     var safetyCtx = document.getElementById('safetyChart').getContext('2d');
-    var safetyPct = {{ security_stats.safe_v2_pct|default: "0" }};
+    var safetyPct = {{ security_stats.safe_v2_pct|default:"0" }};
     var safetyData = {
         labels: ['Safe (V2)', 'At Risk'],
         datasets: [{
