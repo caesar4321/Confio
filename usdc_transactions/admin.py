@@ -61,17 +61,35 @@ class USDCWithdrawalAdmin(admin.ModelAdmin):
     )
 
 
+class TransactionTypeFilter(admin.SimpleListFilter):
+    title = 'Transaction Type'
+    parameter_name = 'tx_type'
+
+    def lookups(self, request, model_admin):
+        return (
+            ('buy', 'Buy (Fiat -> USDC)'),
+            ('sell', 'Sell (USDC -> Fiat)'),
+        )
+
+    def queryset(self, request, queryset):
+        if self.value() == 'buy':
+            return queryset.exclude(from_currency__in=['USDC', 'USDT', 'BTC', 'ETH', 'ALGO'])
+        if self.value() == 'sell':
+            return queryset.filter(from_currency__in=['USDC', 'USDT', 'BTC', 'ETH', 'ALGO'])
+        return queryset
+
+
 @admin.register(GuardarianTransaction)
 class GuardarianTransactionAdmin(admin.ModelAdmin):
-    list_display = ['guardarian_id', 'user', 'amount_display', 'status_display', 'created_at', 'external_id']
-    list_filter = ['status', 'from_currency', 'to_currency', 'created_at']
+    list_display = ['guardarian_id', 'transaction_direction', 'user', 'amount_display', 'status_display', 'onchain_status', 'created_at']
+    list_filter = [TransactionTypeFilter, 'status', 'from_currency', 'created_at']
     search_fields = ['guardarian_id', 'external_id', 'user__email', 'user__name']
     readonly_fields = ['guardarian_id', 'external_id', 'created_at', 'updated_at']
     ordering = ['-created_at']
     
     fieldsets = (
         ('Transaction Info', {
-            'fields': ('guardarian_id', 'external_id', 'status', 'status_details')
+            'fields': ('guardarian_id', 'external_id', 'transaction_direction', 'status', 'status_details')
         }),
         ('User Info', {
             'fields': ('user',)
@@ -80,12 +98,30 @@ class GuardarianTransactionAdmin(admin.ModelAdmin):
             'fields': ('from_amount', 'from_currency', 'to_amount_estimated', 'to_amount_actual', 'to_currency', 'network')
         }),
         ('Linking', {
-            'fields': ('onchain_deposit',)
+            'fields': ('onchain_deposit', 'onchain_withdrawal')
         }),
         ('Timestamps', {
             'fields': ('created_at', 'updated_at')
         })
     )
+
+    def transaction_direction(self, obj):
+        direction = obj.transaction_type.upper()
+        if direction == 'SELL':
+            return format_html('<span style="color: orange; font-weight: bold;">SELL</span>')
+        return format_html('<span style="color: green; font-weight: bold;">BUY</span>')
+    transaction_direction.short_description = "Type"
+
+    def onchain_status(self, obj):
+        if obj.transaction_type == 'buy':
+            if obj.onchain_deposit:
+                return format_html('<span style="color: green;">✔ Linked Deposit</span>')
+            return format_html('<span style="color: red;">Not Linked</span>')
+        else:
+            if obj.onchain_withdrawal:
+                 return format_html('<span style="color: green;">✔ Linked Withdrawal</span>')
+            return format_html('<span style="color: red;">Not Linked</span>')
+    onchain_status.short_description = "On-Chain Link"
 
     def amount_display(self, obj):
         return f"{obj.from_amount} {obj.from_currency} -> {obj.to_amount_actual or obj.to_amount_estimated or '?'} {obj.to_currency}"
