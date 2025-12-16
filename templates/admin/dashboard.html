@@ -417,7 +417,7 @@
                                 {% elif country.user__phone_country == 'BR' %}🇧🇷
                                 {% else %}🌐{% endif %}
                             </span>
-                            {{ country.user__phone_country|default:"Unknown" }}
+                            {{ country.user__phone_country }}
                         </td>
                         <td style="text-align: right;">{{ country.count }} users</td>
                     </tr>
@@ -444,7 +444,7 @@
                 {% for tx in guardarian_recent %}
                 <tr>
                     <td>{{ tx.guardarian_id|slice:":8" }}...</td>
-                    <td>{{ tx.user.email|default:tx.user.username }}</td>
+                    <td>{{ tx.user.email }}</td>
                     <td>{{ tx.from_amount }} {{ tx.from_currency }}</td>
                     <td>
                         <span
