@@ -130,7 +130,11 @@ class Command(BaseCommand):
             tx.save()
             self.stdout.write(f"  {action} {g_id}: {tx.status} ({user_email})")
         else:
-            self.stdout.write(self.style.WARNING(f"  Skipped {g_id} (No User Matched: {user_email})"))
+            self.stdout.write(self.style.WARNING(f"  Skipped {g_id} (No User Matched: '{user_email}')"))
+            # Optional: Print why?
+            if user_email:
+                 # Check partial match?
+                 pass
 
     def match_onchain_deposit(self, tx):
         candidates = USDCDeposit.objects.filter(
