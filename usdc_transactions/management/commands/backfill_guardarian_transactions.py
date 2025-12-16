@@ -80,20 +80,30 @@ class Command(BaseCommand):
             if idx % 10 == 0:
                 self.stdout.write(f"  Progress: {idx}/{total}")
             
-            try:
-                data = self.fetch_single_transaction(g_id)
-                if not data:
-                    self.stdout.write(self.style.WARNING(f"  Tx {g_id}: Not found or API error"))
-                    continue
+            retries = 3
+            while retries > 0:
+                try:
+                    data = self.fetch_single_transaction(g_id)
+                    if data == 429:
+                        self.stdout.write(self.style.WARNING(f"  Rate limit hit for {g_id}. Waiting 5s..."))
+                        time.sleep(5)
+                        retries -= 1
+                        continue
                     
-                self.process_transaction(data)
-                updated_count += 1
-                
-                # Sleep briefly to avoid rate limits if any
-                time.sleep(0.1)
-                
-            except Exception as e:
-                self.stdout.write(self.style.ERROR(f"  Tx {g_id} error: {e}"))
+                    if not data:
+                        self.stdout.write(self.style.WARNING(f"  Tx {g_id}: Not found or API error"))
+                        break
+                        
+                    self.process_transaction(data)
+                    updated_count += 1
+                    
+                    # Sleep to respect rate limits
+                    time.sleep(1.0)
+                    break
+                    
+                except Exception as e:
+                    self.stdout.write(self.style.ERROR(f"  Tx {g_id} error: {e}"))
+                    break
 
         self.stdout.write(self.style.SUCCESS(f"Backfill complete. Processed {updated_count}/{total} transactions."))
 
@@ -105,6 +115,8 @@ class Command(BaseCommand):
              resp = requests.get(url, headers={'x-api-key': api_key}, timeout=10)
              if resp.ok:
                  return resp.json()
+             elif resp.status_code == 429:
+                 return 429
              else:
                  self.stdout.write(f"  API Error for {g_id}: {resp.status_code}")
         except Exception as e:
