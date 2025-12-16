@@ -176,8 +176,15 @@ class Command(BaseCommand):
              if tx.user: has_user = True
         except Exception: pass
 
-        if has_user and tx.status == 'finished' and not tx.onchain_deposit:
-             self.match_onchain_deposit(tx)
+        if has_user and tx.status == 'finished':
+             if tx.transaction_type == 'buy' and not tx.onchain_deposit:
+                 matched = tx.attempt_match_deposit()
+                 if matched:
+                     self.stdout.write(self.style.SUCCESS(f"    Matched Deposit: {matched.deposit_id}"))
+             elif tx.transaction_type == 'sell' and not tx.onchain_withdrawal:
+                 matched = tx.attempt_match_withdrawal()
+                 if matched:
+                     self.stdout.write(self.style.SUCCESS(f"    Matched Withdrawal: {matched.withdrawal_id}"))
             
         if has_user:
             tx.save()
@@ -185,28 +192,4 @@ class Command(BaseCommand):
         else:
             self.stdout.write(self.style.WARNING(f"  Skipped {g_id} (No User Matched: '{user_email}')"))
 
-    def match_onchain_deposit(self, tx):
-        candidates = USDCDeposit.objects.filter(
-            actor_user=tx.user,
-            status='COMPLETED',
-            guardarian_source__isnull=True
-        ).order_by('-created_at')
-        
-        matched_dep = None
-        
-        # Strategy 1: Exact
-        if tx.to_amount_actual:
-            matched_dep = candidates.filter(amount=tx.to_amount_actual).first()
-            
-        # Strategy 2: Fuzzy (5%)
-        if not matched_dep and tx.to_amount_estimated:
-            tolerance = tx.to_amount_estimated * Decimal('0.05')
-            for dep in candidates:
-                diff = abs(tx.to_amount_estimated - dep.amount)
-                if diff <= tolerance:
-                    matched_dep = dep
-                    break
-        
-        if matched_dep:
-            tx.onchain_deposit = matched_dep
-            self.stdout.write(self.style.SUCCESS(f"    Matched Deposit: {matched_dep.deposit_id}"))
+

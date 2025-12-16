@@ -289,14 +289,24 @@ class GuardarianTransaction(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='waiting')
     status_details = models.TextField(blank=True, null=True, help_text='Additional status info or error message')
     
-    # Link to on-chain deposit if matched
+    # Link to on-chain deposit if matched (BUY)
     onchain_deposit = models.OneToOneField(
         USDCDeposit,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
         related_name='guardarian_source',
-        help_text='Matched on-chain deposit'
+        help_text='Matched on-chain deposit (Buy)'
+    )
+    
+    # Link to on-chain withdrawal if matched (SELL)
+    onchain_withdrawal = models.OneToOneField(
+        USDCWithdrawal,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='guardarian_dest',
+        help_text='Matched on-chain withdrawal (Sell)'
     )
     
     # Timestamps
@@ -316,16 +326,27 @@ class GuardarianTransaction(models.Model):
         ]
         
     def __str__(self):
-        return f"Guardarian {self.guardarian_id} ({self.status}) - {self.from_amount} {self.from_currency}"
+        direction = "BUY" if self.transaction_type == 'buy' else "SELL"
+        return f"Guardarian {direction} {self.guardarian_id} ({self.status}) - {self.from_amount} {self.from_currency}"
 
+
+    @property
+    def transaction_type(self):
+        """
+        Determine if this is a BUY (Fiat->Crypto) or SELL (Crypto->Fiat).
+        Logic: If from_currency is USDC (or crypto), it's a SELL.
+        """
+        if self.from_currency and self.from_currency.upper() in ['USDC', 'USDT', 'BTC', 'ETH', 'ALGO']:
+             return 'sell'
+        return 'buy'
 
     def attempt_match_deposit(self):
         """
-        Attempt to link this Guardarian transaction to an on-chain USDCDeposit.
-        Strategy:
-        1. Exact match on 'to_amount_actual' (if known) and 'amount'
-        2. Fuzzy match (5% tolerance) on 'to_amount_estimated' vs 'amount'
+        Attempt to link a BUY transaction to an USDCDeposit.
         """
+        if self.transaction_type != 'buy':
+            return None
+            
         if self.onchain_deposit:
             return self.onchain_deposit
             
@@ -354,6 +375,51 @@ class GuardarianTransaction(models.Model):
             self.onchain_deposit = matched_dep
             self.save(update_fields=['onchain_deposit', 'updated_at'])
             return matched_dep
+            
+        return None
+
+    def attempt_match_withdrawal(self):
+        """
+        Attempt to link a SELL transaction to an USDCWithdrawal.
+        For Sell: User sends USDC -> Guardarian.
+        So we look for a COMPLETED USDCWithdrawal from this user.
+        Amount check: 'from_amount' is what user sent (e.g. 20 USDC).
+        """
+        if self.transaction_type != 'sell':
+            return None
+            
+        if self.onchain_withdrawal:
+            return self.onchain_withdrawal
+            
+        # Candidates: Withdrawals by this user, not yet linked
+        candidates = USDCWithdrawal.objects.filter(
+            actor_user=self.user,
+            status='COMPLETED',
+            guardarian_dest__isnull=True
+        ).order_by('-created_at')
+        
+        matched_wd = None
+        
+        # Guardarian 'from_amount' is the Crypto amount user sent
+        crypto_amount = self.from_amount
+        
+        if crypto_amount > 0:
+            # Strategy 1: Exact Match
+            matched_wd = candidates.filter(amount=crypto_amount).first()
+            
+            # Strategy 2: Fuzzy Match (1% tolerance for fees/rounding)
+            if not matched_wd:
+                tolerance = crypto_amount * Decimal('0.01')
+                for wd in candidates:
+                    diff = abs(crypto_amount - wd.amount)
+                    if diff <= tolerance:
+                        matched_wd = wd
+                        break
+        
+        if matched_wd:
+            self.onchain_withdrawal = matched_wd
+            self.save(update_fields=['onchain_withdrawal', 'updated_at'])
+            return matched_wd
             
         return None
 
