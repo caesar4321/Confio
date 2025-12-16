@@ -36,6 +36,8 @@ def poll_guardarian_transactions():
         logger.error("GUARDARIAN_API_KEY not configured")
         return "Missing API Key"
 
+    import time # Import locally to avoid top-level impact
+    
     updated_count = 0
     
     for tx in pending_txs:
@@ -44,6 +46,10 @@ def poll_guardarian_transactions():
             url = f'{base_url.rstrip("/")}/transaction/{tx.guardarian_id}'
             resp = requests.get(url, headers={'x-api-key': api_key}, timeout=10)
             
+            if resp.status_code == 429:
+                logger.warning("Guardarian rate limit hit during poll. Stopping cycle.")
+                break
+
             if not resp.ok:
                 logger.warning(f"Guardarian poll failed for {tx.guardarian_id}: {resp.status_code}")
                 continue
@@ -67,12 +73,12 @@ def poll_guardarian_transactions():
                 logger.info(f"Updated Guardarian Tx {tx.guardarian_id}: {old_status} -> {new_status}")
                 updated_count += 1
                 
-                # If transaction became finished/completed, try to match with on-chain deposit
+                # Link deposit if finished
                 if new_status == 'finished' and not tx.onchain_deposit:
-                    # Logic to attempt matching with USDCDeposit (optional, as On-chain listener is primary)
-                    # We leave the hard matching to the on-chain listener or a separate reconciliation task,
-                    # but we can try a best-effort link here if the deposit already exists.
-                    pass 
+                    tx.attempt_match_deposit()
+
+            # Sleep to respect rate limits (basic throttle)
+            time.sleep(1.0)
 
         except Exception as e:
             logger.error(f"Error polling Guardarian Tx {tx.guardarian_id}: {e}")

@@ -319,5 +319,43 @@ class GuardarianTransaction(models.Model):
         return f"Guardarian {self.guardarian_id} ({self.status}) - {self.from_amount} {self.from_currency}"
 
 
+    def attempt_match_deposit(self):
+        """
+        Attempt to link this Guardarian transaction to an on-chain USDCDeposit.
+        Strategy:
+        1. Exact match on 'to_amount_actual' (if known) and 'amount'
+        2. Fuzzy match (5% tolerance) on 'to_amount_estimated' vs 'amount'
+        """
+        if self.onchain_deposit:
+            return self.onchain_deposit
+            
+        candidates = USDCDeposit.objects.filter(
+            actor_user=self.user,
+            status='COMPLETED',
+            guardarian_source__isnull=True
+        ).order_by('-created_at')
+        
+        matched_dep = None
+        
+        # Strategy 1: Exact Match (High Confidence)
+        if self.to_amount_actual:
+            matched_dep = candidates.filter(amount=self.to_amount_actual).first()
+            
+        # Strategy 2: Fuzzy Match (Medium Confidence)
+        if not matched_dep and self.to_amount_estimated:
+            tolerance = self.to_amount_estimated * Decimal('0.05')
+            for dep in candidates:
+                diff = abs(self.to_amount_estimated - dep.amount)
+                if diff <= tolerance:
+                    matched_dep = dep
+                    break
+                    
+        if matched_dep:
+            self.onchain_deposit = matched_dep
+            self.save(update_fields=['onchain_deposit', 'updated_at'])
+            return matched_dep
+            
+        return None
+
 # Import new table models
 from .models_unified import UnifiedUSDCTransactionTable
