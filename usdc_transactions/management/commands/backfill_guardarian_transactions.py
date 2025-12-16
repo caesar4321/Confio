@@ -118,14 +118,19 @@ class Command(BaseCommand):
         raw_email = data.get('email') or (data.get('customer') or {}).get('contact_info', {}).get('email')
         user_email = raw_email.strip().lower() if raw_email else None
         
-        self.stdout.write(f"  Debug {g_id}: API Email='{user_email}' (Raw='{raw_email}')")
+        self.stdout.write(f"  Debug {g_id}: API Email='{user_email}' Type={type(user_email)} (Raw='{raw_email}')")
         
         if user_email and not tx.user:
              user = User.objects.filter(email__iexact=user_email).first()
              if user:
                  tx.user = user
+                 self.stdout.write(f"    -> MATCHED User: {user.email}")
              else:
-                 self.stdout.write(f"  Debug {g_id}: No user found for '{user_email}'")
+                 self.stdout.write(f"  Debug {g_id}: No user found for '{user_email}' repr={repr(user_email)}")
+                 # Brute force check in loop for debugging
+                 if 'plac' in user_email:
+                     x = User.objects.filter(email__iexact='placidocastellanos@hotmail.com').exists()
+                     self.stdout.write(f"    -> Direct DB check for 'placidocastellanos@hotmail.com': {x}")
         
         # Match OnChain Deposit
         if tx.user and tx.status == 'finished' and not tx.onchain_deposit:
