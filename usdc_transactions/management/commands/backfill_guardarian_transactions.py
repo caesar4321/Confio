@@ -115,8 +115,10 @@ class Command(BaseCommand):
             tx.external_id = data.get('external_partner_link_id')
 
         # Link User
-        user_email = data.get('email') or (data.get('customer') or {}).get('contact_info', {}).get('email')
-        self.stdout.write(f"  Debug {g_id}: API Email='{user_email}'")
+        raw_email = data.get('email') or (data.get('customer') or {}).get('contact_info', {}).get('email')
+        user_email = raw_email.strip().lower() if raw_email else None
+        
+        self.stdout.write(f"  Debug {g_id}: API Email='{user_email}' (Raw='{raw_email}')")
         
         if user_email and not tx.user:
              user = User.objects.filter(email__iexact=user_email).first()
