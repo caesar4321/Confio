@@ -417,22 +417,57 @@ class ConfioAdminSite(admin.AdminSite):
         
         # Volume (Successful only - USDC)
         guardarian_volume = GuardarianTransaction.objects.filter(
-            status='finished'
+            onchain_deposit__isnull=False
         ).aggregate(total=Sum('to_amount_actual'))['total'] or Decimal('0')
         
         # Transaction Counts
         guardarian_total = GuardarianTransaction.objects.count()
-        guardarian_finished = GuardarianTransaction.objects.filter(status='finished').count()
-        guardarian_success_rate = (guardarian_finished / guardarian_total * 100) if guardarian_total > 0 else 0
+        
+        # KPI 2: Provider Completion (Guardarian says finished)
+        provider_completed_count = GuardarianTransaction.objects.filter(status='finished').count()
+        
+        # KPI 1: On-chain Completion (We received USDC)
+        onchain_completed_count = GuardarianTransaction.objects.filter(onchain_deposit__isnull=False).count()
+        
+        # Abandoned/Idle Logic (Grey Box)
+        # "Active" but older than 1 hour = Abandoned (Window Shopping)
+        one_hour_ago = timezone.now() - timedelta(hours=1)
+        active_states = ['new', 'waiting', 'pending', 'sending', 'exchanging']
+        
+        abandoned_count = GuardarianTransaction.objects.filter(
+            status__in=active_states,
+            created_at__lt=one_hour_ago
+        ).count()
+        
+        # Real Active (In Progress < 1h)
+        real_active_count = GuardarianTransaction.objects.filter(
+            status__in=active_states,
+            created_at__gte=one_hour_ago
+        ).count()
+
+        # Breakdown buckets
+        failed_count = GuardarianTransaction.objects.filter(status='failed').count()
+        expired_count = GuardarianTransaction.objects.filter(status='expired').count()
+        refunded_count = GuardarianTransaction.objects.filter(status='refunded').count()
+        hold_count = GuardarianTransaction.objects.filter(status='hold').count()
+
+        # Rates
+        onchain_rate = (onchain_completed_count / guardarian_total * 100) if guardarian_total > 0 else 0
+        provider_rate = (provider_completed_count / guardarian_total * 100) if guardarian_total > 0 else 0
         
         context['guardarian_stats'] = {
             'volume': guardarian_volume,
-            'total_count': guardarian_total,
-            'finished_count': guardarian_finished,
-            'success_rate': guardarian_success_rate,
-            'waiting_count': GuardarianTransaction.objects.filter(
-                status__in=['new', 'waiting', 'pending', 'sending', 'exchanging']
-            ).count(),
+            'total_sessions': guardarian_total,
+            'onchain_completed': onchain_completed_count,
+            'provider_completed': provider_completed_count,
+            'onchain_rate': onchain_rate,
+            'provider_rate': provider_rate,
+            'abandoned_count': abandoned_count,
+            'real_active_count': real_active_count,
+            'failed_count': failed_count,
+            'expired_count': expired_count,
+            'refunded_count': refunded_count,
+            'hold_count': hold_count,
         }
         
         # Top Currencies (Successful only)
