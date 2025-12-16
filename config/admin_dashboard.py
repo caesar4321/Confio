@@ -445,7 +445,7 @@ class ConfioAdminSite(admin.AdminSite):
         context['guardarian_countries'] = GuardarianTransaction.objects.values(
             'user__phone_country'
         ).annotate(
-            count=Count('id')
+            count=Count('user', distinct=True)
         ).order_by('-count')[:5]
 
         # Recent Transactions

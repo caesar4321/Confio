@@ -410,6 +410,9 @@
                             <span class="country-flag">
                                 {% if country.user__phone_country == 'VE' %}🇻🇪
                                 {% elif country.user__phone_country == 'CO' %}🇨🇴
+                                {% elif country.user__phone_country == 'US' %}🇺🇸
+                                {% elif country.user__phone_country == 'GT' %}🇬🇹
+                                {% elif country.user__phone_country == 'ES' %}🇪🇸
                                 {% elif country.user__phone_country == 'AR' %}🇦🇷
                                 {% elif country.user__phone_country == 'MX' %}🇲🇽
                                 {% elif country.user__phone_country == 'PE' %}🇵🇪
@@ -1160,7 +1163,7 @@
 
     // V2 Safety Score Chart
     var safetyCtx = document.getElementById('safetyChart').getContext('2d');
-    var safetyPct = {{ security_stats.safe_v2_pct|default:"0" }};
+    var safetyPct = {{ security_stats.safe_v2_pct|default: "0" }};
     var safetyData = {
         labels: ['Safe (V2)', 'At Risk'],
         datasets: [{
