@@ -126,10 +126,13 @@ class Command(BaseCommand):
     def process_transaction(self, data):
         g_id = str(data.get('id'))
         
-        tx, created = GuardarianTransaction.objects.get_or_create(
-            guardarian_id=g_id,
-        )
-        
+        try:
+            tx = GuardarianTransaction.objects.get(guardarian_id=g_id)
+            created = False
+        except GuardarianTransaction.DoesNotExist:
+            tx = GuardarianTransaction(guardarian_id=g_id)
+            created = True
+            
         action = "Created" if created else "Updated"
         
         # Update fields
@@ -137,17 +140,18 @@ class Command(BaseCommand):
         
         if data.get('from_amount') is not None:
             tx.from_amount = Decimal(str(data.get('from_amount')))
-        else:
-            if created:
-                tx.from_amount = Decimal('0')
+        elif created:
+            tx.from_amount = Decimal('0')
                 
         if data.get('to_amount'):
             tx.to_amount_actual = Decimal(str(data.get('to_amount')))
         if data.get('expected_to_amount'):
              tx.to_amount_estimated = Decimal(str(data.get('expected_to_amount')))
 
-        tx.from_currency = data.get('from_currency')
-        if not tx.from_currency and created:
+        # Use fetched currency or keep existing
+        if data.get('from_currency'):
+            tx.from_currency = data.get('from_currency')
+        elif created and not tx.from_currency:
             tx.from_currency = 'USD' # Default
             
         tx.to_currency = data.get('to_currency') or 'USDC'
