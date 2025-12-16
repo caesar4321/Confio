@@ -311,6 +311,55 @@ def handle_usdc_withdrawal_save(sender, instance, created, **kwargs):
     """Create/update unified USDC transaction when USDCWithdrawal is saved"""
     create_unified_usdc_transaction_from_withdrawal(instance)
 
+    # --- Guardarian Sell Matching Logic ---
+    # When a withdrawal is completed, check if it matches a pending Guardarian Sell transaction
+    if instance.status == 'COMPLETED' and instance.actor_user and not hasattr(instance, 'guardarian_dest'):
+        try:
+            from .models import GuardarianTransaction
+            from datetime import timedelta
+            
+            # Look for pending Guardarian SELL transactions for this user created in the last 48 hours
+            recent_time = timezone.now() - timedelta(hours=48)
+            
+            # Candidates: User match, recent, no withdrawal linked yet
+            candidates = GuardarianTransaction.objects.filter(
+                user=instance.actor_user,
+                created_at__gte=recent_time,
+                onchain_withdrawal__isnull=True
+            ).exclude(
+                status__in=['failed', 'refunded', 'expired']
+            )
+            
+            matched_tx = None
+            
+            for tx in candidates:
+                # Must be a SELL transaction
+                if tx.transaction_type != 'sell':
+                    continue
+                    
+                # Guardarian 'from_amount' is the Crypto amount user sent
+                crypto_amount = tx.from_amount
+                
+                if crypto_amount > 0:
+                    # Strategy 1: Exact Match on sent amount
+                    if crypto_amount == instance.amount:
+                        matched_tx = tx
+                        break
+                    
+                    # Strategy 2: Fuzzy Match (1% tolerance)
+                    tolerance = crypto_amount * Decimal('0.01')
+                    if abs(crypto_amount - instance.amount) <= tolerance:
+                        matched_tx = tx
+                        break
+            
+            if matched_tx:
+                logger.info(f"Matched On-Chain Withdrawal {instance.withdrawal_id} to Guardarian Sell Tx {matched_tx.guardarian_id}")
+                matched_tx.onchain_withdrawal = instance
+                matched_tx.save()
+                
+        except Exception as e:
+            logger.error(f"Error matching Guardarian Sell transaction: {e}")
+
 
 @receiver(post_save, sender=Conversion)
 def handle_conversion_save_for_usdc(sender, instance, created, **kwargs):
