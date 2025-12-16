@@ -16,7 +16,7 @@ def poll_guardarian_transactions():
     Strategy: Check transactions created in the last 24 hours that are not in a final state.
     """
     # Active states that need polling
-    active_states = ['waiting', 'pending', 'confirmed', 'exchanging', 'sending']
+    active_states = ['new', 'waiting', 'pending', 'confirmed', 'exchanging', 'sending']
     
     # Time window: last 24 hours (generous window)
     time_threshold = timezone.now() - timedelta(hours=24)

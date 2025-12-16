@@ -430,7 +430,9 @@ class ConfioAdminSite(admin.AdminSite):
             'total_count': guardarian_total,
             'finished_count': guardarian_finished,
             'success_rate': guardarian_success_rate,
-            'waiting_count': GuardarianTransaction.objects.filter(status='waiting').count(),
+            'waiting_count': GuardarianTransaction.objects.filter(
+                status__in=['new', 'waiting', 'pending', 'sending', 'exchanging']
+            ).count(),
         }
         
         # Top Currencies (Successful only)
