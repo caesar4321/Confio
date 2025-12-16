@@ -1137,77 +1137,176 @@
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js@2.9.4/dist/Chart.min.js"></script>
     <script>
-    document.addEventListener('DOMContent             {
-        // Growth T            ar growthCtx = document.getElementById('growthChart').getContext('2d');
-             a = {
-            l                ics_trend %}"{{ m.date|date:'M d' }}", {% endfor %}],
-        datasets: [
-                 el: 'DAU',
-             or                 backgroundCol                0.1)',
-            data:                end %}{{ m.dau }}, {% endfor %}],
-        po                ll: true
-            },
-        {
-            label: 'MAU',
-               : '#10b981',
-               olor: 'transparent',
-                 5,                {% for m in me                }, {% endfor %}],
-                        fill: false
+        document.addEventListener('DOMContentLoaded', function () {
+            // Growth Trend Chart
+            var growthCtx = document.getElementById('growthChart').getContext('2d');
+            var growthData = {
+                labels: [{% for m in metrics_trend %}"{{ m.date|date:'M d' }}", {% endfor %}],
+            datasets: [
+            {
+                label: 'DAU',
+                borderColor: '#8b5cf6',
+                backgroundColor: 'rgba(139, 92, 246, 0.1)',
+                data: [{% for m in metrics_trend %}{{ m.dau }}, {% endfor %}],
+            pointRadius: 2,
+            fill: true
+                    },
+            {
+                label: 'MAU',
+                borderColor: '#10b981',
+                backgroundColor: 'transparent',
+                borderDash: [5, 5],
+                data: [{% for m in metrics_trend %}{{ m.mau }}, {% endfor %}],
+            pointRadius: 0,
+            fill: false
+                    }
+                ]
+            };
+        new Chart(growthCtx, {
+            type: 'line',
+            data: growthData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                tooltips: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                scales: {
+                    yAxes: [{
+                        ticks: { beginAtZero: true },
+                        gridLines: { color: "rgba(0, 0, 0, 0.05)" }
+                    }],
+                    xAxes: [{
+                        gridLines: { display: false },
+                        ticks: { maxTicksLimit: 10 }
+                    }]
+                }
             }
-                    rt(growthCtx, {
-                      data: growthData,
-        options: {
-            responsive:             intainAspectRati              tooltips: {
-                mode: 'index'          intersect: false,
-                   scales: {
-            s: [{
-                        inAtZero: t                   gridLines: { co                )" }
-                }],
-                                                    false },
-                         icksLimit: 10 }
-                                        // Coun                     = documen                        .getContext('2d');
-    var cou                         for c in top_countries_metrics %}"{{ c.coun                    
-                       [{% for c                         mau }}, {% endfor %}],
-                                #3b82f6', '#10b981', '#f59e0b                                       1'            6'            ]        };
-    new Chart(              type: 'doughnut',
-        data: countryData,
-        options: {
-             e: true,
-                       : false,
-            legend: {
-                position: 'bottom',
-                l        h: 12 }
-                    });
+        });
+
+        // Country Chart
+        var countryCtx = document.getElementById('countryChart').getContext('2d');
+        var countryData = {
+            labels: [{% for c in top_countries_metrics %}"{{ c.country_code }}", {% endfor %}],
+        datasets: [{
+            data: [{% for c in top_countries_metrics %}{{ c.mau }}, {% endfor %}],
+            backgroundColor: [
+                '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
+                '#ec4899', '#6366f1', '#14b8a6', '#f97316', '#a855f7'
+            ]
+                }]
+            };
+        new Chart(countryCtx, {
+            type: 'doughnut',
+            data: countryData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                legend: {
+                    position: 'bottom',
+                    labels: { boxWidth: 12 }
+                }
+            }
+        });
+
+        // OS Distribution Chart
+        var osCtx = document.getElementById('osChart').getContext('2d');
+        var osData = {
+            labels: ['iOS', 'Android'],
+            datasets: [{
+                data: [{{ os_stats.ios_count }}, {{ os_stats.android_count }}],
+            backgroundColor: ['#007AFF', '#3DDC84']
+                }]
+            };
+        new Chart(osCtx, {
+            type: 'doughnut',
+            data: osData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                legend: {
+                    position: 'bottom',
+                    labels: { boxWidth: 12 }
+                }
+            }
+        });
+
+        // V2 Safety Score Chart
+        var safetyCtx = document.getElementById('safetyChart').getContext('2d');
+        var safetyPct = {{ security_stats.safe_v2_pct|default: "0" }};
+        var safetyData = {
+            labels: ['Safe (V2)', 'At Risk'],
+            datasets: [{
+                data: [safetyPct, 100 - safetyPct],
+                backgroundColor: ['#10b981', '#ef4444']
+            }]
+        };
+        new Chart(safetyCtx, {
+            type: 'doughnut',
+            data: safetyData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                legend: {
+                    position: 'bottom',
+                    labels: { boxWidth: 12 }
+                }
+            }
+        });
+        });
+    </script>
+    {% endblock %}
+    mode: 'index' intersect: false,
+    scales: {
+    s: [{
+    inAtZero: t gridLines: { co )" }
+    }],
+    false },
+    icksLimit: 10 }
+    // Coun = documen .getContext('2d');
+    var cou for c in top_countries_metrics %}"{{ c.coun
+    [{% for c mau }}, {% endfor %}],
+    #3b82f6', '#10b981', '#f59e0b 1' 6' ] };
+    new Chart( type: 'doughnut',
+    data: countryData,
+    options: {
+    e: true,
+    : false,
+    legend: {
+    position: 'bottom',
+    l h: 12 }
+    });
 
     // OS Distribution Chart
-    var osCtx = document.getElemen            Context('2d');
-                    abels: ['iOS', 'Android'],
-        datasets: [{
-                       ios_count }}, {{ os_stats.android_count }}],
-        b            07AFF', '#3DDC84']
-         
-    new Chart(osCtx, {
-            nut',
-        data            tions: {
-                                                 lse,
-            l                 position: 'bottom',
-                       dth: 12 }
-                    });
+    var osCtx = document.getElemen Context('2d');
+    abels: ['iOS', 'Android'],
+    datasets: [{
+    ios_count }}, {{ os_stats.android_count }}],
+    b 07AFF', '#3DDC84']
 
-    // V2 Safet                    Ctx = document.getElement                on            sa        urity        ct|default:"0" }};
-    va        
-        labels: ['Safe (V2)', 'At Risk'],
-        datasets: [{
-          [safetyPct, 10                    backgroundColor: ['#                    }]
-                  yCtx, {
-        type: 'doughnut',
-        data: safetyData,
-                       responsive: true,
-            maintainAspectRatio:            legend: {
-                  'bottom',
-                    xWidth: 12 }
-              }
+    new Chart(osCtx, {
+    nut',
+    data tions: {
+    lse,
+    l position: 'bottom',
+    dth: 12 }
     });
-});
+
+    // V2 Safet Ctx = document.getElement on sa urity ct|default:"0" }};
+    va
+    labels: ['Safe (V2)', 'At Risk'],
+    datasets: [{
+    [safetyPct, 10 backgroundColor: ['# }]
+    yCtx, {
+    type: 'doughnut',
+    data: safetyData,
+    responsive: true,
+    maintainAspectRatio: legend: {
+    'bottom',
+    xWidth: 12 }
+    }
+    });
+    });
     </script>
     {% endblock %}
