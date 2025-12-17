@@ -1812,7 +1812,10 @@ export const TransactionDetailScreen = () => {
                     employeeName: currentTx.employeeName || currentTx.recipient_name,
 
                     // FORCE internal ID for verification QR code (User Request)
-                    transactionHash: currentTx.transactionId || currentTx.id,
+                    // Must prioritize 'id' (Internal DB ID) over 'transactionId' (often Blockchain Hash)
+                    // Also override 'hash' to prevent TransactionReceiptScreen from using the blockchain hash
+                    transactionHash: currentTx.id || currentTx.transactionId,
+                    hash: currentTx.id || currentTx.transactionId,
                   },
                   type: currentTx.type === 'payroll' ? 'payroll' : (currentTx.type === 'payment' ? 'payment' : 'transfer')
                 });
@@ -2564,7 +2567,10 @@ export const TransactionDetailScreen = () => {
                       businessName: currentTx.businessName || currentTx.sender_name || 'Empresa',
 
                       // FORCE internal ID for verification QR code (User Request)
-                      transactionHash: currentTx.transactionId || currentTx.id || transactionData.transactionId,
+                      // Must prioritize 'id' (Internal DB ID) over 'transactionId' (often Blockchain Hash)
+                      // Also override 'hash' to prevent TransactionReceiptScreen from using the blockchain hash
+                      transactionHash: currentTx.id || currentTx.transactionId || transactionData.transactionId,
+                      hash: currentTx.id || currentTx.transactionId || transactionData.transactionId,
                     },
                     type: currentTx.type === 'payment' ? 'payment' : 'transfer'
                   });
