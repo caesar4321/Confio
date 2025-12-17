@@ -1352,8 +1352,13 @@ class SetBusinessDelegatesByEmployee(graphene.Mutation):
             return SetBusinessDelegatesByEmployee(success=False, errors=errors, unsigned_transaction_b64=None, transaction_hash=None)
 
         builder = PayrollTransactionBuilder(network=settings.ALGORAND_NETWORK)
-        try:
+        
+        # Determine sponsor address from settings
+        sponsor_address = settings.BLOCKCHAIN_CONFIG.get('ALGORAND_SPONSOR_ADDRESS')
+        if not sponsor_address:
+             return SetBusinessDelegatesByEmployee(success=False, errors=["Sponsor address not configured"], unsigned_transaction_b64=None, transaction_hash=None)
 
+        try:
             # Retry suggested_params up to 3 times to handle timeouts
             sp = None
             last_err = None
@@ -1369,13 +1374,26 @@ class SetBusinessDelegatesByEmployee(graphene.Mutation):
             if not sp:
                 raise last_err or Exception("Failed to get suggested params")
 
-            txn = builder.build_set_business_delegates(
+            # Build Atomic Group: [SponsorPay, BusinessAppCall]
+            txns = builder.build_set_business_delegates_group(
                 business_account=business_account,
                 add=list(add_set),
                 remove=list(remove_set),
+                sponsor_address=sponsor_address,
+                sponsor_amount=500_000, # 0.5 Algo funding
                 suggested_params=sp,
             )
-            unsigned_b64 = algo_encoding.msgpack_encode(txn)
+            # txns[0] is Sponsor Pay, txns[1] is Business App Call
+            
+            # Save the unsigned Business Transaction to return to client
+            # The client needs THIS exact transaction because it contains the group ID
+            unsigned_b64 = algo_encoding.msgpack_encode(txns[1])
+            
+            # We don't sign or save the sponsor txn here yet. We rebuild it on submit.
+            # But wait, if we rebuild it on submit, we must ensure we use the EXACT same params (fv, lv, gh, gen).
+            # The client will sign txns[1] which contains the group ID.
+            # When we receive signed txns[1], we extract its params and rebuild txns[0] with same params.
+            
         except Exception as e:
             try:
                 cls.logger.exception("[Payroll] set_business_delegates_by_employee build failed biz=%s add=%s remove=%s", business_account, add_set, remove_set)
@@ -1384,71 +1402,144 @@ class SetBusinessDelegatesByEmployee(graphene.Mutation):
             return SetBusinessDelegatesByEmployee(success=False, errors=[f"Build failed: {e}"], unsigned_transaction_b64=None, transaction_hash=None)
 
         if signed_transaction:
+                # Deterministic Reconstruction and Submission
             try:
+                # 1. Decode signed business transaction
                 stx_str = str(signed_transaction or "").strip()
                 stx_str = stx_str.replace('-', '+').replace('_', '/')
                 if len(stx_str) % 4 != 0:
                     stx_str = stx_str + ('=' * ((4 - (len(stx_str) % 4)) % 4))
-                stx_bytes = base64.b64decode(stx_str)
-            except Exception:
-                return SetBusinessDelegatesByEmployee(success=False, errors=["Invalid base64 transaction"], unsigned_transaction_b64=unsigned_b64, transaction_hash=None)
+                
+                # Note: algo_encoding.msgpack_decode expects a BASE64 STRING.
+                stx_bytes = base64.b64decode(stx_str) # Still needed for generic error check or later usage?
+                # Actually, we need stx_bytes only if we are concatenating raw bytes later.
+                
+                # Decode as SignedTransaction to get the inner Transaction
+                stx_obj = algo_encoding.msgpack_decode(stx_str)
+                if not hasattr(stx_obj, 'txn'):
+                     # Maybe it's just `transaction` object if not signed? No, argument says signed_transaction
+                     return SetBusinessDelegatesByEmployee(success=False, errors=["Invalid signed transaction format"], unsigned_transaction_b64=unsigned_b64, transaction_hash=None)
+                
+                business_txn = stx_obj.txn
+                group_id_bytes = business_txn.group
+                
+                if not group_id_bytes:
+                     return SetBusinessDelegatesByEmployee(success=False, errors=["Transaction is missing group ID"], unsigned_transaction_b64=unsigned_b64, transaction_hash=None)
 
-            try:
+                # 2. Rebuild Sponsor Transaction using parameters from Business Transaction
+                # Use standard SuggestParams structure populated from the received txn
+                from algosdk.transaction import SuggestedParams, PaymentTxn
+                
+                rebuilt_sp = SuggestedParams(
+                    fee=1000,
+                    first=business_txn.first_valid_round,
+                    last=business_txn.last_valid_round,
+                    gh=business_txn.genesis_hash,
+                    gen=business_txn.genesis_id,
+                    flat_fee=True
+                )
+                
+                sponsor_txn = PaymentTxn(
+                    sender=sponsor_address,
+                    sp=rebuilt_sp,
+                    receiver=business_account,
+                    amt=500_000, # Must match creation amount exactly
+                    note=b"Payroll Setup Sponsor" # Must match creation note exactly
+                )
+                sponsor_txn.group = group_id_bytes # Assign the Group ID directly
+                
+                # 3. Sign Sponsor Transaction
+                from blockchain.kms_manager import get_kms_signer_from_settings
+                signer = get_kms_signer_from_settings()
+                sponsor_stx = signer.sign_transaction_msgpack(sponsor_txn)
+                
+                # 4. Assemble Group: [SponsorSigned, BusinessSigned]
+                # Combine raw bytes: standard Algorand SDK broadcast expects concatenated binaries? 
+                # Or send_raw_transaction takes one blob? It takes concatenated blobs.
+                # Sponsor STX is msgpack bytes. Business STX is `stx_bytes`.
+                group_blob = base64.b64decode(sponsor_stx) + stx_bytes
+                
+                # 5. Broadcast
                 algod_client = builder.algod_client
-                stx_b64 = base64.b64encode(stx_bytes).decode('utf-8')
-                tx_id = algod_client.send_raw_transaction(stx_b64)
+                group_b64 = base64.b64encode(group_blob).decode('utf-8')
+                tx_id = algod_client.send_raw_transaction(group_b64)
+                
                 try:
-                    cls.logger.info("[Payroll] set_business_delegates_by_employee broadcast ok tx_id=%s biz=%s add=%s remove=%s", tx_id, business_account, add_set, remove_set)
+                    cls.logger.info("[Payroll] set_business_delegates_by_employee atomic broadcast ok tx_id=%s biz=%s", tx_id, business_account)
                 except Exception:
                     pass
 
-                # Automatically fund vault with ALGO for minimum balance requirements
+                # Automatically fund vault for minimum balance (separate from fee sponsorship)
                 try:
                     from blockchain.algorand_sponsor_service import algorand_sponsor_service
                     import asyncio
                     
-                    # Get app address (vault)
                     app_addr = algo_logic.get_application_address(settings.ALGORAND_PAYROLL_APP_ID)
                     
-                    # Check if vault needs funding
                     try:
                         vault_info = algod_client.account_info(app_addr)
                         current_balance = vault_info.get('amount', 0)
                         min_balance = vault_info.get('min-balance', 0)
                         
-                        if current_balance < min_balance + 500_000:  # Fund if below min + 0.5 ALGO buffer
-                            cls.logger.info("[Payroll] Auto-funding vault %s (current: %s, min: %s)", app_addr, current_balance, min_balance)
-                            
+                        if current_balance < min_balance + 500_000:
                             try:
                                 loop = asyncio.get_event_loop()
                             except RuntimeError:
                                 loop = asyncio.new_event_loop()
                                 asyncio.set_event_loop(loop)
                             
-                            fund_result = loop.run_until_complete(
-                                algorand_sponsor_service.fund_account(app_addr, 1_000_000)  # 1 ALGO
+                            loop.run_until_complete(
+                                algorand_sponsor_service.fund_account(app_addr, 1_000_000)
                             )
-                            
-                            if fund_result.get('success'):
-                                cls.logger.info("[Payroll] Vault auto-funded successfully: %s", fund_result.get('tx_id'))
-                            else:
-                                cls.logger.warning("[Payroll] Vault auto-funding failed: %s", fund_result.get('error'))
-                        else:
-                            cls.logger.info("[Payroll] Vault has sufficient balance (%s >= %s)", current_balance, min_balance)
                     except Exception as e:
                         cls.logger.warning("[Payroll] Could not check/fund vault: %s", e)
                 except Exception as e:
                     cls.logger.warning("[Payroll] Vault auto-funding error: %s", e)
+                
+                # The returned tx_id from a group is usually the ID of the first txn? 
+                # Or we can return the ID of the business txn (which is what we care about).
+                # Business txn ID is the hash of business_txn.
+                business_tx_id = business_txn.get_txid()
 
-                return SetBusinessDelegatesByEmployee(success=True, errors=None, unsigned_transaction_b64=unsigned_b64, transaction_hash=tx_id)
+                return SetBusinessDelegatesByEmployee(success=True, errors=None, unsigned_transaction_b64=unsigned_b64, transaction_hash=business_tx_id)
             except Exception as e:
                 try:
-                    cls.logger.exception("[Payroll] set_business_delegates_by_employee broadcast failed biz=%s add=%s remove=%s err=%s", business_account, add_set, remove_set, e)
+                    cls.logger.exception("[Payroll] set_business_delegates_by_employee broadcast failed biz=%s err=%s", business_account, e)
                 except Exception:
                     pass
                 return SetBusinessDelegatesByEmployee(success=False, errors=[f"Broadcast failed: {e}"], unsigned_transaction_b64=unsigned_b64, transaction_hash=None)
 
         return SetBusinessDelegatesByEmployee(success=True, errors=None, unsigned_transaction_b64=unsigned_b64, transaction_hash=None)
+
+
+
+def mask_string(s):
+    """Mask string (e.g. 'Julian' -> 'Ju****')"""
+    if not s or len(s) < 2:
+        return "****"
+    return f"{s[:2]}****"
+
+def mask_phone(phone):
+    """Mask phone (e.g. '1234567890' -> '******7890')"""
+    if not phone or len(phone) < 4:
+        return "****"
+    return f"******{phone[-4:]}"
+
+
+class VerifiedPayrollTransactionType(graphene.ObjectType):
+    is_valid = graphene.Boolean()
+    status = graphene.String()  # VALID, REVOKED, INVALID, ERROR
+    transaction_hash = graphene.String()
+    amount = graphene.String()
+    currency = graphene.String()
+    timestamp = graphene.DateTime()
+    
+    sender_name = graphene.String()
+    
+    recipient_name_masked = graphene.String()
+    recipient_phone_masked = graphene.String()
+    
+    verification_message = graphene.String()
 
 
 class Query(graphene.ObjectType):
@@ -1457,6 +1548,63 @@ class Query(graphene.ObjectType):
     payroll_recipients = graphene.List(PayrollRecipientType, description="Saved payroll recipients for the current business")
     payroll_delegates = graphene.List(graphene.String, description="Delegates for the current business account")
     payroll_vault_balance = graphene.Float(description="Balance of payroll vault for this business (token units)")
+
+    verify_payroll_transaction = graphene.Field(
+        VerifiedPayrollTransactionType,
+        transaction_hash=graphene.String(required=True)
+    )
+
+    def resolve_verify_payroll_transaction(self, info, transaction_hash):
+        try:
+            # Clean hash
+            tx_hash = str(transaction_hash).strip()
+            
+            # Find item
+            item = PayrollItem.objects.select_related(
+                'run__business', 
+                'recipient_user'
+            ).filter(
+                transaction_hash=tx_hash
+            ).first()
+
+            if not item:
+                return VerifiedPayrollTransactionType(
+                    is_valid=False,
+                    status='INVALID',
+                    verification_message="Transacción no encontrada en los registros de Confío."
+                )
+
+            # Check if revoked (deleted or failed/cancelled status)
+            if item.deleted_at or item.status in ['FAILED', 'CANCELLED']:
+                return VerifiedPayrollTransactionType(
+                    is_valid=False,
+                    status='REVOKED',
+                    transaction_hash=tx_hash,
+                    verification_message="Esta transacción fue anulada o revocada."
+                )
+
+            # Valid
+            user = item.recipient_user
+            
+            return VerifiedPayrollTransactionType(
+                is_valid=True,
+                status='VALID',
+                transaction_hash=tx_hash,
+                amount=f"{item.net_amount:f}",
+                currency=item.token_type,
+                timestamp=item.executed_at or item.updated_at,
+                sender_name=item.run.business.name,
+                recipient_name_masked=f"{mask_string(user.first_name)} {mask_string(user.last_name)}",
+                recipient_phone_masked=mask_phone(user.phone_key) if user.phone_key else None,
+                verification_message="Transacción verificada y certificada por Confío."
+            )
+
+        except Exception:
+            return VerifiedPayrollTransactionType(
+                is_valid=False,
+                status='ERROR',
+                verification_message="Ocurrió un error al verificar."
+            )
 
     def _kyc_aml_ok(self, user, operation_type: str):
         if not user or not getattr(user, 'is_authenticated', False):

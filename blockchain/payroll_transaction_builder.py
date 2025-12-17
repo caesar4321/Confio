@@ -259,6 +259,82 @@ class PayrollTransactionBuilder:
         )
         return txn
 
+    def build_set_business_delegates_group(
+        self,
+        business_account: str,
+        add: list[str],
+        remove: list[str],
+        sponsor_address: str,
+        sponsor_amount: int = 500_000,  # 0.5 Algo default
+        suggested_params: Optional[SuggestedParams] = None,
+        note: Optional[bytes] = None,
+    ) -> list[transaction.Transaction]:
+        """
+        Build atomic group:
+        [0] Payment sponsor -> business (fees + min balance help)
+        [1] AppCall set_business_delegates (sender=business)
+        """
+        sp = suggested_params or self.algod_client.suggested_params()
+        sp.flat_fee = True
+        
+        # 1. Sponsor Payment
+        # Fee for itself (1000)
+        sp_pay = SuggestedParams(
+            fee=1000,
+            first=sp.first,
+            last=sp.last,
+            gh=sp.gh,
+            gen=sp.gen,
+            flat_fee=True
+        )
+        pay_txn = transaction.PaymentTxn(
+            sender=sponsor_address,
+            sp=sp_pay,
+            receiver=business_account,
+            amt=sponsor_amount,
+            note=b"Payroll Setup Sponsor"
+        )
+        
+        # 2. Business App Call
+        # Fee is 2*min_fee (2000) for inner txn or just standard operations
+        # The previous method used max(sp.min_fee * 2, sp.fee), let's stick to that default 2000
+        app_fee = 2000
+        sp_app = SuggestedParams(
+            fee=app_fee,
+            first=sp.first,
+            last=sp.last,
+            gh=sp.gh,
+            gen=sp.gen,
+            flat_fee=True
+        )
+        
+        biz_bytes = encoding.decode_address(business_account)
+        add_boxes = [(self.payroll_app_id, biz_bytes + encoding.decode_address(a)) for a in add]
+        remove_boxes = [(self.payroll_app_id, biz_bytes + encoding.decode_address(r)) for r in remove]
+
+        app_args = [
+          self._set_delegates_method.get_selector(),
+          self._addr_type.encode(business_account),
+          ArrayDynamicType(self._addr_type).encode([encoding.decode_address(a) for a in add]),
+          ArrayDynamicType(self._addr_type).encode([encoding.decode_address(r) for r in remove]),
+        ]
+
+        app_txn = transaction.ApplicationNoOpTxn(
+            sender=business_account,
+            sp=sp_app,
+            index=self.payroll_app_id,
+            app_args=app_args,
+            boxes=add_boxes + remove_boxes,
+            note=note,
+        )
+        
+        # Group them
+        gid = transaction.calculate_group_id([pay_txn, app_txn])
+        pay_txn.group = gid
+        app_txn.group = gid
+        
+        return [pay_txn, app_txn]
+
     def build_fund_business(
         self,
         business_account: str,
