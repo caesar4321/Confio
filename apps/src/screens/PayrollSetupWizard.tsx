@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, ScrollView, Alert, ActivityIndicator, FlatList } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, ScrollView, Alert, ActivityIndicator, FlatList, Platform, StatusBar } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -413,6 +413,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
+    marginTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 10 : 0,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },

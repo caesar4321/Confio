@@ -34,6 +34,7 @@ import com.worklets.WorkletsPackage
 import com.rt2zz.reactnativecontacts.ReactNativeContacts
 import com.learnium.RNDeviceInfo.RNDeviceInfo
 import com.Confio.Confio.MediaPickerPackage
+import cl.json.RNSharePackage
 
 import com.uerceg.play_install_referrer.PlayInstallReferrerPackage
 import com.blockstore.BlockStorePackage
@@ -70,6 +71,7 @@ class MainApplication : Application(), ReactApplication {
             ReactNativeContacts(),
             RNDeviceInfo(),
             MediaPickerPackage(),
+            RNSharePackage(),
 
             PlayInstallReferrerPackage(),
             BlockStorePackage()

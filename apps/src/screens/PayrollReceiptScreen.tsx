@@ -8,8 +8,8 @@ import {
   ScrollView,
   Alert,
   Platform,
-  Share,
 } from 'react-native';
+import Share from 'react-native-share';
 import Icon from 'react-native-vector-icons/Feather';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
@@ -145,6 +145,9 @@ export const PayrollReceiptScreen = () => {
 
       // Capture the view as an image
       const uri = await viewShotRef.current.capture();
+      if (!uri) {
+        throw new Error('No se pudo generar la imagen del comprobante.');
+      }
 
       // Save directly to Camera Roll (complies with Google Play policy)
       const savedUri = await CameraRoll.save(uri, { type: 'photo' });
@@ -158,10 +161,13 @@ export const PayrollReceiptScreen = () => {
             text: 'Compartir',
             onPress: async () => {
               try {
-                await Share.share({
+                const message = `Comprobante de pago de nómina - ${employeeName}`;
+
+                await Share.open({
                   title: 'Comprobante de Nómina - Confío',
-                  message: `Comprobante de pago de nómina - ${employeeName}`,
-                  url: savedUri,
+                  message,
+                  url: uri, // Use temp file URI - Works on both iOS and Android with react-native-share
+                  type: 'image/jpeg',
                 });
               } catch (error) {
                 console.error('Share error:', error);

@@ -1,5 +1,5 @@
 import React, { useMemo, useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator, Image, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator, Image, RefreshControl, Platform, StatusBar } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -292,6 +292,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
+    marginTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 10 : 0,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },

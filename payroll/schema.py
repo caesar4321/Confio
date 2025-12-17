@@ -1416,11 +1416,23 @@ class SetBusinessDelegatesByEmployee(graphene.Mutation):
                 
                 # Decode as SignedTransaction to get the inner Transaction
                 stx_obj = algo_encoding.msgpack_decode(stx_str)
-                if not hasattr(stx_obj, 'txn'):
-                     # Maybe it's just `transaction` object if not signed? No, argument says signed_transaction
-                     return SetBusinessDelegatesByEmployee(success=False, errors=["Invalid signed transaction format"], unsigned_transaction_b64=unsigned_b64, transaction_hash=None)
+                cls.logger.info("[Payroll] Decoded STX type: %s, Dir: %s", type(stx_obj), dir(stx_obj))
+
+                business_txn = None
+                if hasattr(stx_obj, 'txn'):
+                    business_txn = stx_obj.txn
+                elif hasattr(stx_obj, 'transaction'):
+                    business_txn = stx_obj.transaction
                 
-                business_txn = stx_obj.txn
+                # If decoded object IS the transaction (implies unsigned or weird decoding), check that
+                if not business_txn and isinstance(stx_obj, transaction.Transaction):
+                    # It's an unsigned transaction! We can't broadcast this.
+                    cls.logger.error("[Payroll] Received UNSIGNED transaction object: %s", stx_obj)
+                    return SetBusinessDelegatesByEmployee(success=False, errors=["Received unsigned transaction. Please sign the transaction."], unsigned_transaction_b64=unsigned_b64, transaction_hash=None)
+                
+                if not business_txn:
+                     return SetBusinessDelegatesByEmployee(success=False, errors=[f"Invalid signed transaction format (Type: {type(stx_obj)})"], unsigned_transaction_b64=unsigned_b64, transaction_hash=None)
+                
                 group_id_bytes = business_txn.group
                 
                 if not group_id_bytes:

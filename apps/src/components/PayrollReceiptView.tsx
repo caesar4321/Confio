@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, Platform, TouchableOpacity, Linking } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
+import QRCode from 'react-native-qrcode-svg';
 
 interface PayrollReceiptViewProps {
   employeeName: string;
@@ -176,6 +177,28 @@ export const PayrollReceiptView: React.FC<PayrollReceiptViewProps> = ({
             <View style={styles.infoContent}>
               <Text style={styles.infoLabel}>Fecha de procesamiento</Text>
               <Text style={styles.infoValue}>{formatDate(date)}</Text>
+            </View>
+          </View>
+        </View>
+      </View>
+
+      {/* Verification QR Code */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Verificación</Text>
+        <View style={styles.qrCard}>
+          <QRCode
+            value={`https://confio.lat/verify/${transactionHash}`}
+            size={120}
+            color="#111827"
+            backgroundColor="white"
+          />
+          <View style={styles.qrTextContainer}>
+            <Text style={styles.qrTitle}>Escanear para verificar</Text>
+            <Text style={styles.qrDescription}>
+              Al abrir el enlace, verifica que aparezca:
+            </Text>
+            <View style={styles.securityHint}>
+              <Text style={styles.securityText}>🔒 Estás en confio.lat</Text>
             </View>
           </View>
         </View>
@@ -365,5 +388,41 @@ const styles = StyleSheet.create({
     color: '#9CA3AF',
     textAlign: 'center',
     lineHeight: 16,
+  },
+  qrCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 24,
+    alignItems: 'center',
+    gap: 16,
+    flexDirection: 'row',
+  },
+  qrTextContainer: {
+    flex: 1,
+    gap: 4,
+  },
+  qrTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  qrDescription: {
+    fontSize: 12,
+    color: '#6B7280',
+    lineHeight: 18,
+  },
+  securityHint: {
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    borderRadius: 8,
+    padding: 8,
+    marginTop: 4,
+  },
+  securityText: {
+    fontSize: 11,
+    color: '#065F46',
+    lineHeight: 16,
+    fontWeight: '500',
   },
 });

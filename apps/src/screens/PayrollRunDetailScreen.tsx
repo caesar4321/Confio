@@ -8,8 +8,8 @@ import {
   ScrollView,
   Alert,
   Platform,
-  Share,
 } from 'react-native';
+import Share from 'react-native-share';
 import Icon from 'react-native-vector-icons/Feather';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
@@ -112,8 +112,11 @@ export const PayrollRunDetailScreen = () => {
         return;
       }
 
-      // Capture the view as an image
+      // Utilities
       const uri = await fullRunRef.current?.capture?.();
+      if (!uri) {
+        throw new Error('No se pudo generar la imagen del comprobante.');
+      }
 
       // Save directly to Camera Roll (complies with Google Play policy)
       const savedUri = await CameraRoll.save(uri, { type: 'photo' });
@@ -127,10 +130,13 @@ export const PayrollRunDetailScreen = () => {
             text: 'Compartir',
             onPress: async () => {
               try {
-                await Share.share({
+                const message = `Corrida #${run?.runId || run?.id?.slice(0, 6)} - ${businessName}`;
+
+                await Share.open({
                   title: 'Comprobante de Corrida de Nómina',
-                  message: `Corrida #${run?.runId || run?.id?.slice(0, 6)} - ${businessName}`,
-                  url: savedUri,
+                  message,
+                  url: uri,
+                  type: 'image/jpeg',
                 });
               } catch (error) {
                 console.error('Share error:', error);
@@ -168,6 +174,9 @@ export const PayrollRunDetailScreen = () => {
 
       // Capture the view as an image
       const uri = await ref?.capture?.();
+      if (!uri) {
+        throw new Error('No se pudo generar la imagen del comprobante.');
+      }
 
       // Save directly to Camera Roll (complies with Google Play policy)
       const savedUri = await CameraRoll.save(uri, { type: 'photo' });
@@ -181,10 +190,13 @@ export const PayrollRunDetailScreen = () => {
             text: 'Compartir',
             onPress: async () => {
               try {
-                await Share.share({
+                const message = `Pago de nómina - ${name}`;
+
+                await Share.open({
                   title: 'Comprobante de Pago de Nómina',
-                  message: `Pago de nómina - ${name}`,
-                  url: savedUri,
+                  message,
+                  url: uri,
+                  type: 'image/jpeg',
                 });
               } catch (error) {
                 console.error('Share error:', error);

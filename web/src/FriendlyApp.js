@@ -20,6 +20,7 @@ import FriendlyFooter from './Components/LandingPage/FriendlyFooter';
 import TermsPage from './Components/LegalDocument/TermsPage';
 import PrivacyPage from './Components/LegalDocument/PrivacyPage';
 import DeletionPage from './Components/LegalDocument/DeletionPage';
+import PayrollVerificationPage from './Components/Verification/PayrollVerificationPage';
 
 import './FriendlyApp.css';
 
@@ -58,26 +59,27 @@ function FriendlyApp() {
         <Router>
           <div className="FriendlyApp">
             <Routes>
-            <Route path="/" element={
-              <>
-                <LanguageSwitcher />
-                <main>
-                  <FriendlyHeroSection />
-                  <FriendlyFeatures />
-                  <FriendlyHowItWorks />
-                  <FriendlyAssets />
-                  <FriendlyRoadmap />
-                  <FriendlyFeeStructure />
-                  <FriendlyTestimonials />
-                  <FriendlyFounder />
-                </main>
-                <FriendlyFooter />
-              </>
-            } />
-            <Route path="/terms" element={<TermsPage />} />
-            <Route path="/privacy" element={<PrivacyPage />} />
-            <Route path="/deletion" element={<DeletionPage />} />
-          </Routes>
+              <Route path="/" element={
+                <>
+                  <LanguageSwitcher />
+                  <main>
+                    <FriendlyHeroSection />
+                    <FriendlyFeatures />
+                    <FriendlyHowItWorks />
+                    <FriendlyAssets />
+                    <FriendlyRoadmap />
+                    <FriendlyFeeStructure />
+                    <FriendlyTestimonials />
+                    <FriendlyFounder />
+                  </main>
+                  <FriendlyFooter />
+                </>
+              } />
+              <Route path="/terms" element={<TermsPage />} />
+              <Route path="/privacy" element={<PrivacyPage />} />
+              <Route path="/deletion" element={<DeletionPage />} />
+              <Route path="/verify/:hash" element={<PayrollVerificationPage />} />
+            </Routes>
           </div>
         </Router>
       </LanguageProvider>
