@@ -253,6 +253,7 @@ class GuardarianTransaction(models.Model):
     
     STATUS_CHOICES = [
         ('waiting', 'Waiting'),       # Initial state
+        ('waiting_for_customer', 'Waiting for Customer'), # Action required
         ('pending', 'Pending'),       # Payment started
         ('confirmed', 'Confirmed'),   # Payment confirmed
         ('exchanging', 'Exchanging'), # Crypto exchange in progress
