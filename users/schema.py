@@ -1022,102 +1022,113 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		if not transaction_hash:
 			return None
 
-		import uuid
-		is_uuid = False
-		try:
-			uuid.UUID(str(transaction_hash))
-			is_uuid = True
-		except ValueError:
-			pass
+		    # SECURITY: Only allow verification by Internal ID.
+    # We must support:
+    # 1. Integer Primary Keys (e.g., "153") - Used by SendTransaction
+    # 2. Custom String IDs (e.g., "A1B2C3D4") - Used by PayrollItem (item_id), PaymentTransaction (payment_transaction_id)
+    # 3. UUIDs (if ever used)
+    # BLOCKED: 64-char Hex Strings (Blockchain Hashes) to prevent scraping/deanonymization.
 
-		# SECURITY: Only allow verification by Internal ID (UUID).
-		# Verification by blockchain hash is disabled to prevent reverse engineering/scraping.
-		if not is_uuid:
-			return VerifiedTransactionType(
-				is_valid=False,
-				status='INVALID',
-				verification_message="Identificador de transacción inválido."
-			)
+    input_str = str(transaction_hash).strip()
+    
+    # 1. Block Blockchain Hashes (64 chars, hex)
+    # Algorand tx IDs are 52 chars base32 or similar? Actually Algo tx are 52 chars (Base32).
+    # ETH/EVM hashes are 66 chars (0x + 64 hex).
+    # Heuristic: If it's long (>40 chars) and looks like a hash, block it.
+    if len(input_str) > 40:
+        return VerifiedTransactionType(
+            is_valid=False,
+            status='INVALID',
+            verification_message="Verificación por hash de blockchain deshabilitada por seguridad. Use el código QR o enlace oficial."
+        )
 
-		# Helper for names
-		def format_name(u):
-			if not u: return "Usuario"
-			fn = u.first_name or ""
-			ln = u.last_name or ""
-			return f"{fn} {ln[0]}." if ln else fn or u.username or "Usuario"
+    # Helper for names
+    def format_name(u):
+        if not u: return "Usuario"
+        fn = u.first_name or ""
+        ln = u.last_name or ""
+        return f"{fn} {ln[0]}." if ln else fn or u.username or "Usuario"
 
-		# 1. Check Payroll
-		try:
-			payroll = PayrollItem.objects.select_related('payroll_run__business', 'employee__user').filter(id=transaction_hash).first()
-			if payroll:
-				user = payroll.employee.user
-				return VerifiedTransactionType(
-					is_valid=True,
-					status='COMPLETED',
-					transaction_hash=payroll.transaction_hash,
-					amount=f"{payroll.net_pay:.2f}",
-					currency=payroll.currency or 'cUSD',
-					timestamp=payroll.paid_at or payroll.created_at,
-					sender_name=payroll.payroll_run.business.name if payroll.payroll_run and payroll.payroll_run.business else "Empresa",
-					recipient_name_masked=format_name(user),
-					recipient_phone_masked=f"******{user.phone_number[-4:]}" if user and user.phone_number else "",
-					verification_message="Pago de nómina verificado exitosamente.",
-					transaction_type="PAYROLL",
-					metadata=json.dumps({"referenceId": str(payroll.payroll_run.id), "memo": "Nómina"})
-				)
-		except Exception as e:
-			logger.error(f"Error verifying payroll: {e}")
+    # Helpers to find transaction
+    payroll = None
+    payment = None
+    transfer = None
 
-		# 2. Check Payment (Merchant)
-		try:
-			payment = PaymentTransaction.objects.select_related('merchant', 'user').filter(id=transaction_hash).first()
-			if payment:
-				return VerifiedTransactionType(
-					is_valid=True,
-					status=payment.status,
-					transaction_hash=payment.transaction_hash,
-					amount=f"{payment.amount:.2f}",
-					currency=payment.currency,
-					timestamp=payment.created_at,
-					sender_name=format_name(payment.user),
-					recipient_name_masked=payment.merchant.name if payment.merchant else "Comercio",
-					recipient_phone_masked="",
-					verification_message="Pago a comercio verificado exitosamente.",
-					transaction_type="PAYMENT",
-					metadata=json.dumps({"referenceId": str(payment.id), "memo": payment.description or "Pago en comercio"})
-				)
-		except Exception as e:
-			logger.error(f"Error verifying payment: {e}")
+    # Try Integer Lookup (Primary Key)
+    if input_str.isdigit():
+        pk = int(input_str)
+        payroll = PayrollItem.objects.select_related('payroll_run__business', 'employee__user').filter(id=pk).first()
+        if not payroll:
+            payment = PaymentTransaction.objects.select_related('merchant', 'payer_user').filter(id=pk).first()
+        if not payroll and not payment:
+            transfer = SendTransaction.objects.select_related('sender_user', 'recipient_user').filter(id=pk).first()
 
-		# 3. Check Send (Transfer)
-		try:
-			transfer = SendTransaction.objects.select_related('sender', 'recipient_user').filter(id=transaction_hash).first()
-			if transfer:
-				sender_name = format_name(transfer.sender)
-				recipient_name = format_name(transfer.recipient_user) if transfer.recipient_user else "Externo"
-				return VerifiedTransactionType(
-					is_valid=True,
-					status=transfer.status,
-					transaction_hash=transfer.transaction_hash,
-					amount=f"{transfer.amount:.2f}",
-					currency=transfer.token_type,
-					timestamp=transfer.created_at,
-					sender_name=sender_name,
-					recipient_name_masked=recipient_name,
-					recipient_phone_masked=f"******{transfer.recipient_user.phone_number[-4:]}" if transfer.recipient_user and transfer.recipient_user.phone_number else "",
-					verification_message="Transferencia P2P verificada.",
-					transaction_type="TRANSFER",
-					metadata=json.dumps({"memo": transfer.message or "Transferencia"})
-				)
-		except Exception as e:
-			logger.error(f"Error verifying transfer: {e}")
+    # Try Custom ID Lookup (if not found yet)
+    if not (payroll or payment or transfer):
+        payroll = PayrollItem.objects.select_related('payroll_run__business', 'employee__user').filter(item_id=input_str).first()
+        
+    if not (payroll or payment or transfer):
+        payment = PaymentTransaction.objects.select_related('merchant', 'payer_user').filter(payment_transaction_id=input_str).first()
 
-		# Not found
-		return VerifiedTransactionType(
-			is_valid=False, 
-			status='INVALID',
-			verification_message="Transacción no encontrada."
-		)
+    # If found, format response
+    if payroll:
+        user = payroll.employee.user
+        return VerifiedTransactionType(
+            is_valid=True,
+            status='COMPLETED',
+            transaction_hash=payroll.transaction_hash,
+            amount=f"{payroll.net_pay:.2f}",
+            currency=payroll.currency or 'cUSD',
+            timestamp=payroll.paid_at or payroll.created_at,
+            sender_name=payroll.payroll_run.business.name if payroll.payroll_run and payroll.payroll_run.business else "Empresa",
+            recipient_name_masked=format_name(user),
+            recipient_phone_masked=f"******{user.phone_number[-4:]}" if user and user.phone_number else "",
+            verification_message="Pago de nómina verificado exitosamente.",
+            transaction_type="PAYROLL",
+            metadata=json.dumps({"referenceId": str(payroll.payroll_run.id), "memo": "Nómina"})
+        )
+
+    if payment:
+        # Note: PaymentTransaction uses 'payer_user' (sender) and 'merchant' (recipient)
+        return VerifiedTransactionType(
+            is_valid=True,
+            status=payment.status,
+            transaction_hash=payment.transaction_hash,
+            amount=f"{payment.amount:.2f}",
+            currency=payment.currency,
+            timestamp=payment.created_at,
+            sender_name=format_name(payment.payer_user),
+            recipient_name_masked=payment.merchant.name if payment.merchant else "Comercio",
+            recipient_phone_masked="",
+            verification_message="Pago a comercio verificado exitosamente.",
+            transaction_type="PAYMENT",
+            metadata=json.dumps({"referenceId": str(payment.id), "memo": payment.description or "Pago en comercio"})
+        )
+
+    if transfer:
+        sender_name = format_name(transfer.sender_user)
+        recipient_name = format_name(transfer.recipient_user) if transfer.recipient_user else "Externo"
+        return VerifiedTransactionType(
+            is_valid=True,
+            status=transfer.status,
+            transaction_hash=transfer.transaction_hash,
+            amount=f"{transfer.amount:.2f}",
+            currency=transfer.token_type,
+            timestamp=transfer.created_at,
+            sender_name=sender_name,
+            recipient_name_masked=recipient_name,
+            recipient_phone_masked=f"******{transfer.recipient_user.phone_number[-4:]}" if transfer.recipient_user and transfer.recipient_user.phone_number else "",
+            verification_message="Transferencia P2P verificada.",
+            transaction_type="TRANSFER",
+            metadata=json.dumps({"memo": transfer.message or "Transferencia"})
+        )
+
+    # Not found
+    return VerifiedTransactionType(
+        is_valid=False,
+        status='INVALID',
+        verification_message="Transacción no encontrada."
+    )
 
 	def resolve_my_balances(self, info):
 		"""Return current balances from DB cache only (fast path).

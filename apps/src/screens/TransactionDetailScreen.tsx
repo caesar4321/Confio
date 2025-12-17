@@ -1805,11 +1805,12 @@ export const TransactionDetailScreen = () => {
                 navigation.navigate('TransactionReceipt', {
                   transaction: {
                     ...currentTx,
-                    // Only pass payroll-specific fields if it is actually payroll
-                    ...(currentTx.type === 'payroll' ? {
-                      employeeName: currentTx.recipient_name || currentTx.employeeName,
-                      businessName: currentTx.sender_name || currentTx.businessName,
-                    } : {}),
+                    // Explicitly pass name fields for ALL types to prevent 'Usuario'/'Comercio' fallback
+                    senderName: currentTx.senderName || currentTx.from || currentTx.sender_name || (currentTx.type === 'payroll' ? (currentTx.businessName || 'Empresa') : undefined),
+                    recipientName: currentTx.recipientName || currentTx.to || currentTx.recipient_name || (currentTx.type === 'payroll' ? (currentTx.employeeName || 'Empleado') : undefined),
+                    businessName: currentTx.businessName || currentTx.sender_name || 'Empresa',
+                    employeeName: currentTx.employeeName || currentTx.recipient_name,
+
                     // FORCE internal ID for verification QR code (User Request)
                     transactionHash: currentTx.transactionId || currentTx.id,
                   },
@@ -2557,6 +2558,11 @@ export const TransactionDetailScreen = () => {
                     transaction: {
                       ...currentTx,
                       ...transactionData,
+                      // Explicitly pass name fields for ALL types
+                      senderName: currentTx.senderName || currentTx.from || currentTx.sender_name,
+                      recipientName: currentTx.recipientName || currentTx.to || currentTx.recipient_name,
+                      businessName: currentTx.businessName || currentTx.sender_name || 'Empresa',
+
                       // FORCE internal ID for verification QR code (User Request)
                       transactionHash: currentTx.transactionId || currentTx.id || transactionData.transactionId,
                     },
