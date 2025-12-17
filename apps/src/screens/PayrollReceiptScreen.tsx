@@ -8,6 +8,7 @@ import {
   ScrollView,
   Alert,
   Platform,
+  StatusBar,
 } from 'react-native';
 import Share from 'react-native-share';
 import Icon from 'react-native-vector-icons/Feather';
@@ -58,16 +59,14 @@ export const PayrollReceiptScreen = () => {
   };
 
   const counterpartyUser = transaction.counterpartyUser || transaction.recipientUser || transaction.senderUser;
-  const employeeUsername = pick(
+  const rawUsername = pick(
     transaction.employeeUsername,
     counterpartyUser?.username,
     transaction.toUsername,
-    transaction.recipientUsername,
-    transaction.counterpartyUsername,
-    transaction.recipientUser?.username,
-    transaction.senderUser?.username,
-    userProfile?.username
+    'Username'
   );
+  // Remove any leading @ symbols (handles both @ and @@ cases)
+  const employeeUsername = rawUsername.replace(/^@+/, '');
 
   const employeeName = pick(
     transaction.employeeName,
@@ -77,12 +76,23 @@ export const PayrollReceiptScreen = () => {
     transaction.toName,
     transaction.displayToName,
     `${counterpartyUser?.firstName || ''} ${counterpartyUser?.lastName || ''}`,
-    isEmployeeView ? `${userProfile?.firstName || ''} ${userProfile?.lastName || ''}` : '',
     employeeUsername,
     'Empleado'
   );
 
-  const employeePhone = pick(
+  // Helper to format phoneKey (format: "1:9293993619") to proper phone format ("+1 9293993619")
+  const formatPhoneKey = (phone: string | undefined | null): string => {
+    if (!phone) return '';
+    // Check if it's in phoneKey format (countryCode:phoneNumber)
+    if (phone.includes(':')) {
+      const [countryCode, phoneNumber] = phone.split(':');
+      return `+${countryCode} ${phoneNumber}`;
+    }
+    // Already in proper format or just a number
+    return phone;
+  };
+
+  const rawPhone = pick(
     transaction.employeePhone,
     counterpartyUser?.phoneKey,
     transaction.toPhone,
@@ -90,9 +100,8 @@ export const PayrollReceiptScreen = () => {
     transaction.counterpartyPhone,
     transaction.recipientUser?.phoneKey,
     transaction.senderUser?.phoneKey,
-    userProfile?.phoneKey,
-    userProfile?.phone
   );
+  const employeePhone = formatPhoneKey(rawPhone);
 
   const businessName = pick(
     transaction.businessName,
@@ -105,7 +114,7 @@ export const PayrollReceiptScreen = () => {
     transaction.senderUser?.username,
     'Empresa'
   );
-  const amount = transaction.amount || '0.00';
+  const amount = (transaction.amount || '0.00').replace(/^[+-]\s*/, '');
   const currency = transaction.currency || 'cUSD';
   const date = transaction.date || transaction.executedAt || transaction.createdAt || new Date().toISOString();
   const transactionHash = transaction.hash || transaction.transactionHash || '';
@@ -128,7 +137,9 @@ export const PayrollReceiptScreen = () => {
       case 'confirmed':
         return 'Pagado';
       case 'pending':
-        return 'Pendiente';
+      case 'processing':
+      case 'submitted':
+        return 'Confirmando';
       case 'failed':
         return 'Fallido';
       default:
@@ -144,10 +155,10 @@ export const PayrollReceiptScreen = () => {
       }
 
       // Capture the view as an image
-      const uri = await viewShotRef.current.capture();
-      if (!uri) {
-        throw new Error('No se pudo generar la imagen del comprobante.');
-      }
+      const viewShot = viewShotRef.current;
+      if (!viewShot || !viewShot.capture) return;
+      const uri = await viewShot.capture();
+      if (!uri) return;
 
       // Save directly to Camera Roll (complies with Google Play policy)
       const savedUri = await CameraRoll.save(uri, { type: 'photo' });
@@ -161,14 +172,15 @@ export const PayrollReceiptScreen = () => {
             text: 'Compartir',
             onPress: async () => {
               try {
-                const message = `Comprobante de pago de nómina - ${employeeName}`;
+                const message = `Comprobante de nómina - ${transaction.businessName}\nEmpleado: ${transaction.employeeName}\nMonto: ${transaction.amount} ${transaction.currency}`;
 
-                await Share.open({
-                  title: 'Comprobante de Nómina - Confío',
-                  message,
-                  url: uri, // Use temp file URI - Works on both iOS and Android with react-native-share
+                const shareOptions = {
+                  title: 'Comprobante de Nómina',
+                  message: message,
+                  url: uri,
                   type: 'image/jpeg',
-                });
+                };
+                await Share.open(shareOptions);
               } catch (error) {
                 console.error('Share error:', error);
               }
@@ -232,9 +244,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
+    marginTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 10 : 0,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
+    borderBottomColor: '#f3f4f6',
   },
   backButton: {
     padding: 8,
