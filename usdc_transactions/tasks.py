@@ -9,7 +9,7 @@ from .models import GuardarianTransaction, USDCDeposit
 
 logger = logging.getLogger(__name__)
 
-@shared_task(name='usdc_transactions.poll_guardarian_transactions')
+@shared_task
 def poll_guardarian_transactions():
     """
     Poll Guardarian for status updates on pending transactions.
@@ -86,7 +86,7 @@ def poll_guardarian_transactions():
     return f"Polled {pending_txs.count()} txs, Updated {updated_count}"
 
 
-@shared_task(name='usdc_transactions.check_single_guardarian_transaction')
+@shared_task
 def check_single_guardarian_transaction(guardarian_id):
     """
     On-demand check for a single transaction (triggered by frontend user action).
