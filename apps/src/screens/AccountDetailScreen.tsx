@@ -1297,6 +1297,7 @@ export const AccountDetailScreen = () => {
         navigation.navigate('TransactionReceipt', {
           transaction: {
             ...transaction,
+            verificationId: txAny.itemId || txAny.id, // Use full UUID for QR code if available
             // Ensure necessary fields for receipt
             employeeName: (transaction as any).recipientUser?.firstName ? `${(transaction as any).recipientUser.firstName} ${(transaction as any).recipientUser.lastName}` : (transaction as any).recipientUser?.username,
             employeeUsername: (transaction as any).recipientUser?.username,

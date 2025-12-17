@@ -32,8 +32,13 @@ export const TransactionReceiptScreen = () => {
   // Infer transaction type if not provided explicitly
   // Note: Future callers should pass { type: 'payroll' | 'payment' | 'transfer' }
   const specifiedType = route.params?.type;
-  const isPayroll = specifiedType === 'payroll' || transaction.payrollRunId || transaction.employeeName;
-  const isPayment = specifiedType === 'payment' || transaction.invoiceId || transaction.merchantName;
+  // FIX: Only infer from props if specifiedType is NOT provided
+  const isPayroll = specifiedType
+    ? specifiedType === 'payroll'
+    : (transaction.payrollRunId || transaction.employeeName);
+  const isPayment = specifiedType
+    ? specifiedType === 'payment'
+    : (transaction.invoiceId || transaction.merchantName);
 
   let type: 'payroll' | 'payment' | 'transfer' = 'transfer';
   if (isPayroll) type = 'payroll';
@@ -75,10 +80,10 @@ export const TransactionReceiptScreen = () => {
 
   if (type === 'payroll') {
     senderLabel = 'Empresa';
-    senderName = pick(transaction.businessName, transaction.fromName, 'Empresa');
+    senderName = pick(transaction.businessName, transaction.sender_name, transaction.senderName, transaction.fromName, 'Empresa');
 
     recipientLabel = 'Empleado';
-    recipientName = pick(transaction.employeeName, transaction.toName, 'Empleado');
+    recipientName = pick(transaction.employeeName, transaction.recipient_name, transaction.recipientName, transaction.toName, 'Empleado');
     const rawUsername = pick(transaction.employeeUsername, counterpartyUser?.username, '');
     const empUsername = rawUsername.replace(/^@+/, '');
     const empPhone = formatPhoneKey(pick(transaction.employeePhone, counterpartyUser?.phoneKey));
@@ -88,24 +93,38 @@ export const TransactionReceiptScreen = () => {
     referenceId = transaction.payrollRunId || transaction.runId || '';
   } else if (type === 'payment') {
     senderLabel = 'Pagador';
-    senderName = pick(transaction.payerName, transaction.senderDisplayName, transaction.fromName, 'Usuario');
+    senderName = pick(transaction.payerName, transaction.senderDisplayName, transaction.sender_name, transaction.senderName, transaction.fromName, 'Usuario');
     const senderPhone = formatPhoneKey(pick(transaction.payerPhone, transaction.senderPhone));
     senderDetail = senderPhone;
 
     recipientLabel = 'Comerciante';
-    recipientName = pick(transaction.merchantName, transaction.recipientBusiness?.name, 'Comercio');
+    recipientName = pick(transaction.merchantName, transaction.recipientBusiness?.name, transaction.recipient_name, transaction.recipientName, 'Comercio');
 
     referenceLabel = 'Factura';
     referenceId = transaction.invoiceId || '';
   } else {
     // Transfer
     senderLabel = 'Remitente';
-    senderName = pick(transaction.senderDisplayName, transaction.fromName, transaction.senderUser?.firstName ? `${transaction.senderUser.firstName} ${transaction.senderUser.lastName}` : '', 'Usuario');
+    senderName = pick(
+      transaction.senderDisplayName,
+      transaction.sender_name,
+      transaction.senderName,
+      transaction.fromName,
+      transaction.senderUser?.firstName ? `${transaction.senderUser.firstName} ${transaction.senderUser.lastName}` : '',
+      'Usuario'
+    );
     const sUsername = transaction.senderUser?.username;
     senderDetail = sUsername ? `@${sUsername}` : formatPhoneKey(transaction.senderPhone);
 
     recipientLabel = 'Destinatario';
-    recipientName = pick(transaction.recipientDisplayName, transaction.toName, transaction.recipientUser?.firstName ? `${transaction.recipientUser.firstName} ${transaction.recipientUser.lastName}` : '', 'Usuario');
+    recipientName = pick(
+      transaction.recipientDisplayName,
+      transaction.recipient_name,
+      transaction.recipientName,
+      transaction.toName,
+      transaction.recipientUser?.firstName ? `${transaction.recipientUser.firstName} ${transaction.recipientUser.lastName}` : '',
+      'Usuario'
+    );
     const rUsername = transaction.recipientUser?.username;
     recipientDetail = rUsername ? `@${rUsername}` : formatPhoneKey(transaction.recipientPhone);
   }
@@ -114,6 +133,8 @@ export const TransactionReceiptScreen = () => {
   const currency = transaction.currency || transaction.tokenType || 'cUSD';
   const date = transaction.date || transaction.executedAt || transaction.createdAt || new Date().toISOString();
   const transactionHash = transaction.hash || transaction.transactionHash || '';
+  // FIX: Use internal ID for verification (QR code), separate from display hash
+  const verificationId = transaction.verificationId || transaction.id || transactionHash;
   const status = (transaction.status || 'completed').toLowerCase();
 
   const handleExportPDF = async () => {
@@ -189,6 +210,7 @@ export const TransactionReceiptScreen = () => {
             date={date}
             status={status}
             transactionHash={transactionHash}
+            verificationId={verificationId}
             referenceId={referenceId}
             referenceLabel={referenceLabel}
             memo={memo}

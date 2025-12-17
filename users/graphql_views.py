@@ -32,6 +32,9 @@ class UnifiedTransactionType(DjangoObjectType):
     # P2P Trade ID for navigation
     p2p_trade_id = graphene.String(description="P2P Trade ID if this is an exchange transaction")
     
+    # Expose Payroll Item ID for QR code verification
+    item_id = graphene.String(description="Payroll Item ID")
+
     # Override token_type to be String to avoid Enum validation errors with mixed case
     token_type = graphene.String(description="Token type (CUSD, USDC, etc)")
     
@@ -218,6 +221,15 @@ class UnifiedTransactionType(DjangoObjectType):
         """Return P2P Trade ID if this is an exchange transaction"""
         if self.transaction_type == 'exchange' and self.p2p_trade_id:
             return str(self.p2p_trade_id)
+        return None
+
+    def resolve_item_id(self, info):
+        """Return Payroll Item ID if this is a payroll transaction"""
+        if self.transaction_type == 'payroll':
+            # Use getattr to avoid potential errors if relationship is missing (though it shouldn't be for payroll type)
+            payroll_item = getattr(self, 'payroll_item', None)
+            if payroll_item:
+                return payroll_item.item_id
         return None
 
 

@@ -20,6 +20,7 @@ export interface TransactionReceiptViewProps {
     referenceLabel?: string; // 'ID de corrida', 'Factura', etc.
     memo?: string;
     generatedDate?: string;
+    verificationId?: string; // Internal ID for QR code (explicitly separate from display hash)
 }
 
 const formatDate = (iso?: string | null) => {
@@ -68,6 +69,7 @@ export const TransactionReceiptView: React.FC<TransactionReceiptViewProps> = ({
     referenceLabel,
     memo,
     generatedDate,
+    verificationId,
 }) => {
     const isCompleted = status.toLowerCase() === 'completed' || status.toLowerCase() === 'confirmed';
     const statusText = statusLabel(status, type);
@@ -183,10 +185,8 @@ export const TransactionReceiptView: React.FC<TransactionReceiptViewProps> = ({
                 <Text style={styles.sectionTitle}>Verificación</Text>
                 <View style={styles.qrCard}>
                     <QRCode
-                        value={`https://confio.lat/verify/${transactionHash}`}
-                        size={100}
-                        color="#111827"
-                        backgroundColor="white"
+                        value={`https://confio.lat/verify/${verificationId || transactionHash}`}
+                        size={80}
                     />
                     <View style={styles.qrTextContainer}>
                         <Text style={styles.qrTitle}>Escanear para verificar</Text>

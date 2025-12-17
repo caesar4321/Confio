@@ -2089,6 +2089,8 @@ export const GET_UNIFIED_TRANSACTIONS = gql`
       description
       invoiceId
       paymentTransactionId
+      # Payroll Item ID for QR Verification
+      itemId
       
       # Invitation fields
       isInvitation
