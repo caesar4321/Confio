@@ -24,7 +24,6 @@ class Command(BaseCommand):
         # Get all PAYROLL_SENT notifications
         notifications = Notification.objects.filter(
             notification_type=NotificationTypeChoices.PAYROLL_SENT,
-            deleted_at__isnull=True
         ).select_related('business')
 
         updated_count = 0
