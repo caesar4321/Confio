@@ -13,9 +13,18 @@ logger = logging.getLogger(__name__)
 def poll_guardarian_transactions():
     """
     Poll Guardarian for status updates on pending transactions.
-    Strategy: Check transactions created in the last 24 hours that are not in a final state.
+    Poll Guardarian for status updates on pending transactions.
+    Strategy: 
+    1. Expire 'new/waiting' transactions older than 1 hour.
+    2. Check 'pending' transactions created in the last 24 hours.
     """
-    # Active states that need polling
+    # 1. Expire stale transactions first
+    expired_count = expire_stale_transactions()
+    if expired_count > 0:
+        logger.info(f"Expired {expired_count} stale Guardarian transactions")
+    
+    # Active states that need polling (removed 'new' and 'waiting' as they are now handled by expiration or user action)
+    # Actually keep them if they are fresh (<1h), but if >1h they are expired.
     active_states = ['new', 'waiting', 'pending', 'confirmed', 'exchanging', 'sending']
     
     # Time window: last 24 hours (generous window)
@@ -83,7 +92,28 @@ def poll_guardarian_transactions():
         except Exception as e:
             logger.error(f"Error polling Guardarian Tx {tx.guardarian_id}: {e}")
 
-    return f"Polled {pending_txs.count()} txs, Updated {updated_count}"
+    return f"Polled {pending_txs.count()} txs, Updated {updated_count}, Expired {expired_count}"
+
+
+def expire_stale_transactions():
+    """
+    Mark 'new' or 'waiting' transactions as expired if they are older than 1 hour.
+    These are likely abandoned by the user.
+    """
+    from datetime import timedelta
+    expiration_threshold = timezone.now() - timedelta(hours=1)
+    
+    stale_states = ['new', 'waiting']
+    
+    updated = GuardarianTransaction.objects.filter(
+        status__in=stale_states,
+        created_at__lt=expiration_threshold
+    ).update(
+        status='expired',
+        status_details='Auto-expired by system (1h timeout)'
+    )
+    
+    return updated
 
 
 @shared_task(name='usdc_transactions.check_single_guardarian_transaction')
