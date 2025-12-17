@@ -116,6 +116,122 @@ export const NotificationScreen = () => {
     return params;
   };
 
+  // ISO country code to dial code mapping
+  const countryDialingCodes: Record<string, string> = {
+    'DO': '+1809', 'US': '+1', 'CA': '+1', 'VE': '+58', 'CO': '+57',
+    'MX': '+52', 'AR': '+54', 'BR': '+55', 'CL': '+56', 'PE': '+51', 'EC': '+593',
+  };
+
+  /**
+   * Shared helper to navigate to PayrollReceipt screen.
+   * Consolidates all payroll navigation logic to avoid duplication.
+   */
+  const navigateToPayrollReceipt = (params: {
+    notifType: string;
+    data: any;
+    id: string;
+    notificationCreatedAt: string;
+  }) => {
+    const { notifType, data, id, notificationCreatedAt } = params;
+    const isReceived = notifType === 'PAYROLL_RECEIVED';
+
+    // Employee name/username resolution
+    let employeeNameResolved: string | undefined;
+    let employeeUsernameResolved: string | undefined;
+
+    if (isReceived) {
+      // Current user is the employee receiving the payroll - use userProfile
+      const firstName = userProfile?.firstName || '';
+      const lastName = userProfile?.lastName || '';
+      const fullName = `${firstName} ${lastName}`.trim();
+      employeeNameResolved = fullName || currentUserName || userProfile?.username || '';
+      employeeUsernameResolved = userProfile?.username?.replace(/^@+/, '') || '';
+    } else {
+      // PAYROLL_SENT: get recipient info from notification data
+      employeeNameResolved = data.employee_name || data.employeeName || data.recipient_name || data.recipientName || data.recipient_display_name || data.to_name || data.toName;
+      employeeUsernameResolved = (data.employee_username || data.employeeUsername || data.recipient_username || data.recipientUsername || data.to_username || data.toUsername)?.replace(/^@+/, '') || '';
+    }
+
+    // Build phone number with dial code
+    let employeePhoneResolved: string | undefined;
+    const rawPhone = data.employee_phone || data.employeePhone || data.recipient_phone || data.recipientPhone;
+    const phoneCountry = data.employee_phone_country || data.employeePhoneCountry || data.recipient_phone_country || data.recipientPhoneCountry;
+
+    if (rawPhone) {
+      // If rawPhone already starts with +, it's already formatted
+      if (rawPhone.startsWith('+')) {
+        employeePhoneResolved = rawPhone;
+      } else if (phoneCountry) {
+        // Use dial code from notification data
+        const dialCode = countryDialingCodes[phoneCountry] || '';
+        employeePhoneResolved = dialCode ? `${dialCode} ${rawPhone}` : rawPhone;
+      } else {
+        employeePhoneResolved = rawPhone;
+      }
+    } else if (isReceived && userProfile?.phoneNumber) {
+      // Fallback for PAYROLL_RECEIVED - current user is the employee
+      const dialCode = userProfile.phoneCountry ? countryDialingCodes[userProfile.phoneCountry] : '';
+      employeePhoneResolved = dialCode ? `${dialCode} ${userProfile.phoneNumber}` : userProfile.phoneNumber;
+    }
+
+    console.log('[NotificationScreen] navigateToPayrollReceipt:', {
+      isReceived,
+      employeeNameResolved,
+      employeeUsernameResolved,
+      employeePhoneResolved,
+      dataKeys: Object.keys(data),
+      fullData: JSON.stringify(data),
+    });
+
+    navigation.navigate('PayrollReceipt', {
+      transaction: {
+        id,
+        type: 'payroll',
+        direction: isReceived ? 'received' : 'sent',
+        employeeName: employeeNameResolved,
+        employeeUsername: employeeUsernameResolved,
+        employeePhone: employeePhoneResolved || '',
+        businessName: isReceived
+          ? (data.business_name || data.businessName || data.sender_name || data.senderName || data.sender_display_name || data.senderDisplayName || data.from || 'Empresa')
+          : (data.business_name || data.businessName || currentUserName || profileData?.businessProfile?.name || 'Tu Empresa'),
+        amount: data.amount || '0.00',
+        currency: data.currency || 'cUSD',
+        date: data.date || data.executed_at || data.executedAt || data.created_at || data.createdAt || notificationCreatedAt,
+        status: data.status || 'completed',
+        hash: data.hash || data.transaction_hash || data.transactionHash,
+        transactionHash: data.hash || data.transaction_hash || data.transactionHash,
+        payrollRunId: data.payroll_run_id || data.payrollRunId || data.run_id || data.runId,
+        runId: data.payroll_run_id || data.payrollRunId || data.run_id || data.runId,
+        notification_type: notifType,
+      }
+    });
+  };
+
+  /**
+   * Shared helper to navigate to TransactionDetail screen.
+   * Standardizes the navigation call with common data merging.
+   */
+  const navigateToTransactionDetail = (params: {
+    id: string;
+    notifType: string;
+    txnType: 'send' | 'sent' | 'received' | 'payment' | 'payroll' | string;
+    baseData: any;
+    enrichedData?: any;
+  }) => {
+    const { id, notifType, txnType, baseData, enrichedData = {} } = params;
+
+    console.log('[NotificationScreen] navigateToTransactionDetail:', {
+      id,
+      notifType,
+      txnType,
+    });
+
+    navigation.navigate('TransactionDetail', {
+      transactionType: txnType,
+      transactionData: { ...baseData, ...enrichedData, id, notification_type: notifType }
+    });
+  };
+
   const handleNotificationPress = useCallback(async (notification: Notification) => {
     // Mark as read if not already
     if (!notification.isRead) {
@@ -288,9 +404,12 @@ export const NotificationScreen = () => {
           createdAt: notification.createdAt,
         };
 
-        navigation.navigate('TransactionDetail', {
-          transactionType: txnType,
-          transactionData: { id: sendId, notification_type: notifType, ...fullData, ...fallbackTx }
+        navigateToTransactionDetail({
+          id: sendId,
+          notifType,
+          txnType,
+          baseData: fullData,
+          enrichedData: fallbackTx,
         });
       } else if (url.includes('transaction/')) {
         const transactionId = url.split('transaction/')[1];
@@ -302,26 +421,11 @@ export const NotificationScreen = () => {
 
         // Handle payroll notifications - navigate to PayrollReceipt screen
         if (notifType === 'PAYROLL_RECEIVED' || notifType === 'PAYROLL_SENT') {
-          navigation.navigate('PayrollReceipt', {
-            transaction: {
-              id: transactionId,
-              type: 'payroll',
-              direction: notifType === 'PAYROLL_RECEIVED' ? 'received' : 'sent',
-              employeeName: fullData.employee_name || fullData.employeeName || fullData.recipient_name || fullData.recipientName || fullData.employee_username || fullData.employeeUsername || fullData.recipient_username || fullData.recipientUsername,
-              employeeUsername: fullData.employee_username || fullData.employeeUsername || fullData.recipient_username || fullData.recipientUsername,
-              employeePhone: fullData.employee_phone || fullData.employeePhone || fullData.recipient_phone || fullData.recipientPhone,
-              businessName: notifType === 'PAYROLL_SENT' ? (currentUserName || 'Tu Empresa') : (fullData.business_name || fullData.businessName || fullData.sender_name || fullData.senderName || fullData.sender_display_name || fullData.senderDisplayName || fullData.from),
-              amount: fullData.amount || '0.00',
-              currency: fullData.currency || 'cUSD',
-              date: fullData.date || fullData.executed_at || fullData.executedAt || fullData.created_at || fullData.createdAt || notification.createdAt,
-              status: fullData.status || 'completed',
-              hash: fullData.hash || fullData.transaction_hash || fullData.transactionHash,
-              transactionHash: fullData.hash || fullData.transaction_hash || fullData.transactionHash,
-              payrollRunId: fullData.payroll_run_id || fullData.payrollRunId || fullData.run_id || fullData.runId,
-              runId: fullData.payroll_run_id || fullData.payrollRunId || fullData.run_id || fullData.runId,
-              notification_type: notifType,
-              ...fullData
-            }
+          navigateToPayrollReceipt({
+            notifType,
+            data: fullData,
+            id: transactionId,
+            notificationCreatedAt: notification.createdAt,
           });
           return;
         }
@@ -434,10 +538,12 @@ export const NotificationScreen = () => {
           txnType
         });
 
-        navigation.navigate('TransactionDetail', {
-          transactionType: txnType,
-          // Pass full notification data as fallback plus id
-          transactionData: { id: transactionId, notification_type: notifType, ...fullData, ...fallbackTx }
+        navigateToTransactionDetail({
+          id: transactionId,
+          notifType,
+          txnType,
+          baseData: fullData,
+          enrichedData: fallbackTx,
         });
       } else if (url.includes('business/')) {
         const businessId = url.split('business/')[1];
@@ -474,26 +580,11 @@ export const NotificationScreen = () => {
 
       // Handle payroll notifications - navigate to PayrollReceipt screen
       if (notifType === 'PAYROLL_RECEIVED' || notifType === 'PAYROLL_SENT') {
-        navigation.navigate('PayrollReceipt', {
-          transaction: {
-            id,
-            type: 'payroll',
-            direction: notifType === 'PAYROLL_RECEIVED' ? 'received' : 'sent',
-            employeeName: fullData.employee_name || fullData.employeeName || fullData.recipient_name || fullData.recipientName || fullData.employee_username || fullData.employeeUsername || fullData.recipient_username || fullData.recipientUsername,
-            employeeUsername: fullData.employee_username || fullData.employeeUsername || fullData.recipient_username || fullData.recipientUsername,
-            employeePhone: fullData.employee_phone || fullData.employeePhone || fullData.recipient_phone || fullData.recipientPhone,
-            businessName: notifType === 'PAYROLL_SENT' ? (currentUserName || 'Tu Empresa') : (fullData.business_name || fullData.businessName || fullData.sender_name || fullData.senderName || fullData.sender_display_name || fullData.senderDisplayName || fullData.from),
-            amount: fullData.amount || '0.00',
-            currency: fullData.currency || 'cUSD',
-            date: fullData.date || fullData.executed_at || fullData.executedAt || fullData.created_at || fullData.createdAt || notification.createdAt,
-            status: fullData.status || 'completed',
-            hash: fullData.hash || fullData.transaction_hash || fullData.transactionHash,
-            transactionHash: fullData.hash || fullData.transaction_hash || fullData.transactionHash,
-            payrollRunId: fullData.payroll_run_id || fullData.payrollRunId || fullData.run_id || fullData.runId,
-            runId: fullData.payroll_run_id || fullData.payrollRunId || fullData.run_id || fullData.runId,
-            notification_type: notifType,
-            ...fullData
-          }
+        navigateToPayrollReceipt({
+          notifType,
+          data: fullData,
+          id,
+          notificationCreatedAt: notification.createdAt,
         });
         return;
       }
@@ -503,6 +594,8 @@ export const NotificationScreen = () => {
         // Direction
         const isSent = txnType === 'sent' || txnType === 'send';
         const isReceived = txnType === 'received';
+        const toAddress = fullData.toAddress ?? fullData.recipient_address;
+        const fromAddress = fullData.fromAddress ?? fullData.sender_address;
         // Names from message if available
         const msg = (notification.message || '').trim();
         let recipientNameFromMsg: string | undefined;
@@ -564,9 +657,12 @@ export const NotificationScreen = () => {
           ...(isSent ? { toPhone: normalizedTo } : {}),
           ...(isReceived ? { fromPhone: normalizedFrom } : {}),
         };
-        navigation.navigate('TransactionDetail', {
-          transactionType: txnType,
-          transactionData: { ...fullData, ...txPayload }
+        navigateToTransactionDetail({
+          id,
+          notifType,
+          txnType,
+          baseData: fullData,
+          enrichedData: txPayload,
         });
       } else {
         // Use relatedPaymentTransaction as richer fallback for payments
@@ -583,44 +679,33 @@ export const NotificationScreen = () => {
           description: rpt.description,
         } : {};
 
-        navigation.navigate('TransactionDetail', {
-          transactionType: txnType,
-          transactionData: { id, notification_type: notifType, ...fullData, ...fallbackPayment }
+        navigateToTransactionDetail({
+          id,
+          notifType,
+          txnType,
+          baseData: fullData,
+          enrichedData: fallbackPayment,
         });
       }
     } else {
       // Fallback: for transaction-like notifications without actionUrl/relatedObject, navigate using data
       if (notifType === 'PAYROLL_RECEIVED' || notifType === 'PAYROLL_SENT') {
         // Navigate to PayrollReceipt screen for payroll notifications
-        const derivedId = parsedData.transaction_id || parsedData.transactionId || parsedData.payment_transaction_id || parsedData.paymentTransactionId || parsedData.id;
-
-        navigation.navigate('PayrollReceipt', {
-          transaction: {
-            id: derivedId,
-            type: 'payroll',
-            direction: notifType === 'PAYROLL_RECEIVED' ? 'received' : 'sent',
-            employeeName: parsedData.employee_name || parsedData.employeeName || parsedData.recipient_name || parsedData.recipientName || parsedData.employee_username || parsedData.employeeUsername || parsedData.recipient_username || parsedData.recipientUsername,
-            employeeUsername: parsedData.employee_username || parsedData.employeeUsername || parsedData.recipient_username || parsedData.recipientUsername,
-            employeePhone: parsedData.employee_phone || parsedData.employeePhone || parsedData.recipient_phone || parsedData.recipientPhone,
-            businessName: notifType === 'PAYROLL_SENT' ? (currentUserName || 'Tu Empresa') : (parsedData.business_name || parsedData.businessName || parsedData.sender_name || parsedData.senderName || parsedData.sender_display_name || parsedData.senderDisplayName || parsedData.from),
-            amount: parsedData.amount || '0.00',
-            currency: parsedData.currency || 'cUSD',
-            date: parsedData.date || parsedData.executed_at || parsedData.executedAt || parsedData.created_at || parsedData.createdAt || notification.createdAt,
-            status: parsedData.status || 'completed',
-            hash: parsedData.hash || parsedData.transaction_hash || parsedData.transactionHash,
-            transactionHash: parsedData.hash || parsedData.transaction_hash || parsedData.transactionHash,
-            payrollRunId: parsedData.payroll_run_id || parsedData.payrollRunId || parsedData.run_id || parsedData.runId,
-            runId: parsedData.payroll_run_id || parsedData.payrollRunId || parsedData.run_id || parsedData.runId,
-            notification_type: notifType,
-            ...parsedData
-          }
+        const derivedId = parsedData.transaction_id || parsedData.transactionId || parsedData.payment_transaction_id || parsedData.paymentTransactionId || parsedData.id || '';
+        navigateToPayrollReceipt({
+          notifType,
+          data: parsedData,
+          id: derivedId,
+          notificationCreatedAt: notification.createdAt,
         });
       } else if (notifType.startsWith('SEND_') || notifType.startsWith('PAYMENT_') || notifType === 'INVITE_RECEIVED') {
         // Attempt to derive an id from data for consistency; may be undefined
         const derivedId = parsedData.transaction_id || parsedData.transactionId || parsedData.payment_transaction_id || parsedData.paymentTransactionId || parsedData.id;
-        navigation.navigate('TransactionDetail', {
-          transactionType: baseTxnType,
-          transactionData: { id: derivedId, notification_type: notifType, ...parsedData }
+        navigateToTransactionDetail({
+          id: derivedId || '',
+          notifType,
+          txnType: baseTxnType,
+          baseData: parsedData,
         });
       }
     }

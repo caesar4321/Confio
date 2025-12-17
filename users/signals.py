@@ -552,6 +552,7 @@ def handle_payroll_item_save(sender, instance, created, **kwargs):
                                 'recipient_name': recipient_name,
                                 'recipient_username': recipient_user.username if recipient_user else '',
                                 'recipient_phone': recipient_user.phone_number if recipient_user else '',
+                                'recipient_phone_country': recipient_user.phone_country if recipient_user else '',
                                 'business_name': business.name if business else 'Empresa',
                             },
                             related_object_type='PayrollItem',
