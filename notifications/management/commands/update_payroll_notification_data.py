@@ -35,7 +35,7 @@ class Command(BaseCommand):
                 data = notif.data if isinstance(notif.data, dict) else json.loads(notif.data or '{}')
                 
                 # Check if already has all the new fields
-                if data.get('recipient_username') and data.get('business_name') and data.get('recipient_phone_country'):
+                if data.get('recipient_username') and data.get('business_name') and data.get('recipient_phone_country') and data.get('status'):
                     self.stdout.write(
                         self.style.WARNING(
                             f'Skipping notification {notif.id}: Already has new fields'
@@ -71,6 +71,7 @@ class Command(BaseCommand):
                 data['recipient_phone'] = recipient_user.phone_number if recipient_user else ''
                 data['recipient_phone_country'] = recipient_user.phone_country if recipient_user else ''
                 data['business_name'] = business.name if business else 'Empresa'
+                data['status'] = 'completed'
 
                 if dry_run:
                     self.stdout.write(
