@@ -90,6 +90,9 @@ export const GET_PAYROLL_RUNS = gql`
       scheduledAt
       createdAt
       tokenType
+      business {
+        name
+      }
       items {
         id
         itemId

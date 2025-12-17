@@ -183,10 +183,10 @@ export const NotificationScreen = () => {
       fullData: JSON.stringify(data),
     });
 
-    navigation.navigate('PayrollReceipt', {
+    navigation.navigate('TransactionReceipt', {
       transaction: {
         id,
-        type: 'payroll',
+        // type: 'payroll', // Redundant if passing explicit type below, but good for self-contained object
         direction: isReceived ? 'received' : 'sent',
         employeeName: employeeNameResolved,
         employeeUsername: employeeUsernameResolved,
@@ -198,12 +198,10 @@ export const NotificationScreen = () => {
         currency: data.currency || 'cUSD',
         date: data.date || data.executed_at || data.executedAt || data.created_at || data.createdAt || notificationCreatedAt,
         status: data.status || 'completed',
-        hash: data.hash || data.transaction_hash || data.transactionHash,
-        transactionHash: data.hash || data.transaction_hash || data.transactionHash,
-        payrollRunId: data.payroll_run_id || data.payrollRunId || data.run_id || data.runId,
-        runId: data.payroll_run_id || data.payrollRunId || data.run_id || data.runId,
-        notification_type: notifType,
-      }
+        transactionHash: data.transaction_hash || data.transactionHash || '',
+        payrollRunId: data.payroll_run_id || data.payrollRunId || '',
+      },
+      type: 'payroll'
     });
   };
 
@@ -227,7 +225,7 @@ export const NotificationScreen = () => {
     });
 
     navigation.navigate('TransactionDetail', {
-      transactionType: txnType,
+      transactionType: txnType as any,
       transactionData: { ...baseData, ...enrichedData, id, notification_type: notifType }
     });
   };
@@ -304,7 +302,8 @@ export const NotificationScreen = () => {
         return;
       }
       if (url.endsWith('send') || url.includes('send?')) {
-        navigation.navigate('SendToFriend');
+        // Generic send link -> Go to Contacts to pick recipient
+        (navigation as any).navigate('Contacts');
         return;
       }
       if (url.includes('wallet')) {

@@ -387,7 +387,8 @@ export type MainStackParamList = {
   PayrollTopUp: undefined;
   PayrollHome: undefined;
   PayrollRunDetail: { run: any };
-  PayrollReceipt: { transaction: any };
+  PayrollReceipt: { transaction: any; type?: 'payroll' };
+  TransactionReceipt: { transaction?: any; type?: 'payroll' | 'payment' | 'transfer' };
   PayrollSetupWizard: undefined;
   PayrollRecipientsManage: undefined;
   PayrollDelegatesManage: undefined;

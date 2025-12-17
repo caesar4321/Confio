@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, FlatList, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, FlatList, RefreshControl, Platform, StatusBar } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -114,6 +114,17 @@ export const PayrollRecipientsManageScreen = () => {
           );
         }}
         contentContainerStyle={styles.listContent}
+        ListFooterComponent={
+          recipients.length > 0 ? (
+            <TouchableOpacity
+              style={styles.footerAddButton}
+              onPress={() => setShowAddModal(true)}
+            >
+              <Icon name="plus" size={18} color={colors.primary} />
+              <Text style={styles.footerAddButtonText}>Agregar destinatario</Text>
+            </TouchableOpacity>
+          ) : null
+        }
       />
 
       <PayrollRecipientModal
@@ -135,6 +146,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
+    marginTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 10 : 0,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
@@ -267,6 +279,24 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     color: '#fff',
+  },
+  footerAddButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    gap: 8,
+    borderStyle: 'dashed',
+  },
+  footerAddButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.primary,
   },
 });
 

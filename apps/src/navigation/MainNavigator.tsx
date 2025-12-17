@@ -62,7 +62,7 @@ import PayrollPendingScreen from '../screens/PayrollPendingScreen';
 import PayrollTopUpScreen from '../screens/PayrollTopUpScreen';
 import PayrollHomeScreen from '../screens/PayrollHomeScreen';
 import PayrollRunDetailScreen from '../screens/PayrollRunDetailScreen';
-import PayrollReceiptScreen from '../screens/PayrollReceiptScreen';
+import TransactionReceiptScreen from '../screens/TransactionReceiptScreen';
 import PayrollSetupWizard from '../screens/PayrollSetupWizard';
 import PayrollRecipientsManageScreen from '../screens/PayrollRecipientsManageScreen';
 import PayrollDelegatesManageScreen from '../screens/PayrollDelegatesManageScreen';
@@ -436,8 +436,13 @@ export const MainNavigator = () => {
           options={{ headerShown: false }}
         />
         <Stack.Screen
+          name="TransactionReceipt"
+          component={TransactionReceiptScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
           name="PayrollReceipt"
-          component={PayrollReceiptScreen}
+          component={TransactionReceiptScreen}
           options={{ headerShown: false }}
         />
         <Stack.Screen

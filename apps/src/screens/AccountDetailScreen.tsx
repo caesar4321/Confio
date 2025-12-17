@@ -118,7 +118,7 @@ export const AccountDetailScreen = () => {
   const route = useRoute<AccountDetailScreenRouteProp>();
   const { formatNumber, formatCurrency } = useNumberFormat();
   const { activeAccount } = useAccount();
-  const { isAuthenticated, isLoading: authLoading, accountContextTick } = useAuth();
+  const { isAuthenticated, isLoading: authLoading, accountContextTick, userProfile } = useAuth();
 
   // Helpers to avoid overstating balances
   const floorToDecimals = useCallback((value: number, decimals: number) => {
@@ -1128,7 +1128,7 @@ export const AccountDetailScreen = () => {
     }
   }, [unifiedTransactionsData, transactionLimit, loadingMore, unifiedLoading, canQueryTransactions]);
 
-  const TransactionItem = memo(({ transaction }: { transaction: Transaction }) => {
+  const TransactionItem = memo(({ transaction, activeAccount, userProfile }: { transaction: Transaction, activeAccount: any, userProfile: any }) => {
     // Format the date properly
     const formattedDate = moment(transaction.date).format('DD/MM/YYYY');
     const formattedTime = transaction.time;
@@ -1291,20 +1291,24 @@ export const AccountDetailScreen = () => {
 
         const businessDisplayName = isEmployeeView
           ? (transaction.from || txAny.senderDisplayName || txAny.displayCounterparty || 'Empresa')
-          : 'Tu Empresa';
+          : (activeAccount?.business?.name || userProfile?.businessName || 'Tu Empresa');
 
         // @ts-ignore - Navigation type mismatch, but works at runtime
-        navigation.navigate('PayrollReceipt', {
+        navigation.navigate('TransactionReceipt', {
           transaction: {
             ...transaction,
-            employeeName: employeeDisplayName,
-            employeeUsername: counterpartyUsername || transaction.toUsername || txAny.recipientUsername || txAny.counterpartyUsername || '',
-            employeePhone: counterpartyPhone || transaction.toPhone || txAny.recipientPhone || txAny.counterpartyPhone || '',
-            businessName: businessDisplayName,
-            payrollRunId: transaction.payrollRunId || transaction.runId || '',
-            direction: txAny.direction,
-            counterpartyUser: counterpartyUser, // Pass the full object for debugging
-          }
+            // Ensure necessary fields for receipt
+            employeeName: (transaction as any).recipientUser?.firstName ? `${(transaction as any).recipientUser.firstName} ${(transaction as any).recipientUser.lastName}` : (transaction as any).recipientUser?.username,
+            employeeUsername: (transaction as any).recipientUser?.username,
+            businessName: activeAccount?.business?.name || 'Empresa',
+            amount: transaction.amount,
+            currency: (transaction as any).tokenType || transaction.currency,
+            date: (transaction as any).createdAt || transaction.date,
+            status: transaction.status,
+            transactionHash: transaction.transactionHash,
+            payrollRunId: transaction.payrollRunId
+          },
+          type: 'payroll'
         });
       } else {
         // @ts-ignore - Navigation type mismatch, but works at runtime
@@ -1879,7 +1883,13 @@ export const AccountDetailScreen = () => {
         style={styles.scrollView}
         sections={groupedTransactions}
         keyExtractor={(item, index) => `${item.id || item.transactionHash || index}-${index}`}
-        renderItem={({ item }) => <TransactionItem transaction={item} />}
+        renderItem={({ item }) => (
+          <TransactionItem
+            transaction={item}
+            activeAccount={activeAccount}
+            userProfile={userProfile}
+          />
+        )}
         renderSectionHeader={({ section: { title } }) => (
           <Text style={styles.sectionHeader}>{title}</Text>
         )}
@@ -3235,7 +3245,7 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     marginBottom: 8,
   },
-  exchangeInputContainer: {
+  exchangeModalInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#f3f4f6',
@@ -3244,7 +3254,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     marginBottom: 12,
   },
-  exchangeInput: {
+  exchangeModalInput: {
     flex: 1,
     fontSize: 24,
     fontWeight: 'bold',

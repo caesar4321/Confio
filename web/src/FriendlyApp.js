@@ -20,7 +20,7 @@ import FriendlyFooter from './Components/LandingPage/FriendlyFooter';
 import TermsPage from './Components/LegalDocument/TermsPage';
 import PrivacyPage from './Components/LegalDocument/PrivacyPage';
 import DeletionPage from './Components/LegalDocument/DeletionPage';
-import PayrollVerificationPage from './Components/Verification/PayrollVerificationPage';
+import TransactionVerificationPage from './Components/Verification/TransactionVerificationPage';
 
 import './FriendlyApp.css';
 
@@ -78,7 +78,7 @@ function FriendlyApp() {
               <Route path="/terms" element={<TermsPage />} />
               <Route path="/privacy" element={<PrivacyPage />} />
               <Route path="/deletion" element={<DeletionPage />} />
-              <Route path="/verify/:hash" element={<PayrollVerificationPage />} />
+              <Route path="/verify/:hash" element={<TransactionVerificationPage />} />
             </Routes>
           </div>
         </Router>

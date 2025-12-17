@@ -1072,7 +1072,11 @@ export const TransactionDetailScreen = () => {
   // Basic completeness for UI
   const hasCompleteData = Boolean(transactionData?.amount && transactionData?.from && transactionData?.to);
   // Phone presence by direction
-  const routeTypeLower = (transactionType || transactionData?.transaction_type || '').toString().toLowerCase();
+  const specifiedType = (transactionType || transactionData?.transaction_type || '').toString().toLowerCase();
+  const isPayroll = specifiedType === 'payroll' ||
+    (transactionData?.payrollRunId && transactionData.payrollRunId !== '') ||
+    (transactionData?.type === 'payroll');
+  const routeTypeLower = specifiedType;
   const hasRecipientPhone = Boolean(
     (transactionData as any)?.toPhone || (transactionData as any)?.recipient_phone || (transactionData as any)?.recipientPhone
   );
@@ -1795,7 +1799,24 @@ export const TransactionDetailScreen = () => {
               <Icon name="arrow-left" size={24} color="#fff" />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Detalle de Transacción</Text>
-            <TouchableOpacity style={styles.headerButton}>
+            <TouchableOpacity
+              style={styles.headerButton}
+              onPress={() => {
+                navigation.navigate('TransactionReceipt', {
+                  transaction: {
+                    ...currentTx,
+                    // Only pass payroll-specific fields if it is actually payroll
+                    ...(currentTx.type === 'payroll' ? {
+                      employeeName: currentTx.recipient_name || currentTx.employeeName,
+                      businessName: currentTx.sender_name || currentTx.businessName,
+                    } : {}),
+                    // FORCE internal ID for verification QR code (User Request)
+                    transactionHash: currentTx.transactionId || currentTx.id,
+                  },
+                  type: currentTx.type === 'payroll' ? 'payroll' : (currentTx.type === 'payment' ? 'payment' : 'transfer')
+                });
+              }}
+            >
               <Icon name="share" size={24} color="#fff" />
             </TouchableOpacity>
           </View>
@@ -2525,6 +2546,30 @@ export const TransactionDetailScreen = () => {
               <Text style={styles.blockchainButtonText}>Ver detalles técnicos</Text>
             </TouchableOpacity>
           </View>
+
+
+          {/* Official Receipt Button */}
+          {(currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'received' || currentTx.type === 'payment') && (
+            <View style={styles.card}>
+              <TouchableOpacity
+                onPress={() => {
+                  navigation.navigate('TransactionReceipt', {
+                    transaction: {
+                      ...currentTx,
+                      ...transactionData,
+                      // FORCE internal ID for verification QR code (User Request)
+                      transactionHash: currentTx.transactionId || currentTx.id || transactionData.transactionId,
+                    },
+                    type: currentTx.type === 'payment' ? 'payment' : 'transfer'
+                  });
+                }}
+                style={[styles.blockchainButton, { backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0' }]}
+              >
+                <Icon name="file-text" size={16} color="#059669" style={styles.blockchainIcon} />
+                <Text style={[styles.blockchainButtonText, { color: '#059669' }]}>Ver comprobante oficial</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           {/* Actions */}
           <View style={styles.card}>

@@ -16,7 +16,7 @@ import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import ViewShot from 'react-native-view-shot';
 import { CameraRoll } from '@react-native-camera-roll/camera-roll';
 import { MainStackParamList } from '../types/navigation';
-import { PayrollReceiptView } from '../components/PayrollReceiptView';
+import { TransactionReceiptView } from '../components/TransactionReceiptView';
 import { PayrollRunReceiptView } from '../components/PayrollRunReceiptView';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'PayrollRunDetail'>;
@@ -365,17 +365,20 @@ export const PayrollRunDetailScreen = () => {
                 ref={(ref) => { receiptRefs.current[capturingIndex] = ref; }}
                 options={{ format: 'jpg', quality: 0.9 }}
               >
-                <PayrollReceiptView
-                  employeeName={name}
-                  employeeUsername={username}
-                  employeePhone={phone}
-                  businessName={businessName}
-                  amount={formatCurrency(Number(it.netAmount || 0))}
+                <TransactionReceiptView
+                  type="payroll"
+                  senderName={businessName}
+                  senderLabel="Empresa"
+                  recipientName={name}
+                  recipientLabel="Empleado"
+                  recipientDetail={username ? `@${username}` : phone}
+                  amount={formatCurrency(Number(it.netAmount || 0)).replace('cUSD', '').trim()} // clean format
                   currency="cUSD"
                   date={run?.scheduledAt || run?.createdAt || new Date().toISOString()}
                   status={it.status || 'completed'}
                   transactionHash={it.transactionHash || ''}
-                  payrollRunId={run?.runId || run?.id?.slice(0, 6) || ''}
+                  referenceId={run?.runId || run?.id?.slice(0, 6) || ''}
+                  referenceLabel="ID de corrida"
                   generatedDate={new Date().toISOString()}
                 />
               </ViewShot>
@@ -426,6 +429,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     marginBottom: 8,
+    marginTop: Platform.OS === 'android' ? 40 : 0,
   },
   backButton: {
     padding: 8,

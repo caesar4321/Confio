@@ -38,14 +38,15 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }) 
 
 // HTTP link
 const httpLink = createHttpLink({
-  uri: process.env.REACT_APP_GRAPHQL_URL || 'http://localhost:8000/graphql/',
+  // Use relative path by default to work in both dev (with proxy) and prod
+  uri: process.env.REACT_APP_GRAPHQL_URL || '/graphql/',
 });
 
 // Auth link for adding headers
 const authLink = setContext((_, { headers }) => {
   // Get the authentication token from local storage if it exists
   const token = localStorage.getItem('token');
-  
+
   // Return the headers to the context so httpLink can read them
   return {
     headers: {

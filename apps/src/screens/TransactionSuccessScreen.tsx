@@ -127,7 +127,21 @@ export const TransactionSuccessScreen = () => {
 
 
   const handleShareReceipt = () => {
-    Alert.alert('Compartir Comprobante', 'Función de compartir en desarrollo');
+    (navigation as any).navigate('TransactionReceipt', {
+      transaction: {
+        ...transactionData,
+        id: transactionData.transactionId,
+        transactionHash: transactionData.transactionId,
+        date: new Date().toISOString(),
+        status: 'completed', // Success screen implies completion
+        // Map fields for generic view
+        employeeName: transactionData.recipient,
+        employeePhone: transactionData.recipientPhone,
+        businessName: transactionData.sender || 'Usuario', // For P2P
+        transactionId: transactionData.transactionId
+      },
+      type: transactionData.type === 'payment' ? 'payment' : 'transfer'
+    });
   };
 
   const { userProfile } = useAuth();
@@ -500,12 +514,12 @@ export const TransactionSuccessScreen = () => {
 
 
               <TouchableOpacity
-                style={[styles.actionButton, { backgroundColor: '#F3F4F6' }]}
+                style={[styles.actionButton, { backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0' }]}
                 onPress={handleShareReceipt}
               >
-                <Icon name="share" size={16} color="#374151" />
-                <Text style={[styles.actionButtonText, { color: '#374151' }]}>
-                  Compartir comprobante
+                <Icon name="file-text" size={16} color="#059669" />
+                <Text style={[styles.actionButtonText, { color: '#059669' }]}>
+                  Ver comprobante oficial
                 </Text>
               </TouchableOpacity>
 

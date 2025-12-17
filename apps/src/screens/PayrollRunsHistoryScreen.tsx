@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, RefreshControl, ScrollView, SafeAreaView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, RefreshControl, ScrollView, SafeAreaView, Platform, StatusBar } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -141,7 +141,7 @@ const PayrollRunsHistoryScreen = () => {
     const badge = statusStyles(item.status);
     const displayDate = item.scheduledAt || item.createdAt;
     const isCompleted = (item.status || '').toLowerCase() === 'completed' ||
-                        (item.status || '').toLowerCase() === 'confirmed';
+      (item.status || '').toLowerCase() === 'confirmed';
 
     return (
       <TouchableOpacity
@@ -318,6 +318,7 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 16,
     paddingHorizontal: 16,
+    marginTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 10 : 0,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#fff',

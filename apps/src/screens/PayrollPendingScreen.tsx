@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, SafeAreaView, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, RefreshControl, ScrollView, SafeAreaView, Platform, StatusBar, ActivityIndicator, Alert } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useQuery, useMutation } from '@apollo/client';
@@ -252,7 +252,7 @@ export const PayrollPendingScreen = () => {
                   <Text style={[styles.statusText, badge.fg]}>{badge.label}</Text>
                 </View>
               </View>
-              <Text style={styles.amount}>{item.netAmount} {item.run?.tokenType || 'cUSD'}</Text>
+              <Text style={styles.amount}>{item.netAmount} {(item.run?.tokenType || 'cUSD') === 'CUSD' ? 'cUSD' : (item.run?.tokenType || 'cUSD')}</Text>
               <Text style={styles.subtext}>Recibe: {item.recipientUser?.firstName} {item.recipientUser?.lastName}</Text>
               <Text style={styles.subtext}>Bruto: {item.grossAmount} · Comisión: {item.feeAmount}</Text>
               <View style={styles.ctaRow}>
@@ -285,8 +285,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
+    marginTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 10 : 0,
+    backgroundColor: '#fff',
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: '#E5E7EB',
   },
   backButton: {
     width: 32,
