@@ -99,12 +99,13 @@ class WalletMigrationService {
                             const v2Balance = v2CheckInfo.amount;
                             const v2Assets = v2CheckInfo.assets || [];
 
-                            // Check if V2 is "Empty" (Only min balance/dust and NO relevant assets)
                             const relevantV2Assets = v2Assets.filter((a: any) => {
                                 const aid = a['asset-id'];
-                                return (aid === CONFIO_ASSET_ID || aid === CUSD_ASSET_ID || aid === USDC_ASSET_ID);
+                                const amount = a['amount'];
+                                return ((aid === CONFIO_ASSET_ID || aid === CUSD_ASSET_ID || aid === USDC_ASSET_ID) && amount > 0);
                             });
-                            const isV2Empty = (v2Balance < 2000000 && relevantV2Assets.length === 0);
+                            // If V2 has < 1.0 ALGO and NO Asset Balance, it is likely just "Opted In" but not migrated.
+                            const isV2Empty = (v2Balance < 1000000 && relevantV2Assets.length === 0);
 
                             if (isV2Empty) {
                                 console.log('[MigrationService] TRUST BUT VERIFY: Backend says Migrated, but V2 is EMPTY. Checking V1 to confirm...');
@@ -122,10 +123,11 @@ class WalletMigrationService {
                                     const v1Assets = v1Info.assets || [];
                                     const relevantV1Assets = v1Assets.filter((a: any) => {
                                         const aid = a['asset-id'];
-                                        return (aid === CONFIO_ASSET_ID || aid === CUSD_ASSET_ID || aid === USDC_ASSET_ID);
+                                        const amount = a['amount'];
+                                        return ((aid === CONFIO_ASSET_ID || aid === CUSD_ASSET_ID || aid === USDC_ASSET_ID) && amount > 0);
                                     });
 
-                                    if (relevantV1Assets.length > 0 || v1Balance > 1000000) {
+                                    if (relevantV1Assets.length > 0 || v1Balance >= 300000) {
                                         console.warn('[MigrationService] ZOMBIE CONFIRMED: V2 Empty, but V1 has funds. Forcing Migration Resume.');
                                         // Fall through to standard check below (which will return true)
                                     } else {
@@ -227,7 +229,7 @@ class WalletMigrationService {
             // We consider it "migrated" or "empty"
             // We ignore junk assets - they will be abandoned in the legacy wallet
             // If V1 is practically empty (only min balance or less, and no RELEVANT assets)
-            if (!hasRelevantAssets && balance < 1000000) {
+            if (!hasRelevantAssets && balance < 300000) {
                 console.log('[MigrationService] V1 is empty/dust. Checking if we need to self-heal (Zombie State).');
 
                 // Check if actually migrated but backend missed it
@@ -240,7 +242,7 @@ class WalletMigrationService {
 
                         const v2Info = await this.algodClient.accountInformation(v2Address).do();
                         // If V2 has confirmed implementation (assets or significant balance)
-                        if (v2Info.amount > 1000000 || (v2Info.assets && v2Info.assets.length > 0)) {
+                        if (v2Info.amount >= 300000 || (v2Info.assets && v2Info.assets.length > 0)) {
                             console.log('[MigrationService] ZOMBIE DETECTED: V1 empty, V2 funded. Self-healing...');
 
                             // 1. Tell Backend
