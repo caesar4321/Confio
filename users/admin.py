@@ -417,15 +417,26 @@ class BankInfoAdmin(admin.ModelAdmin):
 
 @admin.register(UnifiedTransactionTable)
 class UnifiedTransactionAdmin(admin.ModelAdmin):
-    list_display = ('id', 'transaction_hash_short', 'type_display', 'amount_display', 'token_type', 'status_display', 'sender_info', 'counterparty_info', 'created_at', 'transaction_date')
+    list_display = ('id', 'internal_id_display', 'transaction_hash_short', 'type_display', 'amount_display', 'token_type', 'status_display', 'sender_info', 'counterparty_info', 'created_at', 'transaction_date')
     list_filter = ('transaction_type', 'token_type', 'status', 'sender_type', 'counterparty_type', 'created_at')
-    search_fields = ('transaction_hash', 'sender_display_name', 'counterparty_display_name', 'description', 'sender_address', 'counterparty_address', 'sender_phone', 'counterparty_phone')
+    search_fields = (
+        'transaction_hash', 'sender_display_name', 'counterparty_display_name',
+        'description', 'sender_address', 'counterparty_address', 'sender_phone', 'counterparty_phone',
+        'send_transaction__internal_id',
+        'payment_transaction__internal_id',
+        'conversion__internal_id',
+        'p2p_trade__internal_id',
+        'payroll_item__internal_id',
+        'referral_reward_event__internal_id',
+        'presale_purchase__internal_id',
+    )
     date_hierarchy = 'created_at'
     list_per_page = 50
     
     # Now this is a table with foreign keys, we can edit some fields
     readonly_fields = (
         'id', 'send_transaction', 'payment_transaction', 'conversion', 'p2p_trade',
+        'payroll_item', 'referral_reward_event', 'presale_purchase',
         'created_at', 'updated_at', 'transaction_date', 'deleted_at',
         'source_transaction_link'
     )
@@ -453,7 +464,7 @@ class UnifiedTransactionAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         }),
         ('Source Transaction Links', {
-            'fields': ('send_transaction', 'payment_transaction', 'conversion', 'p2p_trade'),
+            'fields': ('send_transaction', 'payment_transaction', 'conversion', 'p2p_trade', 'payroll_item', 'referral_reward_event', 'presale_purchase'),
             'classes': ('collapse',)
         }),
     )
@@ -467,6 +478,36 @@ class UnifiedTransactionAdmin(admin.ModelAdmin):
     def has_delete_permission(self, request, obj=None):
         return False  # Don't allow manual deletion
     
+    def internal_id_display(self, obj):
+        """Display the UUID internal ID from the source transaction"""
+        source = (
+            obj.send_transaction or 
+            obj.payment_transaction or 
+            obj.conversion or 
+            obj.p2p_trade or
+            obj.payroll_item or 
+            obj.presale_purchase or 
+            obj.referral_reward_event
+        )
+        if not source: return "-"
+        
+        # Try finding the ID
+        val = None
+        if hasattr(source, 'internal_id'): 
+            val = source.internal_id
+        elif hasattr(source, 'trade_id'): 
+            val = source.trade_id # P2P
+        elif hasattr(source, 'payment_id'): 
+            val = source.payment_id # Just in case
+
+        if val:
+            if hasattr(val, 'hex'):
+                return val.hex
+            return str(val).replace('-', '')
+            
+        return "-"
+    internal_id_display.short_description = "Internal ID"
+
     def transaction_hash_short(self, obj):
         if obj.transaction_hash:
             return format_html(
@@ -594,6 +635,15 @@ class UnifiedTransactionAdmin(admin.ModelAdmin):
         elif obj.p2p_trade:
             url = reverse('admin:p2p_exchange_p2ptrade_change', args=[obj.p2p_trade.id])
             return format_html('<a href="{}">P2P Trade #{}</a>', url, obj.p2p_trade.id)
+        elif obj.payroll_item:
+            url = reverse('admin:payroll_payrollitem_change', args=[obj.payroll_item.id])
+            return format_html('<a href="{}">Payroll Item #{}</a>', url, obj.payroll_item.id)
+        elif obj.referral_reward_event:
+            url = reverse('admin:achievements_referralrewardevent_change', args=[obj.referral_reward_event.id])
+            return format_html('<a href="{}">Reward Event #{}</a>', url, obj.referral_reward_event.id)
+        elif obj.presale_purchase:
+            url = reverse('admin:presale_presalepurchase_change', args=[obj.presale_purchase.id])
+            return format_html('<a href="{}">Presale Purchase #{}</a>', url, obj.presale_purchase.id)
         return "No source"
     source_transaction_link.short_description = "Source"
     

@@ -162,7 +162,12 @@ class NotificationType(DjangoObjectType):
         if self.related_object_type == 'PaymentTransaction' and self.related_object_id:
             try:
                 from payments.models import PaymentTransaction
-                return PaymentTransaction.objects.get(id=self.related_object_id)
+                # First try lookup by integer ID (new format)
+                try:
+                    return PaymentTransaction.objects.get(id=int(self.related_object_id))
+                except (ValueError, PaymentTransaction.DoesNotExist):
+                    # Fallback: try lookup by internal_id (UUID, old format)
+                    return PaymentTransaction.objects.get(internal_id=self.related_object_id)
             except (PaymentTransaction.DoesNotExist, ImportError):
                 return None
         return None

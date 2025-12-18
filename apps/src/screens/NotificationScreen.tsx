@@ -224,9 +224,43 @@ export const NotificationScreen = () => {
       txnType,
     });
 
+    // Prefer internalId/internal_id, but also accept transaction_id variants since some notifications omit the explicit field
+    const pickInternalId = (candidate: any): string | undefined => {
+      if (candidate === undefined || candidate === null) return undefined;
+      const value = typeof candidate === 'string' ? candidate.trim() : String(candidate || '').trim();
+      if (!value || value.toUpperCase() === '#PENDING') return undefined;
+      // Must look UUID-like to avoid numeric fallbacks (length + letters/hyphen)
+      if (value.length < 32) return undefined;
+      if (!/[A-Fa-f-]/.test(value)) return undefined;
+      return value;
+    };
+
+    const internalId =
+      pickInternalId(enrichedData.internalId) ||
+      pickInternalId(enrichedData.internal_id) ||
+      pickInternalId(enrichedData.transactionId) ||
+      pickInternalId(enrichedData.transaction_id) ||
+      pickInternalId(enrichedData.paymentTransactionId) ||
+      pickInternalId(enrichedData.payment_transaction_id) ||
+      pickInternalId(baseData.internalId) ||
+      pickInternalId(baseData.internal_id) ||
+      pickInternalId(baseData.transactionId) ||
+      pickInternalId(baseData.transaction_id) ||
+      pickInternalId(baseData.paymentTransactionId) ||
+      pickInternalId(baseData.payment_transaction_id) ||
+      pickInternalId(id);
+
+    const transactionPayload = {
+      ...baseData,
+      ...enrichedData,
+      id,
+      notification_type: notifType,
+      ...(internalId ? { internalId, internal_id: internalId } : {}),
+    };
+
     navigation.navigate('TransactionDetail', {
       transactionType: txnType as any,
-      transactionData: { ...baseData, ...enrichedData, id, notification_type: notifType }
+      transactionData: transactionPayload
     });
   };
 
@@ -254,6 +288,9 @@ export const NotificationScreen = () => {
     if (notifType === 'PAYMENT_RECEIVED' || notifType === 'PAYMENT_SENT' || notifType === 'INVOICE_PAID') baseTxnType = 'payment';
     if (notifType === 'PAYROLL_RECEIVED' || notifType === 'PAYROLL_SENT') baseTxnType = 'payroll';
     if (notifType === 'SEND_SENT') baseTxnType = 'sent';
+    if (notifType === 'CONVERSION_COMPLETED') baseTxnType = 'conversion';
+    if (notifType === 'USDC_DEPOSIT_COMPLETED' || notifType === 'USDC_DEPOSIT_PENDING') baseTxnType = 'deposit';
+    if (notifType === 'USDC_WITHDRAWAL_COMPLETED') baseTxnType = 'withdrawal';
 
     // Parse data blob once
     let parsedData: any = notification.data;
@@ -312,9 +349,11 @@ export const NotificationScreen = () => {
       }
       if (url.includes('p2p/trade/')) {
         const tradeId = url.split('p2p/trade/')[1];
+        const internalId = parsedData.internal_id || parsedData.internalId;
         navigation.navigate('ActiveTrade', {
           trade: {
-            id: tradeId
+            id: tradeId,
+            ...(internalId ? { internalId } : {})
           }
         });
       } else if (url.includes('p2p/offer/')) {
@@ -379,6 +418,9 @@ export const NotificationScreen = () => {
           id: sendId,
           notification_type: notifType,
           transaction_type: txnType,
+          // internal_id for proper operation ID display
+          internal_id: fullData.internal_id ?? fullData.internalId ?? fullData.transaction_internal_id,
+          internalId: fullData.internalId ?? fullData.internal_id ?? fullData.transaction_internal_id,
           // names
           recipient_name: fullData.recipient_name ?? fullData.recipientName ?? recipientNameFromMsg,
           sender_name: fullData.sender_name ?? fullData.senderName ?? senderNameFromMsg,
@@ -492,6 +534,9 @@ export const NotificationScreen = () => {
           id: transactionId,
           notification_type: notifType,
           transaction_type: txnType,
+          // internal_id for proper operation ID display
+          internal_id: fullData.internal_id ?? fullData.internalId ?? fullData.transaction_internal_id,
+          internalId: fullData.internalId ?? fullData.internal_id ?? fullData.transaction_internal_id,
           // names and phones
           recipient_name: recipientName,
           recipientPhone: recipientPhone || derivedToPhone,
@@ -646,6 +691,9 @@ export const NotificationScreen = () => {
           id,
           notification_type: notifType,
           transaction_type: txnType,
+          // internal_id for proper operation ID display
+          internal_id: fullData.internal_id ?? fullData.internalId ?? fullData.transaction_internal_id,
+          internalId: fullData.internalId ?? fullData.internal_id ?? fullData.transaction_internal_id,
           currency: uiCurrency,
           // prefer contact-resolved names
           ...(isSent ? { to: displayTo } : {}),
@@ -668,6 +716,9 @@ export const NotificationScreen = () => {
         const rpt: any = (notification as any)?.relatedPaymentTransaction;
         const fallbackPayment = rpt ? {
           transaction_id: rpt.paymentTransactionId || rpt.id,
+          // internal_id for proper operation ID display
+          internal_id: rpt.internal_id ?? rpt.internalId ?? fullData.internal_id ?? fullData.internalId,
+          internalId: rpt.internalId ?? rpt.internal_id ?? fullData.internalId ?? fullData.internal_id,
           amount: rpt.amount,
           token_type: rpt.tokenType,
           status: rpt.status,
@@ -697,7 +748,13 @@ export const NotificationScreen = () => {
           id: derivedId,
           notificationCreatedAt: notification.createdAt,
         });
-      } else if (notifType.startsWith('SEND_') || notifType.startsWith('PAYMENT_') || notifType === 'INVITE_RECEIVED') {
+      } else if (
+        notifType.startsWith('SEND_') ||
+        notifType.startsWith('PAYMENT_') ||
+        notifType === 'INVITE_RECEIVED' ||
+        notifType === 'CONVERSION_COMPLETED' ||
+        notifType.startsWith('USDC_')
+      ) {
         // Attempt to derive an id from data for consistency; may be undefined
         const derivedId = parsedData.transaction_id || parsedData.transactionId || parsedData.payment_transaction_id || parsedData.paymentTransactionId || parsedData.id;
         navigateToTransactionDetail({

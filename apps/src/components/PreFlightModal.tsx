@@ -6,6 +6,7 @@ import {
     Modal,
     TouchableOpacity,
     Platform,
+    ScrollView,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 
@@ -75,41 +76,46 @@ const PreFlightModal: React.FC<PreFlightModalProps> = ({
         >
             <View style={styles.overlay}>
                 <View style={styles.modalContainer}>
-                    {/* Header */}
-                    <View style={styles.header}>
-                        <View style={styles.iconContainer}>
-                            <Icon name="clock" size={24} color="#72D9BC" />
-                        </View>
-                        <Text style={styles.title}>{title}</Text>
-                        <Text style={styles.subtitle}>{subtitle}</Text>
-                    </View>
-
-                    {/* Checklist Items */}
-                    <View style={styles.checklistContainer}>
-                        {checklistItems.map((item, index) => (
-                            <View key={index} style={styles.checklistItem}>
-                                <View style={styles.itemIconContainer}>
-                                    <Text style={styles.emoji}>{item.emoji}</Text>
-                                </View>
-                                <View style={styles.itemTextContainer}>
-                                    <Text style={styles.itemTitle}>{item.title}</Text>
-                                    <Text style={styles.itemDescription}>{item.description}</Text>
-                                </View>
+                    <ScrollView
+                        showsVerticalScrollIndicator={false}
+                        contentContainerStyle={styles.scrollContent}
+                    >
+                        {/* Header */}
+                        <View style={styles.header}>
+                            <View style={styles.iconContainer}>
+                                <Icon name="clock" size={24} color="#72D9BC" />
                             </View>
-                        ))}
-                    </View>
+                            <Text style={styles.title}>{title}</Text>
+                            <Text style={styles.subtitle}>{subtitle}</Text>
+                        </View>
 
-                    {/* Actions */}
-                    <View style={styles.actionsContainer}>
-                        <TouchableOpacity style={styles.primaryButton} onPress={onContinue}>
-                            <Text style={styles.primaryButtonText}>Estoy listo</Text>
-                            <Icon name="arrow-right" size={20} color="#fff" />
-                        </TouchableOpacity>
+                        {/* Checklist Items */}
+                        <View style={styles.checklistContainer}>
+                            {checklistItems.map((item, index) => (
+                                <View key={index} style={styles.checklistItem}>
+                                    <View style={styles.itemIconContainer}>
+                                        <Text style={styles.emoji}>{item.emoji}</Text>
+                                    </View>
+                                    <View style={styles.itemTextContainer}>
+                                        <Text style={styles.itemTitle}>{item.title}</Text>
+                                        <Text style={styles.itemDescription}>{item.description}</Text>
+                                    </View>
+                                </View>
+                            ))}
+                        </View>
 
-                        <TouchableOpacity style={styles.secondaryButton} onPress={onCancel}>
-                            <Text style={styles.secondaryButtonText}>Más tarde</Text>
-                        </TouchableOpacity>
-                    </View>
+                        {/* Actions */}
+                        <View style={styles.actionsContainer}>
+                            <TouchableOpacity style={styles.primaryButton} onPress={onContinue}>
+                                <Text style={styles.primaryButtonText}>Estoy listo</Text>
+                                <Icon name="arrow-right" size={20} color="#fff" />
+                            </TouchableOpacity>
+
+                            <TouchableOpacity style={styles.secondaryButton} onPress={onCancel}>
+                                <Text style={styles.secondaryButtonText}>Más tarde</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </ScrollView>
                 </View>
             </View>
         </Modal>
@@ -129,7 +135,7 @@ const styles = StyleSheet.create({
         borderRadius: 24,
         width: '100%',
         maxWidth: 340,
-        padding: 24,
+        maxHeight: '85%',
         ...Platform.select({
             ios: {
                 shadowColor: '#000',
@@ -141,6 +147,9 @@ const styles = StyleSheet.create({
                 elevation: 8,
             },
         }),
+    },
+    scrollContent: {
+        padding: 24,
     },
     header: {
         alignItems: 'center',

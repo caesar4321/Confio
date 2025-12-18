@@ -9,7 +9,7 @@ from .models import Invoice, PaymentTransaction
 class PaymentTransactionAdmin(admin.ModelAdmin):
     """Admin configuration for PaymentTransaction model"""
     list_display = [
-        'payment_transaction_id',
+        'internal_id',
         'payer_display', 
         'merchant_display',
         'amount_display', 
@@ -29,7 +29,7 @@ class PaymentTransactionAdmin(admin.ModelAdmin):
         'merchant_account_user__is_active'
     ]
     search_fields = [
-        'payment_transaction_id',
+        'internal_id',
         'transaction_hash',
         'payer_user__username', 
         'payer_user__email',
@@ -44,7 +44,7 @@ class PaymentTransactionAdmin(admin.ModelAdmin):
         'merchant_display_name'
     ]
     readonly_fields = [
-        'payment_transaction_id',
+        'internal_id',
         'created_at', 
         'updated_at', 
         'transaction_hash',
@@ -57,7 +57,7 @@ class PaymentTransactionAdmin(admin.ModelAdmin):
     
     fieldsets = (
         ('Payment Information', {
-            'fields': ('payment_transaction_id', 'invoice', 'amount_display', 'amount', 'token_type', 'description')
+            'fields': ('internal_id', 'invoice', 'amount_display', 'amount', 'token_type', 'description')
         }),
         ('Payer Details', {
             'fields': ('payer_type', 'payer_user', 'payer_business', 'payer_display_name'),

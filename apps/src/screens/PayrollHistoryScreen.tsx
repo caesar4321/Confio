@@ -42,7 +42,7 @@ const PayrollHistoryScreen = () => {
       .flatMap((run: any) => {
         const matchItems = (run.items || []).filter((it: any) => it.recipientAccount?.id === accountId);
         return matchItems.map((it: any) => ({
-          id: it.itemId,
+          id: it.internalId,
           amount: it.netAmount,
           token: run.tokenType || 'cUSD',
           status: it.status,

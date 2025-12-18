@@ -25,12 +25,12 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
     Client → Server:
       - {type:"ping"}
       - {type:"prepare_request", amount: number|string}
-      - {type:"submit_request", purchase_id: string, signed_transactions: list, sponsor_transactions?: list}
+      - {type:"submit_request", internal_id: string, signed_transactions: list, sponsor_transactions?: list}
 
     Server → Client:
       - {type:"pong"}
       - {type:"server_ping"}
-      - {type:"prepare_ready", pack:{purchase_id, transactions, sponsor_transactions, user_signing_indexes, group_id}}
+      - {type:"prepare_ready", pack:{internal_id, transactions, sponsor_transactions, user_signing_indexes, group_id}}
       - {type:"error", message}
       - {type:"submit_ok", transaction_id}
     """
@@ -144,7 +144,8 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
                 await self.send_json({
                     "type": "prepare_ready",
                     "pack": {
-                        "purchase_id": pack.get("purchase_id"),
+                        "internal_id": pack.get("purchase_id"),
+                        "purchase_id": pack.get("purchase_id"),  # backward compat
                         "transactions": pack.get("transactions"),
                         "sponsor_transactions": pack.get("sponsor_transactions"),
                         "user_signing_indexes": pack.get("user_signing_indexes", [1]),
@@ -157,10 +158,11 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
             return
         if t == "submit_request":
             try:
-                purchase_id = content.get("purchase_id")
+                # Accept internal_id first, fallback to purchase_id for backward compatibility
+                internal_id = content.get("internal_id") or content.get("purchase_id")
                 signed_transactions = content.get("signed_transactions")
                 sponsor_transactions = content.get("sponsor_transactions") or []
-                res = await self._submit(purchase_id, signed_transactions, sponsor_transactions)
+                res = await self._submit(internal_id, signed_transactions, sponsor_transactions)
                 if not res.get("success"):
                     await self.send_json({"type": "error", "message": res.get("error", "submit_failed")})
                     return
@@ -346,6 +348,24 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
             logger = logging.getLogger(__name__)
             from algosdk import encoding as _enc
             sp0 = next((s for s in (tx_pack.get('sponsor_transactions') or []) if int(s.get('index',-1)) == 0), None)
+        except Exception:
+            pass
+        # Create UnifiedTransactionTable entry for this presale purchase
+        from users.models_unified import UnifiedTransactionTable
+        try:
+            UnifiedTransactionTable.objects.create(
+                transaction_type='presale',
+                internal_id=purchase.internal_id,
+                amount=str(purchase.cusd_amount),
+                token_type='CUSD',
+                status='processing',
+                transaction_hash='',
+                from_address=purchase.from_address,
+                to_address='',
+                presale_purchase=purchase,
+            )
+        except Exception as e:
+            logger.error(f"[PRESALE][WS] Failed to create UnifiedTransactionTable entry: {e}")
             if sp0 and sp0.get('txn'):
                 stx = _enc.msgpack_decode(sp0['txn'])
                 recv = getattr(stx, 'receiver', None)
@@ -401,7 +421,7 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
 
         return {
             "success": True,
-            "purchase_id": str(purchase.id),
+            "purchase_id": str(purchase.internal_id),
             "transactions": transactions,
             "sponsor_transactions": sponsors,  # raw for debugging/clients that need structure
             "user_signing_indexes": [1],
@@ -687,7 +707,7 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
 
         # Load purchase
         try:
-            purchase = PresalePurchase.objects.get(id=purchase_id)
+            purchase = PresalePurchase.objects.get(internal_id=purchase_id)
         except PresalePurchase.DoesNotExist:
             return {"success": False, "error": "purchase_not_found"}
 

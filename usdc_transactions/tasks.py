@@ -15,15 +15,20 @@ def poll_guardarian_transactions():
     Poll Guardarian for status updates on pending transactions.
     Strategy: Check transactions created in the last 7 days that are not in a final state.
     """
-    # Active states that need polling
-    active_states = ['new', 'waiting', 'waiting_for_customer', 'pending', 'confirmed', 'exchanging', 'sending']
+    # Active states customization
+    # 1. Draft/Waiting: User hasn't paid yet or just started. Abandon after 24 hours.
+    waiting_states = ['new', 'waiting', 'waiting_for_customer']
+    waiting_threshold = timezone.now() - timedelta(hours=24)
     
-    # Time window: last 7 days (to catch stuck transactions)
-    time_threshold = timezone.now() - timedelta(days=7)
+    # 2. Processing: User paid, money moving. Keep polling for 7 days to ensure completion.
+    processing_states = ['pending', 'confirmed', 'exchanging', 'sending']
+    processing_threshold = timezone.now() - timedelta(days=7)
+    
+    from django.db.models import Q
     
     pending_txs = GuardarianTransaction.objects.filter(
-        status__in=active_states,
-        created_at__gte=time_threshold
+        Q(status__in=waiting_states, created_at__gte=waiting_threshold) |
+        Q(status__in=processing_states, created_at__gte=processing_threshold)
     )
     
     if not pending_txs.exists():
@@ -49,6 +54,14 @@ def poll_guardarian_transactions():
             if resp.status_code == 429:
                 logger.warning("Guardarian rate limit hit during poll. Stopping cycle.")
                 break
+
+            if resp.status_code == 404:
+                logger.warning(f"Guardarian Tx {tx.guardarian_id} not found (404). Marking as failed.")
+                tx.status = 'failed'
+                tx.status_details = 'Transaction not found on Guardarian (expired/invalid)'
+                tx.save()
+                updated_count += 1
+                continue
 
             if not resp.ok:
                 logger.warning(f"Guardarian poll failed for {tx.guardarian_id}: {resp.status_code}")

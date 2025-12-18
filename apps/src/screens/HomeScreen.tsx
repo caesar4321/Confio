@@ -858,24 +858,29 @@ export const HomeScreen = () => {
         setClaimInviteError('No se encontró tu dirección Algorand');
         return;
       }
-      const res = await inviteSendService.claimInviteForPhone(
+      // Claim ALL pending invites at once
+      const res = await inviteSendService.claimAllPendingInvites(
         userProfile?.phoneNumber,
         userProfile?.phoneCountry,
-        address,
-        inviteReceiptId
+        address
       );
-      if (!res.success) {
-        setClaimInviteError(res.error || 'No se pudo reclamar la invitación');
-      } else {
-        setClaimInviteMessage('Invitación reclamada. Revisa tu billetera.');
+      if (res.totalClaimed === 0 && res.totalFailed === 0) {
+        setClaimInviteError('No se encontraron invitaciones pendientes');
+      } else if (res.totalFailed > 0 && res.totalClaimed === 0) {
+        setClaimInviteError(res.errors[0] || 'No se pudieron reclamar las invitaciones');
+      } else if (res.totalClaimed > 0) {
+        const msg = res.totalClaimed === 1
+          ? 'Invitación reclamada. Revisa tu billetera.'
+          : `${res.totalClaimed} invitaciones reclamadas. Revisa tu billetera.`;
+        setClaimInviteMessage(msg);
         setShowInviteClaimCard(false);
       }
     } catch (e: any) {
-      setClaimInviteError(e?.message || 'No se pudo reclamar la invitación');
+      setClaimInviteError(e?.message || 'No se pudieron reclamar las invitaciones');
     } finally {
       setClaimingInvite(false);
     }
-  }, [claimingInvite, userProfile?.phoneNumber, userProfile?.phoneCountry, inviteReceiptId]);
+  }, [claimingInvite, userProfile?.phoneNumber, userProfile?.phoneCountry]);
 
   // Quick actions configuration - filter based on permissions
   const quickActionsData: QuickAction[] = [
@@ -992,7 +997,7 @@ export const HomeScreen = () => {
     }
   }, [canShowLocalCurrency, showLocalCurrency]);
 
-  // Surface self-claim card only when invite receipt exists
+  // Surface self-claim card only when pending invites exist
   React.useEffect(() => {
     let cancelled = false;
     const checkInvite = async () => {
@@ -1002,10 +1007,14 @@ export const HomeScreen = () => {
         return;
       }
       try {
-        const receipt = await inviteSendService.getInviteReceiptNotice(userProfile.phoneNumber, userProfile.phoneCountry);
+        // Check if there are ANY pending invites to claim
+        const pendingInvites = await inviteSendService.getAllPendingInvites(userProfile.phoneNumber, userProfile.phoneCountry);
         if (!cancelled) {
-          setShowInviteClaimCard(receipt.exists === true);
-          setInviteReceiptId((receipt as any).invitationId || undefined);
+          const hasPendingInvites = pendingInvites.length > 0;
+          setShowInviteClaimCard(hasPendingInvites);
+          // Store the first invitation ID for backwards compatibility (if needed elsewhere)
+          setInviteReceiptId(hasPendingInvites ? pendingInvites[0].invitationId : undefined);
+          console.log(`[HomeScreen] Pending invites check: ${pendingInvites.length} found`);
         }
       } catch (e) {
         if (!cancelled) {

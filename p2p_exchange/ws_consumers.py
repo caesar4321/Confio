@@ -89,8 +89,10 @@ class P2PSessionConsumer(AsyncJsonWebsocketConsumer):
                         "trade_id": pack.get("trade_id"),
                     },
                 })
-            except Exception:
-                await self.send_json({"type": "error", "message": "prepare_exception"})
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                await self.send_json({"type": "error", "message": str(e) or "prepare_exception"})
             return
 
         if msg_type == "submit":

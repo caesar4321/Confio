@@ -85,6 +85,21 @@ class UnifiedTransactionTable(models.Model):
         on_delete=models.CASCADE,
         related_name='unified_transaction'
     )
+    referral_reward_event = models.OneToOneField(
+        'achievements.ReferralRewardEvent',
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name='unified_transaction'
+    )
+
+    presale_purchase = models.OneToOneField(
+        'presale.PresalePurchase',
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name='unified_transaction'
+    )
     
     # Denormalized fields for quick access/filtering
     amount = models.CharField(max_length=32)
@@ -257,10 +272,30 @@ class UnifiedTransactionTable(models.Model):
         return None
     
     @property
+    def internal_id(self):
+        """Return standardized internal_id from linked source models"""
+        if self.transaction_type == 'exchange' and self.p2p_trade:
+            return self.p2p_trade.internal_id
+        if self.transaction_type == 'payroll' and self.payroll_item:
+            return self.payroll_item.internal_id
+        if self.transaction_type == 'payment' and self.payment_transaction:
+            return self.payment_transaction.internal_id
+        if self.transaction_type == 'send' and self.send_transaction:
+            return self.send_transaction.internal_id
+        if self.transaction_type == 'conversion' and self.conversion:
+            return self.conversion.internal_id
+        if self.transaction_type == 'reward' and self.referral_reward_event:
+            return self.referral_reward_event.internal_id
+        if self.transaction_type == 'presale' and self.presale_purchase:
+            return self.presale_purchase.internal_id
+        return None
+
+    @property
     def p2p_trade_id(self):
         """Return P2P trade ID if this is an exchange transaction"""
         if self.transaction_type == 'exchange' and self.p2p_trade:
-            return self.p2p_trade.id
+            # Return internal_id as the public ID
+            return self.p2p_trade.internal_id
         return None
 
     def __str__(self):

@@ -823,6 +823,7 @@ class ReferralRewardEventAdmin(admin.ModelAdmin):
     """Admin for referral reward events."""
 
     list_display = (
+        'internal_id',
         'user',
         'trigger',
         'actor_role',
@@ -833,12 +834,13 @@ class ReferralRewardEventAdmin(admin.ModelAdmin):
     )
     list_filter = ('reward_status', 'trigger', 'actor_role', 'occurred_at')
     search_fields = (
+        'internal_id',
         'user__username',
         'user__email',
         'transaction_reference',
         'reward_tx_id',
     )
-    readonly_fields = ('created_at', 'updated_at')
+    readonly_fields = ('internal_id', 'created_at', 'updated_at')
     raw_id_fields = ('user', 'referral')
     date_hierarchy = 'occurred_at'
 
@@ -927,10 +929,10 @@ class RewardWalletAdmin(admin.ModelAdmin):
 @admin.register(ConfioRewardTransaction)
 class RewardLedgerEntryAdmin(admin.ModelAdmin):
     """Admin for individual CONFIO reward ledger entries"""
-    list_display = ('user', 'transaction_type_badge', 'amount_display', 'balance_after_display', 'created_at')
+    list_display = ('internal_id', 'user', 'transaction_type_badge', 'amount_display', 'balance_after_display', 'created_at')
     list_filter = ('transaction_type', 'created_at')
-    search_fields = ('user__username', 'user__email', 'description')
-    readonly_fields = ('created_at', 'updated_at')
+    search_fields = ('internal_id', 'user__username', 'user__email', 'description')
+    readonly_fields = ('internal_id', 'created_at', 'updated_at')
     raw_id_fields = ('user',)
 
     @admin.display(description="Transaction Type", ordering='transaction_type')

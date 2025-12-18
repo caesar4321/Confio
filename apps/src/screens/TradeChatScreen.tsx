@@ -944,12 +944,23 @@ export const TradeChatScreen: React.FC = () => {
             if (data.status === 'CRYPTO_RELEASED') {
               const t = tradeDetailsData?.p2pTrade;
               // Determine role independent of current activeAccount by checking both my personal and business identities
-              const myBusinessIds = (accounts || []).filter(acc => acc.type === 'business' && acc.business?.id).map(acc => String(acc.business!.id));
+              // Determine role based on ACTIVE ACCOUNT intentionally to resolve self-trade ambiguity
               const iAmBuyer = (() => {
                 if (!t) return false;
-                const isBuyerBusinessMe = t?.buyerBusiness?.id && myBusinessIds.includes(String(t.buyerBusiness.id));
-                const isBuyerUserMe = t?.buyerUser?.id && String(t.buyerUser.id) === String(userProfile?.id);
-                return !!(isBuyerBusinessMe || isBuyerUserMe);
+                // If my active account is the buyer business, I am buyer
+                if (activeAccount?.type === 'business' && t.buyerBusiness?.id && String(activeAccount.business?.id) === String(t.buyerBusiness.id)) return true;
+
+                // If my active account is personal and matches buyer user, I am buyer. 
+                // But wait, if trade has NO buyer business, and I am personal...
+                // Safe check: If active account matches buyer user ID (personal) AND active account is not business
+                if (activeAccount?.type === 'personal' && t.buyerUser?.id && String(userProfile?.id) === String(t.buyerUser.id)) {
+                  // But if I am ALSO the seller business (self trade), and I am currently in Personal mode, I am the Buyer.
+                  // If I was in Business mode, the first check would fail (type=business), and this check fails (type=personal).
+                  // So we must verify we are NOT the seller in the current context?
+                  // actually if I am personal, and buyer is personal, I am the buyer.
+                  return true;
+                }
+                return false;
               })();
               // Ensure account context matches my role for correct transaction perspective
               try {
@@ -968,22 +979,34 @@ export const TradeChatScreen: React.FC = () => {
                   }
                 }
               } catch { }
-              const counterpartyName = iAmBuyer
-                ? (t?.sellerBusiness?.name || `${t?.sellerUser?.firstName || ''} ${t?.sellerUser?.lastName || ''}`.trim() || t?.sellerUser?.username || 'Comerciante')
-                : (t?.buyerBusiness?.name || `${t?.buyerUser?.firstName || ''} ${t?.buyerUser?.lastName || ''}`.trim() || t?.buyerUser?.username || 'Comprador');
+              const calculatedName = iAmBuyer
+                ? (t?.sellerBusiness?.name || ((t?.offer?.exchangeType === 'sell' || t?.offer?.exchangeType === 'SELL') && t?.offer?.offerBusiness?.name) || `${t?.sellerUser?.firstName || ''} ${t?.sellerUser?.lastName || ''}`.trim() || t?.sellerUser?.username || 'Comerciante')
+                : (t?.buyerBusiness?.name || ((t?.offer?.exchangeType === 'buy' || t?.offer?.exchangeType === 'BUY') && t?.offer?.offerBusiness?.name) || `${t?.buyerUser?.firstName || ''} ${t?.buyerUser?.lastName || ''}`.trim() || t?.buyerUser?.username || 'Comprador');
+
+              const counterpartyName = (offer?.name && offer.name !== 'Comerciante' && offer.name !== 'Vendedor' && offer.name !== 'Comprador' && offer.name !== 'Desconocido')
+                ? offer.name
+                : calculatedName;
               // Compute duration from createdAt to completedAt (or now)
               const startMs2 = t?.createdAt ? new Date(t.createdAt as any).getTime() : Date.now();
               const endMs2 = t?.completedAt ? new Date(t.completedAt as any).getTime() : Date.now();
               const durationMin2 = Math.max(0, Math.round((endMs2 - startMs2) / 60000));
 
-              const stats2 = iAmBuyer ? (t?.sellerStats || {}) : (t?.buyerStats || {});
+
+              const statsAuto = (offer && typeof offer.completedTrades === 'number')
+                ? {
+                  isVerified: offer.verified,
+                  completedTrades: offer.completedTrades,
+                  successRate: offer.successRate
+                }
+                : (iAmBuyer ? (t?.sellerStats || {}) : (t?.buyerStats || {}));
+
               navigation.navigate('TraderRating', {
                 tradeId: String(tradeId),
                 trader: {
                   name: counterpartyName,
-                  verified: !!stats2.isVerified,
-                  completedTrades: stats2.completedTrades || 0,
-                  successRate: stats2.successRate || 0,
+                  verified: !!statsAuto.isVerified,
+                  completedTrades: statsAuto.completedTrades || 0,
+                  successRate: statsAuto.successRate || 0,
                 },
                 tradeDetails: {
                   amount,
@@ -1018,9 +1041,13 @@ export const TradeChatScreen: React.FC = () => {
 
               if (iAmBuyer) {
                 // I'm the buyer, so I rate the seller
+                const offerIsSeller = tradeData?.offer?.exchangeType === 'sell' || tradeData?.offer?.exchangeType === 'SELL';
                 if (tradeData?.sellerBusiness) {
                   counterpartyName = tradeData.sellerBusiness.name;
                   counterpartyInfo = tradeData.sellerBusiness;
+                } else if (offerIsSeller && tradeData?.offer?.offerBusiness) {
+                  counterpartyName = tradeData.offer.offerBusiness.name;
+                  counterpartyInfo = tradeData.offer.offerBusiness;
                 } else if (tradeData?.sellerUser) {
                   counterpartyInfo = tradeData.sellerUser;
                   counterpartyName = `${counterpartyInfo.firstName || ''} ${counterpartyInfo.lastName || ''}`.trim() || counterpartyInfo.username || 'Vendedor';
@@ -1031,9 +1058,13 @@ export const TradeChatScreen: React.FC = () => {
                 }
               } else {
                 // I'm the seller, so I rate the buyer
+                const offerIsBuyer = tradeData?.offer?.exchangeType === 'buy' || tradeData?.offer?.exchangeType === 'BUY';
                 if (tradeData?.buyerBusiness) {
                   counterpartyName = tradeData.buyerBusiness.name;
                   counterpartyInfo = tradeData.buyerBusiness;
+                } else if (offerIsBuyer && tradeData?.offer?.offerBusiness) {
+                  counterpartyName = tradeData.offer.offerBusiness.name;
+                  counterpartyInfo = tradeData.offer.offerBusiness;
                 } else if (tradeData?.buyerUser) {
                   counterpartyInfo = tradeData.buyerUser;
                   counterpartyName = `${counterpartyInfo.firstName || ''} ${counterpartyInfo.lastName || ''}`.trim() || counterpartyInfo.username || 'Comprador';
@@ -1857,18 +1888,27 @@ export const TradeChatScreen: React.FC = () => {
             // Auto-navigate to rating (seller perspective here)
             try {
               const tradeData = tradeDetailsData?.p2pTrade;
-              // Recompute role using identities rather than relying on computedTradeTypeRef
-              const myBizIds3 = (accounts || []).filter(acc => acc.type === 'business' && acc.business?.id).map(acc => String(acc.business!.id));
+              // Recompute role using identities but prioritizing activeAccount to resolve self-trades
               const iAmBuyer = (() => {
                 if (!tradeData) return false;
-                const isBuyerBiz = tradeData?.buyerBusiness?.id && myBizIds3.includes(String(tradeData.buyerBusiness.id));
-                const isBuyerUser = tradeData?.buyerUser?.id && String(tradeData.buyerUser.id) === String(userProfile?.id);
-                return !!(isBuyerBiz || isBuyerUser);
+                if (activeAccount?.type === 'business' && tradeData.buyerBusiness?.id && String(activeAccount.business?.id) === String(tradeData.buyerBusiness.id)) return true;
+                if (activeAccount?.type === 'personal' && tradeData.buyerUser?.id && String(userProfile?.id) === String(tradeData.buyerUser.id)) return true;
+                return false;
               })();
-              const name = iAmBuyer
-                ? (tradeData?.sellerBusiness?.name || `${tradeData?.sellerUser?.firstName || ''} ${tradeData?.sellerUser?.lastName || ''}`.trim() || tradeData?.sellerUser?.username || 'Comerciante')
-                : (tradeData?.buyerBusiness?.name || `${tradeData?.buyerUser?.firstName || ''} ${tradeData?.buyerUser?.lastName || ''}`.trim() || tradeData?.buyerUser?.username || 'Comprador');
-              const statsAuto = iAmBuyer ? (tradeData?.sellerStats || {}) : (tradeData?.buyerStats || {});
+              const calculatedName = iAmBuyer
+                ? (tradeData?.sellerBusiness?.name || ((tradeData?.offer?.exchangeType === 'sell' || tradeData?.offer?.exchangeType === 'SELL') && tradeData?.offer?.offerBusiness?.name) || `${tradeData?.sellerUser?.firstName || ''} ${tradeData?.sellerUser?.lastName || ''}`.trim() || tradeData?.sellerUser?.username || 'Comerciante')
+                : (tradeData?.buyerBusiness?.name || ((tradeData?.offer?.exchangeType === 'buy' || tradeData?.offer?.exchangeType === 'BUY') && tradeData?.offer?.offerBusiness?.name) || `${tradeData?.buyerUser?.firstName || ''} ${tradeData?.buyerUser?.lastName || ''}`.trim() || tradeData?.buyerUser?.username || 'Comprador');
+
+              const name = (offer?.name && offer.name !== 'Comerciante' && offer.name !== 'Vendedor' && offer.name !== 'Comprador' && offer.name !== 'Desconocido')
+                ? offer.name
+                : calculatedName;
+              const statsAuto = (offer && typeof offer.completedTrades === 'number')
+                ? {
+                  isVerified: offer.verified,
+                  completedTrades: offer.completedTrades,
+                  successRate: offer.successRate
+                }
+                : (iAmBuyer ? (tradeData?.sellerStats || {}) : (tradeData?.buyerStats || {}));
               navigation.navigate('TraderRating', {
                 tradeId: String(tradeId),
                 trader: {

@@ -1,3 +1,4 @@
+import { Buffer } from 'buffer';
 import React, { useState } from 'react';
 import {
   View,
@@ -42,17 +43,17 @@ const colors = {
 export const USDCWithdrawScreen = () => {
   const navigation = useNavigation();
   const { activeAccount } = useAccount();
-  
+
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [recipientAddress, setRecipientAddress] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
-  
+
   // Fetch USDC balance
   const { data: balanceData, loading: balanceLoading } = useQuery(GET_ACCOUNT_BALANCE, {
     variables: { tokenType: 'USDC' },
     fetchPolicy: 'network-only',
   });
-  
+
   const usdcBalance = balanceData?.accountBalance ? parseFloat(balanceData.accountBalance) : 0;
   // Floor-based display helpers with tiny-balance label
   const floorToDecimals = (value: number, decimals: number) => {
@@ -70,7 +71,7 @@ export const USDCWithdrawScreen = () => {
     return formatFixedFloor(v, 2);
   };
   const networkFee = 0; // Network fee is covered by Confío
-  
+
   // Success helper after WS submit
   const handleWithdrawSuccess = async (txid?: string) => {
     setWithdrawAmount('');
@@ -84,7 +85,7 @@ export const USDCWithdrawScreen = () => {
       ]
     );
   };
-  
+
   // Normalize user input: replace comma decimal with dot; strip invalid characters
   const normalizeAmountInput = (txt: string) => {
     if (!txt) return '';
@@ -102,27 +103,27 @@ export const USDCWithdrawScreen = () => {
       Alert.alert('Error', 'Por favor ingresa una cantidad válida');
       return;
     }
-    
+
     const dest = (recipientAddress || '').trim().toUpperCase();
     if (!dest || !/^[A-Z2-7]{58}$/.test(dest)) {
       Alert.alert('Error', 'La dirección de Algorand debe tener 58 caracteres (A–Z y 2–7), sin espacios');
       return;
     }
-    
+
     const amount = parseFloat(normalizeAmountInput(withdrawAmount));
     if (amount > usdcBalance) {
       Alert.alert('Error', 'Saldo insuficiente');
       return;
     }
-    
+
     // Minimum withdrawal amount
     if (amount < 1) {
       Alert.alert('Error', 'El monto mínimo de retiro es 1 USDC');
       return;
     }
-    
+
     // dest validated above using Algorand format
-    
+
     setIsProcessing(true);
     try {
       // Prepare via WS
@@ -139,7 +140,7 @@ export const USDCWithdrawScreen = () => {
           const aud = oauthData.provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
           await secureDeterministicWallet.createOrRestoreWallet(iss, oauthData.subject, aud, oauthData.provider, activeAccount?.type || 'personal', activeAccount?.index || 0, activeAccount?.id?.startsWith('business_') ? (activeAccount.id.split('_')[1] || undefined) : undefined);
         }
-      } catch {}
+      } catch { }
 
       // Sign user transaction(s)
       const unsignedTxs: string[] = pack?.transactions || [];
@@ -152,7 +153,7 @@ export const USDCWithdrawScreen = () => {
 
       // Submit
       const res = await ws.submit({
-        withdrawalId: String(pack?.withdrawal_id || ''),
+        internalId: String(pack?.internal_id || ''),
         signedUserTransactions,
         sponsorTransactions: pack?.sponsor_transactions || [],
       });
@@ -166,19 +167,19 @@ export const USDCWithdrawScreen = () => {
       setIsProcessing(false);
     }
   };
-  
+
   const totalToReceive = withdrawAmount ? parseFloat(withdrawAmount) : 0;
 
   return (
     <View style={styles.container}>
       <Header
-        navigation={navigation}
+        navigation={navigation as any}
         title="Retirar USDC"
         backgroundColor={colors.accent}
         isLight={true}
         showBackButton={true}
       />
-      
+
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* Balance Card */}
         <View style={styles.balanceCard}>
@@ -190,7 +191,7 @@ export const USDCWithdrawScreen = () => {
           )}
           <Text style={styles.balanceNote}>En la red de Algorand</Text>
         </View>
-        
+
         {/* Warning */}
         <View style={styles.warningContainer}>
           <Icon name="alert-triangle" size={20} color={colors.warning.icon} />
@@ -201,7 +202,7 @@ export const USDCWithdrawScreen = () => {
             </Text>
           </View>
         </View>
-        
+
         {/* Withdrawal Form */}
         <View style={styles.formContainer}>
           <View style={styles.inputGroup}>
@@ -225,7 +226,7 @@ export const USDCWithdrawScreen = () => {
               <Text style={styles.currencyText}>USDC</Text>
             </View>
           </View>
-          
+
           <View style={styles.inputGroup}>
             <Text style={styles.inputLabel}>Dirección de destino</Text>
             <TextInput
@@ -239,7 +240,7 @@ export const USDCWithdrawScreen = () => {
             />
             <Text style={styles.inputHint}>Pega la dirección exacta (A–Z y 2–7), sin espacios</Text>
           </View>
-          
+
           {/* Minimum amount notice */}
           {withdrawAmount && parseFloat(withdrawAmount) > 0 && parseFloat(withdrawAmount) < 1 && (
             <View style={styles.errorContainer}>
@@ -247,7 +248,7 @@ export const USDCWithdrawScreen = () => {
               <Text style={styles.errorText}>El monto mínimo de retiro es 1 USDC</Text>
             </View>
           )}
-          
+
           {/* Fee Summary */}
           <View style={styles.feeSummary}>
             <View style={styles.feeRow}>
@@ -271,7 +272,7 @@ export const USDCWithdrawScreen = () => {
               </Text>
             </View>
           </View>
-          
+
           {/* Withdraw Button */}
           <TouchableOpacity
             style={[
@@ -290,7 +291,7 @@ export const USDCWithdrawScreen = () => {
               </>
             )}
           </TouchableOpacity>
-          
+
           {/* Info */}
           <View style={styles.infoContainer}>
             <Icon name="info" size={16} color={colors.text.secondary} />

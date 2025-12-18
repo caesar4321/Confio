@@ -25,8 +25,8 @@ class PaySessionConsumer(AsyncJsonWebsocketConsumer):
 
     Messages (client → server):
       - {type: "ping"}
-      - {type: "prepare_request", amount: float, asset_type?: str, payment_id?: str, note?: str, recipient_business_id?: str}
-      - {type: "submit_request", signed_transactions: list|jsonstr, payment_id?: str}
+      - {type: "prepare_request", amount: float, asset_type?: str, internal_id?: str, note?: str, recipient_business_id?: str}
+      - {type: "submit_request", signed_transactions: list|jsonstr, internal_id?: str}
 
     Messages (server → client):
       - {type: "pong"}
@@ -80,7 +80,7 @@ class PaySessionConsumer(AsyncJsonWebsocketConsumer):
             # Extract fields
             amount = content.get("amount")
             asset_type = content.get("asset_type") or "CUSD"
-            payment_id = content.get("payment_id")
+            internal_id = content.get("internal_id") or content.get("payment_id")
             note = content.get("note")
             recipient_business_id = content.get("recipient_business_id")
 
@@ -92,7 +92,7 @@ class PaySessionConsumer(AsyncJsonWebsocketConsumer):
                 pack = await self._create_prepare_pack(
                     amount=float(amount),
                     asset_type=str(asset_type),
-                    payment_id=payment_id,
+                    internal_id=internal_id,
                     note=note,
                     recipient_business_id=recipient_business_id,
                 )
@@ -121,7 +121,7 @@ class PaySessionConsumer(AsyncJsonWebsocketConsumer):
                         "gross_amount": pack.get("gross_amount"),
                         "net_amount": pack.get("net_amount"),
                         "fee_amount": pack.get("fee_amount"),
-                        "payment_id": pack.get("payment_id"),
+                        "internal_id": pack.get("internal_id"),
                     },
                 }
                 if not isinstance(response["pack"].get("transactions"), list):
@@ -138,12 +138,12 @@ class PaySessionConsumer(AsyncJsonWebsocketConsumer):
         if msg_type == "submit_request":
             print("[ws/pay_session] <- submit_request")
             signed = content.get("signed_transactions")
-            payment_id = content.get("payment_id")
+            internal_id = content.get("internal_id") or content.get("payment_id")
             if signed is None:
                 await self.send_json({"type": "error", "message": "signed_transactions_required"})
                 return
             try:
-                result = await self._submit_payment(signed_transactions=signed, payment_id=payment_id)
+                result = await self._submit_payment(signed_transactions=signed, internal_id=internal_id)
                 if not result.get("success"):
                     print(f"[ws/pay_session] submit_failed: {result.get('error')}")
                     await self.send_json({"type": "error", "message": result.get("error", "submit_failed")})
@@ -185,7 +185,7 @@ class PaySessionConsumer(AsyncJsonWebsocketConsumer):
         self._idle_task = asyncio.create_task(self._idle_close())
 
     @database_sync_to_async
-    def _create_prepare_pack(self, amount, asset_type, payment_id=None, note=None, recipient_business_id=None):
+    def _create_prepare_pack(self, amount, asset_type, internal_id=None, note=None, recipient_business_id=None):
         """
         Call existing GraphQL mutation to build the sponsored payment transactions,
         reusing business context validation. We emulate a GraphQL info/context.
@@ -209,7 +209,7 @@ class PaySessionConsumer(AsyncJsonWebsocketConsumer):
             info,
             amount=amount,
             asset_type=asset_type,
-            payment_id=payment_id,
+            internal_id=internal_id,
             note=note,
             create_receipt=False,
         )
@@ -224,11 +224,11 @@ class PaySessionConsumer(AsyncJsonWebsocketConsumer):
             "gross_amount": getattr(result, "gross_amount", None),
             "net_amount": getattr(result, "net_amount", None),
             "fee_amount": getattr(result, "fee_amount", None),
-            "payment_id": getattr(result, "payment_id", None),
+            "internal_id": getattr(result, "internal_id", None),
         }
 
     @database_sync_to_async
-    def _submit_payment(self, signed_transactions, payment_id=None):
+    def _submit_payment(self, signed_transactions, internal_id=None):
         from blockchain.payment_mutations import SubmitSponsoredPaymentMutation
         import json
 
@@ -251,7 +251,7 @@ class PaySessionConsumer(AsyncJsonWebsocketConsumer):
             None,
             info,
             signed_transactions=signed_str,
-            payment_id=payment_id,
+            internal_id=internal_id,
         )
         return {
             "success": getattr(result, "success", False),
@@ -411,6 +411,7 @@ class SendSessionConsumer(AsyncJsonWebsocketConsumer):
                 await self.send_json({
                     "type": "submit_ok",
                     "transaction_id": result.get("transaction_id"),
+                    "internal_id": result.get("internal_id"),
                     "confirmed_round": result.get("confirmed_round"),
                     "net_amount": None,
                     "fee_amount": None,
@@ -494,5 +495,6 @@ class SendSessionConsumer(AsyncJsonWebsocketConsumer):
             "success": getattr(result, "success", False),
             "error": getattr(result, "error", None),
             "transaction_id": getattr(result, "transaction_id", None),
+            "internal_id": getattr(result, "internal_id", None),
             "confirmed_round": getattr(result, "confirmed_round", None),
         }

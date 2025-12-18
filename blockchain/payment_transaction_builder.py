@@ -56,7 +56,7 @@ class PaymentTransactionBuilder:
         recipient_address: str,
         amount: int,
         asset_id: int,
-        payment_id: Optional[str] = None,
+        internal_id: Optional[str] = None,
         note: Optional[str] = None
     ):
         """
@@ -70,7 +70,7 @@ class PaymentTransactionBuilder:
             recipient_address: Recipient's Algorand address (merchant)
             amount: Total amount to send in base units (6 decimals for cUSD/CONFIO)
             asset_id: Asset ID (cUSD or CONFIO)
-            payment_id: Optional payment ID for receipt tracking (passed to app call)
+            internal_id: Optional payment ID for receipt tracking (passed to app call)
             note: Optional transaction note
         
         Returns:
@@ -165,7 +165,7 @@ class PaymentTransactionBuilder:
                 name=method_name,
                 args=[
                     Argument(arg_type="address", name="recipient"),
-                    Argument(arg_type="string", name="payment_id")
+                    Argument(arg_type="string", name="internal_id")
                 ],
                 returns=Returns(arg_type="void")
             )
@@ -285,13 +285,13 @@ class PaymentTransactionBuilder:
             
             # Encode the arguments
             recipient_arg = encoding.decode_address(recipient_address)  # Address is just 32 bytes
-            payment_id_str = payment_id if payment_id else ""
-            payment_id_arg = string_type.encode(payment_id_str)  # String needs ABI encoding
+            internal_id_str = internal_id if internal_id else ""
+            internal_id_arg = string_type.encode(internal_id_str)  # String needs ABI encoding
             if getattr(dj_settings, 'PAYMENT_VERBOSE_LOGS', False):
-                logger.info(f"Creating app call with payment_id: '{payment_id_str}' (length: {len(payment_id_str)})")
+                logger.info(f"Creating app call with internal_id: '{internal_id_str}' (length: {len(internal_id_str)})")
             
             # SPONSOR sends the app call (true sponsorship)
-            # The deployed contract's caster reads recipient from app_args[1] and payment_id from app_args[2]
+            # The deployed contract's caster reads recipient from app_args[1] and internal_id from app_args[2]
             # Transaction references are computed automatically by the caster from group structure
             app_call = transaction.ApplicationCallTxn(
                 sender=self.sponsor_address,  # SPONSOR is sender!
@@ -302,7 +302,7 @@ class PaymentTransactionBuilder:
                 app_args=[
                     selector,
                     recipient_arg,  # Recipient address at app_args[1] (32 bytes)
-                    payment_id_arg  # ABI-encoded payment ID at app_args[2]
+                    internal_id_arg  # ABI-encoded payment ID at app_args[2]
                 ],
                 accounts=[sender_address, recipient_address],  # Pass user and recipient as account references
                 foreign_assets=[asset_id]
@@ -486,7 +486,7 @@ class PaymentTransactionBuilder:
         recipient_address: str,
         amount: int,
         asset_id: int,
-        payment_id: Optional[str] = None,
+        internal_id: Optional[str] = None,
         note: Optional[str] = None
     ) -> Tuple[List[transaction.Transaction], List[int]]:
         """
@@ -498,7 +498,7 @@ class PaymentTransactionBuilder:
             recipient_address: Recipient's Algorand address
             amount: Amount to send in base units
             asset_id: Asset ID (cUSD or CONFIO)
-            payment_id: Optional payment ID for receipt tracking
+            internal_id: Optional payment ID for receipt tracking
             note: Optional transaction note
         
         Returns:
@@ -527,13 +527,13 @@ class PaymentTransactionBuilder:
             args=[
                 Argument(arg_type="axfer", name="payment"),
                 Argument(arg_type="address", name="recipient"),
-                Argument(arg_type="string", name="payment_id")
+                Argument(arg_type="string", name="internal_id")
             ],
             returns=Returns(arg_type="void")
         )
         
         # Calculate if we need a receipt
-        needs_receipt = payment_id is not None and len(payment_id) > 0
+        needs_receipt = internal_id is not None and len(internal_id) > 0
         
         if needs_receipt:
             # With receipt: need MBR payment first
@@ -578,7 +578,7 @@ class PaymentTransactionBuilder:
         if needs_receipt:
             import hashlib
             key_prefix = b"p:" + asset_id.to_bytes(8, 'big') + b":"
-            payment_hash = hashlib.sha256(payment_id.encode()).digest()
+            payment_hash = hashlib.sha256(internal_id.encode()).digest()
             box_key = key_prefix + payment_hash
             box_refs.append((self.payment_app_id, box_key))
         
@@ -594,7 +594,7 @@ class PaymentTransactionBuilder:
                 method.get_selector(),
                 (txn_ref_index).to_bytes(1, 'big'),  # Transaction reference as uint8
                 encoding.decode_address(recipient_address),  # Recipient address as bytes
-                (payment_id.encode() if payment_id else b"")  # Payment ID as bytes
+                (internal_id.encode() if internal_id else b"")  # Payment ID as bytes
             ],
             accounts=[sender_address, recipient_address],
             foreign_assets=[asset_id],

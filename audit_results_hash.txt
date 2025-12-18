@@ -1,0 +1,7 @@
+--- Searching for hash starting with 76O4CR77 ---
+Found 1 PaymentTransactions
+PAYMENT: ID=A2QZH3EC Status=CONFIRMED Invoice=245
+  Invoice Status: PAID
+Found 0 SendTransactions
+Found 1 UnifiedTransactions
+UNIFIED: ID=A2QZH3EC Type=payment Status=CONFIRMED

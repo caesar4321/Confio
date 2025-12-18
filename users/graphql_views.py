@@ -21,6 +21,7 @@ class UnifiedTransactionType(DjangoObjectType):
     invoice_id = graphene.String(description="Invoice ID for payments")
     payment_transaction_id = graphene.String(description="Payment transaction ID")
     transaction_hash = graphene.String(description="Transaction hash on blockchain")
+    internal_id = graphene.String(description="Standardized Internal ID (UUID)")
     
     # Add conversion-specific computed fields
     conversion_type = graphene.String(description="Conversion type (usdc_to_cusd or cusd_to_usdc)")
@@ -65,6 +66,22 @@ class UnifiedTransactionType(DjangoObjectType):
             'invitation_expires_at',
         ]
     
+    def resolve_internal_id(self, info):
+        """Standardize internal_id (always return 32-char hex for conversions)"""
+        # If it's a conversion, check the internal_id property which returns the UUID
+        if self.transaction_type == 'conversion':
+            # self.internal_id uses the property accessor (UnifiedTransactionTable.internal_id)
+            # which returns the actual UUID object from the related Conversion
+            val = self.internal_id
+            if val:
+                # If it's a UUID object, return hex. If string (already hex?), return it.
+                if hasattr(val, 'hex'):
+                    return val.hex
+                return str(val).replace('-', '')
+        
+        # For others, return as string (already 32-char hex in DB)
+        return str(self.internal_id) if self.internal_id else None
+
     def resolve_direction(self, info):
         """Resolve transaction direction based on current user's address"""
         # Conversions are always "self" transactions
@@ -284,7 +301,15 @@ class UnifiedTransactionQuery(graphene.ObjectType):
         # Base query - all transactions involving this account
         if account.account_type == 'business' and account.business:
             # For business accounts, filter by business relationships
-            queryset = UnifiedTransactionTable.objects.filter(
+            queryset = UnifiedTransactionTable.objects.select_related(
+                'send_transaction', 
+                'payment_transaction', 
+                'conversion', 
+                'p2p_trade', 
+                'payroll_item', 
+                'referral_reward_event', 
+                'presale_purchase'
+            ).filter(
                 Q(sender_business=account.business) | 
                 Q(counterparty_business=account.business)
             )
@@ -293,7 +318,15 @@ class UnifiedTransactionQuery(graphene.ObjectType):
             # Include:
             # 1. Personal-to-personal transactions (no business involved)
             # 2. Payroll transactions where user is the recipient
-            queryset = UnifiedTransactionTable.objects.filter(
+            queryset = UnifiedTransactionTable.objects.select_related(
+                'send_transaction', 
+                'payment_transaction', 
+                'conversion', 
+                'p2p_trade', 
+                'payroll_item', 
+                'referral_reward_event', 
+                'presale_purchase'
+            ).filter(
                 Q(
                     Q(sender_user=user) & Q(sender_business__isnull=True)
                 ) | 

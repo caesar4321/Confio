@@ -122,12 +122,12 @@ export const PayrollPendingScreen = () => {
     }
 
     try {
-      setPayingItemId(item.itemId);
+      setPayingItemId(item.internalId);
       setIsProcessing(true);
       setProcessingMessage('Preparando pago…');
 
       const prepRes = await preparePayrollItem({
-        variables: { payrollItemId: item.itemId },
+        variables: { payrollItemId: item.internalId },
       });
       const prep = prepRes.data?.preparePayrollItemPayout;
       if (!prep?.success) {
@@ -158,7 +158,7 @@ export const PayrollPendingScreen = () => {
 
       const submitRes = await submitPayrollItem({
         variables: {
-          payrollItemId: item.itemId,
+          payrollItemId: item.internalId,
           signedTransaction: signedB64,
           sponsorSignature: sponsorTransaction
         },
@@ -224,7 +224,7 @@ export const PayrollPendingScreen = () => {
 
       <FlatList
         data={items}
-        keyExtractor={(item: any) => item.itemId}
+        keyExtractor={(item: any) => item.internalId}
         refreshing={loading}
         onRefresh={() => {
           refetch();
@@ -242,7 +242,7 @@ export const PayrollPendingScreen = () => {
           const badge = statusStyles(item.status);
           return (
             <TouchableOpacity
-              style={[styles.card, payingItemId === item.itemId && styles.cardDisabled]}
+              style={[styles.card, payingItemId === item.internalId && styles.cardDisabled]}
               onPress={() => handlePay(item)}
               disabled={!!payingItemId}
             >
@@ -256,7 +256,7 @@ export const PayrollPendingScreen = () => {
               <Text style={styles.subtext}>Recibe: {item.recipientUser?.firstName} {item.recipientUser?.lastName}</Text>
               <Text style={styles.subtext}>Bruto: {item.grossAmount} · Comisión: {item.feeAmount}</Text>
               <View style={styles.ctaRow}>
-                {payingItemId === item.itemId ? (
+                {payingItemId === item.internalId ? (
                   <View style={styles.payButtonDisabled}>
                     <ActivityIndicator size="small" color="#fff" />
                     <Text style={styles.payText}>Enviando...</Text>

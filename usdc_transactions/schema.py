@@ -18,7 +18,7 @@ class USDCDepositType(DjangoObjectType):
         model = USDCDeposit
         fields = (
             'id',
-            'deposit_id',
+            'internal_id',
             'actor_user',
             'actor_business',
             'actor_type',
@@ -33,6 +33,11 @@ class USDCDepositType(DjangoObjectType):
             'updated_at',
             'completed_at'
         )
+    
+    internal_id_gql = graphene.String(name='internalId')
+    
+    def resolve_internal_id_gql(self, info):
+        return self.internal_id
 
 
 class USDCWithdrawalType(DjangoObjectType):
@@ -41,7 +46,7 @@ class USDCWithdrawalType(DjangoObjectType):
         model = USDCWithdrawal
         fields = (
             'id',
-            'withdrawal_id',
+            'internal_id',
             'actor_user',
             'actor_business',
             'actor_type',
@@ -58,6 +63,12 @@ class USDCWithdrawalType(DjangoObjectType):
             'completed_at'
         )
 
+    internal_id_gql = graphene.String(name='internalId')
+
+    def resolve_internal_id_gql(self, info):
+        return self.internal_id
+
+
 
 class UnifiedUSDCTransactionType(DjangoObjectType):
     """GraphQL type for UnifiedUSDCTransactionTable"""
@@ -65,6 +76,7 @@ class UnifiedUSDCTransactionType(DjangoObjectType):
         model = UnifiedUSDCTransactionTable
         fields = (
             'transaction_id',
+            'internal_id',
             'transaction_type',
             'actor_user',
             'actor_business',
@@ -91,12 +103,16 @@ class UnifiedUSDCTransactionType(DjangoObjectType):
     # Add custom fields
     # Explicit alias for camelCase field expected by clients
     transaction_hash_gql = graphene.String(name='transactionHash')
+    internal_id_gql = graphene.String(name='internalId')
     formatted_title = graphene.String()
     icon_name = graphene.String()
     icon_color = graphene.String()
     signed_amount = graphene.String()
     signed_secondary_amount = graphene.String()
     
+    def resolve_transaction_hash_gql(self, info):
+        return self.transaction_hash
+
     def resolve_formatted_title(self, info):
         return self.formatted_title
     
@@ -112,12 +128,13 @@ class UnifiedUSDCTransactionType(DjangoObjectType):
     def resolve_signed_secondary_amount(self, info):
         return self.signed_secondary_amount
 
-    def resolve_transaction_hash_gql(self, info):
-        # Expose model's transaction_hash as transactionHash for clients
+    def resolve_internal_id_gql(self, info):
+        # Expose model's transaction_id (UUID) as internalId for clients
         try:
-            return getattr(self, 'transaction_hash', None)
+            return self.transaction_id
         except Exception:
             return None
+
 
 
 class USDCDepositInput(graphene.InputObjectType):
@@ -226,33 +243,27 @@ class CreateUSDCDeposit(graphene.Mutation):
                 deposit.mark_completed()
                 
                 # Create notification for deposit - moved inside transaction
-                from notifications.utils import create_notification
-                from notifications.models import NotificationType as NotificationTypeChoices
-                
-                logger.info(f"Creating notification for deposit {deposit.deposit_id}")
-                notification = create_notification(
-                    user=user,
-                    business=actor_business,  # Add business context for business accounts
-                    notification_type=NotificationTypeChoices.USDC_DEPOSIT_COMPLETED,
-                    title="Depósito USDC completado",
-                    message=f"Tu depósito de {input.amount} USDC se ha completado exitosamente",
-                    data={
-                        'transaction_id': str(deposit.deposit_id),
-                        'transaction_type': 'deposit',
-                        'type': 'deposit',  # Add this for TransactionDetailScreen
-                        'amount': str(input.amount),
-                        'currency': 'USDC',
-                        'status': 'completed',
-                        'notification_type': 'USDC_DEPOSIT_COMPLETED',
-                        'timestamp': deposit.completed_at.isoformat() if deposit.completed_at else deposit.created_at.isoformat(),
-                        'created_at': deposit.created_at.isoformat(),
-                    },
-                    related_object_type='USDCDeposit',
-                    related_object_id=str(deposit.id),
-                    action_url=f"confio://transaction/{deposit.deposit_id}"
-                )
-                
-                logger.info(f"Notification created with ID: {notification.id}")
+                try:
+                    from notifications.utils import create_transaction_notification
+                    
+                    logger.info(f"Creating notification for deposit {deposit.internal_id}")
+                    
+                    create_transaction_notification(
+                        transaction_type='deposit',
+                        sender_user=deposit.actor_user,
+                        business=deposit.actor_business,
+                        amount=str(deposit.amount),
+                        token_type='USDC',
+                        transaction_id=str(deposit.internal_id),
+                        transaction_model='USDCDeposit',
+                        additional_data={
+                           'source_address': deposit.source_address,
+                           'network': deposit.network
+                        },
+                        action_url=f"confio://transaction/{deposit.internal_id}"
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to create notification for deposit {deposit.internal_id}: {e}")
 
             return CreateUSDCDeposit(
                 deposit=deposit,
@@ -386,43 +397,33 @@ class CreateUSDCWithdrawal(graphene.Mutation):
                     status='PENDING'
                 )
                 
-                logger.info(f"Withdrawal created successfully with ID: {withdrawal.id}, withdrawal_id: {withdrawal.withdrawal_id}")
-                
+                logger.info(f"Withdrawal created successfully with ID: {withdrawal.id}, internal_id: {withdrawal.internal_id}")
                 # Since KYC is disabled and we only do AML checks,
                 # automatically complete the withdrawal (simulating instant processing)
                 # In production, this would be handled by a background task after AML checks
                 withdrawal.mark_completed()
-                logger.info(f"Withdrawal {withdrawal.id} marked as completed")
-                
-                # Create notification for withdrawal - moved inside transaction
-                from notifications.utils import create_notification
-                from notifications.models import NotificationType as NotificationTypeChoices
-                
-                logger.info(f"Creating notification for withdrawal {withdrawal.withdrawal_id}")
-                notification = create_notification(
-                    user=user,
-                    business=actor_business,  # Add business context for business accounts
-                    notification_type=NotificationTypeChoices.USDC_WITHDRAWAL_COMPLETED,
-                    title="Retiro USDC completado",
-                    message=f"Tu retiro de {input.amount} USDC se ha completado exitosamente",
-                    data={
-                        'transaction_id': str(withdrawal.withdrawal_id),
-                        'transaction_type': 'withdrawal',
-                        'type': 'withdrawal',  # Add this for TransactionDetailScreen
-                        'amount': str(input.amount),
-                        'currency': 'USDC',
-                        'destination_address': input.destinationAddress,
-                        'status': 'completed',
-                        'notification_type': 'USDC_WITHDRAWAL_COMPLETED',
-                        'timestamp': withdrawal.completed_at.isoformat() if withdrawal.completed_at else withdrawal.created_at.isoformat(),
-                        'created_at': withdrawal.created_at.isoformat(),
-                    },
-                    related_object_type='USDCWithdrawal',
-                    related_object_id=str(withdrawal.id),
-                    action_url=f"confio://transaction/{withdrawal.withdrawal_id}"
-                )
-                
-                logger.info(f"Notification created with ID: {notification.id}")
+                try:
+                    from notifications.utils import create_transaction_notification
+                    
+                    logger.info(f"Creating notification for withdrawal {withdrawal.internal_id}")
+                    
+                    create_transaction_notification(
+                        transaction_type='withdrawal',
+                        sender_user=withdrawal.actor_user,
+                        business=withdrawal.actor_business,
+                        amount=str(withdrawal.amount),
+                        token_type='USDC',
+                        transaction_id=str(withdrawal.internal_id),
+                        transaction_model='USDCWithdrawal',
+                        additional_data={
+                           'destination_address': withdrawal.destination_address,
+                           'network': withdrawal.network,
+                           'service_fee': str(withdrawal.service_fee)
+                        },
+                        action_url=f"confio://transaction/{withdrawal.internal_id}"
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to create notification for withdrawal {withdrawal.internal_id}: {e}")
 
             return CreateUSDCWithdrawal(
                 withdrawal=withdrawal,
@@ -570,7 +571,7 @@ class Query(graphene.ObjectType):
             queryset = UnifiedUSDCTransactionTable.objects.filter(
                 actor_user=user,
                 actor_business__isnull=True
-            )
+            ).select_related('conversion', 'usdc_deposit', 'usdc_withdrawal')
         
         # Filter by transaction type if specified
         if transaction_type:

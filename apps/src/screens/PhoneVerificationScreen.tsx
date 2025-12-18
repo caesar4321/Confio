@@ -135,20 +135,20 @@ const PhoneVerificationScreen = () => {
   const handleSendTelegramCode = async () => {
     await withCodeRequestGuard(async () => {
       try {
-        const countryCode = selectedCountry?.[2] || 'VE'; // ISO country code (e.g., 'VE' for Venezuela)
+        const countryCode = selectedCountry?.[2] || 'AR'; // ISO country code (e.g., 'AR' for Argentina)
         // Format phone number: remove any spaces, dashes, or other separators
         const cleanPhoneNumber = phoneNumber.replace(/[\s-]/g, '');
         console.log('Sending verification with:', { phoneNumber: cleanPhoneNumber, countryCode });
-        
-        const { data } = await initiateTelegramVerification({ 
-          variables: { 
+
+        const { data } = await initiateTelegramVerification({
+          variables: {
             phoneNumber: cleanPhoneNumber,
             countryCode
-          } 
+          }
         });
-        
+
         console.log('Verification response:', data);
-        
+
         if (data.initiateTelegramVerification.success) {
           setCurrentScreen('code');
           return true;
@@ -169,31 +169,31 @@ const PhoneVerificationScreen = () => {
       if (verificationMethod === 'telegram') {
         // Format phone number: remove any spaces, dashes, or other separators
         const cleanPhoneNumber = phoneNumber.replace(/[\s-]/g, '');
-        
-        const { data } = await verifyTelegramCode({ 
-          variables: { 
-              phoneNumber: cleanPhoneNumber,
-              countryCode: selectedCountry?.[2] || 'VE', // ISO country code
-              code: verificationCode.join('') // Join the code array into a single string
-          } 
+
+        const { data } = await verifyTelegramCode({
+          variables: {
+            phoneNumber: cleanPhoneNumber,
+            countryCode: selectedCountry?.[2] || 'AR', // ISO country code
+            code: verificationCode.join('') // Join the code array into a single string
+          }
         });
-        
+
         if (data.verifyTelegramCode.success) {
           // Check if we're in the profile update flow (user is already authenticated)
           const isProfileUpdateFlow = !!userProfile;
-          
+
           if (isProfileUpdateFlow) {
             // Update the user's phone number in the database
             const { data: updateData } = await updatePhoneNumber({
               variables: {
-                countryCode: selectedCountry?.[1] || '+58', // Phone code (e.g., '+58')
+                countryCode: selectedCountry?.[1] || '+54', // Phone code (e.g., '+54')
                 phoneNumber: cleanPhoneNumber,
               },
             });
-            
+
             if (updateData?.updatePhoneNumber?.success) {
               Alert.alert(
-                'Éxito', 
+                'Éxito',
                 'Número de teléfono actualizado correctamente',
                 [
                   {
@@ -224,7 +224,7 @@ const PhoneVerificationScreen = () => {
                 safeNavigateToMain({ screen: 'Home', params: { checkInviteReceipt: true } });
               }
             } catch (e) {
-              try { safeNavigateToMain(); } catch {}
+              try { safeNavigateToMain(); } catch { }
             }
           }
         } else {
@@ -235,7 +235,7 @@ const PhoneVerificationScreen = () => {
         const { data } = await verifySmsCode({
           variables: {
             phoneNumber: cleanPhoneNumber,
-            countryCode: selectedCountry?.[2] || 'VE',
+            countryCode: selectedCountry?.[2] || 'AR',
             code: verificationCode.join(''),
           },
         });
@@ -244,7 +244,7 @@ const PhoneVerificationScreen = () => {
           if (isProfileUpdateFlow) {
             const { data: updateData } = await updatePhoneNumber({
               variables: {
-                countryCode: selectedCountry?.[1] || '+58',
+                countryCode: selectedCountry?.[1] || '+54',
                 phoneNumber: cleanPhoneNumber,
               },
             });
@@ -267,7 +267,7 @@ const PhoneVerificationScreen = () => {
                 safeNavigateToMain({ screen: 'Home', params: { checkInviteReceipt: true } });
               }
             } catch (e) {
-              try { safeNavigateToMain(); } catch {}
+              try { safeNavigateToMain(); } catch { }
             }
           }
         } else {
@@ -284,7 +284,7 @@ const PhoneVerificationScreen = () => {
   const handleSendSmsCode = async () => {
     await withCodeRequestGuard(async () => {
       try {
-        const countryCode = selectedCountry?.[2] || 'VE';
+        const countryCode = selectedCountry?.[2] || 'AR';
         const cleanPhoneNumber = phoneNumber.replace(/[\s-]/g, '');
         const { data } = await initiateSmsVerification({
           variables: {
@@ -329,75 +329,75 @@ const PhoneVerificationScreen = () => {
   const renderPhoneScreen = () => {
     const isProfileUpdateFlow = !!userProfile;
     const title = isProfileUpdateFlow ? 'Cambiar número de teléfono' : 'Ingresa tu número de teléfono';
-    const subtitle = isProfileUpdateFlow 
+    const subtitle = isProfileUpdateFlow
       ? 'Ingresa tu nuevo número de teléfono para actualizar tu perfil'
       : 'Necesitamos verificar tu identidad para proteger tu cuenta';
-    
+
     return (
-    <View style={styles.screenContainer}>
-      <TouchableOpacity 
-        style={styles.backButton} 
-        onPress={() => {
-          if (userProfile) {
-            // In main flow - just go back
-            navigation.goBack();
-          } else {
-            // In auth flow - navigate back to login screen
-            navigation.navigate('Login');
+      <View style={styles.screenContainer}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => {
+            if (userProfile) {
+              // In main flow - just go back
+              navigation.goBack();
+            } else {
+              // In auth flow - navigate back to login screen
+              navigation.navigate('Login');
+            }
+          }}
+        >
+          <Feather name="arrow-left" size={24} color={colors.darkGray} />
+        </TouchableOpacity>
+
+        <Text style={styles.title}>{title}</Text>
+        <Text style={styles.subtitle}>{subtitle}</Text>
+
+        <Text style={styles.label}>País</Text>
+        <TouchableOpacity
+          style={styles.countrySelector}
+          onPress={openCountryModal}
+          activeOpacity={0.8}
+        >
+          <View style={styles.countrySelectorContent}>
+            <Text style={styles.flag}>{selectedCountry?.[3] || '🌍'}</Text>
+            <Text style={styles.countryName}>{selectedCountry?.[0] || 'Seleccionar país'}</Text>
+          </View>
+          <Feather name="chevron-down" size={22} color={colors.grayText} />
+        </TouchableOpacity>
+
+        <Text style={[styles.label, { marginTop: 24 }]}>Número de teléfono</Text>
+        <View style={styles.phoneInputContainer}>
+          <View style={styles.countryCodeBox}>
+            <Text style={styles.countryCodeText}>{selectedCountry?.[1] || '+54'}</Text>
+          </View>
+          <TextInput
+            ref={phoneInputRef}
+            style={styles.phoneInput}
+            placeholder="412 345 6789"
+            keyboardType="phone-pad"
+            value={phoneNumber}
+            onChangeText={setPhoneNumber}
+            maxLength={15}
+            placeholderTextColor={colors.grayText}
+          />
+        </View>
+
+        <TouchableOpacity
+          style={[styles.continueButton, !phoneNumber && styles.continueButtonDisabled]}
+          onPress={handleContinue}
+          disabled={!phoneNumber}
+        >
+          <Text style={styles.continueButtonText}>Continuar</Text>
+        </TouchableOpacity>
+
+        <Text style={styles.supportingText}>
+          {isProfileUpdateFlow
+            ? 'Tu nuevo número de teléfono se utilizará para verificación y para permitir que tus amigos te envíen dinero.'
+            : 'Tu número de teléfono se utilizará para verificación y para permitir que tus amigos te envíen dinero. No será compartido con terceros.'
           }
-        }}
-      >
-        <Feather name="arrow-left" size={24} color={colors.darkGray} />
-      </TouchableOpacity>
-
-      <Text style={styles.title}>{title}</Text>
-      <Text style={styles.subtitle}>{subtitle}</Text>
-      
-      <Text style={styles.label}>País</Text>
-      <TouchableOpacity
-        style={styles.countrySelector}
-        onPress={openCountryModal}
-        activeOpacity={0.8}
-      >
-        <View style={styles.countrySelectorContent}>
-          <Text style={styles.flag}>{selectedCountry?.[3] || '🌍'}</Text>
-          <Text style={styles.countryName}>{selectedCountry?.[0] || 'Seleccionar país'}</Text>
-        </View>
-        <Feather name="chevron-down" size={22} color={colors.grayText} />
-      </TouchableOpacity>
-
-      <Text style={[styles.label, { marginTop: 24 }]}>Número de teléfono</Text>
-      <View style={styles.phoneInputContainer}>
-        <View style={styles.countryCodeBox}>
-          <Text style={styles.countryCodeText}>{selectedCountry?.[1] || '+58'}</Text>
-        </View>
-        <TextInput
-          ref={phoneInputRef}
-          style={styles.phoneInput}
-          placeholder="412 345 6789"
-          keyboardType="phone-pad"
-          value={phoneNumber}
-          onChangeText={setPhoneNumber}
-          maxLength={15}
-          placeholderTextColor={colors.grayText}
-        />
+        </Text>
       </View>
-
-      <TouchableOpacity
-        style={[styles.continueButton, !phoneNumber && styles.continueButtonDisabled]}
-        onPress={handleContinue}
-        disabled={!phoneNumber}
-      >
-        <Text style={styles.continueButtonText}>Continuar</Text>
-      </TouchableOpacity>
-
-      <Text style={styles.supportingText}>
-        {isProfileUpdateFlow 
-          ? 'Tu nuevo número de teléfono se utilizará para verificación y para permitir que tus amigos te envíen dinero.'
-          : 'Tu número de teléfono se utilizará para verificación y para permitir que tus amigos te envíen dinero. No será compartido con terceros.'
-        }
-      </Text>
-    </View>
     );
   };
 
@@ -410,134 +410,134 @@ const PhoneVerificationScreen = () => {
         : 'Enviar código';
     const isProfileUpdateFlow = !!userProfile;
     const title = isProfileUpdateFlow ? 'Verifica tu nuevo número' : 'Verifica tu número';
-    const subtitle = isProfileUpdateFlow 
+    const subtitle = isProfileUpdateFlow
       ? `Selecciona cómo quieres verificar tu nuevo número\n<Text style={styles.phoneNumber}>${selectedCountry[1]} ${phoneNumber}</Text>`
       : `Selecciona cómo quieres verificar tu número\n<Text style={styles.phoneNumber}>${selectedCountry[1]} ${phoneNumber}</Text>`;
-    
+
     return (
-    <View style={styles.screenContainer}>
-      <TouchableOpacity style={styles.backButton} onPress={handleBack}>
-        <Feather name="arrow-left" size={24} color={colors.darkGray} />
-      </TouchableOpacity>
+      <View style={styles.screenContainer}>
+        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
+          <Feather name="arrow-left" size={24} color={colors.darkGray} />
+        </TouchableOpacity>
 
-      <Text style={styles.title}>{title}</Text>
-      <Text style={styles.subtitle}>
-        {isProfileUpdateFlow 
-          ? `Selecciona cómo quieres verificar tu nuevo número\n`
-          : `Selecciona cómo quieres verificar tu número\n`
-        }
-        <Text style={styles.phoneNumber}>{selectedCountry?.[1] || '+58'} {phoneNumber}</Text>
-      </Text>
+        <Text style={styles.title}>{title}</Text>
+        <Text style={styles.subtitle}>
+          {isProfileUpdateFlow
+            ? `Selecciona cómo quieres verificar tu nuevo número\n`
+            : `Selecciona cómo quieres verificar tu número\n`
+          }
+          <Text style={styles.phoneNumber}>{selectedCountry?.[1] || '+54'} {phoneNumber}</Text>
+        </Text>
 
-      <View style={styles.methodContainer}>
+        <View style={styles.methodContainer}>
+          <TouchableOpacity
+            style={[styles.methodCard, codeRequestBlocked && styles.methodCardDisabled]}
+            activeOpacity={0.85}
+            disabled={codeRequestBlocked}
+            onPress={() => {
+              setVerificationMethod('telegram');
+              handleSendTelegramCode();
+            }}
+          >
+            <View style={styles.methodIconContainer}>
+              <TelegramLogo width="100%" height="100%" />
+            </View>
+            <View style={styles.methodContent}>
+              <Text style={styles.methodTitle}>Verificación vía Telegram</Text>
+              <Text style={styles.methodDescription}>Enviaremos un código a tu cuenta de Telegram</Text>
+              <View style={styles.methodButtonRow}>
+                <Text style={[styles.methodButtonText, codeRequestBlocked && styles.methodButtonTextDisabled]}>
+                  {methodCtaText}
+                </Text>
+                <Feather name="arrow-right" size={16} color={colors.confioGreen} />
+              </View>
+            </View>
+          </TouchableOpacity>
+        </View>
+
         <TouchableOpacity
-          style={[styles.methodCard, codeRequestBlocked && styles.methodCardDisabled]}
-          activeOpacity={0.85}
+          style={[styles.smsButton, codeRequestBlocked && styles.disabledLink]}
           disabled={codeRequestBlocked}
-          onPress={() => {
-            setVerificationMethod('telegram');
-            handleSendTelegramCode();
+          onPress={async () => {
+            setVerificationMethod('sms');
+            await handleSendSmsCode();
           }}
         >
-          <View style={styles.methodIconContainer}>
-            <TelegramLogo width="100%" height="100%" />
-          </View>
-          <View style={styles.methodContent}>
-            <Text style={styles.methodTitle}>Verificación vía Telegram</Text>
-            <Text style={styles.methodDescription}>Enviaremos un código a tu cuenta de Telegram</Text>
-            <View style={styles.methodButtonRow}>
-              <Text style={[styles.methodButtonText, codeRequestBlocked && styles.methodButtonTextDisabled]}>
-                {methodCtaText}
-              </Text>
-              <Feather name="arrow-right" size={16} color={colors.confioGreen} />
-            </View>
-          </View>
+          <Text style={styles.smsButtonText}>Recibir a través de SMS</Text>
+          <Feather name="arrow-right" size={16} color="#6B7280" />
         </TouchableOpacity>
+        {codeRequestCooldown > 0 && (
+          <Text style={styles.cooldownHelper}>Puedes volver a solicitar el código en {codeRequestCooldown}s</Text>
+        )}
       </View>
-
-      <TouchableOpacity
-        style={[styles.smsButton, codeRequestBlocked && styles.disabledLink]}
-        disabled={codeRequestBlocked}
-        onPress={async () => {
-          setVerificationMethod('sms');
-          await handleSendSmsCode();
-        }}
-      >
-        <Text style={styles.smsButtonText}>Recibir a través de SMS</Text>
-        <Feather name="arrow-right" size={16} color="#6B7280" />
-      </TouchableOpacity>
-      {codeRequestCooldown > 0 && (
-        <Text style={styles.cooldownHelper}>Puedes volver a solicitar el código en {codeRequestCooldown}s</Text>
-      )}
-    </View>
     );
   };
 
   const renderVerificationCodeScreen = () => {
     const isProfileUpdateFlow = !!userProfile;
     const title = isProfileUpdateFlow ? 'Verifica tu nuevo número' : 'Ingresa el código';
-    const subtitle = isProfileUpdateFlow 
+    const subtitle = isProfileUpdateFlow
       ? `${verificationMethod === 'telegram' ? 'Enviamos un código a tu Telegram' : 'Enviamos un código por SMS'} para verificar tu nuevo número\n`
       : `${verificationMethod === 'telegram' ? 'Enviamos un código a tu Telegram' : 'Enviamos un código por SMS'} al número\n`;
-    
+
     return (
-    <View style={styles.screenContainer}>
-      <TouchableOpacity style={styles.backButton} onPress={handleBack}>
-        <Feather name="arrow-left" size={24} color={colors.darkGray} />
-      </TouchableOpacity>
+      <View style={styles.screenContainer}>
+        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
+          <Feather name="arrow-left" size={24} color={colors.darkGray} />
+        </TouchableOpacity>
 
-      <Text style={styles.title}>{title}</Text>
-      <Text style={styles.subtitle}>
-        {subtitle}
-        <Text style={styles.phoneNumber}>{selectedCountry?.[1] || '+58'} {phoneNumber}</Text>
-      </Text>
-
-      <View style={styles.codeContainer}>
-        {verificationCode.map((digit, index) => (
-          <TextInput
-            key={index}
-            ref={codeInputRefs[index]}
-            style={styles.codeInput}
-            maxLength={1}
-            keyboardType="number-pad"
-            value={digit}
-            onChangeText={(value) => {
-              const newCode = [...verificationCode];
-              newCode[index] = value;
-              setVerificationCode(newCode);
-              if (value && index < 5) {
-                codeInputRefs[index + 1].current?.focus();
-              }
-            }}
-            onKeyPress={({ nativeEvent }) => {
-              if (nativeEvent.key === 'Backspace' && !verificationCode[index] && index > 0) {
-                codeInputRefs[index - 1].current?.focus();
-              }
-            }}
-            returnKeyType={index === 5 ? 'done' : 'next'}
-          />
-        ))}
-      </View>
-
-      <TouchableOpacity
-        style={[styles.continueButton, verificationCode.join('').length !== 6 && styles.continueButtonDisabled]}
-        onPress={handleContinue}
-        disabled={verificationCode.join('').length !== 6}
-      >
-        <Text style={styles.continueButtonText}>Verificar</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity
-        style={[styles.resendButton, (isRequestingCode || codeRequestCooldown > 0) && styles.disabledLink]}
-        onPress={handleResendCode}
-        disabled={isRequestingCode || codeRequestCooldown > 0}
-      >
-        <Text style={styles.resendButtonText}>¿No recibiste el código? </Text>
-        <Text style={[styles.resendButtonText, { color: colors.confioGreen }]}>
-          {codeRequestCooldown > 0 ? `Reenviar en ${codeRequestCooldown}s` : 'Reenviar código'}
+        <Text style={styles.title}>{title}</Text>
+        <Text style={styles.subtitle}>
+          {subtitle}
+          <Text style={styles.phoneNumber}>{selectedCountry?.[1] || '+54'} {phoneNumber}</Text>
         </Text>
-      </TouchableOpacity>
-    </View>
+
+        <View style={styles.codeContainer}>
+          {verificationCode.map((digit, index) => (
+            <TextInput
+              key={index}
+              ref={codeInputRefs[index]}
+              style={styles.codeInput}
+              maxLength={1}
+              keyboardType="number-pad"
+              value={digit}
+              onChangeText={(value) => {
+                const newCode = [...verificationCode];
+                newCode[index] = value;
+                setVerificationCode(newCode);
+                if (value && index < 5) {
+                  codeInputRefs[index + 1].current?.focus();
+                }
+              }}
+              onKeyPress={({ nativeEvent }) => {
+                if (nativeEvent.key === 'Backspace' && !verificationCode[index] && index > 0) {
+                  codeInputRefs[index - 1].current?.focus();
+                }
+              }}
+              returnKeyType={index === 5 ? 'done' : 'next'}
+            />
+          ))}
+        </View>
+
+        <TouchableOpacity
+          style={[styles.continueButton, verificationCode.join('').length !== 6 && styles.continueButtonDisabled]}
+          onPress={handleContinue}
+          disabled={verificationCode.join('').length !== 6}
+        >
+          <Text style={styles.continueButtonText}>Verificar</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.resendButton, (isRequestingCode || codeRequestCooldown > 0) && styles.disabledLink]}
+          onPress={handleResendCode}
+          disabled={isRequestingCode || codeRequestCooldown > 0}
+        >
+          <Text style={styles.resendButtonText}>¿No recibiste el código? </Text>
+          <Text style={[styles.resendButtonText, { color: colors.confioGreen }]}>
+            {codeRequestCooldown > 0 ? `Reenviar en ${codeRequestCooldown}s` : 'Reenviar código'}
+          </Text>
+        </TouchableOpacity>
+      </View>
     );
   };
 

@@ -25,21 +25,21 @@ export const CountryProvider: React.FC<CountryProviderProps> = ({ children }) =>
   useEffect(() => {
     if (userData?.me?.phoneCountry) {
       const country = getCountryByIso(userData.me.phoneCountry);
-      
+
       if (country) {
         setUserCountry(country);
         setSelectedCountry(country);
       } else {
-        // Fallback to Venezuela if phone country not found
-        const venezuelaCountry = countries.find(c => c[0] === 'Venezuela') || null;
-        setUserCountry(venezuelaCountry);
-        setSelectedCountry(venezuelaCountry);
+        // Fallback to Argentina if phone country not found
+        const argentinaCountry = countries.find(c => c[0] === 'Argentina') || null;
+        setUserCountry(argentinaCountry);
+        setSelectedCountry(argentinaCountry);
       }
     } else {
-      // Fallback to Venezuela if no phone country
-      const venezuelaCountry = countries.find(c => c[0] === 'Venezuela') || null;
-      setUserCountry(venezuelaCountry);
-      setSelectedCountry(venezuelaCountry);
+      // Fallback to Argentina if no phone country
+      const argentinaCountry = countries.find(c => c[0] === 'Argentina') || null;
+      setUserCountry(argentinaCountry);
+      setSelectedCountry(argentinaCountry);
     }
   }, [userData?.me?.phoneCountry]);
 

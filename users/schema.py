@@ -226,6 +226,7 @@ def _record_referral_claim_payout(*, user, referral, event, claim_amount, tx_id)
 			'invitation_reverted': False,
 			'invitation_expires_at': None,
 			'transaction_date': reward_timestamp,
+			'referral_reward_event': event,
 		}
 		UnifiedTransactionTable.objects.update_or_create(
 			transaction_type='reward',
@@ -889,7 +890,7 @@ class ConfioRewardTransactionType(DjangoObjectType):
 	class Meta:
 		model = ConfioRewardTransaction
 		fields = [
-			'id', 'user', 'transaction_type', 'amount', 'balance_after',
+			'id', 'internal_id', 'user', 'transaction_type', 'amount', 'balance_after',
 			'reference_type', 'reference_id', 'description', 'created_at'
 		]
 
@@ -1062,27 +1063,35 @@ class Query(EmployeeQueries, graphene.ObjectType):
 
 		# Try Custom ID Lookup (if not found yet)
 		if not (payroll or payment or transfer):
-			payroll = PayrollItem.objects.select_related('payroll_run__business', 'employee__user').filter(item_id=input_str).first()
+			payroll = PayrollItem.objects.select_related('run__business', 'recipient_user').filter(internal_id=input_str).first()
 			
 		if not (payroll or payment or transfer):
-			payment = PaymentTransaction.objects.select_related('merchant', 'payer_user').filter(payment_transaction_id=input_str).first()
+			payment = PaymentTransaction.objects.select_related('merchant_business', 'payer_user').filter(internal_id=input_str).first()
+			
+		if not (payroll or payment or transfer):
+			transfer = SendTransaction.objects.select_related('sender_user', 'recipient_user').filter(internal_id=input_str).first()
 
 		# If found, format response
-		if payroll:
-			user = payroll.employee.user
+			user = payroll.recipient_user
+			
+			# Handle business name safely
+			business_name = "Empresa"
+			if payroll.run and payroll.run.business:
+				business_name = payroll.run.business.name
+				
 			return VerifiedTransactionType(
 				is_valid=True,
-				status='COMPLETED',
+				status='COMPLETED', # Payroll is usually completed if it exists here, or map status
 				transaction_hash=payroll.transaction_hash,
-				amount=f"{payroll.net_pay:.2f}",
-				currency=payroll.currency or 'cUSD',
-				timestamp=payroll.paid_at or payroll.created_at,
-				sender_name=payroll.payroll_run.business.name if payroll.payroll_run and payroll.payroll_run.business else "Empresa",
+				amount=f"{payroll.net_amount:.2f}",
+				currency=payroll.token_type,
+				timestamp=payroll.executed_at or payroll.created_at,
+				sender_name=business_name,
 				recipient_name_masked=format_name(user),
 				recipient_phone_masked=f"******{user.phone_number[-4:]}" if user and user.phone_number else "",
 				verification_message="Pago de nómina verificado exitosamente.",
 				transaction_type="PAYROLL",
-				metadata=json.dumps({"referenceId": str(payroll.payroll_run.id), "memo": "Nómina"})
+				metadata=json.dumps({"referenceId": str(payroll.run.id) if payroll.run else "", "memo": "Nómina"})
 			)
 
 		if payment:
@@ -1092,10 +1101,10 @@ class Query(EmployeeQueries, graphene.ObjectType):
 				status=payment.status,
 				transaction_hash=payment.transaction_hash,
 				amount=f"{payment.amount:.2f}",
-				currency=payment.currency,
+				currency=payment.token_type,
 				timestamp=payment.created_at,
 				sender_name=format_name(payment.payer_user),
-				recipient_name_masked=payment.merchant.name if payment.merchant else "Comercio",
+				recipient_name_masked=payment.merchant_display_name or (payment.merchant_business.name if payment.merchant_business else "Comercio"),
 				recipient_phone_masked="",
 				verification_message="Pago a comercio verificado exitosamente.",
 				transaction_type="PAYMENT",
@@ -1117,7 +1126,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 				recipient_phone_masked=f"******{transfer.recipient_user.phone_number[-4:]}" if transfer.recipient_user and transfer.recipient_user.phone_number else "",
 				verification_message="Transferencia P2P verificada.",
 				transaction_type="TRANSFER",
-				metadata=json.dumps({"memo": transfer.message or "Transferencia"})
+				metadata=json.dumps({"memo": transfer.memo or "Transferencia"})
 			)
 
 		# Not found
@@ -3591,15 +3600,42 @@ class PrepareReferralRewardClaim(graphene.Mutation):
 			return PrepareReferralRewardClaim(success=False, error="No encontramos esa recompensa.")
 
 		if event.reward_status != 'eligible':
+			# Auto-heal: If event is claimed but referral is not, fix referral.
+			if event.reward_status == 'claimed':
+				referral = event.referral
+				if referral:
+					actor_role = (event.actor_role or '').lower()
+					if actor_role == 'referrer' and referral.referrer_reward_status != 'claimed':
+						referral.referrer_reward_status = 'claimed'
+						referral.save(update_fields=['referrer_reward_status', 'updated_at'])
+					elif actor_role != 'referrer' and referral.referee_reward_status != 'claimed':
+						referral.referee_reward_status = 'claimed'
+						referral.save(update_fields=['referee_reward_status', 'updated_at'])
+				return PrepareReferralRewardClaim(success=False, error="Esta recompensa ya fue reclamada.")
+				
 			return PrepareReferralRewardClaim(success=False, error="Esta recompensa aún no está lista para desbloquear.")
 
+		logger.debug("[PrepareReferralRewardClaim] Processing event=%s user=%s", event.id, user.id)
+		
 		referral = event.referral
 		# For two-sided referrals, check if this specific actor already claimed their portion
 		actor_role = (event.actor_role or '').lower()
 		if referral:
 			if actor_role == 'referrer' and referral.referrer_confio_awarded and referral.referrer_confio_awarded > Decimal('0'):
+				if event.reward_status != 'claimed' or referral.referrer_reward_status != 'claimed':
+					if referral.referrer_reward_status != 'claimed':
+						referral.referrer_reward_status = 'claimed'
+						referral.save(update_fields=['referrer_reward_status', 'updated_at'])
+					event.reward_status = 'claimed'
+					event.save(update_fields=['reward_status', 'updated_at'])
 				return PrepareReferralRewardClaim(success=False, error="Esta recompensa ya fue reclamada.")
 			elif actor_role != 'referrer' and referral.referee_confio_awarded and referral.referee_confio_awarded > Decimal('0'):
+				if event.reward_status != 'claimed' or referral.referee_reward_status != 'claimed':
+					if referral.referee_reward_status != 'claimed':
+						referral.referee_reward_status = 'claimed'
+						referral.save(update_fields=['referee_reward_status', 'updated_at'])
+					event.reward_status = 'claimed'
+					event.save(update_fields=['reward_status', 'updated_at'])
 				return PrepareReferralRewardClaim(success=False, error="Esta recompensa ya fue reclamada.")
 
 		user_address = get_primary_algorand_address(user)
@@ -3710,6 +3746,20 @@ class PrepareReferralRewardClaim(graphene.Mutation):
 						error="Aún no hay CONFIO disponibles para este referido.",
 					)
 				if referee_box.get("ref_claimed_flag", 0) == 1:
+					# Auto-heal: If on-chain says claimed but we are here, DB is out of sync.
+					# Record it as claimed to fix the "stuck" state.
+					logger.info(
+						"[referral_claim] Auto-healing stuck claim: user=%s referral=%s",
+						user.id,
+						referral.id if referral else "None"
+					)
+					_record_referral_claim_payout(
+						user=user,
+						referral=referral,
+						event=event,
+						claim_amount=Decimal(referee_box.get("ref_amount", 0)) / Decimal(1_000_000),
+						tx_id="already-claimed-auto-heal",
+					)
 					return PrepareReferralRewardClaim(
 						success=False,
 						error="Este bono ya fue reclamado.",

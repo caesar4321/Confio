@@ -18,6 +18,7 @@ type SendPreparePack = {
 
 type SubmitResult = {
   transaction_id?: string; transactionId?: string;
+  internal_id?: string; internalId?: string;
   confirmed_round?: number; confirmedRound?: number;
 };
 
@@ -81,7 +82,7 @@ export class SendWsSession {
               console.log('[sendWs] server error', msg?.message);
               this.rejectAll(new Error(msg.message || 'ws_error'));
             }
-          } catch {}
+          } catch { }
         };
       } catch (e) {
         console.log('[sendWs] open failed', e);
@@ -148,7 +149,7 @@ export class SendWsSession {
 
   close() {
     this.closeRequested = true;
-    try { console.log('[sendWs] closing'); this.ws?.close(1000, 'flow_end'); } catch {}
+    try { console.log('[sendWs] closing'); this.ws?.close(1000, 'flow_end'); } catch { }
     this.ws = null;
   }
 }
@@ -161,7 +162,7 @@ export async function prepareSendViaWs(args: PrepareArgs): Promise<SendPreparePa
     s.close();
     return pack;
   } catch (e) {
-    try { s.close(); } catch {}
+    try { s.close(); } catch { }
     return null;
   }
 }
@@ -174,7 +175,7 @@ export async function submitSendViaWs(signedUserTxn: string, sponsorTxn: string)
     s.close();
     return res;
   } catch (e) {
-    try { s.close(); } catch {}
+    try { s.close(); } catch { }
     return null;
   }
 }

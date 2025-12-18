@@ -31,15 +31,18 @@ interface TransactionData {
   recipientPhone?: string;
   recipientUserId?: string;
   sender?: string;
+  senderName?: string;
+  recipientName?: string;
   recipientAddress?: string;
   senderAddress?: string;
   merchantAddress?: string;
   message?: string;
   isOnConfio?: boolean;
-  sendTransactionId?: string;
+  internalId?: string;
   merchant?: string;
   invoiceId?: string;
   transactionId?: string;
+  transactionHash?: string;
   status?: 'SUBMITTED' | 'CONFIRMED' | 'FAILED';
 }
 
@@ -130,15 +133,27 @@ export const TransactionSuccessScreen = () => {
     (navigation as any).navigate('TransactionReceipt', {
       transaction: {
         ...transactionData,
-        id: transactionData.transactionId,
-        transactionHash: transactionData.transactionId,
+        // Use internalId for the receipt verification ID if available, else fallback to hash
+        id: (transactionData as any).internalId || transactionData.transactionId,
+        transactionHash: (transactionData as any).transactionHash || transactionData.transactionId,
         date: new Date().toISOString(),
-        status: 'completed', // Success screen implies completion
+        // Pass actual status - only 'CONFIRMED' shows green, else shows yellow pending
+        status: (transactionData as any).status || 'SUBMITTED',
         // Map fields for generic view
-        employeeName: transactionData.recipient,
-        employeePhone: transactionData.recipientPhone,
-        businessName: transactionData.sender || 'Usuario', // For P2P
-        transactionId: transactionData.transactionId
+        employeeName: (transactionData as any).recipient || (transactionData as any).recipientName || 'Empleado',
+        employeePhone: (transactionData as any).recipientPhone,
+        businessName: (transactionData as any).payerBusiness?.name || (transactionData as any).sender || (transactionData as any).senderName || 'Usuario',
+        senderName: (transactionData as any).payerBusiness?.name || (transactionData as any).payerDisplayName || (transactionData as any).senderName || (transactionData as any).sender || 'Usuario',
+        recipientName: (transactionData as any).recipientBusiness?.name || (transactionData as any).merchantDisplayName || (transactionData as any).recipientName || (transactionData as any).recipient || 'Usuario',
+
+        // Pass rich objects
+        payerBusiness: (transactionData as any).payerBusiness,
+        payerDisplayName: (transactionData as any).payerDisplayName,
+        merchantBusiness: (transactionData as any).merchantBusiness || (transactionData as any).recipientBusiness,
+        merchantDisplayName: (transactionData as any).merchantDisplayName,
+
+        transactionId: (transactionData as any).internalId || transactionData.transactionId,
+        verificationId: (transactionData as any).internalId // Explicitly pass verificationId
       },
       type: transactionData.type === 'payment' ? 'payment' : 'transfer'
     });
@@ -221,7 +236,20 @@ export const TransactionSuccessScreen = () => {
       }
     } catch (error) {
       try {
-        await Share.share({ message: `Te envié dinero por Confío. ${SHARE_LINKS.campaigns.beta}` });
+        // Use the same format as line 176 for consistency
+        const rawUsername = userProfile?.username || '';
+        const cleanUsername = rawUsername.replace('@', '').toUpperCase();
+        const inviteLink = `https://confio.lat/invite/${cleanUsername}`;
+        const fallbackMessage = [
+          'Te envié dinero por Confío 💰',
+          '',
+          'Descarga la app y crea tu cuenta para recibirlo:',
+          '',
+          `📲 ${inviteLink}`,
+          '',
+          '¡Es gratis y en segundos recibes tu dinero!',
+        ].join('\n');
+        await Share.share({ message: fallbackMessage });
       } catch (_) { }
       Alert.alert('Error', 'No se pudo abrir WhatsApp.');
     }
@@ -239,7 +267,8 @@ export const TransactionSuccessScreen = () => {
     (navigation as any).navigate('BottomTabs', { screen: 'Contacts' });
   };
 
-  const transactionId = (transactionData as any).transactionId || 'pendiente';
+  const displayId = (transactionData as any).internalId || (transactionData as any).transactionId || 'pendiente';
+  const transactionId = displayId; // Alias for backward compatibility in render
   const isConfirmed = (transactionData as any).status === 'CONFIRMED';
   const currentDate = new Date().toLocaleDateString('es-ES');
   const currentTime = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
@@ -374,7 +403,7 @@ export const TransactionSuccessScreen = () => {
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>ID de Transacción</Text>
                     <View style={styles.transactionIdContainer}>
-                      <Text style={styles.transactionId}>#{String(transactionId).slice(0, 8)}</Text>
+                      <Text style={styles.transactionId}>#{String(transactionId).toUpperCase().slice(0, 8)}</Text>
                       <TouchableOpacity onPress={handleCopy} style={styles.copyButton}>
                         {copied ? (
                           <Icon name="check-circle" size={16} color={colors.accent} />

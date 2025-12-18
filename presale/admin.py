@@ -1101,6 +1101,7 @@ class PresalePhaseAdmin(admin.ModelAdmin):
 @admin.register(PresalePurchase)
 class PresalePurchaseAdmin(admin.ModelAdmin):
     list_display = [
+        'internal_id',
         'purchase_id',
         'user_link',
         'phase',
@@ -1113,8 +1114,9 @@ class PresalePurchaseAdmin(admin.ModelAdmin):
         'completed_at'
     ]
     list_filter = ['status', 'phase', 'created_at']
-    search_fields = ['user__username', 'user__email', 'transaction_hash']
+    search_fields = ['internal_id', 'user__username', 'user__email', 'transaction_hash']
     readonly_fields = [
+        'internal_id',
         'user', 
         'phase',
         'cusd_amount',
@@ -1130,6 +1132,7 @@ class PresalePurchaseAdmin(admin.ModelAdmin):
     fieldsets = (
         ('Purchase Details', {
             'fields': (
+                'internal_id',
                 'user',
                 'phase',
                 'cusd_amount',

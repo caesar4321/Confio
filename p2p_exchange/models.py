@@ -3,6 +3,11 @@ from django.conf import settings
 from users.models import SoftDeleteModel
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.core.exceptions import ValidationError
+import uuid
+
+def generate_p2p_trade_id():
+    """Generate a unique P2P trade ID (32-char hex UUID)"""
+    return uuid.uuid4().hex
 
 class P2PPaymentMethod(SoftDeleteModel):
     """Payment methods available for P2P trading"""
@@ -33,7 +38,7 @@ class P2PPaymentMethod(SoftDeleteModel):
     country = models.ForeignKey(
         'users.Country',
         on_delete=models.CASCADE,
-        null=True,
+        null=True, 
         blank=True,
         help_text="Country for non-bank payment methods (e.g., fintech, mobile payments)"
     )
@@ -216,7 +221,17 @@ class P2PTrade(SoftDeleteModel):
         ('AML_REVIEW', 'Under AML Review'), # Trade flagged for compliance review
     ]
     
+    # Internal ID for universal reference (32-char UUID)
+    internal_id = models.CharField(
+        max_length=32,
+        unique=True,
+        default=generate_p2p_trade_id,
+        editable=False,
+        null=True  # Allow null for migration
+    )
+    
     # Related offer and users
+
     offer = models.ForeignKey(P2POffer, on_delete=models.CASCADE, related_name='trades', null=True, blank=True)
     
     # DEPRECATED: Old fields (kept for migration compatibility)

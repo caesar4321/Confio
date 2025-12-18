@@ -99,6 +99,7 @@ def create_transaction_notification(
     amount: str = None,
     token_type: str = None,
     transaction_id: str = None,
+    internal_id: str = None,
     transaction_model: str = None,
     additional_data: Optional[Dict[str, Any]] = None
 ) -> Optional[Notification]:
@@ -123,6 +124,7 @@ def create_transaction_notification(
         'amount': amount,
         'token_type': token_type,
         'transaction_id': transaction_id,
+        'internal_id': internal_id,
     }
     if additional_data:
         data.update(additional_data)

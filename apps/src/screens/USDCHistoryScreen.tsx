@@ -35,6 +35,7 @@ const colors = {
 
 interface USDCTransactionRecord {
   transactionId: string;
+  internalId?: string;
   transactionHash?: string;
   transactionType: 'deposit' | 'withdrawal' | 'conversion';
   actorType: 'user' | 'business';
@@ -79,7 +80,7 @@ export const USDCHistoryScreen = () => {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [transactions, setTransactions] = useState<USDCTransactionRecord[]>([]);
-  
+
   // Fetch unified USDC transaction history from GraphQL
   const { data, loading, refetch, fetchMore } = useQuery(GET_UNIFIED_USDC_TRANSACTIONS, {
     variables: { limit: ITEMS_PER_PAGE, offset: 0 },
@@ -98,13 +99,13 @@ export const USDCHistoryScreen = () => {
       setHasMore(newTransactions.length === ITEMS_PER_PAGE);
     },
   });
-  
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     if (Platform.OS === 'ios') {
       Vibration.vibrate(10);
     }
-    
+
     try {
       const result = await refetch({ limit: ITEMS_PER_PAGE, offset: 0 });
       const newTransactions = result.data?.unifiedUsdcTransactions || [];
@@ -119,7 +120,7 @@ export const USDCHistoryScreen = () => {
 
   const loadMore = useCallback(async () => {
     if (loadingMore || !hasMore || refreshing) return;
-    
+
     setLoadingMore(true);
     try {
       const result = await fetchMore({
@@ -128,7 +129,7 @@ export const USDCHistoryScreen = () => {
           offset: transactions.length,
         },
       });
-      
+
       const moreTransactions = result.data?.unifiedUsdcTransactions || [];
       if (moreTransactions.length > 0) {
         setTransactions(prev => [...prev, ...moreTransactions]);
@@ -158,7 +159,7 @@ export const USDCHistoryScreen = () => {
   const formatDate = (dateString: string) => {
     const date = moment.utc(dateString).local();
     const now = moment();
-    
+
     if (date.isSame(now, 'day')) {
       return `Hoy, ${date.format('HH:mm')}`;
     } else if (date.isSame(now.clone().subtract(1, 'day'), 'day')) {
@@ -169,7 +170,7 @@ export const USDCHistoryScreen = () => {
       return date.format('D [de] MMMM, HH:mm');
     }
   };
-  
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'COMPLETED':
@@ -184,7 +185,7 @@ export const USDCHistoryScreen = () => {
         return colors.text.secondary;
     }
   };
-  
+
   const getStatusText = (status: string) => {
     switch (status) {
       case 'COMPLETED':
@@ -209,6 +210,7 @@ export const USDCHistoryScreen = () => {
       transactionData: {
         type: transaction.transactionType.toLowerCase(),
         transactionId: transaction.transactionId,
+        internalId: transaction.internalId,
         amount: transaction.amount,
         currency: transaction.currency,
         secondaryAmount: transaction.secondaryAmount,
@@ -249,7 +251,7 @@ export const USDCHistoryScreen = () => {
       // But we can enhance it with contact names if we have phone numbers
       displayTitle = item.formattedTitle || displayTitle;
     }
-    
+
     return (
       <TouchableOpacity style={styles.historyItem} onPress={() => handleTransactionPress(item)}>
         <View style={styles.itemHeader}>
@@ -281,56 +283,56 @@ export const USDCHistoryScreen = () => {
             )}
           </View>
         </View>
-      
-      <View style={styles.itemDetails}>
-        {item.transactionType.toLowerCase() === 'conversion' && item.exchangeRate && (
-          <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>Tasa</Text>
-            <Text style={styles.detailValue}>1 {item.currency} = {item.exchangeRate} {item.secondaryCurrency}</Text>
-          </View>
-        )}
-        
-        {item.transactionType.toLowerCase() === 'deposit' && item.sourceAddress && (
-          <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>Desde</Text>
-            <Text style={styles.detailValue}>{item.sourceAddress.substring(0, 10)}...{item.sourceAddress.substring(item.sourceAddress.length - 6)}</Text>
-          </View>
-        )}
-        
-        {item.transactionType.toLowerCase() === 'withdrawal' && item.destinationAddress && (
-          <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>Hacia</Text>
-            <Text style={styles.detailValue}>{item.destinationAddress.substring(0, 10)}...{item.destinationAddress.substring(item.destinationAddress.length - 6)}</Text>
-          </View>
-        )}
-        
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>Comisión</Text>
-          {(parseFloat(item.serviceFee) + parseFloat(item.networkFee)) === 0 ? (
-            <View style={styles.feeContainer}>
-              <Text style={[styles.detailValue, { color: colors.mint }]}>Gratis</Text>
-              <Text style={styles.feeNote}>• Cubierto por Confío</Text>
+
+        <View style={styles.itemDetails}>
+          {item.transactionType.toLowerCase() === 'conversion' && item.exchangeRate && (
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Tasa</Text>
+              <Text style={styles.detailValue}>1 {item.currency} = {item.exchangeRate} {item.secondaryCurrency}</Text>
             </View>
-          ) : (
-            <Text style={styles.detailValue}>
-              {(parseFloat(item.serviceFee) + parseFloat(item.networkFee)).toFixed(6)} {item.currency}
-            </Text>
           )}
-        </View>
-        
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>Estado</Text>
-          <View style={styles.statusContainer}>
-            <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
-              {getStatusText(item.status)}
-            </Text>
-            {item.status === 'COMPLETED' && (
-              <View style={[styles.statusDot, { backgroundColor: colors.primary }]} />
+
+          {item.transactionType.toLowerCase() === 'deposit' && item.sourceAddress && (
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Desde</Text>
+              <Text style={styles.detailValue}>{item.sourceAddress.substring(0, 10)}...{item.sourceAddress.substring(item.sourceAddress.length - 6)}</Text>
+            </View>
+          )}
+
+          {item.transactionType.toLowerCase() === 'withdrawal' && item.destinationAddress && (
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Hacia</Text>
+              <Text style={styles.detailValue}>{item.destinationAddress.substring(0, 10)}...{item.destinationAddress.substring(item.destinationAddress.length - 6)}</Text>
+            </View>
+          )}
+
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Comisión</Text>
+            {(parseFloat(item.serviceFee) + parseFloat(item.networkFee)) === 0 ? (
+              <View style={styles.feeContainer}>
+                <Text style={[styles.detailValue, { color: colors.mint }]}>Gratis</Text>
+                <Text style={styles.feeNote}>• Cubierto por Confío</Text>
+              </View>
+            ) : (
+              <Text style={styles.detailValue}>
+                {(parseFloat(item.serviceFee) + parseFloat(item.networkFee)).toFixed(6)} {item.currency}
+              </Text>
             )}
           </View>
+
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Estado</Text>
+            <View style={styles.statusContainer}>
+              <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
+                {getStatusText(item.status)}
+              </Text>
+              {item.status === 'COMPLETED' && (
+                <View style={[styles.statusDot, { backgroundColor: colors.primary }]} />
+              )}
+            </View>
+          </View>
         </View>
-      </View>
-    </TouchableOpacity>
+      </TouchableOpacity>
     );
   };
 
@@ -346,7 +348,7 @@ export const USDCHistoryScreen = () => {
 
   const renderFooter = () => {
     if (!loadingMore) return null;
-    
+
     return (
       <View style={styles.footerLoader}>
         <ActivityIndicator size="small" color={colors.primary} />
@@ -382,7 +384,7 @@ export const USDCHistoryScreen = () => {
         isLight={true}
         showBackButton={true}
       />
-      
+
       <FlatList
         data={transactions}
         renderItem={renderItem}

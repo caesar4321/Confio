@@ -14,7 +14,7 @@ class ConversionType(DjangoObjectType):
         model = Conversion
         fields = (
             'id',
-            'conversion_id',
+            'internal_id',
             'actor_user',
             'actor_business',
             'actor_type',
@@ -45,6 +45,12 @@ class ConversionType(DjangoObjectType):
     def resolve_to_token(self, info):
         """Resolve the destination token based on conversion type"""
         return 'cUSD' if self.conversion_type == 'usdc_to_cusd' else 'USDC'
+
+    def resolve_internal_id(self, info):
+        """Standardize internal_id as 32-char hex string"""
+        if self.internal_id:
+            return self.internal_id.hex
+        return None
 
 
 class ConvertUSDCToCUSD(graphene.Mutation):
@@ -517,7 +523,7 @@ class Query(graphene.ObjectType):
         status=graphene.String(),
         conversion_type=graphene.String()
     )
-    conversion = graphene.Field(ConversionType, conversion_id=graphene.String())
+    conversion = graphene.Field(ConversionType, internal_id=graphene.String())
     
     def resolve_conversions(self, info, limit=None, status=None, conversion_type=None):
         """Resolve user's conversions for active account"""
@@ -577,7 +583,7 @@ class Query(graphene.ObjectType):
         
         return conversions
     
-    def resolve_conversion(self, info, conversion_id):
+    def resolve_conversion(self, info, internal_id):
         """Resolve a specific conversion by ID"""
         user = getattr(info.context, 'user', None)
         if not (user and getattr(user, 'is_authenticated', False)):
@@ -588,7 +594,7 @@ class Query(graphene.ObjectType):
             from django.db.models import Q
             return Conversion.objects.get(
                 Q(actor_user=user) | Q(actor_business__user=user),
-                conversion_id=conversion_id,
+                internal_id=internal_id,
                 is_deleted=False
             )
         except Conversion.DoesNotExist:

@@ -95,7 +95,7 @@ export const GET_PAYROLL_RUNS = gql`
       }
       items {
         id
-        itemId
+        internalId
         status
         netAmount
         recipientAccount {
@@ -124,7 +124,7 @@ export const GET_PENDING_PAYROLL_ITEMS = gql`
   query GetPendingPayrollItems {
     pendingPayrollItems {
       id
-      itemId
+      internalId
       netAmount
       grossAmount
       feeAmount
@@ -513,7 +513,33 @@ export const GET_INVOICE = gql`
         expiresAt
         createdAt
         qrCodeData
+        qrCodeData
         isExpired
+        paymentTransactions {
+          id
+          internalId
+          payerUser {
+            id
+            username
+            firstName
+            lastName
+          }
+          payerBusiness {
+            id
+            name
+            category
+          }
+          payerType
+          payerDisplayName
+          merchantType
+          merchantDisplayName
+          amount
+          tokenType
+          description
+          status
+          transactionHash
+          createdAt
+        }
       }
       success
       errors
@@ -532,7 +558,7 @@ export const PAY_INVOICE = gql`
       }
       paymentTransaction {
         id
-        paymentTransactionId
+        internalId
         amount
         tokenType
         description
@@ -640,7 +666,7 @@ export const GET_PAYMENT_TRANSACTIONS_WITH_FRIEND = gql`
   query GetPaymentTransactionsWithFriend($friendUserId: ID!, $limit: Int) {
     paymentTransactionsWithFriend(friendUserId: $friendUserId, limit: $limit) {
       id
-      paymentTransactionId
+      internalId
       payerUser {
         id
         username
@@ -755,7 +781,7 @@ export const GET_INVOICES = gql`
       }
       paymentTransactions {
         id
-        paymentTransactionId
+        internalId
         payerUser {
           id
           username
@@ -790,6 +816,15 @@ export const GET_INVOICES = gql`
             address
           }
         }
+        payerBusiness {
+          id
+          name
+          category
+        }
+        payerType
+        payerDisplayName
+        merchantType
+        merchantDisplayName
         payerAddress
         merchantAddress
         amount
@@ -922,6 +957,7 @@ export const GET_MY_P2P_TRADES = gql`
     myP2pTrades(offset: $offset, limit: $limit) {
       trades {
       id
+      internalId
       offer {
         id
         exchangeType
@@ -1087,6 +1123,7 @@ export const GET_P2P_TRADE = gql`
   query GetP2PTrade($id: ID!) {
     p2pTrade(id: $id) {
       id
+      internalId
       offer {
         id
         exchangeType
@@ -2088,9 +2125,8 @@ export const GET_UNIFIED_TRANSACTIONS = gql`
       
       description
       invoiceId
-      paymentTransactionId
-      # Payroll Item ID for QR Verification
-      itemId
+      # Unified Internal ID (32-char UUID) for QR Verification
+      internalId
       
       # Invitation fields
       isInvitation
@@ -2146,7 +2182,7 @@ export const GET_NOTIFICATIONS = gql`
           # Minimal related payment data for richer fallback display
           relatedPaymentTransaction {
             id
-            paymentTransactionId
+            internalId
             amount
             tokenType
             status
@@ -2246,6 +2282,58 @@ export const GET_SEND_TRANSACTION_BY_ID = gql`
       transactionHash
       createdAt
       invitationExpiresAt
+      internalId
+    }
+  }
+`;
+
+
+export const GET_PAYMENT_TRANSACTION_BY_ID = gql`
+  query GetPaymentTransactionById($id: ID!) {
+    paymentTransaction(id: $id) {
+      id
+      internalId
+      payerUser {
+        id
+        username
+        firstName
+        lastName
+      }
+      merchantAccountUser {
+        id
+        username
+        firstName
+        lastName
+      }
+      payerBusiness {
+        id
+        name
+        category
+      }
+      merchantBusiness {
+        id
+        name
+        category
+      }
+      payerType
+      merchantType
+      payerDisplayName
+      merchantDisplayName
+      payerPhone
+      payerAddress
+      merchantAddress
+      amount
+      tokenType
+      description
+      status
+      transactionHash
+      createdAt
+      updatedAt
+      invoice {
+        id
+        invoiceId
+        description
+      }
     }
   }
 `;
@@ -2307,7 +2395,7 @@ export const GET_CURRENT_ACCOUNT_TRANSACTIONS = gql`
       
       description
       invoiceId
-      paymentTransactionId
+      internalId
       
       # Invitation fields
       isInvitation
@@ -2385,7 +2473,7 @@ export const GET_UNIFIED_TRANSACTIONS_WITH_FRIEND = gql`
       
       description
       invoiceId
-      paymentTransactionId
+      internalId
       
       # Invitation fields
       isInvitation
@@ -2405,6 +2493,8 @@ export const GET_UNIFIED_TRANSACTIONS_WITH_FRIEND = gql`
     }
   }
 `;
+
+
 
 // User Query by ID
 export const GET_USER_BY_ID = gql`
@@ -2743,6 +2833,7 @@ export const GET_MY_CONFIO_TRANSACTIONS = gql`
   query GetMyConfioTransactions($limit: Int, $offset: Int) {
     myConfioTransactions(limit: $limit, offset: $offset) {
       id
+      internalId
       transactionType
       amount
       balanceAfter
@@ -3123,6 +3214,17 @@ export const INVITE_RECEIPT_FOR_PHONE = gql`
       amount
       timestamp
       invitationId
+    }
+  }
+`;
+
+export const ALL_PENDING_INVITES_FOR_PHONE = gql`
+  query AllPendingInvitesForPhone($phone: String!, $phoneCountry: String) {
+    allPendingInvitesForPhone(phone: $phone, phoneCountry: $phoneCountry) {
+      invitationId
+      assetId
+      amount
+      timestamp
     }
   }
 `;

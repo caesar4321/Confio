@@ -25,8 +25,8 @@ class ConvertSessionConsumer(AsyncJsonWebsocketConsumer):
     """
     WebSocket for cUSD <> USDC conversion (prepare + submit, two-step).
     - prepare: {type:"prepare", direction:"usdc_to_cusd"|"cusd_to_usdc", amount:string}
-      -> {type:"prepare_ready", pack:{conversion_id, transactions, sponsor_transactions, group_id}}
-    - submit: {type:"submit", conversion_id, signed_transactions:[b64], sponsor_transactions:[json|string]}
+      -> {type:"prepare_ready", pack:{internal_id, transactions, sponsor_transactions, group_id}}
+    - submit: {type:"submit", internal_id, signed_transactions:[b64], sponsor_transactions:[json|string]}
       -> {type:"submit_ok", txid}
     """
 
@@ -70,7 +70,7 @@ class ConvertSessionConsumer(AsyncJsonWebsocketConsumer):
                 await self.send_json({
                     "type": "prepare_ready",
                     "pack": {
-                        "conversion_id": pack.get("conversion_id"),
+                        "internal_id": pack.get("internal_id"),
                         "transactions": pack.get("transactions"),
                         "sponsor_transactions": pack.get("sponsor_transactions"),
                         "group_id": pack.get("group_id"),
@@ -80,11 +80,11 @@ class ConvertSessionConsumer(AsyncJsonWebsocketConsumer):
                 await self.send_json({"type": "error", "message": str(e) or "prepare_exception"})
             return
         if t == "submit":
-            conversion_id = content.get("conversion_id")
+            internal_id = content.get("internal_id")
             signed_transactions = content.get("signed_transactions")
             sponsor_transactions = content.get("sponsor_transactions") or []
             try:
-                res = await self._submit(conversion_id=str(conversion_id), signed_transactions=signed_transactions, sponsor_transactions=sponsor_transactions)
+                res = await self._submit(internal_id=str(internal_id), signed_transactions=signed_transactions, sponsor_transactions=sponsor_transactions)
                 if not res.get("success"):
                     await self.send_json({"type": "error", "message": res.get("error", "submit_failed")})
                     return
@@ -139,7 +139,7 @@ class ConvertSessionConsumer(AsyncJsonWebsocketConsumer):
             }
 
         conv = getattr(res, 'conversion', None)
-        conv_id = getattr(conv, 'id', None) if conv else None
+        conv_id = getattr(conv, 'internal_id', None) if conv else None
         txs = getattr(res, 'transactions_to_sign', None)
         sponsors = getattr(res, 'sponsor_transactions', None)
 
@@ -166,14 +166,14 @@ class ConvertSessionConsumer(AsyncJsonWebsocketConsumer):
 
         return {
             "success": True,
-            "conversion_id": str(conv_id) if conv_id else None,
+            "internal_id": str(conv_id) if conv_id else None,
             "transactions": txs_norm,
             "sponsor_transactions": sponsors_norm,
             "group_id": getattr(res, 'group_id', None),
         }
 
     @database_sync_to_async
-    def _submit(self, conversion_id: str, signed_transactions, sponsor_transactions):
+    def _submit(self, internal_id: str, signed_transactions, sponsor_transactions):
         from conversion.models import Conversion
         from algosdk.v2client import algod
         import base64, json as _json, msgpack
@@ -182,7 +182,7 @@ class ConvertSessionConsumer(AsyncJsonWebsocketConsumer):
 
         # Load conversion
         try:
-            conv = Conversion.objects.get(id=conversion_id)
+            conv = Conversion.objects.get(internal_id=internal_id)
         except Conversion.DoesNotExist:
             return {"success": False, "error": "conversion_not_found"}
 
@@ -251,7 +251,7 @@ class ConvertSessionConsumer(AsyncJsonWebsocketConsumer):
                 "amount": getattr(txn, "amt", getattr(txn, "asset_amount", None)),
                 "app_id": getattr(txn, "index", None),
             })
-        logger.info("Conversion %s group composition: %s", conversion_id, debug_rows)
+        logger.info("Conversion %s group composition: %s", internal_id, debug_rows)
 
         txid = algod_client.send_transactions(ordered)
         ref_txid = ordered[-1].get_txid()

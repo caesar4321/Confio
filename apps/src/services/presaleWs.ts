@@ -3,7 +3,9 @@
 import { Platform } from 'react-native';
 
 type PreparePurchasePack = {
-  purchase_id?: string;
+  internal_id?: string;
+  purchase_id?: string; // Legacy, for backward compatibility
+  purchaseId?: string;  // Legacy camelCase variant
   transactions?: any[]; // objects: {index,type,transaction,signed,needs_signature}
   sponsor_transactions?: any[]; // same objects or JSON strings
   user_signing_indexes?: number[];
@@ -76,14 +78,14 @@ export class PresaleWsSession {
     });
   }
 
-  async submitPurchase(purchaseId: string, signedUserTxn: string, sponsorTransactions: (string | { txn: string; signed?: string; index: number })[], timeout = 20000): Promise<SubmitResult> {
+  async submitPurchase(internalId: string, signedUserTxn: string, sponsorTransactions: (string | { txn: string; signed?: string; index: number })[], timeout = 20000): Promise<SubmitResult> {
     await this.open(); if (!this.ws) throw new Error('not_open');
     return new Promise((resolve, reject) => {
       this.resolvers['submit'] = resolve as any; this.rejectors['submit'] = reject as any;
       const t = setTimeout(() => { if (this.rejectors['submit']) { this.rejectors['submit'](new Error('submit_timeout')); delete this.rejectors['submit']; delete this.resolvers['submit']; } }, timeout);
       try {
         const sponsors = (sponsorTransactions || []).map((e: any) => (typeof e === 'string' ? e : JSON.stringify(e)));
-        this.ws!.send(JSON.stringify({ type: 'submit_request', purchase_id: purchaseId, signed_transactions: [{ index: 1, transaction: signedUserTxn }], sponsor_transactions: sponsors }));
+        this.ws!.send(JSON.stringify({ type: 'submit_request', internal_id: internalId, signed_transactions: [{ index: 1, transaction: signedUserTxn }], sponsor_transactions: sponsors }));
       } catch (e) { clearTimeout(t); reject(e); }
     });
   }

@@ -6,14 +6,14 @@ type PrepareArgs = {
 };
 
 type PreparePack = {
-  conversion_id?: string;
+  internal_id?: string;
   transactions?: string[]; // base64 unsigned user txns
   sponsor_transactions?: string[]; // JSON strings with {txn,signed,index}
   group_id?: string;
 };
 
 type SubmitArgs = {
-  conversionId: string;
+  internalId: string;
   signedUserTransactions: string[]; // base64 signed user txns
   sponsorTransactions: (string | { txn: string; signed?: string; index: number })[];
 };
@@ -82,7 +82,7 @@ export class ConvertWsSession {
               console.log('[convertWs] server error', msg?.message);
               this.rejectAll(new Error(msg.message || 'ws_error'));
             }
-          } catch {}
+          } catch { }
         };
       } catch (e) {
         console.log('[convertWs] open failed', e);
@@ -138,12 +138,12 @@ export class ConvertWsSession {
         }
       }, timeoutMs);
       try {
-        console.log('[convertWs] -> submit', args.conversionId);
+        console.log('[convertWs] -> submit', args.internalId);
         // Normalize sponsorTransactions to strings
         const sponsors = (args.sponsorTransactions || []).map((e: any) => (typeof e === 'string' ? e : JSON.stringify(e)));
         this.ws!.send(JSON.stringify({
           type: 'submit',
-          conversion_id: args.conversionId,
+          internal_id: args.internalId,
           signed_transactions: args.signedUserTransactions,
           sponsor_transactions: sponsors,
         }));

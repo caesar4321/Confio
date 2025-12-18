@@ -116,7 +116,8 @@ const ChargeScreen = () => {
           (navigation as any).navigate('BusinessPaymentSuccess', {
             paymentData: {
               id: currentInvoice.id,
-              paymentTransactionId: currentInvoice.paymentTransactions?.[0]?.paymentTransactionId || currentInvoice.invoiceId,
+              paymentTransactionId: currentInvoice.paymentTransactions?.[0]?.internalId || currentInvoice.invoiceId,
+              internalId: currentInvoice.paymentTransactions?.[0]?.internalId || currentInvoice.invoiceId,
               amount: currentInvoice.amount,
               tokenType: currentInvoice.tokenType,
               description: currentInvoice.description,
@@ -127,6 +128,8 @@ const ChargeScreen = () => {
                 lastName: undefined
               },
               payerAccount: currentInvoice.paymentTransactions?.[0]?.payerAccount,
+              payerBusiness: currentInvoice.paymentTransactions?.[0]?.payerBusiness,
+              payerDisplayName: currentInvoice.paymentTransactions?.[0]?.payerDisplayName,
               payerAddress: currentInvoice.paymentTransactions?.[0]?.payerAddress || '0x...',
               merchantUser: {
                 id: activeAccount?.id || '',

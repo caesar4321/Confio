@@ -17,6 +17,7 @@ class SendTransactionType(DjangoObjectType):
         model = SendTransaction
         fields = (
             'id',
+            'internal_id',
             'sender_user',
             'recipient_user',
             'amount',
@@ -103,15 +104,32 @@ class Query(graphene.ObjectType):
 
     @login_required
     def resolve_send_transaction(self, info, id):
-        """Get a specific send transaction by ID"""
+        """Get a specific send transaction by ID (pk or internal_id)"""
         user = info.context.user
         
+        # Check if id looks like a UUID
+        is_uuid = len(str(id)) >= 32
+        
+        # Build query filter
+        if is_uuid:
+            query = Q(internal_id=id)
+            # Try to handle case where id is passed as string but is actually PK? 
+            # Unlikely for >= 32 chars.
+        else:
+            # Assume it's a primary key
+            query = Q(id=id)
+
+        # Permission filter: User must be sender or recipient
+        permission_query = (
+            Q(sender_user=user) | 
+            Q(recipient_user=user)
+        )
+
         try:
             return SendTransaction.objects.get(
-                id=id,
-                sender_user=user
+                query & permission_query
             )
-        except SendTransaction.DoesNotExist:
+        except (SendTransaction.DoesNotExist, ValueError):
             return None
 
     @login_required

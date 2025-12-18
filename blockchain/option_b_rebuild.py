@@ -1,7 +1,7 @@
 # Clean Option B implementation snippet
 # This will be integrated into payment_mutations.py
 
-def rebuild_sponsor_transactions_option_b(signed_transactions, payment_id, settings, logger):
+def rebuild_sponsor_transactions_option_b(signed_transactions, internal_id, settings, logger):
     """
     Option B: Rebuild sponsor transactions deterministically from user-signed AXFERs.
     
@@ -108,7 +108,7 @@ def rebuild_sponsor_transactions_option_b(signed_transactions, payment_id, setti
             name=method_name,
             args=[
                 Argument(arg_type="address", name="recipient"),
-                Argument(arg_type="string", name="payment_id")
+                Argument(arg_type="string", name="internal_id")
             ],
             returns=Returns(arg_type="void")
         )
@@ -117,8 +117,8 @@ def rebuild_sponsor_transactions_option_b(signed_transactions, payment_id, setti
         string_type = ABIType.from_string("string")
         recipient_arg = encoding.decode_address(merchant_address)
         
-        # Use empty string for payment_id in deterministic rebuild (matches creation when no receipt)
-        payment_id_arg = string_type.encode("")
+        # Use empty string for internal_id in deterministic rebuild (matches creation when no receipt)
+        internal_id_arg = string_type.encode("")
         
         # Build sponsor app call (index 3)
         app_call = transaction.ApplicationCallTxn(
@@ -129,7 +129,7 @@ def rebuild_sponsor_transactions_option_b(signed_transactions, payment_id, setti
             app_args=[
                 method.get_selector(),
                 recipient_arg,
-                payment_id_arg
+                internal_id_arg
             ],
             accounts=[payer_address, merchant_address],  # Order matters!
             foreign_assets=[asset_id]

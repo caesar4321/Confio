@@ -1,11 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  TouchableOpacity, 
-  TextInput, 
-  ScrollView, 
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  TextInput,
+  ScrollView,
   Platform,
   Animated,
   Dimensions,
@@ -343,26 +343,27 @@ interface ActiveTrade {
   countryCode?: string;
   currencyCode?: string;
   hasRating?: boolean;
+  internalId?: string;
 }
 
 
 export const ExchangeScreen = () => {
   // Use centralized country selection hook
   const { selectedCountry, showCountryModal, selectCountry, openCountryModal, closeCountryModal } = useCountrySelection();
-  
+
   // Use currency system based on selected country
   const { currency, formatAmount, exchangeRate } = useCurrency();
-  
+
   // Get real market exchange rate for selected country
   const { rate: marketRate, loading: marketRateLoading } = useSelectedCountryRate();
-  
+
   // Use number formatting based on user's locale
   const { formatNumber, formatCurrency } = useNumberFormat();
-  
+
   // Get current account context
   const { activeAccount } = useAccount();
   const { profileData } = useAuth();
-  
+
   // Debug active account
   console.log('[ExchangeScreen] Active account:', {
     activeAccountId: activeAccount?.id,
@@ -371,7 +372,7 @@ export const ExchangeScreen = () => {
     isActiveAccountNull: activeAccount === null,
     isActiveAccountUndefined: activeAccount === undefined
   });
-  
+
   // Get currency information for selected country (from context, same as exchange rate hook)
   const { selectedCountry: contextSelectedCountry, userCountry } = useCountry();
   const currencyCode = getCurrencyForCountry(contextSelectedCountry);
@@ -425,7 +426,7 @@ export const ExchangeScreen = () => {
     offset: tradesOffset,
     limit: TRADES_LIMIT
   };
-  
+
   console.log('[ExchangeScreen] Trades query variables:', {
     activeAccountType: activeAccount?.type,
     activeAccountIndex: activeAccount?.index,
@@ -433,7 +434,7 @@ export const ExchangeScreen = () => {
     limit: tradesQueryVariables.limit,
     willSkipQuery: !activeAccount || !activeAccount.id
   });
-  
+
   const { data: myTradesData, loading: tradesLoading, error: tradesError, refetch: refetchTrades, fetchMore } = useQuery(GET_MY_P2P_TRADES, {
     variables: tradesQueryVariables,
     fetchPolicy: 'network-only', // Always fetch fresh data from server
@@ -442,7 +443,7 @@ export const ExchangeScreen = () => {
     errorPolicy: 'all', // Continue to show data even if there's an error
     // Removed pollInterval - now using focus-based refresh and manual refresh instead
   });
-  
+
   // Debug trades query
   useEffect(() => {
     console.log('[ExchangeScreen] Trades query debug:', {
@@ -511,11 +512,11 @@ export const ExchangeScreen = () => {
 
   // Get active trade count from server
   const activeTradeCount = myTradesData?.myP2pTrades?.activeCount || 0;
-  
+
   // Transform real trades data into UI format
   const activeTrades: ActiveTrade[] = React.useMemo(() => {
     if (!myTradesData?.myP2pTrades?.trades) return [];
-    
+
     console.log('[ExchangeScreen] Raw trades data:', {
       tradesCount: myTradesData.myP2pTrades.trades.length,
       totalCount: myTradesData.myP2pTrades.totalCount,
@@ -538,7 +539,7 @@ export const ExchangeScreen = () => {
         createdAt: trade.createdAt
       }))
     });
-    
+
     // Special debug for trade 14
     const trade14 = myTradesData.myP2pTrades.trades.find((t: any) => t.id === '14');
     if (trade14) {
@@ -550,217 +551,217 @@ export const ExchangeScreen = () => {
         sellerBusiness: trade14.sellerBusiness?.id
       });
     }
-    
+
     // Trades are already filtered and sorted on the server
     return myTradesData.myP2pTrades.trades.map((trade: any) => {
-        // NEW: Use the computed helper fields from GraphQL for cleaner logic
-        const buyerDisplayName = trade.buyerDisplayName || 'Unknown Buyer';
-        const sellerDisplayName = trade.sellerDisplayName || 'Unknown Seller';
-        const buyerType = trade.buyerType || 'user';
-        const sellerType = trade.sellerType || 'user';
-        
-        // Determine if current account is buyer or seller
-        // Since we're filtering by account context, we know this trade involves the current account
-        let tradeType, otherPartyName;
-        
-        console.log('[ExchangeScreen] Analyzing trade:', {
-          tradeId: trade.id,
-          buyerUser: trade.buyerUser?.id,
-          sellerUser: trade.sellerUser?.id,
-          buyerBusiness: trade.buyerBusiness?.id,
-          sellerBusiness: trade.sellerBusiness?.id,
-          buyerDisplayName,
-          sellerDisplayName,
-          currentAccountType: activeAccount?.type,
-          currentUserId: profileData?.userProfile?.id,
-          currentBusinessId: activeAccount?.business?.id,
-          paymentMethod: {
-            name: trade.paymentMethod?.name,
-            displayName: trade.paymentMethod?.displayName,
-            isActive: trade.paymentMethod?.isActive
-          }
-        });
-        
-        if (activeAccount?.type === 'business') {
-          // Current account is business
-          const currentBusinessId = activeAccount.business?.id;
-          const isBuyer = String(trade.buyerBusiness?.id || '') === String(currentBusinessId || '');
-          
-          tradeType = isBuyer ? 'buy' : 'sell';
-          otherPartyName = isBuyer ? sellerDisplayName : buyerDisplayName;
-        } else {
-          // Current account is personal - use the user ID from profile, not account ID
-          const currentUserId = profileData?.userProfile?.id;
-          const isBuyer = String(trade.buyerUser?.id || '') === String(currentUserId || '');
-          
-          tradeType = isBuyer ? 'buy' : 'sell';
-          otherPartyName = isBuyer ? sellerDisplayName : buyerDisplayName;
-        }
-        
-        // Calculate time remaining from server expiresAt without per-item timers
-        const timeRemaining = (() => {
-          const exp = trade.expiresAt ? new Date(trade.expiresAt).getTime() : 0;
-          if (!exp) return 0;
-          const now = Date.now();
-          return Math.max(0, Math.floor((exp - now) / 1000));
-        })();
-        
-        // Map status to step
-        const getStepFromStatus = (status: string, hasRating?: boolean) => {
-          // Handle disputed trades
-          if (status === 'DISPUTED') {
-            return 0; // Special case for disputed trades
-          }
-          
-          // If trade is completed and rated, show as completed (step 5)
-          if (status === 'COMPLETED' && hasRating) {
-            return 5; // Completed and rated
-          }
-          
-          // If trade is completed but not rated, show rating step
-          if (status === 'COMPLETED' && !hasRating) {
-            return 5; // Rating step
-          }
-          
-          // For crypto released or payment confirmed without rating, show rating step
-          if ((status === 'CRYPTO_RELEASED' || status === 'PAYMENT_CONFIRMED') && !hasRating) {
-            return 5; // Rating step
-          }
-          
-          switch (status) {
-            case 'PENDING': return 1;
-            case 'PAYMENT_PENDING': return 2;
-            case 'PAYMENT_SENT': return 3;
-            case 'PAYMENT_CONFIRMED': return 4; // Funds being released
-            case 'CRYPTO_RELEASED': return hasRating ? 5 : 4; // Show step 4 only if not rated yet
-            case 'CANCELLED': return 0; // Special case for cancelled trades
-            case 'EXPIRED': return 0; // Special case for expired trades
-            default: return 1;
-          }
-        };
+      // NEW: Use the computed helper fields from GraphQL for cleaner logic
+      const buyerDisplayName = trade.buyerDisplayName || 'Unknown Buyer';
+      const sellerDisplayName = trade.sellerDisplayName || 'Unknown Seller';
+      const buyerType = trade.buyerType || 'user';
+      const sellerType = trade.sellerType || 'user';
 
-        // Get user stats for the other party based on trade role
-        // If I'm the buyer, I want to see seller's stats, and vice versa
-        let otherPartyStats;
-        if (activeAccount?.type === 'business') {
-          const currentBusinessId = activeAccount.business?.id;
-          const isBuyer = String(trade.buyerBusiness?.id || '') === String(currentBusinessId || '');
-          otherPartyStats = isBuyer ? trade.sellerStats : trade.buyerStats;
-        } else {
-          const currentUserId = profileData?.userProfile?.id;
-          const isBuyer = String(trade.buyerUser?.id || '') === String(currentUserId || '');
-          otherPartyStats = isBuyer ? trade.sellerStats : trade.buyerStats;
-        }
-        
-        // Fallback to offer stats if buyer/seller stats not available
-        otherPartyStats = otherPartyStats || trade.offer?.userStats;
-        
-        // Calculate if user is "online" (active within last 6 hours)
-        const isOnline = otherPartyStats?.lastSeenOnline ? (() => {
-          const lastSeen = new Date(otherPartyStats.lastSeenOnline);
-          const now = new Date();
-          const sixHoursAgo = new Date(now.getTime() - 6 * 60 * 60 * 1000);
-          return lastSeen > sixHoursAgo;
-        })() : false;
-        
-        // Format last seen time
-        const formatLastSeen = (lastSeenOnline: string | null): string => {
-          if (!lastSeenOnline) return "Desconocido";
-          
-          const lastSeen = new Date(lastSeenOnline);
-          const now = new Date();
-          const diffMs = now.getTime() - lastSeen.getTime();
-          const diffHours = diffMs / (1000 * 60 * 60);
-          
-          if (diffHours < 1) return "Activo ahora";
-          if (diffHours < 24) return `Hace ${Math.floor(diffHours)} horas`;
-          if (diffHours < 168) return `Hace ${Math.floor(diffHours / 24)} días`;
-          return "Hace mucho tiempo";
-        };
-        
-        // Format response time from minutes
-        const formatResponseTime = (avgResponseTimeMinutes: number | null): string => {
-          if (!avgResponseTimeMinutes) return "N/A";
-          if (avgResponseTimeMinutes < 60) return `${Math.round(avgResponseTimeMinutes)} min`;
-          return `${Math.round(avgResponseTimeMinutes / 60)} horas`;
-        };
+      // Determine if current account is buyer or seller
+      // Since we're filtering by account context, we know this trade involves the current account
+      let tradeType, otherPartyName;
 
-        // Determine the other party's user ID and business ID
-        let otherPartyUserId, otherPartyBusinessId;
-        const isBusinessOffer = otherPartyName.includes('de '); // Simple check for business names like "Salud de Julian"
-        
-        if (activeAccount?.type === 'business') {
-          const currentBusinessId = activeAccount.business?.id;
-          const isBuyer = String(trade.buyerBusiness?.id || '') === String(currentBusinessId || '');
-          otherPartyUserId = isBuyer ? trade.sellerUser?.id : trade.buyerUser?.id;
-          otherPartyBusinessId = isBuyer ? trade.sellerBusiness?.id : trade.buyerBusiness?.id;
-        } else {
-          const currentUserId = profileData?.userProfile?.id;
-          const isBuyer = String(trade.buyerUser?.id || '') === String(currentUserId || '');
-          otherPartyUserId = isBuyer ? trade.sellerUser?.id : trade.buyerUser?.id;
-          otherPartyBusinessId = isBuyer ? trade.sellerBusiness?.id : trade.buyerBusiness?.id;
+      console.log('[ExchangeScreen] Analyzing trade:', {
+        tradeId: trade.id,
+        buyerUser: trade.buyerUser?.id,
+        sellerUser: trade.sellerUser?.id,
+        buyerBusiness: trade.buyerBusiness?.id,
+        sellerBusiness: trade.sellerBusiness?.id,
+        buyerDisplayName,
+        sellerDisplayName,
+        currentAccountType: activeAccount?.type,
+        currentUserId: profileData?.userProfile?.id,
+        currentBusinessId: activeAccount?.business?.id,
+        paymentMethod: {
+          name: trade.paymentMethod?.name,
+          displayName: trade.paymentMethod?.displayName,
+          isActive: trade.paymentMethod?.isActive
         }
-
-        // Debug the actual status
-        console.log(`[Trade ${trade.id}] Status: ${trade.status}, hasRating: ${trade.hasRating}`);
-        
-        const mappedTrade = {
-          id: trade.id,
-          trader: {
-            name: otherPartyName,
-            isOnline: isOnline,
-            verified: otherPartyStats?.isVerified || false,
-            lastSeen: formatLastSeen(otherPartyStats?.lastSeenOnline || null),
-            responseTime: formatResponseTime(otherPartyStats?.avgResponseTime || null),
-            completedTrades: otherPartyStats?.completedTrades || 0,
-            successRate: otherPartyStats?.successRate || 0,
-            avgRating: otherPartyStats?.avgRating || 0,
-            id: otherPartyBusinessId || otherPartyUserId || otherPartyStats?.id || `trader-${trade.id}`,
-            userId: otherPartyUserId,
-            businessId: otherPartyBusinessId,
-          },
-          amount: trade.cryptoAmount.toString(),
-          crypto: trade.offer?.tokenType === 'CUSD' ? 'cUSD' : (trade.offer?.tokenType || 'cUSD'),
-          totalBs: `${formatNumber(trade.fiatAmount)} ${trade.currencyCode || currency.code}`,
-          step: getStepFromStatus(trade.status, trade.hasRating),
-          totalSteps: 5, // Always 5 steps
-          timeRemaining,
-          status: trade.status, // Keep original case for proper comparison
-          paymentMethod: trade.paymentMethod?.isActive === false ? 
-            'Método inactivo' : 
-            (() => {
-              const method = trade.paymentMethod;
-              if (!method) return 'N/A';
-              const displayName = method.displayName || method.name || 'N/A';
-              const countryFlag = method.bank?.country?.flagEmoji || '';
-              return countryFlag ? `${displayName} ${countryFlag}` : displayName;
-            })(),
-          rate: trade.rateUsed.toString(),
-          tradeType,
-          countryCode: trade.countryCode,
-          currencyCode: trade.currencyCode,
-          hasRating: trade.hasRating || false,
-          createdAt: trade.createdAt,
-          completedAt: trade.completedAt, // Add completedAt for syncing dates
-        };
-        
-        // Debug logging for completed trades
-        if (trade.status === 'COMPLETED') {
-          console.log(`[ExchangeScreen] Completed trade ${trade.id}:`, {
-            cryptoAmount: trade.cryptoAmount,
-            fiatAmount: trade.fiatAmount,
-            status: trade.status,
-            hasRating: trade.hasRating,
-            step: mappedTrade.step,
-            totalSteps: mappedTrade.totalSteps,
-            shouldShowRatingUI: !trade.hasRating,
-            sellerBusiness: trade.sellerBusiness?.name,
-            buyerUser: trade.buyerUser?.username
-          });
-        }
-        
-        return mappedTrade;
       });
+
+      if (activeAccount?.type === 'business') {
+        // Current account is business
+        const currentBusinessId = activeAccount.business?.id;
+        const isBuyer = String(trade.buyerBusiness?.id || '') === String(currentBusinessId || '');
+
+        tradeType = isBuyer ? 'buy' : 'sell';
+        otherPartyName = isBuyer ? sellerDisplayName : buyerDisplayName;
+      } else {
+        // Current account is personal - use the user ID from profile, not account ID
+        const currentUserId = profileData?.userProfile?.id;
+        const isBuyer = String(trade.buyerUser?.id || '') === String(currentUserId || '');
+
+        tradeType = isBuyer ? 'buy' : 'sell';
+        otherPartyName = isBuyer ? sellerDisplayName : buyerDisplayName;
+      }
+
+      // Calculate time remaining from server expiresAt without per-item timers
+      const timeRemaining = (() => {
+        const exp = trade.expiresAt ? new Date(trade.expiresAt).getTime() : 0;
+        if (!exp) return 0;
+        const now = Date.now();
+        return Math.max(0, Math.floor((exp - now) / 1000));
+      })();
+
+      // Map status to step
+      const getStepFromStatus = (status: string, hasRating?: boolean) => {
+        // Handle disputed trades
+        if (status === 'DISPUTED') {
+          return 0; // Special case for disputed trades
+        }
+
+        // If trade is completed and rated, show as completed (step 5)
+        if (status === 'COMPLETED' && hasRating) {
+          return 5; // Completed and rated
+        }
+
+        // If trade is completed but not rated, show rating step
+        if (status === 'COMPLETED' && !hasRating) {
+          return 5; // Rating step
+        }
+
+        // For crypto released or payment confirmed without rating, show rating step
+        if ((status === 'CRYPTO_RELEASED' || status === 'PAYMENT_CONFIRMED') && !hasRating) {
+          return 5; // Rating step
+        }
+
+        switch (status) {
+          case 'PENDING': return 1;
+          case 'PAYMENT_PENDING': return 2;
+          case 'PAYMENT_SENT': return 3;
+          case 'PAYMENT_CONFIRMED': return 4; // Funds being released
+          case 'CRYPTO_RELEASED': return hasRating ? 5 : 4; // Show step 4 only if not rated yet
+          case 'CANCELLED': return 0; // Special case for cancelled trades
+          case 'EXPIRED': return 0; // Special case for expired trades
+          default: return 1;
+        }
+      };
+
+      // Get user stats for the other party based on trade role
+      // If I'm the buyer, I want to see seller's stats, and vice versa
+      let otherPartyStats;
+      if (activeAccount?.type === 'business') {
+        const currentBusinessId = activeAccount.business?.id;
+        const isBuyer = String(trade.buyerBusiness?.id || '') === String(currentBusinessId || '');
+        otherPartyStats = isBuyer ? trade.sellerStats : trade.buyerStats;
+      } else {
+        const currentUserId = profileData?.userProfile?.id;
+        const isBuyer = String(trade.buyerUser?.id || '') === String(currentUserId || '');
+        otherPartyStats = isBuyer ? trade.sellerStats : trade.buyerStats;
+      }
+
+      // Fallback to offer stats if buyer/seller stats not available
+      otherPartyStats = otherPartyStats || trade.offer?.userStats;
+
+      // Calculate if user is "online" (active within last 6 hours)
+      const isOnline = otherPartyStats?.lastSeenOnline ? (() => {
+        const lastSeen = new Date(otherPartyStats.lastSeenOnline);
+        const now = new Date();
+        const sixHoursAgo = new Date(now.getTime() - 6 * 60 * 60 * 1000);
+        return lastSeen > sixHoursAgo;
+      })() : false;
+
+      // Format last seen time
+      const formatLastSeen = (lastSeenOnline: string | null): string => {
+        if (!lastSeenOnline) return "Desconocido";
+
+        const lastSeen = new Date(lastSeenOnline);
+        const now = new Date();
+        const diffMs = now.getTime() - lastSeen.getTime();
+        const diffHours = diffMs / (1000 * 60 * 60);
+
+        if (diffHours < 1) return "Activo ahora";
+        if (diffHours < 24) return `Hace ${Math.floor(diffHours)} horas`;
+        if (diffHours < 168) return `Hace ${Math.floor(diffHours / 24)} días`;
+        return "Hace mucho tiempo";
+      };
+
+      // Format response time from minutes
+      const formatResponseTime = (avgResponseTimeMinutes: number | null): string => {
+        if (!avgResponseTimeMinutes) return "N/A";
+        if (avgResponseTimeMinutes < 60) return `${Math.round(avgResponseTimeMinutes)} min`;
+        return `${Math.round(avgResponseTimeMinutes / 60)} horas`;
+      };
+
+      // Determine the other party's user ID and business ID
+      let otherPartyUserId, otherPartyBusinessId;
+      const isBusinessOffer = otherPartyName.includes('de '); // Simple check for business names like "Salud de Julian"
+
+      if (activeAccount?.type === 'business') {
+        const currentBusinessId = activeAccount.business?.id;
+        const isBuyer = String(trade.buyerBusiness?.id || '') === String(currentBusinessId || '');
+        otherPartyUserId = isBuyer ? trade.sellerUser?.id : trade.buyerUser?.id;
+        otherPartyBusinessId = isBuyer ? trade.sellerBusiness?.id : trade.buyerBusiness?.id;
+      } else {
+        const currentUserId = profileData?.userProfile?.id;
+        const isBuyer = String(trade.buyerUser?.id || '') === String(currentUserId || '');
+        otherPartyUserId = isBuyer ? trade.sellerUser?.id : trade.buyerUser?.id;
+        otherPartyBusinessId = isBuyer ? trade.sellerBusiness?.id : trade.buyerBusiness?.id;
+      }
+
+      // Debug the actual status
+      console.log(`[Trade ${trade.id}] Status: ${trade.status}, hasRating: ${trade.hasRating}`);
+
+      const mappedTrade = {
+        id: trade.id,
+        trader: {
+          name: otherPartyName,
+          isOnline: isOnline,
+          verified: otherPartyStats?.isVerified || false,
+          lastSeen: formatLastSeen(otherPartyStats?.lastSeenOnline || null),
+          responseTime: formatResponseTime(otherPartyStats?.avgResponseTime || null),
+          completedTrades: otherPartyStats?.completedTrades || 0,
+          successRate: otherPartyStats?.successRate || 0,
+          avgRating: otherPartyStats?.avgRating || 0,
+          id: otherPartyBusinessId || otherPartyUserId || otherPartyStats?.id || `trader-${trade.id}`,
+          userId: otherPartyUserId,
+          businessId: otherPartyBusinessId,
+        },
+        amount: trade.cryptoAmount.toString(),
+        crypto: trade.offer?.tokenType === 'CUSD' ? 'cUSD' : (trade.offer?.tokenType || 'cUSD'),
+        totalBs: `${formatNumber(trade.fiatAmount)} ${trade.currencyCode || currency.code}`,
+        step: getStepFromStatus(trade.status, trade.hasRating),
+        totalSteps: 5, // Always 5 steps
+        timeRemaining,
+        status: trade.status, // Keep original case for proper comparison
+        paymentMethod: trade.paymentMethod?.isActive === false ?
+          'Método inactivo' :
+          (() => {
+            const method = trade.paymentMethod;
+            if (!method) return 'N/A';
+            const displayName = method.displayName || method.name || 'N/A';
+            const countryFlag = method.bank?.country?.flagEmoji || '';
+            return countryFlag ? `${displayName} ${countryFlag}` : displayName;
+          })(),
+        rate: trade.rateUsed.toString(),
+        tradeType,
+        countryCode: trade.countryCode,
+        currencyCode: trade.currencyCode,
+        hasRating: trade.hasRating || false,
+        createdAt: trade.createdAt,
+        completedAt: trade.completedAt, // Add completedAt for syncing dates
+      };
+
+      // Debug logging for completed trades
+      if (trade.status === 'COMPLETED') {
+        console.log(`[ExchangeScreen] Completed trade ${trade.id}:`, {
+          cryptoAmount: trade.cryptoAmount,
+          fiatAmount: trade.fiatAmount,
+          status: trade.status,
+          hasRating: trade.hasRating,
+          step: mappedTrade.step,
+          totalSteps: mappedTrade.totalSteps,
+          shouldShowRatingUI: !trade.hasRating,
+          sellerBusiness: trade.sellerBusiness?.name,
+          buyerUser: trade.buyerUser?.username
+        });
+      }
+
+      return mappedTrade;
+    });
   }, [myTradesData, formatAmount, activeAccount]);
 
   // Debug country changes - Apollo will automatically refetch when variables change
@@ -779,12 +780,12 @@ export const ExchangeScreen = () => {
     if (paymentMethodsLoading) {
       return ['Todos los métodos']; // Show default while loading
     }
-    
+
     const pmList = paymentMethodsData?.p2p_payment_methods || paymentMethodsData?.p2pPaymentMethods;
     if (!pmList) {
       return ['Todos los métodos']; // Default when no data
     }
-    
+
     const serverMethods = pmList.map((pm: any) => pm.displayName);
     return ['Todos los métodos', ...serverMethods];
   }, [paymentMethodsData, paymentMethodsLoading]); // Removed selectedCountry dependency
@@ -846,7 +847,7 @@ export const ExchangeScreen = () => {
   // Filter offers client-side by amount and advanced filters
   const filteredOffers = React.useMemo(() => {
     const offers = offersData?.p2pOffers || [];
-    
+
     // Debug logging
     console.log('[ExchangeScreen] Filtering offers:', {
       totalOffers: offers.length,
@@ -867,9 +868,9 @@ export const ExchangeScreen = () => {
         country: o.countryCode
       }))
     });
-    
+
     // Apply client-side filtering
-    
+
     return offers.filter((offer: any) => {
       // 1. Filter by amount within operation limits
       if (amount && amount.trim() !== '') {
@@ -877,20 +878,20 @@ export const ExchangeScreen = () => {
         if (!isNaN(searchAmount) && searchAmount > 0) {
           const minAmount = parseFloat(offer.minAmount?.toString().replace(/,/g, '') || '0');
           const maxAmount = parseFloat(offer.maxAmount?.toString().replace(/,/g, '') || '0');
-          
+
           // Check if search amount falls within the offer's "Límite por operación"
           if (searchAmount < minAmount || searchAmount > maxAmount) {
             return false;
           }
         }
       }
-      
+
       // 2. Filter by rate range (Tasa min/max)
       const hasMinRate = minRate && minRate.trim() !== '';
       const hasMaxRate = maxRate && maxRate.trim() !== '';
-      
+
       // Apply rate filtering if specified
-      
+
       // Only apply rate filtering if at least one rate filter is provided
       if (hasMinRate || hasMaxRate) {
         // Parse the offer rate
@@ -898,12 +899,12 @@ export const ExchangeScreen = () => {
         if (offer.rate !== undefined && offer.rate !== null) {
           offerRate = parseFloat(offer.rate.toString().replace(/,/g, ''));
         }
-        
+
         // Skip offers without valid rates when rate filters are active
         if (isNaN(offerRate) || offerRate <= 0) {
           return false;
         }
-        
+
         // Apply minimum rate filter (if provided)
         if (hasMinRate) {
           const minRateValue = parseFloat(minRate.replace(/,/g, ''));
@@ -911,7 +912,7 @@ export const ExchangeScreen = () => {
             return false;
           }
         }
-        
+
         // Apply maximum rate filter (if provided) 
         if (hasMaxRate) {
           const maxRateValue = parseFloat(maxRate.replace(/,/g, ''));
@@ -920,7 +921,7 @@ export const ExchangeScreen = () => {
           }
         }
       }
-      
+
       // 3. Filter by verification status (Verificados)
       if (filterVerified) {
         const isVerified = offer.userStats?.isVerified === true;
@@ -928,7 +929,7 @@ export const ExchangeScreen = () => {
           return false;
         }
       }
-      
+
       // 4. Filter by activity status (En línea -> "Activos hoy")
       if (filterOnline) {
         // Consider user "active" if they've been seen within the last 6 hours
@@ -936,16 +937,16 @@ export const ExchangeScreen = () => {
         if (!lastSeen) {
           return false;
         }
-        
+
         const lastSeenDate = new Date(lastSeen);
         const now = new Date();
         const sixHoursAgo = new Date(now.getTime() - 6 * 60 * 60 * 1000);
-        
+
         if (lastSeenDate < sixHoursAgo) {
           return false;
         }
       }
-      
+
       // 5. Filter by high volume (+100 ops)
       if (filterHighVolume) {
         const totalTrades = offer.userStats?.totalTrades || 0;
@@ -953,7 +954,7 @@ export const ExchangeScreen = () => {
           return false;
         }
       }
-      
+
       return true; // Offer passes all filters
     });
   }, [offersData?.p2pOffers, amount, minRate, maxRate, filterVerified, filterOnline, filterHighVolume]);
@@ -1012,12 +1013,12 @@ export const ExchangeScreen = () => {
   // Fixed header heights - don't change with filters
   const HEADER_HEIGHT_OFFERS = Platform.OS === 'ios' ? 384 : 404; // Adjusted for quick filters
   const HEADER_HEIGHT_OTHER = Platform.OS === 'ios' ? 140 : 160; // Adjusted for iOS
-  
+
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
   const [activeList, setActiveList] = useState<'offers' | 'trades' | 'myOffers'>('offers');
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const route = useRoute<RouteProp<MainStackParamList, 'Exchange'>>();
-  
+
   // Header height never changes with filters - keeps it stable
   const headerHeight = activeList === 'offers' ? HEADER_HEIGHT_OFFERS : HEADER_HEIGHT_OTHER;
 
@@ -1032,22 +1033,22 @@ export const ExchangeScreen = () => {
   useEffect(() => {
     if (route.params?.refreshData) {
       console.log('[ExchangeScreen] Refreshing data due to route params');
-      
+
       // Refetch offers data
       if (refetch) {
         refetch();
       }
-      
+
       // Refetch my offers data
       if (refetchMyOffers) {
         refetchMyOffers();
       }
-      
+
       // Refetch trades data
       if (refetchTrades) {
         refetchTrades();
       }
-      
+
       // Clear the refresh parameter to prevent repeated refreshes
       navigation.setParams({ refreshData: undefined });
     }
@@ -1122,20 +1123,20 @@ export const ExchangeScreen = () => {
   const handleScroll = (event: any) => {
     const currentScrollY = event.nativeEvent.contentOffset.y;
     const scrollDifference = currentScrollY - lastScrollY.current;
-    
+
     if (Math.abs(scrollDifference) > 10) {
       // Removed forceHeaderVisible updates to prevent re-renders
-      
+
       lastScrollY.current = currentScrollY;
     }
-    
+
     scrollY.setValue(currentScrollY);
-    
+
     // Check if we need to load more trades (infinite scroll)
     if (activeList === 'trades' && myTradesData?.myP2pTrades?.hasMore && !isLoadingMoreTrades) {
       const { contentOffset, layoutMeasurement, contentSize } = event.nativeEvent;
       const paddingToBottom = 100; // Start loading 100px from the bottom
-      
+
       if (contentOffset.y + layoutMeasurement.height >= contentSize.height - paddingToBottom) {
         loadMoreTrades();
       }
@@ -1145,11 +1146,11 @@ export const ExchangeScreen = () => {
   // Handle pull-to-refresh
   const handleRefresh = async () => {
     setRefreshing(true);
-    
+
     try {
       // Reset pagination when refreshing
       setTradesOffset(0);
-      
+
       // Refresh based on active list
       if (activeList === 'trades' && refetchTrades) {
         await refetchTrades();
@@ -1180,7 +1181,7 @@ export const ExchangeScreen = () => {
     }
 
     setIsLoadingMoreTrades(true);
-    
+
     try {
       const result = await fetchMore({
         variables: {
@@ -1189,7 +1190,7 @@ export const ExchangeScreen = () => {
         },
         updateQuery: (prev, { fetchMoreResult }) => {
           if (!fetchMoreResult) return prev;
-          
+
           return {
             myP2pTrades: {
               ...fetchMoreResult.myP2pTrades,
@@ -1201,7 +1202,7 @@ export const ExchangeScreen = () => {
           };
         }
       });
-      
+
       console.log('[ExchangeScreen] Loaded more trades:', {
         newCount: result.data.myP2pTrades.trades.length,
         hasMore: result.data.myP2pTrades.hasMore
@@ -1216,37 +1217,37 @@ export const ExchangeScreen = () => {
   // Reset scroll position when switching between tabs
   const resetScrollPosition = () => {
     // Force header to be fully visible immediately
-    
+
     // Complete reset of scroll system
     scrollY.stopAnimation(); // Stop any ongoing animations
     scrollY.setValue(0);
     scrollY.setOffset(0);
     scrollY.flattenOffset(); // Ensure animated value is properly reset
     lastScrollY.current = 0;
-    
+
     // Immediate scroll to top with no animation
     if (scrollViewRef.current) {
       scrollViewRef.current.scrollTo({ y: 0, animated: false });
     }
-    
+
     // Ensure complete reset with multiple checkpoints
     const performReset = () => {
       scrollY.setValue(0);
       scrollY.setOffset(0);
       lastScrollY.current = 0;
-      
+
       if (scrollViewRef.current) {
         scrollViewRef.current.scrollTo({ y: 0, animated: false });
       }
     };
-    
+
     // Immediate reset
     performReset();
-    
+
     // Additional resets to ensure completeness
     setTimeout(performReset, 50);
     setTimeout(performReset, 150);
-    
+
     // Removed timeout to prevent re-renders
   };
 
@@ -1268,16 +1269,16 @@ export const ExchangeScreen = () => {
   // Check if an offer belongs to the current user/account
   const checkIfOwnOffer = (offer: any): boolean => {
     if (!activeAccount) return false;
-    
+
     const isBusinessAccount = activeAccount.type === 'business';
-    const currentBusinessId = isBusinessAccount ? 
+    const currentBusinessId = isBusinessAccount ?
       (profileData?.businessProfile?.id || activeAccount.business?.id) : null;
     const currentUserId = profileData?.userProfile?.id;
-    
+
     // Check for old user field fallback
     const hasOldUserField = !!offer.user;
     const oldUserMatch = hasOldUserField && offer.user?.id === currentUserId;
-    
+
     console.log('[DEBUG] checkIfOwnOffer:', {
       // Current account info
       activeAccountType: activeAccount.type,
@@ -1298,7 +1299,7 @@ export const ExchangeScreen = () => {
       businessMatch: isBusinessAccount && offer.offerBusiness?.id === currentBusinessId,
       userMatch: !isBusinessAccount && offer.offerUser?.id === currentUserId,
     });
-    
+
     if (isBusinessAccount) {
       // Business account viewing - only own if offer is from same business
       return offer.offerBusiness?.id === currentBusinessId;
@@ -1308,14 +1309,14 @@ export const ExchangeScreen = () => {
       if (offer.offerBusiness) {
         return false; // Business offers are never "own" for personal accounts
       }
-      
+
       // IMPORTANT: Do not fall back to old user field for business offers
       // The old user field might contain the business owner's user ID
       if (hasOldUserField && !offer.offerUser && !offer.offerBusiness) {
         // Only use old field if new fields are missing (legacy data)
         return offer.user?.id === currentUserId;
       }
-      
+
       return offer.offerUser?.id === currentUserId;
     }
   };
@@ -1327,7 +1328,7 @@ export const ExchangeScreen = () => {
 
     // Check if user has any payment method that matches the offer's payment methods
     const offerPaymentMethods = offer.paymentMethods || [];
-    
+
     return offerPaymentMethods.some((offerMethod: any) => {
       return userBankAccounts.some((userAccount: any) => {
         // First check if user has the new paymentMethod field
@@ -1340,7 +1341,7 @@ export const ExchangeScreen = () => {
             if (offerMethod.requiresAccountNumber && !userAccount.accountNumber) return false;
             return true;
           }
-        } 
+        }
         // Legacy check for old bank-only structure
         else if (offerMethod.providerType === 'BANK' && userAccount.bank) {
           return userAccount.bank.id === offerMethod.bank?.id;
@@ -1356,10 +1357,10 @@ export const ExchangeScreen = () => {
       offerId: offer.id,
       offerData: offer
     });
-    
+
     // Check if user is trying to trade with themselves
     const isOwnOffer = checkIfOwnOffer(offer);
-    
+
     console.log('[DEBUG] handleSelectOffer AFTER CHECK:', {
       action,
       offerId: offer.id,
@@ -1369,7 +1370,7 @@ export const ExchangeScreen = () => {
       willBlockTrade: action === 'trade' && isOwnOffer,
       aboutToShowAlert: action === 'trade' && isOwnOffer
     });
-    
+
     if (action === 'trade' && isOwnOffer) {
       console.log('[DEBUG] SHOWING SELF-TRADE ALERT for offer:', offer.id);
       Alert.alert(
@@ -1387,16 +1388,16 @@ export const ExchangeScreen = () => {
         'Para convertir con esta oferta, primero debes configurar un método de pago compatible.',
         [
           { text: 'Cancelar', style: 'cancel' },
-          { 
-            text: 'Configurar', 
+          {
+            text: 'Configurar',
             onPress: () => navigation.navigate('BankInfo'),
-            style: 'default' 
+            style: 'default'
           }
         ]
       );
       return;
     }
-    
+
     // Map real GraphQL offer data to navigation format
     // Determine the creator name based on offer type
     let userName = 'Usuario';
@@ -1415,21 +1416,21 @@ export const ExchangeScreen = () => {
     const successRate = parseFloat(userStats.successRate || '0');
     // Use server-provided stats flag for verification (reflects real status)
     const isVerified = userStats.isVerified === true;
-    
+
     // Calculate activity status for lastSeen
     const getActivityText = () => {
       const lastSeen = userStats.lastSeenOnline;
       if (!lastSeen) return 'Sin actividad reciente';
-      
+
       const lastSeenDate = new Date(lastSeen);
       const hoursAgo = (Date.now() - lastSeenDate.getTime()) / (1000 * 60 * 60);
-      
+
       if (hoursAgo < 2) return 'Activo recientemente';
       if (hoursAgo < 6) return 'Activo hoy';
       if (hoursAgo < 24) return 'Visto hoy';
       return 'Inactivo';
     };
-    
+
     // Calculate response time text
     const getResponseTimeText = () => {
       const avgResponseMinutes = userStats.avgResponseTime;
@@ -1447,7 +1448,7 @@ export const ExchangeScreen = () => {
       name: userName,
       rate: offer.rate.toString(),
       limit: `${offer.minAmount} - ${offer.maxAmount}`,
-              // available removed
+      // available removed
       paymentMethods: offer.paymentMethods || [],
       responseTime: getResponseTimeText(),
       completedTrades: completedTrades,
@@ -1473,7 +1474,7 @@ export const ExchangeScreen = () => {
           rawUserStats: JSON.stringify(userStats)
         }
       });
-      
+
       const traderData = {
         id: offer.offerUser?.id || offer.offerBusiness?.id || offer.user?.id || offer.id,
         name: userName,
@@ -1487,16 +1488,16 @@ export const ExchangeScreen = () => {
         userId: offer.offerUser?.id || offer.user?.id,
         businessId: offer.offerBusiness?.id,
       };
-      
-      navigation.navigate('TraderProfile', { 
+
+      navigation.navigate('TraderProfile', {
         trader: traderData,
         crypto: selectedCrypto,
         offer: { ...offer, isFavorite: offer.isFavorite }
       });
     } else if (action === 'trade') {
       // Navigate to TradeConfirm screen
-      navigation.navigate('TradeConfirm', { 
-        offer: mappedOffer, 
+      navigation.navigate('TradeConfirm', {
+        offer: mappedOffer,
         crypto: selectedCrypto,
         tradeType: activeTab as 'buy' | 'sell'
       });
@@ -1509,19 +1510,19 @@ export const ExchangeScreen = () => {
     const [isExpanded, setIsExpanded] = useState(false);
     const [isFavoriting, setIsFavoriting] = useState(false);
     const [localIsFavorite, setLocalIsFavorite] = useState(offer.isFavorite);
-    
+
     // Update local state when offer prop changes
     React.useEffect(() => {
       setLocalIsFavorite(offer.isFavorite);
     }, [offer.isFavorite]);
-    
+
     // Get user from auth context
     const { profileData } = useAuth();
     const user = profileData?.userProfile;
-    
+
     // Check if this is the user's own offer
     const isOwnOffer = checkIfOwnOffer(offer);
-    
+
     // Define mutation inline to avoid import issues
     const TOGGLE_FAVORITE_MUTATION = gql`
       mutation ToggleFavoriteTrader($traderUserId: ID, $traderBusinessId: ID, $note: String) {
@@ -1532,10 +1533,10 @@ export const ExchangeScreen = () => {
         }
       }
     `;
-    
+
     // Add mutation hook
     const [toggleFavorite] = useMutation(TOGGLE_FAVORITE_MUTATION);
-    
+
     // Debug logging for badge rendering
     console.log('[DEBUG] OfferCard render:', {
       offerId: offer.id,
@@ -1545,7 +1546,7 @@ export const ExchangeScreen = () => {
       hasUser: !!user,
       isFavorite: offer.isFavorite
     });
-    
+
     // Extract user info from the real offer structure
     // Determine the creator name based on offer type
     let userName = 'Usuario';
@@ -1572,23 +1573,23 @@ export const ExchangeScreen = () => {
     const isNewTrader = completedTrades < 5;
     const isHighRated = avgRating >= 4.5 && completedTrades >= 10;
     const isFastResponder = responseTime && responseTime <= 15;
-    
+
     // Calculate simple activity status instead of real-time online
     const getActivityStatus = () => {
       const lastSeen = userStats.lastSeenOnline;
       if (!lastSeen) return { text: 'Sin actividad reciente', isActive: false };
-      
+
       const lastSeenDate = new Date(lastSeen);
       const hoursAgo = (Date.now() - lastSeenDate.getTime()) / (1000 * 60 * 60);
-      
+
       if (hoursAgo < 2) return { text: 'Activo recientemente', isActive: true };
       if (hoursAgo < 6) return { text: 'Activo hoy', isActive: true };
       if (hoursAgo < 24) return { text: 'Visto hoy', isActive: false };
       return { text: 'Inactivo', isActive: false };
     };
-    
+
     const activityStatus = getActivityStatus();
-    
+
     // Handle toggle favorite
     const handleToggleFavorite = async () => {
       console.log('[handleToggleFavorite] Called with conditions:', {
@@ -1597,16 +1598,16 @@ export const ExchangeScreen = () => {
         isFavoriting,
         willReturn: isOwnOffer || !user || isFavoriting
       });
-      
+
       if (isOwnOffer || !user || isFavoriting) return;
-      
+
       try {
         setIsFavoriting(true);
-        
+
         // Optimistic update
         const newFavoriteStatus = !localIsFavorite;
         setLocalIsFavorite(newFavoriteStatus);
-        
+
         // Determine if we're favoriting a user or business
         // Only send one ID - prioritize business if it exists
         let mutationVariables = {};
@@ -1623,18 +1624,18 @@ export const ExchangeScreen = () => {
           setLocalIsFavorite(!newFavoriteStatus); // Revert on error
           return;
         }
-        
+
         console.log('[handleToggleFavorite] Sending mutation with:', {
           ...mutationVariables,
           offerId: offer.id
         });
-        
+
         const { data } = await toggleFavorite({
           variables: mutationVariables
         });
-        
+
         console.log('[handleToggleFavorite] Mutation response:', data);
-        
+
         if (data?.toggleFavoriteTrader?.success) {
           console.log('[handleToggleFavorite] Success! New isFavorite status:', data.toggleFavoriteTrader.isFavorite);
           // Update with server response
@@ -1655,7 +1656,7 @@ export const ExchangeScreen = () => {
         setIsFavoriting(false);
       }
     };
-    
+
     return (
       <View style={styles.offerCard}>
         {/* Own Offer Badge */}
@@ -1666,7 +1667,7 @@ export const ExchangeScreen = () => {
           </View>
         )}
         <View style={styles.offerHeader}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.offerUser}
             onPress={() => !isOwnOffer && handleSelectOffer(offer, 'profile')}
             activeOpacity={isOwnOffer ? 1 : 0.7}
@@ -1685,7 +1686,7 @@ export const ExchangeScreen = () => {
                   {isVerified && (
                     <Icon name="shield" size={16} color={colors.accent} />
                   )}
-                  <TouchableOpacity 
+                  <TouchableOpacity
                     style={styles.favoriteButton}
                     onPress={() => {
                       console.log('[Star Button] Pressed. Current isFavorite:', offer.isFavorite);
@@ -1693,10 +1694,10 @@ export const ExchangeScreen = () => {
                     }}
                     disabled={isFavoriting || isOwnOffer}
                   >
-                    <Icon 
-                      name="star" 
-                      size={18} 
-                      color={localIsFavorite ? '#FBBF24' : (isOwnOffer ? '#E5E7EB' : '#9CA3AF')} 
+                    <Icon
+                      name="star"
+                      size={18}
+                      color={localIsFavorite ? '#FBBF24' : (isOwnOffer ? '#E5E7EB' : '#9CA3AF')}
                     />
                   </TouchableOpacity>
                 </View>
@@ -1728,12 +1729,12 @@ export const ExchangeScreen = () => {
                 const offerRate = parseFloat(offer.rate);
                 const difference = ((offerRate - marketRate) / marketRate) * 100;
                 const isGoodDeal = activeTab === 'buy' ? difference < 0 : difference > 0;
-                
+
                 // Only show if difference is significant (> 0.5%)
                 if (Math.abs(difference) > 0.5) {
                   return (
                     <View style={[
-                      styles.rateComparison, 
+                      styles.rateComparison,
                       isGoodDeal ? styles.goodDeal : styles.badDeal
                     ]}>
                       <Text style={[
@@ -1754,11 +1755,11 @@ export const ExchangeScreen = () => {
                 {(() => {
                   // Use real avgResponseTime from userStats if available
                   const avgResponseMinutes = offer.userStats?.avgResponseTime || null;
-                  
+
                   if (avgResponseMinutes === null || avgResponseMinutes === undefined) {
                     return 'Sin datos';
                   }
-                  
+
                   // Convert to response categories based on actual data
                   if (avgResponseMinutes <= 15) {
                     return 'Responde rápido';
@@ -1775,124 +1776,124 @@ export const ExchangeScreen = () => {
           </View>
         </View>
 
-      <View style={styles.offerDetails}>
-        <View style={styles.limitsContainer}>
-          <View style={styles.limitBox}>
-            <Text style={styles.limitLabel}>Límites</Text>
-            <Text style={styles.limitValue}>{offer.minAmount} - {offer.maxAmount} {crypto}</Text>
+        <View style={styles.offerDetails}>
+          <View style={styles.limitsContainer}>
+            <View style={styles.limitBox}>
+              <Text style={styles.limitLabel}>Límites</Text>
+              <Text style={styles.limitValue}>{offer.minAmount} - {offer.maxAmount} {crypto}</Text>
+            </View>
+            {/* Removed Disponible: availability verified at escrow enable time */}
           </View>
-          {/* Removed Disponible: availability verified at escrow enable time */}
-        </View>
-        <TouchableOpacity 
-          style={styles.detailRow}
-          onPress={() => offer.paymentMethods?.length > 0 && setIsExpanded(!isExpanded)}
-          activeOpacity={offer.paymentMethods?.length > 0 ? 0.7 : 1}
-        >
-          <Text style={styles.detailLabel}>Métodos de pago</Text>
-          <View style={styles.paymentMethodsContainer}>
-            {!isExpanded ? (
-              <View style={styles.paymentMethodsCollapsed}>
-                <Text style={styles.detailValue}>
-                  {(() => {
-                    const methods = offer.paymentMethods || [];
-                    if (methods.length === 0) return 'N/A';
-                    
-                    const maxVisible = 2; // Show first 2 methods
-                    const visibleMethods = methods.slice(0, maxVisible);
-                    const remainingCount = methods.length - maxVisible;
-                    
-                    let text = visibleMethods.map((pm: any) => {
-                      const countryFlag = pm.bank?.country?.flagEmoji || '';
-                      return countryFlag ? `${pm.displayName} ${countryFlag}` : pm.displayName;
-                    }).join(', ');
-                    if (remainingCount > 0) {
-                      text += `, +${remainingCount} más`;
-                    }
-                    
-                    return text;
-                  })()}
-                </Text>
-                {offer.paymentMethods?.length > 2 && (
-                  <Icon name="chevron-down" size={16} color="#6B7280" style={{ marginLeft: 4 }} />
-                )}
-              </View>
-            ) : (
-              <View style={styles.paymentMethodsExpanded}>
-                <View style={styles.paymentMethodsList}>
-                  {offer.paymentMethods?.map((pm: any, index: number) => (
-                    <View key={pm.id || index} style={styles.paymentMethodItem}>
-                      <Icon 
-                        name={getPaymentMethodIcon(pm.icon, pm.providerType, pm.displayName || pm.name)} 
-                        size={14} 
-                        color="#6B7280" 
-                      />
-                      <Text style={styles.paymentMethodName}>
-                        {pm.displayName || pm.name}
-                        {pm.bank?.country?.flagEmoji ? ` ${pm.bank.country.flagEmoji}` : ''}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-                <Icon name="chevron-up" size={16} color="#6B7280" style={{ marginLeft: 4 }} />
-              </View>
-            )}
-          </View>
-        </TouchableOpacity>
-      </View>
+          <TouchableOpacity
+            style={styles.detailRow}
+            onPress={() => offer.paymentMethods?.length > 0 && setIsExpanded(!isExpanded)}
+            activeOpacity={offer.paymentMethods?.length > 0 ? 0.7 : 1}
+          >
+            <Text style={styles.detailLabel}>Métodos de pago</Text>
+            <View style={styles.paymentMethodsContainer}>
+              {!isExpanded ? (
+                <View style={styles.paymentMethodsCollapsed}>
+                  <Text style={styles.detailValue}>
+                    {(() => {
+                      const methods = offer.paymentMethods || [];
+                      if (methods.length === 0) return 'N/A';
 
-      <View style={styles.offerActions}>
-        {isOwnOffer ? (
-          // Show different actions for own offers
-          <>
-            <TouchableOpacity 
+                      const maxVisible = 2; // Show first 2 methods
+                      const visibleMethods = methods.slice(0, maxVisible);
+                      const remainingCount = methods.length - maxVisible;
+
+                      let text = visibleMethods.map((pm: any) => {
+                        const countryFlag = pm.bank?.country?.flagEmoji || '';
+                        return countryFlag ? `${pm.displayName} ${countryFlag}` : pm.displayName;
+                      }).join(', ');
+                      if (remainingCount > 0) {
+                        text += `, +${remainingCount} más`;
+                      }
+
+                      return text;
+                    })()}
+                  </Text>
+                  {offer.paymentMethods?.length > 2 && (
+                    <Icon name="chevron-down" size={16} color="#6B7280" style={{ marginLeft: 4 }} />
+                  )}
+                </View>
+              ) : (
+                <View style={styles.paymentMethodsExpanded}>
+                  <View style={styles.paymentMethodsList}>
+                    {offer.paymentMethods?.map((pm: any, index: number) => (
+                      <View key={pm.id || index} style={styles.paymentMethodItem}>
+                        <Icon
+                          name={getPaymentMethodIcon(pm.icon, pm.providerType, pm.displayName || pm.name)}
+                          size={14}
+                          color="#6B7280"
+                        />
+                        <Text style={styles.paymentMethodName}>
+                          {pm.displayName || pm.name}
+                          {pm.bank?.country?.flagEmoji ? ` ${pm.bank.country.flagEmoji}` : ''}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                  <Icon name="chevron-up" size={16} color="#6B7280" style={{ marginLeft: 4 }} />
+                </View>
+              )}
+            </View>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.offerActions}>
+          {isOwnOffer ? (
+            // Show different actions for own offers
+            <>
+              <TouchableOpacity
                 style={[styles.detailsButton, { opacity: 0.6 }]}
                 disabled={true}
-            >
-              <Text style={[styles.detailsButtonText, { color: '#6B7280' }]}>Tu Oferta</Text>
-            </TouchableOpacity>
-            <TouchableOpacity 
+              >
+                <Text style={[styles.detailsButtonText, { color: '#6B7280' }]}>Tu Oferta</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
                 style={[styles.buyButton, { backgroundColor: '#6B7280' }]}
                 disabled={true}
-            >
-              <Text style={styles.buyButtonText}>No Disponible</Text>
-            </TouchableOpacity>
-          </>
-        ) : (
-          // Show normal actions for other users' offers
-          <>
-            <TouchableOpacity 
+              >
+                <Text style={styles.buyButtonText}>No Disponible</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            // Show normal actions for other users' offers
+            <>
+              <TouchableOpacity
                 style={styles.detailsButton}
                 onPress={() => handleSelectOffer(offer, 'profile')}
-            >
-              <Text style={styles.detailsButtonText}>Perfil</Text>
-            </TouchableOpacity>
-            <TouchableOpacity 
+              >
+                <Text style={styles.detailsButtonText}>Perfil</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
                 style={styles.buyButton}
                 onPress={() => handleSelectOffer(offer, 'trade')}
-            >
-              <Text style={styles.buyButtonText}>{activeTab === 'buy' ? 'Comprar' : 'Vender'}</Text>
-            </TouchableOpacity>
-          </>
-        )}
+              >
+                <Text style={styles.buyButtonText}>{activeTab === 'buy' ? 'Comprar' : 'Vender'}</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
       </View>
-    </View>
-  );
+    );
   };
 
   const MyOfferCard = ({ offer, onRefresh }: { offer: any; onRefresh: () => void }) => {
     const [isExpanded, setIsExpanded] = useState(false);
     const [updateOffer, { loading: updating }] = useMutation(UPDATE_P2P_OFFER);
-    
+
     // Format token type for display
     const formatTokenType = (tokenType: string): string => {
       if (tokenType === 'CUSD') return 'cUSD';
       return tokenType; // CONFIO and others remain unchanged
     };
-    
+
     // Handle pause/resume offer
     const handleTogglePause = async () => {
       const newStatus = offer.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE';
-      
+
       try {
         const { data } = await updateOffer({
           variables: {
@@ -1900,7 +1901,7 @@ export const ExchangeScreen = () => {
             status: newStatus
           }
         });
-        
+
         if (data?.updateP2pOffer?.success) {
           Alert.alert(
             'Éxito',
@@ -1914,12 +1915,12 @@ export const ExchangeScreen = () => {
         Alert.alert('Error', 'No se pudo conectar con el servidor');
       }
     };
-    
+
     // Handle edit offer
     const handleEdit = () => {
       // Navigate to edit offer screen with offer data
-      navigation.navigate('CreateOffer', { 
-        editMode: true, 
+      navigation.navigate('CreateOffer', {
+        editMode: true,
         offerId: offer.id,
         offerData: {
           exchangeType: offer.exchangeType,
@@ -1939,10 +1940,10 @@ export const ExchangeScreen = () => {
     const getOfferCountryInfo = (countryCode: string) => {
       const country = countries.find(c => c[2] === countryCode) as Country | undefined;
       if (!country) return { name: countryCode, currency: 'USD', symbol: '$', flag: '🌍' };
-      
+
       const currency = getCurrencyForCountry(country);
       const symbol = getCurrencySymbol(currency);
-      
+
       return {
         name: country[0], // Country name
         currency: currency, // Currency code from utility
@@ -1952,7 +1953,7 @@ export const ExchangeScreen = () => {
     };
 
     const countryInfo = getOfferCountryInfo(offer.countryCode);
-    
+
     // Format amount with the offer's original country currency
     const formatOfferAmount = (amount: number) => {
       return `${countryInfo.currency} ${formatNumber(amount, {
@@ -1960,7 +1961,7 @@ export const ExchangeScreen = () => {
         maximumFractionDigits: 2
       })}`;
     };
-    
+
     const getStatusColor = (status: string) => {
       switch (status) {
         case 'ACTIVE': return colors.primary;
@@ -1996,8 +1997,8 @@ export const ExchangeScreen = () => {
         {/* Offer Type and Token */}
         <View style={styles.myOfferTypeRow}>
           <View style={styles.myOfferTypeContainer}>
-            <View style={[styles.myOfferTypeBadge, 
-              { backgroundColor: offer.exchangeType === 'BUY' ? colors.primary : colors.accent }
+            <View style={[styles.myOfferTypeBadge,
+            { backgroundColor: offer.exchangeType === 'BUY' ? colors.primary : colors.accent }
             ]}>
               <Text style={styles.myOfferTypeText}>
                 {offer.exchangeType === 'BUY' ? 'COMPRA' : 'VENTA'}
@@ -2036,7 +2037,7 @@ export const ExchangeScreen = () => {
 
         {/* Payment Methods */}
         {offer.paymentMethods && offer.paymentMethods.length > 0 && (
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.myOfferPaymentMethods}
             onPress={() => setIsExpanded(!isExpanded)}
             activeOpacity={0.7}
@@ -2045,10 +2046,10 @@ export const ExchangeScreen = () => {
               <Text style={styles.myOfferPaymentLabel}>
                 <Icon name="credit-card" size={12} color="#6B7280" /> Métodos de pago
               </Text>
-              <Icon 
-                name={isExpanded ? "chevron-up" : "chevron-down"} 
-                size={16} 
-                color="#6B7280" 
+              <Icon
+                name={isExpanded ? "chevron-up" : "chevron-down"}
+                size={16}
+                color="#6B7280"
               />
             </View>
             <View style={styles.myOfferPaymentList}>
@@ -2081,21 +2082,21 @@ export const ExchangeScreen = () => {
         {/* Action Buttons */}
         {(offer.status === 'ACTIVE' || offer.status === 'PAUSED') && (
           <View style={styles.myOfferActions}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[styles.myOfferActionButton, updating && styles.disabledButton]}
               onPress={handleTogglePause}
               disabled={updating}
             >
-              <Icon 
-                name={offer.status === 'ACTIVE' ? "pause" : "play"} 
-                size={14} 
-                color={updating ? '#9CA3AF' : colors.accent} 
+              <Icon
+                name={offer.status === 'ACTIVE' ? "pause" : "play"}
+                size={14}
+                color={updating ? '#9CA3AF' : colors.accent}
               />
               <Text style={[styles.myOfferActionText, { color: updating ? '#9CA3AF' : colors.accent }]}>
                 {updating ? 'Actualizando...' : (offer.status === 'ACTIVE' ? 'Pausar' : 'Activar')}
               </Text>
             </TouchableOpacity>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.myOfferActionButton}
               onPress={handleEdit}
             >
@@ -2110,283 +2111,285 @@ export const ExchangeScreen = () => {
 
   const ActiveTradeCard = ({ trade }: { trade: ActiveTrade }) => {
     const formatTime = (seconds: number) => {
-        const minutes = Math.floor(seconds / 60);
-        const secs = seconds % 60;
-        return `${minutes}:${secs.toString().padStart(2, '0')}`;
+      const minutes = Math.floor(seconds / 60);
+      const secs = seconds % 60;
+      return `${minutes}:${secs.toString().padStart(2, '0')}`;
     };
 
     const getStepText = (step: number, status?: string, hasRating?: boolean) => {
-        if (status === 'COMPLETED' && hasRating) {
-            return "Intercambio completado";
-        }
-        if (status === 'COMPLETED' && !hasRating) {
-            return "Calificar trader";
-        }
-        if (status === 'CRYPTO_RELEASED' && !hasRating) {
-            return "Calificar trader";
-        }
-        if (status === 'CRYPTO_RELEASED' && hasRating) {
-            return "Intercambio completado";
-        }
-        const steps: { [key: number]: string } = { 
-            1: "Realizar pago", 
-            2: "Confirmar pago", 
-            3: "Esperando verificación", 
-            4: "Liberando fondos", 
-            5: "Calificar trader" 
-        };
-        return steps[step] || "En proceso";
+      if (status === 'COMPLETED' && hasRating) {
+        return "Intercambio completado";
+      }
+      if (status === 'COMPLETED' && !hasRating) {
+        return "Calificar trader";
+      }
+      if (status === 'CRYPTO_RELEASED' && !hasRating) {
+        return "Calificar trader";
+      }
+      if (status === 'CRYPTO_RELEASED' && hasRating) {
+        return "Intercambio completado";
+      }
+      const steps: { [key: number]: string } = {
+        1: "Realizar pago",
+        2: "Confirmar pago",
+        3: "Esperando verificación",
+        4: "Liberando fondos",
+        5: "Calificar trader"
+      };
+      return steps[step] || "En proceso";
     };
 
     return (
-        <View style={[
-            styles.activeTradeCard,
-            trade.status === 'COMPLETED' && styles.completedTradeCard,
-            trade.status === 'DISPUTED' && styles.disputedTradeCard
-        ]}>
-            <View style={styles.tradeHeader}>
-                <TouchableOpacity 
-                    style={[styles.tradeUser, { flex: 1 }]}
-                    onPress={() => {
-                        console.log('[ActiveTradeCard] Navigating to TraderProfile with:', {
-                            name: trade.trader.name,
-                            successRate: trade.trader.successRate,
-                            avgRating: trade.trader.avgRating,
-                            completedTrades: trade.trader.completedTrades
-                        });
-                        navigation.navigate('TraderProfile', {
-                            trader: {
-                                id: trade.trader.id,
-                                name: trade.trader.name,
-                                completedTrades: trade.trader.completedTrades,
-                                successRate: trade.trader.successRate,
-                                responseTime: trade.trader.responseTime,
-                                isOnline: trade.trader.isOnline,
-                                verified: trade.trader.verified,
-                                lastSeen: trade.trader.lastSeen,
-                                avgRating: trade.trader.avgRating,
-                                userId: trade.trader.userId,
-                                businessId: trade.trader.businessId,
-                            }
-                        });
-                    }}
-                    activeOpacity={0.7}
-                >
-                    <View style={styles.avatarContainer}>
-                        <Text style={styles.avatarText}>{trade.trader.name.charAt(0)}</Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                        <Text style={styles.userName} numberOfLines={1}>{trade.trader.name}</Text>
-                        <Text style={styles.tradeDetails} numberOfLines={1}>
-                            {trade.amount} {trade.crypto} por {trade.totalBs}
-                        </Text>
-                    </View>
-                </TouchableOpacity>
-                {/* Only show timer for active trades */}
-                {trade.status !== 'COMPLETED' && trade.status !== 'DISPUTED' && (
-                    <View style={[styles.timerBadge, trade.timeRemaining <= 0 && styles.timerBadgeExpired]}>
-                        <Text style={[styles.timerText, trade.timeRemaining <= 0 && styles.timerTextExpired]}>{formatTime(trade.timeRemaining)}</Text>
-                    </View>
-                )}
-                {/* Show completed date for completed trades */}
-                {trade.status === 'COMPLETED' && (
-                    <View style={styles.completedDateBadge}>
-                        <Text style={styles.completedDateText}>Completado</Text>
-                    </View>
-                )}
-                {/* Show dispute badge for disputed trades */}
-                {trade.status === 'DISPUTED' && (
-                    <View style={styles.disputeBadge}>
-                        <Icon name="alert-triangle" size={14} color="#fff" />
-                        <Text style={styles.disputeText}>En Disputa</Text>
-                    </View>
-                )}
+      <View style={[
+        styles.activeTradeCard,
+        trade.status === 'COMPLETED' && styles.completedTradeCard,
+        trade.status === 'DISPUTED' && styles.disputedTradeCard
+      ]}>
+        <View style={styles.tradeHeader}>
+          <TouchableOpacity
+            style={[styles.tradeUser, { flex: 1 }]}
+            onPress={() => {
+              console.log('[ActiveTradeCard] Navigating to TraderProfile with:', {
+                name: trade.trader.name,
+                successRate: trade.trader.successRate,
+                avgRating: trade.trader.avgRating,
+                completedTrades: trade.trader.completedTrades
+              });
+              navigation.navigate('TraderProfile', {
+                trader: {
+                  id: trade.trader.id,
+                  name: trade.trader.name,
+                  completedTrades: trade.trader.completedTrades,
+                  successRate: trade.trader.successRate,
+                  responseTime: trade.trader.responseTime,
+                  isOnline: trade.trader.isOnline,
+                  verified: trade.trader.verified,
+                  lastSeen: trade.trader.lastSeen,
+                  avgRating: trade.trader.avgRating,
+                  userId: trade.trader.userId,
+                  businessId: trade.trader.businessId,
+                }
+              });
+            }}
+            activeOpacity={0.7}
+          >
+            <View style={styles.avatarContainer}>
+              <Text style={styles.avatarText}>{trade.trader.name.charAt(0)}</Text>
             </View>
-            {/* Different layout for disputed trades */}
-            {trade.status === 'DISPUTED' ? (
-                <TouchableOpacity 
-                    style={styles.disputedTradeContent}
-                    onPress={() => {
-                        navigation.navigate('ActiveTrade', {
-                            trade: {
-                                id: trade.id,
-                                trader: trade.trader,
-                                amount: trade.amount,
-                                crypto: trade.crypto,
-                                totalBs: trade.totalBs,
-                                paymentMethod: trade.paymentMethod,
-                                rate: trade.rate,
-                                step: trade.step,
-                                timeRemaining: trade.timeRemaining,
-                                tradeType: trade.tradeType,
-                                countryCode: trade.countryCode,
-                                currencyCode: trade.currencyCode,
-                                status: trade.status,
-                                hasRating: trade.hasRating,
-                                createdAt: trade.createdAt,
-                                completedAt: trade.completedAt,
-                            }
-                        });
-                    }}
-                >
-                    <View style={styles.disputeWarningContainer}>
-                        <Icon name="alert-triangle" size={24} color="#DC2626" />
-                        <View style={styles.disputeWarningTextContainer}>
-                            <Text style={styles.disputeWarningTitle}>Intercambio en disputa</Text>
-                            <Text style={styles.disputeWarningText}>
-                                Este intercambio está siendo revisado por nuestro equipo de soporte. 
-                                Toca para ver detalles.
-                            </Text>
-                        </View>
-                    </View>
-                    <View style={styles.disputeActionButton}>
-                        <Text style={styles.disputeActionText}>Ver detalles</Text>
-                        <Icon name="chevron-right" size={16} color="#DC2626" />
-                    </View>
-                </TouchableOpacity>
-            ) : /* Different layout for completed trades */
-            (() => {
-              const isCompletedWithRating = (trade.status === 'COMPLETED' || trade.status === 'CRYPTO_RELEASED' || trade.status === 'PAYMENT_CONFIRMED') && trade.hasRating;
-              if (trade.status === 'COMPLETED' || trade.status === 'CRYPTO_RELEASED' || trade.status === 'PAYMENT_CONFIRMED') {
-                console.log(`[ExchangeScreen] Trade ${trade.id} completion check:`, {
+            <View style={{ flex: 1 }}>
+              <Text style={styles.userName} numberOfLines={1}>{trade.trader.name}</Text>
+              <Text style={styles.tradeDetails} numberOfLines={1}>
+                {trade.amount} {trade.crypto} por {trade.totalBs}
+              </Text>
+            </View>
+          </TouchableOpacity>
+          {/* Only show timer for active trades */}
+          {trade.status !== 'COMPLETED' && trade.status !== 'DISPUTED' && (
+            <View style={[styles.timerBadge, trade.timeRemaining <= 0 && styles.timerBadgeExpired]}>
+              <Text style={[styles.timerText, trade.timeRemaining <= 0 && styles.timerTextExpired]}>{formatTime(trade.timeRemaining)}</Text>
+            </View>
+          )}
+          {/* Show completed date for completed trades */}
+          {trade.status === 'COMPLETED' && (
+            <View style={styles.completedDateBadge}>
+              <Text style={styles.completedDateText}>Completado</Text>
+            </View>
+          )}
+          {/* Show dispute badge for disputed trades */}
+          {trade.status === 'DISPUTED' && (
+            <View style={styles.disputeBadge}>
+              <Icon name="alert-triangle" size={14} color="#fff" />
+              <Text style={styles.disputeText}>En Disputa</Text>
+            </View>
+          )}
+        </View>
+        {/* Different layout for disputed trades */}
+        {trade.status === 'DISPUTED' ? (
+          <TouchableOpacity
+            style={styles.disputedTradeContent}
+            onPress={() => {
+              navigation.navigate('ActiveTrade', {
+                trade: {
+                  id: trade.id,
+                  trader: trade.trader,
+                  amount: trade.amount,
+                  crypto: trade.crypto,
+                  totalBs: trade.totalBs,
+                  paymentMethod: trade.paymentMethod,
+                  rate: trade.rate,
+                  step: trade.step,
+                  timeRemaining: trade.timeRemaining,
+                  tradeType: trade.tradeType,
+                  countryCode: trade.countryCode,
+                  currencyCode: trade.currencyCode,
                   status: trade.status,
                   hasRating: trade.hasRating,
-                  isCompletedWithRating,
-                  willShowCompletedUI: isCompletedWithRating
+                  createdAt: trade.createdAt,
+                  completedAt: trade.completedAt,
+                  internalId: trade.internalId
+                }
+              });
+            }}
+          >
+            <View style={styles.disputeWarningContainer}>
+              <Icon name="alert-triangle" size={24} color="#DC2626" />
+              <View style={styles.disputeWarningTextContainer}>
+                <Text style={styles.disputeWarningTitle}>Intercambio en disputa</Text>
+                <Text style={styles.disputeWarningText}>
+                  Este intercambio está siendo revisado por nuestro equipo de soporte.
+                  Toca para ver detalles.
+                </Text>
+              </View>
+            </View>
+            <View style={styles.disputeActionButton}>
+              <Text style={styles.disputeActionText}>Ver detalles</Text>
+              <Icon name="chevron-right" size={16} color="#DC2626" />
+            </View>
+          </TouchableOpacity>
+        ) : /* Different layout for completed trades */
+          (() => {
+            const isCompletedWithRating = (trade.status === 'COMPLETED' || trade.status === 'CRYPTO_RELEASED' || trade.status === 'PAYMENT_CONFIRMED') && trade.hasRating;
+            if (trade.status === 'COMPLETED' || trade.status === 'CRYPTO_RELEASED' || trade.status === 'PAYMENT_CONFIRMED') {
+              console.log(`[ExchangeScreen] Trade ${trade.id} completion check:`, {
+                status: trade.status,
+                hasRating: trade.hasRating,
+                isCompletedWithRating,
+                willShowCompletedUI: isCompletedWithRating
+              });
+            }
+            return isCompletedWithRating;
+          })() ? (
+            <TouchableOpacity
+              style={styles.completedTradeContent}
+              onPress={() => {
+                navigation.navigate('ActiveTrade', {
+                  trade: {
+                    id: trade.id,
+                    trader: trade.trader ? {
+                      name: trade.trader.name || 'Comerciante',
+                      isOnline: trade.trader.isOnline || false,
+                      verified: trade.trader.verified || false,
+                      lastSeen: trade.trader.lastSeen || 'Desconocido',
+                      responseTime: trade.trader.responseTime || 'N/A',
+                      completedTrades: trade.trader.completedTrades || 0,
+                      successRate: trade.trader.successRate || 0,
+                      avgRating: trade.trader.avgRating || 0,
+                    } : {
+                      name: 'Comerciante',
+                      isOnline: false,
+                      verified: false,
+                      lastSeen: 'Desconocido',
+                      responseTime: 'N/A',
+                      completedTrades: 0,
+                      successRate: 0,
+                      avgRating: 0,
+                    },
+                    amount: trade.amount,
+                    crypto: trade.crypto,
+                    totalBs: trade.totalBs,
+                    paymentMethod: trade.paymentMethod,
+                    rate: trade.rate,
+                    step: trade.step,
+                    timeRemaining: trade.timeRemaining,
+                    tradeType: trade.tradeType,
+                    countryCode: trade.countryCode,
+                    currencyCode: trade.currencyCode,
+                    status: trade.status,
+                    hasRating: trade.hasRating,
+                    createdAt: trade.createdAt,
+                    completedAt: trade.completedAt,
+                  }
                 });
-              }
-              return isCompletedWithRating;
-            })() ? (
-                <TouchableOpacity 
-                    style={styles.completedTradeContent}
-                    onPress={() => {
-                        navigation.navigate('ActiveTrade', {
-                            trade: {
-                                id: trade.id,
-                                trader: trade.trader ? {
-                                    name: trade.trader.name || 'Comerciante',
-                                    isOnline: trade.trader.isOnline || false,
-                                    verified: trade.trader.verified || false,
-                                    lastSeen: trade.trader.lastSeen || 'Desconocido',
-                                    responseTime: trade.trader.responseTime || 'N/A',
-                                    completedTrades: trade.trader.completedTrades || 0,
-                                    successRate: trade.trader.successRate || 0,
-                                    avgRating: trade.trader.avgRating || 0,
-                                } : {
-                                    name: 'Comerciante',
-                                    isOnline: false,
-                                    verified: false,
-                                    lastSeen: 'Desconocido',
-                                    responseTime: 'N/A',
-                                    completedTrades: 0,
-                                    successRate: 0,
-                                    avgRating: 0,
-                                },
-                                amount: trade.amount,
-                                crypto: trade.crypto,
-                                totalBs: trade.totalBs,
-                                paymentMethod: trade.paymentMethod,
-                                rate: trade.rate,
-                                step: trade.step,
-                                timeRemaining: trade.timeRemaining,
-                                tradeType: trade.tradeType,
-                                countryCode: trade.countryCode,
-                                currencyCode: trade.currencyCode,
-                                status: trade.status,
-                                hasRating: trade.hasRating,
-                                createdAt: trade.createdAt,
-                                completedAt: trade.completedAt,
-                            }
-                        });
-                    }}
-                >
-                    <View style={styles.completedBadgeRow}>
-                        {trade.hasRating ? (
-                            <>
-                                <Icon name="check-circle" size={16} color="#10B981" style={{ marginRight: 4 }} />
-                                <Text style={styles.completedText}>Intercambio completado y calificado</Text>
-                            </>
-                        ) : (
-                            <>
-                                <Icon name="alert-circle" size={16} color="#F59E0B" style={{ marginRight: 4 }} />
-                                <Text style={styles.pendingRatingText}>Pendiente de calificar</Text>
-                            </>
-                        )}
-                    </View>
-                    <View style={styles.completedTradeInfo}>
-                        <Text style={styles.completedDateText}>
-                            {formatLocalDateTime(trade.completedAt || trade.createdAt)}
-                        </Text>
-                    </View>
-                    <View style={styles.viewDetailsRow}>
-                        <Text style={styles.viewDetailsText}>Ver detalles del intercambio</Text>
-                        <Icon name="chevron-right" size={16} color="#6B7280" />
-                    </View>
-                </TouchableOpacity>
-            ) : (
-                /* Active trades layout */
-                <>
-                    <View style={styles.progressContainer}>
-                        <Text style={styles.stepText}>Paso {trade.step}/{trade.totalSteps}: {getStepText(trade.step, trade.status, trade.hasRating)}</Text>
-                        <View style={styles.progressBar}>
-                            <View style={[styles.progressFill, { width: `${(trade.step / trade.totalSteps) * 100}%` }]} />
-                        </View>
-                    </View>
-                    <TouchableOpacity 
-                        style={styles.continueButton}
-                        onPress={() => {
-                            navigation.navigate('ActiveTrade', {
-                                trade: {
-                                    id: trade.id,
-                                    trader: trade.trader ? {
-                                        name: trade.trader.name || 'Comerciante',
-                                        isOnline: trade.trader.isOnline || false,
-                                        verified: trade.trader.verified || false,
-                                        lastSeen: trade.trader.lastSeen || 'Desconocido',
-                                        responseTime: trade.trader.responseTime || 'N/A',
-                                        completedTrades: trade.trader.completedTrades || 0,
-                                        successRate: trade.trader.successRate || 0,
-                                        avgRating: trade.trader.avgRating || 0,
-                                    } : {
-                                        name: 'Comerciante',
-                                        isOnline: false,
-                                        verified: false,
-                                        lastSeen: 'Desconocido',
-                                        responseTime: 'N/A',
-                                        completedTrades: 0,
-                                        successRate: 0,
-                                        avgRating: 0,
-                                    },
-                                    amount: trade.amount,
-                                    crypto: trade.crypto,
-                                    totalBs: trade.totalBs,
-                                    paymentMethod: trade.paymentMethod,
-                                    rate: trade.rate,
-                                    step: trade.step,
-                                    timeRemaining: trade.timeRemaining,
-                                    tradeType: trade.tradeType,
-                                    countryCode: trade.countryCode,
-                                    currencyCode: trade.currencyCode,
-                                    status: trade.status,
-                                    hasRating: trade.hasRating,
-                                    createdAt: trade.createdAt,
-                                    completedAt: trade.completedAt,
-                                }
-                            });
-                        }}
-                    >
-                        <Text style={styles.continueButtonText}>Continuar</Text>
-                    </TouchableOpacity>
-                </>
-            )}
-        </View>
+              }}
+            >
+              <View style={styles.completedBadgeRow}>
+                {trade.hasRating ? (
+                  <>
+                    <Icon name="check-circle" size={16} color="#10B981" style={{ marginRight: 4 }} />
+                    <Text style={styles.completedText}>Intercambio completado y calificado</Text>
+                  </>
+                ) : (
+                  <>
+                    <Icon name="alert-circle" size={16} color="#F59E0B" style={{ marginRight: 4 }} />
+                    <Text style={styles.pendingRatingText}>Pendiente de calificar</Text>
+                  </>
+                )}
+              </View>
+              <View style={styles.completedTradeInfo}>
+                <Text style={styles.completedDateText}>
+                  {formatLocalDateTime(trade.completedAt || trade.createdAt)}
+                </Text>
+              </View>
+              <View style={styles.viewDetailsRow}>
+                <Text style={styles.viewDetailsText}>Ver detalles del intercambio</Text>
+                <Icon name="chevron-right" size={16} color="#6B7280" />
+              </View>
+            </TouchableOpacity>
+          ) : (
+            /* Active trades layout */
+            <>
+              <View style={styles.progressContainer}>
+                <Text style={styles.stepText}>Paso {trade.step}/{trade.totalSteps}: {getStepText(trade.step, trade.status, trade.hasRating)}</Text>
+                <View style={styles.progressBar}>
+                  <View style={[styles.progressFill, { width: `${(trade.step / trade.totalSteps) * 100}%` }]} />
+                </View>
+              </View>
+              <TouchableOpacity
+                style={styles.continueButton}
+                onPress={() => {
+                  navigation.navigate('ActiveTrade', {
+                    trade: {
+                      id: trade.id,
+                      trader: trade.trader ? {
+                        name: trade.trader.name || 'Comerciante',
+                        isOnline: trade.trader.isOnline || false,
+                        verified: trade.trader.verified || false,
+                        lastSeen: trade.trader.lastSeen || 'Desconocido',
+                        responseTime: trade.trader.responseTime || 'N/A',
+                        completedTrades: trade.trader.completedTrades || 0,
+                        successRate: trade.trader.successRate || 0,
+                        avgRating: trade.trader.avgRating || 0,
+                      } : {
+                        name: 'Comerciante',
+                        isOnline: false,
+                        verified: false,
+                        lastSeen: 'Desconocido',
+                        responseTime: 'N/A',
+                        completedTrades: 0,
+                        successRate: 0,
+                        avgRating: 0,
+                      },
+                      amount: trade.amount,
+                      crypto: trade.crypto,
+                      totalBs: trade.totalBs,
+                      paymentMethod: trade.paymentMethod,
+                      rate: trade.rate,
+                      step: trade.step,
+                      timeRemaining: trade.timeRemaining,
+                      tradeType: trade.tradeType,
+                      countryCode: trade.countryCode,
+                      currencyCode: trade.currencyCode,
+                      status: trade.status,
+                      hasRating: trade.hasRating,
+                      createdAt: trade.createdAt,
+                      completedAt: trade.completedAt,
+                      internalId: trade.internalId
+                    }
+                  });
+                }}
+              >
+                <Text style={styles.continueButtonText}>Continuar</Text>
+              </TouchableOpacity>
+            </>
+          )}
+      </View>
     );
   };
 
   // Create a separate component for the amount input to prevent re-renders
-  const AmountInputSection = React.memo(({ 
+  const AmountInputSection = React.memo(({
     initialAmount,
-    selectedCrypto, 
+    selectedCrypto,
     selectedPaymentMethod,
     onAmountUpdate,
     onPaymentMethodPress,
@@ -2402,30 +2405,30 @@ export const ExchangeScreen = () => {
     // Local state for the input to prevent parent re-renders
     const [localAmount, setLocalAmount] = useState(initialAmount);
     const inputRef = useRef<TextInputType>(null);
-    
+
     // Sync with parent state when needed (e.g., on search or blur)
     const syncAmount = React.useCallback(() => {
       if (localAmount !== initialAmount) {
         onAmountUpdate(localAmount);
       }
     }, [localAmount, initialAmount, onAmountUpdate]);
-    
+
     // Update local state when typing
     const handleLocalChange = React.useCallback((value: string) => {
       setLocalAmount(value);
     }, []);
-    
+
     // Sync when search is pressed
     const handleSearchPress = React.useCallback(() => {
       syncAmount();
       onSearchPress();
     }, [syncAmount, onSearchPress]);
-    
+
     // Update local state if parent state changes externally
     useEffect(() => {
       setLocalAmount(initialAmount);
     }, [initialAmount]);
-    
+
     return (
       <>
         <View style={styles.amountInputContainer}>
@@ -2477,10 +2480,10 @@ export const ExchangeScreen = () => {
     const [localValue, setLocalValue] = useState(value);
     const inputRef = useRef<TextInputType>(null);
     const debounceTimer = useRef<NodeJS.Timeout | null>(null);
-    
+
     // Use forwarded ref if provided, otherwise use internal ref
     const actualRef = ref || inputRef;
-    
+
     // Sync with parent when input loses focus
     const syncValue = React.useCallback(() => {
       // Cancel any pending debounced update
@@ -2488,35 +2491,35 @@ export const ExchangeScreen = () => {
         clearTimeout(debounceTimer.current);
         debounceTimer.current = null;
       }
-      
+
       // Immediately sync if there's a difference
       if (localValue !== value) {
         onChangeText(localValue);
       }
     }, [localValue, value, onChangeText]);
-    
+
     // Debounced sync to parent (delays sync to prevent rapid re-renders)
     const debouncedSync = React.useCallback((text: string) => {
       if (debounceTimer.current) {
         clearTimeout(debounceTimer.current);
       }
-      
+
       debounceTimer.current = setTimeout(() => {
         onChangeText(text);
       }, 500); // 500ms delay - responsive but prevents rapid re-renders
     }, [onChangeText]);
-    
+
     // Update local state when typing and schedule debounced sync
     const handleLocalChange = React.useCallback((text: string) => {
       setLocalValue(text);
       debouncedSync(text);
     }, [debouncedSync]);
-    
+
     // Update local state if parent value changes externally
     useEffect(() => {
       setLocalValue(value);
     }, [value]);
-    
+
     // Cleanup timer on unmount
     useEffect(() => {
       return () => {
@@ -2525,7 +2528,7 @@ export const ExchangeScreen = () => {
         }
       };
     }, []);
-    
+
     return (
       <TextInput
         ref={actualRef}
@@ -2556,535 +2559,535 @@ export const ExchangeScreen = () => {
         inputRange: [-1000, 0, 1000],
         outputRange: [0, 0, 1000],
         extrapolate: 'clamp',
-      }), 
-      0, 
+      }),
+      0,
       headerHeight
     );
 
     const headerTranslateY = scrollYClamped.interpolate({
-        inputRange: [0, headerHeight],
-        outputRange: [0, -headerHeight],
-        extrapolate: 'clamp',
+      inputRange: [0, headerHeight],
+      outputRange: [0, -headerHeight],
+      extrapolate: 'clamp',
     });
 
     return (
-        <Animated.View 
-            // Remove onLayout completely - we're using fixed heights
-            style={[
-                styles.header,
-                {
-                    transform: [{ translateY: headerTranslateY }],
-                }
-            ]}
-            pointerEvents="box-none" // Allow touches to pass through empty areas
-        >
-            {activeTradeCount > 0 ? (
-                <TouchableOpacity 
-                    style={styles.activeTradesAlert}
-                    onPress={() => {
-                        if (activeList !== 'trades') {
-                            setActiveList('trades');
-                            resetScrollPosition();
-                        }
-                    }}
-                >
-                    <Icon name="alert-triangle" size={16} color={colors.primary} />
-                    <Text style={styles.activeTradesText}>
-                        {activeTradeCount} intercambio{activeTradeCount > 1 ? 's' : ''} activo{activeTradeCount > 1 ? 's' : ''} - Toca para continuar
-                    </Text>
-                    <Icon name="chevron-right" size={16} color={colors.primary} />
-                </TouchableOpacity>
-            ) : null}
+      <Animated.View
+        // Remove onLayout completely - we're using fixed heights
+        style={[
+          styles.header,
+          {
+            transform: [{ translateY: headerTranslateY }],
+          }
+        ]}
+        pointerEvents="box-none" // Allow touches to pass through empty areas
+      >
+        {activeTradeCount > 0 ? (
+          <TouchableOpacity
+            style={styles.activeTradesAlert}
+            onPress={() => {
+              if (activeList !== 'trades') {
+                setActiveList('trades');
+                resetScrollPosition();
+              }
+            }}
+          >
+            <Icon name="alert-triangle" size={16} color={colors.primary} />
+            <Text style={styles.activeTradesText}>
+              {activeTradeCount} intercambio{activeTradeCount > 1 ? 's' : ''} activo{activeTradeCount > 1 ? 's' : ''} - Toca para continuar
+            </Text>
+            <Icon name="chevron-right" size={16} color={colors.primary} />
+          </TouchableOpacity>
+        ) : null}
 
-            <View style={styles.mainTabsContainer}>
-                <TouchableOpacity
-                    style={[styles.mainTab, activeList === 'offers' && styles.activeMainTab]}
-                    onPress={() => {
-                        if (activeList !== 'offers') {
-                            setActiveList('offers');
-                            resetScrollPosition();
-                        }
-                    }}
-                >
-                    <Text style={[styles.mainTabText, activeList === 'offers' && styles.activeMainTabText]}>
-                        Ofertas
-                    </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                    style={[styles.mainTab, activeList === 'myOffers' && styles.activeMainTab]}
-                    onPress={() => {
-                        if (activeList !== 'myOffers') {
-                            setActiveList('myOffers');
-                            resetScrollPosition();
-                        }
-                    }}
-                >
-                    <Text style={[styles.mainTabText, activeList === 'myOffers' && styles.activeMainTabText]}>
-                        Mis Ofertas
-                    </Text>
-                    {myOffersData?.myP2pOffers?.length > 0 && (
-                        <View style={styles.notificationBadge}>
-                            <Text style={styles.notificationText}>{myOffersData.myP2pOffers.length}</Text>
-                        </View>
-                    )}
-                </TouchableOpacity>
-                <TouchableOpacity
-                    style={[styles.mainTab, activeList === 'trades' && styles.activeMainTab]}
-                    onPress={() => {
-                        if (activeList !== 'trades') {
-                            setActiveList('trades');
-                            resetScrollPosition();
-                        }
-                    }}
-                >
-                    <Text style={[styles.mainTabText, activeList === 'trades' && styles.activeMainTabText]}>
-                        Mis Intercambios
-                    </Text>
-                    {activeTradeCount > 0 ? (
-                        <View style={styles.notificationBadge}>
-                            <Text style={styles.notificationText}>{activeTradeCount}</Text>
-                        </View>
-                    ) : null}
-                </TouchableOpacity>
+        <View style={styles.mainTabsContainer}>
+          <TouchableOpacity
+            style={[styles.mainTab, activeList === 'offers' && styles.activeMainTab]}
+            onPress={() => {
+              if (activeList !== 'offers') {
+                setActiveList('offers');
+                resetScrollPosition();
+              }
+            }}
+          >
+            <Text style={[styles.mainTabText, activeList === 'offers' && styles.activeMainTabText]}>
+              Ofertas
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.mainTab, activeList === 'myOffers' && styles.activeMainTab]}
+            onPress={() => {
+              if (activeList !== 'myOffers') {
+                setActiveList('myOffers');
+                resetScrollPosition();
+              }
+            }}
+          >
+            <Text style={[styles.mainTabText, activeList === 'myOffers' && styles.activeMainTabText]}>
+              Mis Ofertas
+            </Text>
+            {myOffersData?.myP2pOffers?.length > 0 && (
+              <View style={styles.notificationBadge}>
+                <Text style={styles.notificationText}>{myOffersData.myP2pOffers.length}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.mainTab, activeList === 'trades' && styles.activeMainTab]}
+            onPress={() => {
+              if (activeList !== 'trades') {
+                setActiveList('trades');
+                resetScrollPosition();
+              }
+            }}
+          >
+            <Text style={[styles.mainTabText, activeList === 'trades' && styles.activeMainTabText]}>
+              Mis Intercambios
+            </Text>
+            {activeTradeCount > 0 ? (
+              <View style={styles.notificationBadge}>
+                <Text style={styles.notificationText}>{activeTradeCount}</Text>
+              </View>
+            ) : null}
+          </TouchableOpacity>
+        </View>
+
+        {activeList === 'offers' && (
+          <>
+            {/* Buy/Sell Toggle */}
+            <View style={styles.tabContainer}>
+              <TouchableOpacity
+                style={[styles.tab, activeTab === 'buy' && styles.activeTab]}
+                onPress={() => {
+                  if (activeTab !== 'buy') {
+                    setActiveTab('buy');
+                    resetScrollPosition();
+                  }
+                }}
+              >
+                <Text style={[styles.tabText, activeTab === 'buy' && styles.activeTabText]}>Comprar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.tab, activeTab === 'sell' && styles.activeTab]}
+                onPress={() => {
+                  if (activeTab !== 'sell') {
+                    setActiveTab('sell');
+                    resetScrollPosition();
+                  }
+                }}
+              >
+                <Text style={[styles.tabText, activeTab === 'sell' && styles.activeTabText]}>Vender</Text>
+              </TouchableOpacity>
             </View>
 
-            {activeList === 'offers' && (
-                <>
-                    {/* Buy/Sell Toggle */}
-                    <View style={styles.tabContainer}>
-                        <TouchableOpacity
-                            style={[styles.tab, activeTab === 'buy' && styles.activeTab]}
-                            onPress={() => {
-                                if (activeTab !== 'buy') {
-                                    setActiveTab('buy');
-                                    resetScrollPosition();
-                                }
-                            }}
-                        >
-                            <Text style={[styles.tabText, activeTab === 'buy' && styles.activeTabText]}>Comprar</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            style={[styles.tab, activeTab === 'sell' && styles.activeTab]}
-                            onPress={() => {
-                                if (activeTab !== 'sell') {
-                                    setActiveTab('sell');
-                                    resetScrollPosition();
-                                }
-                            }}
-                        >
-                            <Text style={[styles.tabText, activeTab === 'sell' && styles.activeTabText]}>Vender</Text>
-                        </TouchableOpacity>
-                    </View>
+            {/* Crypto Selection */}
+            <View style={styles.cryptoSelector}>
+              <TouchableOpacity
+                style={[styles.cryptoButton, selectedCrypto === 'cUSD' && styles.selectedCryptoButton]}
+                onPress={() => {
+                  if (selectedCrypto !== 'cUSD') {
+                    setSelectedCrypto('cUSD');
+                    resetScrollPosition();
+                  }
+                }}
+              >
+                <Text style={[styles.cryptoButtonText, selectedCrypto === 'cUSD' && styles.selectedCryptoButtonText]}>
+                  Confío Dollar ($cUSD)
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.cryptoButton, selectedCrypto === 'CONFIO' && styles.selectedCryptoButton]}
+                onPress={() => {
+                  if (selectedCrypto !== 'CONFIO') {
+                    setSelectedCrypto('CONFIO');
+                    resetScrollPosition();
+                  }
+                }}
+              >
+                <Text style={[styles.cryptoButtonText, selectedCrypto === 'CONFIO' && styles.selectedCryptoButtonText]}>
+                  Confío ($CONFIO)
+                </Text>
+              </TouchableOpacity>
+            </View>
 
-                    {/* Crypto Selection */}
-                    <View style={styles.cryptoSelector}>
-                        <TouchableOpacity
-                            style={[styles.cryptoButton, selectedCrypto === 'cUSD' && styles.selectedCryptoButton]}
-                            onPress={() => {
-                                if (selectedCrypto !== 'cUSD') {
-                                    setSelectedCrypto('cUSD');
-                                    resetScrollPosition();
-                                }
-                            }}
-                        >
-                            <Text style={[styles.cryptoButtonText, selectedCrypto === 'cUSD' && styles.selectedCryptoButtonText]}>
-                                Confío Dollar ($cUSD)
-                            </Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            style={[styles.cryptoButton, selectedCrypto === 'CONFIO' && styles.selectedCryptoButton]}
-                            onPress={() => {
-                                if (selectedCrypto !== 'CONFIO') {
-                                    setSelectedCrypto('CONFIO');
-                                    resetScrollPosition();
-                                }
-                            }}
-                        >
-                            <Text style={[styles.cryptoButtonText, selectedCrypto === 'CONFIO' && styles.selectedCryptoButtonText]}>
-                                Confío ($CONFIO)
-                            </Text>
-                        </TouchableOpacity>
-                    </View>
+            {/* Amount, Payment Method, and Search */}
+            <View style={[
+              styles.searchContainer,
+              showAdvancedFilters && styles.searchContainerExtended
+            ]}>
+              <AmountInputSection
+                initialAmount={amount}
+                selectedCrypto={selectedCrypto}
+                selectedPaymentMethod={selectedPaymentMethod}
+                onAmountUpdate={handleAmountUpdate}
+                onPaymentMethodPress={handleOpenPaymentModal}
+                onSearchPress={handleSearch}
+              />
+            </View>
 
-                    {/* Amount, Payment Method, and Search */}
-                    <View style={[
-                        styles.searchContainer,
-                        showAdvancedFilters && styles.searchContainerExtended
-                    ]}>
-                        <AmountInputSection
-                            initialAmount={amount}
-                            selectedCrypto={selectedCrypto}
-                            selectedPaymentMethod={selectedPaymentMethod}
-                            onAmountUpdate={handleAmountUpdate}
-                            onPaymentMethodPress={handleOpenPaymentModal}
-                            onSearchPress={handleSearch}
-                        />
-                    </View>
+            {/* Rate and Filter Controls */}
+            <View style={[
+              styles.rateFilterContainer,
+              showAdvancedFilters && styles.rateFilterContainerExtended
+            ]}>
+              <View style={styles.marketRateContainer}>
+                <Icon name="trending-up" size={12} color="#059669" style={styles.marketRateIcon} />
+                <Text style={styles.marketRateText}>
+                  {marketRateLoading ? 'Cargando...' :
+                    marketRate ? `${formatNumber(marketRate)} ${currencyCode}/USD mercado` : 'Sin datos de mercado'}
+                </Text>
+              </View>
+              <View style={styles.filterControls}>
+                <TouchableOpacity
+                  style={[
+                    styles.filterButton,
+                    (showAdvancedFilters || minRate || maxRate || filterVerified || filterOnline || filterHighVolume) && styles.activeFilterButton
+                  ]}
+                  onPress={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                >
+                  <Icon
+                    name="filter"
+                    size={12}
+                    color={(showAdvancedFilters || minRate || maxRate || filterVerified || filterOnline || filterHighVolume) ? colors.primary : '#6B7280'}
+                  />
+                  {(minRate || maxRate || filterVerified || filterOnline || filterHighVolume) && (
+                    <View style={styles.filterIndicator} />
+                  )}
+                </TouchableOpacity>
 
-                    {/* Rate and Filter Controls */}
-                    <View style={[
-                        styles.rateFilterContainer,
-                        showAdvancedFilters && styles.rateFilterContainerExtended
-                    ]}>
-                        <View style={styles.marketRateContainer}>
-                            <Icon name="trending-up" size={12} color="#059669" style={styles.marketRateIcon} />
-                            <Text style={styles.marketRateText}>
-                                {marketRateLoading ? 'Cargando...' : 
-                                 marketRate ? `${formatNumber(marketRate)} ${currencyCode}/USD mercado` : 'Sin datos de mercado'}
-                            </Text>
-                        </View>
-                        <View style={styles.filterControls}>
-                            <TouchableOpacity
-                                style={[
-                                    styles.filterButton, 
-                                    (showAdvancedFilters || minRate || maxRate || filterVerified || filterOnline || filterHighVolume) && styles.activeFilterButton
-                                ]}
-                                onPress={() => setShowAdvancedFilters(!showAdvancedFilters)}
-                            >
-                                <Icon
-                                    name="filter"
-                                    size={12}
-                                    color={(showAdvancedFilters || minRate || maxRate || filterVerified || filterOnline || filterHighVolume) ? colors.primary : '#6B7280'}
-                                />
-                                {(minRate || maxRate || filterVerified || filterOnline || filterHighVolume) && (
-                                    <View style={styles.filterIndicator} />
-                                )}
-                            </TouchableOpacity>
-                            
-                            {/* Favorites filter button */}
-                            <TouchableOpacity
-                                style={[
-                                    styles.filterButton,
-                                    filterFavorites && styles.activeFilterButton
-                                ]}
-                                onPress={() => {
-                                    setFilterFavorites(!filterFavorites);
-                                    // Immediately refetch with favorites filter
-                                    let paymentMethodName = null;
-                                    if (selectedPaymentMethod !== 'Todos los métodos' && paymentMethodsData?.p2pPaymentMethods) {
-                                        const method = paymentMethodsData.p2pPaymentMethods.find((pm: any) => pm.displayName === selectedPaymentMethod);
-                                        paymentMethodName = method?.name || null;
-                                    }
-                                    refetch({
-                                        exchangeType: activeTab === 'buy' ? 'SELL' : 'BUY',
-                                        tokenType: selectedCrypto,
-                                        paymentMethod: paymentMethodName,
-                                        countryCode: selectedCountry?.[2],
-                                        favoritesOnly: !filterFavorites
-                                    });
-                                }}
-                            >
-                                <Icon
-                                    name="star"
-                                    size={12}
-                                    color={filterFavorites ? colors.primary : '#6B7280'}
-                                />
-                            </TouchableOpacity>
-                            
-                            {/* Quick clear filters button - only show when filters are active */}
-                            {(amount || minRate || maxRate || filterVerified || filterOnline || filterHighVolume || filterFavorites || selectedPaymentMethod !== 'Todos los métodos') && (
-                                <TouchableOpacity 
-                                    style={styles.quickClearButton}
-                                    onPress={() => {
-                                        // Clear all filter values
-                                        setAmount('');
-                                        setMinRate('');
-                                        setMaxRate('');
-                                        setFilterVerified(false);
-                                        setFilterOnline(false);
-                                        setFilterHighVolume(false);
-                                        setFilterFavorites(false);
-                                        setSelectedPaymentMethod('Todos los métodos');
-                                        
-                                        // Also clear the filter inputs
-                                        minRateInputRef.current?.clear();
-                                        maxRateInputRef.current?.clear();
-                                    }}
-                                >
-                                    <Icon name="x-circle" size={12} color="#ef4444" />
-                                </TouchableOpacity>
-                            )}
-                            
-                            <TouchableOpacity 
-                                style={styles.refreshButton}
-                                onPress={() => {
-                                    // Trigger refresh animation
-                                    Animated.timing(refreshRotation, {
-                                        toValue: refreshRotation._value + 1,
-                                        duration: 500,
-                                        useNativeDriver: true,
-                                    }).start();
-                                    
-                                    // Convert display name to internal name inline
-                                    let paymentMethodName = null;
-                                    if (selectedPaymentMethod !== 'Todos los métodos' && paymentMethodsData?.p2pPaymentMethods) {
-                                        const method = paymentMethodsData.p2pPaymentMethods.find((pm: any) => pm.displayName === selectedPaymentMethod);
-                                        paymentMethodName = method?.name || null;
-                                    }
+                {/* Favorites filter button */}
+                <TouchableOpacity
+                  style={[
+                    styles.filterButton,
+                    filterFavorites && styles.activeFilterButton
+                  ]}
+                  onPress={() => {
+                    setFilterFavorites(!filterFavorites);
+                    // Immediately refetch with favorites filter
+                    let paymentMethodName = null;
+                    if (selectedPaymentMethod !== 'Todos los métodos' && paymentMethodsData?.p2pPaymentMethods) {
+                      const method = paymentMethodsData.p2pPaymentMethods.find((pm: any) => pm.displayName === selectedPaymentMethod);
+                      paymentMethodName = method?.name || null;
+                    }
+                    refetch({
+                      exchangeType: activeTab === 'buy' ? 'SELL' : 'BUY',
+                      tokenType: selectedCrypto,
+                      paymentMethod: paymentMethodName,
+                      countryCode: selectedCountry?.[2],
+                      favoritesOnly: !filterFavorites
+                    });
+                  }}
+                >
+                  <Icon
+                    name="star"
+                    size={12}
+                    color={filterFavorites ? colors.primary : '#6B7280'}
+                  />
+                </TouchableOpacity>
 
-                                    refetch({
-                                        exchangeType: activeTab === 'buy' ? 'SELL' : 'BUY',
-                                        tokenType: selectedCrypto,
-                                        paymentMethod: paymentMethodName,
-                                        countryCode: selectedCountry?.[2],
-                                        favoritesOnly: filterFavorites
-                                    });
-                                    // Also refresh trades if viewing trades tab
-                                    if (activeList === 'trades' && refetchTrades) {
-                                        refetchTrades();
-                                    }
-                                }}
-                                disabled={offersLoading}
-                            >
-                                <Animated.View
-                                    style={{
-                                        transform: [{
-                                            rotate: refreshRotation.interpolate({
-                                                inputRange: [0, 1],
-                                                outputRange: ['0deg', '360deg']
-                                            })
-                                        }]
-                                    }}
-                                >
-                                    <Icon 
-                                        name="refresh-cw" 
-                                        size={12} 
-                                        color={offersLoading ? colors.primary : '#6B7280'} 
-                                    />
-                                </Animated.View>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
+                {/* Quick clear filters button - only show when filters are active */}
+                {(amount || minRate || maxRate || filterVerified || filterOnline || filterHighVolume || filterFavorites || selectedPaymentMethod !== 'Todos los métodos') && (
+                  <TouchableOpacity
+                    style={styles.quickClearButton}
+                    onPress={() => {
+                      // Clear all filter values
+                      setAmount('');
+                      setMinRate('');
+                      setMaxRate('');
+                      setFilterVerified(false);
+                      setFilterOnline(false);
+                      setFilterHighVolume(false);
+                      setFilterFavorites(false);
+                      setSelectedPaymentMethod('Todos los métodos');
 
-                    {/* Advanced Filters */}
-                    {showAdvancedFilters && (
-                        <>
-                            {/* Background fill for the gap */}
-                            <View style={styles.filterGapFill} />
-                            <View style={styles.advancedFilters}>
-                            <View style={styles.filterInputs}>
-                                <FilterInput
-                                    ref={minRateInputRef}
-                                    placeholder="Tasa min."
-                                    value={minRate}
-                                    onChangeText={setMinRate}
-                                />
-                                <FilterInput
-                                    ref={maxRateInputRef}
-                                    placeholder="Tasa max."
-                                    value={maxRate}
-                                    onChangeText={setMaxRate}
-                                />
-                            </View>
+                      // Also clear the filter inputs
+                      minRateInputRef.current?.clear();
+                      maxRateInputRef.current?.clear();
+                    }}
+                  >
+                    <Icon name="x-circle" size={12} color="#ef4444" />
+                  </TouchableOpacity>
+                )}
 
-                            {/* Country Filter */}
-                            <View style={styles.countryFilterContainer}>
-                                <Text style={styles.filterLabel}>País:</Text>
-                                <TouchableOpacity
-                                    style={styles.countryFilterSelector}
-                                    onPress={openCountryModal}
-                                >
-                                    <Text style={styles.countryFilterFlag}>{selectedCountry?.[3] || '🌍'}</Text>
-                                    <Text style={styles.countryFilterName}>
-                                        {selectedCountry?.[0] || 'Todos los países'}
-                                    </Text>
-                                    <Icon name="chevron-down" size={16} color="#6B7280" />
-                                </TouchableOpacity>
-                            </View>
+                <TouchableOpacity
+                  style={styles.refreshButton}
+                  onPress={() => {
+                    // Trigger refresh animation
+                    Animated.timing(refreshRotation, {
+                      toValue: refreshRotation._value + 1,
+                      duration: 500,
+                      useNativeDriver: true,
+                    }).start();
 
-                            <View style={styles.filterCheckboxes}>
-                                <TouchableOpacity 
-                                    style={styles.checkboxItem}
-                                    onPress={() => setFilterVerified(!filterVerified)}
-                                >
-                                    <View style={[styles.checkbox, filterVerified && styles.checkboxChecked]}>
-                                        {filterVerified && <Icon name="check" size={12} color="#fff" />}
-                                    </View>
-                                    <Text style={styles.checkboxLabel}>Verificados</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity 
-                                    style={styles.checkboxItem}
-                                    onPress={() => setFilterOnline(!filterOnline)}
-                                >
-                                    <View style={[styles.checkbox, filterOnline && styles.checkboxChecked]}>
-                                        {filterOnline && <Icon name="check" size={12} color="#fff" />}
-                                    </View>
-                                    <Text style={styles.checkboxLabel}>Activos hoy</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity 
-                                    style={styles.checkboxItem}
-                                    onPress={() => setFilterHighVolume(!filterHighVolume)}
-                                >
-                                    <View style={[styles.checkbox, filterHighVolume && styles.checkboxChecked]}>
-                                        {filterHighVolume && <Icon name="check" size={12} color="#fff" />}
-                                    </View>
-                                    <Text style={styles.checkboxLabel}>+100 ops</Text>
-                                </TouchableOpacity>
-                            </View>
+                    // Convert display name to internal name inline
+                    let paymentMethodName = null;
+                    if (selectedPaymentMethod !== 'Todos los métodos' && paymentMethodsData?.p2pPaymentMethods) {
+                      const method = paymentMethodsData.p2pPaymentMethods.find((pm: any) => pm.displayName === selectedPaymentMethod);
+                      paymentMethodName = method?.name || null;
+                    }
 
-                            <View style={styles.filterActions}>
-                                <TouchableOpacity 
-                                    style={styles.clearAllButton}
-                                    onPress={() => {
-                                        // Clear all filter values
-                                        setAmount('');
-                                        setMinRate('');
-                                        setMaxRate('');
-                                        setFilterVerified(false);
-                                        setFilterOnline(false);
-                                        setFilterHighVolume(false);
-                                        setSelectedPaymentMethod('Todos los métodos');
-                                        
-                                        // Also clear the filter inputs
-                                        minRateInputRef.current?.clear();
-                                        maxRateInputRef.current?.clear();
-                                    }}
-                                >
-                                    <Icon name="refresh-ccw" size={12} color="#6B7280" />
-                                    <Text style={styles.clearAllButtonText}>Limpiar Todo</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity 
-                                    style={styles.applyButton}
-                                    onPress={() => {
-                                        // Force sync of filter input values by blurring them
-                                        // This ensures any typed values are captured before applying filters
-                                        minRateInputRef.current?.blur();
-                                        maxRateInputRef.current?.blur();
-                                        
-                                        // Close the advanced filters menu
-                                        setShowAdvancedFilters(false);
-                                        
-                                        // Optional: Also refresh the base data from server
-                                        // Convert display name to internal name inline
-                                        let paymentMethodName = null;
-                                        if (selectedPaymentMethod !== 'Todos los métodos' && (paymentMethodsData?.p2p_payment_methods || paymentMethodsData?.p2pPaymentMethods)) {
-                                            const method = (paymentMethodsData?.p2p_payment_methods || paymentMethodsData?.p2pPaymentMethods).find((pm: any) => pm.displayName === selectedPaymentMethod);
-                                            paymentMethodName = method?.name || null;
-                                        }
+                    refetch({
+                      exchangeType: activeTab === 'buy' ? 'SELL' : 'BUY',
+                      tokenType: selectedCrypto,
+                      paymentMethod: paymentMethodName,
+                      countryCode: selectedCountry?.[2],
+                      favoritesOnly: filterFavorites
+                    });
+                    // Also refresh trades if viewing trades tab
+                    if (activeList === 'trades' && refetchTrades) {
+                      refetchTrades();
+                    }
+                  }}
+                  disabled={offersLoading}
+                >
+                  <Animated.View
+                    style={{
+                      transform: [{
+                        rotate: refreshRotation.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: ['0deg', '360deg']
+                        })
+                      }]
+                    }}
+                  >
+                    <Icon
+                      name="refresh-cw"
+                      size={12}
+                      color={offersLoading ? colors.primary : '#6B7280'}
+                    />
+                  </Animated.View>
+                </TouchableOpacity>
+              </View>
+            </View>
 
-                                        refetch({
-                                            exchangeType: activeTab === 'buy' ? 'SELL' : 'BUY',
-                                            tokenType: selectedCrypto,
-                                            paymentMethod: paymentMethodName,
-                                            countryCode: selectedCountry?.[2]
-                                        });
-                                    }}
-                                >
-                                    <Text style={styles.applyButtonText}>Aplicar</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    style={styles.closeButton}
-                                    onPress={() => setShowAdvancedFilters(false)}
-                                >
-                                    <Icon name="x" size={12} color="#6B7280" />
-                                </TouchableOpacity>
-                            </View>
-                        </View>
-                        </>
-                    )}
-                    
-                    {/* Quick Filter Chips */}
-                    <ScrollView 
-                        horizontal 
-                        style={styles.quickFilters}
-                        showsHorizontalScrollIndicator={false}
-                        contentContainerStyle={styles.quickFiltersContent}
+            {/* Advanced Filters */}
+            {showAdvancedFilters && (
+              <>
+                {/* Background fill for the gap */}
+                <View style={styles.filterGapFill} />
+                <View style={styles.advancedFilters}>
+                  <View style={styles.filterInputs}>
+                    <FilterInput
+                      ref={minRateInputRef}
+                      placeholder="Tasa min."
+                      value={minRate}
+                      onChangeText={setMinRate}
+                    />
+                    <FilterInput
+                      ref={maxRateInputRef}
+                      placeholder="Tasa max."
+                      value={maxRate}
+                      onChangeText={setMaxRate}
+                    />
+                  </View>
+
+                  {/* Country Filter */}
+                  <View style={styles.countryFilterContainer}>
+                    <Text style={styles.filterLabel}>País:</Text>
+                    <TouchableOpacity
+                      style={styles.countryFilterSelector}
+                      onPress={openCountryModal}
                     >
-                        <TouchableOpacity 
-                            style={[styles.filterChip, filterVerified && styles.filterChipActive]}
-                            onPress={() => setFilterVerified(!filterVerified)}
-                        >
-                            <Icon name="shield" size={12} color={filterVerified ? '#fff' : '#6B7280'} />
-                            <Text style={[styles.filterChipText, filterVerified && styles.filterChipTextActive]}>
-                                Verificados
-                            </Text>
-                        </TouchableOpacity>
-                        
-                        <TouchableOpacity 
-                            style={[styles.filterChip, filterHighVolume && styles.filterChipActive]}
-                            onPress={() => setFilterHighVolume(!filterHighVolume)}
-                        >
-                            <Icon name="trending-up" size={12} color={filterHighVolume ? '#fff' : '#6B7280'} />
-                            <Text style={[styles.filterChipText, filterHighVolume && styles.filterChipTextActive]}>
-                                +100 trades
-                            </Text>
-                        </TouchableOpacity>
-                        
-                        <TouchableOpacity 
-                            style={[styles.filterChip, filterOnline && styles.filterChipActive]}
-                            onPress={() => setFilterOnline(!filterOnline)}
-                        >
-                            <Icon name="activity" size={12} color={filterOnline ? '#fff' : '#6B7280'} />
-                            <Text style={[styles.filterChipText, filterOnline && styles.filterChipTextActive]}>
-                                Activos
-                            </Text>
-                        </TouchableOpacity>
-                        
-                        <TouchableOpacity 
-                            style={[
-                                styles.filterChip, 
-                                (minRate || maxRate) && styles.filterChipActive
-                            ]}
-                            onPress={() => {
-                                if (minRate || maxRate) {
-                                    // Toggle off
-                                    setMinRate('');
-                                    setMaxRate('');
-                                    minRateInputRef.current?.clear();
-                                    maxRateInputRef.current?.clear();
-                                } else {
-                                    // Toggle on - find best rate from current offers
-                                    const rates = filteredOffers.map(offer => parseFloat(offer.rate)).filter(rate => !isNaN(rate));
-                                    if (rates.length > 0) {
-                                        if (activeTab === 'buy') {
-                                            // For buying, we want the lowest rate
-                                            const bestRate = Math.min(...rates);
-                                            const maxAcceptableRate = bestRate * 1.05; // 5% above best rate
-                                            setMaxRate(maxAcceptableRate.toFixed(2));
-                                            maxRateInputRef.current?.setNativeProps({ text: maxAcceptableRate.toFixed(2) });
-                                        } else {
-                                            // For selling, we want the highest rate
-                                            const bestRate = Math.max(...rates);
-                                            const minAcceptableRate = bestRate * 0.95; // 5% below best rate
-                                            setMinRate(minAcceptableRate.toFixed(2));
-                                            minRateInputRef.current?.setNativeProps({ text: minAcceptableRate.toFixed(2) });
-                                        }
-                                    }
-                                }
-                            }}
-                        >
-                            <Icon name="percent" size={12} color={(minRate || maxRate) ? '#fff' : '#6B7280'} />
-                            <Text style={[
-                                styles.filterChipText, 
-                                (minRate || maxRate) && styles.filterChipTextActive
-                            ]}>
-                                Mejor tasa
-                            </Text>
-                        </TouchableOpacity>
-                        
-                        {(filterVerified || filterOnline || filterHighVolume || minRate || maxRate) && (
-                            <TouchableOpacity 
-                                style={[styles.filterChip, styles.clearChip]}
-                                onPress={() => {
-                                    setFilterVerified(false);
-                                    setFilterOnline(false);
-                                    setFilterHighVolume(false);
-                                    setMinRate('');
-                                    setMaxRate('');
-                                    minRateInputRef.current?.clear();
-                                    maxRateInputRef.current?.clear();
-                                }}
-                            >
-                                <Icon name="x" size={12} color="#EF4444" />
-                                <Text style={[styles.filterChipText, { color: '#EF4444' }]}>
-                                    Limpiar
-                                </Text>
-                            </TouchableOpacity>
-                        )}
-                    </ScrollView>
-                </>
+                      <Text style={styles.countryFilterFlag}>{selectedCountry?.[3] || '🌍'}</Text>
+                      <Text style={styles.countryFilterName}>
+                        {selectedCountry?.[0] || 'Todos los países'}
+                      </Text>
+                      <Icon name="chevron-down" size={16} color="#6B7280" />
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={styles.filterCheckboxes}>
+                    <TouchableOpacity
+                      style={styles.checkboxItem}
+                      onPress={() => setFilterVerified(!filterVerified)}
+                    >
+                      <View style={[styles.checkbox, filterVerified && styles.checkboxChecked]}>
+                        {filterVerified && <Icon name="check" size={12} color="#fff" />}
+                      </View>
+                      <Text style={styles.checkboxLabel}>Verificados</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.checkboxItem}
+                      onPress={() => setFilterOnline(!filterOnline)}
+                    >
+                      <View style={[styles.checkbox, filterOnline && styles.checkboxChecked]}>
+                        {filterOnline && <Icon name="check" size={12} color="#fff" />}
+                      </View>
+                      <Text style={styles.checkboxLabel}>Activos hoy</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.checkboxItem}
+                      onPress={() => setFilterHighVolume(!filterHighVolume)}
+                    >
+                      <View style={[styles.checkbox, filterHighVolume && styles.checkboxChecked]}>
+                        {filterHighVolume && <Icon name="check" size={12} color="#fff" />}
+                      </View>
+                      <Text style={styles.checkboxLabel}>+100 ops</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={styles.filterActions}>
+                    <TouchableOpacity
+                      style={styles.clearAllButton}
+                      onPress={() => {
+                        // Clear all filter values
+                        setAmount('');
+                        setMinRate('');
+                        setMaxRate('');
+                        setFilterVerified(false);
+                        setFilterOnline(false);
+                        setFilterHighVolume(false);
+                        setSelectedPaymentMethod('Todos los métodos');
+
+                        // Also clear the filter inputs
+                        minRateInputRef.current?.clear();
+                        maxRateInputRef.current?.clear();
+                      }}
+                    >
+                      <Icon name="refresh-ccw" size={12} color="#6B7280" />
+                      <Text style={styles.clearAllButtonText}>Limpiar Todo</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.applyButton}
+                      onPress={() => {
+                        // Force sync of filter input values by blurring them
+                        // This ensures any typed values are captured before applying filters
+                        minRateInputRef.current?.blur();
+                        maxRateInputRef.current?.blur();
+
+                        // Close the advanced filters menu
+                        setShowAdvancedFilters(false);
+
+                        // Optional: Also refresh the base data from server
+                        // Convert display name to internal name inline
+                        let paymentMethodName = null;
+                        if (selectedPaymentMethod !== 'Todos los métodos' && (paymentMethodsData?.p2p_payment_methods || paymentMethodsData?.p2pPaymentMethods)) {
+                          const method = (paymentMethodsData?.p2p_payment_methods || paymentMethodsData?.p2pPaymentMethods).find((pm: any) => pm.displayName === selectedPaymentMethod);
+                          paymentMethodName = method?.name || null;
+                        }
+
+                        refetch({
+                          exchangeType: activeTab === 'buy' ? 'SELL' : 'BUY',
+                          tokenType: selectedCrypto,
+                          paymentMethod: paymentMethodName,
+                          countryCode: selectedCountry?.[2]
+                        });
+                      }}
+                    >
+                      <Text style={styles.applyButtonText}>Aplicar</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.closeButton}
+                      onPress={() => setShowAdvancedFilters(false)}
+                    >
+                      <Icon name="x" size={12} color="#6B7280" />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </>
             )}
-        </Animated.View>
+
+            {/* Quick Filter Chips */}
+            <ScrollView
+              horizontal
+              style={styles.quickFilters}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.quickFiltersContent}
+            >
+              <TouchableOpacity
+                style={[styles.filterChip, filterVerified && styles.filterChipActive]}
+                onPress={() => setFilterVerified(!filterVerified)}
+              >
+                <Icon name="shield" size={12} color={filterVerified ? '#fff' : '#6B7280'} />
+                <Text style={[styles.filterChipText, filterVerified && styles.filterChipTextActive]}>
+                  Verificados
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.filterChip, filterHighVolume && styles.filterChipActive]}
+                onPress={() => setFilterHighVolume(!filterHighVolume)}
+              >
+                <Icon name="trending-up" size={12} color={filterHighVolume ? '#fff' : '#6B7280'} />
+                <Text style={[styles.filterChipText, filterHighVolume && styles.filterChipTextActive]}>
+                  +100 trades
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.filterChip, filterOnline && styles.filterChipActive]}
+                onPress={() => setFilterOnline(!filterOnline)}
+              >
+                <Icon name="activity" size={12} color={filterOnline ? '#fff' : '#6B7280'} />
+                <Text style={[styles.filterChipText, filterOnline && styles.filterChipTextActive]}>
+                  Activos
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.filterChip,
+                  (minRate || maxRate) && styles.filterChipActive
+                ]}
+                onPress={() => {
+                  if (minRate || maxRate) {
+                    // Toggle off
+                    setMinRate('');
+                    setMaxRate('');
+                    minRateInputRef.current?.clear();
+                    maxRateInputRef.current?.clear();
+                  } else {
+                    // Toggle on - find best rate from current offers
+                    const rates = filteredOffers.map(offer => parseFloat(offer.rate)).filter(rate => !isNaN(rate));
+                    if (rates.length > 0) {
+                      if (activeTab === 'buy') {
+                        // For buying, we want the lowest rate
+                        const bestRate = Math.min(...rates);
+                        const maxAcceptableRate = bestRate * 1.05; // 5% above best rate
+                        setMaxRate(maxAcceptableRate.toFixed(2));
+                        maxRateInputRef.current?.setNativeProps({ text: maxAcceptableRate.toFixed(2) });
+                      } else {
+                        // For selling, we want the highest rate
+                        const bestRate = Math.max(...rates);
+                        const minAcceptableRate = bestRate * 0.95; // 5% below best rate
+                        setMinRate(minAcceptableRate.toFixed(2));
+                        minRateInputRef.current?.setNativeProps({ text: minAcceptableRate.toFixed(2) });
+                      }
+                    }
+                  }
+                }}
+              >
+                <Icon name="percent" size={12} color={(minRate || maxRate) ? '#fff' : '#6B7280'} />
+                <Text style={[
+                  styles.filterChipText,
+                  (minRate || maxRate) && styles.filterChipTextActive
+                ]}>
+                  Mejor tasa
+                </Text>
+              </TouchableOpacity>
+
+              {(filterVerified || filterOnline || filterHighVolume || minRate || maxRate) && (
+                <TouchableOpacity
+                  style={[styles.filterChip, styles.clearChip]}
+                  onPress={() => {
+                    setFilterVerified(false);
+                    setFilterOnline(false);
+                    setFilterHighVolume(false);
+                    setMinRate('');
+                    setMaxRate('');
+                    minRateInputRef.current?.clear();
+                    maxRateInputRef.current?.clear();
+                  }}
+                >
+                  <Icon name="x" size={12} color="#EF4444" />
+                  <Text style={[styles.filterChipText, { color: '#EF4444' }]}>
+                    Limpiar
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </ScrollView>
+          </>
+        )}
+      </Animated.View>
     );
   });
 
@@ -3094,7 +3097,7 @@ export const ExchangeScreen = () => {
   const renderContent = () => {
     if (activeList === 'offers') {
       const offers = filteredOffers; // Use filtered offers instead of raw data
-      
+
       if (offersLoading) {
         return (
           <View style={styles.offersList}>
@@ -3104,7 +3107,7 @@ export const ExchangeScreen = () => {
           </View>
         );
       }
-      
+
       if (offersError) {
         return (
           <View style={[styles.offersList, { padding: 16 }]}>
@@ -3112,14 +3115,14 @@ export const ExchangeScreen = () => {
           </View>
         );
       }
-      
+
       if (offers.length === 0) {
         // Show different message based on active filters
         const hasAmount = amount && amount.trim() !== '';
         const hasRateFilters = (minRate && minRate.trim() !== '') || (maxRate && maxRate.trim() !== '');
         const hasAdvancedFilters = filterVerified || filterOnline || filterHighVolume;
         const hasAnyFilters = hasAmount || hasRateFilters || hasAdvancedFilters || filterFavorites;
-        
+
         if (hasAnyFilters) {
           return (
             <View style={styles.offersList}>
@@ -3142,14 +3145,14 @@ export const ExchangeScreen = () => {
             </View>
           );
         }
-        
+
         return (
           <View style={styles.offersList}>
             <EmptyState
               icon="trending-up"
               title={activeTab === 'buy' ? 'No hay vendedores' : 'No hay compradores'}
-              subtitle={activeTab === 'buy' 
-                ? 'Sé el primero en crear una oferta de venta' 
+              subtitle={activeTab === 'buy'
+                ? 'Sé el primero en crear una oferta de venta'
                 : 'Sé el primero en crear una oferta de compra'}
               actionLabel="Crear oferta"
               onAction={() => navigation.navigate('CreateOffer')}
@@ -3163,7 +3166,7 @@ export const ExchangeScreen = () => {
           </View>
         );
       }
-      
+
       return (
         <View style={[styles.offersList, { padding: 16, paddingTop: 8 }]}>
           {offers.map((offer: any) => (
@@ -3172,7 +3175,7 @@ export const ExchangeScreen = () => {
         </View>
       );
     }
-    
+
     if (activeList === 'trades') {
       return (
         <View style={[styles.offersList, { padding: 16 }]}>
@@ -3198,7 +3201,7 @@ export const ExchangeScreen = () => {
               {activeTrades.map((trade) => (
                 <ActiveTradeCard key={trade.id} trade={trade} />
               ))}
-              
+
               {/* Load More Button */}
               {myTradesData?.myP2pTrades?.hasMore && (
                 <TouchableOpacity
@@ -3277,7 +3280,7 @@ export const ExchangeScreen = () => {
         </View>
       );
     }
-    
+
     return null;
   };
 
@@ -3298,7 +3301,7 @@ export const ExchangeScreen = () => {
             {'\n\n'}
             Para usar esta función, puedes cambiar a tu cuenta personal desde el menú de perfil.
           </Text>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.employeeBlockButton}
             onPress={() => navigation.goBack()}
           >
@@ -3328,7 +3331,7 @@ export const ExchangeScreen = () => {
   return (
     <View style={styles.container}>
       <Header />
-      
+
       <Modal
         animationType="fade"
         transparent={true}
@@ -3342,13 +3345,13 @@ export const ExchangeScreen = () => {
             <TouchableWithoutFeedback>
               <View style={styles.modalContent}>
                 <Text style={styles.modalTitle}>Métodos de pago</Text>
-                <ScrollView 
+                <ScrollView
                   style={styles.modalScrollView}
                   showsVerticalScrollIndicator={true}
                 >
                   {paymentMethods.map((method, index) => (
-                    <TouchableOpacity 
-                      key={index} 
+                    <TouchableOpacity
+                      key={index}
                       style={styles.modalItem}
                       onPress={() => onSelectPaymentMethod(method)}
                     >
@@ -3403,19 +3406,19 @@ export const ExchangeScreen = () => {
         </View>
       </Modal>
 
-      <Animated.ScrollView 
+      <Animated.ScrollView
         ref={scrollViewRef}
-        style={styles.content} 
-        contentContainerStyle={{ 
+        style={styles.content}
+        contentContainerStyle={{
           paddingTop: Platform.OS === 'ios' ? headerHeight - 16 : headerHeight, // Adjust for iOS content padding
-          paddingBottom: 100 
+          paddingBottom: 100
         }}
         onScroll={Animated.event(
-            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-            { 
-              useNativeDriver: false, // Must be false for RefreshControl to work
-              listener: handleScroll
-            }
+          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+          {
+            useNativeDriver: false, // Must be false for RefreshControl to work
+            listener: handleScroll
+          }
         )}
         scrollEventThrottle={16}
         bounces={true}
@@ -3436,7 +3439,7 @@ export const ExchangeScreen = () => {
       </Animated.ScrollView>
 
       {/* Floating Action Button */}
-      <TouchableOpacity 
+      <TouchableOpacity
         style={styles.fab}
         onPress={() => navigation.navigate('CreateOffer')}
       >

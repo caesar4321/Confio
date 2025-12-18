@@ -23,7 +23,7 @@ class Conversion(models.Model):
     ]
     
     # Unique identifier
-    conversion_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    internal_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     
     # Direct User/Business actor pattern
     actor_user = models.ForeignKey(
@@ -95,7 +95,7 @@ class Conversion(models.Model):
             models.Index(fields=['actor_user', 'status'], name='conv_actor_user_status_idx'),
             models.Index(fields=['actor_business', 'status'], name='conv_actor_bus_status_idx'),
             models.Index(fields=['actor_type', 'status'], name='conv_actor_type_status_idx'),
-            models.Index(fields=['conversion_id']),
+            models.Index(fields=['internal_id']),
             models.Index(fields=['created_at']),
         ]
     

@@ -37,10 +37,11 @@ const formatDate = (iso?: string | null) => {
 
 const statusLabel = (status: string, type: string) => {
     const s = status.toLowerCase();
-    if (s === 'completed' || s === 'confirmed') return 'Completado';
-    if (s === 'pending') return 'Pendiente';
+    // Confirmed-like statuses show "Confirmado" (confirmed, completed, paid)
+    if (s === 'confirmed' || s === 'completed' || s === 'paid') return 'Confirmado';
     if (s === 'failed') return 'Fallido';
-    return 'Procesado';
+    // Pending statuses show "Confirmando…"
+    return 'Confirmando…';
 };
 
 const getHeaderTitle = (type: string) => {
@@ -71,7 +72,9 @@ export const TransactionReceiptView: React.FC<TransactionReceiptViewProps> = ({
     generatedDate,
     verificationId,
 }) => {
-    const isCompleted = status.toLowerCase() === 'completed' || status.toLowerCase() === 'confirmed';
+    const s = status.toLowerCase();
+    // Confirmed-like statuses get green styling (confirmed, completed, paid)
+    const isCompleted = s === 'confirmed' || s === 'completed' || s === 'paid';
     const statusText = statusLabel(status, type);
 
     return (
@@ -180,22 +183,24 @@ export const TransactionReceiptView: React.FC<TransactionReceiptViewProps> = ({
                 </View>
             </View>
 
-            {/* Verification QR Code */}
-            <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Verificación</Text>
-                <View style={styles.qrCard}>
-                    <QRCode
-                        value={`https://confio.lat/verify/${verificationId || transactionHash}`}
-                        size={80}
-                    />
-                    <View style={styles.qrTextContainer}>
-                        <Text style={styles.qrTitle}>Escanear para verificar</Text>
-                        <Text style={styles.qrDescription}>
-                            Comprueba la autenticidad de este recibo en confio.lat
-                        </Text>
+            {/* Verification QR Code - only show if we have a valid verification ID (not transaction hash) */}
+            {verificationId && (
+                <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Verificación</Text>
+                    <View style={styles.qrCard}>
+                        <QRCode
+                            value={`https://confio.lat/verify/${verificationId}`}
+                            size={80}
+                        />
+                        <View style={styles.qrTextContainer}>
+                            <Text style={styles.qrTitle}>Escanear para verificar</Text>
+                            <Text style={styles.qrDescription}>
+                                Comprueba la autenticidad de este recibo en confio.lat
+                            </Text>
+                        </View>
                     </View>
                 </View>
-            </View>
+            )}
 
             {/* Certification Footer */}
             <View style={styles.certificationCard}>

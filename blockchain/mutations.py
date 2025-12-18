@@ -923,6 +923,7 @@ class SubmitSponsoredGroupMutation(graphene.Mutation):
     success = graphene.Boolean()
     error = graphene.String()
     transaction_id = graphene.String()
+    internal_id = graphene.String()
     confirmed_round = graphene.Int()
     fees_saved = graphene.Float()
     
@@ -1130,10 +1131,12 @@ class SubmitSponsoredGroupMutation(graphene.Mutation):
                             stx.save(update_fields=['status'])
             except Exception as pe:
                 logger.warning(f"Failed to persist SendTransaction for tx {result.get('tx_id')}: {pe}")
+                stx = None
 
             return cls(
                 success=True,
                 transaction_id=result['tx_id'],
+                internal_id=str(stx.internal_id) if stx else None,
                 confirmed_round=result['confirmed_round'] or 0,
                 fees_saved=result.get('fees_saved') or 0.0
             )

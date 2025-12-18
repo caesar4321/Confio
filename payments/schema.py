@@ -27,7 +27,7 @@ class PaymentTransactionType(DjangoObjectType):
         model = PaymentTransaction
         fields = (
             'id',
-            'payment_transaction_id',
+            'internal_id',
             'payer_user', 
             'merchant_account_user',
             'payer_account',
@@ -57,25 +57,28 @@ class PaymentTransactionType(DjangoObjectType):
         try:
             # 1) If the instance already has the response-time dict with transactions, return it
             if isinstance(self.blockchain_data, dict) and 'transactions' in self.blockchain_data:
-                print(f"resolve_blockchain_data: using instance data for {self.payment_transaction_id} (transactions present)")
+                logger.debug(f"resolve_blockchain_data: using instance data for {self.internal_id} (transactions present)")
                 return self.blockchain_data
 
             # 2) Otherwise, try cross-request override cache
-            key = f"ptx:override:{self.payment_transaction_id}"
-            override = cache.get(key)
-            if override is not None:
-                print(f"resolve_blockchain_data: using override for {self.payment_transaction_id} with keys: {list(override.keys())}")
-                return override
-        except Exception:
+            if self.internal_id:
+                key = f"ptx:override:{self.internal_id}"
+                override = cache.get(key)
+                if override is not None:
+                    logger.debug(f"resolve_blockchain_data: using override for {self.internal_id} with keys: {list(override.keys())}")
+                    return override
+        except Exception as e:
+            logger.error(f"Error resolving blockchain_data for {self.internal_id}: {e}")
             pass
         try:
             # Log fallback case for diagnostics
             truncated = str(self.blockchain_data)
             if isinstance(self.blockchain_data, (dict, list)):
-                print(f"resolve_blockchain_data: fallback dict/list for {self.payment_transaction_id}")
+                logger.debug(f"resolve_blockchain_data: fallback dict/list for {self.internal_id}")
             else:
-                print(f"resolve_blockchain_data: fallback string for {self.payment_transaction_id}: {truncated[:120]}...")
-        except Exception:
+                logger.debug(f"resolve_blockchain_data: fallback string for {self.internal_id}: {truncated[:120]}...")
+        except Exception as e:
+            logger.error(f"Error logging fallback blockchain_data for {self.internal_id}: {e}")
             pass
         return self.blockchain_data
 
@@ -340,8 +343,8 @@ class PayInvoice(graphene.Mutation):
             )
 
         # Debug logging
-        print(f"PayInvoice: User {user.id} attempting to pay invoice {invoice_id}")
-        print(f"PayInvoice: Idempotency key: {idempotency_key or 'NOT PROVIDED'}")
+        logger.debug(f"PayInvoice: User {user.id} attempting to pay invoice {invoice_id}")
+        logger.debug(f"PayInvoice: Idempotency key: {idempotency_key or 'NOT PROVIDED'}")
 
         # Use atomic transaction with SELECT FOR UPDATE to prevent race conditions
         try:
@@ -389,7 +392,7 @@ class PayInvoice(graphene.Mutation):
 
                 # After locking the invoice row, re-check idempotency to avoid race
                 if idempotency_key:
-                    print(f"PayInvoice: Post-lock idempotency check for key: {idempotency_key}")
+                    logger.debug(f"PayInvoice: Post-lock idempotency check for key: {idempotency_key}")
                     existing_payment = PaymentTransaction.objects.filter(
                         invoice=invoice,
                         payer_user=user,
@@ -397,7 +400,7 @@ class PayInvoice(graphene.Mutation):
                         deleted_at__isnull=True
                     ).first()
                     if existing_payment:
-                        print(f"PayInvoice: Found existing payment {existing_payment.id} after lock, returning it")
+                        logger.debug(f"PayInvoice: Found existing payment {existing_payment.id} after lock, returning it")
                         return PayInvoice(
                             invoice=existing_payment.invoice,
                             payment_transaction=existing_payment,
@@ -406,9 +409,9 @@ class PayInvoice(graphene.Mutation):
                         )
                 
                 # Debug: Log the JWT account context being used
-                print(f"PayInvoice - JWT account context: {account_type}_{account_index}, business_id={business_id}")
-                print(f"PayInvoice - User ID: {user.id}")
-                print(f"PayInvoice - Available accounts for user: {list(user.accounts.values_list('account_type', 'account_index', 'algorand_address'))}")
+                logger.debug(f"PayInvoice - JWT account context: {account_type}_{account_index}, business_id={business_id}")
+                logger.debug(f"PayInvoice - User ID: {user.id}")
+                logger.debug(f"PayInvoice - Available accounts for user: {list(user.accounts.values_list('account_type', 'account_index', 'algorand_address'))}")
                 
                 # Get the payer's active account using JWT context
                 if account_type == 'business' and business_id:
@@ -425,7 +428,7 @@ class PayInvoice(graphene.Mutation):
                         account_index=account_index
                     ).first()
                 
-                print(f"PayInvoice - Found payer account: {payer_account}")
+                logger.debug(f"PayInvoice - Found payer account: {payer_account}")
                 
                 if not payer_account or not payer_account.algorand_address:
                     return PayInvoice(
@@ -511,11 +514,12 @@ class PayInvoice(graphene.Mutation):
                 blockchain_error = None
                 
                 try:
-                    print(f"PayInvoice: Attempting to create blockchain transactions for payment {payment_transaction.payment_transaction_id}")
-                    print(f"PayInvoice: Merchant business: {merchant_business.id if merchant_business else 'None'}")
-                    print(f"PayInvoice: Amount: {invoice.amount} {invoice.token_type}")
+                    logger.info(f"PayInvoice: Attempting to create blockchain transactions for payment {payment_transaction.internal_id}")
+                    logger.debug(f"PayInvoice: Merchant business: {merchant_business.id if merchant_business else 'None'}")
+                    logger.debug(f"PayInvoice: Amount: {invoice.amount} {invoice.token_type}")
                     
                     from blockchain.payment_mutations import CreateSponsoredPaymentMutation, SubmitSponsoredPaymentMutation
+                    from blockchain.algorand_utils import create_payment_transactions
                     from decimal import Decimal
                     import json
                     
@@ -535,7 +539,7 @@ class PayInvoice(graphene.Mutation):
                     # This is a temporary approach - in production, the JWT should already contain this
                     request.META['HTTP_X_RECIPIENT_BUSINESS_ID'] = str(merchant_business.id) if merchant_business else ''
                     
-                    print(f"PayInvoice: Creating sponsored payment mutation...")
+                    logger.debug(f"PayInvoice: Creating sponsored payment mutation...")
                     
                     # Create the sponsored payment
                     create_result = CreateSponsoredPaymentMutation.mutate(
@@ -543,7 +547,7 @@ class PayInvoice(graphene.Mutation):
                         info=info,
                         amount=float(amount_decimal),
                         asset_type=asset_type,
-                        payment_id=payment_transaction.payment_transaction_id,
+                        payment_id=payment_transaction.internal_id,
                         note=f"Payment for invoice {invoice.invoice_id}",
                         create_receipt=True
                     )
@@ -551,12 +555,12 @@ class PayInvoice(graphene.Mutation):
                     # Restore original META
                     request.META = original_meta
                     
-                    print(f"PayInvoice: Create result - success: {create_result.success}, has transactions: {bool(create_result.transactions)}")
+                    logger.debug(f"PayInvoice: Create result - success: {create_result.success}, has transactions: {bool(create_result.transactions)}")
                     if not create_result.success:
-                        print(f"PayInvoice: Create error: {create_result.error}")
+                        logger.debug(f"PayInvoice: Create error: {create_result.error}")
                     
                     if create_result.success and create_result.transactions:
-                        print(f"PayInvoice: Created blockchain payment transactions")
+                        logger.debug(f"PayInvoice: Created blockchain payment transactions")
                         
                         # Mark as pending blockchain confirmation
                         payment_transaction.status = 'PENDING_BLOCKCHAIN'
@@ -574,7 +578,7 @@ class PayInvoice(graphene.Mutation):
                         
                         # Save minimal tracking info to DB (no transactions persisted)
                         payment_transaction.blockchain_data = {
-                            'payment_id': payment_transaction.payment_transaction_id,
+                            'payment_id': payment_transaction.internal_id,
                             'status': 'pending_signature'
                         }
                         # Persist status + placeholder hash so merchants can react immediately
@@ -596,7 +600,7 @@ class PayInvoice(graphene.Mutation):
                         response_net = float(create_result.net_amount)
                         response_fee = float(create_result.fee_amount)
                         cache.set(
-                            f"ptx:override:{payment_transaction.payment_transaction_id}",
+                            f"ptx:override:{payment_transaction.internal_id}",
                             {
                                 'transactions': response_transactions,
                                 'group_id': response_group_id,
@@ -701,6 +705,7 @@ class Query(graphene.ObjectType):
     invoice = graphene.Field(InvoiceType, invoice_id=graphene.String())
     invoices = graphene.List(InvoiceType)
     payment_transactions = graphene.List(PaymentTransactionType)
+    payment_transaction = graphene.Field(PaymentTransactionType, id=graphene.ID(required=True))
     payment_transactions_with_friend = graphene.List(
         PaymentTransactionType,
         friend_user_id=graphene.ID(required=True),
@@ -746,6 +751,39 @@ class Query(graphene.ObjectType):
         return PaymentTransaction.objects.filter(
             models.Q(payer_user=user) | models.Q(merchant_account_user=user)
         ).order_by('-created_at')
+
+    def resolve_payment_transaction(self, info, id):
+        """Resolve a single payment transaction by ID (internal_id or pk)"""
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return None
+        
+        from django.db import models
+        try:
+            # Check internal_id (UUID) or PK
+            if len(str(id)) >= 32:
+                q = models.Q(internal_id=id)
+            else:
+                q = models.Q(id=id)
+
+            # Ensure user is party to transaction checks
+            # 1. User is payer
+            # 2. User is merchant account owner
+            # 3. User is employee of payer business
+            # 4. User is employee of merchant business
+            
+            # Simple check first:
+            base_q = q & (models.Q(payer_user=user) | models.Q(merchant_account_user=user))
+            
+            try:
+                return PaymentTransaction.objects.get(base_q)
+            except PaymentTransaction.DoesNotExist:
+                # If simple check fails, check business permissions if applicable
+                # (This can be expanded if needed, for now start with direct association)
+                raise
+                
+        except (PaymentTransaction.DoesNotExist, ValueError):
+            return None
 
 
     def resolve_payment_transactions_with_friend(self, info, friend_user_id, limit=None):

@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional
 from django.conf import settings
 
 from algosdk import encoding as algo_encoding, mnemonic, transaction
+import msgpack
 from algosdk.logic import get_application_address
 from algosdk.transaction import PaymentTxn, AssetTransferTxn, ApplicationNoOpTxn, SuggestedParams
 
@@ -379,7 +380,8 @@ class PresaleTransactionBuilder:
                 {"index": 2, "txn": algo_encoding.msgpack_encode(app_call), "signed": sponsor_signed_2},
             ],
             "transactions_to_sign": [
-                {"index": 1, "txn": algo_encoding.msgpack_encode(cusd_axfer), "message": "User cUSD payment"}
+                # Use raw msgpack of dictify() for unsigned txns so JS algosdk can decode
+                {"index": 1, "txn": base64.b64encode(msgpack.packb(cusd_axfer.dictify(), use_bin_type=True)).decode(), "message": "User cUSD payment"}
             ],
             "group_id": base64.b64encode(gid).decode(),
         }
@@ -444,7 +446,8 @@ class PresaleTransactionBuilder:
                 {"index": 0, "txn": algo_encoding.msgpack_encode(sponsor_bump), "signed": sponsor_signed_0},
             ],
             "transactions_to_sign": [
-                {"index": 1, "txn": algo_encoding.msgpack_encode(app_opt_in), "message": "User app opt-in"}
+                # Use raw msgpack of dictify() for unsigned txns so JS algosdk can decode
+                {"index": 1, "txn": base64.b64encode(msgpack.packb(app_opt_in.dictify(), use_bin_type=True)).decode(), "message": "User app opt-in"}
             ],
             "group_id": base64.b64encode(gid).decode(),
         }
@@ -528,7 +531,8 @@ class PresaleTransactionBuilder:
                 {"index": 1, "txn": algo_encoding.msgpack_encode(app_call), "signed": sponsor_signed_1},
             ],
             "transactions_to_sign": [
-                {"index": 0, "txn": algo_encoding.msgpack_encode(user_witness), "message": "User claim witness"}
+                # Use raw msgpack of dictify() for unsigned txns so JS algosdk can decode
+                {"index": 0, "txn": base64.b64encode(msgpack.packb(user_witness.dictify(), use_bin_type=True)).decode(), "message": "User claim witness"}
             ],
             "group_id": base64.b64encode(gid).decode(),
         }

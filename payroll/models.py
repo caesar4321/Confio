@@ -1,3 +1,4 @@
+import uuid
 import secrets
 import string
 from decimal import Decimal
@@ -15,8 +16,8 @@ def generate_run_id():
 
 
 def generate_payroll_item_id():
-    """Generate a unique payroll item ID"""
-    return ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(12))
+    """Generate a unique payroll item ID (32-char hex UUID)"""
+    return uuid.uuid4().hex
 
 
 class PayrollRun(SoftDeleteModel):
@@ -88,7 +89,7 @@ class PayrollItem(SoftDeleteModel):
         ('CANCELLED', 'Cancelled'),
     ]
 
-    item_id = models.CharField(max_length=32, unique=True, default=generate_payroll_item_id, editable=False)
+    internal_id = models.CharField(max_length=32, unique=True, default=generate_payroll_item_id, editable=False)
     run = models.ForeignKey(
         PayrollRun,
         on_delete=models.CASCADE,
@@ -125,7 +126,7 @@ class PayrollItem(SoftDeleteModel):
     class Meta:
         ordering = ['-created_at']
         indexes = [
-            models.Index(fields=['item_id']),
+            models.Index(fields=['internal_id']),
             models.Index(fields=['run', 'status']),
             models.Index(fields=['recipient_user']),
             models.Index(fields=['recipient_account']),
@@ -139,12 +140,12 @@ class PayrollItem(SoftDeleteModel):
         ]
 
     def __str__(self):
-        return f"{self.item_id} -> {self.recipient_account.algorand_address}"
+        return f"{self.internal_id} -> {self.recipient_account.algorand_address}"
 
     @property
     def payroll_item_box_id(self):
         """Box key to use on-chain"""
-        return self.item_id
+        return self.internal_id
 
 
 class PayrollRecipient(SoftDeleteModel):

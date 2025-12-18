@@ -1,3 +1,4 @@
+import { Buffer } from 'buffer';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View,
@@ -246,7 +247,7 @@ export const PaymentProcessingScreen = () => {
           const pack = await prepareViaWs({
             amount: amt,
             assetType,
-            paymentId: transactionData.invoiceId,
+            internalId: transactionData.invoiceId,
             note,
             recipientBusinessId: (transactionData as any).merchantBusinessId
           });
@@ -255,7 +256,7 @@ export const PaymentProcessingScreen = () => {
           }
           wsPack = {
             transactions: (pack as any).transactions,
-            paymentId: (pack as any).paymentId || (pack as any).payment_id || transactionData.invoiceId,
+            paymentId: (pack as any).internalId || (pack as any).internal_id || (pack as any).paymentId || (pack as any).payment_id || transactionData.invoiceId,
             groupId: (pack as any).groupId || (pack as any).group_id
           } as any;
           console.log('PaymentProcessingScreen[WS]: Prepared pack received');
@@ -297,7 +298,12 @@ export const PaymentProcessingScreen = () => {
         const round = (wsRes as any).confirmedRound || (wsRes as any).confirmed_round;
         console.log('PaymentProcessingScreen[WS]: Confirmed', { txid, round, sign_ms: Math.round(tSignEnd - tSignStart), total_ms: Math.round(now() - t0) });
         setIsComplete(true);
-        setPaymentResponse({ blockchainTxId: txid, blockchainRound: round });
+        // Include paymentTransaction.internalId for QR verification on success screen
+        setPaymentResponse({
+          blockchainTxId: txid,
+          blockchainRound: round,
+          paymentTransaction: { internalId: paymentIdForSubmit }
+        });
         return;
         /*
         // Log current account context for debugging
@@ -333,7 +339,7 @@ export const PaymentProcessingScreen = () => {
               invoice(invoiceId: $invoiceId) {
                 invoiceId
                 paymentTransactions {
-                  paymentTransactionId
+                  internalId
                   status
                   blockchainData
                   createdAt
@@ -361,7 +367,7 @@ export const PaymentProcessingScreen = () => {
             data = {
               payInvoice: {
                 paymentTransaction: {
-                  paymentTransactionId: candidate.paymentTransactionId,
+                  internalId: candidate.internalId,
                   blockchainData: candidate.blockchainData,
                 },
                 success: true
@@ -503,7 +509,7 @@ export const PaymentProcessingScreen = () => {
             
             // Submit via WebSocket first
             const { submitViaWs } = await import('../services/payWs');
-            const wsRes = await submitViaWs(signedTransactions, data.payInvoice.paymentTransaction.paymentTransactionId);
+            const wsRes = await submitViaWs(signedTransactions, data.payInvoice.paymentTransaction.internalId);
             let submitResult: any = null;
             let tSubmitEnd = now();
             if (wsRes && (wsRes.transactionId || wsRes.transaction_id)) {
@@ -530,7 +536,7 @@ export const PaymentProcessingScreen = () => {
               mutation: SUBMIT_SPONSORED_PAYMENT,
               variables: {
                 signedTransactions: JSON.stringify(signedTransactions),
-                paymentId: data.payInvoice.paymentTransaction.paymentTransactionId
+                internalId: data.payInvoice.paymentTransaction.internalId
               }
             });
             tSubmitEnd = now();
@@ -588,7 +594,7 @@ export const PaymentProcessingScreen = () => {
                     try { blockchainData = JSON.parse(blockchainData); } catch {}
                   }
                   const transactions = blockchainData.transactions || [];
-                  const paymentId = pt.paymentTransactionId;
+                  const internalId = pt.internalId;
 
                   // Sign needed transactions
                   const tSignStart = now();
@@ -614,7 +620,7 @@ export const PaymentProcessingScreen = () => {
                   // Submit via WS first
                   const { submitViaWs } = await import('../services/payWs');
                   const tSubmitStart = now();
-                  const wsRes = await submitViaWs(signedTransactions, paymentId);
+                  const wsRes = await submitViaWs(signedTransactions, internalId);
                   let tSubmitEnd = now();
                   if (wsRes && (wsRes.transactionId || wsRes.transaction_id)) {
                     console.log('PaymentProcessingScreen: Blockchain payment confirmed (recovered path, WS):', wsRes);
@@ -627,7 +633,7 @@ export const PaymentProcessingScreen = () => {
                       });
                     } catch {}
                     setIsComplete(true);
-                    setPaymentResponse({ paymentTransaction: { paymentTransactionId: paymentId } });
+                    setPaymentResponse({ paymentTransaction: { internalId: internalId } });
                     return;
                   }
                   // Fallback HTTP GraphQL
@@ -635,7 +641,7 @@ export const PaymentProcessingScreen = () => {
                   const { SUBMIT_SPONSORED_PAYMENT } = await import('../apollo/mutations');
                   const submitResult = await apollo2.mutate({
                     mutation: SUBMIT_SPONSORED_PAYMENT,
-                    variables: { signedTransactions: JSON.stringify(signedTransactions), paymentId }
+                    variables: { signedTransactions: JSON.stringify(signedTransactions), internalId }
                   });
                   tSubmitEnd = now();
                   if (submitResult.data?.submitSponsoredPayment?.success) {
@@ -649,7 +655,7 @@ export const PaymentProcessingScreen = () => {
                       });
                     } catch {}
                     setIsComplete(true);
-                    setPaymentResponse({ paymentTransaction: { paymentTransactionId: paymentId } });
+                    setPaymentResponse({ paymentTransaction: { internalId: internalId } });
                     return;
                   }
                 }
@@ -705,10 +711,18 @@ export const PaymentProcessingScreen = () => {
           );
         } else {
           // Navigate to payment success screen
-          const rawHash = paymentResponse?.paymentTransaction?.transactionHash || '';
+          // paymentResponse structure varies between WS-only (flat) and Mutation (nested)
+          // valid paths: .blockchainTxId, .paymentTransaction.transactionHash, .transaction_id
+          const rawHash =
+            paymentResponse?.blockchainTxId ||
+            paymentResponse?.paymentTransaction?.transactionHash ||
+            paymentResponse?.transaction_id ||
+            '';
+
           const isPlaceholderHash = rawHash.startsWith('pending_blockchain_') || rawHash.startsWith('temp_') || rawHash.toLowerCase() === 'pending';
           const txHash = isPlaceholderHash ? '' : rawHash;
-          const status = txHash ? 'CONFIRMED' : 'SUBMITTED';
+          // Status is always SUBMITTED initially - blockchain confirmation comes later via Celery task
+          const status = 'SUBMITTED';
           const successData = {
             type: 'payment',
             amount: transactionData.amount,
@@ -720,7 +734,8 @@ export const PaymentProcessingScreen = () => {
             message: transactionData.message || '',
             address: transactionData.address || '',
             transactionHash: txHash,
-            paymentTransactionId: paymentResponse?.paymentTransaction?.paymentTransactionId || '',
+            // Use undefined instead of empty string so QR code section properly hides when no internalId
+            internalId: paymentResponse?.paymentTransaction?.internalId || undefined,
             status,
           };
 

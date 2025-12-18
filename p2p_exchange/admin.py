@@ -317,10 +317,10 @@ class DisputedTradeFilter(admin.SimpleListFilter):
 
 @admin.register(P2PTrade)
 class P2PTradeAdmin(EnhancedAdminMixin, admin.ModelAdmin):
-    list_display = ['id', 'crypto_amount_display', 'country_display', 'trade_summary', 'status_display', 'escrow_status_display', 'dispute_indicator', 'time_remaining', 'created_at', 'completed_at']
+    list_display = ['internal_id', 'crypto_amount_display', 'country_display', 'trade_summary', 'status_display', 'escrow_status_display', 'dispute_indicator', 'time_remaining', 'created_at', 'completed_at']
     list_filter = [DisputedTradeFilter, 'status', 'created_at', 'completed_at', 'offer__token_type', 'country_code', 'payment_method']
     search_fields = [
-        'id', 'buyer_user__username', 'seller_user__username', 'offer__user__username',
+        'internal_id', 'buyer_user__username', 'seller_user__username', 'offer__user__username',
         'buyer_business__name', 'seller_business__name', 'payment_reference'
     ]
     readonly_fields = [
@@ -328,7 +328,7 @@ class P2PTradeAdmin(EnhancedAdminMixin, admin.ModelAdmin):
         'escrow_status_display', 'escrow_amount_display', 'escrow_token_display', 'escrow_tx_hash_display', 'escrow_released_tx_hash_display', 'escrow_escrowed_at_display', 'escrow_released_at_display',
         'onchain_escrow_sanity'
     ]
-    readonly_fields = ['created_at', 'updated_at', 'crypto_amount_display', 'country_display', 'status_display', 'time_remaining', 'trade_summary', 'rating_link', 'dispute_link',
+    readonly_fields = ['internal_id', 'created_at', 'updated_at', 'crypto_amount_display', 'country_display', 'status_display', 'time_remaining', 'trade_summary', 'rating_link', 'dispute_link',
                       'escrow_status_display', 'escrow_amount_display', 'escrow_token_display', 'escrow_tx_hash_display', 'escrow_released_tx_hash_display', 'escrow_escrowed_at_display', 'escrow_released_at_display',
                       'onchain_escrow_sanity']
     list_per_page = 50

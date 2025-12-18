@@ -1,6 +1,7 @@
 from django.core.management.base import BaseCommand
 from django.conf import settings
 from django.utils import timezone
+from django.db import models
 
 from presale.models import PresalePurchase
 from users.models_unified import UnifiedTransactionTable
@@ -37,14 +38,7 @@ class Command(BaseCommand):
 
         for purchase in purchases.select_related("user", "phase"):
             ref = f"presale_purchase:{purchase.id}"
-            exists = UnifiedTransactionTable.objects.filter(
-                transaction_type="presale",
-                payment_reference_id=ref,
-            ).exists()
-            if exists:
-                skipped += 1
-                continue
-
+            
             user = purchase.user
             user_display = user.get_full_name() or user.username or user.email or "Tú"
             amount_str = format(purchase.confio_amount.normalize(), "f")
@@ -79,21 +73,40 @@ class Command(BaseCommand):
                 "invitation_reverted": False,
                 "invitation_expires_at": None,
                 "transaction_date": purchase.completed_at or timezone.now(),
+                "presale_purchase": purchase,
             }
 
-            if dry_run:
-                self.stdout.write(f"[DRY RUN] Would create unified transaction for purchase {purchase.id}")
+            # Check if exists by either relation OR reference ID
+            utx = UnifiedTransactionTable.objects.filter(
+                transaction_type="presale",
+            ).filter(
+                models.Q(payment_reference_id=ref) | models.Q(presale_purchase=purchase)
+            ).first()
+
+            if utx:
+                if dry_run:
+                    self.stdout.write(f"[DRY RUN] Would update existing UTX {utx.id} for purchase {purchase.id}")
+                else:
+                    # Update existing
+                    for k, v in defaults.items():
+                        setattr(utx, k, v)
+                    utx.payment_reference_id = ref
+                    utx.save()
+                    # It's an update, count as created or separate stat? Kept simple.
             else:
-                UnifiedTransactionTable.objects.update_or_create(
-                    transaction_type="presale",
-                    payment_reference_id=ref,
-                    defaults=defaults,
-                )
-            created += 1
+                if dry_run:
+                    self.stdout.write(f"[DRY RUN] Would create unified transaction for purchase {purchase.id}")
+                else:
+                    UnifiedTransactionTable.objects.create(
+                        transaction_type="presale",
+                        payment_reference_id=ref,
+                        **defaults
+                    )
+                created += 1
 
         created_msg = created if not dry_run else f"0 (would create {created})"
         self.stdout.write(
             self.style.SUCCESS(
-                f"Processed {total} purchases → created {created_msg} entries, skipped {skipped}"
+                f"Processed {total} purchases → created/updated entries, skipped {skipped}"
             )
         )

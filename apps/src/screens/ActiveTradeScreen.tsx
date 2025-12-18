@@ -47,6 +47,7 @@ const SCROLL_MAX_HEIGHT = Math.min(Math.floor(Dimensions.get('window').height * 
 
 interface ActiveTrade {
   id: string;
+  internalId?: string;
   trader: {
     name: string;
     isOnline: boolean;
@@ -77,7 +78,7 @@ export const ActiveTradeScreen: React.FC = () => {
   const { trade: routeTrade } = route.params;
   const { userProfile } = useAuth();
   const { activeAccount, accounts } = useAccount();
-  
+
   // All useState hooks must be called unconditionally
   const [activeTradeStep, setActiveTradeStep] = useState(1);
   const [timeRemaining, setTimeRemaining] = useState(900);
@@ -91,52 +92,53 @@ export const ActiveTradeScreen: React.FC = () => {
   const [confioCode, setConfioCode] = useState<string | null>(null);
   const [confioCodeExp, setConfioCodeExp] = useState<string | null>(null);
   const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
-  
+
   // Dispute now goes on-chain via prepare/submit using p2pSponsoredService
-  
+
   // Fetch full trade details immediately if we only have an ID
   const { data: tradeDetailsData, loading: tradeDetailsLoading, error: tradeDetailsError, refetch } = useQuery(GET_P2P_TRADE, {
     variables: { id: routeTrade?.id },
     skip: !routeTrade?.id,
     fetchPolicy: 'cache-and-network',
   });
-  
+
   // Use full trade data if available, otherwise use route params
   const fullTradeData = tradeDetailsData?.p2pTrade;
   const currentUserId = userProfile?.id;
   const currentBusinessId = activeAccount?.business?.id;
-  
+
   // Get all my business IDs from all accounts
   const myBusinessIds = accounts
     ?.filter(acc => acc.type === 'business' && acc.business?.id)
     .map(acc => String(acc.business.id)) || [];
-  
+
   // Determine if current user is buyer or seller using strict ID comparisons against the active account context
   const iAmBuyer = fullTradeData ? (
     (fullTradeData.buyerUser?.id && String(fullTradeData.buyerUser.id) === String(currentUserId || '')) ||
     (fullTradeData.buyer?.id && String(fullTradeData.buyer.id) === String(currentUserId || '')) ||
     (currentBusinessId && fullTradeData.buyerBusiness?.id && String(fullTradeData.buyerBusiness.id) === String(currentBusinessId))
   ) : false;
-  
+
   const iAmSeller = fullTradeData ? (
     (fullTradeData.sellerUser?.id && String(fullTradeData.sellerUser.id) === String(currentUserId || '')) ||
     (fullTradeData.seller?.id && String(fullTradeData.seller.id) === String(currentUserId || '')) ||
     (currentBusinessId && fullTradeData.sellerBusiness?.id && String(fullTradeData.sellerBusiness.id) === String(currentBusinessId))
   ) : false;
-  
+
   const trade = fullTradeData ? {
     id: fullTradeData.id,
+    internalId: fullTradeData.internalId || routeTrade?.internalId || routeTrade?.internal_id,
     step: fullTradeData.step || 1,
     status: fullTradeData.status,
     hasRating: fullTradeData.hasRating || false,
     tradeType: iAmBuyer ? 'buy' : 'sell', // Current user's perspective
     trader: iAmBuyer ? {
       // If I'm buyer, show seller info
-      name: fullTradeData.sellerBusiness?.name || 
-        fullTradeData.sellerDisplayName || 
-        `${fullTradeData.sellerUser?.firstName || ''} ${fullTradeData.sellerUser?.lastName || ''}`.trim() || 
-        fullTradeData.sellerUser?.username || 
-        `${fullTradeData.seller?.firstName || ''} ${fullTradeData.seller?.lastName || ''}`.trim() || 
+      name: fullTradeData.sellerBusiness?.name ||
+        fullTradeData.sellerDisplayName ||
+        `${fullTradeData.sellerUser?.firstName || ''} ${fullTradeData.sellerUser?.lastName || ''}`.trim() ||
+        fullTradeData.sellerUser?.username ||
+        `${fullTradeData.seller?.firstName || ''} ${fullTradeData.seller?.lastName || ''}`.trim() ||
         fullTradeData.seller?.username || 'Vendedor',
       isOnline: fullTradeData.sellerStats?.isOnline || false,
       verified: fullTradeData.sellerStats?.isVerified || false,
@@ -146,11 +148,11 @@ export const ActiveTradeScreen: React.FC = () => {
       successRate: fullTradeData.sellerStats?.successRate || 0,
     } : {
       // If I'm seller, show buyer info
-      name: fullTradeData.buyerBusiness?.name || 
-        fullTradeData.buyerDisplayName || 
-        `${fullTradeData.buyerUser?.firstName || ''} ${fullTradeData.buyerUser?.lastName || ''}`.trim() || 
-        fullTradeData.buyerUser?.username || 
-        `${fullTradeData.buyer?.firstName || ''} ${fullTradeData.buyer?.lastName || ''}`.trim() || 
+      name: fullTradeData.buyerBusiness?.name ||
+        fullTradeData.buyerDisplayName ||
+        `${fullTradeData.buyerUser?.firstName || ''} ${fullTradeData.buyerUser?.lastName || ''}`.trim() ||
+        fullTradeData.buyerUser?.username ||
+        `${fullTradeData.buyer?.firstName || ''} ${fullTradeData.buyer?.lastName || ''}`.trim() ||
         fullTradeData.buyer?.username || 'Comprador',
       isOnline: fullTradeData.buyerStats?.isOnline || false,
       verified: fullTradeData.buyerStats?.isVerified || false,
@@ -184,10 +186,10 @@ export const ActiveTradeScreen: React.FC = () => {
         const parsed = JSON.parse(urls);
         if (Array.isArray(parsed)) return parsed.length;
       }
-    } catch {}
+    } catch { }
     return 0;
   })();
-  
+
   // Helper function to get step from trade status
   const getStepFromStatus = (status: string) => {
     switch (status) {
@@ -210,7 +212,7 @@ export const ActiveTradeScreen: React.FC = () => {
       setActiveTradeStep(step);
     }
   }, [trade?.status]);
-  
+
   // Initialize and tick countdown from server expiresAt
   useEffect(() => {
     const expiresAtIso = fullTradeData?.expiresAt as string | undefined;
@@ -242,27 +244,19 @@ export const ActiveTradeScreen: React.FC = () => {
       return () => spin.stop();
     }
   }, [activeTradeStep, spinAnim]);
-  
+
   // Reduce render-time logging to avoid noise that looks like polling
-  useEffect(() => {
-    console.log('[ActiveTradeScreen] Trade status changed:', {
-      tradeId: routeTrade?.id,
-      status: fullTradeData?.status,
-      step: fullTradeData?.step,
-      isBuyer: iAmBuyer,
-      isSeller: iAmSeller,
-    });
-  }, [routeTrade?.id, fullTradeData?.status, fullTradeData?.step, iAmBuyer, iAmSeller]);
-  
+
+
   // no-op
-  
+
   // Format crypto token for display
   const formatCrypto = (crypto: string): string => {
     if (crypto === 'CUSD' || crypto === 'cusd') return 'cUSD';
     if (crypto === 'CONFIO' || crypto === 'confio') return 'CONFIO';
     return crypto;
   };
-  
+
   // Show loading state while fetching full trade details
   if (tradeDetailsLoading && !routeTrade?.step) {
     return (
@@ -288,7 +282,7 @@ export const ActiveTradeScreen: React.FC = () => {
       </SafeAreaView>
     );
   }
-  
+
   // Show error if trade data couldn't be loaded
   if (tradeDetailsError || (!trade && !tradeDetailsLoading)) {
     return (
@@ -341,7 +335,7 @@ export const ActiveTradeScreen: React.FC = () => {
     }
 
     // Ensure keyboard is closed and show global spinner overlay
-    try { Keyboard.dismiss(); } catch {}
+    try { Keyboard.dismiss(); } catch { }
     setIsSubmittingDispute(true);
     // Hide the modal so the spinner overlay is clearly visible above the screen
     setShowDisputeModal(false);
@@ -391,7 +385,7 @@ export const ActiveTradeScreen: React.FC = () => {
       if (!res.success) throw new Error(res.error || 'Fallo al subir la evidencia');
       Alert.alert('Evidencia subida', 'Tu video fue enviado correctamente para revisión.');
       setShowEvidenceSheet(false);
-      try { await refetch(); } catch {}
+      try { await refetch(); } catch { }
     } catch (e: any) {
       console.error('[Dispute] upload evidence error:', e?.message || e);
       Alert.alert('Error', e?.message || 'No se pudo subir la evidencia.');
@@ -423,10 +417,28 @@ export const ActiveTradeScreen: React.FC = () => {
   };
 
   const handleOpenChat = () => {
+    // Calculate correct counterparty name for chat
+    let chatName = trade.trader?.name || 'Comerciante';
+    const fullData = tradeDetailsData?.p2pTrade;
+    if (fullData) {
+      const iAmBuyer = trade.tradeType === 'buy';
+      if (iAmBuyer) {
+        if (fullData.sellerBusiness) chatName = fullData.sellerBusiness.name;
+        else if (fullData.offer?.exchangeType === 'SELL' && fullData.offer?.offerBusiness) chatName = fullData.offer.offerBusiness.name;
+        else if (fullData.sellerDisplayName) chatName = fullData.sellerDisplayName;
+        else if (fullData.sellerUser) chatName = `${fullData.sellerUser.firstName || ''} ${fullData.sellerUser.lastName || ''}`.trim() || fullData.sellerUser.username || chatName;
+      } else {
+        if (fullData.buyerBusiness) chatName = fullData.buyerBusiness.name;
+        else if (fullData.offer?.exchangeType === 'BUY' && fullData.offer?.offerBusiness) chatName = fullData.offer.offerBusiness.name;
+        else if (fullData.buyerDisplayName) chatName = fullData.buyerDisplayName;
+        else if (fullData.buyerUser) chatName = `${fullData.buyerUser.firstName || ''} ${fullData.buyerUser.lastName || ''}`.trim() || fullData.buyerUser.username || chatName;
+      }
+    }
+
     navigation.navigate('TradeChat', {
       offer: {
         id: trade.id,
-        name: trade.trader?.name || 'Comerciante',
+        name: chatName,
         rate: (trade.rate || '0') + ' ' + (trade.currencyCode || 'VES'),
         limit: '1000',
         available: '500',
@@ -497,14 +509,14 @@ export const ActiveTradeScreen: React.FC = () => {
           <Text style={styles.stepDescription}>
             Transfiere <Text style={styles.boldText}>{trade.totalBs || '0'} {trade.currencyCode || 'VES'}</Text> usando:
           </Text>
-          
+
           <View style={styles.paymentMethodCard}>
             <View style={styles.paymentMethodHeader}>
               <View style={styles.paymentMethodIcon}>
-                <Icon 
-                  name={getPaymentMethodIcon(null, null, trade.paymentMethod)} 
-                  size={18} 
-                  color="#fff" 
+                <Icon
+                  name={getPaymentMethodIcon(null, null, trade.paymentMethod)}
+                  size={18}
+                  color="#fff"
                 />
               </View>
               <View>
@@ -548,7 +560,7 @@ export const ActiveTradeScreen: React.FC = () => {
               </View>
             </View>
           )}
-          
+
           <View style={styles.infoCard}>
             <View style={styles.infoContent}>
               <Icon name="info" size={20} color={colors.accent} style={styles.infoIcon} />
@@ -560,7 +572,7 @@ export const ActiveTradeScreen: React.FC = () => {
               </View>
             </View>
           </View>
-          
+
           <TouchableOpacity style={styles.primaryButton} onPress={handleOpenChat}>
             <Icon name="message-circle" size={16} color="#fff" style={styles.buttonIcon} />
             <Text style={styles.primaryButtonText}>Ir al chat del intercambio</Text>
@@ -575,7 +587,7 @@ export const ActiveTradeScreen: React.FC = () => {
           <Text style={styles.stepDescription}>
             {trade.trader?.name || 'El vendedor'} debe transferir <Text style={styles.boldText}>{trade.totalBs || '0'} {trade.currencyCode || 'VES'}</Text> a tu cuenta.
           </Text>
-          
+
           <View style={styles.infoCard}>
             <View style={styles.infoContent}>
               <Icon name="clock" size={20} color={colors.accent} style={styles.infoIcon} />
@@ -608,10 +620,10 @@ export const ActiveTradeScreen: React.FC = () => {
             </View>
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>ID del intercambio:</Text>
-              <Text style={[styles.summaryValue, { fontSize: 12 }]}>#{trade.id.slice(-8).toUpperCase()}</Text>
+              <Text style={[styles.summaryValue, { fontSize: 12 }]}>#{(fullTradeData?.internalId || trade.internalId || trade.id).toString().slice(0, 7).toUpperCase()}</Text>
             </View>
           </View>
-          
+
           <TouchableOpacity style={styles.primaryButton} onPress={handleOpenChat}>
             <Icon name="message-circle" size={16} color="#fff" style={styles.buttonIcon} />
             <Text style={styles.primaryButtonText}>Ir al chat del intercambio</Text>
@@ -629,33 +641,33 @@ export const ActiveTradeScreen: React.FC = () => {
           <Text style={styles.stepDescription}>
             Confirma que has completado el pago de <Text style={styles.boldText}>{trade.totalBs || '0'} {trade.currencyCode || 'VES'}</Text>
           </Text>
-          
+
           <View style={styles.infoCard}>
             <View style={styles.infoContent}>
               <Icon name="info" size={20} color={colors.accent} style={styles.infoIcon} />
               <View>
                 <Text style={styles.infoTitle}>Verificación del vendedor</Text>
                 <Text style={styles.infoText}>
-                  {trade.trader?.name || 'El vendedor'} verificará el pago en su cuenta bancaria. 
+                  {trade.trader?.name || 'El vendedor'} verificará el pago en su cuenta bancaria.
                   Por favor sé paciente mientras confirma la transacción.
                 </Text>
               </View>
             </View>
           </View>
-            
+
           <View style={styles.warningCard}>
             <View style={styles.warningContent}>
               <Icon name="alert-triangle" size={20} color="#D97706" style={styles.warningIcon} />
               <View>
                 <Text style={styles.warningTitle}>Solo confirma si ya pagaste</Text>
                 <Text style={styles.warningText}>
-                  No marques como pagado si no has completado la transferencia. 
+                  No marques como pagado si no has completado la transferencia.
                   Esto puede resultar en la suspensión de tu cuenta.
                 </Text>
               </View>
             </View>
           </View>
-          
+
           <View style={styles.infoCard}>
             <View style={styles.infoContent}>
               <Icon name="info" size={20} color={colors.accent} style={styles.infoIcon} />
@@ -667,7 +679,7 @@ export const ActiveTradeScreen: React.FC = () => {
               </View>
             </View>
           </View>
-          
+
           <TouchableOpacity style={styles.primaryButton} onPress={handleOpenChat}>
             <Icon name="message-circle" size={16} color="#ffffff" style={styles.buttonIcon} />
             <Text style={styles.primaryButtonText}>Ir al chat del intercambio</Text>
@@ -682,14 +694,14 @@ export const ActiveTradeScreen: React.FC = () => {
           <Text style={styles.stepDescription}>
             Verifica que recibiste <Text style={styles.boldText}>{trade.totalBs || '0'} {trade.currencyCode || 'VES'}</Text> en tu cuenta bancaria.
           </Text>
-          
+
           <View style={styles.warningCard}>
             <View style={styles.warningContent}>
               <Icon name="alert-triangle" size={20} color="#D97706" style={styles.warningIcon} />
               <View>
                 <Text style={styles.warningTitle}>Verifica antes de confirmar</Text>
                 <Text style={styles.warningText}>
-                  Solo confirma si realmente recibiste el pago en tu cuenta. 
+                  Solo confirma si realmente recibiste el pago en tu cuenta.
                   Una vez confirmado, se liberarán los {formatCrypto(trade.crypto || 'cUSD')} al comprador.
                 </Text>
               </View>
@@ -707,7 +719,7 @@ export const ActiveTradeScreen: React.FC = () => {
               </View>
             </View>
           </View>
-          
+
           <View style={styles.infoCard}>
             <View style={styles.infoContent}>
               <Icon name="info" size={20} color={colors.accent} style={styles.infoIcon} />
@@ -719,7 +731,7 @@ export const ActiveTradeScreen: React.FC = () => {
               </View>
             </View>
           </View>
-          
+
           <TouchableOpacity style={styles.primaryButton} onPress={handleOpenChat}>
             <Icon name="message-circle" size={16} color="#ffffff" style={styles.buttonIcon} />
             <Text style={styles.primaryButtonText}>Ir al chat del intercambio</Text>
@@ -737,49 +749,49 @@ export const ActiveTradeScreen: React.FC = () => {
           <Text style={styles.stepDescription}>
             {trade.trader?.name || 'El vendedor'} está verificando tu pago. Esto puede tomar unos minutos.
           </Text>
-      
-      <View style={styles.loadingCard}>
-        <Animated.View 
-          style={[
-            styles.spinner,
-            {
-              transform: [{
-                rotate: spinAnim.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: ['0deg', '360deg'],
-                })
-              }]
-            }
-          ]}
-        />
-        <Text style={styles.loadingTitle}>Verificando pago...</Text>
-        <Text style={styles.loadingSubtitle}>Tiempo promedio: {trade.trader?.responseTime || 'N/A'}</Text>
-      </View>
-      
-      <View style={styles.summaryCard}>
-        <Text style={styles.summaryTitle}>Resumen de la operación</Text>
-        <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>Cantidad:</Text>
-          <Text style={styles.summaryValue}>{trade.amount || '0'} {trade.crypto}</Text>
-        </View>
-        <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>Pagado:</Text>
-          <Text style={styles.summaryValue}>{trade.totalBs || '0'} {trade.currencyCode || 'VES'}</Text>
-        </View>
-        <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>Tasa de cambio:</Text>
-          <Text style={styles.summaryValue}>{trade.rate || '0'} {trade.currencyCode || 'VES'}/{formatCrypto(trade.crypto || 'cUSD')}</Text>
-        </View>
-        <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>Vendedor:</Text>
-          <Text style={styles.summaryValue}>{trade.trader?.name || 'el vendedor'}</Text>
-        </View>
-        <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>ID del intercambio:</Text>
-          <Text style={[styles.summaryValue, { fontSize: 12 }]}>#{trade.id.slice(-8).toUpperCase()}</Text>
-        </View>
-      </View>
-      
+
+          <View style={styles.loadingCard}>
+            <Animated.View
+              style={[
+                styles.spinner,
+                {
+                  transform: [{
+                    rotate: spinAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: ['0deg', '360deg'],
+                    })
+                  }]
+                }
+              ]}
+            />
+            <Text style={styles.loadingTitle}>Verificando pago...</Text>
+            <Text style={styles.loadingSubtitle}>Tiempo promedio: {trade.trader?.responseTime || 'N/A'}</Text>
+          </View>
+
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryTitle}>Resumen de la operación</Text>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Cantidad:</Text>
+              <Text style={styles.summaryValue}>{trade.amount || '0'} {trade.crypto}</Text>
+            </View>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Pagado:</Text>
+              <Text style={styles.summaryValue}>{trade.totalBs || '0'} {trade.currencyCode || 'VES'}</Text>
+            </View>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Tasa de cambio:</Text>
+              <Text style={styles.summaryValue}>{trade.rate || '0'} {trade.currencyCode || 'VES'}/{formatCrypto(trade.crypto || 'cUSD')}</Text>
+            </View>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Vendedor:</Text>
+              <Text style={styles.summaryValue}>{trade.trader?.name || 'el vendedor'}</Text>
+            </View>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>ID del intercambio:</Text>
+              <Text style={[styles.summaryValue, { fontSize: 12 }]}>#{(fullTradeData?.internalId || trade.internalId || trade.id).toString().slice(0, 7).toUpperCase()}</Text>
+            </View>
+          </View>
+
           <TouchableOpacity style={styles.primaryButton} onPress={handleOpenChat}>
             <Icon name="message-circle" size={16} color="#fff" style={styles.buttonIcon} />
             <Text style={styles.primaryButtonText}>Ir al chat del intercambio</Text>
@@ -794,9 +806,9 @@ export const ActiveTradeScreen: React.FC = () => {
           <Text style={styles.stepDescription}>
             Estamos procesando la transferencia de {trade.amount || '0'} {formatCrypto(trade.crypto || 'cUSD')} a {trade.trader?.name || 'el comprador'}.
           </Text>
-          
+
           <View style={styles.loadingCard}>
-            <Animated.View 
+            <Animated.View
               style={[
                 styles.spinner,
                 {
@@ -812,7 +824,7 @@ export const ActiveTradeScreen: React.FC = () => {
             <Text style={styles.loadingTitle}>Procesando transacción...</Text>
             <Text style={styles.loadingSubtitle}>Esto puede tomar unos minutos</Text>
           </View>
-          
+
           <View style={styles.summaryCard}>
             <Text style={styles.summaryTitle}>Resumen de la operación</Text>
             <View style={styles.summaryRow}>
@@ -828,7 +840,7 @@ export const ActiveTradeScreen: React.FC = () => {
               <Text style={styles.summaryValue}>{trade.trader?.name || 'el comprador'}</Text>
             </View>
           </View>
-          
+
           <TouchableOpacity style={styles.primaryButton} onPress={handleOpenChat}>
             <Icon name="message-circle" size={16} color="#fff" style={styles.buttonIcon} />
             <Text style={styles.primaryButtonText}>Ir al chat del intercambio</Text>
@@ -841,15 +853,9 @@ export const ActiveTradeScreen: React.FC = () => {
   const renderStep4 = () => {
     // Get full trade data from GraphQL query
     const fullTradeData = tradeDetailsData?.p2pTrade;
-    
-    console.log('[ActiveTradeScreen] renderStep4 - trade data:', {
-      tradeId: trade.id,
-      status: trade.status,
-      hasRating: trade.hasRating,
-      step: trade.step,
-      willShowRatedUI: (trade.status === 'COMPLETED' || trade.status === 'CRYPTO_RELEASED' || trade.status === 'PAYMENT_CONFIRMED') && trade.hasRating
-    });
-    
+
+
+
     // If trade is already completed (rated), show different UI
     if ((trade.status === 'COMPLETED' || trade.status === 'CRYPTO_RELEASED' || trade.status === 'PAYMENT_CONFIRMED') && trade.hasRating) {
       return (
@@ -863,12 +869,12 @@ export const ActiveTradeScreen: React.FC = () => {
               Este intercambio ha sido completado y calificado
             </Text>
           </View>
-          
+
           <View style={styles.transactionDetailsCard}>
             <Text style={styles.transactionDetailsTitle}>Detalles de la transacción</Text>
             <View style={styles.transactionDetailsRow}>
               <Text style={styles.transactionDetailsLabel}>ID del intercambio:</Text>
-              <Text style={[styles.transactionDetailsValue, { fontSize: 12 }]}>#{trade.id.slice(-8).toUpperCase()}</Text>
+              <Text style={[styles.transactionDetailsValue, { fontSize: 12 }]}>#{(fullTradeData?.internalId || trade.internalId || trade.id).toString().slice(0, 7).toUpperCase()}</Text>
             </View>
             <View style={styles.transactionDetailsRow}>
               <Text style={styles.transactionDetailsLabel}>Fecha de finalización:</Text>
@@ -899,7 +905,7 @@ export const ActiveTradeScreen: React.FC = () => {
               <Text style={[styles.transactionDetailsValue, { color: colors.success }]}>Completado y calificado</Text>
             </View>
           </View>
-          
+
           <View style={styles.successButtons}>
             <TouchableOpacity style={styles.secondaryButton} onPress={handleGoBack}>
               <Text style={styles.secondaryButtonText}>Volver a Intercambios</Text>
@@ -909,7 +915,7 @@ export const ActiveTradeScreen: React.FC = () => {
           {/* Technical details button for completed & rated trade (if hash available) */}
           {(
             <View style={styles.transactionDetailsCard}>
-              <TouchableOpacity 
+              <TouchableOpacity
                 onPress={() => setShowTechnicalDetails(true)}
                 style={styles.blockchainButton}
               >
@@ -973,9 +979,9 @@ export const ActiveTradeScreen: React.FC = () => {
                           return;
                         }
                         const base = __DEV__ ? 'https://testnet.explorer.perawallet.app' : 'https://explorer.perawallet.app';
-                    const url = `${base}/tx/${encodeURIComponent(txid)}`;
-                    try { await Linking.openURL(url); }
-                    catch { Alert.alert('Error', 'No se pudo abrir Pera Explorer.'); }
+                        const url = `${base}/tx/${encodeURIComponent(txid)}`;
+                        try { await Linking.openURL(url); }
+                        catch { Alert.alert('Error', 'No se pudo abrir Pera Explorer.'); }
                       } catch (e) {
                         Alert.alert('Error', 'No se pudo abrir Pera Explorer.');
                       }
@@ -991,7 +997,7 @@ export const ActiveTradeScreen: React.FC = () => {
         </View>
       );
     }
-    
+
     // If trade is not yet rated, show rating button
     return (
       <View style={styles.stepCard}>
@@ -1004,12 +1010,12 @@ export const ActiveTradeScreen: React.FC = () => {
             Has recibido <Text style={styles.boldText}>{trade.amount || '0'} {formatCrypto(trade.crypto || 'cUSD')}</Text> en tu wallet
           </Text>
         </View>
-        
+
         <View style={styles.transactionDetailsCard}>
           <Text style={styles.transactionDetailsTitle}>Detalles de la transacción</Text>
           <View style={styles.transactionDetailsRow}>
             <Text style={styles.transactionDetailsLabel}>ID del intercambio:</Text>
-            <Text style={[styles.transactionDetailsValue, { fontSize: 12 }]}>#{trade.id.slice(-8).toUpperCase()}</Text>
+            <Text style={[styles.transactionDetailsValue, { fontSize: 12 }]}>#{(fullTradeData?.internalId || trade.internalId || trade.internal_id || trade.id).toString().slice(0, 7).toUpperCase()}</Text>
           </View>
           <View style={styles.transactionDetailsRow}>
             <Text style={styles.transactionDetailsLabel}>Fecha de finalización:</Text>
@@ -1036,7 +1042,7 @@ export const ActiveTradeScreen: React.FC = () => {
             <Text style={styles.transactionDetailsValue}>{fullTradeData?.paymentMethod?.displayName || trade.paymentMethod || 'N/A'}</Text>
           </View>
         </View>
-        
+
         <View style={styles.successButtons}>
           <TouchableOpacity style={styles.primaryButton} onPress={() => {
             // Check if already rated
@@ -1044,20 +1050,26 @@ export const ActiveTradeScreen: React.FC = () => {
               Alert.alert('Ya calificado', 'Ya has calificado este intercambio.');
               return;
             }
-            
+
             // Determine who is rating whom based on current user's role
             const iAmBuyer = trade.tradeType === 'buy';
             const fullTradeData = tradeDetailsData?.p2pTrade;
-            
+
             // Get counterparty information - handle both personal and business accounts
             let counterpartyName = '';
             let counterpartyInfo = null;
-            
+
             if (iAmBuyer) {
               // I'm the buyer, so I rate the seller
+              const offerIsSeller = fullTradeData?.offer?.exchangeType === 'sell' || fullTradeData?.offer?.exchangeType === 'SELL';
+
               if (fullTradeData?.sellerBusiness) {
                 counterpartyName = fullTradeData.sellerBusiness.name;
                 counterpartyInfo = fullTradeData.sellerBusiness;
+              } else if (offerIsSeller && fullTradeData?.offer?.offerBusiness) {
+                // Fallback to offer business if trade link missing
+                counterpartyName = fullTradeData.offer.offerBusiness.name;
+                counterpartyInfo = fullTradeData.offer.offerBusiness;
               } else if (fullTradeData?.sellerUser) {
                 counterpartyInfo = fullTradeData.sellerUser;
                 counterpartyName = `${counterpartyInfo.firstName || ''} ${counterpartyInfo.lastName || ''}`.trim() || counterpartyInfo.username || 'Vendedor';
@@ -1072,9 +1084,15 @@ export const ActiveTradeScreen: React.FC = () => {
               }
             } else {
               // I'm the seller, so I rate the buyer
+              const offerIsBuyer = fullTradeData?.offer?.exchangeType === 'buy' || fullTradeData?.offer?.exchangeType === 'BUY';
+
               if (fullTradeData?.buyerBusiness) {
                 counterpartyName = fullTradeData.buyerBusiness.name;
                 counterpartyInfo = fullTradeData.buyerBusiness;
+              } else if (offerIsBuyer && fullTradeData?.offer?.offerBusiness) {
+                // Fallback to offer business if trade link missing
+                counterpartyName = fullTradeData.offer.offerBusiness.name;
+                counterpartyInfo = fullTradeData.offer.offerBusiness;
               } else if (fullTradeData?.buyerUser) {
                 counterpartyInfo = fullTradeData.buyerUser;
                 counterpartyName = `${counterpartyInfo.firstName || ''} ${counterpartyInfo.lastName || ''}`.trim() || counterpartyInfo.username || 'Comprador';
@@ -1088,10 +1106,10 @@ export const ActiveTradeScreen: React.FC = () => {
                 counterpartyName = trade.trader?.name || 'Comprador';
               }
             }
-            
+
             // Get the correct counterparty stats
             const counterpartyStats = iAmBuyer ? fullTradeData?.sellerStats : fullTradeData?.buyerStats;
-            
+
             console.log('[ActiveTradeScreen] Rating navigation:', {
               iAmBuyer,
               tradeType: trade.tradeType,
@@ -1105,7 +1123,7 @@ export const ActiveTradeScreen: React.FC = () => {
               counterpartyStats,
               hasRating: trade.hasRating,
             });
-            
+
             navigation.navigate('TraderRating', {
               tradeId: trade.id,
               trader: {
@@ -1140,7 +1158,7 @@ export const ActiveTradeScreen: React.FC = () => {
         {/* Technical details button for completed trade (if hash available) */}
         {(
           <View style={styles.transactionDetailsCard}>
-            <TouchableOpacity 
+            <TouchableOpacity
               onPress={() => setShowTechnicalDetails(true)}
               style={styles.blockchainButton}
             >
@@ -1174,28 +1192,28 @@ export const ActiveTradeScreen: React.FC = () => {
                 nestedScrollEnabled
                 contentInsetAdjustmentBehavior={Platform.OS === 'ios' ? 'always' : 'automatic'}
               >
-                  <View style={styles.modalSection}>
-                    <Text style={styles.modalSectionTitle}>Transacción</Text>
-                    <View style={styles.technicalRow}>
-                      <Text style={styles.technicalLabel}>Red</Text>
-                      <Text style={styles.technicalValue}>{__DEV__ ? 'Testnet' : 'Mainnet'}</Text>
-                    </View>
-                    <View style={styles.technicalRow}>
-                      <Text style={styles.technicalLabel}>Hash</Text>
-                      <Text style={styles.technicalValue} numberOfLines={1}>
-                        {(() => {
-                          const h = (
-                            fullTradeData?.escrow?.releaseTransactionHash ||
-                            fullTradeData?.escrow?.escrowTransactionHash ||
-                            fullTradeData?.cryptoTransactionHash ||
-                            ''
-                          ).toString();
-                          if (!h) return 'N/D';
-                          return h.replace(/(.{10}).+(.{6})/, '$1…$2');
-                        })()}
-                      </Text>
-                    </View>
+                <View style={styles.modalSection}>
+                  <Text style={styles.modalSectionTitle}>Transacción</Text>
+                  <View style={styles.technicalRow}>
+                    <Text style={styles.technicalLabel}>Red</Text>
+                    <Text style={styles.technicalValue}>{__DEV__ ? 'Testnet' : 'Mainnet'}</Text>
                   </View>
+                  <View style={styles.technicalRow}>
+                    <Text style={styles.technicalLabel}>Hash</Text>
+                    <Text style={styles.technicalValue} numberOfLines={1}>
+                      {(() => {
+                        const h = (
+                          fullTradeData?.escrow?.releaseTransactionHash ||
+                          fullTradeData?.escrow?.escrowTransactionHash ||
+                          fullTradeData?.cryptoTransactionHash ||
+                          ''
+                        ).toString();
+                        if (!h) return 'N/D';
+                        return h.replace(/(.{10}).+(.{6})/, '$1…$2');
+                      })()}
+                    </Text>
+                  </View>
+                </View>
 
                 <TouchableOpacity
                   style={[styles.explorerButton]}
@@ -1234,7 +1252,7 @@ export const ActiveTradeScreen: React.FC = () => {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
-      
+
       <View style={styles.header}>
         <View style={styles.headerContent}>
           <TouchableOpacity onPress={handleGoBack} style={styles.backButton}>
@@ -1245,7 +1263,7 @@ export const ActiveTradeScreen: React.FC = () => {
           </Text>
           <View style={styles.headerSpacer} />
           {trade.status !== 'COMPLETED' && trade.status !== 'CANCELLED' && trade.status !== 'EXPIRED' && trade.status !== 'DISPUTED' && (
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.menuButton}
               onPress={() => {
                 Alert.alert(
@@ -1279,11 +1297,11 @@ export const ActiveTradeScreen: React.FC = () => {
             </View>
           )}
         </View>
-        
+
         {trade.status !== 'DISPUTED' && (
           <TradeProgressBar currentStep={activeTradeStep} totalSteps={4} />
         )}
-        
+
         {trade.status !== 'COMPLETED' && trade.status !== 'DISPUTED' && (
           <View style={styles.timerCard}>
             <View style={styles.timerHeader}>
@@ -1297,15 +1315,15 @@ export const ActiveTradeScreen: React.FC = () => {
               )}
             </View>
             <View style={styles.timerProgressBar}>
-              <View 
+              <View
                 style={[
-                  styles.timerProgressFill, 
+                  styles.timerProgressFill,
                   { width: `${Math.max(10, 100 - getProgressPercentage())}%` },
                   timeRemaining <= 0 && styles.timerProgressExpired
-                ]} 
+                ]}
               />
             </View>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.viewAllTradesHint}
               onPress={() => navigation.navigate('BottomTabs', { screen: 'Exchange' })}
             >
@@ -1315,7 +1333,7 @@ export const ActiveTradeScreen: React.FC = () => {
           </View>
         )}
       </View>
-      
+
       {/* Dispute Banner */}
       {trade.status === 'DISPUTED' && (
         <View style={styles.disputeBanner}>
@@ -1324,7 +1342,7 @@ export const ActiveTradeScreen: React.FC = () => {
             <View style={styles.disputeBannerTextContainer}>
               <Text style={styles.disputeBannerTitle}>🤝 Estamos aquí para ayudarte</Text>
               <Text style={styles.disputeBannerText}>
-                Hemos recibido tu solicitud y nuestro equipo especializado está trabajando para resolver 
+                Hemos recibido tu solicitud y nuestro equipo especializado está trabajando para resolver
                 este intercambio de manera justa. Tus fondos están completamente seguros durante este proceso.
               </Text>
               {!!(fullTradeData?.hasEvidence || ownEvidenceCount > 0) && (
@@ -1336,7 +1354,7 @@ export const ActiveTradeScreen: React.FC = () => {
               )}
             </View>
           </View>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.disputeChatButton}
             onPress={handleOpenChat}
           >
@@ -1354,7 +1372,7 @@ export const ActiveTradeScreen: React.FC = () => {
                   setConfioCode(res.confioCode || null);
                   setConfioCodeExp(res.expiresAt || null);
                 }
-              } catch {}
+              } catch { }
               setShowEvidenceSheet(true);
             }}
           >
@@ -1363,13 +1381,13 @@ export const ActiveTradeScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
       )}
-      
+
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {trade.status === 'DISPUTED' ? (
           <View style={styles.stepCard}>
             <Text style={styles.stepTitle}>✅ Tu caso está en buenas manos</Text>
             <Text style={styles.stepDescription}>
-              Un especialista de nuestro equipo está revisando todos los detalles para encontrar la mejor solución. 
+              Un especialista de nuestro equipo está revisando todos los detalles para encontrar la mejor solución.
               Recibirás una notificación tan pronto como tengamos una resolución.
             </Text>
             <View style={styles.disputeInfoCard}>
@@ -1547,6 +1565,57 @@ export const ActiveTradeScreen: React.FC = () => {
                     <Text style={styles.modalDescription}>
                       Solo se aceptan grabaciones de pantalla del app del banco/fintech (30–45s, máx. 200MB). Sigue esta lista:
                     </Text>
+                    {!!confioCode && (
+                      <View style={{ backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0', borderRadius: 8, padding: 12, marginBottom: 12 }}>
+                        <Text style={{ color: '#065F46', fontSize: 14, marginBottom: 4 }}>Código Confío</Text>
+                        <Text style={{ color: '#065F46', fontSize: 20, fontWeight: 'bold' }}>{confioCode}</Text>
+                        {!!confioCodeExp && (
+                          <Text style={{ color: '#065F46', fontSize: 12, marginTop: 4 }}>Vence: {formatLocalDateTime(confioCodeExp)}</Text>
+                        )}
+                      </View>
+                    )}
+                    <Text style={styles.stepDescription}>1) Muestra el código de Confío en la pantalla de disputa</Text>
+                    <Text style={styles.stepDescription}>2) Abre tu app bancaria y busca la transacción</Text>
+                    <Text style={styles.stepDescription}>3) El memo debe incluir el código</Text>
+                    <Text style={styles.stepDescription}>4) Haz pull-to-refresh para actualizar</Text>
+                    <Text style={styles.stepDescription}>5) Desplázate para mostrar ID/importe/hora</Text>
+                    <Text style={styles.stepDescription}>6) Regresa a Confío y sube el video</Text>
+                  </ScrollView>
+                </View>
+                <View style={styles.modalActions}>
+                  <TouchableOpacity style={styles.modalSubmitButton} onPress={pickScreenRecordingFromGallery}>
+                    <Text style={styles.modalSubmitButtonText}>Seleccionar video de pantalla</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          </SafeAreaView>
+        ) : (
+          <View style={[styles.modalOverlay]} pointerEvents="box-none">
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Subir evidencia</Text>
+                <TouchableOpacity onPress={() => setShowEvidenceSheet(false)} style={styles.modalCloseButton}>
+                  <Icon name="x" size={24} color="#6B7280" />
+                </TouchableOpacity>
+              </View>
+              <View style={{ maxHeight: SCROLL_MAX_HEIGHT }}>
+                <ScrollView
+                  style={styles.modalScroll}
+                  contentContainerStyle={styles.modalScrollContent}
+                  keyboardShouldPersistTaps="handled"
+                  keyboardDismissMode={'interactive'}
+                  showsVerticalScrollIndicator={true}
+                  nestedScrollEnabled
+                  overScrollMode="always"
+                  scrollEventThrottle={16}
+                  decelerationRate="normal"
+                  directionalLockEnabled
+                  alwaysBounceVertical
+                >
+                  <Text style={styles.modalDescription}>
+                    Solo se aceptan grabaciones de pantalla del app del banco/fintech (30–45s, máx. 200MB). Sigue esta lista:
+                  </Text>
                   {!!confioCode && (
                     <View style={{ backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0', borderRadius: 8, padding: 12, marginBottom: 12 }}>
                       <Text style={{ color: '#065F46', fontSize: 14, marginBottom: 4 }}>Código Confío</Text>
@@ -1562,65 +1631,14 @@ export const ActiveTradeScreen: React.FC = () => {
                   <Text style={styles.stepDescription}>4) Haz pull-to-refresh para actualizar</Text>
                   <Text style={styles.stepDescription}>5) Desplázate para mostrar ID/importe/hora</Text>
                   <Text style={styles.stepDescription}>6) Regresa a Confío y sube el video</Text>
-                  </ScrollView>
-                </View>
-                <View style={styles.modalActions}>
-                  <TouchableOpacity style={styles.modalSubmitButton} onPress={pickScreenRecordingFromGallery}>
-                    <Text style={styles.modalSubmitButtonText}>Seleccionar video de pantalla</Text>
-                  </TouchableOpacity>
-                </View>
+                </ScrollView>
+              </View>
+              <View style={styles.modalActions}>
+                <TouchableOpacity style={styles.modalSubmitButton} onPress={pickScreenRecordingFromGallery}>
+                  <Text style={styles.modalSubmitButtonText}>Seleccionar video de pantalla</Text>
+                </TouchableOpacity>
               </View>
             </View>
-          </SafeAreaView>
-        ) : (
-          <View style={[styles.modalOverlay]} pointerEvents="box-none">
-            <View style={styles.modalContent}>
-                  <View style={styles.modalHeader}>
-                    <Text style={styles.modalTitle}>Subir evidencia</Text>
-                    <TouchableOpacity onPress={() => setShowEvidenceSheet(false)} style={styles.modalCloseButton}>
-                      <Icon name="x" size={24} color="#6B7280" />
-                    </TouchableOpacity>
-                  </View>
-                  <View style={{ maxHeight: SCROLL_MAX_HEIGHT }}>
-                    <ScrollView
-                      style={styles.modalScroll}
-                      contentContainerStyle={styles.modalScrollContent}
-                      keyboardShouldPersistTaps="handled"
-                      keyboardDismissMode={'interactive'}
-                      showsVerticalScrollIndicator={true}
-                      nestedScrollEnabled
-                      overScrollMode="always"
-                      scrollEventThrottle={16}
-                      decelerationRate="normal"
-                      directionalLockEnabled
-                      alwaysBounceVertical
-                    >
-                      <Text style={styles.modalDescription}>
-                        Solo se aceptan grabaciones de pantalla del app del banco/fintech (30–45s, máx. 200MB). Sigue esta lista:
-                      </Text>
-                      {!!confioCode && (
-                        <View style={{ backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0', borderRadius: 8, padding: 12, marginBottom: 12 }}>
-                          <Text style={{ color: '#065F46', fontSize: 14, marginBottom: 4 }}>Código Confío</Text>
-                          <Text style={{ color: '#065F46', fontSize: 20, fontWeight: 'bold' }}>{confioCode}</Text>
-                          {!!confioCodeExp && (
-                            <Text style={{ color: '#065F46', fontSize: 12, marginTop: 4 }}>Vence: {formatLocalDateTime(confioCodeExp)}</Text>
-                          )}
-                        </View>
-                      )}
-                      <Text style={styles.stepDescription}>1) Muestra el código de Confío en la pantalla de disputa</Text>
-                      <Text style={styles.stepDescription}>2) Abre tu app bancaria y busca la transacción</Text>
-                      <Text style={styles.stepDescription}>3) El memo debe incluir el código</Text>
-                      <Text style={styles.stepDescription}>4) Haz pull-to-refresh para actualizar</Text>
-                      <Text style={styles.stepDescription}>5) Desplázate para mostrar ID/importe/hora</Text>
-                      <Text style={styles.stepDescription}>6) Regresa a Confío y sube el video</Text>
-                    </ScrollView>
-                  </View>
-                  <View style={styles.modalActions}>
-                    <TouchableOpacity style={styles.modalSubmitButton} onPress={pickScreenRecordingFromGallery}>
-                      <Text style={styles.modalSubmitButtonText}>Seleccionar video de pantalla</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
           </View>
         )}
       </Modal>

@@ -159,6 +159,12 @@ class PresalePhase(models.Model):
         return 0
 
 
+import uuid
+
+def generate_presale_purchase_id():
+    """Generate a unique presale purchase ID (32-char hex UUID)"""
+    return uuid.uuid4().hex
+
 class PresalePurchase(models.Model):
     """Records individual presale purchases"""
     STATUS_CHOICES = [
@@ -168,6 +174,15 @@ class PresalePurchase(models.Model):
         ('failed', 'Failed'),
         ('refunded', 'Refunded'),
     ]
+    
+    # Internal ID for universal reference (32-char UUID)
+    internal_id = models.CharField(
+        max_length=32,
+        unique=True,
+        default=generate_presale_purchase_id,
+        editable=False,
+        null=True  # Allow null for migration
+    )
     
     user = models.ForeignKey(
         User, 

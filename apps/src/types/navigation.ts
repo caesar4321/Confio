@@ -215,7 +215,7 @@ export type MainStackParamList = {
       merchant?: string;
       action: string;
       isOnConfio?: boolean;
-      sendTransactionId?: string;
+      internalId?: string;
       recipientAddress?: string;
       invoiceId?: string;
     };
@@ -233,7 +233,7 @@ export type MainStackParamList = {
       location?: string;
       terminal?: string;
       isOnConfio?: boolean;
-      sendTransactionId?: string;
+      internalId?: string;
       invoiceId?: string;
     };
   };
@@ -290,7 +290,7 @@ export type MainStackParamList = {
   BusinessPaymentSuccess: {
     paymentData: {
       id: string;
-      paymentTransactionId: string;
+      internalId: string;
       amount: string;
       tokenType: string;
       description?: string;

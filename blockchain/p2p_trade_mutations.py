@@ -422,10 +422,55 @@ class SubmitP2PCreateTrade(graphene.Mutation):
 
             # Determine total group size dynamically: sponsor txns + user-signed txns (AXFER + AppCall)
             total_count = len(signed_by_idx) + len(user_signed_dicts)
+            
+            # --- DEBUG: Verify Group ID Consistency ---
+            try:
+                client_grp = axfer_dict['txn'].get('grp')
+                if client_grp:
+                    import base64
+                    client_grp_b64 = base64.b64encode(client_grp).decode()
+                    logger.info(f'[P2P Submit] Client Group ID: {client_grp_b64}')
+                
+                # CheckParams
+                logger.info(f'[P2P Submit] Extracted Params: first={sp.first} last={sp.last} gh={sp.gh} gen={sp.gen} fee={sp.fee} min_fee={getattr(sp, "min_fee", "N/A")}')
+
+                # Re-calculate group ID from the ORDERED list of txns we are about to submit
+                # We need to construct the full list of UNsigned txns to calc group id
+                temp_txns = [None] * total_count
+                for idx, txn in expected.items():
+                    # Sponsor txns
+                    b = base64.b64decode(txn)
+                    u = msgpack.unpackb(b, raw=False)
+                    # Clear group if present to recalculate
+                    if 'grp' in u['txn']: del u['txn']['grp']
+                    temp_txns[idx] = transaction.Transaction.undictify(u)
+                
+                # User txns
+                for idx, d in enumerate(user_signed_dicts):
+                    # We don't know the exact index yet without 'missing', but we know logical order
+                    # Wait, 'missing' is calculated below. Let's calculate it here.
+                    missing_idxs = sorted([i for i in range(total_count) if i not in signed_by_idx])
+                    # Heuristic: lower => AXFER, higher => APPL
+                    target_idx = missing_idxs[idx] # user_signed_dicts is [AXFER, APPL] usually? No, order in list depends on client
+                    # We verified user_signed_dicts earlier has AXFER and APPL
+                    # But the loop above "for s in signed_user_txns" preserves order sent by client
+                    # Client sends [AXFER, APPL] ?
+                    # Let's rely on axfer_dict and app_dict objects we already identified
+                    
+                # Actually, let's just grab the sponsor txn (Tx 0) and compare it against what we think it should be
+                # If Tx 0 changes, Group ID changes. 
+                # We can't easily see Client's Tx 0 (it's not sent).
+                # But we can see if User Tx contains the same Group ID as our new calc
+                
+            except Exception as e:
+                logger.error(f'[P2P Debug] Group ID Check Error: {e}')
+            # ------------------------------------------
+
             # Determine missing indices (user-signed: AXFER and AppCall)
             missing = sorted([i for i in range(total_count) if i not in signed_by_idx])
             if len(missing) != len(user_signed_dicts):
                 return cls(success=False, error='Unexpected group shape: expected two user transactions')
+
             # Enforce that the AXFER sender matches the expected seller address from the AppCall accounts
             try:
                 expected_seller = None
@@ -975,7 +1020,12 @@ class SubmitP2pAcceptTrade(graphene.Mutation):
             user_stx = transaction.SignedTransaction.undictify(user_dict)
 
             txid = algod_client.send_transactions([stx0, user_stx])
-            # Do not wait; respond immediately. Celery confirms and updates notifications.
+            # Wait for confirmation to avoid race condition with subsequent mark_paid
+            try:
+                transaction.wait_for_confirmation(algod_client, txid, 4)
+            except Exception as e:
+                logger.warning(f'[P2P SubmitAccept] Wait confirmation warning: {e}')
+            
             ref_txid = user_stx.get_txid()
         except Exception as e:
             return cls(success=False, error=str(e))
@@ -1097,7 +1147,8 @@ class PrepareP2PMarkPaid(graphene.Mutation):
                 logger.info('[P2P Prepare][mark_paid] Box sanity: trade_id=%s box_len=%s buyer=%s status_hex=%s', trade_id, len(raw), (buyer_addr or '')[:12], status_hex)
                 # Enforce ACTIVE and correct buyer to avoid on-chain assert
                 if status_hex != '01':
-                    return cls(success=False, error='El intercambio todavía no está ACTIVO en cadena. Espera unos segundos e inténtalo de nuevo.')
+                    logger.error(f'[P2P Debug] Box content dump: len={len(raw)} raw_b64={_b64.b64encode(raw).decode()}')
+                    return cls(success=False, error=f'El intercambio todavía no está ACTIVO en cadena (status={status_hex}). Espera unos segundos e inténtalo de nuevo.')
                 if buyer_addr and buyer_addr != acct.algorand_address:
                     return cls(success=False, error=f'Debes marcar pagado desde la cuenta compradora: {buyer_addr}')
                 # Do not special-case buyer == sponsor here; rely on proper group alignment elsewhere

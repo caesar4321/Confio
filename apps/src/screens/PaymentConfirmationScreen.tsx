@@ -71,7 +71,7 @@ export const PaymentConfirmationScreen = () => {
 
 
   const { invoiceData } = route.params;
-  
+
   // Helper function to format amount with 2 decimal places
   const formatAmount = (amount: string | number): string => {
     const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
@@ -102,7 +102,7 @@ export const PaymentConfirmationScreen = () => {
       'NON_PROFIT': 'Organización Sin Fines de Lucro',
       'OTHER': 'Otros'
     };
-    
+
     return categoryTranslations[category.toUpperCase()] || category;
   };
 
@@ -134,7 +134,7 @@ export const PaymentConfirmationScreen = () => {
     }
     // Background refresh (non-blocking)
     setBalanceLoading(true);
-    apolloClient.query<{ accountBalance: string}>({
+    apolloClient.query<{ accountBalance: string }>({
       query: GET_ACCOUNT_BALANCE,
       variables: { tokenType: token },
       fetchPolicy: 'network-only'
@@ -149,7 +149,7 @@ export const PaymentConfirmationScreen = () => {
       if (mounted) setBalanceLoading(false);
     });
     return () => { mounted = false; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [invoiceData.tokenType]);
 
   // Background preflight: create the sponsored payment so confirm only signs+submits
@@ -165,14 +165,14 @@ export const PaymentConfirmationScreen = () => {
         const wsPack = await prepareViaWs({
           amount: amt,
           assetType,
-          paymentId: invoiceData.invoiceId,
+          internalId: invoiceData.invoiceId,
           note,
           recipientBusinessId: invoiceData.merchantAccount?.business?.id
         });
         if (alive && wsPack && Array.isArray(wsPack.transactions) && wsPack.transactions.length === 4) {
           setPrepared({
             transactions: wsPack.transactions,
-            paymentId: (wsPack as any).paymentId || (wsPack as any).payment_id || invoiceData.invoiceId,
+            paymentId: (wsPack as any).internalId || (wsPack as any).internal_id || (wsPack as any).paymentId || (wsPack as any).payment_id || invoiceData.invoiceId,
             groupId: (wsPack as any).groupId || (wsPack as any).group_id
           });
           console.log('PaymentConfirmationScreen: Preflight prepared via WS');
@@ -190,16 +190,16 @@ export const PaymentConfirmationScreen = () => {
       }
     })();
     return () => { alive = false; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [invoiceData.invoiceId]);
 
   // Removed prewarm HEAD /health pings
 
   const currentPayment = {
     type: 'merchant',
-    recipient: invoiceData.merchantAccount.business?.name || 
-               invoiceData.merchantUser.firstName || 
-               invoiceData.merchantUser.username,
+    recipient: invoiceData.merchantAccount.business?.name ||
+      invoiceData.merchantUser.firstName ||
+      invoiceData.merchantUser.username,
     recipientType: translateCategory(invoiceData.merchantAccount.business?.category || 'Usuario'),
     amount: invoiceData.amount,
     currency: normalizeTokenType(invoiceData.tokenType),
@@ -207,15 +207,15 @@ export const PaymentConfirmationScreen = () => {
     location: invoiceData.merchantAccount.business?.address || 'Dirección no disponible',
     merchantId: invoiceData.merchantAccount.id,
     paymentId: invoiceData.invoiceId,
-    avatar: (invoiceData.merchantAccount.business?.name || 
-             invoiceData.merchantUser.firstName || 
-             invoiceData.merchantUser.username).charAt(0).toUpperCase(),
+    avatar: (invoiceData.merchantAccount.business?.name ||
+      invoiceData.merchantUser.firstName ||
+      invoiceData.merchantUser.username).charAt(0).toUpperCase(),
     verification: 'Verificado ✓'
   };
 
   // Use snapshot balance; no immediate network dependency
   const realBalance = balanceSnapshot || '0';
-  
+
   // Fallback to mock values only if explicit error (dev/test)
   const mockBalances: { [key: string]: string } = {
     'cUSD': '2850.35',
@@ -223,7 +223,7 @@ export const PaymentConfirmationScreen = () => {
     'CONFIO': '234.18',
     'USDC': '458.22'
   };
-  
+
   const fallbackBalance = balanceError ? mockBalances[invoiceData.tokenType] || '0' : realBalance;
   const hasEnoughBalance = balanceSnapshot != null && parseFloat(fallbackBalance) >= parseFloat(currentPayment.amount);
 
@@ -260,27 +260,27 @@ export const PaymentConfirmationScreen = () => {
   // Wallet data for display
   const walletData = {
     symbol: currentPayment.currency,
-    name: currentPayment.currency === 'cUSD' ? 'Confío Dollar' : 
-          currentPayment.currency === 'CONFIO' ? 'Confío' : 
-          currentPayment.currency === 'USDC' ? 'USD Coin' : currentPayment.currency,
+    name: currentPayment.currency === 'cUSD' ? 'Confío Dollar' :
+      currentPayment.currency === 'CONFIO' ? 'Confío' :
+        currentPayment.currency === 'USDC' ? 'USD Coin' : currentPayment.currency,
     balance: formatBalanceDisplay(fallbackBalance),
-    color: currentPayment.currency === 'cUSD' ? colors.primary : 
-           currentPayment.currency === 'CONFIO' ? colors.secondary : 
-           currentPayment.currency === 'USDC' ? colors.accent : colors.primary,
-    icon: currentPayment.currency === 'cUSD' ? 'C' : 
-          currentPayment.currency === 'CONFIO' ? 'F' : 
-          currentPayment.currency === 'USDC' ? 'U' : '?'
+    color: currentPayment.currency === 'cUSD' ? colors.primary :
+      currentPayment.currency === 'CONFIO' ? colors.secondary :
+        currentPayment.currency === 'USDC' ? colors.accent : colors.primary,
+    icon: currentPayment.currency === 'cUSD' ? 'C' :
+      currentPayment.currency === 'CONFIO' ? 'F' :
+        currentPayment.currency === 'USDC' ? 'U' : '?'
   };
 
   const handleConfirmPayment = async () => {
     console.log('PaymentConfirmationScreen: handleConfirmPayment called for', { invoiceId: invoiceData.invoiceId });
-    
+
     // Prevent double-clicks/rapid button presses
     if (isProcessing || navLock.current) {
       console.log('PaymentConfirmationScreen: Already processing, ignoring duplicate click');
       return;
     }
-    
+
     if (!hasEnoughBalance) {
       Alert.alert('Saldo Insuficiente', 'No tienes suficiente saldo para realizar este pago.');
       return;
@@ -288,9 +288,9 @@ export const PaymentConfirmationScreen = () => {
 
     setIsProcessing(true);
     navLock.current = true;
-  // Create deterministic idempotency key for this submission window (1 min granularity)
-  const minuteTimestamp = Math.floor(Date.now() / 60000);
-  const idempotencyKey = `pay_${invoiceData.invoiceId}_${minuteTimestamp}`;
+    // Create deterministic idempotency key for this submission window (1 min granularity)
+    const minuteTimestamp = Math.floor(Date.now() / 60000);
+    const idempotencyKey = `pay_${invoiceData.invoiceId}_${minuteTimestamp}`;
 
     // Background preflight: moved to top-level effect
 
@@ -305,14 +305,14 @@ export const PaymentConfirmationScreen = () => {
         const pack = await prepareViaWs({
           amount: amt,
           assetType,
-          paymentId: invoiceData.invoiceId,
+          internalId: invoiceData.invoiceId,
           note,
           recipientBusinessId: invoiceData.merchantAccount?.business?.id
         });
         if (pack && Array.isArray((pack as any).transactions) && (pack as any).transactions.length === 4) {
           preparedForNav = {
             transactions: (pack as any).transactions,
-            paymentId: (pack as any).paymentId || (pack as any).payment_id || invoiceData.invoiceId,
+            paymentId: (pack as any).internalId || (pack as any).internal_id || (pack as any).paymentId || (pack as any).payment_id || invoiceData.invoiceId,
             groupId: (pack as any).groupId || (pack as any).group_id
           } as any;
           setPrepared(preparedForNav);
@@ -362,7 +362,7 @@ export const PaymentConfirmationScreen = () => {
         setIsProcessing(false);
       }
     }, 5000);
-    
+
     // Reset processing state after navigation
     setTimeout(() => {
       setIsProcessing(false);
@@ -386,20 +386,20 @@ export const PaymentConfirmationScreen = () => {
             <Text style={styles.headerTitle}>Confirmar Pago</Text>
             <View style={styles.placeholder} />
           </View>
-          
+
           <View style={styles.headerCenter}>
             <View style={styles.merchantIcon}>
               <Icon name="shopping-bag" size={32} color={colors.primary} />
             </View>
-            
+
             <Text style={styles.amountText}>
               ${formatAmount(currentPayment.amount)} {currentPayment.currency}
             </Text>
-            
+
             <Text style={styles.recipientText}>
               Pagar a {currentPayment.recipient}
             </Text>
-            
+
             <Text style={styles.recipientTypeText}>
               {currentPayment.recipientType}
             </Text>
@@ -411,7 +411,7 @@ export const PaymentConfirmationScreen = () => {
           {/* Recipient Details */}
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Detalles del destinatario</Text>
-            
+
             <View style={styles.recipientRow}>
               <View style={styles.avatar}>
                 <Text style={styles.avatarText}>{currentPayment.avatar}</Text>
@@ -460,7 +460,7 @@ export const PaymentConfirmationScreen = () => {
             <Text style={styles.cardTitle}>
               Pagar desde tu cuenta {currentPayment.currency}
             </Text>
-            
+
             <View style={[styles.balanceCard, { backgroundColor: colors.primaryLight }]}>
               <View style={styles.balanceRow}>
                 <View style={styles.balanceIcon}>
@@ -472,16 +472,16 @@ export const PaymentConfirmationScreen = () => {
                 </View>
                 <View style={styles.balanceAmount}>
                   <Text style={styles.balanceValue}>
-                    {balanceSnapshot == null || balanceLoading ? 'Cargando...' : 
-                     balanceError ? 'Error' : `$${walletData.balance}`}
+                    {balanceSnapshot == null || balanceLoading ? 'Cargando...' :
+                      balanceError ? 'Error' : `$${walletData.balance}`}
                   </Text>
                   <Text style={[
                     styles.balanceStatus,
                     { color: hasEnoughBalance ? '#10B981' : '#EF4444' }
                   ]}>
-                    {balanceSnapshot == null || balanceLoading ? 'Verificando...' : 
-                     balanceError ? 'Error al cargar saldo' :
-                     hasEnoughBalance ? 'Saldo suficiente' : 'Saldo insuficiente'}
+                    {balanceSnapshot == null || balanceLoading ? 'Verificando...' :
+                      balanceError ? 'Error al cargar saldo' :
+                        hasEnoughBalance ? 'Saldo suficiente' : 'Saldo insuficiente'}
                   </Text>
                 </View>
               </View>
@@ -491,7 +491,7 @@ export const PaymentConfirmationScreen = () => {
           {/* Payment Summary */}
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Resumen del pago</Text>
-            
+
             <View style={styles.summaryList}>
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>Monto</Text>
@@ -499,7 +499,7 @@ export const PaymentConfirmationScreen = () => {
                   ${formatAmount(currentPayment.amount)} {currentPayment.currency}
                 </Text>
               </View>
-              
+
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>Comisión para ti</Text>
                 <View style={styles.commissionInfo}>
@@ -507,9 +507,9 @@ export const PaymentConfirmationScreen = () => {
                   <Text style={styles.commissionSubtext}>Cubierto por Confío</Text>
                 </View>
               </View>
-              
+
               <View style={styles.divider} />
-              
+
               <View style={styles.summaryRow}>
                 <Text style={styles.totalLabel}>Total a pagar</Text>
                 <Text style={styles.totalAmount}>
@@ -558,10 +558,10 @@ export const PaymentConfirmationScreen = () => {
             >
               <Text style={styles.confirmButtonText}>
                 {isProcessing ? 'Procesando...' :
-                 hasEnoughBalance ? 'Confirmar Pago' : (balanceSnapshot == null ? 'Cargando saldo…' : 'Saldo Insuficiente')}
-            </Text>
-          </TouchableOpacity>
-            
+                  hasEnoughBalance ? 'Confirmar Pago' : (balanceSnapshot == null ? 'Cargando saldo…' : 'Saldo Insuficiente')}
+              </Text>
+            </TouchableOpacity>
+
             <TouchableOpacity style={styles.cancelButton} onPress={handleCancel}>
               <Text style={styles.cancelButtonText}>Cancelar</Text>
             </TouchableOpacity>
@@ -570,7 +570,7 @@ export const PaymentConfirmationScreen = () => {
           {/* Value Proposition */}
           <View style={styles.card}>
             <Text style={styles.cardTitle}>¿Por qué elegir Confío?</Text>
-            
+
             <View style={[styles.valueCard, { backgroundColor: colors.primaryLight }]}>
               <View style={styles.valueRow}>
                 <Icon name="check-circle" size={20} color={colors.primaryDark} />

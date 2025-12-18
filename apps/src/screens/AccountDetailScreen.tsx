@@ -95,6 +95,14 @@ interface Transaction {
   isExternalDeposit?: boolean;
   senderType?: string;
   secondaryCurrency?: string;
+  // Enhanced fields
+  senderDisplayName?: string;
+  counterpartyDisplayName?: string;
+  senderUser?: any;
+  recipientUser?: any;
+  internalId?: string;
+  senderName?: string;
+  recipientName?: string;
   p2pTradeId?: string;
   isRewardPayout?: boolean;
   toUsername?: string;
@@ -575,6 +583,8 @@ export const AccountDetailScreen = () => {
         console.log('[AccountDetail] Transaction:', {
           id: tx.id,
           type: type,
+          p2pTradeId: tx.p2pTradeId,
+          internalId: tx.internalId, // Log this specifically
           direction: tx.direction,
           displayCounterparty: tx.displayCounterparty,
           senderPhone: tx.senderPhone,
@@ -583,7 +593,7 @@ export const AccountDetailScreen = () => {
           isActualInvitation: isActualInvitation,
           senderAddress: tx.senderAddress,
           counterpartyAddress: tx.counterpartyAddress,
-          counterpartyUser: tx.counterpartyUser
+          // counterpartyUser: tx.counterpartyUser // reducing noise
         });
 
         // For proper contact name lookup, we need to pass the phone numbers
@@ -840,6 +850,9 @@ export const AccountDetailScreen = () => {
           counterpartyDisplayName: tx.counterpartyDisplayName,
           senderDisplayName: tx.senderDisplayName,
           businessName: payrollBusinessName,
+          internalId: tx.internalId, // Pass internalId to detail screen
+          senderBusiness: tx.senderBusiness,
+          recipientBusiness: tx.counterpartyBusiness,
         };
 
         // Debug final transaction for external deposits
@@ -1218,6 +1231,7 @@ export const AccountDetailScreen = () => {
         transactionType: transaction.type,
         transactionData: {
           type: transaction.type,
+          internalId: (transaction as any).internalId,
           from: (transaction.type === 'received' || transaction.type === 'reward')
             ? (transaction.from || contactInfo.displayName)
             : (transaction.type === 'payment' && transaction.amount.startsWith('+'))
@@ -1254,15 +1268,38 @@ export const AccountDetailScreen = () => {
           invitationClaimed: transaction.invitationClaimed || false,
           invitationReverted: transaction.invitationReverted || false,
           invitationExpiresAt: transaction.invitationExpiresAt || undefined,
+          // Pass rich name data for Detail Screen resolution
+          senderName: transaction.senderDisplayName || (transaction.senderUser?.firstName ? `${transaction.senderUser.firstName} ${transaction.senderUser.lastName || ''}`.trim() : undefined) || transaction.from,
+          recipientName: transaction.counterpartyDisplayName || (transaction.recipientUser?.firstName ? `${transaction.recipientUser.firstName} ${transaction.recipientUser.lastName || ''}`.trim() : undefined) || transaction.to,
+          senderUser: transaction.senderUser,
+          recipientUser: transaction.recipientUser,
+          senderDisplayName: transaction.senderDisplayName,
+          recipientDisplayName: transaction.counterpartyDisplayName,
+          senderBusiness: (transaction as any).senderBusiness,
+          recipientBusiness: (transaction as any).recipientBusiness,
+          payerBusiness: (transaction as any).senderBusiness, // Alias for payment logic
+          merchantBusiness: (transaction as any).recipientBusiness, // Alias for payment logic
         }
       };
       // Navigate to different screens based on transaction type
+      console.log('[AccountDetail] onPress transaction:', {
+        type: transaction.type,
+        p2pTradeId: transaction.p2pTradeId,
+        internalId: transaction.internalId,
+        fullIds: { id: transaction.id, internal_id: (transaction as any).internal_id }
+      });
       if (transaction.type === 'exchange' && transaction.p2pTradeId) {
         // Navigate to ActiveTrade screen for P2P trades
+        console.log('[AccountDetail] Navigating to ActiveTrade:', {
+          p2pTradeId: transaction.p2pTradeId,
+          internalId: transaction.internalId,
+          fullTx: transaction
+        });
         // @ts-ignore - Navigation type mismatch, but works at runtime
         navigation.navigate('ActiveTrade', {
           trade: {
-            id: transaction.p2pTradeId
+            id: transaction.p2pTradeId,
+            internalId: transaction.internalId
           }
         });
       } else if (transaction.type === 'payroll') {
@@ -1297,11 +1334,11 @@ export const AccountDetailScreen = () => {
         navigation.navigate('TransactionReceipt', {
           transaction: {
             ...transaction,
-            verificationId: txAny.itemId || txAny.id, // Use full UUID for QR code if available
+            verificationId: txAny.internalId || txAny.id, // Use full UUID for QR code if available
             // Ensure necessary fields for receipt
-            employeeName: (transaction as any).recipientUser?.firstName ? `${(transaction as any).recipientUser.firstName} ${(transaction as any).recipientUser.lastName}` : (transaction as any).recipientUser?.username,
-            employeeUsername: (transaction as any).recipientUser?.username,
-            businessName: activeAccount?.business?.name || 'Empresa',
+            employeeName: employeeDisplayName,
+            employeeUsername: counterpartyUsername,
+            businessName: businessDisplayName,
             amount: transaction.amount,
             currency: (transaction as any).tokenType || transaction.currency,
             date: (transaction as any).createdAt || transaction.date,

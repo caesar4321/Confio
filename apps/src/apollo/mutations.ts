@@ -316,6 +316,7 @@ export const SUBMIT_INVITE_FOR_PHONE = gql`
       success
       error
       txid
+      internalId
     }
   }
 `;
@@ -509,7 +510,7 @@ export const GET_CONVERSIONS = gql`
   query GetConversions($limit: Int, $status: String) {
     conversions(limit: $limit, status: $status) {
       id
-      conversionId
+      internalId
       conversionType
       fromAmount
       toAmount
@@ -539,6 +540,7 @@ export const GET_UNIFIED_USDC_TRANSACTIONS = gql`
   query GetUnifiedUSDCTransactions($limit: Int, $offset: Int, $transactionType: String) {
     unifiedUsdcTransactions(limit: $limit, offset: $offset, transactionType: $transactionType) {
       transactionId
+      internalId
       transactionHash
       transactionType
       actorType
@@ -711,11 +713,11 @@ export const CREATE_SPONSORED_PAYMENT = gql`
 export const SUBMIT_SPONSORED_PAYMENT = gql`
   mutation SubmitSponsoredPayment(
     $signedTransactions: JSONString!
-    $paymentId: String
+    $internalId: String
   ) {
     submitSponsoredPayment(
       signedTransactions: $signedTransactions
-      paymentId: $paymentId
+      internalId: $internalId
     ) {
       success
       error

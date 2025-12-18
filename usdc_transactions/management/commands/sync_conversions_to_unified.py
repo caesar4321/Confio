@@ -28,19 +28,19 @@ class Command(BaseCommand):
                     result = create_unified_usdc_transaction_from_conversion(conversion)
                     if result:
                         success_count += 1
-                        self.stdout.write(f'✓ Synced conversion {conversion.conversion_id}')
+                        self.stdout.write(f'✓ Synced conversion {conversion.internal_id}')
                     else:
                         error_count += 1
                         self.stdout.write(
                             self.style.WARNING(
-                                f'✗ Failed to sync conversion {conversion.conversion_id}'
+                                f'✗ Failed to sync conversion {conversion.internal_id}'
                             )
                         )
                 except Exception as e:
                     error_count += 1
                     self.stdout.write(
                         self.style.ERROR(
-                            f'✗ Error syncing conversion {conversion.conversion_id}: {e}'
+                            f'✗ Error syncing conversion {conversion.internal_id}: {e}'
                         )
                     )
         

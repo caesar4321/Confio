@@ -33,7 +33,7 @@ class PayrollItemType(DjangoObjectType):
         model = PayrollItem
         fields = (
             'id',
-            'item_id',
+            'internal_id',
             'run',
             'recipient_user',
             'recipient_account',
@@ -335,7 +335,7 @@ class CreatePayrollRun(graphene.Mutation):
 
 class PreparePayrollItemPayout(graphene.Mutation):
     class Arguments:
-        payroll_item_id = graphene.String(required=True, description="Payroll item_id to prepare payout for")
+        payroll_item_id = graphene.String(required=True, description="Payroll internal_id to prepare payout for")
         note = graphene.String(required=False)
 
     item = graphene.Field(PayrollItemType)
@@ -377,7 +377,7 @@ class PreparePayrollItemPayout(graphene.Mutation):
             return PreparePayrollItemPayout(item=None, run=None, success=False, errors=["Business context with send_funds permission required"])
 
         try:
-            item = PayrollItem.objects.select_related('run', 'recipient_account', 'recipient_user').get(item_id=payroll_item_id, deleted_at__isnull=True)
+            item = PayrollItem.objects.select_related('run', 'recipient_account', 'recipient_user').get(internal_id=payroll_item_id, deleted_at__isnull=True)
         except PayrollItem.DoesNotExist:
             return PreparePayrollItemPayout(item=None, run=None, success=False, errors=["Payroll item not found"])
 
@@ -499,7 +499,7 @@ class PreparePayrollItemPayout(graphene.Mutation):
                 business_address=business_account.algorand_address,
                 recipient_address=item.recipient_account.algorand_address,
                 net_amount=net_base,
-                payroll_item_id=item.item_id,
+                payroll_item_id=item.internal_id,
                 note=note.encode() if note else None,
             )
             # Use sponsored execution so delegate pays 0 fees
@@ -560,7 +560,7 @@ class PreparePayrollItemPayout(graphene.Mutation):
 
 class SubmitPayrollItemPayout(graphene.Mutation):
     class Arguments:
-        payroll_item_id = graphene.String(required=True, description="Payroll item_id to submit payout for")
+        payroll_item_id = graphene.String(required=True, description="Payroll internal_id to submit payout for")
         signed_transaction = graphene.String(required=True, description="Base64-encoded signed AppCall transaction")
         sponsor_signature = graphene.String(required=False, description="Base64-encoded signed sponsor transaction")
 
@@ -600,7 +600,7 @@ class SubmitPayrollItemPayout(graphene.Mutation):
             pass
 
         try:
-            item = PayrollItem.objects.select_related('run').get(item_id=payroll_item_id, deleted_at__isnull=True)
+            item = PayrollItem.objects.select_related('run').get(internal_id=payroll_item_id, deleted_at__isnull=True)
         except PayrollItem.DoesNotExist:
             return SubmitPayrollItemPayout(item=None, run=None, success=False, errors=["Payroll item not found"])
 
@@ -710,7 +710,7 @@ class SubmitPayrollItemPayout(graphene.Mutation):
         if tx_hash:
             try:
                 from blockchain.tasks import confirm_payroll_item_payout
-                confirm_payroll_item_payout.delay(item.item_id, tx_hash)
+                confirm_payroll_item_payout.delay(item.internal_id, tx_hash)
             except Exception as e:
                 cls.logger.warning(f"Failed to enqueue payroll confirmation task: {e}")
 

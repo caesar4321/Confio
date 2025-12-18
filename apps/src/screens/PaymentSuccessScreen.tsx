@@ -11,12 +11,14 @@ import {
   Clipboard,
   Modal,
   Linking,
+  Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { colors } from '../config/theme';
 import { formatLocalDate, formatLocalTime } from '../utils/dateUtils';
+import { useAuth } from '../contexts/AuthContext';
 
 type PaymentSuccessRouteProp = RouteProp<{
   PaymentSuccess: {
@@ -33,6 +35,8 @@ type PaymentSuccessRouteProp = RouteProp<{
       location?: string;
       terminal?: string;
       address?: string;
+      internalId?: string;
+      status?: string;
     };
   };
 }, 'PaymentSuccess'>;
@@ -46,6 +50,7 @@ export const PaymentSuccessScreen = () => {
   const { transactionData } = route.params;
   const [copied, setCopied] = useState(false);
   const [showTechnical, setShowTechnical] = useState(false);
+  const { userProfile, profileData } = useAuth();
 
   // Helper function to format currency for display
   const formatCurrency = (currency: string): string => {
@@ -76,12 +81,42 @@ export const PaymentSuccessScreen = () => {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleRequestReceipt = () => {
-    Alert.alert('Solicitar Factura', 'Función de solicitud de factura en desarrollo');
-  };
-
   const handleShareReceipt = () => {
-    Alert.alert('Compartir Comprobante', 'Función de compartir en desarrollo');
+    (navigation as any).navigate('TransactionReceipt', {
+      transaction: {
+        ...transactionData,
+        id: transactionData.internalId || transactionData.transactionHash || 'pending',
+        transactionHash: transactionData.transactionHash || 'pending',
+        date: new Date().toISOString(),
+        // Pass actual status - 'CONFIRMED' for green, anything else for yellow pending
+        status: transactionData.status || 'pending',
+        // Map fields for generic view
+        merchantName: transactionData.merchant,
+        merchantAddress: transactionData.merchantAddress,
+        amount: transactionData.amount,
+        currency: transactionData.currency,
+        transactionId: transactionData.internalId || transactionData.transactionHash,
+        // verificationId for QR code - ONLY use internalId (UUID), never transactionHash
+        verificationId: transactionData.internalId || undefined,
+
+        // Inject current user info as payer (since this screen is for the payer)
+        payerName: profileData?.currentAccountType === 'business'
+          ? profileData?.businessProfile?.name || 'Negocio'
+          : (userProfile?.firstName
+            ? `${userProfile.firstName} ${userProfile.lastName || ''}`.trim()
+            : (userProfile?.username || 'Usuario')),
+
+        payerDisplayName: profileData?.currentAccountType === 'business'
+          ? profileData?.businessProfile?.name || 'Negocio'
+          : (userProfile?.firstName
+            ? `${userProfile.firstName} ${userProfile.lastName || ''}`.trim()
+            : (userProfile?.username || 'Usuario')),
+
+        senderUser: userProfile,
+        payerBusiness: profileData?.currentAccountType === 'business' ? profileData?.businessProfile : undefined,
+      },
+      type: 'payment'
+    });
   };
 
   const handleViewTechnicalDetails = () => {
@@ -106,13 +141,13 @@ export const PaymentSuccessScreen = () => {
             <View style={styles.successCircle}>
               <Icon name="check-circle" size={48} color={colors.primary} />
             </View>
-            
+
             <Text style={styles.headerTitle}>¡Pago realizado!</Text>
-            
+
             <Text style={styles.headerAmount}>
               -${transactionData.amount} {formatCurrency(transactionData.currency)}
             </Text>
-            
+
             <Text style={styles.headerSubtitle}>
               Pagado en {transactionData.merchant}
             </Text>
@@ -124,7 +159,7 @@ export const PaymentSuccessScreen = () => {
           {/* Payment Summary */}
           <View style={styles.summaryContainer}>
             <Text style={styles.sectionTitle}>Resumen de Pago</Text>
-            
+
             <View style={styles.summaryContent}>
               {/* Merchant Info */}
               <View style={styles.participantRow}>
@@ -138,7 +173,7 @@ export const PaymentSuccessScreen = () => {
                     {transactionData.merchant}
                   </Text>
                   <Text style={styles.participantDetails}>
-                    {transactionData.location && transactionData.terminal 
+                    {transactionData.location && transactionData.terminal
                       ? `${transactionData.location} • ${transactionData.terminal}`
                       : transactionData.address || 'Dirección no disponible'
                     }
@@ -157,7 +192,7 @@ export const PaymentSuccessScreen = () => {
                     ${transactionData.amount} {formatCurrency(transactionData.currency)}
                   </Text>
                 </View>
-                
+
                 <View style={styles.feeRow}>
                   <Text style={styles.feeLabel}>Comisión de red</Text>
                   <View style={styles.feeValue}>
@@ -178,7 +213,7 @@ export const PaymentSuccessScreen = () => {
                     })()}
                   </Text>
                 </View>
-                
+
                 <View style={styles.divider} />
                 <View style={styles.totalRow}>
                   <Text style={styles.totalLabel}>Total debitado</Text>
@@ -218,11 +253,11 @@ export const PaymentSuccessScreen = () => {
                     </View>
                   </View>
                 ) : (
-                  transactionData.paymentTransactionId ? (
+                  transactionData.internalId ? (
                     <View style={styles.detailRow}>
                       <Text style={styles.detailLabel}>ID de Pago</Text>
                       <View style={styles.transactionIdContainer}>
-                        <Text style={styles.transactionId}>#{String(transactionData.paymentTransactionId).slice(-8).toUpperCase()}</Text>
+                        <Text style={styles.transactionId}>#{String(transactionData.internalId).slice(-8).toUpperCase()}</Text>
                       </View>
                     </View>
                   ) : null
@@ -233,8 +268,8 @@ export const PaymentSuccessScreen = () => {
                   <View style={styles.statusContainer}>
                     {transactionData.status === 'SUBMITTED' || !transactionData.transactionHash ? (
                       <>
-                        <Icon name="clock" size={16} color={colors.warning || '#d97706'} />
-                        <Text style={[styles.statusText, { color: colors.warning || '#d97706' }]}>Confirmando…</Text>
+                        <Icon name="clock" size={16} color={'#d97706'} />
+                        <Text style={[styles.statusText, { color: '#d97706' }]}>Confirmando…</Text>
                       </>
                     ) : (
                       <>
@@ -263,7 +298,7 @@ export const PaymentSuccessScreen = () => {
           {/* Confío Value Proposition */}
           <View style={styles.valueContainer}>
             <Text style={styles.sectionTitle}>¿Por qué elegir Confío?</Text>
-            
+
             <View style={styles.valueContent}>
               <View style={styles.valueRow}>
                 <Icon name="check-circle" size={20} color={colors.primary} />
@@ -285,17 +320,9 @@ export const PaymentSuccessScreen = () => {
           {/* Quick Actions */}
           <View style={styles.actionsContainer}>
             <Text style={styles.sectionTitle}>Acciones Rápidas</Text>
-            
+
             <View style={styles.actionsContent}>
-              <TouchableOpacity 
-                style={[styles.actionButton, { backgroundColor: colors.secondary }]}
-                onPress={handleRequestReceipt}
-              >
-                <Icon name="file-text" size={16} color="#ffffff" />
-                <Text style={styles.actionButtonText}>Solicitar factura</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={[styles.actionButton, { backgroundColor: '#F3F4F6' }]}
                 onPress={handleShareReceipt}
               >
@@ -304,8 +331,8 @@ export const PaymentSuccessScreen = () => {
                   Compartir comprobante
                 </Text>
               </TouchableOpacity>
-              
-              <TouchableOpacity 
+
+              <TouchableOpacity
                 style={[styles.actionButton, { backgroundColor: '#F3F4F6' }]}
                 onPress={handleViewTechnicalDetails}
               >
@@ -319,15 +346,15 @@ export const PaymentSuccessScreen = () => {
 
           {/* Navigation */}
           <View style={styles.navigationContainer}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[styles.navButton, { backgroundColor: '#F3F4F6' }]}
               onPress={handleGoHome}
             >
               <Icon name="home" size={16} color="#374151" />
               <Text style={[styles.navButtonText, { color: '#374151' }]}>Ir al inicio</Text>
             </TouchableOpacity>
-            
-            <TouchableOpacity 
+
+            <TouchableOpacity
               style={[styles.navButton, { backgroundColor: colors.secondary }]}
               onPress={handleViewContacts}
             >
@@ -350,7 +377,7 @@ export const PaymentSuccessScreen = () => {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Detalles técnicos</Text>
               <TouchableOpacity onPress={() => setShowTechnical(false)} style={{ padding: 8 }}>
-                <Icon name="x" size={20} color={colors.text.primary} />
+                <Icon name="x" size={20} color={colors.text} />
               </TouchableOpacity>
             </View>
             <View style={styles.modalBody}>
@@ -820,4 +847,4 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     marginLeft: 8,
   },
-}); 
+});

@@ -39,7 +39,7 @@ interface TransactionData {
   merchant?: string;
   action: string;
   isOnConfio?: boolean;
-  sendTransactionId?: string;
+  internalId?: string;
   recipientAddress?: string;
   recipientPhone?: string;
   recipientUserId?: string;
@@ -48,6 +48,9 @@ interface TransactionData {
   idempotencyKey?: string; // Pass idempotency key from calling screen
   transactionId?: string; // Store transaction ID after successful processing
   tokenType?: string; // For blockchain transactions (CUSD, CONFIO)
+  senderName?: string;
+  sender?: string;
+  recipientName?: string;
 }
 
 export const TransactionProcessingScreen = () => {
@@ -448,7 +451,12 @@ export const TransactionProcessingScreen = () => {
             throw new Error('submit_failed');
           }
           transactionId = (submitRes.transactionId || submitRes.transaction_id) as string;
+          const internalId = (submitRes.internalId || submitRes.internal_id) as string | undefined;
           confirmedRound = (submitRes.confirmedRound || submitRes.confirmed_round) as number | undefined;
+
+          if (transactionData) {
+            (transactionData as any).internalId = internalId;
+          }
         } catch (wsSubmitErr) {
           console.error('TransactionProcessingScreen: WS submit failed:', wsSubmitErr);
           setTransactionError('No se pudo enviar la transacción. Revisa tu conexión e inténtalo de nuevo.');
@@ -502,6 +510,9 @@ export const TransactionProcessingScreen = () => {
         setCurrentStep(2);
         if (res.txid) {
           (transactionData as any).transactionId = res.txid;
+        }
+        if (res.internalId) {
+          (transactionData as any).internalId = res.internalId;
         }
         // Mark as submitted so Success screen shows "Confirmando…" until Celery confirms
         (transactionData as any).status = 'SUBMITTED';

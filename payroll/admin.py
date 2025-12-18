@@ -33,7 +33,7 @@ class PayrollRunAdmin(admin.ModelAdmin):
 @admin.register(PayrollItem)
 class PayrollItemAdmin(admin.ModelAdmin):
     list_display = (
-        'item_id',
+        'internal_id',
         'run',
         'recipient_user',
         'recipient_account',
@@ -44,8 +44,8 @@ class PayrollItemAdmin(admin.ModelAdmin):
         'created_at',
     )
     list_filter = ('status', 'token_type', 'run__business', 'created_at', 'deleted_at')
-    search_fields = ('item_id', 'run__run_id', 'recipient_user__username')
-    readonly_fields = ('item_id', 'gross_amount', 'net_amount', 'fee_amount', 'created_at', 'updated_at')
+    search_fields = ('internal_id', 'run__run_id', 'recipient_user__username')
+    readonly_fields = ('internal_id', 'gross_amount', 'net_amount', 'fee_amount', 'created_at', 'updated_at')
     ordering = ('-created_at',)
 
 

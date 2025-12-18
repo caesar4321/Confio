@@ -437,6 +437,12 @@ class P2PTradeType(DjangoObjectType):
     has_rating = graphene.Boolean()
     # Add confirmations field
     confirmations = graphene.List(P2PTradeConfirmationType)
+    
+    def resolve_internal_id(self, info):
+        val = self.internal_id
+        print(f"[DEBUG] resolve_internal_id for Trade {self.id}: {val} (Type: {type(val)})")
+        return val
+
     # Add user stats for both parties
     buyer_stats = graphene.Field(P2PUserStatsType)
     seller_stats = graphene.Field(P2PUserStatsType)
@@ -451,7 +457,7 @@ class P2PTradeType(DjangoObjectType):
     class Meta:
         model = P2PTrade
         fields = (
-            'id', 'offer', 
+            'id', 'internal_id', 'offer', 
             # New direct relationship fields
             'buyer_user', 'buyer_business', 'seller_user', 'seller_business',
             # Keep old fields for backward compatibility (but marked as deprecated)

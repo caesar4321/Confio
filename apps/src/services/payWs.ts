@@ -3,7 +3,7 @@
 type PrepareRequest = {
   amount: number;
   assetType?: string;
-  paymentId?: string;
+  internalId?: string;
   note?: string;
   recipientBusinessId?: string | number;
 };
@@ -16,7 +16,7 @@ type PreparePack = {
   groupId?: string;
   gross_amount?: number; net_amount?: number; fee_amount?: number;
   grossAmount?: number; netAmount?: number; feeAmount?: number;
-  payment_id?: string; paymentId?: string;
+  internal_id?: string; internalId?: string;
 };
 
 type SubmitResult = {
@@ -94,7 +94,7 @@ export class PayWsSession {
               console.log('[payWs] server error', msg?.message);
               this.rejectAll(new Error(msg.message || 'ws_error'));
             }
-          } catch {}
+          } catch { }
         };
       } catch (e) {
         console.log('[payWs] open failed', e);
@@ -128,7 +128,7 @@ export class PayWsSession {
       }, timeoutMs);
       try {
         console.log('[payWs] -> prepare_request');
-        this.ws!.send(JSON.stringify({ type: 'prepare_request', amount: req.amount, asset_type: req.assetType, payment_id: req.paymentId, note: req.note, recipient_business_id: req.recipientBusinessId }));
+        this.ws!.send(JSON.stringify({ type: 'prepare_request', amount: req.amount, asset_type: req.assetType, internal_id: req.internalId, note: req.note, recipient_business_id: req.recipientBusinessId }));
       } catch (e) {
         clearTimeout(t);
         reject(e);
@@ -136,7 +136,7 @@ export class PayWsSession {
     });
   }
 
-  async submit(signedTransactions: any, paymentId?: string, timeoutMs = 10000): Promise<SubmitResult> {
+  async submit(signedTransactions: any, internalId?: string, timeoutMs = 10000): Promise<SubmitResult> {
     await this.open();
     if (!this.ws) throw new Error('not_open');
     return new Promise<SubmitResult>((resolve, reject) => {
@@ -151,7 +151,7 @@ export class PayWsSession {
       }, timeoutMs);
       try {
         console.log('[payWs] -> submit_request');
-        this.ws!.send(JSON.stringify({ type: 'submit_request', signed_transactions: signedTransactions, payment_id: paymentId }));
+        this.ws!.send(JSON.stringify({ type: 'submit_request', signed_transactions: signedTransactions, internal_id: internalId }));
       } catch (e) {
         clearTimeout(t);
         reject(e);
@@ -161,7 +161,7 @@ export class PayWsSession {
 
   close() {
     this.closeRequested = true;
-    try { console.log('[payWs] closing'); this.ws?.close(1000, 'flow_end'); } catch {}
+    try { console.log('[payWs] closing'); this.ws?.close(1000, 'flow_end'); } catch { }
     this.ws = null;
   }
 }
@@ -174,20 +174,20 @@ export async function prepareViaWs(req: PrepareRequest): Promise<PreparePack | n
     s.close();
     return pack;
   } catch (e) {
-    try { s.close(); } catch {}
+    try { s.close(); } catch { }
     return null;
   }
 }
 
-export async function submitViaWs(signedTransactions: any, paymentId?: string): Promise<SubmitResult | null> {
+export async function submitViaWs(signedTransactions: any, internalId?: string): Promise<SubmitResult | null> {
   const s = new PayWsSession();
   try {
     await s.open();
-    const res = await s.submit(signedTransactions, paymentId);
+    const res = await s.submit(signedTransactions, internalId);
     s.close();
     return res;
   } catch (e) {
-    try { s.close(); } catch {}
+    try { s.close(); } catch { }
     return null;
   }
 }

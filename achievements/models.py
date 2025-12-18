@@ -8,6 +8,13 @@ from django.core.exceptions import ValidationError
 from django.db.models import F, Q, Sum
 from decimal import Decimal
 from users.models import SoftDeleteModel
+import uuid
+
+def generate_reward_transaction_id():
+    return uuid.uuid4().hex
+
+def generate_referral_event_id():
+    return uuid.uuid4().hex
 
 
 class AchievementType(SoftDeleteModel):
@@ -510,6 +517,12 @@ class ReferralRewardEvent(models.Model):
     reward_tx_id = models.CharField(max_length=128, blank=True)
     error = models.TextField(blank=True)
     metadata = models.JSONField(default=dict, blank=True)
+    internal_id = models.CharField(
+        max_length=32,
+        unique=True,
+        default=generate_referral_event_id,
+        editable=False,
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -796,6 +809,15 @@ class ConfioRewardTransaction(SoftDeleteModel):
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name='confio_transactions'
+    )
+    
+    # Internal ID for universal reference (32-char UUID)
+    internal_id = models.CharField(
+        max_length=32,
+        unique=True,
+        default=generate_reward_transaction_id,
+        editable=False,
+        null=True  # Allow null for migration
     )
     
     transaction_type = models.CharField(

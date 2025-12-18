@@ -6,19 +6,19 @@ type PrepareArgs = {
 };
 
 type PreparePack = {
-  withdrawal_id?: string;
+  internal_id?: string;
   transactions?: string[]; // base64 unsigned user txns
   sponsor_transactions?: string[]; // JSON strings with {txn,signed?,index}
   group_id?: string;
 };
 
 type SubmitArgs = {
-  withdrawalId: string;
+  internalId: string;
   signedUserTransactions: string[]; // base64 signed user txns
   sponsorTransactions: (string | { txn: string; signed?: string; index: number })[];
 };
 
-type SubmitResult = { txid?: string };
+type SubmitResult = { txid?: string; internalId?: string; internal_id?: string; };
 
 function getWsBase(): string {
   const { getApiUrl } = require('../config/env');
@@ -80,7 +80,7 @@ export class WithdrawWsSession {
               console.log('[withdrawWs] server error', msg?.message);
               this.rejectAll(new Error(msg.message || 'ws_error'));
             }
-          } catch {}
+          } catch { }
         };
       } catch (e) {
         console.log('[withdrawWs] open failed', e);
@@ -136,11 +136,11 @@ export class WithdrawWsSession {
         }
       }, timeoutMs);
       try {
-        console.log('[withdrawWs] -> submit', args.withdrawalId);
+        console.log('[withdrawWs] -> submit', args.internalId);
         const sponsors = (args.sponsorTransactions || []).map((e: any) => (typeof e === 'string' ? e : JSON.stringify(e)));
         this.ws!.send(JSON.stringify({
           type: 'submit',
-          withdrawal_id: args.withdrawalId,
+          internal_id: args.internalId,
           signed_transactions: args.signedUserTransactions,
           sponsor_transactions: sponsors,
         }));

@@ -137,6 +137,7 @@ export const PayrollRunDetailScreen = () => {
                   message,
                   url: uri,
                   type: 'image/jpeg',
+                  filename: `Comprobante_Corrida_Nomina_${run?.runId || 'N/A'}`,
                 });
               } catch (error) {
                 console.error('Share error:', error);
@@ -193,10 +194,11 @@ export const PayrollRunDetailScreen = () => {
                 const message = `Pago de nómina - ${name}`;
 
                 await Share.open({
-                  title: 'Comprobante de Pago de Nómina',
+                  title: 'Comprobante de Nómina',
                   message,
                   url: uri,
                   type: 'image/jpeg',
+                  filename: `Comprobante_Nomina_${it.internalId || 'pago'}`,
                 });
               } catch (error) {
                 console.error('Share error:', error);
@@ -380,6 +382,7 @@ export const PayrollRunDetailScreen = () => {
                   referenceId={run?.runId || run?.id?.slice(0, 6) || ''}
                   referenceLabel="ID de corrida"
                   generatedDate={new Date().toISOString()}
+                  verificationId={it.internalId || it.id}
                 />
               </ViewShot>
             </View>

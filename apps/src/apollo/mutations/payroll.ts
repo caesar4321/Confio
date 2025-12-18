@@ -36,7 +36,7 @@ export const PREPARE_PAYROLL_ITEM_PAYOUT = gql`
       transactions
       unsignedTransactionB64
       sponsorTransaction
-      item { itemId status }
+      item { internalId status }
       run { id status }
     }
   }
@@ -48,7 +48,7 @@ export const SUBMIT_PAYROLL_ITEM_PAYOUT = gql`
       success
       errors
       transactionHash
-      item { itemId status }
+      item { internalId status }
       run { id status }
     }
   }

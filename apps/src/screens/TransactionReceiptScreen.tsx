@@ -55,12 +55,33 @@ export const TransactionReceiptScreen = () => {
   const counterpartyUser = transaction.counterpartyUser || transaction.recipientUser || transaction.senderUser;
 
   // Formatters
-  const formatPhoneKey = (phone: string | undefined | null): string => {
+  // Formatters
+  const formatPhoneNumber = (phone: string | undefined | null): string => {
     if (!phone) return '';
+
+    // Check for "CC:Number" format (internal Confío format)
     if (phone.includes(':')) {
       const [countryCode, phoneNumber] = phone.split(':');
       return `+${countryCode} ${phoneNumber}`;
     }
+
+    // Check for "CCNumber" format (e.g., CO3001234567) from IOS/server
+    const countryCodeMatch = phone.match(/^([A-Z]{2})(.+)$/);
+    if (countryCodeMatch) {
+      const [, countryPrefix, phoneNumber] = countryCodeMatch;
+      const countryDialingCodes: { [key: string]: string } = {
+        'US': '1', 'AS': '1', 'DO': '1', 'VE': '58', 'CO': '57',
+        'MX': '52', 'AR': '54', 'PE': '51', 'CL': '56', 'EC': '593',
+        'BR': '55', 'UY': '598', 'PY': '595', 'BO': '591',
+        // Add more as needed
+      };
+
+      const dialingCode = countryDialingCodes[countryPrefix];
+      if (dialingCode) {
+        return `+${dialingCode} ${phoneNumber}`;
+      }
+    }
+
     return phone;
   };
 
@@ -86,19 +107,35 @@ export const TransactionReceiptScreen = () => {
     recipientName = pick(transaction.employeeName, transaction.recipient_name, transaction.recipientName, transaction.toName, 'Empleado');
     const rawUsername = pick(transaction.employeeUsername, counterpartyUser?.username, '');
     const empUsername = rawUsername.replace(/^@+/, '');
-    const empPhone = formatPhoneKey(pick(transaction.employeePhone, counterpartyUser?.phoneKey));
+    const empPhone = formatPhoneNumber(pick(transaction.employeePhone, counterpartyUser?.phoneKey));
     recipientDetail = empUsername ? `@${empUsername}` : empPhone;
 
     referenceLabel = 'ID de corrida';
     referenceId = transaction.payrollRunId || transaction.runId || '';
   } else if (type === 'payment') {
     senderLabel = 'Pagador';
-    senderName = pick(transaction.payerName, transaction.senderDisplayName, transaction.sender_name, transaction.senderName, transaction.fromName, 'Usuario');
-    const senderPhone = formatPhoneKey(pick(transaction.payerPhone, transaction.senderPhone));
+    senderName = pick(
+      transaction.payerBusiness?.name,
+      transaction.payerDisplayName,
+      transaction.payerName,
+      transaction.senderDisplayName,
+      transaction.sender_name,
+      transaction.senderName,
+      transaction.fromName,
+      'Usuario'
+    );
+    const senderPhone = formatPhoneNumber(pick(transaction.payerPhone, transaction.senderPhone));
     senderDetail = senderPhone;
 
     recipientLabel = 'Comerciante';
-    recipientName = pick(transaction.merchantName, transaction.recipientBusiness?.name, transaction.recipient_name, transaction.recipientName, 'Comercio');
+    recipientName = pick(
+      transaction.recipientBusiness?.name,
+      transaction.merchantName,
+      transaction.merchantDisplayName,
+      transaction.recipient_name,
+      transaction.recipientName,
+      'Comercio'
+    );
 
     referenceLabel = 'Factura';
     referenceId = transaction.invoiceId || '';
@@ -114,7 +151,7 @@ export const TransactionReceiptScreen = () => {
       'Usuario'
     );
     const sUsername = transaction.senderUser?.username;
-    senderDetail = sUsername ? `@${sUsername}` : formatPhoneKey(transaction.senderPhone);
+    senderDetail = sUsername ? `@${sUsername}` : formatPhoneNumber(transaction.senderPhone);
 
     recipientLabel = 'Destinatario';
     recipientName = pick(
@@ -126,7 +163,7 @@ export const TransactionReceiptScreen = () => {
       'Usuario'
     );
     const rUsername = transaction.recipientUser?.username;
-    recipientDetail = rUsername ? `@${rUsername}` : formatPhoneKey(transaction.recipientPhone);
+    recipientDetail = rUsername ? `@${rUsername}` : formatPhoneNumber(transaction.recipientPhone);
   }
 
   const amount = (transaction.amount || '0.00').replace(/^[+-]\s*/, '').replace('cUSD', '').trim();
@@ -154,12 +191,18 @@ export const TransactionReceiptScreen = () => {
             text: 'Compartir',
             onPress: async () => {
               try {
-                const message = `Comprobante de ${type} - ${amount} ${currency}`;
+                let spanishType = 'Transacción';
+                if (type === 'payroll') spanishType = 'Nómina';
+                else if (type === 'payment') spanishType = 'Pago';
+                else if (type === 'transfer') spanishType = 'Transferencia';
+
+                const message = `Comprobante de ${spanishType} - ${amount} ${currency}`;
                 await Share.open({
-                  title: 'Comprobante',
+                  title: `Comprobante de ${spanishType}`,
                   message,
                   url: uri,
                   type: 'image/jpeg',
+                  filename: `Comprobante_${spanishType}_${transaction.id || 'confio'}`,
                 });
               } catch (error) {
                 console.error('Share error:', error);

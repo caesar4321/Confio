@@ -454,6 +454,19 @@ def scan_inbound_deposits():
                         status='COMPLETED',
                         **kwargs,
                     )
+                    
+                    # Try to resolve sender name
+                    sender_name = 'Usuario desconocido'
+                    try:
+                        sender_account = Account.objects.filter(algorand_address=sender).select_related('user', 'business').first()
+                        if sender_account:
+                            if sender_account.account_type == 'business' and sender_account.business:
+                                sender_name = sender_account.business.name
+                            elif sender_account.user:
+                                sender_name = f"{sender_account.user.first_name or ''} {sender_account.user.last_name or ''}".strip() or sender_account.user.username or 'Usuario'
+                    except Exception:
+                        pass
+                    
                     try:
                         notif_utils.create_notification(
                             user=account.user,
@@ -463,19 +476,20 @@ def scan_inbound_deposits():
                             title="Depósito USDC recibido",
                             message=f"Recibiste {human_amt} USDC",
                             data={
-                                'transaction_id': str(deposit.deposit_id),
+                                'transaction_id': str(deposit.internal_id),
                                 'transaction_type': 'deposit',
                                 'type': 'deposit',
                                 'currency': 'USDC',
                                 'amount': str(human_amt),
                                 'sender': sender,
+                                'sender_name': sender_name,
                                 'receiver': to_addr,
                                 'txid': txid,
                                 'round': cround,
                             },
                             related_object_type='USDCDeposit',
-                            related_object_id=str(deposit.id),
-                            action_url=f"confio://transaction/{deposit.deposit_id}",
+                            related_object_id=str(deposit.internal_id),
+                            action_url=f"confio://transaction/{deposit.internal_id}",
                         )
                     except Exception as ne:
                         logger.warning(f"Failed to create USDC deposit notification: {ne}")
@@ -635,14 +649,14 @@ def scan_inbound_deposits():
 
 @shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=5, retry_kwargs={"max_retries": 6})
 @ensure_db_connection_closed
-def confirm_payment_transaction(self, payment_id: str, txid: str):
+def confirm_payment_transaction(self, internal_id: str, txid: str):
     """
     Poll algod for a submitted payment transaction until confirmed, then
     update DB state and send notifications. On transient errors, Celery
     auto‑retries with exponential backoff.
 
     Args:
-        payment_id: PaymentTransaction.payment_transaction_id
+        internal_id: PaymentTransaction.internal_id
         txid: Algorand transaction id for the submitted group
     """
     try:
@@ -677,16 +691,16 @@ def confirm_payment_transaction(self, payment_id: str, txid: str):
         try:
             payment_tx: PaymentTransaction = PaymentTransaction.objects.select_related(
                 'invoice', 'payer_user', 'payer_business', 'merchant_business', 'merchant_account'
-            ).get(payment_transaction_id=payment_id)
+            ).get(internal_id=internal_id)
         except PaymentTransaction.DoesNotExist:
-            logger.error(f"PaymentTransaction {payment_id} not found for confirmation")
+            logger.error(f"PaymentTransaction {internal_id} not found for confirmation")
             return {'status': 'missing'}
 
         if pool_error:
             payment_tx.status = 'FAILED'
             payment_tx.error_message = str(pool_error)
             payment_tx.save(update_fields=['status', 'error_message', 'updated_at'])
-            logger.error(f"Payment {payment_id} failed in pool: {pool_error}")
+            logger.error(f"Payment {internal_id} failed in pool: {pool_error}")
             return {'status': 'failed', 'pool_error': pool_error}
 
         if confirmed_round > 0:
@@ -734,17 +748,21 @@ def confirm_payment_transaction(self, payment_id: str, txid: str):
                     title="Pago recibido",
                     message=f"Recibiste {amount_str} {display_token} de {payer_name}",
                     data={
-                        'transaction_id': payment_tx.payment_transaction_id,
+                        'transaction_id': str(payment_tx.internal_id),
+                        'internal_id': str(payment_tx.internal_id),
                         'transaction_hash': payment_tx.transaction_hash,
                         'amount': amount_str,
                         'token_type': token,
+                        'sender_name': payer_name,
+                        'recipient_name': merchant_name,
+                        'transaction_type': 'payment',
                     },
                     related_object_type='PaymentTransaction',
                     related_object_id=str(payment_tx.id),
-                    action_url=f"confio://transaction/{payment_tx.payment_transaction_id}",
+                    action_url=f"confio://transaction/{payment_tx.internal_id}",
                 )
             except Exception as e:
-                logger.warning(f"Could not create merchant notification for {payment_id}: {e}")
+                logger.warning(f"Could not create merchant notification for {internal_id}: {e}")
 
             try:
                 notif_utils.create_notification(
@@ -755,21 +773,25 @@ def confirm_payment_transaction(self, payment_id: str, txid: str):
                     title="Pago enviado",
                     message=f"Pagaste {amount_str} {display_token} a {merchant_name}",
                     data={
-                        'transaction_id': payment_tx.payment_transaction_id,
+                        'transaction_id': str(payment_tx.internal_id),
+                        'internal_id': str(payment_tx.internal_id),
                         'transaction_hash': payment_tx.transaction_hash,
                         'amount': amount_str,
                         'token_type': token,
+                        'sender_name': payer_name,
+                        'recipient_name': merchant_name,
+                        'transaction_type': 'payment',
                     },
                     related_object_type='PaymentTransaction',
                     related_object_id=str(payment_tx.id),
-                    action_url=f"confio://transaction/{payment_tx.payment_transaction_id}",
+                    action_url=f"confio://transaction/{payment_tx.internal_id}",
                 )
             except Exception as e:
-                logger.warning(f"Could not create payer notification for {payment_id}: {e}")
+                logger.warning(f"Could not create payer notification for {internal_id}: {e}")
 
             # Do not send an extra 'invoice paid' notification; 'Pago recibido' is sufficient.
 
-            logger.info(f"Payment {payment_id} confirmed in round {confirmed_round}")
+            logger.info(f"Payment {internal_id} confirmed in round {confirmed_round}")
             return {'status': 'confirmed', 'round': confirmed_round}
 
         # Not confirmed yet: keep polling via Celery retry
@@ -823,7 +845,7 @@ def confirm_payroll_item_payout(self, item_id: str, txid: str):
                 pass
 
         try:
-            payroll_item = PayrollItem.objects.select_related('run__business', 'recipient_user', 'recipient_account').get(item_id=item_id)
+            payroll_item = PayrollItem.objects.select_related('run__business', 'recipient_user', 'recipient_account').get(internal_id=item_id)
         except PayrollItem.DoesNotExist:
             logger.error(f"PayrollItem {item_id} not found for confirmation")
             return {'status': 'missing'}
@@ -875,32 +897,62 @@ def scan_outbound_confirmations(max_batch: int = 50):
         def check_tx(txid: str) -> tuple[int, str]:
             try:
                 info = algod_client.pending_transaction_info(txid)
-            except Exception as e:
-                logger.warning(f"pending_transaction_info error for {txid}: {e}")
+            except Exception:
+                # Suppress warning as missing txs are common when failing stuck ones
                 return 0, ''
             cr = int(info.get('confirmed-round') or 0)
             pe = info.get('pool-error') or info.get('pool_error') or ''
             return cr, pe
 
         # Payments
+        # Use a cutoff to auto-fail stuck transactions
+        from django.utils import timezone
+        import datetime
+        # Aggressive cutoff: 2 mins. If not in pool/rounds by then, it's gone.
+        cutoff_time = timezone.now() - datetime.timedelta(minutes=2)
+
         pay_qs = PaymentTransaction.objects.filter(status='SUBMITTED').exclude(transaction_hash__isnull=True).exclude(transaction_hash='')[:max_batch]
         for p in pay_qs:
             cr, pe = check_tx(p.transaction_hash)
+            
+            # If confirmed
+            if cr > 0:
+                try:
+                    confirm_payment_transaction.run(p.internal_id, p.transaction_hash)
+                except Exception:
+                    continue
+                processed += 1
+                continue
+
+            # If pool error
             if pe:
                 p.status = 'FAILED'
                 p.error_message = str(pe)
                 p.save(update_fields=['status', 'error_message', 'updated_at'])
                 processed += 1
                 continue
-            if cr > 0:
-                # Reuse logic from confirm_payment_transaction
-                try:
-                    confirm_payment_transaction.run(p.payment_transaction_id, p.transaction_hash)
-                except Exception:
-                    # Fallback to inline minimal update
-                    p.status = 'CONFIRMED'
-                    p.save(update_fields=['status', 'updated_at'])
+                
+            # If missing from node (cr=0, pe='') and old, mark failed
+            if cr == 0 and not pe and p.updated_at < cutoff_time:
+                p.status = 'FAILED'
+                p.error_message = "Transaction expired or lost from pool"
+                p.save(update_fields=['status', 'error_message', 'updated_at'])
+                logger.warning(f"Marking stuck payment {p.internal_id} as FAILED (missing from node)")
                 processed += 1
+                continue
+
+        # Cleanup stale PENDING_BLOCKCHAIN payments (never submitted to blockchain)
+        pending_blockchain_qs = PaymentTransaction.objects.filter(
+            status='PENDING_BLOCKCHAIN',
+            updated_at__lt=cutoff_time
+        )[:max_batch]
+        for p in pending_blockchain_qs:
+            p.status = 'FAILED'
+            p.error_message = "Payment preparation expired - blockchain submission never completed"
+            p.save(update_fields=['status', 'error_message', 'updated_at'])
+            logger.warning(f"Marking stale PENDING_BLOCKCHAIN payment {p.internal_id} as FAILED")
+            processed += 1
+
 
         # Sends
         send_qs = SendTransaction.objects.filter(status='SUBMITTED').exclude(transaction_hash__isnull=True).exclude(transaction_hash='')[:max_batch]
@@ -912,6 +964,16 @@ def scan_outbound_confirmations(max_batch: int = 50):
                 s.save(update_fields=['status', 'error_message', 'updated_at'])
                 processed += 1
                 continue
+            
+            # If missing from node (cr=0, pe='') and old, mark failed
+            if cr == 0 and not pe and s.updated_at < cutoff_time:
+                s.status = 'FAILED'
+                s.error_message = "Transaction expired or lost from pool"
+                s.save(update_fields=['status', 'error_message', 'updated_at'])
+                logger.warning(f"Marking stuck send {s.internal_id} as FAILED (missing from node)")
+                processed += 1
+                continue
+
             if cr > 0:
                 s.status = 'CONFIRMED'
                 s.save(update_fields=['status', 'updated_at'])
@@ -948,13 +1010,21 @@ def scan_outbound_confirmations(max_batch: int = 50):
                             title="Dinero recibido",
                             message=f"Recibiste {amount_str} {display_token} de {sender_name}",
                             data={
+                                'transaction_id': str(s.internal_id),
+                                'internal_id': str(s.internal_id),
                                 'transaction_hash': s.transaction_hash,
                                 'amount': amount_str,
                                 'token_type': token,
+                                'sender_name': sender_name,
+                                'recipient_name': recipient_name,
+                                'sender_phone': s.sender_phone or '',
+                                'recipient_phone': s.recipient_phone or '',
+                                'memo': s.memo or '',
+                                'transaction_type': 'send',
                             },
                             related_object_type='SendTransaction',
-                            related_object_id=str(s.id),
-                            action_url=f"confio://send/{s.id}",
+                            related_object_id=str(s.internal_id),
+                            action_url=f"confio://send/{s.internal_id}",
                         )
                     # Sender notification
                     if s.sender_user_id:
@@ -966,13 +1036,21 @@ def scan_outbound_confirmations(max_batch: int = 50):
                             title="Dinero enviado",
                             message=f"Enviaste {amount_str} {display_token} a {recipient_name}",
                             data={
+                                'transaction_id': str(s.internal_id),
+                                'internal_id': str(s.internal_id),
                                 'transaction_hash': s.transaction_hash,
                                 'amount': amount_str,
                                 'token_type': token,
+                                'sender_name': sender_name,
+                                'recipient_name': recipient_name,
+                                'sender_phone': s.sender_phone or '',
+                                'recipient_phone': s.recipient_phone or '',
+                                'memo': s.memo or '',
+                                'transaction_type': 'send',
                             },
                             related_object_type='SendTransaction',
-                            related_object_id=str(s.id),
-                            action_url=f"confio://send/{s.id}",
+                            related_object_id=str(s.internal_id),
+                            action_url=f"confio://send/{s.internal_id}",
                         )
                 except Exception as ne:
                     logger.warning(f"Notification error for SendTransaction {s.id}: {ne}")
@@ -1125,6 +1203,7 @@ def scan_outbound_confirmations(max_batch: int = 50):
                                 'invitation_reverted': False,
                                 'invitation_expires_at': None,
                                 'transaction_date': p.completed_at or dj_tz.now(),
+                                'presale_purchase': p,  # Link to source model for internal_id
                             },
                         )
                     except Exception as ue:
@@ -1196,7 +1275,7 @@ def scan_outbound_confirmations(max_batch: int = 50):
                                         notification_type=NotificationTypeChoices.P2P_CRYPTO_RELEASED,
                                         user=buyer_user,
                                         business=tr.buyer_business,
-                                        trade_id=str(tr.id),
+                                        trade_id=str(tr.internal_id),
                                         amount=str(tr.crypto_amount),
                                         token_type=base['token_type'],
                                         counterparty_name=tr.seller_display_name,
@@ -1207,7 +1286,7 @@ def scan_outbound_confirmations(max_batch: int = 50):
                                         notification_type=NotificationTypeChoices.P2P_CRYPTO_RELEASED,
                                         user=seller_user,
                                         business=tr.seller_business,
-                                        trade_id=str(tr.id),
+                                        trade_id=str(tr.internal_id),
                                         amount=str(tr.crypto_amount),
                                         token_type=base['token_type'],
                                         counterparty_name=tr.buyer_display_name,
@@ -1236,7 +1315,7 @@ def scan_outbound_confirmations(max_batch: int = 50):
                                         notification_type=NotificationTypeChoices.P2P_TRADE_CANCELLED,
                                         user=buyer_user,
                                         business=tr.buyer_business,
-                                        trade_id=str(tr.id),
+                                        trade_id=str(tr.internal_id),
                                         amount=str(tr.crypto_amount),
                                         token_type=(tr.offer.token_type if tr.offer else 'CUSD'),
                                         counterparty_name=tr.seller_display_name,
@@ -1247,7 +1326,7 @@ def scan_outbound_confirmations(max_batch: int = 50):
                                         notification_type=NotificationTypeChoices.P2P_TRADE_CANCELLED,
                                         user=seller_user,
                                         business=tr.seller_business,
-                                        trade_id=str(tr.id),
+                                        trade_id=str(tr.internal_id),
                                         amount=str(tr.crypto_amount),
                                         token_type=(tr.offer.token_type if tr.offer else 'CUSD'),
                                         counterparty_name=tr.buyer_display_name,
@@ -1277,7 +1356,7 @@ def scan_outbound_confirmations(max_batch: int = 50):
                                         notification_type=NotificationTypeChoices.P2P_DISPUTE_RESOLVED,
                                         user=buyer_user,
                                         business=tr.buyer_business,
-                                        trade_id=str(tr.id),
+                                        trade_id=str(tr.internal_id),
                                         amount=str(tr.crypto_amount),
                                         token_type=(tr.offer.token_type if tr.offer else 'CUSD'),
                                         counterparty_name=tr.seller_display_name,
@@ -1288,7 +1367,7 @@ def scan_outbound_confirmations(max_batch: int = 50):
                                         notification_type=NotificationTypeChoices.P2P_DISPUTE_RESOLVED,
                                         user=seller_user,
                                         business=tr.seller_business,
-                                        trade_id=str(tr.id),
+                                        trade_id=str(tr.internal_id),
                                         amount=str(tr.crypto_amount),
                                         token_type=(tr.offer.token_type if tr.offer else 'CUSD'),
                                         counterparty_name=tr.buyer_display_name,
@@ -1348,7 +1427,8 @@ def scan_outbound_confirmations(max_batch: int = 50):
                         business=c.actor_business,
                         amount=amount_to,
                         token_type=to_token,
-                        transaction_id=str(c.id),
+                        transaction_id=str(c.internal_id),
+                        internal_id=str(c.internal_id),
                         transaction_model='Conversion',
                         additional_data={
                             'from_amount': amount_from,
@@ -1370,7 +1450,7 @@ def scan_outbound_confirmations(max_batch: int = 50):
                             title=title,
                             message=msg,
                             data={
-                                'transaction_id': str(c.id),
+                                'transaction_id': str(c.internal_id),
                                 'from_amount': amount_from,
                                 'from_token': from_token,
                                 'to_amount': amount_to,
@@ -1379,8 +1459,8 @@ def scan_outbound_confirmations(max_batch: int = 50):
                                 'conversion_type': c.conversion_type,
                             },
                             related_object_type='Conversion',
-                            related_object_id=str(c.id),
-                            action_url=f"confio://transaction/{c.id}",
+                            related_object_id=str(c.internal_id),
+                            action_url=f"confio://transaction/{c.internal_id}",
                         )
                 except Exception as ne:
                     logger.warning(f"Conversion notification error for Conversion {c.id}: {ne}")
@@ -1524,7 +1604,7 @@ def scan_outbound_confirmations(max_batch: int = 50):
                                     'transaction_hash': txh,
                                 },
                                 related_object_type='USDCWithdrawal',
-                                related_object_id=str(getattr(u.usdc_withdrawal, 'id', '')),
+                                related_object_id=str(getattr(u.usdc_withdrawal, 'internal_id', '')),
                                 action_url=f"confio://transaction/{u.transaction_id}"
                             )
                     except Exception as ne:

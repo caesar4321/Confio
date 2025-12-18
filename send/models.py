@@ -1,8 +1,13 @@
 from django.db import models
 from django.conf import settings
 from users.models import SoftDeleteModel
+import uuid
 
 # Create your models here.
+
+def generate_send_transaction_id():
+    """Generate a unique send transaction ID (32-char hex UUID)"""
+    return uuid.uuid4().hex
 
 class SendTransaction(SoftDeleteModel):
     """Model for storing send transaction data (direct user-to-user transfers)"""
@@ -21,6 +26,14 @@ class SendTransaction(SoftDeleteModel):
         ('CONFIO', 'Confío Token'),
         ('USDC', 'USD Coin')
     ]
+
+    # Unique identifier for the send transaction (internal)
+    internal_id = models.CharField(
+        max_length=32,
+        unique=True,
+        default=generate_send_transaction_id,
+        editable=False
+    )
 
     # User references (from our database) - LEGACY
     sender_user = models.ForeignKey(

@@ -146,9 +146,9 @@ def create_unified_usdc_transaction_from_conversion(conversion):
             secondary_currency = 'cUSD'
         
         unified, created = UnifiedUSDCTransactionTable.objects.update_or_create(
-            conversion=conversion,
+            transaction_id=conversion.internal_id,
             defaults={
-                'transaction_id': conversion.conversion_id,
+                'conversion': conversion,
                 'transaction_type': 'conversion',
                 
                 # Actor info

@@ -89,24 +89,89 @@ class WalletMigrationService {
                     console.log('[MigrationService] Already migrated on backend ✅', myAccount);
 
                     if (myAccount.algorandAddress) {
-                        // Force update local keychain to match backend (Fix for stale V1 address persisting)
                         try {
-                            if (!authService) {
-                                throw new Error('AuthService instance is undefined');
-                            }
-                            await authService.forceUpdateLocalAlgorandAddress(myAccount.algorandAddress, {
-                                type: 'personal',
-                                index: accountIndex,
-                                businessId: businessId
+                            // TRUST BUT VERIFY (ZOMBIE TYPE 2 FIX)
+                            // Even if backend says migrated, check if V2 is actually funded.
+                            // If V2 is empty, it might be a Failed Atomic Migration (Backend=True, Chain=False).
+
+                            // Check V2 on-chain state
+                            const v2CheckInfo = await this.algodClient.accountInformation(myAccount.algorandAddress).do();
+                            const v2Balance = v2CheckInfo.amount;
+                            const v2Assets = v2CheckInfo.assets || [];
+
+                            // Check if V2 is "Empty" (Only min balance/dust and NO relevant assets)
+                            const relevantV2Assets = v2Assets.filter((a: any) => {
+                                const aid = a['asset-id'];
+                                return (aid === CONFIO_ASSET_ID || aid === CUSD_ASSET_ID || aid === USDC_ASSET_ID);
                             });
-                            console.log('[MigrationService] Synchronized local keychain address with backend V2 address.');
+                            const isV2Empty = (v2Balance < 2000000 && relevantV2Assets.length === 0);
+
+                            if (isV2Empty) {
+                                console.log('[MigrationService] TRUST BUT VERIFY: Backend says Migrated, but V2 is EMPTY. Checking V1 to confirm...');
+
+                                // Refinement: Only handle as Zombie if V1 HAS FUNDS. 
+                                // Otherwise, it's just a new user or empty user.
+                                try {
+                                    const v1Wallet = await secureDeterministicWallet.restoreLegacyV1Wallet(
+                                        iss, sub, aud, provider, 'personal', accountIndex, businessId
+                                    );
+                                    const v1Address = v1Wallet.address;
+
+                                    const v1Info = await this.algodClient.accountInformation(v1Address).do();
+                                    const v1Balance = v1Info.amount;
+                                    const v1Assets = v1Info.assets || [];
+                                    const relevantV1Assets = v1Assets.filter((a: any) => {
+                                        const aid = a['asset-id'];
+                                        return (aid === CONFIO_ASSET_ID || aid === CUSD_ASSET_ID || aid === USDC_ASSET_ID);
+                                    });
+
+                                    if (relevantV1Assets.length > 0 || v1Balance > 1000000) {
+                                        console.warn('[MigrationService] ZOMBIE CONFIRMED: V2 Empty, but V1 has funds. Forcing Migration Resume.');
+                                        // Fall through to standard check below (which will return true)
+                                    } else {
+                                        console.log('[MigrationService] False Alarm: V1 is also empty/dust. User is legitimately empty or new. Confirmed Migrated.');
+                                        // Real Success (Empty)
+                                        if (!authService) {
+                                            throw new Error('AuthService instance is undefined');
+                                        }
+                                        await authService.forceUpdateLocalAlgorandAddress(myAccount.algorandAddress, {
+                                            type: 'personal',
+                                            index: accountIndex,
+                                            businessId: businessId
+                                        });
+                                        return { needsMigration: false, v2Address: myAccount.algorandAddress };
+                                    }
+                                } catch (e) {
+                                    console.warn('[MigrationService] Failed to check V1, assuming Valid Empty User:', e);
+                                    return { needsMigration: false, v2Address: myAccount.algorandAddress };
+                                }
+
+                            } else {
+                                // Real Success
+                                // Force update local keychain to match backend
+                                if (!authService) {
+                                    throw new Error('AuthService instance is undefined');
+                                }
+                                await authService.forceUpdateLocalAlgorandAddress(myAccount.algorandAddress, {
+                                    type: 'personal',
+                                    index: accountIndex,
+                                    businessId: businessId
+                                });
+                                console.log('[MigrationService] Verified V2 funded. Syncing local keychain.');
+                                return { needsMigration: false, v2Address: myAccount.algorandAddress };
+                            }
+
                         } catch (err) {
-                            console.warn('[MigrationService] Failed to sync local keychain address:', JSON.stringify(err, Object.getOwnPropertyNames(err)));
+                            console.warn('[MigrationService] Failed to verify V2 or sync local:', JSON.stringify(err, Object.getOwnPropertyNames(err)));
+                            // If verification fails (network), fallback to trusting backend (safest default)
+                            // return { needsMigration: false, v2Address: myAccount.algorandAddress };
+                            // Actually, if network fails, we probably cant migrate anyway.
                         }
                     } else {
                         console.warn('[MigrationService] Migrated but no address?!');
                     }
-                    return { needsMigration: false, v2Address: myAccount.algorandAddress };
+                    // If we are here, it means we detected Empty V2 (Type 2 Zombie) or fell through.
+                    // We continue to standard V1 check below.
                 } else {
                     console.log('[MigrationService] Backend says NOT migrated ❌ ' + JSON.stringify({
                         myAccount,
@@ -161,13 +226,46 @@ class WalletMigrationService {
             // If V1 is practically empty (only min balance or less, and no RELEVANT assets)
             // We consider it "migrated" or "empty"
             // We ignore junk assets - they will be abandoned in the legacy wallet
-            if (!hasRelevantAssets) {
-                // Check if there's significant Algo balance worth sweeping (e.g. > 1 Algo)
-                // Otherwise, we abandon the dust/min-balance locked by junk assets
-                if (balance < 1000000) { // < 1 Algo
-                    console.log('[MigrationService] V1 has only junk assets/dust. Marking as done.');
-                    return { needsMigration: false, v1Address, v1Balance: 0 };
+            // If V1 is practically empty (only min balance or less, and no RELEVANT assets)
+            if (!hasRelevantAssets && balance < 1000000) {
+                console.log('[MigrationService] V1 is empty/dust. Checking if we need to self-heal (Zombie State).');
+
+                // Check if actually migrated but backend missed it
+                if (v2Secret) {
+                    try {
+                        const v2Wallet = deriveWalletV2(v2Secret, {
+                            iss, sub, aud, accountType: 'personal', accountIndex, businessId
+                        });
+                        const v2Address = v2Wallet.address;
+
+                        const v2Info = await this.algodClient.accountInformation(v2Address).do();
+                        // If V2 has confirmed implementation (assets or significant balance)
+                        if (v2Info.amount > 1000000 || (v2Info.assets && v2Info.assets.length > 0)) {
+                            console.log('[MigrationService] ZOMBIE DETECTED: V1 empty, V2 funded. Self-healing...');
+
+                            // 1. Tell Backend
+                            await apolloClient.mutate({
+                                mutation: MARK_WALLET_MIGRATED_MUTATION,
+                                variables: { newAddress: v2Address }
+                            });
+
+                            // 2. Update Local
+                            if (authService) {
+                                await authService.forceUpdateLocalAlgorandAddress(v2Address, {
+                                    type: 'personal', index: accountIndex, businessId
+                                });
+                            }
+
+                            console.log('[MigrationService] Self-healing complete. Switched to V2.');
+                            return { needsMigration: false, v2Address };
+                        }
+                    } catch (e) {
+                        console.warn('[MigrationService] Failed to check/heal V2 state:', e);
+                    }
                 }
+
+                console.log('[MigrationService] V1 empty and no active V2 found. Marking as done/new.');
+                return { needsMigration: false, v1Address, v1Balance: 0 };
             }
 
             // V1 has contents.
@@ -356,15 +454,31 @@ class WalletMigrationService {
                 console.log('[MigrationService] Migration successful (TxID: ' + submitResult.data.submitBusinessOptInGroup.transactionId + ')');
 
                 // Call backend to flag user as migrated
-                try {
-                    await apolloClient.mutate({
-                        mutation: MARK_WALLET_MIGRATED_MUTATION,
-                        variables: {
-                            newAddress: v2Address
-                        }
-                    });
-                    console.log(`[MigrationService] Marked as migrated on backend (Address updated to ${v2Address}).`);
+                // Call backend to flag user as migrated with RETRY logic
+                let markedSuccess = false;
+                for (let attempt = 1; attempt <= 3; attempt++) {
+                    try {
+                        await apolloClient.mutate({
+                            mutation: MARK_WALLET_MIGRATED_MUTATION,
+                            variables: {
+                                newAddress: v2Address
+                            }
+                        });
+                        markedSuccess = true;
+                        console.log(`[MigrationService] Marked as migrated on backend (Address updated to ${v2Address}).`);
+                        break;
+                    } catch (err) {
+                        console.warn(`[MigrationService] Attempt ${attempt} to mark migration failed:`, err);
+                        if (attempt < 3) await new Promise(r => setTimeout(r, 1000)); // Wait 1s
+                    }
+                }
 
+                if (!markedSuccess) {
+                    console.error('[MigrationService] CRITICAL: Failed to mark migration on backend after 3 attempts. Local state will be updated, but backend might de-sync.');
+                    // We continue anyway to update local keychain so user can use the app
+                }
+
+                try {
                     // CRITICAL FIX: Force update local keychain to V2 address so UI reflects it immediately
                     await authService.forceUpdateLocalAlgorandAddress(v2Address, {
                         type: 'personal',
@@ -374,8 +488,7 @@ class WalletMigrationService {
                     console.log('[MigrationService] Local keychain synchronized with V2 address.');
 
                 } catch (e) {
-                    console.error('[MigrationService] CRITICAL: Failed to mark migration on backend or sync local:', e);
-                    // We should probably re-throw or handle this better, but for now we log error
+                    console.error('[MigrationService] CRITICAL: Failed to sync local keychain:', e);
                 }
 
                 return true;

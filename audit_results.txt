@@ -1,0 +1,12 @@
+--- Auditing Confirmed Payments with Pending Invoices ---
+Found 0 stuck payments.
+
+--- Auditing Submitted Payments (potentially confirmed on chain) ---
+Found 0 submitted payments.
+
+--- Auditing Recent Invoices (Last 24h) ---
+Invoice KJRXWY9J (PENDING): 0 payments
+Invoice X88YHR4Q (PENDING): 0 payments
+Invoice 1619L6IP (PENDING): 0 payments
+Invoice ZPXF56CR (PENDING): 0 payments
+Invoice N26IEVNF (PENDING): 0 payments

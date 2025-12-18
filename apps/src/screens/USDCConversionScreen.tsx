@@ -381,7 +381,7 @@ export const USDCConversionScreen = () => {
         signedUserTransactions.push(Buffer.from(signed).toString('base64'));
       }
       setLoadingMessage('Enviando conversión...');
-      await ws.submit({ conversionId: pack?.conversion_id, signedUserTransactions, sponsorTransactions: pack?.sponsor_transactions || [] });
+      await ws.submit({ internalId: pack?.internal_id, signedUserTransactions, sponsorTransactions: pack?.sponsor_transactions || [] });
 
       setLoadingMessage('');
       await refetchCusd();

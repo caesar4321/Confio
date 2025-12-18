@@ -309,8 +309,27 @@ class P2PTradeTransactionBuilder:
 
             atc = AtomicTransactionComposer()
             # Fee bump
+            # Fee bump + Conditional MBR Top-up
+            # Check buyer balance and min-balance
+            topup_amt = 0
+            try:
+                acc_info = self.algod_client.account_info(buyer_address)
+                bal = acc_info.get('amount', 0)
+                min_bal = acc_info.get('min-balance', 0)
+                # Ensure user has at least min_bal + 0.01 ALGO (10,000 microAlgo) headroom
+                # This fixes "balance below min" errors and provides slight gas buffering
+                required = min_bal + 10000
+                if bal < required:
+                    topup_amt = required - bal
+                    self.logger.info(f'[P2P Builder] Auto-topup buyer {buyer_address[-6:]}: bal={bal} min={min_bal} adding={topup_amt}')
+            except Exception as e:
+                self.logger.warning(f'[P2P Builder] Failed to check buyer balance for topup: {e}')
+                # Fallback: if we can't check, assume 0 topup or safe small amount? 
+                # Better to be conservative and not send if we can't verify need, or send small fixed?
+                pass
+
             sp0 = transaction.SuggestedParams(fee=2*min_fee, first=params.first, last=params.last, gh=params.gh, gen=params.gen, flat_fee=True)
-            pay = transaction.PaymentTxn(sender=self.sponsor_address, sp=sp0, receiver=self.app_address, amt=0, note=b'P2P accept user')
+            pay = transaction.PaymentTxn(sender=self.sponsor_address, sp=sp0, receiver=buyer_address, amt=int(topup_amt), note=b'P2P accept + topup')
             atc.add_transaction(TransactionWithSigner(pay, AccountTransactionSigner('0'*64)))
 
             method = self._method('accept_trade')

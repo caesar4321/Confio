@@ -2,6 +2,7 @@ from django.db import models
 from django.conf import settings
 from django.utils import timezone
 from users.models import SoftDeleteModel
+import uuid
 import secrets
 import string
 
@@ -10,8 +11,8 @@ def generate_invoice_id():
     return ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(8))
 
 def generate_payment_transaction_id():
-    """Generate a unique payment transaction ID"""
-    return ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(12))
+    """Generate a unique payment transaction ID (32-char hex UUID)"""
+    return uuid.uuid4().hex
 
 class PaymentTransaction(SoftDeleteModel):
     """Model for storing payment transaction data (specific to invoice payments)"""
@@ -32,7 +33,7 @@ class PaymentTransaction(SoftDeleteModel):
     ]
 
     # Unique identifier for the payment transaction
-    payment_transaction_id = models.CharField(
+    internal_id = models.CharField(
         max_length=32,
         unique=True,
         default=generate_payment_transaction_id,
@@ -165,7 +166,7 @@ class PaymentTransaction(SoftDeleteModel):
     class Meta:
         ordering = ['-created_at']
         indexes = [
-            models.Index(fields=['payment_transaction_id']),
+            models.Index(fields=['internal_id']),
             models.Index(fields=['transaction_hash']),
             models.Index(fields=['payer_user', 'status']),
             models.Index(fields=['merchant_account_user', 'status']),
@@ -191,7 +192,7 @@ class PaymentTransaction(SoftDeleteModel):
 
     def __str__(self):
         merchant_name = self.merchant_business.name
-        return f"PAY-{self.payment_transaction_id}: {self.token_type} {self.amount} from {self.payer_user} to {merchant_name}"
+        return f"PAY-{self.internal_id}: {self.token_type} {self.amount} from {self.payer_user} to {merchant_name}"
 
 
 # Update unified user activity on new payment transactions

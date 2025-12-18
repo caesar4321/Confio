@@ -21,9 +21,9 @@ class WithdrawSessionConsumer(AsyncJsonWebsocketConsumer):
     """
     WebSocket for USDC withdrawals (prepare + submit, two-step).
     - prepare: {type:"prepare", amount:"<decimal>", destination_address:"<algo_addr>"}
-      -> {type:"prepare_ready", pack:{withdrawal_id, transactions:[b64], sponsor_transactions:[json], group_id}}
-    - submit: {type:"submit", withdrawal_id:"<id>", signed_transactions:[b64], sponsor_transactions:[json|string]}
-      -> {type:"submit_ok", txid}
+      -> {type:"prepare_ready", pack:{internal_id, transactions:[b64], sponsor_transactions:[json], group_id}}
+    - submit: {type:"submit", internal_id:"<id>", signed_transactions:[b64], sponsor_transactions:[json|string]}
+      -> {type:"submit_ok", txid, internal_id}
     """
 
     KEEPALIVE_SEC = 25
@@ -62,7 +62,7 @@ class WithdrawSessionConsumer(AsyncJsonWebsocketConsumer):
                 await self.send_json({
                     "type": "prepare_ready",
                     "pack": {
-                        "withdrawal_id": pack.get("withdrawal_id"),
+                        "internal_id": pack.get("internal_id"),
                         "transactions": pack.get("transactions"),
                         "sponsor_transactions": pack.get("sponsor_transactions"),
                         "group_id": pack.get("group_id"),
@@ -75,18 +75,18 @@ class WithdrawSessionConsumer(AsyncJsonWebsocketConsumer):
                 await self.send_json({"type": "error", "message": str(e) or "prepare_exception"})
             return
         if t == "submit":
-            wid = content.get("withdrawal_id")
+            iid = content.get("internal_id") or content.get("withdrawal_id")
             signed_transactions = content.get("signed_transactions")
             sponsor_transactions = content.get("sponsor_transactions") or []
             try:
-                res = await self._submit(withdrawal_id=str(wid), signed_transactions=signed_transactions, sponsor_transactions=sponsor_transactions)
+                res = await self._submit(internal_id=str(iid), signed_transactions=signed_transactions, sponsor_transactions=sponsor_transactions)
                 if not res.get("success"):
                     import logging
                     logger = logging.getLogger(__name__)
                     logger.error(f"WS Submit Failed: {res.get('error')}")
                     await self.send_json({"type": "error", "message": res.get("error", "submit_failed")})
                     return
-                await self.send_json({"type": "submit_ok", "txid": res.get("txid")})
+                await self.send_json({"type": "submit_ok", "txid": res.get("txid"), "internal_id": res.get("internal_id")})
             except Exception as e:
                 import logging
                 logger = logging.getLogger(__name__)
@@ -230,14 +230,14 @@ class WithdrawSessionConsumer(AsyncJsonWebsocketConsumer):
 
         return {
             "success": True,
-            "withdrawal_id": str(withdrawal.id),
+            "internal_id": str(withdrawal.internal_id),
             "transactions": [algo_encoding.msgpack_encode(user_axfer)],
             "sponsor_transactions": [json.dumps({"txn": algo_encoding.msgpack_encode(sponsor_payment), "signed": sponsor_signed_b64, "index": 0})],
             "group_id": (gid and __import__('base64').b64encode(gid).decode('utf-8')),
         }
 
     @database_sync_to_async
-    def _submit(self, withdrawal_id: str, signed_transactions, sponsor_transactions):
+    def _submit(self, internal_id: str, signed_transactions, sponsor_transactions):
         from django.conf import settings
         from algosdk.v2client import algod
         import base64, json as _json, msgpack
@@ -247,7 +247,7 @@ class WithdrawSessionConsumer(AsyncJsonWebsocketConsumer):
         from django.utils import timezone as dj_tz
 
         try:
-            w = USDCWithdrawal.objects.get(id=withdrawal_id)
+            w = USDCWithdrawal.objects.get(internal_id=internal_id)
         except USDCWithdrawal.DoesNotExist:
             return {"success": False, "error": "withdrawal_not_found"}
 
@@ -307,7 +307,7 @@ class WithdrawSessionConsumer(AsyncJsonWebsocketConsumer):
             UnifiedUSDCTransactionTable.objects.update_or_create(
                 usdc_withdrawal=w,
                 defaults={
-                    'transaction_id': w.withdrawal_id,
+                    'transaction_id': str(w.internal_id),
                     'transaction_type': 'withdrawal',
                     'actor_user': w.actor_user,
                     'actor_business': w.actor_business,
@@ -331,4 +331,4 @@ class WithdrawSessionConsumer(AsyncJsonWebsocketConsumer):
 
         # Do not send notification here; Celery will emit on confirmation (success/failure)
 
-        return {"success": True, "txid": ref_txid}
+        return {"success": True, "txid": ref_txid, "internal_id": str(w.internal_id)}

@@ -16,7 +16,13 @@ class USDCDeposit(models.Model):
     ]
     
     # Unique identifier
-    deposit_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    internal_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    
+    @property
+    def deposit_id(self):
+        """Alias for internal_id to support legacy code"""
+        return self.internal_id
+
     
     # Direct User/Business actor pattern
     actor_user = models.ForeignKey(
@@ -84,7 +90,7 @@ class USDCDeposit(models.Model):
             models.Index(fields=['actor_user', 'status'], name='usdc_dep_actor_user_status_idx'),
             models.Index(fields=['actor_business', 'status'], name='usdc_dep_actor_bus_status_idx'),
             models.Index(fields=['actor_type', 'status'], name='usdc_dep_actor_type_status_idx'),
-            models.Index(fields=['deposit_id']),
+            models.Index(fields=['internal_id']),
             models.Index(fields=['created_at']),
         ]
     
@@ -136,7 +142,12 @@ class USDCWithdrawal(models.Model):
     ]
     
     # Unique identifier
-    withdrawal_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+    internal_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+
+    @property
+    def withdrawal_id(self):
+        return self.internal_id
+
     
     # Direct User/Business actor pattern
     actor_user = models.ForeignKey(
@@ -207,7 +218,7 @@ class USDCWithdrawal(models.Model):
             models.Index(fields=['actor_user', 'status'], name='usdc_w_actor_user_status_idx'),
             models.Index(fields=['actor_business', 'status'], name='usdc_w_actor_bus_status_idx'),
             models.Index(fields=['actor_type', 'status'], name='usdc_w_actor_type_status_idx'),
-            models.Index(fields=['withdrawal_id']),
+            models.Index(fields=['internal_id']),
             models.Index(fields=['created_at']),
         ]
     

@@ -33,6 +33,7 @@ class SendTypeFilter(admin.SimpleListFilter):
 class SendTransactionAdmin(EnhancedAdminMixin, admin.ModelAdmin):
     """Admin configuration for SendTransaction model"""
     list_display = [
+        'internal_id',
         'id',
         'sender_display',
         'recipient_type_display',
@@ -58,6 +59,7 @@ class SendTransactionAdmin(EnhancedAdminMixin, admin.ModelAdmin):
         'recipient_user__is_active'
     ]
     search_fields = [
+        'internal_id',
         'transaction_hash',
         'sender_user__username', 
         'sender_user__email',
@@ -72,6 +74,7 @@ class SendTransactionAdmin(EnhancedAdminMixin, admin.ModelAdmin):
         'recipient_display_name'
     ]
     readonly_fields = [
+        'internal_id',
         'created_at', 
         'updated_at', 
         'transaction_hash',
@@ -84,7 +87,7 @@ class SendTransactionAdmin(EnhancedAdminMixin, admin.ModelAdmin):
     
     fieldsets = (
         ('Transaction Information', {
-            'fields': ('amount_display', 'amount', 'token_type', 'memo')
+            'fields': ('internal_id', 'amount_display', 'amount', 'token_type', 'memo')
         }),
         ('Sender Details', {
             'fields': ('sender_type', 'sender_user', 'sender_business', 'sender_display_name'),

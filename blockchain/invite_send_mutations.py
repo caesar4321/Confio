@@ -265,6 +265,7 @@ class SubmitInviteForPhone(graphene.Mutation):
     success = graphene.Boolean()
     error = graphene.String()
     txid = graphene.String()
+    internal_id = graphene.String()
 
     @classmethod
     def mutate(cls, root, info, signed_user_txn: str, sponsor_transactions: list[str], invitation_id: str, message: Optional[str] = ''):
@@ -460,15 +461,18 @@ class SubmitInviteForPhone(graphene.Mutation):
             except Exception as e:
                 logger.exception('[SubmitInviteForPhone] wait_for_confirmation failed for %s: %r', ref_txid, e)
                 return cls(success=False, error=str(e))
-            # Update persisted SendTransaction record
+            # Update persisted SendTransaction record and get internal_id
+            send_internal_id = None
             try:
-                SendTransaction.objects.filter(idempotency_key=invitation_id).update(
-                    status='CONFIRMED',
-                    transaction_hash=ref_txid
-                )
+                stx = SendTransaction.objects.filter(idempotency_key=invitation_id).first()
+                if stx:
+                    stx.status = 'CONFIRMED'
+                    stx.transaction_hash = ref_txid
+                    stx.save(update_fields=['status', 'transaction_hash', 'updated_at'])
+                    send_internal_id = stx.internal_id
             except Exception as e:
                 logger.warning(f'[InviteSend] Could not update SendTransaction invitation {invitation_id}: {e}')
-            return cls(success=True, txid=ref_txid)
+            return cls(success=True, txid=ref_txid, internal_id=send_internal_id)
         except Exception as e:
             logger.error(f"Invite submit error: {e}")
             return cls(success=False, error=str(e))
@@ -872,6 +876,14 @@ ClaimInviteForPhoneField = ClaimInviteForPhone.Field()
 
 
 # Query: invite receipt for current user's phone
+class PendingInviteType(graphene.ObjectType):
+    """Type returned by all_pending_invites_for_phone query"""
+    invitation_id = graphene.String()
+    asset_id = graphene.String()
+    amount = graphene.Int()
+    timestamp = graphene.Int()
+
+
 class InviteReceiptType(graphene.ObjectType):
     exists = graphene.Boolean()
     status_code = graphene.Int()
@@ -951,3 +963,57 @@ def get_invite_receipt_for_phone(user_phone: str, user_country: str | None):
         return {'exists': False}
     except Exception:
         return {'exists': False}
+
+
+def get_all_pending_invites_for_phone(user_phone: str, user_country: str | None):
+    """Return ALL pending invitations for this phone from DB.
+    
+    This allows the frontend to claim all pending invites at once when a user signs up.
+    """
+    builder = InviteSendTransactionBuilder()
+    client = get_algod_client()
+    results = []
+    try:
+        from users.phone_utils import normalize_phone as _norm
+        from send.models import PhoneInvite
+        phone_keys = []
+        canonical = _norm(user_phone or '', user_country or '')
+        if canonical:
+            phone_keys.append(canonical)
+        digits_only = ''.join(ch for ch in (user_phone or '') if ch.isdigit())
+        if digits_only and digits_only not in phone_keys:
+            phone_keys.append(digits_only)
+        if not phone_keys:
+            return results
+
+        # Find ALL pending invites for any candidate key
+        pending_invites = PhoneInvite.objects.filter(
+            phone_key__in=phone_keys,
+            status='pending',
+            deleted_at__isnull=True
+        ).order_by('created_at')  # Oldest first
+        
+        for inv in pending_invites:
+            # Check if invite box still exists on-chain (not yet claimed/reclaimed)
+            try:
+                invite_box = client.application_box_by_name(builder.app_id, inv.invitation_id.encode())
+                raw_val = base64.b64decode(invite_box['value']['bytes']) if isinstance(invite_box.get('value'), dict) else base64.b64decode(invite_box.get('value', ''))
+                asset_id = None
+                amount = None
+                if len(raw_val) >= 48:
+                    amount = int.from_bytes(raw_val[32:40], 'big')
+                    asset_id = int.from_bytes(raw_val[40:48], 'big')
+                results.append({
+                    'invitation_id': inv.invitation_id,
+                    'asset_id': str(asset_id) if asset_id is not None else None,
+                    'amount': amount,
+                    'timestamp': int(inv.created_at.timestamp()) if hasattr(inv, 'created_at') and inv.created_at else 0,
+                })
+            except Exception:
+                # Invite box doesn't exist (maybe already claimed), skip
+                continue
+        
+        return results
+    except Exception:
+        return results
+

@@ -59,7 +59,7 @@ class Payment(models.Model):
     ]
     
     # Payment ID for tracking
-    payment_id = models.CharField(max_length=100, unique=True, db_index=True)
+    internal_id = models.CharField(max_length=100, unique=True, db_index=True)
     
     # Parties involved
     sender = models.ForeignKey(
@@ -122,13 +122,13 @@ class Payment(models.Model):
         indexes = [
             models.Index(fields=['sender', 'status', '-created_at']),
             models.Index(fields=['recipient', 'status', '-created_at']),
-            models.Index(fields=['payment_id']),
+            models.Index(fields=['internal_id']),
             models.Index(fields=['transaction_hash']),
         ]
         ordering = ['-created_at']
     
     def __str__(self):
-        return f"Payment {self.payment_id[:8]}... ({self.amount} {self.currency})"
+        return f"Payment {self.internal_id[:8]}... ({self.amount} {self.currency})"
 
 
 class PaymentReceipt(models.Model):
@@ -150,7 +150,7 @@ class PaymentReceipt(models.Model):
         ]
     
     def __str__(self):
-        return f"Receipt for {self.payment.payment_id[:8]}..."
+        return f"Receipt for {self.payment.internal_id[:8]}..."
 
 
 

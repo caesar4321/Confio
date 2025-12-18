@@ -10,6 +10,8 @@ import {
   Platform,
   StatusBar,
   Clipboard,
+  Modal,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
@@ -24,7 +26,7 @@ type BusinessPaymentSuccessRouteProp = RouteProp<{
   BusinessPaymentSuccess: {
     paymentData: {
       id: string;
-      paymentTransactionId: string;
+      internalId: string;
       invoiceId?: string;
       amount: string;
       tokenType: string;
@@ -48,6 +50,12 @@ type BusinessPaymentSuccessRouteProp = RouteProp<{
         };
       };
       payerAddress: string;
+      payerBusiness?: {
+        id: string;
+        name: string;
+        category: string;
+      };
+      payerDisplayName?: string;
       merchantUser: {
         id: string;
         username: string;
@@ -78,8 +86,9 @@ export const BusinessPaymentSuccessScreen = () => {
   const navigation = useNavigation();
   const route = useRoute<BusinessPaymentSuccessRouteProp>();
   const [copied, setCopied] = useState(false);
+  const [showTechnical, setShowTechnical] = useState(false);
   const [displayCustomerName, setDisplayCustomerName] = useState<string>('Cliente');
-  
+
   const { paymentData } = route.params;
 
   // Calculate merchant fee (0.9%)
@@ -96,10 +105,12 @@ export const BusinessPaymentSuccessScreen = () => {
   };
 
   // Get customer name - prefer business name if payment was made from business account
-  const initialCustomerName = paymentData.payerAccount?.business?.name || 
-                              paymentData.payerUser?.firstName || 
-                              paymentData.payerUser?.lastName || 
-                              paymentData.payerUser?.username || 'Cliente';
+  const initialCustomerName = paymentData.payerDisplayName ||
+    paymentData.payerBusiness?.name ||
+    paymentData.payerAccount?.business?.name ||
+    paymentData.payerUser?.firstName ||
+    paymentData.payerUser?.lastName ||
+    paymentData.payerUser?.username || 'Cliente';
 
   // Prefer the name in params; if it's a placeholder, try fetching from invoice to enrich
   React.useEffect(() => {
@@ -117,7 +128,7 @@ export const BusinessPaymentSuccessScreen = () => {
         const { data } = await fetchInvoice({ variables: { invoiceId } });
         if (data?.getInvoice?.success && data.getInvoice.invoice?.paymentTransactions) {
           const list = data.getInvoice.invoice.paymentTransactions;
-          const ptx = list.find((pt: any) => pt?.paymentTransactionId === paymentData.paymentTransactionId) || list[0];
+          const ptx = list.find((pt: any) => pt?.internalId === paymentData.internalId) || list[0];
           if (ptx?.payerUser) {
             const name = ptx.payerUser.firstName || ptx.payerUser.lastName || ptx.payerUser.username;
             if (name) setDisplayCustomerName(name);
@@ -127,7 +138,7 @@ export const BusinessPaymentSuccessScreen = () => {
         // ignore enrichment errors
       }
     })();
-  }, [invoiceId, shouldFetchInvoice, fetchInvoice, paymentData?.paymentTransactionId]);
+  }, [invoiceId, shouldFetchInvoice, fetchInvoice, paymentData?.internalId]);
 
   // Get customer avatar
   const customerAvatar = (displayCustomerName || 'C').charAt(0).toUpperCase();
@@ -135,13 +146,13 @@ export const BusinessPaymentSuccessScreen = () => {
   // Format date and time
   const paymentDate = new Date(paymentData.createdAt);
   const formattedDate = paymentDate.toLocaleDateString('es-ES');
-  const formattedTime = paymentDate.toLocaleTimeString('es-ES', { 
-    hour: '2-digit', 
-    minute: '2-digit' 
+  const formattedTime = paymentDate.toLocaleTimeString('es-ES', {
+    hour: '2-digit',
+    minute: '2-digit'
   });
 
   const handleCopy = () => {
-    Clipboard.setString(paymentData.paymentTransactionId);
+    Clipboard.setString(paymentData.internalId);
     Alert.alert('Copiado', 'ID de transacción copiado al portapapeles');
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -160,7 +171,34 @@ export const BusinessPaymentSuccessScreen = () => {
   };
 
   const handleShareReceipt = () => {
-    Alert.alert('Compartir Comprobante', 'Función de compartir en desarrollo');
+    (navigation as any).navigate('TransactionReceipt', {
+      transaction: {
+        ...paymentData,
+        // Map to fields expected by TransactionReceiptScreen
+        internalId: paymentData.internalId,
+        id: paymentData.id || paymentData.internalId,
+        amount: paymentData.amount,
+        currency: formatCurrency(paymentData.tokenType),
+        status: paymentData.status,
+        date: paymentData.createdAt,
+
+        // Payer info
+        payerName: paymentData.payerDisplayName || paymentData.payerBusiness?.name || 'Cliente',
+        senderDisplayName: paymentData.payerDisplayName,
+        payerBusiness: paymentData.payerBusiness,
+        senderUser: paymentData.payerUser,
+        payerPhone: '', // Not always available in paymentData unless added to schema override
+
+        // Merchant info
+        merchantName: paymentData.merchantAccount?.business?.name || 'Comercio',
+        recipientBusiness: paymentData.merchantAccount?.business,
+        recipientUser: paymentData.merchantUser,
+
+        transactionHash: paymentData.transactionHash,
+        verificationId: paymentData.internalId
+      },
+      type: 'payment'
+    });
   };
 
   const handleViewCustomerProfile = () => {
@@ -186,11 +224,11 @@ export const BusinessPaymentSuccessScreen = () => {
             </View>
 
             <Text style={styles.successTitle}>¡Pago Recibido!</Text>
-            
+
             <Text style={styles.amountText}>
               +${netAmount.toFixed(2)} {currentCurrency}
             </Text>
-            
+
             <Text style={styles.customerText}>De {displayCustomerName}</Text>
           </View>
         </View>
@@ -200,7 +238,7 @@ export const BusinessPaymentSuccessScreen = () => {
           {/* Customer Info */}
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Cliente</Text>
-            
+
             <View style={styles.customerRow}>
               <View style={styles.avatar}>
                 <Text style={styles.avatarText}>{customerAvatar}</Text>
@@ -222,11 +260,11 @@ export const BusinessPaymentSuccessScreen = () => {
                   <Text style={styles.detailSubtext}>Hace unos segundos</Text>
                 </View>
               </View>
-              
+
               <View style={styles.detailItem}>
                 <Icon name="file-text" size={16} color="#9CA3AF" />
                 <View style={styles.detailContent}>
-                  <Text style={styles.detailText}>ID: {paymentData.paymentTransactionId}</Text>
+                  <Text style={styles.detailText}>ID: {paymentData.internalId}</Text>
                   <Text style={styles.detailSubtext}>{paymentData.description || 'Sin descripción'}</Text>
                 </View>
               </View>
@@ -236,7 +274,7 @@ export const BusinessPaymentSuccessScreen = () => {
           {/* Revenue Summary */}
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Resumen de Ingresos</Text>
-            
+
             <View style={styles.revenueContainer}>
               {/* Revenue breakdown */}
               <View style={styles.revenueBreakdown}>
@@ -244,12 +282,12 @@ export const BusinessPaymentSuccessScreen = () => {
                   <Text style={styles.revenueLabel}>Monto recibido del cliente</Text>
                   <Text style={styles.revenueAmount}>${paymentData.amount}</Text>
                 </View>
-                
+
                 <View style={styles.revenueRow}>
                   <Text style={styles.feeLabel}>Comisión Confío (0.9%)</Text>
                   <Text style={styles.feeAmount}>-${merchantFee.toFixed(2)}</Text>
                 </View>
-                
+
                 <View style={styles.revenueRow}>
                   <Text style={styles.feeLabel}>Comisión de red</Text>
                   <View style={styles.freeFeeContainer}>
@@ -257,9 +295,9 @@ export const BusinessPaymentSuccessScreen = () => {
                     <Text style={styles.freeFeeSubtext}>Cubierto por Confío</Text>
                   </View>
                 </View>
-                
+
                 <View style={styles.divider} />
-                
+
                 <View style={styles.revenueRow}>
                   <Text style={styles.netLabel}>Ingreso neto</Text>
                   <Text style={styles.netAmount}>+${netAmount.toFixed(2)}</Text>
@@ -278,17 +316,17 @@ export const BusinessPaymentSuccessScreen = () => {
                 <View style={styles.transactionRow}>
                   <Text style={styles.transactionLabel}>Estado</Text>
                   <View style={styles.statusContainer}>
-                {isConfirming ? (
-                  <>
-                    <Icon name="clock" size={16} color={confirmColor} />
-                    <Text style={[styles.statusText, { color: confirmColor }]}>Confirmando…</Text>
-                  </>
-                ) : (
-                  <>
-                    <Icon name="check-circle" size={16} color="#10B981" />
-                    <Text style={styles.statusText}>Procesado exitosamente</Text>
-                  </>
-                )}
+                    {isConfirming ? (
+                      <>
+                        <Icon name="clock" size={16} color={confirmColor} />
+                        <Text style={[styles.statusText, { color: confirmColor }]}>Confirmando…</Text>
+                      </>
+                    ) : (
+                      <>
+                        <Icon name="check-circle" size={16} color="#10B981" />
+                        <Text style={styles.statusText}>Confirmado</Text>
+                      </>
+                    )}
                   </View>
                 </View>
 
@@ -301,7 +339,7 @@ export const BusinessPaymentSuccessScreen = () => {
                   <Text style={styles.transactionLabel}>ID de Transacción</Text>
                   <View style={styles.transactionIdContainer}>
                     <Text style={styles.transactionId}>
-                      #{paymentData.paymentTransactionId.slice(-8).toUpperCase()}
+                      #{paymentData.internalId?.slice(-8)?.toUpperCase() || 'N/A'}
                     </Text>
                     <TouchableOpacity onPress={handleCopy} style={styles.copyButton}>
                       {copied ? (
@@ -319,38 +357,36 @@ export const BusinessPaymentSuccessScreen = () => {
           {/* Quick Actions */}
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Acciones Rápidas</Text>
-            
+
             <View style={styles.actionsContainer}>
-              <TouchableOpacity 
-                style={[styles.actionButton, { backgroundColor: isCUSD ? colors.primary : colors.secondary }]}
-                onPress={handleGenerateInvoice}
+              <TouchableOpacity
+                style={[styles.actionButton, { backgroundColor: '#F3F4F6' }]}
+                onPress={handleShareReceipt}
               >
-                <Icon name="file-text" size={16} color="white" />
-                <Text style={styles.actionButtonText}>Generar factura</Text>
+                <Icon name="share-2" size={16} color="#374151" />
+                <Text style={[styles.actionButtonText, { color: '#374151' }]}>Compartir comprobante</Text>
               </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.secondaryActionButton} onPress={handleShareReceipt}>
-                <Icon name="share-2" size={16} color="#6B7280" />
-                <Text style={styles.secondaryActionText}>Compartir comprobante</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.secondaryActionButton} onPress={handleViewCustomerProfile}>
-                <Icon name="user" size={16} color="#6B7280" />
-                <Text style={styles.secondaryActionText}>Ver perfil del cliente</Text>
+
+              <TouchableOpacity
+                style={[styles.actionButton, { backgroundColor: '#F3F4F6' }]}
+                onPress={() => setShowTechnical(true)}
+              >
+                <Icon name="external-link" size={16} color="#374151" />
+                <Text style={[styles.actionButtonText, { color: '#374151' }]}>Ver detalles técnicos</Text>
               </TouchableOpacity>
             </View>
           </View>
 
           {/* Continue Working */}
           <View style={styles.continueContainer}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[styles.continueButton, { backgroundColor: isCUSD ? colors.primary : colors.secondary }]}
               onPress={handleNewCharge}
             >
               <Icon name="plus" size={16} color="white" />
               <Text style={styles.continueButtonText}>Nuevo Cobro</Text>
             </TouchableOpacity>
-            
+
             <TouchableOpacity style={styles.homeButton} onPress={handleGoHome}>
               <Icon name="home" size={16} color="#6B7280" />
               <Text style={styles.homeButtonText}>Ir al Inicio</Text>
@@ -360,7 +396,7 @@ export const BusinessPaymentSuccessScreen = () => {
           {/* Why Choose Confío */}
           <View style={styles.card}>
             <Text style={styles.cardTitle}>¿Por qué elegir Confío?</Text>
-            
+
             <View style={[styles.whyConfioContainer, { backgroundColor: isCUSD ? '#ECFDF5' : '#F5F3FF' }]}>
               <View style={styles.whyConfioHeader}>
                 <Icon name="check-circle" size={20} color={isCUSD ? colors.primary : colors.secondary} />
@@ -389,6 +425,72 @@ export const BusinessPaymentSuccessScreen = () => {
           </View>
         </View>
       </ScrollView>
+
+      {/* Technical Details Modal */}
+      <Modal
+        visible={showTechnical}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowTechnical(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Detalles técnicos</Text>
+              <TouchableOpacity onPress={() => setShowTechnical(false)} style={{ padding: 8 }}>
+                <Icon name="x" size={20} color="#111827" />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.modalBody}>
+              <View style={styles.modalSection}>
+                <Text style={styles.modalSectionTitle}>Transacción</Text>
+                <View style={styles.modalRow}>
+                  <Text style={styles.modalLabel}>Red</Text>
+                  <Text style={styles.modalValue}>{__DEV__ ? 'Testnet' : 'Mainnet'}</Text>
+                </View>
+                <View style={styles.modalRow}>
+                  <Text style={styles.modalLabel}>Hash</Text>
+                  <Text style={styles.modalValue} numberOfLines={1}>
+                    {(() => {
+                      const h = (paymentData.transactionHash || '').toString();
+                      if (!h) return 'N/D';
+                      return h.replace(/(.{10}).+(.{6})/, '$1…$2');
+                    })()}
+                  </Text>
+                </View>
+                {paymentData.merchantAddress && (
+                  <View style={styles.modalRow}>
+                    <Text style={styles.modalLabel}>Comercio</Text>
+                    <Text style={styles.modalValue} numberOfLines={1}>
+                      {paymentData.merchantAddress.replace(/(.{10}).+(.{6})/, '$1…$2')}
+                    </Text>
+                  </View>
+                )}
+              </View>
+              <TouchableOpacity
+                style={[styles.explorerButton, { backgroundColor: '#8B5CF6' }]}
+                onPress={async () => {
+                  const txid = paymentData.transactionHash;
+                  if (!txid) {
+                    Alert.alert('Sin hash', 'Aún no hay hash de transacción disponible.');
+                    return;
+                  }
+                  const base = __DEV__ ? 'https://testnet.explorer.perawallet.app' : 'https://explorer.perawallet.app';
+                  const url = `${base}/tx/${encodeURIComponent(txid)}`;
+                  try {
+                    await Linking.openURL(url);
+                  } catch {
+                    Alert.alert('Error', 'No se pudo abrir Pera Explorer.');
+                  }
+                }}
+              >
+                <Icon name="external-link" size={16} color="#fff" style={{ marginRight: 8 }} />
+                <Text style={styles.explorerButtonText}>Abrir en Pera Explorer</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -608,7 +710,7 @@ const styles = StyleSheet.create({
   statusText: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#059669',
+    color: '#10B981',
     marginLeft: 4,
   },
   transactionIdContainer: {
@@ -728,5 +830,74 @@ const styles = StyleSheet.create({
   successMessageText: {
     fontSize: 14,
     textAlign: 'center',
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    width: '90%',
+    maxWidth: 400,
+    overflow: 'hidden',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#111827',
+  },
+  modalBody: {
+    padding: 16,
+  },
+  modalSection: {
+    marginBottom: 16,
+  },
+  modalSectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 8,
+  },
+  modalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  modalLabel: {
+    fontSize: 14,
+    color: '#6B7280',
+  },
+  modalValue: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#111827',
+    flex: 1,
+    textAlign: 'right',
+  },
+  explorerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  explorerButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '500',
   },
 }); 

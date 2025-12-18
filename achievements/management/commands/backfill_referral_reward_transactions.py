@@ -56,12 +56,6 @@ class Command(BaseCommand):
 
         for event in events:
             identifier = f"referral_claim:{event.id}:{event.user_id}"
-            if UnifiedTransactionTable.objects.filter(
-                transaction_type="reward", payment_reference_id=identifier
-            ).exists():
-                skipped += 1
-                continue
-
             claim_amount = Command._event_claim_amount(event)
             if claim_amount <= Decimal("0"):
                 skipped += 1
@@ -104,6 +98,7 @@ class Command(BaseCommand):
                 "invitation_reverted": False,
                 "invitation_expires_at": None,
                 "transaction_date": timestamp,
+                "referral_reward_event": event,
             }
 
             self.stdout.write(

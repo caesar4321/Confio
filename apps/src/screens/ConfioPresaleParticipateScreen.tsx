@@ -176,10 +176,11 @@ export const ConfioPresaleParticipateScreen = () => {
       const signedUserB64 = Buffer.from(signedUser).toString('base64');
 
       // 3) Submit group
-      const purchaseId = pack?.purchase_id || pack?.purchaseId;
-      if (!purchaseId) throw new Error('purchase_id_missing');
+      // 3) Submit group
+      const internalId = pack?.internal_id || pack?.purchase_id || pack?.purchaseId; // Fallback for backward compatibility
+      if (!internalId) throw new Error('purchase_id_missing');
       try {
-        await session.submitPurchase(purchaseId, signedUserB64, sponsorTxns);
+        await session.submitPurchase(internalId, signedUserB64, sponsorTxns);
       } catch (e: any) {
         // If server requires opt-in at submit, auto opt-in and retry silently
         if (String(e?.message || '').includes('requires_presale_app_optin')) {
@@ -194,8 +195,8 @@ export const ConfioPresaleParticipateScreen = () => {
           const retryUserBytes = Buffer.from(retryUserToSign.transaction, 'base64');
           const retrySignedUser = await algorandService.signTransactionBytes(retryUserBytes);
           const retrySignedUserB64 = Buffer.from(retrySignedUser).toString('base64');
-          const retryPurchaseId = retryPack?.purchase_id || retryPack?.purchaseId;
-          await session.submitPurchase(retryPurchaseId, retrySignedUserB64, retrySponsorTxns);
+          const retryInternalId = retryPack?.internal_id || retryPack?.purchase_id || retryPack?.purchaseId || '';
+          await session.submitPurchase(retryInternalId, retrySignedUserB64, retrySponsorTxns);
         } else {
           throw e;
         }
@@ -959,13 +960,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
-  },
-  errorText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: '#6B7280',
-    textAlign: 'center',
-    marginBottom: 24,
   },
   retryButton: {
     backgroundColor: colors.secondary,

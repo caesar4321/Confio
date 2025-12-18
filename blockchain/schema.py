@@ -27,7 +27,9 @@ from .invite_send_mutations import (
     SubmitInviteForPhone,
     ClaimInviteForPhoneField,
     InviteReceiptType,
+    PendingInviteType,
     get_invite_receipt_for_phone,
+    get_all_pending_invites_for_phone,
 )
 from .p2p_trade_mutations import P2PTradeMutations, P2PTradePrepareMutations
 
@@ -39,6 +41,11 @@ class Query(graphene.ObjectType):
     p2p_trade_box_exists = graphene.Field(graphene.Boolean, trade_id=graphene.String(required=True))
     invite_receipt_for_phone = graphene.Field(
         InviteReceiptType,
+        phone=graphene.String(required=True),
+        phone_country=graphene.String(required=False)
+    )
+    all_pending_invites_for_phone = graphene.List(
+        PendingInviteType,
         phone=graphene.String(required=True),
         phone_country=graphene.String(required=False)
     )
@@ -69,6 +76,13 @@ class Query(graphene.ObjectType):
             return None
         res = get_invite_receipt_for_phone(phone, phone_country)
         return InviteReceiptType(**res) if res else None
+
+    def resolve_all_pending_invites_for_phone(self, info, phone, phone_country=None):
+        user = info.context.user
+        if not user or not user.is_authenticated:
+            return []
+        results = get_all_pending_invites_for_phone(phone, phone_country)
+        return [PendingInviteType(**r) for r in results]
 
 
 class Mutation(graphene.ObjectType):

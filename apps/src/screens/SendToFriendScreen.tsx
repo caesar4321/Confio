@@ -8,6 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import { useNumberFormat } from '../utils/numberFormatting';
+import { useAuth } from '../contexts/AuthContext';
 
 const colors = {
   primary: '#34D399', // emerald-400
@@ -67,9 +68,10 @@ export const SendToFriendScreen = () => {
   const route = useRoute();
   // Safe area handled with SafeAreaView
   const { formatNumber } = useNumberFormat();
-  
+  const { userProfile } = useAuth();
+
   const friend: Friend = (route.params as any)?.friend || { name: 'Friend', avatar: 'F', isOnConfio: true, phone: '' };
-  
+
   // Debug log to check friend data
   console.log('SendToFriendScreen: route.params:', route.params);
   console.log('SendToFriendScreen: friend data:', friend);
@@ -99,7 +101,7 @@ export const SendToFriendScreen = () => {
         variables: { tokenType: tok }
       });
       if (cached?.accountBalance && mounted) setBalanceSnapshot(cached.accountBalance);
-    } catch {}
+    } catch { }
     setBalanceLoading(true);
     apolloClient.query<{ accountBalance: string }>({
       query: GET_ACCOUNT_BALANCE,
@@ -108,7 +110,7 @@ export const SendToFriendScreen = () => {
     }).then(res => {
       if (!mounted) return;
       setBalanceSnapshot(res.data?.accountBalance ?? null);
-    }).catch(() => {}).finally(() => mounted && setBalanceLoading(false));
+    }).catch(() => { }).finally(() => mounted && setBalanceLoading(false));
     return () => { mounted = false; };
   }, [tokenType]);
   const availableBalance = React.useMemo(() => parseFloat(balanceSnapshot || '0'), [balanceSnapshot]);
@@ -159,13 +161,13 @@ export const SendToFriendScreen = () => {
 
   const handleSend = async () => {
     console.log('SendToFriendScreen: handleSend called');
-    
+
     // Prevent double-clicks/rapid button presses
     if (isProcessing || navLock.current) {
       console.log('SendToFriendScreen: Already processing, ignoring duplicate click');
       return;
     }
-    
+
     if (!amount || parseFloat(amount) < config.minSend) {
       setErrorMessage(`El mínimo para enviar es ${config.minSend} ${config.name}`);
       setShowError(true);
@@ -174,10 +176,10 @@ export const SendToFriendScreen = () => {
 
     setIsProcessing(true);
     navLock.current = true;
-    
+
     try {
       console.log('SendToFriendScreen: Navigating to TransactionProcessing');
-      
+
       // For idempotency key, we need a stable identifier
       // For Confío users, use their user ID; for non-Confío, use phone number hash
       let recipientIdentifier: string;
@@ -190,13 +192,13 @@ export const SendToFriendScreen = () => {
       } else {
         recipientIdentifier = 'unknown';
       }
-      
+
       // Generate idempotency key to prevent double-spending
       // Use full timestamp (not just minute) to allow multiple transactions
       const timestamp = Date.now();
       const amountStr = amount.replace('.', '');
       const idempotencyKey = `send_${recipientIdentifier}_${amountStr}_${config.name}_${timestamp}`;
-      
+
       // Navigate to processing screen with transaction data
       (navigation as any).replace('TransactionProcessing', {
         transactionData: {
@@ -211,7 +213,9 @@ export const SendToFriendScreen = () => {
           // recipientAddress removed - server will determine this
           memo: '', // Empty memo - user can add notes in a future feature
           idempotencyKey: idempotencyKey,
-          prepared: prepared
+          prepared: prepared,
+          senderName: userProfile?.firstName ? `${userProfile.firstName} ${userProfile.lastName || ''}`.trim() : (userProfile?.username || 'Usuario'),
+          sender: userProfile?.firstName || 'Usuario'
         }
       });
     } catch (error) {
@@ -231,25 +235,25 @@ export const SendToFriendScreen = () => {
       <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
         {/* Header */}
         <SafeAreaView edges={['top']} style={{ backgroundColor: config.color }}>
-        <View style={[styles.header, { backgroundColor: config.color, paddingTop: 8 }]}> 
-          <View style={styles.headerContent}>
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-              <Icon name="arrow-left" size={24} color="#ffffff" />
-            </TouchableOpacity>
-            <Text style={styles.headerTitle}>Enviar a {friend.name}</Text>
-            <View style={styles.placeholder} />
-          </View>
-          <View style={styles.headerInfo}>
-            <View style={styles.friendAvatarContainer}>
-              <Text style={styles.friendAvatarText}>{friend.avatar}</Text>
+          <View style={[styles.header, { backgroundColor: config.color, paddingTop: 8 }]}>
+            <View style={styles.headerContent}>
+              <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+                <Icon name="arrow-left" size={24} color="#ffffff" />
+              </TouchableOpacity>
+              <Text style={styles.headerTitle}>Enviar a {friend.name}</Text>
+              <View style={styles.placeholder} />
             </View>
-            <Text style={styles.headerSubtitle}>{friend.name}</Text>
-            {friend.phone && friend.phone !== friend.name && friend.phone.trim() !== '' && (
-              <Text style={styles.headerPhone}>{friend.phone}</Text>
-            )}
-            <Text style={styles.headerDescription}>Enviar {config.name} a tu amigo</Text>
+            <View style={styles.headerInfo}>
+              <View style={styles.friendAvatarContainer}>
+                <Text style={styles.friendAvatarText}>{friend.avatar}</Text>
+              </View>
+              <Text style={styles.headerSubtitle}>{friend.name}</Text>
+              {friend.phone && friend.phone !== friend.name && friend.phone.trim() !== '' && (
+                <Text style={styles.headerPhone}>{friend.phone}</Text>
+              )}
+              <Text style={styles.headerDescription}>Enviar {config.name} a tu amigo</Text>
+            </View>
           </View>
-        </View>
         </SafeAreaView>
 
         {/* Available Balance */}
@@ -285,7 +289,7 @@ export const SendToFriendScreen = () => {
             </View>
             <View style={styles.quickAmounts}>
               {config.quickAmounts.map((val) => (
-                <TouchableOpacity 
+                <TouchableOpacity
                   key={val}
                   onPress={() => handleQuickAmount(val)}
                   style={styles.quickAmountButton}
@@ -339,7 +343,7 @@ export const SendToFriendScreen = () => {
             </View>
           </View>
 
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[
               styles.confirmButton,
               (!amount || parseFloat(amount) < config.minSend || parseFloat(amount || '0') > availableBalance || isProcessing) && styles.confirmButtonDisabled
@@ -355,10 +359,10 @@ export const SendToFriendScreen = () => {
             }}
           >
             <Text style={styles.confirmButtonText}>
-              {isProcessing ? 'Procesando...' : 
-               balanceSnapshot == null ? 'Cargando saldo…' : 
-               parseFloat(amount || '0') > availableBalance ? 'Saldo insuficiente' : 
-               `Enviar a ${friend.name}`}
+              {isProcessing ? 'Procesando...' :
+                balanceSnapshot == null ? 'Cargando saldo…' :
+                  parseFloat(amount || '0') > availableBalance ? 'Saldo insuficiente' :
+                    `Enviar a ${friend.name}`}
             </Text>
           </TouchableOpacity>
 

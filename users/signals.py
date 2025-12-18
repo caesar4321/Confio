@@ -229,6 +229,14 @@ def create_unified_transaction_from_p2p_trade(p2p_trade):
 def create_unified_transaction_from_conversion(conversion):
     """Create or update UnifiedTransactionTable from Conversion"""
     try:
+        # Defensive refresh: If hashes are missing, ensure we have the latest DB state
+        # This handles cases where update_fields might have been used or race conditions occurred
+        if not conversion.from_transaction_hash and not conversion.to_transaction_hash:
+            try:
+                conversion.refresh_from_db(fields=['from_transaction_hash', 'to_transaction_hash'])
+            except Exception:
+                pass
+
         # Determine token type based on conversion type
         if conversion.conversion_type == 'usdc_to_cusd':
             token_type = 'USDC'
@@ -249,7 +257,7 @@ def create_unified_transaction_from_conversion(conversion):
                 'amount': str(conversion.from_amount),
                 'token_type': token_type,
                 'status': status,
-                'transaction_hash': conversion.from_transaction_hash or '',
+                'transaction_hash': conversion.from_transaction_hash or conversion.to_transaction_hash or '',
                 'error_message': conversion.error_message or '',
                 
                 # Sender info (the converter)
@@ -280,7 +288,7 @@ def create_unified_transaction_from_conversion(conversion):
         )
         return unified
     except Exception as e:
-        print(f"Error creating unified transaction from conversion: {e}")
+        logger.exception("Error creating unified transaction from conversion %s", conversion.id)
         return None
 
 
@@ -475,7 +483,7 @@ def handle_conversion_save(sender, instance, created, **kwargs):
                         event="conversion_usdc_to_cusd",
                         amount=Decimal(instance.from_amount),
                         metadata={
-                            "conversion_id": str(instance.conversion_id),
+                            "conversion_id": str(instance.internal_id),
                         },
                     ),
                 )
@@ -514,7 +522,7 @@ def handle_payroll_item_save(sender, instance, created, **kwargs):
                         title="Pago de nómina recibido",
                         message=f"Recibiste {instance.net_amount} {display_token} de {business.name}",
                         data={
-                            'transaction_id': instance.item_id,
+                            'transaction_id': instance.internal_id,
                             'transaction_hash': instance.transaction_hash,
                             'transaction_type': 'payroll',
                             'amount': str(instance.net_amount),
@@ -524,7 +532,7 @@ def handle_payroll_item_save(sender, instance, created, **kwargs):
                         },
                         related_object_type='PayrollItem',
                         related_object_id=str(instance.id),
-                        action_url=f"confio://transaction/{instance.item_id}",
+                        action_url=f"confio://transaction/{instance.internal_id}",
                     )
                     
                     # Create notification for business owner
@@ -545,7 +553,7 @@ def handle_payroll_item_save(sender, instance, created, **kwargs):
                             title="Nómina enviada",
                             message=f"Enviaste {instance.net_amount} {display_token} a {recipient_name}",
                             data={
-                                'transaction_id': instance.item_id,
+                                'transaction_id': instance.internal_id,
                                 'transaction_hash': instance.transaction_hash,
                                 'transaction_type': 'payroll',
                                 'amount': str(instance.net_amount),
@@ -559,16 +567,16 @@ def handle_payroll_item_save(sender, instance, created, **kwargs):
                             },
                             related_object_type='PayrollItem',
                             related_object_id=str(instance.id),
-                            action_url=f"confio://transaction/{instance.item_id}",
+                            action_url=f"confio://transaction/{instance.internal_id}",
                         )
                 except Exception as e:
-                    logger.warning(f"Failed to create payroll notification for item {instance.item_id}: {e}")
+                    logger.warning(f"Failed to create payroll notification for item {instance.internal_id}: {e}")
 
     # Always sync parent PayrollRun status based on child items
     try:
         sync_payroll_run_status(instance.run_id)
     except Exception as e:
-        logger.warning(f"Failed to sync payroll run status for item {instance.item_id}: {e}")
+        logger.warning(f"Failed to sync payroll run status for item {instance.internal_id}: {e}")
 
 
 # Handle soft deletes
@@ -618,7 +626,7 @@ def handle_payroll_item_soft_delete(sender, instance, **kwargs):
     try:
         sync_payroll_run_status(instance.run_id)
     except Exception as e:
-        logger.warning(f"Failed to sync payroll run after delete for item {instance.item_id}: {e}")
+        logger.warning(f"Failed to sync payroll run after delete for item {instance.internal_id}: {e}")
 
 
 def sync_payroll_run_status(run_id: int):

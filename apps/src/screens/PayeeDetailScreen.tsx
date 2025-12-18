@@ -93,7 +93,7 @@ export const PayeeDetailScreen = () => {
       .flatMap((run: any) => {
         const matchItems = (run.items || []).filter((it: any) => it.recipientAccount?.id === accountId);
         return matchItems.map((it: any) => ({
-          id: it.itemId,
+          id: it.internalId,
           status: it.status,
           runStatus: run.status,
           token: run.tokenType,

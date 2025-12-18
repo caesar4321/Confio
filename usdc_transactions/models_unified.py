@@ -121,6 +121,17 @@ class UnifiedUSDCTransactionTable(models.Model):
     
     def __str__(self):
         return f"{self.actor_display_name} - {self.get_transaction_type_display()} {self.amount} {self.currency} - {self.status}"
+
+    @property
+    def internal_id(self):
+        """Return standardized internal_id from linked source models"""
+        if self.transaction_type == 'deposit' and self.usdc_deposit:
+            return self.usdc_deposit.internal_id
+        if self.transaction_type == 'withdrawal' and self.usdc_withdrawal:
+            return self.usdc_withdrawal.internal_id
+        if self.transaction_type == 'conversion' and self.conversion:
+            return self.conversion.internal_id
+        return None
     
     @property
     def is_completed(self):
