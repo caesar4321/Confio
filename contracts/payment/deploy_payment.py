@@ -538,8 +538,9 @@ def update_payment_contract(app_id: int):
     # Suggested params
     params = algod_client.suggested_params()
 
-    # Beaker update() method selector (update()void)
-    update_selector = bytes.fromhex("1d04d61a")  # update()void
+    # Get update method selector from the contract spec
+    update_method = app_spec.contract.get_method_by_name("update")
+    update_selector = update_method.get_selector()
 
     # Create UpdateApplication transaction with selector
     update_txn = ApplicationCallTxn(
@@ -551,6 +552,7 @@ def update_payment_contract(app_id: int):
         clear_program=clear_program,
         app_args=[update_selector],
     )
+
 
     signed_update = admin_signer(update_txn)
     tx_id = algod_client.send_transaction(signed_update)

@@ -240,11 +240,11 @@ def pay_with_cusd(
         Assert(Gtxn[1].asset_sender() == Global.zero_address()),
         Assert(Gtxn[1].rekey_to() == Global.zero_address()),
         
-        # Verify the fee AXFER (to fee recipient) at index 2
+        # Verify the fee AXFER (to contract for accumulation) at index 2
         Assert(Gtxn[2].type_enum() == TxnType.AssetTransfer),
         Assert(Gtxn[2].xfer_asset() == app.state.cusd_asset_id),
         Assert(Gtxn[2].sender() == actual_payer.load()),
-        Assert(Gtxn[2].asset_receiver() == app.state.fee_recipient),  # To fee recipient
+        Assert(Gtxn[2].asset_receiver() == Global.current_application_address()),  # To contract for accumulation
         Assert(Gtxn[2].asset_close_to() == Global.zero_address()),
         Assert(Gtxn[2].asset_sender() == Global.zero_address()),
         Assert(Gtxn[2].rekey_to() == Global.zero_address()),
@@ -292,10 +292,11 @@ def pay_with_cusd(
         Assert(Gtxn[0].rekey_to() == Global.zero_address()),
         Assert(Gtxn[0].close_remainder_to() == Global.zero_address()),
         
-        # No inner transactions needed - payments go directly!
-        # Just update statistics
+        # No inner transactions needed - payments go directly to merchant!
+        # Fees are accumulated in contract and withdrawn later by admin
         
-        # Do not track fees as a balance (fees go directly to fee_recipient)
+        # Track fees as balance (fees accumulate in contract)
+        app.state.cusd_fees_balance.set(app.state.cusd_fees_balance.get() + fee_amount.load()),
         app.state.total_cusd_volume.set(app.state.total_cusd_volume.get() + total_amount.load()),
         app.state.total_cusd_fees_collected.set(app.state.total_cusd_fees_collected.get() + fee_amount.load()),
         
@@ -357,12 +358,12 @@ def pay_with_confio(
         Assert(Gtxn[1].asset_sender() == Global.zero_address()),
         Assert(Gtxn[1].rekey_to() == Global.zero_address()),
 
-        # Verify the fee AXFER (to fee recipient) at index 2
+        # Verify the fee AXFER (to contract for accumulation) at index 2
         Log(Bytes("PWC:A2")),
         Assert(Gtxn[2].type_enum() == TxnType.AssetTransfer),
         Assert(Gtxn[2].xfer_asset() == app.state.confio_asset_id),
         Assert(Gtxn[2].sender() == actual_payer.load()),
-        Assert(Gtxn[2].asset_receiver() == app.state.fee_recipient),  # To fee recipient
+        Assert(Gtxn[2].asset_receiver() == Global.current_application_address()),  # To contract for accumulation
         Assert(Gtxn[2].asset_close_to() == Global.zero_address()),
         Assert(Gtxn[2].asset_sender() == Global.zero_address()),
         Assert(Gtxn[2].rekey_to() == Global.zero_address()),
@@ -412,10 +413,11 @@ def pay_with_confio(
         Assert(Gtxn[0].rekey_to() == Global.zero_address()),
         Assert(Gtxn[0].close_remainder_to() == Global.zero_address()),
         
-        # No inner transactions needed - payments go directly!
-        # Just update statistics
+        # No inner transactions needed - payments go directly to merchant!
+        # Fees are accumulated in contract and withdrawn later by admin
         
-        # Do not track fees as a balance (fees go directly to fee_recipient)
+        # Track fees as balance (fees accumulate in contract)
+        app.state.confio_fees_balance.set(app.state.confio_fees_balance.get() + fee_amount.load()),
         app.state.total_confio_volume.set(app.state.total_confio_volume.get() + total_amount.load()),
         app.state.total_confio_fees_collected.set(app.state.total_confio_fees_collected.get() + fee_amount.load()),
         Log(Bytes("PWC:END")),
@@ -428,8 +430,7 @@ def pay_with_confio(
 def withdraw_fees():
     """
     Admin withdraws collected fees to fee recipient
-    Only withdraws tracked fee amounts, not entire balance.
-    Fees flow directly to recipient; this is effectively a no-op reset.
+    Sends accumulated fees from contract to fee_recipient via inner transactions
     """
     req_inners = ScratchVar(TealType.uint64)
     
@@ -450,19 +451,55 @@ def withdraw_fees():
             If(app.state.cusd_fees_balance.get() > Int(0), Int(1), Int(0)) +
             If(app.state.confio_fees_balance.get() > Int(0), Int(1), Int(0))
         ),
-        # Fee must cover: base + dynamic number of inner transfers (likely zero)
+        # Fee must cover: base + dynamic number of inner transfers
         Assert(Txn.fee() >= Global.min_txn_fee() * (Int(1) + req_inners.load())),
+        
+        # Verify fee recipient is set
+        Assert(app.state.fee_recipient != Bytes("")),
         
         # Check actual balances match tracked amounts (clearer failures)
         (cusd_bal := AssetHolding.balance(Global.current_application_address(), app.state.cusd_asset_id)),
         (confio_bal := AssetHolding.balance(Global.current_application_address(), app.state.confio_asset_id)),
         
-        # Clear tracked balances (should be zero already)
-        app.state.cusd_fees_balance.set(Int(0)),
-        app.state.confio_fees_balance.set(Int(0)),
+        # Withdraw cUSD fees if any
+        If(
+            app.state.cusd_fees_balance.get() > Int(0),
+            Seq(
+                Assert(And(cusd_bal.hasValue(), cusd_bal.value() >= app.state.cusd_fees_balance.get())),
+                InnerTxnBuilder.Begin(),
+                InnerTxnBuilder.SetFields({
+                    TxnField.type_enum: TxnType.AssetTransfer,
+                    TxnField.xfer_asset: app.state.cusd_asset_id,
+                    TxnField.asset_receiver: app.state.fee_recipient,
+                    TxnField.asset_amount: app.state.cusd_fees_balance.get(),
+                    TxnField.fee: Int(0)
+                }),
+                InnerTxnBuilder.Submit(),
+                app.state.cusd_fees_balance.set(Int(0))
+            )
+        ),
+        
+        # Withdraw CONFIO fees if any
+        If(
+            app.state.confio_fees_balance.get() > Int(0),
+            Seq(
+                Assert(And(confio_bal.hasValue(), confio_bal.value() >= app.state.confio_fees_balance.get())),
+                InnerTxnBuilder.Begin(),
+                InnerTxnBuilder.SetFields({
+                    TxnField.type_enum: TxnType.AssetTransfer,
+                    TxnField.xfer_asset: app.state.confio_asset_id,
+                    TxnField.asset_receiver: app.state.fee_recipient,
+                    TxnField.asset_amount: app.state.confio_fees_balance.get(),
+                    TxnField.fee: Int(0)
+                }),
+                InnerTxnBuilder.Submit(),
+                app.state.confio_fees_balance.set(Int(0))
+            )
+        ),
         
         Approve()
     )
+
 
 @app.external
 def update_fee_recipient(new_recipient: abi.Address):

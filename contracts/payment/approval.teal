@@ -1,72 +1,76 @@
 #pragma version 8
 intcblock 0 1 4 2 100000 10000
-bytecblock 0x 0x69735f706175736564 0x637573645f61737365745f6964 0x636f6e66696f5f61737365745f6964 0x637573645f666565735f62616c616e6365 0x636f6e66696f5f666565735f62616c616e6365 0x61646d696e 0x6665655f726563697069656e74 0x73706f6e736f725f61646472657373 0x151f7c75 0x746f74616c5f637573645f766f6c756d65 0x746f74616c5f637573645f666565735f636f6c6c6563746564 0x746f74616c5f636f6e66696f5f766f6c756d65 0x746f74616c5f636f6e66696f5f666565735f636f6c6c6563746564
+bytecblock 0x 0x69735f706175736564 0x61646d696e 0x637573645f61737365745f6964 0x636f6e66696f5f61737365745f6964 0x637573645f666565735f62616c616e6365 0x636f6e66696f5f666565735f62616c616e6365 0x6665655f726563697069656e74 0x73706f6e736f725f61646472657373 0x151f7c75 0x746f74616c5f637573645f766f6c756d65 0x746f74616c5f637573645f666565735f636f6c6c6563746564 0x746f74616c5f636f6e66696f5f766f6c756d65 0x746f74616c5f636f6e66696f5f666565735f636f6c6c6563746564
 txna ApplicationArgs 0
 pushbytes 0x4c5c61ba // "create()void"
 ==
-bnz main_l32
+bnz main_l34
 txna ApplicationArgs 0
 pushbytes 0x990af164 // "setup_assets(uint64,uint64)void"
 ==
-bnz main_l31
+bnz main_l33
 txna ApplicationArgs 0
 pushbytes 0x5e56e73d // "pay_with_cusd(address,string)void"
 ==
-bnz main_l30
+bnz main_l32
 txna ApplicationArgs 0
 pushbytes 0x32b77663 // "pay_with_confio(address,string)void"
 ==
-bnz main_l29
+bnz main_l31
 txna ApplicationArgs 0
 pushbytes 0x4a48daaf // "withdraw_fees()void"
 ==
-bnz main_l28
+bnz main_l30
 txna ApplicationArgs 0
 pushbytes 0x00d30bac // "update_fee_recipient(address)void"
 ==
-bnz main_l27
+bnz main_l29
+txna ApplicationArgs 0
+pushbytes 0x44f2c1be // "set_admin(address)void"
+==
+bnz main_l28
 txna ApplicationArgs 0
 pushbytes 0xa93d8862 // "set_sponsor(address)void"
 ==
-bnz main_l26
+bnz main_l27
 txna ApplicationArgs 0
 pushbytes 0x0178f94b // "pause()void"
 ==
-bnz main_l25
+bnz main_l26
 txna ApplicationArgs 0
 pushbytes 0x1b529de8 // "unpause()void"
 ==
-bnz main_l24
+bnz main_l25
 txna ApplicationArgs 0
 pushbytes 0xbd3e49c4 // "get_fee_balances()(uint64,uint64)"
 ==
-bnz main_l23
+bnz main_l24
 txna ApplicationArgs 0
 pushbytes 0x5ea3af47 // "get_total_volume()(uint64,uint64)"
 ==
-bnz main_l22
+bnz main_l23
 txna ApplicationArgs 0
 pushbytes 0xb6eb818d // "get_total_fees_collected()(uint64,uint64)"
 ==
-bnz main_l21
+bnz main_l22
 txna ApplicationArgs 0
 pushbytes 0x0f5d2495 // "get_fee_recipient()address"
 ==
-bnz main_l20
+bnz main_l21
 txna ApplicationArgs 0
 pushbytes 0x01b19a5c // "is_paused()bool"
 ==
-bnz main_l19
+bnz main_l20
 txna ApplicationArgs 0
 pushbytes 0xa0e81872 // "update()void"
 ==
-bnz main_l18
+bnz main_l19
 txna ApplicationArgs 0
 pushbytes 0x24378d3c // "delete()void"
 ==
-bnz main_l17
+bnz main_l18
 err
-main_l17:
+main_l18:
 txn OnCompletion
 pushint 5 // DeleteApplication
 ==
@@ -75,10 +79,10 @@ intc_0 // 0
 !=
 &&
 assert
-callsub deletecaster_31
+callsub deletecaster_33
 intc_1 // 1
 return
-main_l18:
+main_l19:
 txn OnCompletion
 intc_2 // UpdateApplication
 ==
@@ -87,19 +91,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub updatecaster_30
-intc_1 // 1
-return
-main_l19:
-txn OnCompletion
-intc_0 // NoOp
-==
-txn ApplicationID
-intc_0 // 0
-!=
-&&
-assert
-callsub ispausedcaster_29
+callsub updatecaster_32
 intc_1 // 1
 return
 main_l20:
@@ -111,7 +103,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub getfeerecipientcaster_28
+callsub ispausedcaster_31
 intc_1 // 1
 return
 main_l21:
@@ -123,7 +115,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub gettotalfeescollectedcaster_27
+callsub getfeerecipientcaster_30
 intc_1 // 1
 return
 main_l22:
@@ -135,7 +127,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub gettotalvolumecaster_26
+callsub gettotalfeescollectedcaster_29
 intc_1 // 1
 return
 main_l23:
@@ -147,7 +139,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub getfeebalancescaster_25
+callsub gettotalvolumecaster_28
 intc_1 // 1
 return
 main_l24:
@@ -159,7 +151,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub unpausecaster_24
+callsub getfeebalancescaster_27
 intc_1 // 1
 return
 main_l25:
@@ -171,7 +163,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub pausecaster_23
+callsub unpausecaster_26
 intc_1 // 1
 return
 main_l26:
@@ -183,7 +175,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub setsponsorcaster_22
+callsub pausecaster_25
 intc_1 // 1
 return
 main_l27:
@@ -195,7 +187,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub updatefeerecipientcaster_21
+callsub setsponsorcaster_24
 intc_1 // 1
 return
 main_l28:
@@ -207,7 +199,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub withdrawfeescaster_20
+callsub setadmincaster_23
 intc_1 // 1
 return
 main_l29:
@@ -219,7 +211,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub paywithconfiocaster_19
+callsub updatefeerecipientcaster_22
 intc_1 // 1
 return
 main_l30:
@@ -231,7 +223,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub paywithcusdcaster_18
+callsub withdrawfeescaster_21
 intc_1 // 1
 return
 main_l31:
@@ -243,7 +235,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub setupassetscaster_17
+callsub paywithconfiocaster_20
 intc_1 // 1
 return
 main_l32:
@@ -252,17 +244,41 @@ intc_0 // NoOp
 ==
 txn ApplicationID
 intc_0 // 0
+!=
+&&
+assert
+callsub paywithcusdcaster_19
+intc_1 // 1
+return
+main_l33:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub setupassetscaster_18
+intc_1 // 1
+return
+main_l34:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
 ==
 &&
 assert
-callsub createcaster_16
+callsub createcaster_17
 intc_1 // 1
 return
 
 // create
 create_0:
 proto 0 0
-bytec 6 // "admin"
+bytec_2 // "admin"
 txn Sender
 app_global_put
 bytec 7 // "fee_recipient"
@@ -271,16 +287,16 @@ app_global_put
 bytec_1 // "is_paused"
 intc_0 // 0
 app_global_put
-bytec_2 // "cusd_asset_id"
+bytec_3 // "cusd_asset_id"
 intc_0 // 0
 app_global_put
-bytec_3 // "confio_asset_id"
+bytec 4 // "confio_asset_id"
 intc_0 // 0
 app_global_put
-bytec 4 // "cusd_fees_balance"
+bytec 5 // "cusd_fees_balance"
 intc_0 // 0
 app_global_put
-bytec 5 // "confio_fees_balance"
+bytec 6 // "confio_fees_balance"
 intc_0 // 0
 app_global_put
 intc_1 // 1
@@ -290,15 +306,15 @@ return
 setupassets_1:
 proto 2 0
 txn Sender
-bytec 6 // "admin"
+bytec_2 // "admin"
 app_global_get
 ==
-bytec_2 // "cusd_asset_id"
+bytec_3 // "cusd_asset_id"
 app_global_get
 intc_0 // 0
 ==
 &&
-bytec_3 // "confio_asset_id"
+bytec 4 // "confio_asset_id"
 app_global_get
 intc_0 // 0
 ==
@@ -343,10 +359,12 @@ global CurrentApplicationAddress
 ==
 assert
 gtxn 0 Amount
+intc 4 // 100000
 intc_3 // 2
 intc 4 // 100000
 *
-==
++
+>=
 assert
 gtxn 0 CloseRemainderTo
 global ZeroAddress
@@ -356,10 +374,10 @@ gtxn 0 RekeyTo
 global ZeroAddress
 ==
 assert
-bytec_2 // "cusd_asset_id"
+bytec_3 // "cusd_asset_id"
 frame_dig -2
 app_global_put
-bytec_3 // "confio_asset_id"
+bytec 4 // "confio_asset_id"
 frame_dig -1
 app_global_put
 itxn_begin
@@ -401,13 +419,13 @@ txn NumAccounts
 intc_3 // 2
 >=
 assert
-txna Accounts 0
+gtxn 1 Sender
 store 4
 bytec_1 // "is_paused"
 app_global_get
 intc_0 // 0
 ==
-bytec_2 // "cusd_asset_id"
+bytec_3 // "cusd_asset_id"
 app_global_get
 intc_0 // 0
 !=
@@ -435,7 +453,7 @@ intc_2 // axfer
 ==
 assert
 gtxn 1 XferAsset
-bytec_2 // "cusd_asset_id"
+bytec_3 // "cusd_asset_id"
 app_global_get
 ==
 assert
@@ -464,7 +482,7 @@ intc_2 // axfer
 ==
 assert
 gtxn 2 XferAsset
-bytec_2 // "cusd_asset_id"
+bytec_3 // "cusd_asset_id"
 app_global_get
 ==
 assert
@@ -473,8 +491,7 @@ load 4
 ==
 assert
 gtxn 2 AssetReceiver
-bytec 7 // "fee_recipient"
-app_global_get
+global CurrentApplicationAddress
 ==
 assert
 gtxn 2 AssetCloseTo
@@ -512,6 +529,12 @@ store 3
 load 1
 load 3
 ==
+load 1
+load 3
+intc_1 // 1
++
+==
+||
 assert
 load 0
 intc_0 // 0
@@ -522,15 +545,11 @@ intc_0 // 0
 >
 assert
 txn NumAccounts
-intc_3 // 2
+intc_1 // 1
 >=
 assert
-txna Accounts 1
 frame_dig -2
-==
-assert
-txna Accounts 1
-bytec_2 // "cusd_asset_id"
+bytec_3 // "cusd_asset_id"
 app_global_get
 asset_holding_get AssetBalance
 store 6
@@ -578,8 +597,8 @@ gtxn 0 CloseRemainderTo
 global ZeroAddress
 ==
 assert
-bytec 4 // "cusd_fees_balance"
-bytec 4 // "cusd_fees_balance"
+bytec 5 // "cusd_fees_balance"
+bytec 5 // "cusd_fees_balance"
 app_global_get
 load 1
 +
@@ -611,13 +630,15 @@ txn NumAccounts
 intc_3 // 2
 >=
 assert
-txna Accounts 0
+gtxn 1 Sender
 store 11
+pushbytes 0x5057433a5354415254 // "PWC:START"
+log
 bytec_1 // "is_paused"
 app_global_get
 intc_0 // 0
 ==
-bytec_3 // "confio_asset_id"
+bytec 4 // "confio_asset_id"
 app_global_get
 intc_0 // 0
 !=
@@ -640,12 +661,14 @@ txn GroupIndex
 pushint 3 // 3
 ==
 assert
+pushbytes 0x5057433a4131 // "PWC:A1"
+log
 gtxn 1 TypeEnum
 intc_2 // axfer
 ==
 assert
 gtxn 1 XferAsset
-bytec_3 // "confio_asset_id"
+bytec 4 // "confio_asset_id"
 app_global_get
 ==
 assert
@@ -669,12 +692,14 @@ gtxn 1 RekeyTo
 global ZeroAddress
 ==
 assert
+pushbytes 0x5057433a4132 // "PWC:A2"
+log
 gtxn 2 TypeEnum
 intc_2 // axfer
 ==
 assert
 gtxn 2 XferAsset
-bytec_3 // "confio_asset_id"
+bytec 4 // "confio_asset_id"
 app_global_get
 ==
 assert
@@ -683,8 +708,7 @@ load 11
 ==
 assert
 gtxn 2 AssetReceiver
-bytec 7 // "fee_recipient"
-app_global_get
+global CurrentApplicationAddress
 ==
 assert
 gtxn 2 AssetCloseTo
@@ -722,6 +746,12 @@ store 10
 load 8
 load 10
 ==
+load 8
+load 10
+intc_1 // 1
++
+==
+||
 assert
 load 7
 intc_0 // 0
@@ -732,15 +762,13 @@ intc_0 // 0
 >
 assert
 txn NumAccounts
-intc_3 // 2
+intc_1 // 1
 >=
 assert
-txna Accounts 1
+pushbytes 0x5057433a41434331 // "PWC:ACC1"
+log
 frame_dig -2
-==
-assert
-txna Accounts 1
-bytec_3 // "confio_asset_id"
+bytec 4 // "confio_asset_id"
 app_global_get
 asset_holding_get AssetBalance
 store 13
@@ -763,6 +791,8 @@ txn Fee
 global MinTxnFee
 >=
 assert
+pushbytes 0x5057433a535030 // "PWC:SP0"
+log
 gtxn 0 TypeEnum
 intc_1 // pay
 ==
@@ -788,8 +818,8 @@ gtxn 0 CloseRemainderTo
 global ZeroAddress
 ==
 assert
-bytec 5 // "confio_fees_balance"
-bytec 5 // "confio_fees_balance"
+bytec 6 // "confio_fees_balance"
+bytec 6 // "confio_fees_balance"
 app_global_get
 load 8
 +
@@ -806,6 +836,8 @@ app_global_get
 load 8
 +
 app_global_put
+pushbytes 0x5057433a454e44 // "PWC:END"
+log
 intc_1 // 1
 return
 
@@ -813,7 +845,7 @@ return
 withdrawfees_4:
 proto 0 0
 txn Sender
-bytec 6 // "admin"
+bytec_2 // "admin"
 app_global_get
 ==
 bytec_1 // "is_paused"
@@ -826,18 +858,18 @@ txn RekeyTo
 global ZeroAddress
 ==
 assert
-bytec 4 // "cusd_fees_balance"
+bytec 5 // "cusd_fees_balance"
 app_global_get
 intc_0 // 0
 >
-bnz withdrawfees_4_l13
+bnz withdrawfees_4_l9
 intc_0 // 0
 withdrawfees_4_l2:
-bytec 5 // "confio_fees_balance"
+bytec 6 // "confio_fees_balance"
 app_global_get
 intc_0 // 0
 >
-bnz withdrawfees_4_l12
+bnz withdrawfees_4_l8
 intc_0 // 0
 withdrawfees_4_l4:
 +
@@ -850,105 +882,94 @@ load 14
 *
 >=
 assert
+bytec 7 // "fee_recipient"
+app_global_get
+bytec_0 // ""
+!=
+assert
 global CurrentApplicationAddress
-bytec_2 // "cusd_asset_id"
+bytec_3 // "cusd_asset_id"
 app_global_get
 asset_holding_get AssetBalance
 store 16
 store 15
 global CurrentApplicationAddress
-bytec_3 // "confio_asset_id"
+bytec 4 // "confio_asset_id"
 app_global_get
 asset_holding_get AssetBalance
 store 18
 store 17
-bytec 4 // "cusd_fees_balance"
+bytec 5 // "cusd_fees_balance"
 app_global_get
 intc_0 // 0
 >
-bnz withdrawfees_4_l11
+bnz withdrawfees_4_l7
 withdrawfees_4_l5:
-bytec 5 // "confio_fees_balance"
+bytec 6 // "confio_fees_balance"
 app_global_get
 intc_0 // 0
 >
-bnz withdrawfees_4_l10
-withdrawfees_4_l6:
-bytec 4 // "cusd_fees_balance"
-app_global_get
-intc_0 // 0
->
-bnz withdrawfees_4_l9
-withdrawfees_4_l7:
-bytec 5 // "confio_fees_balance"
-app_global_get
-intc_0 // 0
->
-bz withdrawfees_4_l14
-itxn_begin
-intc_2 // axfer
-itxn_field TypeEnum
-bytec_3 // "confio_asset_id"
-app_global_get
-itxn_field XferAsset
-bytec 7 // "fee_recipient"
-app_global_get
-itxn_field AssetReceiver
-bytec 5 // "confio_fees_balance"
-app_global_get
-itxn_field AssetAmount
-intc_0 // 0
-itxn_field Fee
-itxn_submit
-bytec 5 // "confio_fees_balance"
-intc_0 // 0
-app_global_put
-b withdrawfees_4_l14
-withdrawfees_4_l9:
-itxn_begin
-intc_2 // axfer
-itxn_field TypeEnum
-bytec_2 // "cusd_asset_id"
-app_global_get
-itxn_field XferAsset
-bytec 7 // "fee_recipient"
-app_global_get
-itxn_field AssetReceiver
-bytec 4 // "cusd_fees_balance"
-app_global_get
-itxn_field AssetAmount
-intc_0 // 0
-itxn_field Fee
-itxn_submit
-bytec 4 // "cusd_fees_balance"
-intc_0 // 0
-app_global_put
-b withdrawfees_4_l7
-withdrawfees_4_l10:
+bz withdrawfees_4_l10
 load 18
 load 17
-bytec 5 // "confio_fees_balance"
+bytec 6 // "confio_fees_balance"
 app_global_get
 >=
 &&
 assert
-b withdrawfees_4_l6
-withdrawfees_4_l11:
+itxn_begin
+intc_2 // axfer
+itxn_field TypeEnum
+bytec 4 // "confio_asset_id"
+app_global_get
+itxn_field XferAsset
+bytec 7 // "fee_recipient"
+app_global_get
+itxn_field AssetReceiver
+bytec 6 // "confio_fees_balance"
+app_global_get
+itxn_field AssetAmount
+intc_0 // 0
+itxn_field Fee
+itxn_submit
+bytec 6 // "confio_fees_balance"
+intc_0 // 0
+app_global_put
+b withdrawfees_4_l10
+withdrawfees_4_l7:
 load 16
 load 15
-bytec 4 // "cusd_fees_balance"
+bytec 5 // "cusd_fees_balance"
 app_global_get
 >=
 &&
 assert
+itxn_begin
+intc_2 // axfer
+itxn_field TypeEnum
+bytec_3 // "cusd_asset_id"
+app_global_get
+itxn_field XferAsset
+bytec 7 // "fee_recipient"
+app_global_get
+itxn_field AssetReceiver
+bytec 5 // "cusd_fees_balance"
+app_global_get
+itxn_field AssetAmount
+intc_0 // 0
+itxn_field Fee
+itxn_submit
+bytec 5 // "cusd_fees_balance"
+intc_0 // 0
+app_global_put
 b withdrawfees_4_l5
-withdrawfees_4_l12:
+withdrawfees_4_l8:
 intc_1 // 1
 b withdrawfees_4_l4
-withdrawfees_4_l13:
+withdrawfees_4_l9:
 intc_1 // 1
 b withdrawfees_4_l2
-withdrawfees_4_l14:
+withdrawfees_4_l10:
 intc_1 // 1
 return
 
@@ -956,7 +977,7 @@ return
 updatefeerecipient_5:
 proto 1 0
 txn Sender
-bytec 6 // "admin"
+bytec_2 // "admin"
 app_global_get
 ==
 bytec_1 // "is_paused"
@@ -983,17 +1004,57 @@ app_global_put
 intc_1 // 1
 return
 
-// set_sponsor
-setsponsor_6:
+// set_admin
+setadmin_6:
 proto 1 0
 txn Sender
-bytec 6 // "admin"
+bytec_2 // "admin"
 app_global_get
+==
+assert
+bytec_1 // "is_paused"
+app_global_get
+intc_1 // 1
 ==
 assert
 txn RekeyTo
 global ZeroAddress
 ==
+assert
+frame_dig -1
+global ZeroAddress
+!=
+assert
+frame_dig -1
+global CurrentApplicationAddress
+!=
+assert
+bytec_2 // "admin"
+frame_dig -1
+app_global_put
+intc_1 // 1
+return
+
+// set_sponsor
+setsponsor_7:
+proto 1 0
+txn Sender
+bytec_2 // "admin"
+app_global_get
+==
+assert
+bytec_1 // "is_paused"
+app_global_get
+intc_1 // 1
+==
+assert
+txn RekeyTo
+global ZeroAddress
+==
+assert
+frame_dig -1
+global ZeroAddress
+!=
 assert
 bytec 8 // "sponsor_address"
 frame_dig -1
@@ -1002,10 +1063,10 @@ intc_1 // 1
 return
 
 // pause
-pause_7:
+pause_8:
 proto 0 0
 txn Sender
-bytec 6 // "admin"
+bytec_2 // "admin"
 app_global_get
 ==
 bytec_1 // "is_paused"
@@ -1025,10 +1086,10 @@ intc_1 // 1
 return
 
 // unpause
-unpause_8:
+unpause_9:
 proto 0 0
 txn Sender
-bytec 6 // "admin"
+bytec_2 // "admin"
 app_global_get
 ==
 bytec_1 // "is_paused"
@@ -1048,17 +1109,17 @@ intc_1 // 1
 return
 
 // get_fee_balances
-getfeebalances_9:
+getfeebalances_10:
 proto 0 1
 bytec_0 // ""
 intc_0 // 0
 dupn 3
 bytec_0 // ""
 dup
-bytec 4 // "cusd_fees_balance"
+bytec 5 // "cusd_fees_balance"
 app_global_get
 frame_bury 1
-bytec 5 // "confio_fees_balance"
+bytec 6 // "confio_fees_balance"
 app_global_get
 frame_bury 2
 frame_dig 1
@@ -1070,7 +1131,7 @@ frame_bury 0
 retsub
 
 // get_total_volume
-gettotalvolume_10:
+gettotalvolume_11:
 proto 0 1
 bytec_0 // ""
 intc_0 // 0
@@ -1092,7 +1153,7 @@ frame_bury 0
 retsub
 
 // get_total_fees_collected
-gettotalfeescollected_11:
+gettotalfeescollected_12:
 proto 0 1
 bytec_0 // ""
 intc_0 // 0
@@ -1114,7 +1175,7 @@ frame_bury 0
 retsub
 
 // get_fee_recipient
-getfeerecipient_12:
+getfeerecipient_13:
 proto 0 1
 bytec_0 // ""
 bytec 7 // "fee_recipient"
@@ -1128,7 +1189,7 @@ assert
 retsub
 
 // is_paused
-ispaused_13:
+ispaused_14:
 proto 0 1
 intc_0 // 0
 bytec_1 // "is_paused"
@@ -1141,10 +1202,10 @@ frame_bury 0
 retsub
 
 // update
-update_14:
+update_15:
 proto 0 0
 txn Sender
-bytec 6 // "admin"
+bytec_2 // "admin"
 app_global_get
 ==
 assert
@@ -1152,10 +1213,10 @@ intc_1 // 1
 return
 
 // delete
-delete_15:
+delete_16:
 proto 0 0
 txn Sender
-bytec 6 // "admin"
+bytec_2 // "admin"
 app_global_get
 ==
 assert
@@ -1164,13 +1225,13 @@ global ZeroAddress
 ==
 assert
 global CurrentApplicationAddress
-bytec_2 // "cusd_asset_id"
+bytec_3 // "cusd_asset_id"
 app_global_get
 asset_holding_get AssetBalance
 store 20
 store 19
 global CurrentApplicationAddress
-bytec_3 // "confio_asset_id"
+bytec 4 // "confio_asset_id"
 app_global_get
 asset_holding_get AssetBalance
 store 22
@@ -1193,13 +1254,13 @@ intc_1 // 1
 return
 
 // create_caster
-createcaster_16:
+createcaster_17:
 proto 0 0
 callsub create_0
 retsub
 
 // setup_assets_caster
-setupassetscaster_17:
+setupassetscaster_18:
 proto 0 0
 intc_0 // 0
 dup
@@ -1215,7 +1276,7 @@ callsub setupassets_1
 retsub
 
 // pay_with_cusd_caster
-paywithcusdcaster_18:
+paywithcusdcaster_19:
 proto 0 0
 bytec_0 // ""
 dup
@@ -1229,7 +1290,7 @@ callsub paywithcusd_2
 retsub
 
 // pay_with_confio_caster
-paywithconfiocaster_19:
+paywithconfiocaster_20:
 proto 0 0
 bytec_0 // ""
 dup
@@ -1243,13 +1304,13 @@ callsub paywithconfio_3
 retsub
 
 // withdraw_fees_caster
-withdrawfeescaster_20:
+withdrawfeescaster_21:
 proto 0 0
 callsub withdrawfees_4
 retsub
 
 // update_fee_recipient_caster
-updatefeerecipientcaster_21:
+updatefeerecipientcaster_22:
 proto 0 0
 bytec_0 // ""
 txna ApplicationArgs 1
@@ -1258,33 +1319,43 @@ frame_dig 0
 callsub updatefeerecipient_5
 retsub
 
-// set_sponsor_caster
-setsponsorcaster_22:
+// set_admin_caster
+setadmincaster_23:
 proto 0 0
 bytec_0 // ""
 txna ApplicationArgs 1
 frame_bury 0
 frame_dig 0
-callsub setsponsor_6
+callsub setadmin_6
+retsub
+
+// set_sponsor_caster
+setsponsorcaster_24:
+proto 0 0
+bytec_0 // ""
+txna ApplicationArgs 1
+frame_bury 0
+frame_dig 0
+callsub setsponsor_7
 retsub
 
 // pause_caster
-pausecaster_23:
+pausecaster_25:
 proto 0 0
-callsub pause_7
+callsub pause_8
 retsub
 
 // unpause_caster
-unpausecaster_24:
+unpausecaster_26:
 proto 0 0
-callsub unpause_8
+callsub unpause_9
 retsub
 
 // get_fee_balances_caster
-getfeebalancescaster_25:
+getfeebalancescaster_27:
 proto 0 0
 bytec_0 // ""
-callsub getfeebalances_9
+callsub getfeebalances_10
 frame_bury 0
 bytec 9 // 0x151f7c75
 frame_dig 0
@@ -1293,10 +1364,10 @@ log
 retsub
 
 // get_total_volume_caster
-gettotalvolumecaster_26:
+gettotalvolumecaster_28:
 proto 0 0
 bytec_0 // ""
-callsub gettotalvolume_10
+callsub gettotalvolume_11
 frame_bury 0
 bytec 9 // 0x151f7c75
 frame_dig 0
@@ -1305,10 +1376,10 @@ log
 retsub
 
 // get_total_fees_collected_caster
-gettotalfeescollectedcaster_27:
+gettotalfeescollectedcaster_29:
 proto 0 0
 bytec_0 // ""
-callsub gettotalfeescollected_11
+callsub gettotalfeescollected_12
 frame_bury 0
 bytec 9 // 0x151f7c75
 frame_dig 0
@@ -1317,10 +1388,10 @@ log
 retsub
 
 // get_fee_recipient_caster
-getfeerecipientcaster_28:
+getfeerecipientcaster_30:
 proto 0 0
 bytec_0 // ""
-callsub getfeerecipient_12
+callsub getfeerecipient_13
 frame_bury 0
 bytec 9 // 0x151f7c75
 frame_dig 0
@@ -1329,10 +1400,10 @@ log
 retsub
 
 // is_paused_caster
-ispausedcaster_29:
+ispausedcaster_31:
 proto 0 0
 intc_0 // 0
-callsub ispaused_13
+callsub ispaused_14
 frame_bury 0
 bytec 9 // 0x151f7c75
 pushbytes 0x00 // 0x00
@@ -1344,13 +1415,13 @@ log
 retsub
 
 // update_caster
-updatecaster_30:
+updatecaster_32:
 proto 0 0
-callsub update_14
+callsub update_15
 retsub
 
 // delete_caster
-deletecaster_31:
+deletecaster_33:
 proto 0 0
-callsub delete_15
+callsub delete_16
 retsub

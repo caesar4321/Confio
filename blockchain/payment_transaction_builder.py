@@ -244,14 +244,15 @@ class PaymentTransactionBuilder:
                 index=asset_id
             )
             
-            # Transaction 2: Asset transfer from user to FEE RECIPIENT (0 fee - sponsored)
+            # Transaction 2: Asset transfer from user to CONTRACT for fee accumulation (0 fee - sponsored)
             fee_transfer = transaction.AssetTransferTxn(
                 sender=sender_address,
                 sp=asset_params,  # Same params, 0 fee
-                receiver=fee_recipient,  # To fee treasury
+                receiver=self.app_address,  # To contract for accumulation
                 amt=fee_amount,  # Fee amount
                 index=asset_id
             )
+
             
             # Transaction 3: App call (SENT BY SPONSOR)
             app_params = SuggestedParams(
