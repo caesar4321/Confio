@@ -32,10 +32,15 @@ class Migration(migrations.Migration):
             old_name='withdrawal_id',
             new_name='internal_id',
         ),
-        migrations.AddField(
-            model_name='guardariantransaction',
-            name='onchain_withdrawal',
-            field=models.OneToOneField(blank=True, help_text='Matched on-chain withdrawal (Sell)', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='guardarian_dest', to='usdc_transactions.usdcwithdrawal'),
+        migrations.SeparateDatabaseAndState(
+            database_operations=[],
+            state_operations=[
+                migrations.AddField(
+                    model_name='guardariantransaction',
+                    name='onchain_withdrawal',
+                    field=models.OneToOneField(blank=True, help_text='Matched on-chain withdrawal (Sell)', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='guardarian_dest', to='usdc_transactions.usdcwithdrawal'),
+                ),
+            ]
         ),
         migrations.AlterField(
             model_name='guardariantransaction',
