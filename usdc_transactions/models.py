@@ -373,6 +373,13 @@ class GuardarianTransaction(models.Model):
         # Strategy 1: Exact Match (High Confidence)
         if self.to_amount_actual:
             matched_dep = candidates.filter(amount=self.to_amount_actual).first()
+
+            # Strategy 1.5: Micro-Mismatch (< 5 micro-units) for float/rounding errors
+            if not matched_dep:
+                tolerance = Decimal('0.000005')
+                min_amt = self.to_amount_actual - tolerance
+                max_amt = self.to_amount_actual + tolerance
+                matched_dep = candidates.filter(amount__gte=min_amt, amount__lte=max_amt).first()
             
         # Strategy 2: Fuzzy Match (Medium Confidence)
         if not matched_dep and self.to_amount_estimated:
