@@ -1072,6 +1072,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			transfer = SendTransaction.objects.select_related('sender_user', 'recipient_user').filter(internal_id=input_str).first()
 
 		# If found, format response
+		if payroll:
 			user = payroll.recipient_user
 			
 			# Handle business name safely
@@ -1093,6 +1094,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 				transaction_type="PAYROLL",
 				metadata=json.dumps({"referenceId": str(payroll.run.id) if payroll.run else "", "memo": "Nómina"})
 			)
+
 
 		if payment:
 			# Note: PaymentTransaction uses 'payer_user' (sender) and 'merchant' (recipient)
