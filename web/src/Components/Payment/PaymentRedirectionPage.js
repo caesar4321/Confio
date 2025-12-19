@@ -1,38 +1,80 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import FriendlyHeroSection from '../LandingPage/FriendlyHeroSection';
+import { Helmet } from 'react-helmet';
+import '../Verification/Verification.css';
 
 const PaymentRedirectionPage = () => {
     const { id } = useParams();
-    const [redirecting, setRedirecting] = useState(true);
 
     useEffect(() => {
-        // Attempt deep link redirection
+        // Attempt deep link redirection immediately
         if (id) {
             const appLink = `confio://pay/${id}`;
-            const fallbackLink = 'https://apps.apple.com/us/app/conf%C3%ADo/id6476486307'; // Update with actual generic store link or landing
-
-            // Try to open the app
             window.location.href = appLink;
 
-            // Fallback logic could be added here (e.g. check if user stays on page)
-            // For now, we just show the landing page content as fallback/background
-
-            const timer = setTimeout(() => {
-                setRedirecting(false);
-            }, 2000);
-            return () => clearTimeout(timer);
+            // Optional: fallback logic if needed
         }
     }, [id]);
 
     return (
-        <div className="payment-redirection-page">
-            <FriendlyHeroSection
-                title="Complete your payment in the Confío App"
-                subtitle="If the app didn't open automatically, use the buttons below."
-                showDownloadButtons={true}
-            />
-            {/* We reuse the Hero Section as it already has download buttons and nice styling */}
+        <div className="verification-container">
+            <Helmet>
+                <title>Completar Pago | Confío</title>
+                <meta name="theme-color" content="#10B981" />
+            </Helmet>
+
+            <div className="verification-card" style={{ textAlign: 'center' }}>
+                <div className="security-banner-web">
+                    <i className="fas fa-lock"></i> confio.lat <i className="fas fa-check-circle"></i>
+                </div>
+
+                <div className="status-icon-circle success">
+                    <i className="fas fa-mobile-alt"></i>
+                </div>
+
+                <h1 className="status-title text-success">
+                    Abriendo Confío...
+                </h1>
+
+                <p className="verification-subtext" style={{ marginBottom: '24px' }}>
+                    Si la app no se abre automáticamente, usa los botones de abajo.
+                </p>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <a
+                        href={`confio://pay/${id}`}
+                        className="btn-primary"
+                        style={{
+                            background: '#10B981',
+                            color: 'white',
+                            padding: '12px 20px',
+                            borderRadius: '12px',
+                            textDecoration: 'none',
+                            fontWeight: '600',
+                            display: 'block'
+                        }}
+                    >
+                        Abrir App
+                    </a>
+
+                    <div style={{ marginTop: '12px', fontSize: '14px', color: '#6B7280' }}>
+                        ¿No tienes la app?
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+                        <a href="https://play.google.com/store/apps/details?id=com.Confio.Confio" target="_blank" rel="noopener noreferrer">
+                            <img src="https://upload.wikimedia.org/wikipedia/commons/7/78/Google_Play_Store_badge_EN.svg" alt="Google Play" style={{ height: '40px' }} />
+                        </a>
+                        <a href="https://apps.apple.com/app/id6472662314" target="_blank" rel="noopener noreferrer">
+                            <img src="https://upload.wikimedia.org/wikipedia/commons/3/3c/Download_on_the_App_Store_Badge.svg" alt="App Store" style={{ height: '40px' }} />
+                        </a>
+                    </div>
+                </div>
+
+                <div className="verification-footer">
+                    <p>Confío &copy; {new Date().getFullYear()}</p>
+                </div>
+            </div>
         </div>
     );
 };
