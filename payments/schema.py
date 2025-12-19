@@ -8,6 +8,7 @@ from datetime import timedelta
 from django.db import transaction
 from django.db.models import F
 from .models import Invoice, PaymentTransaction
+from django.db.models import Q
 from send.validators import validate_transaction_amount
 from django.conf import settings
 from security.utils import graphql_require_kyc, graphql_require_aml
@@ -281,7 +282,7 @@ class GetInvoice(graphene.Mutation):
     def mutate(cls, root, info, invoice_id):
         try:
             invoice = Invoice.objects.get(
-                invoice_id=invoice_id,
+                Q(invoice_id=invoice_id) | Q(internal_id=invoice_id),
                 status='PENDING'
             )
             
@@ -353,7 +354,7 @@ class PayInvoice(graphene.Mutation):
             with transaction.atomic():
                 # Get the invoice with row-level locking
                 invoice = Invoice.objects.select_for_update().get(
-                    invoice_id=invoice_id,
+                    Q(invoice_id=invoice_id) | Q(internal_id=invoice_id),
                     status='PENDING'
                 )
                 
@@ -717,7 +718,7 @@ class Query(graphene.ObjectType):
     def resolve_invoice(self, info, invoice_id):
         # Anyone can view an invoice by ID
         try:
-            return Invoice.objects.get(invoice_id=invoice_id)
+            return Invoice.objects.get(Q(invoice_id=invoice_id) | Q(internal_id=invoice_id))
         except Invoice.DoesNotExist:
             return None
 
