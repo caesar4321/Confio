@@ -165,7 +165,7 @@ class PaymentTransactionAdmin(admin.ModelAdmin):
 class InvoiceAdmin(admin.ModelAdmin):
     """Admin configuration for Invoice model"""
     list_display = [
-        'invoice_id', 
+        'internal_id', 
         'merchant_display', 
         'amount_display', 
         'token_type', 
@@ -183,7 +183,7 @@ class InvoiceAdmin(admin.ModelAdmin):
         'created_by_user__is_active'
     ]
     search_fields = [
-        'invoice_id', 
+        'internal_id', 
         'created_by_user__username', 
         'created_by_user__email',
         'merchant_business__name',
@@ -191,7 +191,7 @@ class InvoiceAdmin(admin.ModelAdmin):
         'description'
     ]
     readonly_fields = [
-        'invoice_id', 
+        'internal_id', 
         'created_at', 
         'updated_at', 
         'qr_code_data', 
@@ -205,7 +205,7 @@ class InvoiceAdmin(admin.ModelAdmin):
     
     fieldsets = (
         ('Invoice Information', {
-            'fields': ('invoice_id', 'amount_display', 'amount', 'token_type', 'description')
+            'fields': ('internal_id', 'amount_display', 'amount', 'token_type', 'description')
         }),
         ('Merchant Details', {
             'fields': ('merchant_type', 'merchant_business', 'created_by_user', 'merchant_display_name', 'merchant_account'),

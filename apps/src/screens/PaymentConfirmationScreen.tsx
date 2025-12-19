@@ -25,7 +25,7 @@ type PaymentConfirmationRouteProp = RouteProp<{
   PaymentConfirmation: {
     invoiceData: {
       id: string;
-      invoiceId: string;
+      internalId: string;
       amount: string;
       tokenType: string;
       description?: string;
@@ -160,19 +160,19 @@ export const PaymentConfirmationScreen = () => {
         setPrepareError(null);
         const amt = parseFloat(String(invoiceData.amount || '0'));
         const assetType = (String(invoiceData.tokenType || 'cUSD')).toUpperCase();
-        const note = `Invoice ${invoiceData.invoiceId}`;
+        const note = `Invoice ${invoiceData.internalId}`;
         // Try WebSocket fast path first
         const wsPack = await prepareViaWs({
           amount: amt,
           assetType,
-          internalId: invoiceData.invoiceId,
+          internalId: invoiceData.internalId,
           note,
           recipientBusinessId: invoiceData.merchantAccount?.business?.id
         });
         if (alive && wsPack && Array.isArray(wsPack.transactions) && wsPack.transactions.length === 4) {
           setPrepared({
             transactions: wsPack.transactions,
-            paymentId: (wsPack as any).internalId || (wsPack as any).internal_id || (wsPack as any).paymentId || (wsPack as any).payment_id || invoiceData.invoiceId,
+            paymentId: (wsPack as any).internalId || (wsPack as any).internal_id || (wsPack as any).paymentId || (wsPack as any).payment_id || invoiceData.internalId,
             groupId: (wsPack as any).groupId || (wsPack as any).group_id
           });
           console.log('PaymentConfirmationScreen: Preflight prepared via WS');
@@ -191,7 +191,7 @@ export const PaymentConfirmationScreen = () => {
     })();
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [invoiceData.invoiceId]);
+  }, [invoiceData.internalId]);
 
   // Removed prewarm HEAD /health pings
 
@@ -206,7 +206,7 @@ export const PaymentConfirmationScreen = () => {
     description: invoiceData.description,
     location: invoiceData.merchantAccount.business?.address || 'Dirección no disponible',
     merchantId: invoiceData.merchantAccount.id,
-    paymentId: invoiceData.invoiceId,
+    paymentId: invoiceData.internalId,
     avatar: (invoiceData.merchantAccount.business?.name ||
       invoiceData.merchantUser.firstName ||
       invoiceData.merchantUser.username).charAt(0).toUpperCase(),
@@ -273,7 +273,7 @@ export const PaymentConfirmationScreen = () => {
   };
 
   const handleConfirmPayment = async () => {
-    console.log('PaymentConfirmationScreen: handleConfirmPayment called for', { invoiceId: invoiceData.invoiceId });
+    console.log('PaymentConfirmationScreen: handleConfirmPayment called for', { invoiceId: invoiceData.internalId });
 
     // Prevent double-clicks/rapid button presses
     if (isProcessing || navLock.current) {
@@ -290,7 +290,7 @@ export const PaymentConfirmationScreen = () => {
     navLock.current = true;
     // Create deterministic idempotency key for this submission window (1 min granularity)
     const minuteTimestamp = Math.floor(Date.now() / 60000);
-    const idempotencyKey = `pay_${invoiceData.invoiceId}_${minuteTimestamp}`;
+    const idempotencyKey = `pay_${invoiceData.internalId}_${minuteTimestamp}`;
 
     // Background preflight: moved to top-level effect
 
@@ -300,19 +300,19 @@ export const PaymentConfirmationScreen = () => {
       try {
         const amt = parseFloat(String(invoiceData.amount || '0'));
         const assetType = (String(invoiceData.tokenType || 'cUSD')).toUpperCase();
-        const note = `Invoice ${invoiceData.invoiceId}`;
-        console.log('PaymentConfirmationScreen: prepareViaWs on confirm', { invoiceId: invoiceData.invoiceId, amt, assetType });
+        const note = `Invoice ${invoiceData.internalId}`;
+        console.log('PaymentConfirmationScreen: prepareViaWs on confirm', { invoiceId: invoiceData.internalId, amt, assetType });
         const pack = await prepareViaWs({
           amount: amt,
           assetType,
-          internalId: invoiceData.invoiceId,
+          internalId: invoiceData.internalId,
           note,
           recipientBusinessId: invoiceData.merchantAccount?.business?.id
         });
         if (pack && Array.isArray((pack as any).transactions) && (pack as any).transactions.length === 4) {
           preparedForNav = {
             transactions: (pack as any).transactions,
-            paymentId: (pack as any).internalId || (pack as any).internal_id || (pack as any).paymentId || (pack as any).payment_id || invoiceData.invoiceId,
+            paymentId: (pack as any).internalId || (pack as any).internal_id || (pack as any).paymentId || (pack as any).payment_id || invoiceData.internalId,
             groupId: (pack as any).groupId || (pack as any).group_id
           } as any;
           setPrepared(preparedForNav);
@@ -346,7 +346,7 @@ export const PaymentConfirmationScreen = () => {
         address: currentPayment.location,
         message: currentPayment.description,
         action: 'Procesando pago',
-        invoiceId: invoiceData.invoiceId,
+        internalId: invoiceData.internalId,
         idempotencyKey,
         merchantBusinessId: invoiceData.merchantAccount?.business?.id,
         preflight: true,

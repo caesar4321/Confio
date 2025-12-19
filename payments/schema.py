@@ -89,7 +89,7 @@ class InvoiceType(DjangoObjectType):
         model = Invoice
         fields = (
             'id',
-            'invoice_id',
+
             'internal_id',
             'created_by_user',
             'created_by_user',
@@ -242,7 +242,7 @@ class CreateInvoice(graphene.Mutation):
                     employee=user,
                     action='invoice_created',
                     request=info.context,
-                    invoice_id=invoice.invoice_id,
+                    invoice_id=invoice.internal_id,
                     amount=input.amount,
                     details={
                         'token_type': input.token_type,
@@ -282,7 +282,7 @@ class GetInvoice(graphene.Mutation):
     def mutate(cls, root, info, invoice_id):
         try:
             invoice = Invoice.objects.get(
-                Q(invoice_id=invoice_id) | Q(internal_id=invoice_id),
+                internal_id=invoice_id,
                 status='PENDING'
             )
             
@@ -354,7 +354,7 @@ class PayInvoice(graphene.Mutation):
             with transaction.atomic():
                 # Get the invoice with row-level locking
                 invoice = Invoice.objects.select_for_update().get(
-                    Q(invoice_id=invoice_id) | Q(internal_id=invoice_id),
+                    internal_id=invoice_id,
                     status='PENDING'
                 )
                 
@@ -475,7 +475,7 @@ class PayInvoice(graphene.Mutation):
                 import uuid
                 microsecond_timestamp = int(time.time() * 1000000)
                 unique_id = str(uuid.uuid4())[:8]
-                temp_transaction_hash = f"temp_{invoice.invoice_id}_{microsecond_timestamp}_{unique_id}"
+                temp_transaction_hash = f"temp_{invoice.internal_id}_{microsecond_timestamp}_{unique_id}"
                 
                 # Create the payment transaction (normalize token type to backend canonical form)
                 normalized_token_type = 'CUSD' if str(invoice.token_type).upper() == 'CUSD' else str(invoice.token_type).upper()
@@ -551,7 +551,7 @@ class PayInvoice(graphene.Mutation):
                         amount=float(amount_decimal),
                         asset_type=asset_type,
                         payment_id=payment_transaction.internal_id,
-                        note=f"Payment for invoice {invoice.invoice_id}",
+                        note=f"Payment for invoice {invoice.internal_id}",
                         create_receipt=True
                     )
                     
@@ -665,7 +665,7 @@ class PayInvoice(graphene.Mutation):
                             employee=invoice.created_by_user,
                             action='payment_accepted',
                             request=info.context,
-                            invoice_id=invoice.invoice_id,
+                            invoice_id=invoice.internal_id,
                             transaction_id=payment_transaction.transaction_hash,
                             amount=invoice.amount,
                             details={
@@ -718,7 +718,7 @@ class Query(graphene.ObjectType):
     def resolve_invoice(self, info, invoice_id):
         # Anyone can view an invoice by ID
         try:
-            return Invoice.objects.get(Q(invoice_id=invoice_id) | Q(internal_id=invoice_id))
+            return Invoice.objects.get(internal_id=invoice_id)
         except Invoice.DoesNotExist:
             return None
 

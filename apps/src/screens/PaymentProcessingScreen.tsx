@@ -30,7 +30,7 @@ type PaymentProcessingRouteProp = RouteProp<{
       action: string;
       address?: string;
       message?: string;
-      invoiceId?: string;
+      internalId?: string;
       idempotencyKey?: string;
       merchantBusinessId?: string | number;
       preflight?: boolean;
@@ -78,7 +78,7 @@ export const PaymentProcessingScreen = () => {
     amount: transactionData?.amount,
     currency: transactionData?.currency,
     merchant: transactionData?.merchant,
-    hasInvoiceId: !!transactionData?.invoiceId,
+    hasInvoiceId: !!transactionData?.internalId,
     hasIdemKey: !!transactionData?.idempotencyKey,
   });
 
@@ -192,17 +192,17 @@ export const PaymentProcessingScreen = () => {
   useEffect(() => {
     console.log('PaymentProcessingScreen: useEffect triggered', {
       isValid,
-      hasInvoiceId: !!transactionData.invoiceId,
-      invoiceId: transactionData.invoiceId,
+      hasInvoiceId: !!transactionData.internalId,
+      invoiceId: transactionData.internalId,
       isProcessing,
       hasProcessedRef: hasProcessedRef.current,
       transactionData
     });
 
-    if (!isValid || !transactionData.invoiceId || isProcessing || hasProcessedRef.current || !bioChecked) {
+    if (!isValid || !transactionData.internalId || isProcessing || hasProcessedRef.current || !bioChecked) {
       console.log('PaymentProcessingScreen: Returning early from useEffect', {
         reason: !isValid ? 'not valid' :
-          !transactionData.invoiceId ? 'no invoiceId' :
+          !transactionData.internalId ? 'no invoiceId' :
             isProcessing ? 'already processing' :
               !bioChecked ? 'biometric not confirmed' :
                 'already processed'
@@ -226,7 +226,7 @@ export const PaymentProcessingScreen = () => {
       try {
         const now = () => (typeof performance !== 'undefined' && (performance as any).now ? (performance as any).now() : Date.now());
         const t0 = now();
-        console.log('PaymentProcessingScreen[WS]: Start', { invoiceId: transactionData.invoiceId, preparedCount: prepared?.transactions?.length || 0 });
+        console.log('PaymentProcessingScreen[WS]: Start', { invoiceId: transactionData.internalId, preparedCount: prepared?.transactions?.length || 0 });
 
         // update UI steps
         setCurrentStep(0); // verifying
@@ -242,12 +242,12 @@ export const PaymentProcessingScreen = () => {
           const { prepareViaWs } = await import('../services/payWs');
           const amt = parseFloat(String(transactionData.amount || '0'));
           const assetType = String(transactionData.currency || 'cUSD').toUpperCase();
-          const note = `Invoice ${transactionData.invoiceId}`;
+          const note = `Invoice ${transactionData.internalId}`;
           console.log('PaymentProcessingScreen[WS]: Calling prepareViaWs', { amt, assetType, note, recipientBusinessId: (transactionData as any).merchantBusinessId });
           const pack = await prepareViaWs({
             amount: amt,
             assetType,
-            internalId: transactionData.invoiceId,
+            internalId: transactionData.internalId,
             note,
             recipientBusinessId: (transactionData as any).merchantBusinessId
           });
@@ -256,7 +256,7 @@ export const PaymentProcessingScreen = () => {
           }
           wsPack = {
             transactions: (pack as any).transactions,
-            paymentId: (pack as any).internalId || (pack as any).internal_id || (pack as any).paymentId || (pack as any).payment_id || transactionData.invoiceId,
+            paymentId: (pack as any).internalId || (pack as any).internal_id || (pack as any).paymentId || (pack as any).payment_id || transactionData.internalId,
             groupId: (pack as any).groupId || (pack as any).group_id
           } as any;
           console.log('PaymentProcessingScreen[WS]: Prepared pack received');
@@ -288,7 +288,7 @@ export const PaymentProcessingScreen = () => {
         }
         const tSignEnd = now();
 
-        const paymentIdForSubmit = ((wsPack as any)?.paymentId as string) || (transactionData.invoiceId as string);
+        const paymentIdForSubmit = ((wsPack as any)?.paymentId as string) || (transactionData.internalId as string);
         console.log('PaymentProcessingScreen[WS]: Submitting via WS', { indexes: signedTransactions.map(t => t.index), paymentIdForSubmit });
         const wsRes = await submitViaWs(signedTransactions, paymentIdForSubmit);
         if (!wsRes || (!wsRes.transactionId && !(wsRes as any).transaction_id)) {
@@ -685,7 +685,7 @@ export const PaymentProcessingScreen = () => {
     };
 
     processPaymentWsOnly();
-  }, [isValid, transactionData.invoiceId, bioChecked]);
+  }, [isValid, transactionData.internalId, bioChecked]);
 
 
 

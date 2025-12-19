@@ -130,7 +130,7 @@ class CreateSponsoredPaymentMutation(graphene.Mutation):
             if not recipient_business_id and internal_id:
                 from payments.models import Invoice
                 # Try to find invoice by ID
-                inv = Invoice.objects.filter(invoice_id=internal_id).first()
+                inv = Invoice.objects.filter(internal_id=internal_id).first()
                 if inv and inv.merchant_business:
                     recipient_business_id = str(inv.merchant_business.id)
                     logger.info(f"Resolved recipient business {recipient_business_id} from Invoice {internal_id}")
@@ -367,7 +367,7 @@ class CreateSponsoredPaymentMutation(graphene.Mutation):
             if internal_id:
                 from payments.models import PaymentTransaction, Invoice
                 # Resolve invoice by invoice_id (internal_id param is used as invoiceId in this flow)
-                invoice_obj = Invoice.objects.filter(invoice_id=internal_id).first()
+                invoice_obj = Invoice.objects.filter(internal_id=internal_id).first()
                 
                 if not invoice_obj:
                      raise ValueError(f"Invoice not found for invoice_id {internal_id}")
@@ -387,7 +387,7 @@ class CreateSponsoredPaymentMutation(graphene.Mutation):
                 except Exception:
                     pass
                 # Build a unique placeholder hash to satisfy unique constraint before submit
-                placeholder_hash = f"pending_blockchain_{invoice_obj.invoice_id}_{int(time.time()*1000)}"
+                placeholder_hash = f"pending_blockchain_{invoice_obj.internal_id}_{int(time.time()*1000)}"
                 # Assemble minimal defaults
                 defaults = {
                     'payer_user': payer_user,
@@ -421,7 +421,7 @@ class CreateSponsoredPaymentMutation(graphene.Mutation):
                 )
                 # Use the model's auto-generated UUID internal_id
                 generated_internal_id = payment_tx.internal_id
-                logger.info(f"PaymentTransaction {'created' if created else 'found'}: internal_id={generated_internal_id}, invoice={invoice_obj.invoice_id}")
+                logger.info(f"PaymentTransaction {'created' if created else 'found'}: internal_id={generated_internal_id}, invoice={invoice_obj.internal_id}")
 
             return cls(
                 success=True,

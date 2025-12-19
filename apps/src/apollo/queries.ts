@@ -467,7 +467,7 @@ export const CREATE_INVOICE = gql`
     createInvoice(input: $input) {
       invoice {
         id
-        invoiceId
+
         internalId
         amount
         tokenType
@@ -489,7 +489,7 @@ export const GET_INVOICE = gql`
     getInvoice(invoiceId: $invoiceId) {
       invoice {
         id
-        invoiceId
+
         internalId
         createdByUser {
           id
@@ -554,7 +554,7 @@ export const PAY_INVOICE = gql`
     payInvoice(invoiceId: $invoiceId, idempotencyKey: $idempotencyKey) {
       invoice {
         id
-        invoiceId
+
         status
         paidAt
       }
@@ -707,7 +707,7 @@ export const GET_PAYMENT_TRANSACTIONS_WITH_FRIEND = gql`
       updatedAt
       invoice {
         id
-        invoiceId
+
         description
       }
     }
@@ -748,7 +748,7 @@ export const GET_INVOICES = gql`
   query GetInvoices {
     invoices {
       id
-      invoiceId
+      internalId
       amount
       tokenType
       description
@@ -2333,7 +2333,7 @@ export const GET_PAYMENT_TRANSACTION_BY_ID = gql`
       updatedAt
       invoice {
         id
-        invoiceId
+
         description
       }
     }

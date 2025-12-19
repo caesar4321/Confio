@@ -5,10 +5,14 @@ from users.models import SoftDeleteModel
 import uuid
 import secrets
 import string
+import secrets
+import string
+
 
 def generate_invoice_id():
-    """Generate a unique invoice ID"""
+    """Generate a unique invoice ID (Legacy - Required for Migrations)"""
     return ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(8))
+
 
 def generate_payment_transaction_id():
     """Generate a unique payment transaction ID (32-char hex UUID)"""
@@ -228,12 +232,7 @@ class Invoice(SoftDeleteModel):
     ]
 
     # Unique identifier for the invoice
-    invoice_id = models.CharField(
-        max_length=32,
-        unique=True,
-        default=generate_invoice_id,
-        editable=False
-    )
+
 
     # Internal safe UUID for sharing (32-char hex)
     internal_id = models.CharField(
@@ -309,7 +308,7 @@ class Invoice(SoftDeleteModel):
     class Meta:
         ordering = ['-created_at']
         indexes = [
-            models.Index(fields=['invoice_id']),
+            models.Index(fields=['internal_id']),
             models.Index(fields=['merchant_business', 'status']),
             models.Index(fields=['status', 'expires_at']),
             models.Index(fields=['created_at']),
@@ -317,7 +316,7 @@ class Invoice(SoftDeleteModel):
 
     def __str__(self):
         merchant_name = self.merchant_business.name
-        return f"INV-{self.invoice_id}: {self.token_type} {self.amount} by {merchant_name}"
+        return f"INV-{self.internal_id[:8]}: {self.token_type} {self.amount} by {merchant_name}"
 
     @property
     def is_expired(self):
@@ -327,4 +326,4 @@ class Invoice(SoftDeleteModel):
     @property
     def qr_code_data(self):
         """Generate QR code data for the invoice"""
-        return f"confio://pay/{self.invoice_id}"
+        return f"confio://pay/{self.internal_id}"
