@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery, gql } from '@apollo/client';
 import { Helmet } from 'react-helmet';
-import QRCode from 'qrcode.react';
+import { QRCodeCanvas } from 'qrcode.react';
 import '../Verification/Verification.css';
 
 const GET_INVOICE_PUBLIC = gql`
@@ -112,7 +112,7 @@ const PaymentRedirectionPage = () => {
                             display: 'inline-block',
                             marginBottom: '24px'
                         }}>
-                            <QRCode value={qrValue} size={200} level={"H"} includeMargin={false} />
+                            <QRCodeCanvas value={qrValue} size={200} level={"H"} includeMargin={false} />
                             <p style={{ fontSize: '12px', color: '#6B7280', marginTop: '12px', marginBottom: 0 }}>
                                 Escanea con tu cámara o App Confío
                             </p>
