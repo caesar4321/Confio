@@ -20,6 +20,8 @@ import { prepareViaWs } from '../services/payWs';
 import { useAccount } from '../contexts/AccountContext';
 import { colors } from '../config/theme';
 import { formatNumber } from '../utils/numberFormatting';
+import { useMutation } from '@apollo/client';
+import { GET_INVOICE } from '../apollo/queries';
 
 type PaymentConfirmationRouteProp = RouteProp<{
   PaymentConfirmation: {
@@ -69,8 +71,60 @@ export const PaymentConfirmationScreen = () => {
   const [prepareError, setPrepareError] = useState<string | null>(null);
   const navLock = useRef(false);
 
+  // Extract params (invoiceData is normal flow, invoiceId is deep link)
+  const { invoiceData: initialInvoiceData, invoiceId } = route.params as any;
 
-  const { invoiceData } = route.params;
+  // State for invoice data (fetched or passed)
+  const [fetchedInvoiceData, setFetchedInvoiceData] = useState<any | null>(initialInvoiceData || null);
+  const [isFetchingInvoice, setIsFetchingInvoice] = useState(false);
+
+  // Use mutation to fetch invoice (aligned with ScanScreen usage)
+  const [getInvoice] = useMutation(GET_INVOICE);
+
+  // Fetch logic
+  const fetchInvoice = async (id: string) => {
+    setIsFetchingInvoice(true);
+    try {
+      // NOTE: GET_INVOICE is a Mutation in apollo/queries.ts that returns { getInvoice: { invoice, success, errors } }
+      // We use the mutation hook [getInvoice]
+      const { data } = await getInvoice({ variables: { invoiceId: id } });
+
+      if (data?.getInvoice?.success && data?.getInvoice?.invoice) {
+        setFetchedInvoiceData(data.getInvoice.invoice);
+      } else {
+        const msg = data?.getInvoice?.errors?.[0] || 'Factura no encontrada';
+        Alert.alert('Error', msg);
+        navigation.goBack();
+      }
+    } catch (e: any) {
+      console.error('Error fetching invoice:', e);
+      Alert.alert('Error', 'No se pudo cargar la factura. Verifique su conexión.');
+      navigation.goBack();
+    } finally {
+      setIsFetchingInvoice(false);
+    }
+  };
+
+  // Effect to trigger fetch if needed
+  useEffect(() => {
+    // If we have initial data, update state (unlikely to change but good practice)
+    if (initialInvoiceData && !fetchedInvoiceData) {
+      setFetchedInvoiceData(initialInvoiceData);
+      return;
+    }
+
+    // If passed via deep link and we don't have data yet
+    if (invoiceId && !fetchedInvoiceData && !isFetchingInvoice) {
+      console.log('PaymentConfirmation: Deep link detected, fetching invoice', invoiceId);
+      fetchInvoice(invoiceId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invoiceId, initialInvoiceData]);
+
+  // ALIAS for the rest of the component
+  const invoiceData = fetchedInvoiceData;
+  const safeInvoiceId = invoiceData?.internalId || '';
+  const safeTokenType = invoiceData?.tokenType || 'cUSD';
 
   // Helper function to format amount with 2 decimal places
   const formatAmount = (amount: string | number): string => {
@@ -118,8 +172,9 @@ export const PaymentConfirmationScreen = () => {
   const [balanceError, setBalanceError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!invoiceData) return; // Guard clause
     let mounted = true;
-    const token = normalizeTokenType(invoiceData.tokenType);
+    const token = normalizeTokenType(safeTokenType);
     try {
       // Read from cache only (no network)
       const cached = apolloClient.readQuery<{ accountBalance: string }>({
@@ -150,17 +205,20 @@ export const PaymentConfirmationScreen = () => {
     });
     return () => { mounted = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [invoiceData.tokenType]);
+  }, [safeTokenType]);
 
   // Background preflight: create the sponsored payment so confirm only signs+submits
   useEffect(() => {
+    if (!invoiceData) return;
     let alive = true;
-    (async () => {
+
+    const runPreflight = async () => {
       try {
         setPrepareError(null);
         const amt = parseFloat(String(invoiceData.amount || '0'));
         const assetType = (String(invoiceData.tokenType || 'cUSD')).toUpperCase();
         const note = `Invoice ${invoiceData.internalId}`;
+
         // Try WebSocket fast path first
         const wsPack = await prepareViaWs({
           amount: amt,
@@ -169,6 +227,7 @@ export const PaymentConfirmationScreen = () => {
           note,
           recipientBusinessId: invoiceData.merchantAccount?.business?.id
         });
+
         if (alive && wsPack && Array.isArray(wsPack.transactions) && wsPack.transactions.length === 4) {
           setPrepared({
             transactions: wsPack.transactions,
@@ -188,12 +247,31 @@ export const PaymentConfirmationScreen = () => {
         if (alive) setPrepareError(e?.message || 'Failed to prepare payment');
         console.log('PaymentConfirmationScreen: Preflight exception', e?.message || e);
       }
-    })();
+    };
+
+    runPreflight();
+
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [invoiceData.internalId]);
+  }, [safeInvoiceId]);
 
-  // Removed prewarm HEAD /health pings
+  // Loading state (Render phase) - placed AFTER all hooks
+  if (isFetchingInvoice) {
+    return (
+      <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <View style={{ padding: 20, alignItems: 'center' }}>
+          <Text style={{ marginTop: 10, color: '#666' }}>Cargando detalles del pago...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Guard: if no data, don't render content
+  if (!invoiceData) {
+    return (
+      <SafeAreaView style={styles.container} />
+    );
+  }
 
   const currentPayment = {
     type: 'merchant',
@@ -934,4 +1012,4 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 
-}); 
+});

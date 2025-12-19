@@ -2188,14 +2188,21 @@ class PrepareAtomicMigrationMutation(graphene.Mutation):
             # Determine which assets to migrate (Strict Whitelist + USDC if present)
             # Also detect if there are leftover "junk" assets that prevent account closure
             assets_to_migrate = []
+            legacy_assets_to_burn = []  # Legacy tokens to close to burn address, not V2
             has_leftover_assets = False
             
-            # Helper to check if asset ID is relevant
+            # Legacy CONFÍO from before token migration (mainnet)
+            # This is a dead token - we close it to a burn address, not V2
+            LEGACY_CONFIO_ASSET_ID = 3198568509
+            LEGACY_BURN_ADDRESS = 'PFFGG74A3BTBMPOJSTJALIIF4PO3JQJCS3WKYYXDQQ73J35EG2QOSCQRSY'
+            
+            # Helper to check if asset ID is relevant (triggers migration)
             def is_relevant_asset(aid):
                 relevant_ids = [
                     AlgorandAccountManager.CONFIO_ASSET_ID,
                     AlgorandAccountManager.CUSD_ASSET_ID,
-                    AlgorandAccountManager.USDC_ASSET_ID
+                    AlgorandAccountManager.USDC_ASSET_ID,
+                    LEGACY_CONFIO_ASSET_ID,  # Old CONFÍO token (will be burned)
                 ]
                 # Filter out None values in case settings are missing
                 return aid in [r for r in relevant_ids if r is not None]
@@ -2204,7 +2211,12 @@ class PrepareAtomicMigrationMutation(graphene.Mutation):
                 aid = asset['asset-id']
                 amount = asset['amount']
                 if is_relevant_asset(aid):
-                    assets_to_migrate.append(aid)
+                    if aid == LEGACY_CONFIO_ASSET_ID:
+                        # Legacy token goes to burn address, not V2
+                        legacy_assets_to_burn.append(aid)
+                    else:
+                        # Regular token goes to V2
+                        assets_to_migrate.append(aid)
                 else:
                     # If irrelevant asset has balance, we can't easily close it
                     if amount > 0:
@@ -2217,6 +2229,7 @@ class PrepareAtomicMigrationMutation(graphene.Mutation):
             
             # Also ensure we target CONFIO/cUSD for V2 opt-in even if V1 doesn't have them yet
             # (To ensure V2 is fully setup for the future)
+            # NOTE: We do NOT include legacy CONFIO here - it's a dead token
             target_v2_opt_ins = set(assets_to_migrate)
             if AlgorandAccountManager.CONFIO_ASSET_ID:
                 target_v2_opt_ins.add(AlgorandAccountManager.CONFIO_ASSET_ID)
@@ -2267,9 +2280,10 @@ class PrepareAtomicMigrationMutation(graphene.Mutation):
             # 1. Sponsor MBR Fund (Sponsor -> V2)
             # 2. V2 Opt-Ins (N * Axfer)
             # 3. V1 Asset Closes (M * Axfer)
+            # 3b. Legacy Asset Burns (L * Axfer)
             # 4. V1 Close Algo (1 * Pay) - OR - V1 Max Send (1 * Pay)
             
-            op_count = 1 + len(needed_opt_ins) + len(assets_to_migrate) + 1
+            op_count = 1 + len(needed_opt_ins) + len(assets_to_migrate) + len(legacy_assets_to_burn) + 1
             min_fee = 1000
             total_group_fee = op_count * min_fee
             
@@ -2296,7 +2310,7 @@ class PrepareAtomicMigrationMutation(graphene.Mutation):
                 opt_in.fee = 0
                 txns.append({'txn': opt_in, 'signer': 'v2', 'desc': f'Opt-in {aid}'})
                 
-            # Txn Group 3: V1 Asset Closes
+            # Txn Group 3: V1 Asset Closes (to V2)
             for aid in assets_to_migrate:
                 # Use close_assets_to to empty and close the asset
                 close_asset = AssetTransferTxn(
@@ -2309,6 +2323,20 @@ class PrepareAtomicMigrationMutation(graphene.Mutation):
                 )
                 close_asset.fee = 0
                 txns.append({'txn': close_asset, 'signer': 'v1', 'desc': f'Migrate Asset {aid}'})
+            
+            # Txn Group 3b: Legacy Asset Burns (to burn address, not V2)
+            for aid in legacy_assets_to_burn:
+                # Close legacy tokens to burn address to remove them from V1
+                burn_asset = AssetTransferTxn(
+                    sender=v1_address,
+                    sp=params,
+                    receiver=LEGACY_BURN_ADDRESS,
+                    close_assets_to=LEGACY_BURN_ADDRESS,
+                    amt=0,
+                    index=aid
+                )
+                burn_asset.fee = 0
+                txns.append({'txn': burn_asset, 'signer': 'v1', 'desc': f'Burn Legacy Asset {aid}'})
                 
             # Txn Group 4: V1 Algo Transfer (Close or Max Send)
             if not has_leftover_assets:
@@ -2330,7 +2358,7 @@ class PrepareAtomicMigrationMutation(graphene.Mutation):
                 # V1 Min Balance = 100,000 (Base) + 100,000 * len(Assets)
                 # Assets count = Total Assets - Migrated Assets
                 
-                remaining_assets_count = len(v1_assets) - len(assets_to_migrate)
+                remaining_assets_count = len(v1_assets) - len(assets_to_migrate) - len(legacy_assets_to_burn)
                 # Ensure count is non-negative
                 remaining_assets_count = max(0, remaining_assets_count)
                 
@@ -2342,7 +2370,7 @@ class PrepareAtomicMigrationMutation(graphene.Mutation):
                 # but subtract the MBR of the assets we ARE closing.
                 
                 current_min = v1_info.get('min-balance', 100000)
-                freed_mbr = len(assets_to_migrate) * 100_000
+                freed_mbr = (len(assets_to_migrate) + len(legacy_assets_to_burn)) * 100_000
                 new_v1_min_balance = max(100_000, current_min - freed_mbr)
                 
                 amount_to_send = max(0, v1_algo_balance - new_v1_min_balance)

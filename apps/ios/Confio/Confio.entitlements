@@ -11,6 +11,7 @@
 	<key>com.apple.developer.associated-domains</key>
 	<array>
 		<string>applinks:confio.lat</string>
+		<string>applinks:www.confio.lat</string>
 	</array>
 </dict>
 </plist>

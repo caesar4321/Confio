@@ -113,10 +113,14 @@ class InvoiceType(DjangoObjectType):
     is_expired = graphene.Boolean()
     qr_code_data = graphene.String()
     payment_transactions = graphene.List(PaymentTransactionType)
+    currency = graphene.String() # Alias for token_type for web app
     
     def resolve_is_expired(self, info):
         """Resolve is_expired property"""
         return self.is_expired
+    
+    def resolve_currency(self, info):
+        return self.token_type
     
     def resolve_qr_code_data(self, info):
         """Resolve qr_code_data property"""
@@ -282,8 +286,7 @@ class GetInvoice(graphene.Mutation):
     def mutate(cls, root, info, invoice_id):
         try:
             invoice = Invoice.objects.get(
-                internal_id=invoice_id,
-                status='PENDING'
+                internal_id=invoice_id
             )
             
             # Check if expired
@@ -719,6 +722,15 @@ class Query(graphene.ObjectType):
         # Anyone can view an invoice by ID
         try:
             return Invoice.objects.get(internal_id=invoice_id)
+        except Invoice.DoesNotExist:
+            return None
+
+    # Support for Web App query (using camelCase)
+    resolveInvoice = graphene.Field(InvoiceType, invoiceId=graphene.String(required=True))
+
+    def resolve_resolveInvoice(self, info, invoiceId):
+        try:
+            return Invoice.objects.get(internal_id=invoiceId)
         except Invoice.DoesNotExist:
             return None
 

@@ -329,7 +329,9 @@ const ChargeScreen = () => {
     if (id) {
       try {
         await Share.open({
-          message: `Paga mi factura de ${invoice.amount} ${invoice.tokenType} usando este enlace: https://confio.lat/pay/${id}`,
+          message: Platform.OS === 'ios'
+            ? `Paga mi factura de ${invoice.amount} ${invoice.tokenType} usando este enlace: https://confio.lat/pay/${id}`
+            : `Paga mi factura de ${invoice.amount} ${invoice.tokenType} usando este enlace:`, // Android concatenates 'url' automatically
           url: `https://confio.lat/pay/${id}`,
           title: 'Pago'
         });

@@ -13,6 +13,7 @@ const GET_INVOICE_PUBLIC = gql`
       currency
       status
       description
+      merchantDisplayName
       createdByUser {
         firstName
         lastName
@@ -66,9 +67,9 @@ const PaymentRedirectionPage = () => {
         );
     }
 
-    const { amount, currency, status, description, createdByUser } = invoice;
+    const { amount, currency, status, description, createdByUser, merchantDisplayName } = invoice;
     const isPaid = status === 'PAID';
-    const merchantName = createdByUser ? `${createdByUser.firstName} ${createdByUser.lastName}` : 'Comercio Confío';
+    const merchantName = merchantDisplayName || (createdByUser ? `${createdByUser.firstName} ${createdByUser.lastName}` : 'Comercio Confío');
     const qrValue = `confio://pay/${invoice.internalId}`;
 
     return (

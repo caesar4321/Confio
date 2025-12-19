@@ -102,9 +102,12 @@ export const ScanScreen = () => {
       return;
     }
 
-    // 2. Check for Payment QR Code
-    const qrMatch = scannedData.match(/^confio:\/\/pay\/(.+)$/);
-    if (!qrMatch || !qrMatch[1]) {
+    // 2. Check for Payment QR Code (Custom Scheme OR Universal Link via HTTPS)
+    const schemeMatch = scannedData.match(/^confio:\/\/pay\/(.+)$/);
+    const httpsMatch = scannedData.match(/^https:\/\/confio\.lat\/pay\/(.+)$/);
+    const validMatch = schemeMatch || httpsMatch;
+
+    if (!validMatch || !validMatch[1]) {
       Alert.alert(
         'Invalid QR Code',
         'This QR code is not a valid Confío payment code.',
@@ -114,7 +117,7 @@ export const ScanScreen = () => {
       return;
     }
 
-    const invoiceId = qrMatch[1];
+    const invoiceId = validMatch[1];
     console.log('Invoice ID extracted:', invoiceId);
 
     setIsProcessing(true);

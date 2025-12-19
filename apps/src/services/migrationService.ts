@@ -27,6 +27,10 @@ import { secureDeterministicWallet, retrieveClientSecret, getOrCreateMasterSecre
 import authService from './authService';
 import { API_URL, CONFIO_ASSET_ID, CUSD_ASSET_ID, USDC_ASSET_ID } from '../config/env';
 
+// Legacy CONFÍO asset ID from before token migration
+// Users who have this in V1 need it swept to V2
+const LEGACY_CONFIO_ASSET_ID = '3198568509';
+
 
 // Use public AlgoNode API for client-side state checks (Read-Only)
 // This avoids needing Algod credentials on the client
@@ -108,7 +112,9 @@ class WalletMigrationService {
                                 // console.log(`[MigrationService] Asset Check: ID=${aid} (Type=${typeof aid}) vs CONFIO=${CONFIO_ASSET_ID} (Type=${typeof CONFIO_ASSET_ID})`);
 
                                 // Robust comparison using String() to handle Number vs BigInt vs Integer differences
+                                // Include legacy CONFIO asset ID for users with old tokens
                                 const matches = (String(aid) === String(CONFIO_ASSET_ID) ||
+                                    String(aid) === String(LEGACY_CONFIO_ASSET_ID) ||
                                     String(aid) === String(CUSD_ASSET_ID) ||
                                     String(aid) === String(USDC_ASSET_ID));
                                 return (matches && amount > 0);
@@ -204,8 +210,10 @@ class WalletMigrationService {
                 const aid = a['asset-id'];
                 // Robust comparison (String) to handle BigInt/Number mismatch
                 // This detects Opt-Ins even if balance is 0
+                // Include legacy CONFIO asset ID for users with old tokens
                 return (
                     String(aid) === String(CONFIO_ASSET_ID) ||
+                    String(aid) === String(LEGACY_CONFIO_ASSET_ID) ||
                     String(aid) === String(CUSD_ASSET_ID) ||
                     String(aid) === String(USDC_ASSET_ID)
                 );
@@ -213,13 +221,12 @@ class WalletMigrationService {
 
             const hasRelevantAssets = relevantAssets.length > 0;
 
-            // If V1 is practically empty (only min balance or less, and no RELEVANT assets)
-            // We consider it "migrated" or "empty"
-            // We ignore junk assets - they will be abandoned in the legacy wallet
-            // If V1 is practically empty (only min balance or less, and no RELEVANT assets)
-            // INCREASED THRESHOLD to 1.0 ALGO to allow for leftover MBR (opt-ins).
-            if (!hasRelevantAssets && balance < 1000000) {
-                console.log('[MigrationService] V1 is empty/dust. Checking if we need to self-heal (Zombie State).');
+            // V1 is considered empty if it has NO relevant asset opt-ins.
+            // We completely ignore ALGO balance - only asset opt-ins matter.
+            // If V1 has no relevant opt-ins, there's nothing to migrate.
+            // Any leftover ALGO or junk assets will be abandoned (user's choice to recover manually).
+            if (!hasRelevantAssets) {
+                console.log('[MigrationService] V1 has no relevant asset opt-ins. Checking if we need to self-heal (Zombie State).');
 
                 // Check if actually migrated but backend missed it
                 if (v2Secret) {
@@ -230,8 +237,9 @@ class WalletMigrationService {
                         const v2Address = v2Wallet.address;
 
                         const v2Info = await this.algodClient.accountInformation(v2Address).do();
-                        // If V2 has confirmed implementation (assets or significant balance)
-                        if (v2Info.amount >= 300000 || (v2Info.assets && v2Info.assets.length > 0)) {
+                        // If V2 has confirmed implementation (assets)
+                        // NOTE: We also ignore V2 ALGO balance, only check assets
+                        if (v2Info.assets && v2Info.assets.length > 0) {
                             console.log('[MigrationService] ZOMBIE DETECTED: V1 empty, V2 funded. Self-healing...');
 
                             // 1. Tell Backend
@@ -258,7 +266,7 @@ class WalletMigrationService {
                     }
                 }
 
-                console.log('[MigrationService] V1 empty and no active V2 found. Marking as done/new.');
+                console.log('[MigrationService] V1 empty (no opt-ins) and no active V2 found. Marking as done/new.');
                 return { needsMigration: false, v1Address, v1Balance: 0 };
             }
 

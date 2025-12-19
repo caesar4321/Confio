@@ -8,8 +8,7 @@ const linking: LinkingOptions<RootStackParamList> = {
             Main: {
                 screens: {
                     VerifyTransaction: 'verify/:hash',
-                    // We can add other routes here later
-                    // e.g., PaymentProcessing: 'pay/:invoiceId'
+                    PaymentConfirmation: 'pay/:invoiceId',
                 },
             },
             Auth: {

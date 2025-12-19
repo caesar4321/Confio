@@ -17,7 +17,7 @@ EC2_HOST=""
 EC2_USER="ubuntu"
 KEY_PATH=""
 REMOTE_APP_DIR="/opt/confio"
-ENV_FILE=".env"
+ENV_FILE=".env.mainnet"
 
 while getopts ":h:u:i:d:e:" opt; do
   case ${opt} in
@@ -100,7 +100,7 @@ set -x
 APP_DIR="${APP_DIR:-/opt/confio}"
 VENV_DIR="$APP_DIR/myvenv"
 LEGACY_VENV="$APP_DIR/venv"
-ENV_FILE="${ENV_FILE:-.env}"
+ENV_FILE="${ENV_FILE:-.env.mainnet}"
 
 echo "==> Ensure base directories"
 sudo mkdir -p "$APP_DIR"
@@ -114,7 +114,7 @@ if [[ -f "$APP_DIR/$ENV_FILE" ]]; then sudo cp "$APP_DIR/$ENV_FILE" /tmp/${ENV_F
 
 # Remove old app code to avoid stale migrations/files lingering
 sudo find "$APP_DIR" -mindepth 1 -maxdepth 1 \
-  \( -name venv -o -name myvenv -o -name media -o -name staticfiles -o -name "$ENV_FILE" -o -name ".git" \) -prune -o -exec rm -rf {} +
+  \( -name venv -o -name myvenv -o -name media -o -name staticfiles -o -name ".env*" -o -name ".git" \) -prune -o -exec rm -rf {} +
 
 # Restore env file if we preserved it
 if [[ -f /tmp/${ENV_FILE}.confio.bak.$$ ]]; then sudo mv /tmp/${ENV_FILE}.confio.bak.$$ "$APP_DIR/$ENV_FILE"; fi
