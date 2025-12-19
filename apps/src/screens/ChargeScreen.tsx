@@ -86,13 +86,13 @@ const ChargeScreen = () => {
   useEffect(() => {
     if (showQRCode && invoice && invoiceData?.invoices) {
       console.log('ChargeScreen: Checking for payment status updates...');
-      console.log('ChargeScreen: Current invoice ID:', invoice.invoiceId);
-      console.log('ChargeScreen: Available invoices:', invoiceData.invoices.map((inv: any) => ({ id: inv.invoiceId, status: inv.status })));
+      console.log('ChargeScreen: Current invoice ID:', invoice.internalId);
+      console.log('ChargeScreen: Available invoices:', invoiceData.invoices.map((inv: any) => ({ id: inv.internalId, status: inv.status })));
 
-      const currentInvoice = invoiceData.invoices.find((inv: any) => inv.invoiceId === invoice.invoiceId);
+      const currentInvoice = invoiceData.invoices.find((inv: any) => inv.internalId === invoice.internalId);
       if (currentInvoice) {
         console.log('ChargeScreen: Found current invoice:', {
-          id: currentInvoice.invoiceId,
+          id: currentInvoice.internalId,
           status: currentInvoice.status,
           paidByUser: currentInvoice.paidByUser,
           transaction: currentInvoice.transaction
@@ -120,9 +120,9 @@ const ChargeScreen = () => {
           // Automatically navigate to business payment success screen
           (navigation as any).navigate('BusinessPaymentSuccess', {
             paymentData: {
-              id: currentInvoice.id,
-              paymentTransactionId: currentInvoice.paymentTransactions?.[0]?.internalId || currentInvoice.invoiceId,
-              internalId: currentInvoice.paymentTransactions?.[0]?.internalId || currentInvoice.invoiceId,
+              id: currentInvoice.internalId,
+              paymentTransactionId: currentInvoice.paymentTransactions?.[0]?.internalId || currentInvoice.internalId,
+              internalId: currentInvoice.paymentTransactions?.[0]?.internalId || currentInvoice.internalId,
               amount: currentInvoice.amount,
               tokenType: currentInvoice.tokenType,
               description: currentInvoice.description,
@@ -670,7 +670,7 @@ const ChargeScreen = () => {
                       </View>
 
                       <Text style={styles.qrCodeText}>
-                        ID: {invoice?.invoiceId || 'Generando...'}
+                        ID: {invoice?.internalId?.substring(0, 8).toUpperCase() || 'Generando...'}
                       </Text>
 
                       <View style={[styles.paymentDetails, { backgroundColor: currentCurrency.color + '10' }]}>
@@ -780,7 +780,7 @@ const ChargeScreen = () => {
             </View>
           )}
         </View>
-      </ScrollView>
+      </ScrollView >
     </>
   );
 };
