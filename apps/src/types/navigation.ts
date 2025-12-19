@@ -237,6 +237,9 @@ export type MainStackParamList = {
       invoiceId?: string;
     };
   };
+  VerifyTransaction: {
+    hash: string;
+  };
   PaymentConfirmation: {
     invoiceData: {
       id: string;

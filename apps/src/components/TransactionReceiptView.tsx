@@ -137,51 +137,32 @@ export const TransactionReceiptView: React.FC<TransactionReceiptViewProps> = ({
             </View>
 
             {/* Transaction Metadata */}
-            <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Datos adicionales</Text>
-                <View style={styles.infoCard}>
-                    {referenceId && (
-                        <View style={styles.infoRow}>
-                            <Icon name="hash" size={18} color="#6B7280" />
-                            <View style={styles.infoContent}>
-                                <Text style={styles.infoLabel}>{referenceLabel || 'Referencia'}</Text>
-                                <Text style={styles.infoValue}>{referenceId}</Text>
-                            </View>
-                        </View>
-                    )}
-
-                    {memo && (
-                        <View style={styles.infoRow}>
-                            <Icon name="message-square" size={18} color="#6B7280" />
-                            <View style={styles.infoContent}>
-                                <Text style={styles.infoLabel}>Concepto</Text>
-                                <Text style={styles.infoValue}>{memo}</Text>
-                            </View>
-                        </View>
-                    )}
-
-                    {transactionHash && (
-                        <TouchableOpacity
-                            style={styles.infoRow}
-                            onPress={() => {
-                                const base = __DEV__ ? 'https://testnet.explorer.perawallet.app' : 'https://explorer.perawallet.app';
-                                const url = `${base}/tx/${transactionHash}`;
-                                Linking.openURL(url);
-                            }}
-                            activeOpacity={0.7}
-                        >
-                            <Icon name="link" size={18} color="#059669" />
-                            <View style={styles.infoContent}>
-                                <Text style={styles.infoLabel}>Hash blockchain</Text>
-                                <View style={styles.hashContainer}>
-                                    <Text style={styles.infoValueMono} numberOfLines={1}>{transactionHash}</Text>
-                                    <Icon name="external-link" size={14} color="#059669" style={styles.externalIcon} />
+            {(referenceId || memo) && (
+                <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Datos adicionales</Text>
+                    <View style={styles.infoCard}>
+                        {referenceId && (
+                            <View style={styles.infoRow}>
+                                <Icon name="hash" size={18} color="#6B7280" />
+                                <View style={styles.infoContent}>
+                                    <Text style={styles.infoLabel}>{referenceLabel || 'Referencia'}</Text>
+                                    <Text style={styles.infoValue}>{referenceId}</Text>
                                 </View>
                             </View>
-                        </TouchableOpacity>
-                    )}
+                        )}
+
+                        {memo && (
+                            <View style={styles.infoRow}>
+                                <Icon name="message-square" size={18} color="#6B7280" />
+                                <View style={styles.infoContent}>
+                                    <Text style={styles.infoLabel}>Concepto</Text>
+                                    <Text style={styles.infoValue}>{memo}</Text>
+                                </View>
+                            </View>
+                        )}
+                    </View>
                 </View>
-            </View>
+            )}
 
             {/* Verification QR Code - only show if we have a valid verification ID (not transaction hash) */}
             {verificationId && (

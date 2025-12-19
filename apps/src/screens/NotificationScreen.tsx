@@ -248,6 +248,8 @@ export const NotificationScreen = () => {
       pickInternalId(baseData.transaction_id) ||
       pickInternalId(baseData.paymentTransactionId) ||
       pickInternalId(baseData.payment_transaction_id) ||
+      pickInternalId(enrichedData.id) ||
+      pickInternalId(baseData.id) ||
       pickInternalId(id);
 
     const transactionPayload = {
@@ -284,7 +286,7 @@ export const NotificationScreen = () => {
       return;
     }
     let baseTxnType: any = 'send';
-    if (notifType === 'INVITE_RECEIVED' || notifType === 'SEND_RECEIVED') baseTxnType = 'received';
+    if (notifType === 'INVITE_RECEIVED' || notifType === 'SEND_RECEIVED' || notifType === 'SEND_FROM_EXTERNAL') baseTxnType = 'received';
     if (notifType === 'PAYMENT_RECEIVED' || notifType === 'PAYMENT_SENT' || notifType === 'INVOICE_PAID') baseTxnType = 'payment';
     if (notifType === 'PAYROLL_RECEIVED' || notifType === 'PAYROLL_SENT') baseTxnType = 'payroll';
     if (notifType === 'SEND_SENT') baseTxnType = 'sent';
@@ -629,6 +631,44 @@ export const NotificationScreen = () => {
           data: fullData,
           id,
           notificationCreatedAt: notification.createdAt,
+        });
+        return;
+      }
+
+      // Handle USDC Deposits
+      if (type === 'USDCDeposit' || notifType.startsWith('USDC_DEPOSIT')) {
+        const fromAddress = fullData.sender_address || fullData.from_address || fullData.source_address;
+        const toAddress = fullData.recipient_address || fullData.to_address;
+
+        const txPayload: any = {
+          id,
+          notification_type: notifType,
+          transaction_type: 'deposit',
+          internal_id: fullData.internal_id ?? fullData.internalId,
+          internalId: fullData.internalId ?? fullData.internal_id,
+          currency: fullData.currency || 'cUSD', // Deposits are usually displayed as cUSD equivalent or USDC
+          token_type: 'USDC',
+          amount: fullData.amount ? `+${fullData.amount}` : undefined,
+          // Recipient is the current user
+          recipient_name: fullData.recipient_name || userProfile?.firstName || 'Usuario',
+          to: fullData.recipient_name || userProfile?.firstName || 'Usuario',
+          // Sender is external
+          sender_name: 'Billetera Externa',
+          from: 'Billetera Externa',
+          sender_address: fromAddress,
+          fromAddress,
+          recipient_address: toAddress,
+          toAddress,
+          status: 'completed',
+          createdAt: notification.createdAt,
+        };
+
+        navigateToTransactionDetail({
+          id,
+          notifType,
+          txnType: 'deposit',
+          baseData: fullData,
+          enrichedData: txPayload
         });
         return;
       }

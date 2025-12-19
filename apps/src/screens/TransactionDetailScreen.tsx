@@ -1226,7 +1226,7 @@ export const TransactionDetailScreen = () => {
     txData = {
       ...(transactionData || {}),
       type: resolvedType,
-      from: tx.senderDisplayName || tx.senderUser?.firstName || (transactionData as any)?.senderName || 'Usuario',
+      from: tx.senderDisplayName || tx.senderUser?.firstName || (transactionData as any)?.senderName || (tx.senderAddress ? `Externo (${tx.senderAddress.slice(0, 4)}...${tx.senderAddress.slice(-4)})` : 'Usuario'),
       fromAddress: tx.senderAddress,
       to: tx.recipientDisplayName || tx.recipientUser?.firstName || (transactionData as any)?.recipientName || 'Usuario',
       toAddress: tx.recipientAddress,
@@ -1366,7 +1366,12 @@ export const TransactionDetailScreen = () => {
     // Prefer senderName/recipientName over generic "Usuario" or undefined
     if ((!normalizedTransactionData.from || normalizedTransactionData.from === 'Usuario') && normalizedTransactionData.senderName) {
       (normalizedTransactionData as any).from = normalizedTransactionData.senderName;
+    } else if ((!normalizedTransactionData.from || normalizedTransactionData.from === 'Usuario') && normalizedTransactionData.senderAddress) {
+      // Fallback to sender addresses for external wallets
+      const addr = normalizedTransactionData.senderAddress;
+      (normalizedTransactionData as any).from = `Externo (${addr.slice(0, 4)}...${addr.slice(-4)})`;
     }
+
     if ((!normalizedTransactionData.to || normalizedTransactionData.to === 'Usuario') && normalizedTransactionData.recipientName) {
       (normalizedTransactionData as any).to = normalizedTransactionData.recipientName;
     }

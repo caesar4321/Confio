@@ -57,7 +57,7 @@ const TransactionVerificationPage = () => {
     if (loading) return (
         <div className="verification-container loading">
             <div className="spinner"></div>
-            <p>Verificando transacción...</p>
+            <p className="loading-text">Verificando transacción...</p>
         </div>
     );
 
@@ -71,24 +71,18 @@ const TransactionVerificationPage = () => {
             case 'PAYROLL':
                 return {
                     title: 'Comprobante de Nómina',
-                    sender: 'Empresa (Remitente)',
-                    recipient: 'Empleado (Destinatario)',
+                    sender: 'Empresa',
+                    recipient: 'Empleado',
                     message: 'Pago de nómina verificado'
                 };
             case 'PAYMENT':
                 return {
                     title: 'Comprobante de Pago',
-                    sender: 'Cliente (Pagador)',
-                    recipient: 'Comercio (Receptor)',
+                    sender: 'Pagador',
+                    recipient: 'Comercio',
                     message: 'Pago a comercio verificado'
                 };
             case 'TRANSFER':
-                return {
-                    title: 'Comprobante de Transferencia',
-                    sender: 'Remitente',
-                    recipient: 'Destinatario',
-                    message: 'Transferencia verificada'
-                };
             default:
                 return {
                     title: 'Comprobante de Transacción',
@@ -108,21 +102,18 @@ const TransactionVerificationPage = () => {
                 <Helmet>
                     <title>Verificación Fallida | Confío</title>
                 </Helmet>
-                <div className="security-banner">
-                    <span className="secure-icon">🔒</span>
-                    Estás en <span className="domain-highlight">confio.lat</span>
-                    <span className="secure-check">✓</span>
-                </div>
                 <div className="verification-card">
-                    <div className="status-icon invalid">❌</div>
-                    <h1>Verificación Fallida</h1>
+                    <div className="status-icon-circle error">
+                        <i className="fas fa-times"></i>
+                    </div>
+                    <h1>No encontrada</h1>
                     <p className="verification-message">
                         No pudimos encontrar esta transacción en nuestros registros.
                         El código puede ser incorrecto o la transacción no existe.
                     </p>
-                    <div className="hash-display">
-                        <span>Hash consultado:</span>
-                        <code>{hash}</code>
+                    <div className="hash-box">
+                        <div className="hash-label">Código consultado:</div>
+                        <div className="hash-value">{hash}</div>
                     </div>
                 </div>
             </div>
@@ -136,99 +127,74 @@ const TransactionVerificationPage = () => {
                 <meta name="theme-color" content={isValid ? '#10B981' : '#EF4444'} />
             </Helmet>
 
-            <div className="security-banner">
-                <span className="secure-icon">🔒</span>
-                Estás en <span className="domain-highlight">confio.lat</span>
-                <span className="secure-check">✓</span>
-            </div>
-
             <div className="verification-card">
-                <div className={`status-icon ${isValid ? 'valid' : 'revoked'}`}>
-                    {isValid ? '✅' : (isRevoked ? '⚠️' : '❌')}
+                <div className="security-banner-web">
+                    <i className="fas fa-lock"></i> confio.lat <i className="fas fa-check-circle"></i>
                 </div>
 
-                <div className="verification-header">
-                    <span className="verification-type-badge">{labels.title}</span>
+                <div className="status-section">
+                    <div className={`status-icon-circle ${isValid ? 'success' : 'revoked'}`}>
+                        <i className={`fas ${isValid ? 'fa-check' : 'fa-exclamation-triangle'}`}></i>
+                    </div>
+                    <h2 className={`status-title ${isValid ? 'text-success' : 'text-danger'}`}>
+                        {isValid ? 'Comprobante Validado' : (isRevoked ? 'Transacción Revocada' : 'Transacción Inválida')}
+                    </h2>
+                    <p className="verification-subtext">{result.verificationMessage || labels.message}</p>
                 </div>
 
-                <h1>{isValid ? 'Comprobante Validado' : (isRevoked ? 'Transacción Revocada' : 'Transacción Inválida')}</h1>
                 {isValid && (
-                    <p className="certification-text">
-                        Confío certifica la coincidencia de los datos del comprobante con la transacción registrada en Algorand.
-                    </p>
-                )}
+                    <div className="details-card">
+                        <div className="amount-section">
+                            <span className="amount-label">Monto Total</span>
+                            <div className="amount-display">
+                                {result.amount} <small>{result.currency === 'CUSD' ? 'cUSD' : result.currency}</small>
+                            </div>
+                            <div className="date-display">{formattedDate}</div>
+                        </div>
 
-                <p className="verification-message">{result.verificationMessage || labels.message}</p>
-
-                {isValid && (
-                    <div className="details-grid">
-                        <div className="detail-item full-width">
-                            <label>Monto</label>
-                            <div className="amount-value">
-                                {result.amount} <small>{result.currency}</small>
+                        <div className="info-row">
+                            <div className="info-col">
+                                <label>{labels.sender}</label>
+                                <div className="info-value strong">{result.senderName}</div>
+                            </div>
+                            <div className="info-col text-right">
+                                <label>{labels.recipient}</label>
+                                <div className="info-value masked">
+                                    {result.recipientNameMasked}
+                                    {result.recipientPhoneMasked && <span className="phone-sub">{result.recipientPhoneMasked}</span>}
+                                </div>
                             </div>
                         </div>
 
-                        <div className="detail-item">
-                            <label>Fecha</label>
-                            <div>{formattedDate}</div>
-                        </div>
+                        {(parsedMetadata?.referenceId || parsedMetadata?.memo) && <div className="divider"></div>}
 
-                        <div className="detail-item">
-                            <label>{labels.sender}</label>
-                            <div className="business-name">{result.senderName}</div>
-                        </div>
-
-                        <div className="detail-item">
-                            <label>{labels.recipient}</label>
-                            <div className="masked-data" title="Datos parcialmente ocultos por privacidad">
-                                {result.recipientNameMasked}
-                                {result.recipientPhoneMasked && <small className="phone-sub">{result.recipientPhoneMasked}</small>}
-                            </div>
-                        </div>
-
-                        {/* Extra metadata fields if available */}
-                        {parsedMetadata && parsedMetadata.referenceId && (
-                            <div className="detail-item">
+                        {parsedMetadata?.referenceId && (
+                            <div className="info-row single">
                                 <label>Referencia</label>
-                                <div>{parsedMetadata.referenceId}</div>
+                                <div className="info-value">{parsedMetadata.referenceId}</div>
                             </div>
                         )}
 
-                        {parsedMetadata && parsedMetadata.memo && (
-                            <div className="detail-item full-width">
+                        {parsedMetadata?.memo && (
+                            <div className="info-row single">
                                 <label>Concepto</label>
-                                <div>{parsedMetadata.memo}</div>
+                                <div className="info-value">{parsedMetadata.memo}</div>
                             </div>
                         )}
 
-                        <div className="detail-item full-width">
-                            <label>Hash de Transacción (Blockchain)</label>
-                            <div className="hash-container">
-                                <a
-                                    href={`https://explorer.perawallet.app/tx/${result.transactionHash}`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="hash-link"
-                                    title="Ver en explorador de bloques"
-                                >
-                                    <code>{result.transactionHash}</code>
-                                </a>
-                                <a
-                                    href={`https://explorer.perawallet.app/tx/${result.transactionHash}`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="explorer-link"
-                                >
-                                    Ver en AlgoExplorer ↗
-                                </a>
-                            </div>
+                        <div className="divider"></div>
+
+
+
+                        <div className="certification-badge">
+                            <i className="fas fa-shield-alt"></i>
+                            <span>Confío certifica la autenticidad de este comprobante.</span>
                         </div>
                     </div>
                 )}
 
                 <div className="verification-footer">
-                    <p>Confío | Prueba de Transacción</p>
+                    <p>Confío &copy; {new Date().getFullYear()}</p>
                 </div>
             </div>
         </div>

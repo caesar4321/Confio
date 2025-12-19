@@ -498,29 +498,13 @@ def scan_inbound_deposits():
             else:
                 # cUSD or CONFIO inbound notification
                 token_name = 'cUSD' if xaid == CUSD_ID else 'CONFIO'
-                try:
-                    notif_utils.create_notification(
-                        user=account.user,
-                        account=account,
-                        business=account.business if account.account_type == 'business' else None,
-                        notification_type=NotificationTypeChoices.SEND_FROM_EXTERNAL,
-                        title=f"Depósito {token_name} recibido",
-                        message=f"Recibiste {human_amt} {token_name}",
-                        data={
-                            'token_type': token_name,
-                            'amount': str(human_amt),
-                            'sender': sender,
-                            'receiver': to_addr,
-                            'txid': txid,
-                            'round': cround,
-                        },
-                    )
-                except Exception as ne:
-                    logger.warning(f"Failed to create inbound {token_name} notification: {ne}")
-
-                # Persist as a SendTransaction (external -> Confío) so unified picks it up via signals
+                # Persist as a SendTransaction (external -> Confío) FIRST so we have the ID for the notification
+                # so unified picks it up via signals AND we can link the notification to it
+                internal_id = None
+                send_tx = None
                 try:
                     from datetime import datetime, timezone as py_tz
+                    import uuid
                     created_at = datetime.fromtimestamp(
                         tx.get('round-time', cround) or cround,
                         tz=py_tz.utc,
@@ -528,6 +512,7 @@ def scan_inbound_deposits():
                     # Use indexer txid and intra for idempotency;
                     # never use empty string for unique transaction_hash
                     idempotency_key = f"ALG:{txid}:{intra or 0}"
+                    
                     send_kwargs = {
                         'sender_user': None,
                         'recipient_user': account.user if account.account_type == 'personal' else None,
@@ -550,21 +535,55 @@ def scan_inbound_deposits():
                         'error_message': '',
                         'created_at': created_at,
                     }
-                    # Create or update the send transaction based on idempotency
-                    # If a row with the same transaction_hash already exists, skip
+                    
+                    # Create or update based on idempotency
+                    # Check by hash first
                     if txid:
-                        exists = SendTransaction.all_objects.filter(transaction_hash=txid).exists()
-                        if not exists:
-                            SendTransaction.all_objects.create(**send_kwargs)
-                    else:
-                        # No txid (inner txns); fall back to idempotency key uniqueness
-                        try:
-                            SendTransaction.all_objects.create(**send_kwargs)
-                        except Exception:
-                            # If race/dup, ignore
-                            pass
+                        send_tx = SendTransaction.all_objects.filter(transaction_hash=txid).first()
+                    
+                    if not send_tx:
+                        # Try by idempotency key
+                        send_tx = SendTransaction.all_objects.filter(idempotency_key=idempotency_key).first()
+
+                    if not send_tx:
+                        send_tx = SendTransaction.all_objects.create(**send_kwargs)
+                    
+                    internal_id = str(send_tx.internal_id) if send_tx and send_tx.internal_id else None
+
                 except Exception as ue:
                     logger.warning(f"Failed to create SendTransaction for inbound {token_name}: {ue}")
+
+                try:
+                    notif_data = {
+                        'token_type': token_name,
+                        'amount': str(human_amt),
+                        'sender': sender,
+                        'receiver': to_addr,
+                        'txid': txid,
+                        'round': cround,
+                        'sender_name': 'Billetera Externa',
+                        'transaction_type': 'received'
+                    }
+                    
+                    if internal_id:
+                        notif_data['transaction_id'] = internal_id
+                        notif_data['internal_id'] = internal_id
+                        notif_data['internalId'] = internal_id
+
+                    notif_utils.create_notification(
+                        user=account.user,
+                        account=account,
+                        business=account.business if account.account_type == 'business' else None,
+                        notification_type=NotificationTypeChoices.SEND_FROM_EXTERNAL,
+                        title=f"Depósito {token_name} recibido",
+                        message=f"Recibiste {human_amt} {token_name}",
+                        data=notif_data,
+                        related_object_type='SendTransaction',
+                        related_object_id=internal_id, 
+                        action_url=f"confio://transaction/{internal_id}" if internal_id else None
+                    )
+                except Exception as ne:
+                    logger.warning(f"Failed to create inbound {token_name} notification: {ne}")
 
             # Mark balances stale for this recipient
             try:

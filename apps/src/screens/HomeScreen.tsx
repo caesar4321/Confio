@@ -1120,6 +1120,11 @@ export const HomeScreen = () => {
       console.log('HomeScreen - Received ALGORAND_ADDRESS_UPDATED event:', newAddress);
       if (mounted) {
         setAlgorandAddress(newAddress);
+        // FORCE REFETCH OF BALANCES
+        // Now that the backend has the new address (via migrationService Update),
+        // we must trigger a fresh query to resolve_my_balances to see the funds.
+        refetchMyBalances();
+        refetchPendingPayroll();
       }
     });
 

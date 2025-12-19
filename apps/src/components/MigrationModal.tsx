@@ -6,7 +6,7 @@ import { oauthStorage } from '../services/oauthStorageService';
 import { GOOGLE_CLIENT_IDS } from '../config/env';
 import { AccountManager } from '../utils/accountManager';
 import { apolloClient } from '../apollo/client';
-import { GET_MY_MIGRATION_STATUS } from '../apollo/queries';
+
 
 export const MigrationModal = () => {
     const [visible, setVisible] = useState(false);
@@ -19,25 +19,11 @@ export const MigrationModal = () => {
 
     const checkMigration = async () => {
         try {
-            // 1. Check Backend Status Implementation FIRST
-            // This avoids issues where local keychain is empty but backend knows we migrated
-            try {
-                const { data } = await apolloClient.query({
-                    query: GET_MY_MIGRATION_STATUS,
-                    fetchPolicy: 'network-only'
-                });
+            // 1. (Removed) Preliminary Backend Status Check
+            // We removed the UI-level backend check because it was preventing the "Zombie Type 2" fix.
+            // migrationService.checkNeedsMigration() now handles both backend status AND 
+            // the "Trust But Verify" on-chain validation internally.
 
-                const myAccount = data?.userAccounts?.find((a: any) =>
-                    a.accountType?.toLowerCase() === 'personal' && String(a.accountIndex) === '0'
-                );
-
-                if (myAccount?.isKeylessMigrated) {
-                    console.log('[MigrationModal] Backend says already migrated ✅');
-                    return; // Stop here, no need to migrate
-                }
-            } catch (e) {
-                console.warn('[MigrationModal] Backend status check failed, proceeding to local check:', e);
-            }
 
             // 2. Get OAuth context
             const oauthData = await oauthStorage.getOAuthSubject();

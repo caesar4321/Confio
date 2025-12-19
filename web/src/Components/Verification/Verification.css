@@ -1,197 +1,268 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+:root {
+  --primary: #10B981;
+  --primary-dark: #059669;
+  --danger: #EF4444;
+  --warning: #F59E0B;
+  --text-main: #111827;
+  --text-secondary: #6B7280;
+  --bg-main: #F3F4F6;
+  --surface: #FFFFFF;
+  --border: #E5E7EB;
+}
+
+body {
+  margin: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  background-color: var(--bg-main);
+}
+
 .verification-container {
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 20px;
-  background-color: #F3F4F6;
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
-  position: relative;
+  padding: 16px;
+  background-color: var(--bg-main);
 }
 
 .verification-card {
-  background: white;
+  background: var(--surface);
   width: 100%;
-  max-width: 480px;
-  border-radius: 20px;
-  padding: 40px 30px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
-  text-align: center;
-  animation: fadeIn 0.5s ease-out;
+  max-width: 440px;
+  border-radius: 24px;
+  padding: 32px 24px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
   position: relative;
-  z-index: 10;
+  overflow: hidden;
 }
 
-.security-banner {
-  position: absolute;
-  top: 20px;
-  background: #ECFDF5;
-  border: 1px solid #A7F3D0;
-  padding: 8px 16px;
-  border-radius: 20px;
-  color: #065F46;
+/* Security Banner */
+.security-banner-web {
+  background: #F0FDF4;
+  color: #15803D;
   font-size: 13px;
   font-weight: 500;
+  text-align: center;
+  padding: 8px;
+  border-radius: 12px;
+  margin-bottom: 24px;
   display: flex;
   align-items: center;
-  gap: 6px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-  animation: slideDown 0.5s ease-out;
-  z-index: 20;
+  justify-content: center;
+  gap: 8px;
 }
 
-.domain-highlight {
+/* Status Section */
+.status-section {
+  text-align: center;
+  margin-bottom: 32px;
+}
+
+.status-icon-circle {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 16px auto;
+  font-size: 28px;
+}
+
+.status-icon-circle.success {
+  background-color: #D1FAE5;
+  color: var(--primary);
+}
+
+.status-icon-circle.revoked,
+.status-icon-circle.error {
+  background-color: #FEE2E2;
+  color: var(--danger);
+}
+
+.status-title {
+  font-size: 20px;
   font-weight: 700;
-  color: #059669;
+  margin: 0 0 8px 0;
+  color: var(--text-main);
 }
 
-.secure-check {
-  color: #10B981;
-  font-weight: bold;
+.text-success {
+  color: var(--primary-dark);
 }
 
-@keyframes slideDown {
-  from {
-    opacity: 0;
-    transform: translateY(-20px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+.text-danger {
+  color: #DC2626;
 }
 
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.status-icon {
-  font-size: 64px;
-  margin-bottom: 20px;
-}
-
-h1 {
-  color: #111827;
-  font-size: 24px;
-  font-weight: 800;
-  margin: 0 0 10px 0;
-  letter-spacing: -0.5px;
-}
-
-.verification-message {
-  color: #6B7280;
+.verification-subtext {
   font-size: 15px;
-  margin-bottom: 30px;
+  color: var(--text-secondary);
   line-height: 1.5;
+  margin: 0;
 }
 
-.details-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 20px;
-  text-align: left;
+/* Details Card */
+.details-card {
   background: #F9FAFB;
+  border: 1px solid var(--border);
+  border-radius: 16px;
   padding: 20px;
-  border-radius: 12px;
-  border: 1px solid #E5E7EB;
 }
 
-.detail-item label {
+.amount-section {
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+.amount-label {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
   text-transform: uppercase;
-  color: #9CA3AF;
-  font-weight: 600;
   letter-spacing: 0.5px;
+  color: var(--text-secondary);
+  font-weight: 600;
   margin-bottom: 4px;
 }
 
-.detail-item div {
-  color: #374151;
-  font-weight: 500;
-  font-size: 15px;
+.amount-display {
+  font-size: 32px;
+  font-weight: 800;
+  color: var(--text-main);
+  letter-spacing: -0.5px;
 }
 
-.amount-value {
-  color: #10B981 !important;
-  font-size: 24px !important;
-  font-weight: 700 !important;
+.amount-display small {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-left: 2px;
 }
 
-.amount-value small {
+.date-display {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+.divider {
+  height: 1px;
+  background-color: var(--border);
+  margin: 16px 0;
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.info-row.single {
+  flex-direction: column;
+}
+
+.info-col {
+  flex: 1;
+}
+
+.text-right {
+  text-align: right;
+}
+
+.info-col label,
+.info-row.single label,
+.blockchain-section label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.info-value {
   font-size: 14px;
-  color: #6B7280;
-  margin-left: 4px;
+  color: var(--text-main);
+  font-weight: 500;
+  word-break: break-word;
 }
 
-.business-name {
-  font-weight: 700 !important;
-}
-
-.masked-data {
-  color: #4B5563;
+.info-value.strong {
+  font-weight: 600;
 }
 
 .phone-sub {
   display: block;
   font-size: 12px;
-  color: #9CA3AF;
+  color: var(--text-secondary);
   margin-top: 2px;
 }
 
-.hash-container {
-  overflow: hidden;
-}
-
-.hash-container code {
-  display: block;
-  background: #E5E7EB;
-  padding: 8px;
-  border-radius: 6px;
-  font-size: 11px;
-  color: #4B5563;
-  margin-bottom: 8px;
-  word-break: break-all;
-  word-break: break-all;
-  font-family: monospace;
+/* Blockchain Hash */
+.hash-display-row {
+  display: flex;
+  align-items: center;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  text-decoration: none;
   transition: all 0.2s;
 }
 
-.hash-link {
-  text-decoration: none;
-  display: block;
+.hash-display-row:hover {
+  border-color: var(--primary);
+  background: #F0FDF4;
 }
 
-.hash-link:hover code {
-  background: #D1FAE5;
-  color: #065F46;
-  border: 1px solid #A7F3D0;
-}
-
-.explorer-link {
+.hash-code {
+  font-family: 'SF Mono', 'Roboto Mono', monospace;
   font-size: 12px;
-  color: #10B981;
-  text-decoration: none;
-  font-weight: 600;
+  color: var(--text-secondary);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-right: 8px;
 }
 
-.explorer-link:hover {
-  text-decoration: underline;
+.external-icon {
+  font-size: 12px;
+  color: var(--primary);
 }
 
+/* Certification Badge */
+.certification-badge {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background-color: #ECFDF5;
+  border: 1px solid #D1FAE5;
+  border-radius: 12px;
+  padding: 12px;
+  margin-top: 20px;
+}
+
+.certification-badge i {
+  color: var(--primary);
+  font-size: 16px;
+  margin-top: 2px;
+}
+
+.certification-badge span {
+  font-size: 12px;
+  color: #065F46;
+  line-height: 1.4;
+  font-weight: 500;
+}
+
+/* Footer */
 .verification-footer {
-  margin-top: 40px;
-  border-top: 1px solid #E5E7EB;
-  padding-top: 20px;
+  text-align: center;
+  margin-top: 32px;
 }
 
 .verification-footer p {
@@ -200,27 +271,47 @@ h1 {
   margin: 0;
 }
 
-/* Constants */
-.valid .verification-card {
-  border-top: 4px solid #10B981;
+/* Invalid State */
+.verification-container.invalid .verification-card {
+  text-align: center;
+  border-top: 4px solid var(--danger);
 }
 
-.revoked .verification-card {
-  border-top: 4px solid #EF4444;
+.hash-box {
+  background: #F3F4F6;
+  padding: 12px;
+  border-radius: 8px;
+  margin-top: 20px;
 }
 
-.invalid .verification-card {
-  border-top: 4px solid #EF4444;
+.hash-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
 }
 
-.loading .spinner {
+.hash-value {
+  font-family: monospace;
+  font-size: 13px;
+  color: var(--text-main);
+  word-break: break-all;
+}
+
+/* Loading */
+.loading-text {
+  color: var(--text-secondary);
+  margin-top: 16px;
+  font-weight: 500;
+}
+
+.spinner {
   width: 40px;
   height: 40px;
   border: 3px solid #E5E7EB;
-  border-top: 3px solid #10B981;
+  border-top: 3px solid var(--primary);
   border-radius: 50%;
   animation: spin 1s linear infinite;
-  margin: 0 auto 20px auto;
+  margin: 0 auto;
 }
 
 @keyframes spin {
@@ -230,5 +321,12 @@ h1 {
 
   100% {
     transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 480px) {
+  .verification-card {
+    padding: 24px 16px;
+    border-radius: 20px;
   }
 }

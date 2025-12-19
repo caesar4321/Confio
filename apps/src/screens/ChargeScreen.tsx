@@ -26,6 +26,10 @@ import { Clipboard } from 'react-native';
 import { jwtDecode } from 'jwt-decode';
 import authService from '../services/authService';
 import businessOptInService from '../services/businessOptInService';
+import Share from 'react-native-share';
+import ViewShot from 'react-native-view-shot';
+import { CameraRoll } from '@react-native-camera-roll/camera-roll';
+import { useRef } from 'react';
 
 // Import currency icons
 const cUSDIcon = require('../assets/png/cUSD.png');
@@ -53,6 +57,7 @@ const colors = {
 const ChargeScreen = () => {
   const navigation = useNavigation<ChargeScreenNavigationProp>();
   const { activeAccount } = useAccount();
+  const viewShotRef = useRef<ViewShot>(null);
 
   const [mode, setMode] = useState('cobrar');
   const [selectedCurrency, setSelectedCurrency] = useState('cUSD');
@@ -316,9 +321,59 @@ const ChargeScreen = () => {
     setAmount('');
     setDescription('');
     setInvoice(null);
-    setPaymentStatus('pending');
     setHasNavigatedToSuccess(false);
   };
+
+  const handleShareLink = async () => {
+    const id = invoice?.internalId;
+    if (id) {
+      try {
+        await Share.open({
+          message: `Paga mi factura de ${invoice.amount} ${invoice.tokenType} usando este enlace: https://confio.lat/pay/${id}`,
+          url: `https://confio.lat/pay/${id}`,
+          title: 'Pago'
+        });
+      } catch (error) {
+        console.error('Share error:', error);
+      }
+    } else {
+      // Fallback or alert
+      Alert.alert('Error', 'No hay enlace disponible');
+    }
+  };
+
+  const handleDownloadQR = async () => {
+    try {
+      if (!viewShotRef.current) return;
+      const uri = await viewShotRef.current.capture();
+      if (!uri) return;
+
+      await CameraRoll.save(uri, { type: 'photo' });
+      Alert.alert('Guardado', 'Código QR guardado en la galería', [{ text: 'OK' }]);
+    } catch (error) {
+      console.error('Download error:', error);
+      Alert.alert('Error', 'No se pudo guardar la imagen');
+    }
+  };
+
+  const handleShareQR = async () => {
+    try {
+      if (!viewShotRef.current) return;
+      const uri = await viewShotRef.current.capture();
+      if (!uri) return;
+
+      await Share.open({
+        title: 'Código QR de Pago',
+        message: `Paga mi factura de ${invoice?.amount || amount} ${invoice?.tokenType || selectedCurrency}`,
+        url: uri,
+        type: 'image/jpeg',
+      });
+    } catch (error) {
+      console.error('Share QR error:', error);
+    }
+  };
+
+
 
 
 
@@ -591,63 +646,80 @@ const ChargeScreen = () => {
                 <>
                   {/* QR Code Display with Real-time Status */}
                   <View style={styles.card}>
-                    <Text style={styles.qrTitle}>Código QR de Pago</Text>
-                    <Text style={styles.qrSubtitle}>
-                      Comparte este código con tu cliente para recibir el pago
-                    </Text>
-
-                    {/* Real-time Status Badge */}
-                    <View style={[styles.statusBadge, { backgroundColor: statusInfo.bgColor }]}>
-                      <Icon name={statusInfo.icon as any} size={16} color={statusInfo.color} style={styles.statusIcon} />
-                      <Text style={[styles.statusText, { color: statusInfo.color }]}>
-                        {statusInfo.text}
+                    <ViewShot ref={viewShotRef} options={{ format: 'jpg', quality: 0.9 }} style={{ backgroundColor: '#ffffff' }}>
+                      <Text style={styles.qrTitle}>Código QR de Pago</Text>
+                      <Text style={styles.qrSubtitle}>
+                        Comparte este código con tu cliente para recibir el pago
                       </Text>
-                    </View>
 
-                    <View style={styles.qrCodeContainer}>
-                      <QRCode
-                        value={invoice?.qrCodeData || `confio://pay/${Date.now()}`}
-                        size={200}
-                        color="#000000"
-                        backgroundColor="#FFFFFF"
-                      />
-                    </View>
+                      {/* Real-time Status Badge */}
+                      <View style={[styles.statusBadge, { backgroundColor: statusInfo.bgColor }]}>
+                        <Icon name={statusInfo.icon as any} size={16} color={statusInfo.color} style={styles.statusIcon} />
+                        <Text style={[styles.statusText, { color: statusInfo.color }]}>
+                          {statusInfo.text}
+                        </Text>
+                      </View>
 
-                    <Text style={styles.qrCodeText}>
-                      ID: {invoice?.invoiceId || 'Generando...'}
-                    </Text>
+                      <View style={styles.qrCodeContainer}>
+                        <QRCode
+                          value={invoice?.internalId ? `confio://pay/${invoice.internalId}` : (invoice?.qrCodeData || `confio://pay/${Date.now()}`)}
+                          size={200}
+                          color="#000000"
+                          backgroundColor="#FFFFFF"
+                        />
+                      </View>
 
-                    <View style={[styles.paymentDetails, { backgroundColor: currentCurrency.color + '10' }]}>
-                      <Text style={[styles.paymentAmount, { color: currentCurrency.color }]}>
-                        ${invoice?.amount || amount} {formatCurrency(invoice?.tokenType || selectedCurrency)}
+                      <Text style={styles.qrCodeText}>
+                        ID: {invoice?.invoiceId || 'Generando...'}
                       </Text>
-                      <Text style={styles.paymentDescription}>
-                        {invoice?.description || description || 'Sin descripción'}
-                      </Text>
-                      <Text style={styles.paymentId}>
-                        Válido por 24 horas
-                      </Text>
-                    </View>
+
+                      <View style={[styles.paymentDetails, { backgroundColor: currentCurrency.color + '10' }]}>
+                        <Text style={[styles.paymentAmount, { color: currentCurrency.color }]}>
+                          ${invoice?.amount || amount} {formatCurrency(invoice?.tokenType || selectedCurrency)}
+                        </Text>
+                        <Text style={styles.paymentDescription}>
+                          {invoice?.description || description || 'Sin descripción'}
+                        </Text>
+                        <Text style={styles.paymentId}>
+                          Válido por 24 horas
+                        </Text>
+                      </View>
+                    </ViewShot>
 
                     <View style={styles.actionButtons}>
                       <TouchableOpacity
                         style={styles.actionButton}
-                        onPress={() => handleCopy(invoice?.qrCodeData || `confio://pay/${Date.now()}`)}
+                        onPress={() => {
+                          const id = invoice?.internalId;
+                          if (id) {
+                            handleCopy(`https://confio.lat/pay/${id}`);
+                          } else {
+                            handleCopy(invoice?.qrCodeData || `confio://pay/${Date.now()}`);
+                          }
+                        }}
                       >
                         <Icon name={copied ? "check-circle" : "copy"} size={16} color="#374151" />
                         <Text style={styles.actionButtonText}>
-                          {copied ? 'Copiado' : 'Copiar enlace de pago'}
+                          {copied ? 'Copiado' : 'Copiar enlace'}
                         </Text>
                       </TouchableOpacity>
 
-                      <TouchableOpacity style={styles.actionButton}>
-                        <Icon name="share" size={16} color="#374151" />
-                        <Text style={styles.actionButtonText}>Compartir código QR</Text>
+                      <TouchableOpacity
+                        style={styles.actionButton}
+                        onPress={handleShareLink}
+                      >
+                        <Icon name="share-2" size={16} color="#374151" />
+                        <Text style={styles.actionButtonText}>Enviar Enlace</Text>
                       </TouchableOpacity>
 
-                      <TouchableOpacity style={styles.actionButton}>
+                      <TouchableOpacity style={styles.actionButton} onPress={handleShareQR}>
+                        <Icon name="share" size={16} color="#374151" />
+                        <Text style={styles.actionButtonText}>Enviar QR</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity style={styles.actionButton} onPress={handleDownloadQR}>
                         <Icon name="download" size={16} color="#374151" />
-                        <Text style={styles.actionButtonText}>Descargar imagen</Text>
+                        <Text style={styles.actionButtonText}>Guardar</Text>
                       </TouchableOpacity>
                     </View>
                   </View>

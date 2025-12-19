@@ -84,6 +84,25 @@ export const ScanScreen = () => {
     setScannedSuccessfully(true);
 
     // Parse the QR code data
+
+    // 1. Check for Verification QR Code (Universal Link or URI Scheme)
+    const verifyMatch = scannedData.match(/verify\/([a-zA-Z0-9]+)/);
+    if (verifyMatch && verifyMatch[1]) {
+      const hash = verifyMatch[1];
+      console.log('Verification hash extracted:', hash);
+      setIsProcessing(true);
+      setScannedSuccessfully(true);
+
+      // Navigate to dedicated Verify screen
+      setTimeout(() => {
+        (navigation as any).navigate('VerifyTransaction', { hash });
+        setIsProcessing(false);
+        setScannedSuccessfully(false);
+      }, 500);
+      return;
+    }
+
+    // 2. Check for Payment QR Code
     const qrMatch = scannedData.match(/^confio:\/\/pay\/(.+)$/);
     if (!qrMatch || !qrMatch[1]) {
       Alert.alert(
@@ -104,7 +123,7 @@ export const ScanScreen = () => {
       // SECURITY: Cross-check with server - don't trust QR code data
       // We only use the QR code to get the invoice ID, then fetch real data from server
       const { data: invoiceData } = await getInvoice({
-        variables: { invoiceId }
+        variables: { invoiceId: invoiceId as string }
       });
 
       if (!invoiceData?.getInvoice?.success) {

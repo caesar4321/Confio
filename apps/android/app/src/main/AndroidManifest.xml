@@ -77,17 +77,10 @@
             <action android:name="android.intent.action.VIEW" />
             <category android:name="android.intent.category.DEFAULT" />
             <category android:name="android.intent.category.BROWSABLE" />
-            <data android:scheme="https" android:host="confio.lat" />
-            <data android:scheme="http" android:host="confio.lat" />
-        </intent-filter>
-
-        <!-- Deep Links for @username format -->
-        <intent-filter android:autoVerify="true">
-            <action android:name="android.intent.action.VIEW" />
-            <category android:name="android.intent.category.DEFAULT" />
-            <category android:name="android.intent.category.BROWSABLE" />
-            <data android:scheme="https" android:host="confio.lat" android:pathPrefix="/@" />
-            <data android:scheme="http" android:host="confio.lat" android:pathPrefix="/@" />
+            <data android:scheme="https" android:host="confio.lat" android:pathPrefix="/verify" />
+            <data android:scheme="http" android:host="confio.lat" android:pathPrefix="/verify" />
+            <data android:scheme="https" android:host="confio.lat" android:pathPrefix="/pay" />
+            <data android:scheme="http" android:host="confio.lat" android:pathPrefix="/pay" />
         </intent-filter>
       </activity>
     </application>

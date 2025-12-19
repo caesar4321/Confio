@@ -1,12 +1,16 @@
 [
   {
-    "relation": ["delegate_permission/common.handle_all_urls"],
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
     "target": {
       "namespace": "android_app",
       "package_name": "com.Confio.Confio",
       "sha256_cert_fingerprints": [
-        "45:68:2D:3B:95:1F:5F:BE:A7:7E:9A:14:ED:F4:AC:B2:C8:AB:06:11:40:11:46:F2:6D:37:38:60:59:CF:89:78"
+        "45:68:2D:3B:95:1F:5F:BE:A7:7E:9A:14:ED:F4:AC:B2:C8:AB:06:11:40:11:46:F2:6D:37:38:60:59:CF:89:78",
+        "55:9A:D4:B8:47:80:A5:28:65:DF:B9:99:21:06:A6:7B:AC:33:1E:20:21:16:3A:4A:32:51:A0:E1:07:65:20:8D",
+        "95:2F:76:85:13:2B:CA:4D:85:E5:FD:14:9D:EB:70:29:F6:8A:E9:E6:1C:52:8C:AC:A9:B5:35:D5:06:19:39:67"
       ]
     }
   }
-] 
+]

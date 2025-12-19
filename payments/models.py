@@ -235,6 +235,14 @@ class Invoice(SoftDeleteModel):
         editable=False
     )
 
+    # Internal safe UUID for sharing (32-char hex)
+    internal_id = models.CharField(
+        max_length=32,
+        unique=True,
+        default=generate_payment_transaction_id, # Reuse the same UUID4 hex generator
+        editable=False
+    )
+
     # User who created the invoice (could be business owner or cashier)
     created_by_user = models.ForeignKey(
         settings.AUTH_USER_MODEL,

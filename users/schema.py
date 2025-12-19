@@ -1114,8 +1114,18 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			)
 
 		if transfer:
-			sender_name = format_name(transfer.sender_user)
+			# Handle external sender (no sender_user)
+			if transfer.sender_user:
+				sender_name = format_name(transfer.sender_user)
+			elif transfer.sender_business:
+				sender_name = transfer.sender_business.name
+			else:
+				# External wallet
+				addr = transfer.sender_address or ""
+				sender_name = f"Externo ({addr[:4]}...{addr[-4:]})" if len(addr) > 8 else "Billetera Externa"
+
 			recipient_name = format_name(transfer.recipient_user) if transfer.recipient_user else "Externo"
+			
 			return VerifiedTransactionType(
 				is_valid=True,
 				status=transfer.status,
@@ -1126,9 +1136,9 @@ class Query(EmployeeQueries, graphene.ObjectType):
 				sender_name=sender_name,
 				recipient_name_masked=recipient_name,
 				recipient_phone_masked=f"******{transfer.recipient_user.phone_number[-4:]}" if transfer.recipient_user and transfer.recipient_user.phone_number else "",
-				verification_message="Transferencia P2P verificada.",
+				verification_message="Transferencia confirmada.",
 				transaction_type="TRANSFER",
-				metadata=json.dumps({"memo": transfer.memo or "Transferencia"})
+				metadata=json.dumps({"memo": transfer.memo or "Transferencia", "sender_address": transfer.sender_address})
 			)
 
 		# Not found

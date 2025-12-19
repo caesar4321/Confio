@@ -4,8 +4,11 @@
     "details": [
       {
         "appID": "XFJB7SA87Q.com.Confio.Confio",
-        "paths": [ "/@", "/@*", "/app/*", "/referral/*", "/achievement/*", "/influencer/*", "/*" ]
+        "paths": [
+          "/verify/*",
+          "/pay/*"
+        ]
       }
     ]
   }
-} 
+}

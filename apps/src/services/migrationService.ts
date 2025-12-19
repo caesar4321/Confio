@@ -5,9 +5,9 @@ import { SUBMIT_SPONSORED_GROUP } from '../apollo/mutations';
 import { GET_MY_MIGRATION_STATUS } from '../apollo/queries';
 import { gql } from '@apollo/client';
 
-const MARK_WALLET_MIGRATED_MUTATION = gql`
-    mutation MarkWalletMigrated($newAddress: String) {
-        markWalletMigrated(newAddress: $newAddress) {
+const UPDATE_ACCOUNT_ALGORAND_ADDRESS = gql`
+    mutation UpdateAccountAlgorandAddress($algorandAddress: String!, $isV2Wallet: Boolean) {
+        updateAccountAlgorandAddress(algorandAddress: $algorandAddress, isV2Wallet: $isV2Wallet) {
             success
             error
         }
@@ -98,14 +98,25 @@ class WalletMigrationService {
                             const v2CheckInfo = await this.algodClient.accountInformation(myAccount.algorandAddress).do();
                             const v2Balance = v2CheckInfo.amount;
                             const v2Assets = v2CheckInfo.assets || [];
+                            console.log('[MigrationService] ID Debug:', { CONFIO: CONFIO_ASSET_ID, CUSD: CUSD_ASSET_ID, USDC: USDC_ASSET_ID });
+                            // console.log('[MigrationService] V2 Assets Raw:', JSON.stringify(v2Assets));
 
                             const relevantV2Assets = v2Assets.filter((a: any) => {
                                 const aid = a['asset-id'];
                                 const amount = a['amount'];
-                                return ((aid === CONFIO_ASSET_ID || aid === CUSD_ASSET_ID || aid === USDC_ASSET_ID) && amount > 0);
+                                // Debug log for asset comparison
+                                // console.log(`[MigrationService] Asset Check: ID=${aid} (Type=${typeof aid}) vs CONFIO=${CONFIO_ASSET_ID} (Type=${typeof CONFIO_ASSET_ID})`);
+
+                                // Robust comparison using String() to handle Number vs BigInt vs Integer differences
+                                const matches = (String(aid) === String(CONFIO_ASSET_ID) ||
+                                    String(aid) === String(CUSD_ASSET_ID) ||
+                                    String(aid) === String(USDC_ASSET_ID));
+                                return (matches && amount > 0);
                             });
-                            // If V2 has < 1.0 ALGO and NO Asset Balance, it is likely just "Opted In" but not migrated.
-                            const isV2Empty = (v2Balance < 1000000 && relevantV2Assets.length === 0);
+                            // If V2 has NO Asset Balance, it is suspicious (might be a Zombie), regardless of ALGO balance.
+                            // We ignore V2 ALGO balance because anyone can fund it; true migration equals moving Assets.
+                            const isV2Suspicious = (relevantV2Assets.length === 0);
+                            const isV2Empty = isV2Suspicious; // Alias for compatibility with existing logic block
 
                             if (isV2Empty) {
                                 console.log('[MigrationService] TRUST BUT VERIFY: Backend says Migrated, but V2 is EMPTY. Checking V1 to confirm...');
@@ -113,36 +124,11 @@ class WalletMigrationService {
                                 // Refinement: Only handle as Zombie if V1 HAS FUNDS. 
                                 // Otherwise, it's just a new user or empty user.
                                 try {
-                                    const v1Wallet = await secureDeterministicWallet.restoreLegacyV1Wallet(
-                                        iss, sub, aud, provider, 'personal', accountIndex, businessId
-                                    );
-                                    const v1Address = v1Wallet.address;
-
-                                    const v1Info = await this.algodClient.accountInformation(v1Address).do();
-                                    const v1Balance = v1Info.amount;
-                                    const v1Assets = v1Info.assets || [];
-                                    const relevantV1Assets = v1Assets.filter((a: any) => {
-                                        const aid = a['asset-id'];
-                                        const amount = a['amount'];
-                                        return ((aid === CONFIO_ASSET_ID || aid === CUSD_ASSET_ID || aid === USDC_ASSET_ID) && amount > 0);
-                                    });
-
-                                    if (relevantV1Assets.length > 0 || v1Balance >= 300000) {
-                                        console.warn('[MigrationService] ZOMBIE CONFIRMED: V2 Empty, but V1 has funds. Forcing Migration Resume.');
-                                        // Fall through to standard check below (which will return true)
-                                    } else {
-                                        console.log('[MigrationService] False Alarm: V1 is also empty/dust. User is legitimately empty or new. Confirmed Migrated.');
-                                        // Real Success (Empty)
-                                        if (!authService) {
-                                            throw new Error('AuthService instance is undefined');
-                                        }
-                                        await authService.forceUpdateLocalAlgorandAddress(myAccount.algorandAddress, {
-                                            type: 'personal',
-                                            index: accountIndex,
-                                            businessId: businessId
-                                        });
-                                        return { needsMigration: false, v2Address: myAccount.algorandAddress };
-                                    }
+                                    // Manually derive/restore V1 address
+                                    // We need to know the V1 address.
+                                    // For now, assume if V2 is empty and we are marked migrated, check the standard V1 path.
+                                    // We'll fall through to the main check below which handles V1 restoration.
+                                    console.warn('[MigrationService] Suspected Zombie State. Falling through to full verification.');
                                 } catch (e) {
                                     console.warn('[MigrationService] Failed to check V1, assuming Valid Empty User:', e);
                                     return { needsMigration: false, v2Address: myAccount.algorandAddress };
@@ -163,11 +149,11 @@ class WalletMigrationService {
                                 return { needsMigration: false, v2Address: myAccount.algorandAddress };
                             }
 
-                        } catch (err) {
-                            console.warn('[MigrationService] Failed to verify V2 or sync local:', JSON.stringify(err, Object.getOwnPropertyNames(err)));
-                            // If verification fails (network), fallback to trusting backend (safest default)
-                            // return { needsMigration: false, v2Address: myAccount.algorandAddress };
-                            // Actually, if network fails, we probably cant migrate anyway.
+                        } catch (err: any) {
+                            console.warn('[MigrationService] Failed to verify V2 (Network/BigInt error). Defaulting to Backend Status (Migrated). Error:', err?.message || err);
+                            // CRITICAL FIX: If verification crashes (e.g. timeout or BigInt error), do NOT fall through.
+                            // Trust the backend -> Migrated.
+                            return { needsMigration: false, v2Address: myAccount.algorandAddress };
                         }
                     } else {
                         console.warn('[MigrationService] Migrated but no address?!');
@@ -216,10 +202,12 @@ class WalletMigrationService {
             // This prevents "Junk Assets" (airdrops/spam) from triggering infinite migration loops
             const relevantAssets = assets.filter((a: any) => {
                 const aid = a['asset-id'];
+                // Robust comparison (String) to handle BigInt/Number mismatch
+                // This detects Opt-Ins even if balance is 0
                 return (
-                    aid === CONFIO_ASSET_ID ||
-                    aid === CUSD_ASSET_ID ||
-                    aid === USDC_ASSET_ID
+                    String(aid) === String(CONFIO_ASSET_ID) ||
+                    String(aid) === String(CUSD_ASSET_ID) ||
+                    String(aid) === String(USDC_ASSET_ID)
                 );
             });
 
@@ -229,7 +217,8 @@ class WalletMigrationService {
             // We consider it "migrated" or "empty"
             // We ignore junk assets - they will be abandoned in the legacy wallet
             // If V1 is practically empty (only min balance or less, and no RELEVANT assets)
-            if (!hasRelevantAssets && balance < 300000) {
+            // INCREASED THRESHOLD to 1.0 ALGO to allow for leftover MBR (opt-ins).
+            if (!hasRelevantAssets && balance < 1000000) {
                 console.log('[MigrationService] V1 is empty/dust. Checking if we need to self-heal (Zombie State).');
 
                 // Check if actually migrated but backend missed it
@@ -247,8 +236,11 @@ class WalletMigrationService {
 
                             // 1. Tell Backend
                             await apolloClient.mutate({
-                                mutation: MARK_WALLET_MIGRATED_MUTATION,
-                                variables: { newAddress: v2Address }
+                                mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS,
+                                variables: {
+                                    algorandAddress: v2Address,
+                                    isV2Wallet: true
+                                }
                             });
 
                             // 2. Update Local
@@ -361,7 +353,13 @@ class WalletMigrationService {
             if (!rawTransactions || rawTransactions.length === 0) {
                 // Nothing to migrate or already done
                 console.log('[MigrationService] No transactions returned (nothing to migrate?). Marking complete.');
-                await apolloClient.mutate({ mutation: MARK_WALLET_MIGRATED_MUTATION });
+                await apolloClient.mutate({
+                    mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS,
+                    variables: {
+                        algorandAddress: v2Address,
+                        isV2Wallet: true
+                    }
+                });
                 return true;
             }
 
@@ -455,19 +453,22 @@ class WalletMigrationService {
             if (submitResult.data?.submitBusinessOptInGroup?.success) {
                 console.log('[MigrationService] Migration successful (TxID: ' + submitResult.data.submitBusinessOptInGroup.transactionId + ')');
 
-                // Call backend to flag user as migrated
-                // Call backend to flag user as migrated with RETRY logic
+                // 5. Success! Mark as migrated in Backend AND Update Address
+                // We use UpdateAccountAlgorandAddress to ensure the DB knows the new V2 address
+                // for correct balance caching, while also setting isKeylessMigrated=True.
+                console.log('Marking V2 migration status in backend...');
                 let markedSuccess = false;
                 for (let attempt = 1; attempt <= 3; attempt++) {
                     try {
                         await apolloClient.mutate({
-                            mutation: MARK_WALLET_MIGRATED_MUTATION,
+                            mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS,
                             variables: {
-                                newAddress: v2Address
+                                algorandAddress: v2Address,
+                                isV2Wallet: true
                             }
                         });
                         markedSuccess = true;
-                        console.log(`[MigrationService] Marked as migrated on backend (Address updated to ${v2Address}).`);
+                        console.log(`[MigrationService] Marked as migrated on backend.`);
                         break;
                     } catch (err) {
                         console.warn(`[MigrationService] Attempt ${attempt} to mark migration failed:`, err);

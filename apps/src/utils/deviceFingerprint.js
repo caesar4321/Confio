@@ -52,7 +52,7 @@ class DeviceFingerprint {
       const systemVersion = await DeviceInfo.getSystemVersion(); // e.g., "13.0"
 
       // Try to get a persistent ID from keychain
-      const stored = await getGenericPassword({ service: 'confio_persistent_device_id' });
+      const stored = await getGenericPassword({ service: 'confio_persistent_device_id_v2' });
       if (stored && stored.password) {
         return stored.password;
       }
@@ -65,7 +65,7 @@ class DeviceFingerprint {
       await setGenericPassword(
         'persistent_id',
         persistentId,
-        { service: 'confio_persistent_device_id' }
+        { service: 'confio_persistent_device_id_v2' }
       );
 
       return persistentId;
@@ -339,7 +339,7 @@ class DeviceFingerprint {
   static async getPersistentId() {
     try {
       // Try to get existing persistent ID from keychain
-      const stored = await getGenericPassword({ service: 'confio_device_id' });
+      const stored = await getGenericPassword({ service: 'confio_device_id_v2' });
 
       if (stored && stored.password) {
         return stored.password;
@@ -352,7 +352,7 @@ class DeviceFingerprint {
       await setGenericPassword(
         'device_id',
         stableId,
-        { service: 'confio_device_id' }
+        { service: 'confio_device_id_v2' }
       );
 
       return stableId;

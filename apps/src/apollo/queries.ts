@@ -468,6 +468,7 @@ export const CREATE_INVOICE = gql`
       invoice {
         id
         invoiceId
+        internalId
         amount
         tokenType
         description
@@ -489,6 +490,7 @@ export const GET_INVOICE = gql`
       invoice {
         id
         invoiceId
+        internalId
         createdByUser {
           id
           username

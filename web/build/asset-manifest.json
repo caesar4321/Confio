@@ -1,18 +1,18 @@
 {
   "files": {
-    "main.css": "/static/css/main.0ef0d8fd.css",
-    "main.js": "/static/js/main.64a8ce8e.js",
+    "main.css": "/static/css/main.cdec0a1a.css",
+    "main.js": "/static/js/main.ae5a888b.js",
     "static/media/JulianMoon_Founder.jpeg": "/static/media/JulianMoon_Founder.77611b65ceb3c7457238.jpeg",
     "static/media/cUSD.png": "/static/media/cUSD.661eddfa58b01fe037d4.png",
     "static/media/TikTok.png": "/static/media/TikTok.c0aae623631b10c441d6.png",
     "static/media/CONFIO.png": "/static/media/CONFIO.e77f3e4c08a252bdbb03.png",
     "static/media/ConfioApp.png": "/static/media/ConfioApp.751f5fd28f52567e4290.png",
     "index.html": "/index.html",
-    "main.0ef0d8fd.css.map": "/static/css/main.0ef0d8fd.css.map",
-    "main.64a8ce8e.js.map": "/static/js/main.64a8ce8e.js.map"
+    "main.cdec0a1a.css.map": "/static/css/main.cdec0a1a.css.map",
+    "main.ae5a888b.js.map": "/static/js/main.ae5a888b.js.map"
   },
   "entrypoints": [
-    "static/css/main.0ef0d8fd.css",
-    "static/js/main.64a8ce8e.js"
+    "static/css/main.cdec0a1a.css",
+    "static/js/main.ae5a888b.js"
   ]
 }

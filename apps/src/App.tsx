@@ -21,9 +21,10 @@ import { pushNotificationService } from './services/pushNotificationService';
 import { navigationRef } from './navigation/RootNavigation';
 import { initializeNotifee } from './services/notifeeConfig';
 import { USDCConversionNotice } from './components/USDCConversionNotice';
+import linking from './navigation/linking'; // Import linking config
 // Dev: attach derivation verifier helper
 if (__DEV__) {
-  import('./dev/derivationVerifier').catch(() => {});
+  import('./dev/derivationVerifier').catch(() => { });
 }
 
 // Native screens are enabled in bootstrap.ts for better performance
@@ -51,13 +52,13 @@ const Navigation: React.FC = () => {
       messagingService.initialize(true).catch(error => {
         console.error('Failed to initialize messaging service:', error);
       });
-      
+
       // Initialize push notification service
       console.log('[App] Initializing push notification service...');
       pushNotificationService.initialize().catch(error => {
         console.error('Failed to initialize push notification service:', error);
       });
-      
+
       // Also ensure token is registered for the current user
       // This handles the case where permissions are already granted
       messagingService.ensureTokenRegisteredForCurrentUser().catch(error => {
@@ -76,7 +77,7 @@ const Navigation: React.FC = () => {
   }
 
   console.log('Rendering navigation stack, isAuthenticated:', isAuthenticated);
-  
+
   return (
     <Stack.Navigator
       screenOptions={{
@@ -100,8 +101,11 @@ const AppContent: React.FC = () => {
       <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" translucent={false} />
       {/* Apply bottom safe area globally; leave top to headers/screens */}
       <SafeAreaView style={{ flex: 1, backgroundColor: colors.neutralDark }} edges={['bottom']}>
-        <NavigationContainer ref={navigationRef}>
-          <AuthProvider 
+        <NavigationContainer
+          ref={navigationRef}
+          linking={linking as any}
+        >
+          <AuthProvider
             navigationRef={navigationRef as any}
           >
             <AccountProvider>

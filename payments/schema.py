@@ -89,6 +89,8 @@ class InvoiceType(DjangoObjectType):
         fields = (
             'id',
             'invoice_id',
+            'internal_id',
+            'created_by_user',
             'created_by_user',
             'merchant_account',
             'paid_by_user',

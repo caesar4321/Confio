@@ -148,10 +148,14 @@ export const TransactionReceiptScreen = () => {
       transaction.senderName,
       transaction.fromName,
       transaction.senderUser?.firstName ? `${transaction.senderUser.firstName} ${transaction.senderUser.lastName}` : '',
-      'Usuario'
+      transaction.senderAddress ? `Externo (${transaction.senderAddress.slice(0, 4)}...${transaction.senderAddress.slice(-4)})` : '',
+      'Billetera Externa'
     );
     const sUsername = transaction.senderUser?.username;
-    senderDetail = sUsername ? `@${sUsername}` : formatPhoneNumber(transaction.senderPhone);
+    const sAddr = transaction.senderAddress || transaction.fromAddress;
+    senderDetail = sUsername
+      ? `@${sUsername}`
+      : (formatPhoneNumber(transaction.senderPhone) || (sAddr ? `${sAddr.slice(0, 6)}...${sAddr.slice(-6)}` : ''));
 
     recipientLabel = 'Destinatario';
     recipientName = pick(
@@ -170,8 +174,12 @@ export const TransactionReceiptScreen = () => {
   const currency = transaction.currency || transaction.tokenType || 'cUSD';
   const date = transaction.date || transaction.executedAt || transaction.createdAt || new Date().toISOString();
   const transactionHash = transaction.hash || transaction.transactionHash || '';
-  // FIX: Use internal ID for verification (QR code), separate from display hash
-  const verificationId = transaction.verificationId || transaction.id || transactionHash;
+  // FIX: Strictly use verificationId or internal id. NEVER use transaction hash for verification.
+  // If no valid internal ID exists, verificationId should be falsy, checking for length to avoid 'undefined' string
+  const rawId = transaction.verificationId || transaction.id || transaction.internalId || transaction.internal_id;
+  // Ensure it's a UUID/Internal ID (not a hash)
+  const isHash = typeof rawId === 'string' && rawId.startsWith('0x');
+  const verificationId = (!isHash && rawId) ? rawId : undefined;
   const status = (transaction.status || 'completed').toLowerCase();
 
   const handleExportPDF = async () => {
