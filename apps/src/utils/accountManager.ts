@@ -62,7 +62,7 @@ export class AccountManager {
   private static instance: AccountManager;
   private cachedActiveContext: AccountContext | null = null;
 
-  private constructor() {}
+  private constructor() { }
 
   public static getInstance(): AccountManager {
     if (!AccountManager.instance) {
@@ -99,16 +99,16 @@ export class AccountManager {
     }
 
     const parts = accountId.split('_');
-    
+
     if (parts.length === 2 && parts[0].toLowerCase() === 'personal') {
       // Personal format: personal_index
       const [type, indexStr] = parts;
       const index = parseInt(indexStr, 10);
-      
+
       if (isNaN(index)) {
         throw new Error(`Invalid account ID format: "${accountId}" (expected format: "personal_0")`);
       }
-      
+
       return {
         type: 'personal' as AccountType,
         index
@@ -118,11 +118,11 @@ export class AccountManager {
       const [type, businessIdStr, indexStr] = parts;
       const businessId = businessIdStr;
       const index = parseInt(indexStr, 10);
-      
+
       if (!businessId || isNaN(index)) {
         throw new Error(`Invalid account ID format: "${accountId}" (expected format: "business_19_0")`);
       }
-      
+
       return {
         type: 'business' as AccountType,
         index,
@@ -144,7 +144,7 @@ export class AccountManager {
         return this.cachedActiveContext;
       }
       console.log('AccountManager - getActiveAccountContext: retrieving from Keychain');
-      
+
       const credentials = await Keychain.getGenericPassword({
         service: `${ACCOUNT_KEYCHAIN_SERVICE}_active`
       });
@@ -156,9 +156,9 @@ export class AccountManager {
       }
 
       const activeAccountId = credentials.password;
-      
+
       console.log('AccountManager - Retrieved active account ID from Keychain:', activeAccountId);
-      
+
       // Check if the account ID is empty or invalid
       if (!activeAccountId || activeAccountId.trim() === '') {
         console.log('AccountManager - Empty active account ID found, returning default');
@@ -172,12 +172,12 @@ export class AccountManager {
         contextIndex: context.index,
         contextBusinessId: context.businessId
       });
-      
+
       this.cachedActiveContext = context;
       return this.cachedActiveContext;
     } catch (error) {
-      console.error('Error getting active account context:', error);
-      // Return default on error
+      console.warn('AccountManager - Error getting active account context from Keychain:', error);
+      // Return default on error, but log it as a warning so we know it happened
       return this.getDefaultAccountContext();
     }
   }
@@ -194,14 +194,14 @@ export class AccountManager {
       } else {
         accountId = this.generateAccountId(context.type, context.index);
       }
-      
+
       console.log('AccountManager - setActiveAccountContext:', {
         contextType: context.type,
         contextIndex: context.index,
         contextBusinessId: context.businessId,
         generatedAccountId: accountId
       });
-      
+
       await Keychain.setGenericPassword(
         'account_data',
         accountId,
@@ -210,7 +210,7 @@ export class AccountManager {
           accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
         }
       );
-      
+
       console.log('AccountManager - Active account context stored in Keychain');
       // Update cache to reflect the latest context
       this.cachedActiveContext = context;
@@ -226,7 +226,7 @@ export class AccountManager {
    */
   public async cleanupCorruptedData(): Promise<void> {
     console.log('AccountManager - Starting cleanup of corrupted data');
-    
+
     try {
       // Try to retrieve all possible account IDs that might exist
       const possibleAccountIds = [
@@ -238,13 +238,13 @@ export class AccountManager {
         'business_4',
         'business_5'
       ];
-      
+
       for (const accountId of possibleAccountIds) {
         try {
           const credentials = await Keychain.getGenericPassword({
             service: `${ACCOUNT_KEYCHAIN_SERVICE}_${accountId}`
           });
-          
+
           if (credentials && credentials.password) {
             // Try to parse the data to see if it's valid JSON
             try {
@@ -257,7 +257,7 @@ export class AccountManager {
             } catch (parseError) {
               console.log(`AccountManager - Corrupted data found for ${accountId}, removing...`);
               console.log(`AccountManager - Raw data: "${credentials.password}"`);
-              
+
               // Remove the corrupted entry
               await Keychain.resetGenericPassword({
                 service: `${ACCOUNT_KEYCHAIN_SERVICE}_${accountId}`
@@ -269,7 +269,7 @@ export class AccountManager {
           console.log(`AccountManager - No data found for ${accountId}`);
         }
       }
-      
+
       console.log('AccountManager - Cleanup completed');
     } catch (error) {
       console.error('AccountManager - Error during cleanup:', error);
@@ -281,34 +281,34 @@ export class AccountManager {
    */
   public async getStoredAccounts(): Promise<StoredAccount[]> {
     console.log('AccountManager - getStoredAccounts: starting to retrieve accounts');
-    
+
     try {
       const accounts: StoredAccount[] = [];
-      
+
       // Try to retrieve accounts for both types
       for (const type of ['personal', 'business'] as AccountType[]) {
         let index = 0;
-        
+
         while (index < 10) { // Limit to prevent infinite loops
           const accountId = this.generateAccountId(type, index);
-          
+
           try {
             const credentials = await Keychain.getGenericPassword({
               service: `${ACCOUNT_KEYCHAIN_SERVICE}_${accountId}`
             });
-            
+
             if (credentials === false) {
               // No more accounts of this type
               console.log(`AccountManager - No account found for ${accountId}`);
               break;
             }
-            
+
             if (!credentials.password) {
               console.log(`AccountManager - Empty password for ${accountId}, skipping`);
               index++;
               continue;
             }
-            
+
             // Try to parse the JSON data
             let account: StoredAccount;
             try {
@@ -316,29 +316,29 @@ export class AccountManager {
             } catch (parseError) {
               console.log(`AccountManager - Corrupted data for ${accountId}, removing and skipping:`, parseError);
               console.log(`AccountManager - Raw data: "${credentials.password}"`);
-              
+
               // Remove the corrupted entry
               await Keychain.resetGenericPassword({
                 service: `${ACCOUNT_KEYCHAIN_SERVICE}_${accountId}`
               });
-              
+
               index++;
               continue;
             }
-            
+
             // Validate the parsed account data
             if (!account.id || !account.type || typeof account.index !== 'number' || !account.name) {
               console.log(`AccountManager - Invalid account data for ${accountId}, removing:`, account);
-              
+
               // Remove the invalid entry
               await Keychain.resetGenericPassword({
                 service: `${ACCOUNT_KEYCHAIN_SERVICE}_${accountId}`
               });
-              
+
               index++;
               continue;
             }
-            
+
             console.log(`AccountManager - Found valid account: ${accountId}`, {
               accountType: account.type,
               accountIndex: account.index,
@@ -382,17 +382,17 @@ export class AccountManager {
     try {
       console.log('AccountManager - syncServerAccounts: syncing with server data', {
         serverAccountsCount: serverAccounts.length,
-        serverAccounts: serverAccounts.map(acc => ({ 
-          id: acc.accountId, 
-          type: acc.accountType, 
+        serverAccounts: serverAccounts.map(acc => ({
+          id: acc.accountId,
+          type: acc.accountType,
           index: acc.accountIndex,
-          businessName: acc.business?.name 
+          businessName: acc.business?.name
         }))
       });
-      
+
       // Clear existing accounts
       await this.clearAllAccounts();
-      
+
       // Store server accounts locally
       for (const serverAccount of serverAccounts) {
         const account: StoredAccount = {
@@ -406,7 +406,7 @@ export class AccountManager {
           createdAt: serverAccount.createdAt,
           isActive: false
         };
-        
+
         await this.storeAccount(account);
         console.log(`AccountManager - Synced server account: ${account.id}`, {
           type: account.type,
@@ -414,7 +414,7 @@ export class AccountManager {
           name: account.name
         });
       }
-      
+
       // Set the first account as active if no active account exists
       if (serverAccounts.length > 0) {
         try {
@@ -429,7 +429,7 @@ export class AccountManager {
           console.log('AccountManager - Set first account as active:', firstAccount.accountId);
         }
       }
-      
+
       console.log('AccountManager - syncServerAccounts completed successfully');
     } catch (error) {
       console.error('Error syncing server accounts:', error);
@@ -448,10 +448,10 @@ export class AccountManager {
         index: account.index,
         name: account.name
       });
-      
+
       const accountJson = JSON.stringify(account);
       console.log('AccountManager - storeAccount: JSON data to store:', accountJson);
-      
+
       // Try a different approach - use the account ID as the service name
       await Keychain.setGenericPassword(
         'account_data',
@@ -461,18 +461,18 @@ export class AccountManager {
           accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
         }
       );
-      
+
       console.log('AccountManager - storeAccount: account stored successfully');
-      
+
       // Verify the storage by immediately retrieving it
       try {
         const storedCredentials = await Keychain.getGenericPassword({
           service: `${ACCOUNT_KEYCHAIN_SERVICE}_${account.id}`
         });
-        
+
         if (storedCredentials && storedCredentials.password) {
           console.log('AccountManager - storeAccount: verification - stored data:', storedCredentials.password);
-          
+
           // Try to parse it to make sure it's valid JSON
           const parsed = JSON.parse(storedCredentials.password);
           console.log('AccountManager - storeAccount: verification - parsed successfully:', {
@@ -500,7 +500,7 @@ export class AccountManager {
    */
   public async getNextAvailableIndex(type: AccountType): Promise<number> {
     const accounts = await this.getStoredAccounts();
-    
+
     console.log('AccountManager - getNextAvailableIndex:', {
       requestedType: type,
       totalAccounts: accounts.length,
@@ -508,7 +508,7 @@ export class AccountManager {
       businessAccounts: accounts.filter(acc => acc.type === 'business').length,
       allAccounts: accounts.map(acc => ({ id: acc.id, type: acc.type, index: acc.index }))
     });
-    
+
     if (type === 'personal') {
       // Only allow 1 personal account (index 0)
       const personalAccounts = accounts.filter(acc => acc.type === 'personal');
@@ -521,12 +521,12 @@ export class AccountManager {
     } else {
       // For business accounts, start from 0 and increment
       const businessAccounts = accounts.filter(acc => acc.type === 'business');
-      
+
       if (businessAccounts.length === 0) {
         console.log('AccountManager - No business accounts found, returning index 0');
         return 0;
       }
-      
+
       const maxIndex = Math.max(...businessAccounts.map(acc => acc.index));
       console.log('AccountManager - Business accounts found, returning index:', maxIndex + 1);
       return maxIndex + 1;
@@ -546,7 +546,7 @@ export class AccountManager {
     category?: string
   ): Promise<StoredAccount> {
     console.warn('AccountManager.createAccount is deprecated. Use server mutations for account creation.');
-    
+
     // For backward compatibility, return a mock account
     // This should not be used for actual account creation
     return {
@@ -568,7 +568,7 @@ export class AccountManager {
   public async updateAccount(accountId: string, updates: Partial<StoredAccount>): Promise<void> {
     const accounts = await this.getStoredAccounts();
     const account = accounts.find(acc => acc.id === accountId);
-    
+
     if (!account) {
       throw new Error(`Account not found: ${accountId}`);
     }
@@ -583,12 +583,12 @@ export class AccountManager {
   public async deleteAccount(accountId: string): Promise<void> {
     try {
       console.log('AccountManager - deleteAccount: deleting account:', accountId);
-      
+
       // Delete the specific account using resetGenericPassword (works on both iOS and Android)
       await Keychain.resetGenericPassword({
         service: `${ACCOUNT_KEYCHAIN_SERVICE}_${accountId}`
       });
-      
+
       console.log('AccountManager - deleteAccount: account deleted successfully:', accountId);
     } catch (error) {
       console.error('Error deleting account:', error);
@@ -602,21 +602,21 @@ export class AccountManager {
   public async clearAllAccounts(): Promise<void> {
     try {
       console.log('AccountManager - clearAllAccounts: starting cleanup');
-      
+
       // Clear active account context using resetGenericPassword
       await Keychain.resetGenericPassword({
         service: `${ACCOUNT_KEYCHAIN_SERVICE}_active`
       });
-      
+
       // Clear all stored accounts by iterating through them
       const accounts = await this.getStoredAccounts();
       console.log('AccountManager - clearAllAccounts: found accounts to clear:', accounts.length);
-      
+
       for (const account of accounts) {
         console.log('AccountManager - clearAllAccounts: clearing account:', account.id);
         await this.deleteAccount(account.id);
       }
-      
+
       console.log('AccountManager - clearAllAccounts: cleanup completed');
     } catch (error) {
       console.error('Error clearing all accounts:', error);
@@ -630,12 +630,12 @@ export class AccountManager {
   public async resetActiveAccount(): Promise<void> {
     try {
       console.log('AccountManager - resetActiveAccount: resetting active account');
-      
+
       // Clear the active account using resetGenericPassword
       await Keychain.resetGenericPassword({
         service: `${ACCOUNT_KEYCHAIN_SERVICE}_active`
       });
-      
+
       console.log('AccountManager - resetActiveAccount: active account reset successfully');
     } catch (error) {
       console.error('Error resetting active account:', error);
@@ -665,29 +665,29 @@ export class AccountManager {
    */
   public async initializeDefaultAccount(): Promise<StoredAccount | null> {
     console.log('AccountManager - initializeDefaultAccount: starting initialization');
-    
+
     // First, clean up any corrupted data
     await this.cleanupCorruptedData();
-    
+
     const accounts = await this.getStoredAccounts();
     console.log('AccountManager - initializeDefaultAccount: accounts after cleanup:', {
       count: accounts.length,
       accounts: accounts.map(acc => ({ id: acc.id, type: acc.type, index: acc.index, name: acc.name }))
     });
-    
+
     if (accounts.length === 0) {
       console.log('AccountManager - initializeDefaultAccount: no accounts found, returning null');
       console.log('AccountManager - Note: Default accounts should only be created after proper authentication');
       return null;
     }
-    
+
     console.log('AccountManager - initializeDefaultAccount: returning first existing account:', {
       id: accounts[0].id,
       type: accounts[0].type,
       index: accounts[0].index,
       name: accounts[0].name
     });
-    
+
     // Return the first account (should be personal_0)
     return accounts[0];
   }

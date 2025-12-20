@@ -1579,14 +1579,11 @@ export class AuthService {
     try {
       return await accountManager.getActiveAccountContext();
     } catch (error) {
-      console.error('Error getting active account context, resetting to default:', error);
-      // Reset corrupted active account data
-      try {
-        await accountManager.resetActiveAccount();
-      } catch (resetError) {
-        console.error('Error resetting active account:', resetError);
-      }
-      // Return default context
+      console.error('Error getting active account context, returning default (persisting storage):', error);
+      // Do NOT reset corrupted active account data on read error
+      // This prevents transient keychain errors from wiping user preference
+
+      // Return default context temporarily
       return accountManager.getDefaultAccountContext();
     }
   }
