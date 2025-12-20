@@ -2,7 +2,6 @@ import algosdk from 'algosdk';
 import { Buffer } from 'buffer';
 import { apolloClient } from '../apollo/client';
 import { SUBMIT_SPONSORED_GROUP } from '../apollo/mutations';
-import { GET_MY_MIGRATION_STATUS } from '../apollo/queries';
 import { gql } from '@apollo/client';
 
 const UPDATE_ACCOUNT_ALGORAND_ADDRESS = gql`
@@ -78,110 +77,13 @@ class WalletMigrationService {
     ): Promise<MigrationStatus> {
 
         try {
-            // 0. Check Backend Status Implementation
-            try {
-                const { data } = await apolloClient.query({
-                    query: GET_MY_MIGRATION_STATUS,
-                    fetchPolicy: 'network-only' // Always fetch fresh
-                });
-
-                const myAccount = data?.userAccounts?.find((a: any) =>
-                    a.accountType?.toLowerCase() === 'personal' && String(a.accountIndex) === String(accountIndex)
-                );
-
-                if (myAccount?.isKeylessMigrated) {
-                    console.log('[MigrationService] Already migrated on backend ✅', myAccount);
-
-                    if (myAccount.algorandAddress) {
-                        try {
-                            // TRUST BUT VERIFY (ZOMBIE TYPE 2 FIX)
-                            // Even if backend says migrated, check if V2 is actually funded.
-                            // If V2 is empty, it might be a Failed Atomic Migration (Backend=True, Chain=False).
-
-                            // Check V2 on-chain state
-                            const v2CheckInfo = await this.algodClient.accountInformation(myAccount.algorandAddress).do();
-                            const v2Balance = v2CheckInfo.amount;
-                            const v2Assets = v2CheckInfo.assets || [];
-                            console.log('[MigrationService] ID Debug:', { CONFIO: CONFIO_ASSET_ID, CUSD: CUSD_ASSET_ID, USDC: USDC_ASSET_ID });
-                            // console.log('[MigrationService] V2 Assets Raw:', JSON.stringify(v2Assets));
-
-                            const relevantV2Assets = v2Assets.filter((a: any) => {
-                                const aid = a['asset-id'];
-                                const amount = a['amount'];
-                                // Debug log for asset comparison
-                                // console.log(`[MigrationService] Asset Check: ID=${aid} (Type=${typeof aid}) vs CONFIO=${CONFIO_ASSET_ID} (Type=${typeof CONFIO_ASSET_ID})`);
-
-                                // Robust comparison using String() to handle Number vs BigInt vs Integer differences
-                                // Include legacy CONFIO asset ID for users with old tokens
-                                const matches = (String(aid) === String(CONFIO_ASSET_ID) ||
-                                    String(aid) === String(LEGACY_CONFIO_ASSET_ID) ||
-                                    String(aid) === String(CUSD_ASSET_ID) ||
-                                    String(aid) === String(USDC_ASSET_ID));
-                                return (matches && amount > 0);
-                            });
-                            // If V2 has NO Asset Balance, it is suspicious (might be a Zombie), regardless of ALGO balance.
-                            // We ignore V2 ALGO balance because anyone can fund it; true migration equals moving Assets.
-                            const isV2Suspicious = (relevantV2Assets.length === 0);
-                            const isV2Empty = isV2Suspicious; // Alias for compatibility with existing logic block
-
-                            if (isV2Empty) {
-                                console.log('[MigrationService] TRUST BUT VERIFY: Backend says Migrated, but V2 is EMPTY. Checking V1 to confirm...');
-
-                                // Refinement: Only handle as Zombie if V1 HAS FUNDS. 
-                                // Otherwise, it's just a new user or empty user.
-                                try {
-                                    // Manually derive/restore V1 address
-                                    // We need to know the V1 address.
-                                    // For now, assume if V2 is empty and we are marked migrated, check the standard V1 path.
-                                    // We'll fall through to the main check below which handles V1 restoration.
-                                    console.warn('[MigrationService] Suspected Zombie State. Falling through to full verification.');
-                                } catch (e) {
-                                    console.warn('[MigrationService] Failed to check V1, assuming Valid Empty User:', e);
-                                    return { needsMigration: false, v2Address: myAccount.algorandAddress };
-                                }
-
-                            } else {
-                                // Real Success
-                                // Force update local keychain to match backend
-                                if (!authService) {
-                                    throw new Error('AuthService instance is undefined');
-                                }
-                                await authService.forceUpdateLocalAlgorandAddress(myAccount.algorandAddress, {
-                                    type: 'personal',
-                                    index: accountIndex,
-                                    businessId: businessId
-                                });
-                                console.log('[MigrationService] Verified V2 funded. Syncing local keychain.');
-                                return { needsMigration: false, v2Address: myAccount.algorandAddress };
-                            }
-
-                        } catch (err: any) {
-                            console.warn('[MigrationService] Failed to verify V2 (Network/BigInt error). Defaulting to Backend Status (Migrated). Error:', err?.message || err);
-                            // CRITICAL FIX: If verification crashes (e.g. timeout or BigInt error), do NOT fall through.
-                            // Trust the backend -> Migrated.
-                            return { needsMigration: false, v2Address: myAccount.algorandAddress };
-                        }
-                    } else {
-                        console.warn('[MigrationService] Migrated but no address?!');
-                    }
-                    // If we are here, it means we detected Empty V2 (Type 2 Zombie) or fell through.
-                    // We continue to standard V1 check below.
-                } else {
-                    console.log('[MigrationService] Backend says NOT migrated ❌ ' + JSON.stringify({
-                        myAccount,
-                        allAccounts: data?.userAccounts?.map((a: any) => ({
-                            type: a.accountType,
-                            index: a.accountIndex,
-                            idxType: typeof a.accountIndex,
-                            migrated: a.isKeylessMigrated,
-                            raw: JSON.stringify(a)
-                        })),
-                        lookingFor: { accountIndex, type: 'personal' }
-                    }, null, 2));
-                }
-            } catch (e) {
-                console.warn('[MigrationService] Backend status check failed, falling back to chain check:', e);
-            }
+            // SIMPLIFIED FLOW:
+            // 1. Always derive and check V1 on-chain (source of truth)
+            // 2. If V1 has relevant assets -> needsMigration = true
+            // 3. If V1 is empty -> check V2 for self-heal
+            //
+            // We skip the backend status check entirely - chain state is the source of truth.
+            // This eliminates the confusing "Trust But Verify" double-check.
 
             // Use namespaced V2 secret check
             const v2Secret = await getOrCreateMasterSecret(sub);
