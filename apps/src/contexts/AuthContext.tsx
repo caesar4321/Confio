@@ -114,8 +114,8 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
 
   // Mutation for token refresh (used on resume)
   const REFRESH_TOKEN = gql`
-    mutation RefreshToken($refreshToken: String!) {
-      refreshToken(refreshToken: $refreshToken) {
+    mutation RefreshToken($refreshToken: String!, $accountType: String, $accountIndex: Int, $businessId: ID) {
+      refreshToken(refreshToken: $refreshToken, accountType: $accountType, accountIndex: $accountIndex, businessId: $businessId) {
         token
         refreshExpiresIn
       }
@@ -433,9 +433,28 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           const decoded: any = jwtDecode(at);
           const now = Math.floor(Date.now() / 1000);
           if ((decoded?.exp ?? 0) <= now + 30) {
+            // Retrieve current active context to preserve session state
+            let contextArgs = {};
+            try {
+              const activeCtx = await AuthService.getInstance().getActiveAccountContext();
+              if (activeCtx) {
+                console.log('[AuthContext] Refreshing token with preserved context:', activeCtx);
+                contextArgs = {
+                  accountType: activeCtx.type,
+                  accountIndex: activeCtx.index,
+                  businessId: activeCtx.businessId
+                };
+              }
+            } catch (err) {
+              console.warn('[AuthContext] Failed to get active context during refresh, defaulting to token payload:', err);
+            }
+
             const { data } = await apolloClient.mutate({
               mutation: REFRESH_TOKEN,
-              variables: { refreshToken: rt },
+              variables: {
+                refreshToken: rt,
+                ...contextArgs
+              },
               context: { skipAuth: true },
             });
             const newAccess = data?.refreshToken?.token;

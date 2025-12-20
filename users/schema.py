@@ -3034,6 +3034,9 @@ class SwitchAccountToken(graphene.Mutation):
 class RefreshToken(graphene.Mutation):
 	class Arguments:
 		refreshToken = graphene.String(required=True)
+		account_type = graphene.String(required=False)
+		account_index = graphene.Int(required=False)
+		business_id = graphene.ID(required=False)
 
 	token = graphene.String()
 	payload = graphene.JSONString()
@@ -3044,10 +3047,11 @@ class RefreshToken(graphene.Mutation):
 		super().__init__(*args, **kwargs)
 
 	@classmethod
-	def mutate(cls, root, info, refreshToken):
+	def mutate(cls, root, info, refreshToken, account_type=None, account_index=None, business_id=None):
 		logger.info("RefreshToken mutation called")
 		try:
-			logger.info("Received refreshToken: %s", refreshToken)
+			logger.info("Received refreshToken: %s (overrides: type=%s, idx=%s, bid=%s)", 
+				refreshToken, account_type, account_index, business_id)
 			# Verify the refresh token
 			payload = jwt_decode(refreshToken)
 			logger.info("Decoded payload: %s", payload)
@@ -3067,11 +3071,14 @@ class RefreshToken(graphene.Mutation):
 			if user.auth_token_version != token_version:
 				raise Exception("Token version mismatch")
 			
-			# Extract account context from refresh token
-			account_type = payload.get('account_type', 'personal')
-			account_index = payload.get('account_index', 0)
-			business_id = payload.get('business_id')
+			# Determine account context (Prioritize arguments > Token Payload > Default)
+			final_account_type = account_type if account_type else payload.get('account_type', 'personal')
+			final_account_index = account_index if account_index is not None else payload.get('account_index', 0)
+			final_business_id = business_id if business_id else payload.get('business_id')
 			
+			logger.info("Final Context for new token: type=%s, idx=%s, bid=%s", 
+				final_account_type, final_account_index, final_business_id)
+
 			# Create a mock context object with account info
 			class MockContext:
 				def __init__(self, account_type, account_index, business_id=None):
@@ -3081,7 +3088,7 @@ class RefreshToken(graphene.Mutation):
 					# can embed it for employee contexts
 					self.active_business_id = business_id
 			
-			context = MockContext(account_type, account_index, business_id)
+			context = MockContext(final_account_type, final_account_index, final_business_id)
 			
 			# Generate new access token with account context
 			from users.jwt import jwt_payload_handler
@@ -3097,6 +3104,7 @@ class RefreshToken(graphene.Mutation):
 				refreshExpiresIn=refresh_exp
 			)
 		except Exception as e:
+			logger.error(f"RefreshToken error: {str(e)}")
 			raise Exception(str(e))
 
 

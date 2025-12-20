@@ -12,8 +12,11 @@ import {
   RefreshControl,
   Animated,
   Dimensions,
-  Vibration
+  Vibration,
+  AppState,
+  AppStateStatus
 } from 'react-native';
+import ConvertModal from '../components/ConvertModal';
 import { Gradient } from '../components/common/Gradient';
 import { AuthService } from '../services/authService';
 import { useNavigation, useFocusEffect, useRoute } from '@react-navigation/native';
@@ -24,6 +27,7 @@ import { useHeader } from '../contexts/HeaderContext';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import Icon from 'react-native-vector-icons/Feather';
+import FAIcon from 'react-native-vector-icons/FontAwesome';
 import InviteClaimBanner from '../components/InviteClaimBanner';
 import * as Keychain from 'react-native-keychain';
 import { getApiUrl } from '../config/env';
@@ -136,7 +140,9 @@ export const HomeScreen = () => {
   const [showReferralInput, setShowReferralInput] = useState(false);
 
 
-  // Animation values
+  // New UX State
+  const [showConvertModal, setShowConvertModal] = useState(false);
+
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.95)).current;
   const balanceAnim = useRef(new Animated.Value(0)).current;
@@ -518,6 +524,41 @@ export const HomeScreen = () => {
       console.error('Error fetching balances:', myBalancesError);
     }
   }, [isInitialized, myBalancesLoading, myBalancesData, myBalancesError]);
+
+  // Deposit Detection & Guardarian Return Logic
+  // Inserted here to have access to usdcBalance and totalUSDValue
+  useFocusEffect(
+    useCallback(() => {
+      const checkDeposit = async () => {
+        try {
+          // Validate usdcBalance is a valid number
+          const currentBalance = Number(usdcBalance) || 0;
+
+          console.log('HomeScreen - Deposit Check:', { usdcBalance, currentBalance });
+
+          const storedBalance = await Keychain.getGenericPassword({ service: 'com.confio.usdc_last_balance' });
+          const lastBalance = storedBalance ? parseFloat(storedBalance.password) : 0;
+
+          console.log('HomeScreen - Balance comparison:', { lastBalance, currentBalance });
+
+          // Only show modal if balance INCREASED and is now positive
+          if (currentBalance > lastBalance && currentBalance > 0) {
+            console.log('HomeScreen - USDC Deposit Detected! Showing Modal.');
+            setShowConvertModal(true);
+          }
+
+          // ALWAYS update last seen balance (even if 0, to track decreases)
+          await Keychain.setGenericPassword('balance', currentBalance.toString(), { service: 'com.confio.usdc_last_balance' });
+        } catch (e) {
+          console.error('HomeScreen - Error checking deposit:', e);
+        }
+      };
+
+      // Run the check
+      checkDeposit();
+
+    }, [usdcBalance])
+  );
 
   // No more mock accounts - we fetch from server
 
@@ -935,29 +976,98 @@ export const HomeScreen = () => {
         manageP2p: false,
       };
 
-      return quickActionsData.filter(action => {
+      return [
+        {
+          id: 'send',
+          label: 'Enviar',
+          icon: 'send',
+          color: '#34D399',
+          route: () => navigation.navigate('BottomTabs', { screen: 'Contacts' }),
+        },
+        {
+          id: 'pay',
+          label: 'Pagar',
+          icon: 'shopping-bag',
+          color: '#8b5cf6',
+          route: () => {
+            const isBusinessAccount = activeAccount?.type?.toLowerCase() === 'business';
+            navigation.navigate('BottomTabs', {
+              screen: isBusinessAccount ? 'Charge' : 'Scan'
+            } as any);
+          },
+        },
+        {
+          id: 'exchange',
+          label: 'Recargar',
+          icon: 'dollar-sign',
+          color: '#3b82f6',
+          route: () => navigation.navigate('TopUp'),
+        },
+        {
+          id: 'withdraw',
+          label: 'Retirar',
+          icon: 'bank',
+          isFA: true,
+          color: '#F59E0B',
+          route: () => navigation.navigate('Sell'),
+        },
+      ].filter(action => {
         switch (action.id) {
           case 'send':
-            // Employees can't send funds
             return permissions.sendFunds === true;
-          case 'receive':
-            // Employees can receive if they can accept payments
-            return permissions.acceptPayments === true;
+          // 'receive' removed
           case 'pay':
-            // Employees need sendFunds permission to pay
             return permissions.sendFunds === true;
           case 'exchange':
-            // Employees need manageP2p permission
             return permissions.manageP2p === true;
+          case 'withdraw':
+            // Assuming withdraw requires sendFunds or manageP2p? 
+            // Currently Retirar (Sell) lets you send USDC to bank. It involves sending funds.
+            return permissions.sendFunds === true;
           default:
             return true;
         }
       });
     }
 
-    // Non-employees get all actions
-    return quickActionsData;
-  }, [activeAccount, quickActionsData]);
+    // Non-employees get new default actions (No Receive, Add Withdraw)
+    return [
+      {
+        id: 'send',
+        label: 'Enviar',
+        icon: 'send',
+        color: '#34D399',
+        route: () => navigation.navigate('BottomTabs', { screen: 'Contacts' }),
+      },
+      {
+        id: 'pay',
+        label: 'Pagar',
+        icon: 'shopping-bag',
+        color: '#8b5cf6',
+        route: () => {
+          const isBusinessAccount = activeAccount?.type?.toLowerCase() === 'business';
+          navigation.navigate('BottomTabs', {
+            screen: isBusinessAccount ? 'Charge' : 'Scan'
+          } as any);
+        },
+      },
+      {
+        id: 'exchange',
+        label: 'Recargar',
+        icon: 'dollar-sign',
+        color: '#3b82f6',
+        route: () => navigation.navigate('TopUp'),
+      },
+      {
+        id: 'withdraw',
+        label: 'Retirar',
+        icon: 'bank',
+        isFA: true,
+        color: '#F59E0B',
+        route: () => navigation.navigate('Sell'),
+      }
+    ];
+  }, [activeAccount, navigation]);
 
   // Entrance animation - only run after initialization
   React.useEffect(() => {
@@ -1589,7 +1699,12 @@ export const HomeScreen = () => {
                     }
                   ]}
                 >
-                  <Icon name={action.icon} size={22} color="#fff" />
+                  {/* @ts-ignore */}
+                  {(action as any).isFA ? (
+                    <FAIcon name={action.icon} size={20} color="#fff" />
+                  ) : (
+                    <Icon name={action.icon} size={22} color="#fff" />
+                  )}
                 </Animated.View>
                 <Text style={styles.actionLabel}>{action.label}</Text>
               </TouchableOpacity>
@@ -1723,10 +1838,19 @@ export const HomeScreen = () => {
         message="Reclamando tu invitación..."
       />
 
-      {/* Success modal for automatic deferred referral registration */}
       <ReferralSuccessModal
         visible={showDeferredReferralSuccess}
         onClose={() => setShowDeferredReferralSuccess(false)}
+      />
+
+      {/* Convert Modal */}
+      <ConvertModal
+        visible={showConvertModal}
+        onConvert={() => {
+          setShowConvertModal(false);
+          navigation.navigate('USDCConversion');
+        }}
+        onCancel={() => setShowConvertModal(false)}
       />
     </View>
   );

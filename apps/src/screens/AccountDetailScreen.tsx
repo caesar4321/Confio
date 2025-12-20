@@ -22,6 +22,7 @@ import {
   Clipboard,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
+import FAIcon from 'react-native-vector-icons/FontAwesome';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
@@ -2053,13 +2054,13 @@ export const AccountDetailScreen = () => {
 
                   <View style={styles.usdcActions}>
                     <TouchableOpacity
-                      style={styles.usdcActionButton}
-                      onPress={() => navigation.navigate('USDCDeposit', { tokenType: 'usdc' })}
+                      style={[styles.usdcActionButton, { backgroundColor: '#FEF3C7', borderWidth: 1, borderColor: '#F59E0B' }]}
+                      onPress={() => navigation.navigate('Sell')}
                     >
-                      <Icon name="download" size={16} color="#3b82f6" style={styles.actionIcon} />
+                      <FAIcon name="bank" size={14} color="#92400E" style={styles.actionIcon} />
                       <View style={styles.actionTextContainer}>
-                        <Text style={styles.usdcActionButtonText}>Depositar</Text>
-                        <Text style={styles.usdcActionSubtext}>Recibe desde Algorand</Text>
+                        <Text style={[styles.usdcActionButtonText, { color: '#92400E' }]}>Retirar</Text>
+                        <Text style={[styles.usdcActionSubtext, { color: '#B45309' }]}>A tu banco</Text>
                       </View>
                     </TouchableOpacity>
 
@@ -2308,11 +2309,11 @@ export const AccountDetailScreen = () => {
               style={styles.moreOptionsItem}
               onPress={() => {
                 setShowMoreOptionsModal(false);
-                navigation.navigate('Sell');
+                navigation.navigate('USDCDeposit', { tokenType: 'usdc' });
               }}
             >
-              <Icon name="dollar-sign" size={20} color="#1f2937" />
-              <Text style={styles.moreOptionsItemText}>Retirar USDC a tu banco</Text>
+              <Icon name="download" size={20} color="#1f2937" />
+              <Text style={styles.moreOptionsItemText}>Depositar USDC</Text>
             </TouchableOpacity>
 
             <TouchableOpacity

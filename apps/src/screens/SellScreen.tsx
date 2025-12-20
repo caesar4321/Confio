@@ -14,8 +14,11 @@ import {
     Linking,
     Image,
     StatusBar,
+    AppState,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
+import FAIcon from 'react-native-vector-icons/FontAwesome';
+import * as Keychain from 'react-native-keychain';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
@@ -29,6 +32,7 @@ import { createGuardarianTransaction, fetchGuardarianFiatCurrencies, GuardarianF
 import { getFlagForCurrency } from '../utils/currencyFlags';
 import USDCLogo from '../assets/png/USDC.png';
 import PreFlightModal from '../components/PreFlightModal';
+import GuardarianReturnModal from '../components/GuardarianReturnModal';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'Sell'>;
 
@@ -62,6 +66,55 @@ export const SellScreen = () => {
     const [fiatLoading, setFiatLoading] = useState(false);
     const [fiatError, setFiatError] = useState<string | null>(null);
     const [showPreFlightModal, setShowPreFlightModal] = useState(false);
+    const [showGuardarianReturnModal, setShowGuardarianReturnModal] = useState(false);
+    const appStateRef = React.useRef(AppState.currentState);
+
+    // AppState listener for Guardarian return detection
+    useEffect(() => {
+        // Check immediately on mount (in case we're returning from Guardarian)
+        const checkGuardarianPending = async () => {
+            console.log('SellScreen - Checking Guardarian pending on mount/foreground');
+            try {
+                const credentials = await Keychain.getGenericPassword({ service: 'com.confio.guardarian_pending' });
+                console.log('SellScreen - Keychain result:', credentials ? 'Found' : 'Not found');
+                if (credentials && credentials.password) {
+                    const timestamp = parseInt(credentials.password, 10);
+                    const now = Date.now();
+                    console.log('SellScreen - Pending timestamp:', timestamp, 'Now:', now, 'Diff:', now - timestamp);
+                    // Check if pending state is recent (< 30 minutes)
+                    if (now - timestamp < 30 * 60 * 1000) {
+                        console.log('SellScreen - Showing Guardarian return modal');
+                        setShowGuardarianReturnModal(true);
+                    } else {
+                        // Expired, clear it
+                        console.log('SellScreen - Pending expired, clearing');
+                        await Keychain.resetGenericPassword({ service: 'com.confio.guardarian_pending' });
+                    }
+                }
+            } catch (e) {
+                console.error('SellScreen - Error checking Guardarian return:', e);
+            }
+        };
+
+        // Check immediately on mount
+        checkGuardarianPending();
+
+        // Also listen for AppState changes
+        const subscription = AppState.addEventListener('change', async (nextAppState) => {
+            if (
+                appStateRef.current.match(/inactive|background/) &&
+                nextAppState === 'active'
+            ) {
+                console.log('SellScreen - App returned to foreground');
+                await checkGuardarianPending();
+            }
+            appStateRef.current = nextAppState;
+        });
+
+        return () => {
+            subscription.remove();
+        };
+    }, []);
 
     // Order state
     const [orderCreated, setOrderCreated] = useState(false);
@@ -139,8 +192,12 @@ export const SellScreen = () => {
                 setDepositMemo(tx.deposit_extra_id || '');
                 setOrderId(tx.id);
                 setOrderCreated(true);
-            } else if (tx.redirect_url) {
                 try {
+                    // Track that user went to Guardarian for return detection
+                    const timestamp = Date.now().toString();
+                    await Keychain.setGenericPassword('guardarian_sell', timestamp, { service: 'com.confio.guardarian_pending' });
+                    console.log('SellScreen - Guardarian pending flag SET:', timestamp);
+
                     await Linking.openURL(tx.redirect_url);
                     return;
                 } catch (openErr) {
@@ -257,7 +314,7 @@ export const SellScreen = () => {
             <ScrollView contentContainerStyle={styles.content}>
                 <View style={styles.heroSection}>
                     <View style={styles.heroIconContainer}>
-                        <Icon name="dollar-sign" size={32} color="#3B82F6" />
+                        <FAIcon name="bank" size={28} color="#F59E0B" />
                     </View>
                     <Text style={styles.heroTitle}>Retira a tu banco</Text>
                     <Text style={styles.heroSubtitle}>
@@ -306,7 +363,7 @@ export const SellScreen = () => {
                     </View>
 
                     <View style={styles.conversionHint}>
-                        <Icon name="arrow-down" size={14} color="#3B82F6" />
+                        <Icon name="arrow-down" size={14} color="#F59E0B" />
                         <Text style={styles.conversionText}>Recibirás moneda local en tu banco</Text>
                     </View>
                 </View>
@@ -315,19 +372,19 @@ export const SellScreen = () => {
                 <View style={styles.featuresContainer}>
                     <View style={styles.featureItem}>
                         <View style={styles.featureIconCircle}>
-                            <Icon name="zap" size={16} color="#3B82F6" />
+                            <Icon name="zap" size={16} color="#F59E0B" />
                         </View>
                         <Text style={styles.featureText}>Rápido</Text>
                     </View>
                     <View style={styles.featureItem}>
                         <View style={styles.featureIconCircle}>
-                            <Icon name="shield" size={16} color="#3B82F6" />
+                            <Icon name="shield" size={16} color="#F59E0B" />
                         </View>
                         <Text style={styles.featureText}>Seguro</Text>
                     </View>
                     <View style={styles.featureItem}>
                         <View style={styles.featureIconCircle}>
-                            <Icon name="credit-card" size={16} color="#3B82F6" />
+                            <Icon name="credit-card" size={16} color="#F59E0B" />
                         </View>
                         <Text style={styles.featureText}>A tu banco</Text>
                     </View>
@@ -376,6 +433,31 @@ export const SellScreen = () => {
                 onCancel={() => setShowPreFlightModal(false)}
                 onContinue={handleProceedToGuardarian}
             />
+
+            {/* Guardarian Return Modal */}
+            <GuardarianReturnModal
+                visible={showGuardarianReturnModal}
+                onConvert={async () => {
+                    setShowGuardarianReturnModal(false);
+                    try {
+                        await Keychain.resetGenericPassword({ service: 'com.confio.guardarian_pending' });
+                    } catch { }
+                    navigation.navigate('USDCConversion' as any, { direction: 'cusd_to_usdc' });
+                }}
+                onRetirar={async () => {
+                    setShowGuardarianReturnModal(false);
+                    try {
+                        await Keychain.resetGenericPassword({ service: 'com.confio.guardarian_pending' });
+                    } catch { }
+                    navigation.navigate('USDCWithdraw' as any);
+                }}
+                onCancel={async () => {
+                    setShowGuardarianReturnModal(false);
+                    try {
+                        await Keychain.resetGenericPassword({ service: 'com.confio.guardarian_pending' });
+                    } catch { }
+                }}
+            />
         </SafeAreaView>
     );
 };
@@ -415,7 +497,7 @@ const styles = StyleSheet.create({
         width: 72,
         height: 72,
         borderRadius: 36,
-        backgroundColor: '#DBEAFE',
+        backgroundColor: '#FEF3C7', // Amber-100
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: 16,
@@ -539,7 +621,7 @@ const styles = StyleSheet.create({
     },
     conversionText: {
         fontSize: 13,
-        color: '#3B82F6',
+        color: '#F59E0B',
         fontWeight: '600',
     },
 
@@ -557,7 +639,7 @@ const styles = StyleSheet.create({
         width: 48,
         height: 48,
         borderRadius: 24,
-        backgroundColor: '#DBEAFE',
+        backgroundColor: '#FEF3C7', // Amber-100
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -568,7 +650,7 @@ const styles = StyleSheet.create({
     },
     // CTA Button
     ctaButton: {
-        backgroundColor: '#3B82F6',
+        backgroundColor: '#F59E0B',
         borderRadius: 16,
         paddingVertical: 18,
         paddingHorizontal: 24,
@@ -576,7 +658,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         gap: 8,
-        shadowColor: '#3B82F6',
+        shadowColor: '#F59E0B',
         shadowOpacity: 0.3,
         shadowRadius: 12,
         shadowOffset: { width: 0, height: 4 },

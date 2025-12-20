@@ -15,7 +15,7 @@ import {
   Image,
   Easing,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/Feather';
 import { Header } from '../navigation/Header';
@@ -70,12 +70,17 @@ const colors = {
 };
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList>;
+type ConversionRouteProp = RouteProp<MainStackParamList, 'USDCConversion'>;
 
 export const USDCConversionScreen = () => {
   const navigation = useNavigation<NavigationProp>();
+  const route = useRoute<ConversionRouteProp>();
   const { activeAccount } = useAccount();
   const [amount, setAmount] = useState('');
-  const [conversionDirection, setConversionDirection] = useState<'usdc_to_cusd' | 'cusd_to_usdc'>('usdc_to_cusd');
+  // Use route param if provided, otherwise default to usdc_to_cusd (original behavior)
+  const routeDirection = (route.params as any)?.direction;
+  const initialDirection = routeDirection === 'cusd_to_usdc' ? 'cusd_to_usdc' : 'usdc_to_cusd';
+  const [conversionDirection, setConversionDirection] = useState<'usdc_to_cusd' | 'cusd_to_usdc'>(initialDirection);
   const [isProcessing, setIsProcessing] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
 
