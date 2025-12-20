@@ -1,4 +1,5 @@
 /* Lightweight WS client for send flow (prepare + submit) */
+import appCheck from '@react-native-firebase/app-check';
 
 type PrepareArgs = {
   amount: number;
@@ -56,8 +57,16 @@ export class SendWsSession {
       try {
         const token = await getJwtToken();
         if (!token) throw new Error('no_token');
-        const wsUrl = `${getWsBase()}ws/send_session?token=${encodeURIComponent(token)}`;
-        console.log('[sendWs] Opening', wsUrl.replace(token, '***'));
+
+        // Fetch App Check token for connection security
+        let appCheckToken = '';
+        try {
+          const { token } = await appCheck().getToken();
+          if (token) appCheckToken = token;
+        } catch (e) { console.log('[sendWs] App Check token error', e); }
+
+        const wsUrl = `${getWsBase()}ws/send_session?token=${encodeURIComponent(token)}&app_check_token=${encodeURIComponent(appCheckToken)}`;
+        console.log('[sendWs] Opening', wsUrl.replace(token, '***').replace(appCheckToken, '***'));
         const ws = new WebSocket(wsUrl);
         this.ws = ws;
         const timeout = setTimeout(() => { console.log('[sendWs] open timeout'); reject(new Error('open_timeout')); }, 2500);
@@ -104,6 +113,9 @@ export class SendWsSession {
   async prepare(args: PrepareArgs, timeoutMs = 8000): Promise<SendPreparePack> {
     await this.open();
     if (!this.ws) throw new Error('not_open');
+
+
+
     return new Promise<SendPreparePack>((resolve, reject) => {
       this.pendingResolvers['prepare'] = resolve as any;
       this.pendingRejectors['prepare'] = reject as any;

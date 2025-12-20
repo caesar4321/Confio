@@ -2235,6 +2235,11 @@
   dependencies:
     superstruct "^2.0.2"
 
+"@react-native-firebase/app-check@^22.2.0":
+  version "22.2.0"
+  resolved "https://registry.npmjs.org/@react-native-firebase/app-check/-/app-check-22.2.0.tgz"
+  integrity sha512-xdBQkvu6WoUi4Qnby32YOMYV84MV5gX3gvYV4XKTso2Li/aawnZ8wUrsP5BUbUcg0vLxR/gq7qux53c7ZnPlMQ==
+
 "@react-native-firebase/app@^22.2.0", "@react-native-firebase/app@22.2.0":
   version "22.2.0"
   resolved "https://registry.npmjs.org/@react-native-firebase/app/-/app-22.2.0.tgz"

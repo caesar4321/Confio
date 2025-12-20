@@ -9,6 +9,10 @@ class _DummyRequest:
     def __init__(self, user, meta):
         self.user = user
         self.META = meta
+        self.headers = {}  # Mock headers to avoid AttributeError
+        # NOTE: _app_check_verified is session-scoped (WebSocket connection).
+        # It MUST NOT be reused across connections or requests.
+        self._app_check_verified = True  # Signal that App Check was already verified at WS connect
 
 
 class _DummyInfo:
@@ -50,6 +54,21 @@ class PaySessionConsumer(AsyncJsonWebsocketConsumer):
         query_string = self.scope.get("query_string", b"").decode()
         params = parse_qs(query_string)
         self._raw_token = (params.get("token", [None])[0]) or ""
+        
+        # Firebase App Check (Warning Mode)
+        app_check_token = (params.get("app_check_token", [None])[0]) or ""
+        try:
+            from security.integrity_service import app_check_service
+            # should_enforce=False -> Warning Mode (log only)
+            # should_enforce=False -> Warning Mode (log only)
+            await database_sync_to_async(app_check_service.verify_and_record)(
+                user=user,
+                token=app_check_token,
+                action='payment',
+                should_enforce=False
+            )
+        except Exception as e:
+            print(f"[ws/pay_session] App Check error: {e}")
 
         print(f"[ws/pay_session] connect user={getattr(user, 'id', None)}")
         # Accept connection (no subprotocol required for RN WebSocket)
@@ -283,6 +302,21 @@ class SendSessionConsumer(AsyncJsonWebsocketConsumer):
         params = parse_qs(query_string)
         self._raw_token = (params.get("token", [None])[0]) or ""
         self._sponsor_txn = None  # keep last prepared sponsor txn for submit
+
+        # Firebase App Check (Warning Mode)
+        app_check_token = (params.get("app_check_token", [None])[0]) or ""
+        try:
+            from security.integrity_service import app_check_service
+            # should_enforce=False -> Warning Mode (log only)
+            # should_enforce=False -> Warning Mode (log only)
+            await database_sync_to_async(app_check_service.verify_and_record)(
+                user=user,
+                token=app_check_token,
+                action='transfer',
+                should_enforce=False
+            )
+        except Exception as e:
+            print(f"[ws/send_session] App Check error: {e}")
 
         print(f"[ws/send_session] connect user={getattr(user, 'id', None)}")
         await self.accept()

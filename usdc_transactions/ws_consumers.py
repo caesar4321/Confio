@@ -36,6 +36,21 @@ class WithdrawSessionConsumer(AsyncJsonWebsocketConsumer):
             return
         params = parse_qs(self.scope.get("query_string", b"").decode())
         self._raw_token = (params.get("token", [None])[0]) or ""
+        
+        # Firebase App Check (Warning Mode)
+        app_check_token = (params.get("app_check_token", [None])[0]) or ""
+        try:
+            from security.integrity_service import app_check_service
+            # should_enforce=False -> Warning Mode (log only)
+            # should_enforce=False -> Warning Mode (log only)
+            await database_sync_to_async(app_check_service.verify_and_record)(
+                user=user,
+                token=app_check_token,
+                action='transfer',
+                should_enforce=False
+            )
+        except Exception as e:
+            print(f"[ws/withdraw_session] App Check error: {e}")
         await self.accept()
         self._keepalive_task = asyncio.create_task(self._keepalive())
         self._idle_task = asyncio.create_task(self._idle_close())

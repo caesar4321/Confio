@@ -1,1 +1,5 @@
-{}
+{
+    "react-native": {
+        "app_check_debug_enabled": true
+    }
+}

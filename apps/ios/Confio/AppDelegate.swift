@@ -2,6 +2,7 @@ import UIKit
 import React
 import GoogleSignIn
 import FirebaseCore
+import FirebaseAppCheck
 
 @main
 class AppDelegate: UIResponder, UIApplicationDelegate, RCTBridgeDelegate {
@@ -11,6 +12,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate, RCTBridgeDelegate {
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
+    // Configure App Check BEFORE FirebaseApp.configure()
+    #if DEBUG
+      // Use Debug provider for development builds
+      let providerFactory = AppCheckDebugProviderFactory()
+    #else
+      // Use App Attest for production builds
+      let providerFactory = AppAttestProviderFactory()
+    #endif
+    AppCheck.setAppCheckProviderFactory(providerFactory)
+    
     // Initialize Firebase
     FirebaseApp.configure()
     

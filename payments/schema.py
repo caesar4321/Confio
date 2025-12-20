@@ -339,6 +339,10 @@ class PayInvoice(graphene.Mutation):
     @graphql_require_aml()
     @graphql_require_kyc('send_money')
     def mutate(cls, root, info, invoice_id, idempotency_key=None):
+        # Firebase App Check (Warning Mode)
+        from security.integrity_service import app_check_service
+        app_check_service.verify_request_header(info.context, action='payment', should_enforce=False)
+
         user = getattr(info.context, 'user', None)
         if not (user and getattr(user, 'is_authenticated', False)):
             return PayInvoice(

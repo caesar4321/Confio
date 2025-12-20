@@ -20,6 +20,7 @@ import io.invertase.firebase.auth.ReactNativeFirebaseAuthPackage
 import io.invertase.firebase.messaging.ReactNativeFirebaseMessagingPackage
 import io.invertase.firebase.analytics.ReactNativeFirebaseAnalyticsPackage
 import io.invertase.firebase.crashlytics.ReactNativeFirebaseCrashlyticsPackage
+import io.invertase.firebase.appcheck.ReactNativeFirebaseAppCheckPackage
 import com.reactnativegooglesignin.RNGoogleSigninPackage
 import org.linusu.RNGetRandomValuesPackage
 import com.oblador.keychain.KeychainPackage
@@ -39,6 +40,10 @@ import cl.json.RNSharePackage
 import com.uerceg.play_install_referrer.PlayInstallReferrerPackage
 import com.blockstore.BlockStorePackage
 
+import com.google.firebase.appcheck.FirebaseAppCheck
+import com.google.firebase.appcheck.debug.DebugAppCheckProviderFactory
+import com.google.firebase.appcheck.playintegrity.PlayIntegrityAppCheckProviderFactory
+
 class MainApplication : Application(), ReactApplication {
 
   override val reactNativeHost: ReactNativeHost =
@@ -57,6 +62,7 @@ class MainApplication : Application(), ReactApplication {
             ReactNativeFirebaseMessagingPackage(),
             ReactNativeFirebaseAnalyticsPackage(),
             ReactNativeFirebaseCrashlyticsPackage(),
+            ReactNativeFirebaseAppCheckPackage(),
             RNGoogleSigninPackage(),
             RNGetRandomValuesPackage(),
             KeychainPackage(),
@@ -91,6 +97,23 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
+    
+    // Initialize Firebase App Check
+    try {
+        val firebaseAppCheck = FirebaseAppCheck.getInstance()
+        if (BuildConfig.DEBUG) {
+            firebaseAppCheck.installAppCheckProviderFactory(
+                DebugAppCheckProviderFactory.getInstance()
+            )
+        } else {
+            firebaseAppCheck.installAppCheckProviderFactory(
+                PlayIntegrityAppCheckProviderFactory.getInstance()
+            )
+        }
+    } catch (e: Exception) {
+        // Log error if needed
+    }
+
     SoLoader.init(this, OpenSourceMergedSoMapping)
     if (BuildConfig.IS_NEW_ARCHITECTURE_ENABLED) {
       // If you opted-in for the New Architecture, we load the native entry point for this app.

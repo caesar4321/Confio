@@ -20,6 +20,8 @@ class InviteSendService {
     assetType: 'CUSD' | 'CONFIO' = 'CUSD',
     message?: string,
   ): Promise<{ success: boolean; error?: string; prepared?: PreparedInvite }> {
+
+
     const { data } = await apolloClient.mutate({
       mutation: PREPARE_INVITE_FOR_PHONE,
       variables: { phone, phoneCountry, amount, assetType, message },
@@ -63,15 +65,7 @@ class InviteSendService {
     try {
       console.log('[InviteSend] lengths', {
         signed: signedAxferB64Norm.length,
-        s0: sponsorUnsigned[0]?.length,
-        s1: sponsorUnsigned[1]?.length,
-        s2: sponsorUnsigned[2]?.length,
-        mod4: {
-          signed: signedAxferB64Norm.length % 4,
-          s0: sponsorUnsigned[0]?.length % 4,
-          s1: sponsorUnsigned[1]?.length % 4,
-          s2: sponsorUnsigned[2]?.length % 4,
-        }
+        mod4: signedAxferB64Norm.length % 4
       })
     } catch { }
 

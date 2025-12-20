@@ -165,9 +165,13 @@ class CreateUSDCDeposit(graphene.Mutation):
         if not (user and getattr(user, 'is_authenticated', False)):
             return CreateUSDCDeposit(
                 deposit=None,
-                success=False,
                 errors=["Authentication required"]
             )
+        
+        # Firebase App Check (Warning Mode)
+        from security.integrity_service import app_check_service
+        from security.integrity_service import app_check_service
+        app_check_service.verify_request_header(info.context, action='transfer', should_enforce=False)
 
         try:
             # Get JWT context with validation and permission check
@@ -305,9 +309,13 @@ class CreateUSDCWithdrawal(graphene.Mutation):
             logger.warning("Authentication failed - no user or not authenticated")
             return CreateUSDCWithdrawal(
                 withdrawal=None,
-                success=False,
                 errors=["Authentication required"]
             )
+
+        # Firebase App Check (Warning Mode)
+        from security.integrity_service import app_check_service
+        from security.integrity_service import app_check_service
+        app_check_service.verify_request_header(info.context, action='transfer', should_enforce=False)
 
         try:
             # Get JWT context with validation and permission check

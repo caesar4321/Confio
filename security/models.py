@@ -964,3 +964,137 @@ class AMLCheck(SoftDeleteModel):
     
     def __str__(self):
         return f"AML Check for {self.user.username} - {self.get_status_display()}"
+
+
+class IntegrityVerdict(models.Model):
+    """
+    Play Integrity API verification results.
+    Tracks every integrity check for each user to detect historical violations.
+    
+    Key feature: When claiming rewards, we check both current device AND
+    historical records to prevent emulator->legit device abuse.
+    """
+    
+    TRIGGER_ACTION_CHOICES = [
+        ('signup', 'Signup'),
+        ('reward_claim', 'Reward Claim'),
+        ('transfer', 'Transfer/Withdrawal'),
+        ('login', 'Login'),
+        ('payroll', 'Payroll'),
+        ('topup_sell', 'TopUp/Sell'),
+        ('payment', 'Payment'),
+    ]
+    
+    APP_RECOGNITION_CHOICES = [
+        ('PLAY_RECOGNIZED', 'Play Recognized'),
+        ('UNRECOGNIZED_VERSION', 'Unrecognized Version'),
+        ('UNEVALUATED', 'Unevaluated'),
+    ]
+    
+    APP_LICENSING_CHOICES = [
+        ('LICENSED', 'Licensed'),
+        ('UNLICENSED', 'Unlicensed'),
+        ('UNEVALUATED', 'Unevaluated'),
+    ]
+    
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='integrity_verdicts',
+        help_text="User being verified"
+    )
+    device_fingerprint = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Device fingerprint hash at time of check"
+    )
+    
+    # Integrity Verdicts from Google
+    app_recognition = models.CharField(
+        max_length=50,
+        choices=APP_RECOGNITION_CHOICES,
+        default='UNEVALUATED',
+        help_text="Whether app is recognized by Play Store"
+    )
+    device_integrity = models.JSONField(
+        default=list,
+        help_text="Device integrity labels: MEETS_DEVICE_INTEGRITY, MEETS_BASIC_INTEGRITY, etc."
+    )
+    app_licensing = models.CharField(
+        max_length=50,
+        choices=APP_LICENSING_CHOICES,
+        default='UNEVALUATED',
+        help_text="Whether app is licensed from Play Store"
+    )
+    
+    # Computed flags for quick querying
+    is_emulator = models.BooleanField(
+        default=False,
+        help_text="No device integrity = likely emulator"
+    )
+    is_rooted = models.BooleanField(
+        default=False,
+        help_text="Only MEETS_BASIC_INTEGRITY = likely rooted"
+    )
+    passed = models.BooleanField(
+        default=False,
+        help_text="Did this check pass our requirements?"
+    )
+    
+    # Context
+    trigger_action = models.CharField(
+        max_length=20,
+        choices=TRIGGER_ACTION_CHOICES,
+        help_text="What action triggered this check"
+    )
+    raw_response = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Raw decoded response from Google (for debugging)"
+    )
+    error_message = models.TextField(
+        blank=True,
+        help_text="Error message if verification failed"
+    )
+    
+    # Metadata
+    created_at = models.DateTimeField(
+        default=timezone.now,
+        db_index=True
+    )
+    
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = "Integrity Verdict"
+        verbose_name_plural = "Integrity Verdicts"
+        indexes = [
+            models.Index(fields=['user', 'passed']),
+            models.Index(fields=['user', 'trigger_action', 'created_at']),
+            models.Index(fields=['is_emulator']),
+            models.Index(fields=['is_rooted']),
+        ]
+    
+    def __str__(self):
+        status = "✓" if self.passed else "✗"
+        return f"{status} {self.user.username} - {self.trigger_action} - {self.created_at.strftime('%Y-%m-%d %H:%M')}"
+    
+    @classmethod
+    def has_historical_violation(cls, user) -> bool:
+        """
+        Check if user has ANY failed integrity check in their history.
+        Used to block reward claims from users who previously used
+        emulator/rooted devices.
+        """
+        return cls.objects.filter(
+            user=user,
+            passed=False
+        ).exists()
+    
+    @classmethod
+    def has_emulator_history(cls, user) -> bool:
+        """Check if user ever used an emulator."""
+        return cls.objects.filter(
+            user=user,
+            is_emulator=True
+        ).exists()
+

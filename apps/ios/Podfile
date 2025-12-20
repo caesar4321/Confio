@@ -6,7 +6,7 @@ $VCEnableFrameProcessors = false
 # Force disable New Architecture to prevent React Native Screens crashes
 ENV['RCT_NEW_ARCH_ENABLED'] = '0'
 
-platform :ios, '16.0'
+platform :ios, '15.1'
 prepare_react_native_project!
 
 # Flipper is disabled due to Firebase use_frameworks requirement
@@ -45,7 +45,7 @@ target 'Confio' do
         config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'] = 'arm64'
         
         # Minimum iOS deployment target
-        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '16.0'
+        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.1'
         
         # Fix for React Native Screens sheet presentation
         if target.name == 'RNScreens'

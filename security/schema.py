@@ -303,10 +303,88 @@ class SecurityQuery(graphene.ObjectType):
         ).order_by('-verified_at', '-updated_at', '-created_at').first()
 
 
+class RequestIntegrityNonce(graphene.Mutation):
+    """Generate a nonce for Play Integrity token request"""
+    
+    success = graphene.Boolean()
+    nonce = graphene.String()
+    error = graphene.String()
+    
+    @classmethod
+    def mutate(cls, root, info):
+        user = info.context.user
+        if not user.is_authenticated:
+            return RequestIntegrityNonce(success=False, error="Authentication required")
+        
+        try:
+            from .integrity_service import play_integrity_service
+            nonce = play_integrity_service.generate_nonce(user.id)
+            return RequestIntegrityNonce(success=True, nonce=nonce)
+        except Exception as e:
+            logger.error(f"Error generating integrity nonce: {e}")
+            return RequestIntegrityNonce(success=False, error=str(e))
+
+
+class VerifyAppCheck(graphene.Mutation):
+    """Verify a Firebase App Check token and check historical violations"""
+    
+    class Arguments:
+        token = graphene.String(required=True)
+        action = graphene.String(required=True)  # 'signup', 'reward_claim', 'transfer'
+        device_fingerprint = graphene.String()
+    
+    success = graphene.Boolean()
+    passed = graphene.Boolean()
+    is_blocked = graphene.Boolean()
+    has_historical_violation = graphene.Boolean()
+    error = graphene.String()
+    
+    @classmethod
+    def mutate(cls, root, info, token, action, device_fingerprint=None):
+        user = info.context.user
+        if not user.is_authenticated:
+            return VerifyAppCheck(
+                success=False,
+                passed=True,  # Fail-open
+                is_blocked=False,
+                has_historical_violation=False,
+                error="Authentication required"
+            )
+        
+        try:
+            from .integrity_service import app_check_service
+            result = app_check_service.verify_and_record(
+                user=user,
+                token=token,
+                action=action,
+                device_fingerprint=device_fingerprint or ''
+            )
+            
+            return VerifyAppCheck(
+                success=result['success'],
+                passed=result['passed'],
+                is_blocked=result['is_blocked'],
+                has_historical_violation=result['has_historical_violation'],
+                error=result.get('error')
+            )
+        except Exception as e:
+            logger.error(f"Error verifying app check: {e}")
+            return VerifyAppCheck(
+                success=False,
+                passed=True,  # Fail-open
+                is_blocked=False,
+                has_historical_violation=False,
+                error=str(e)
+            )
+
+
 class SecurityMutation(graphene.ObjectType):
     check_kyc_status = CheckKYCStatus.Field()
+    request_integrity_nonce = RequestIntegrityNonce.Field()
+    verify_app_check = VerifyAppCheck.Field()
 
 
 # Export for main schema
 Query = SecurityQuery
 Mutation = SecurityMutation
+

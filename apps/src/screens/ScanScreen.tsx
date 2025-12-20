@@ -1,10 +1,10 @@
-import React, { useState, useCallback, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Dimensions, Alert, Platform, Linking } from 'react-native';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Dimensions, Alert, Platform, Linking, AppState, AppStateStatus } from 'react-native';
 import { Camera, useCameraDevice, useCodeScanner, CameraPermissionStatus } from 'react-native-vision-camera';
 import type { Code } from 'react-native-vision-camera';
 import Icon from 'react-native-vector-icons/Feather';
 import { useAccount } from '../contexts/AccountContext';
-import { useRoute, RouteProp, useNavigation, useFocusEffect } from '@react-navigation/native';
+import { useRoute, RouteProp, useNavigation, useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { BottomTabParamList } from '../types/navigation';
 import { useMutation } from '@apollo/client';
 import { GET_INVOICE } from '../apollo/queries';
@@ -22,6 +22,12 @@ export const ScanScreen = () => {
   const navigation = useNavigation();
   const scanMode = route.params?.mode;
 
+  // Navigation focus state
+  const isFocused = useIsFocused();
+  // App foreground/background state
+  const appState = useRef(AppState.currentState);
+  const [isAppActive, setIsAppActive] = useState(appState.current === 'active');
+
   const isBusinessAccount = activeAccount?.type?.toLowerCase() === 'business';
 
   // GraphQL mutations
@@ -33,14 +39,29 @@ export const ScanScreen = () => {
     accountType: activeAccount?.type,
     accountName: activeAccount?.name,
     isBusinessAccount,
-    scanMode
+    scanMode,
+    isFocused,
+    isAppActive
   });
+
+  // Monitor AppState to disable camera when app is in background
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      appState.current = nextAppState;
+      setIsAppActive(nextAppState === 'active');
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
 
   console.log('ScanScreen - Debug info:', {
     hasPermission,
     device: device ? 'found' : 'not found',
     scanFrameSize,
-    isFlashOn
+    isFlashOn,
+    cameraActive: isFocused && isAppActive && !isProcessing
   });
 
   useEffect(() => {
@@ -172,9 +193,12 @@ export const ScanScreen = () => {
   const codeScanner = useCodeScanner({
     codeTypes: ['qr'],
     onCodeScanned: (codes: Code[]) => {
-      if (codes.length > 0 && !isProcessing) {
+      // Only scan if focused, active, and not already processing
+      if (codes.length > 0 && !isProcessing && isFocused && isAppActive) {
         const scannedData = codes[0].value;
-        handleQRCodeScanned(scannedData);
+        if (scannedData) {
+          handleQRCodeScanned(scannedData);
+        }
       }
     },
   });
@@ -216,16 +240,19 @@ export const ScanScreen = () => {
     );
   }
 
-
+  // Calculate if camera should be active
+  // STRICT RULE: Only active if screen is focused AND app is in foreground AND not processing a scan
+  // This prevents background scanning when payment modal is up
+  const isActive = isFocused && isAppActive && !isProcessing;
 
   return (
     <View style={styles.container}>
       <Camera
         style={styles.camera}
         device={device}
-        isActive={true}
+        isActive={isActive}
         codeScanner={codeScanner}
-        torch={isFlashOn ? 'on' : 'off'}
+        torch={isFlashOn && isActive ? 'on' : 'off'}
         enableZoomGesture
       />
 

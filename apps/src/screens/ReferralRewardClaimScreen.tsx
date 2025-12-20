@@ -365,6 +365,8 @@ export const ReferralRewardClaimScreen: React.FC = () => {
       setBusyId(referral.id);
 
       try {
+
+
         const eventId = referral.viewerRewardEventId || null;
         if (!eventId) {
           throw new Error('No pudimos encontrar la recompensa para este rol.');

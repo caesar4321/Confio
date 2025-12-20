@@ -600,6 +600,8 @@ export class AuthService {
         throw new Error('No auth tokens received from server');
       }
 
+
+
       // 7) Now derive Algorand wallet (pepper fetch requires JWT)
       const algorandService = (await import('./algorandService')).default;
       const algorandAddress = await algorandService.createOrRestoreWallet(firebaseToken, googleSubject);
@@ -823,6 +825,8 @@ export class AuthService {
           // Continue, but follow-up GraphQL may fail if tokens missing
         }
       }
+
+
 
       // Now derive Algorand wallet (pepper fetch requires JWT)
       const algorandService = (await import('./algorandService')).default;

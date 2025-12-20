@@ -1,4 +1,5 @@
 /* Lightweight WS client for USDC withdrawals (prepare + submit) */
+import appCheck from '@react-native-firebase/app-check';
 
 type PrepareArgs = {
   amount: string | number;
@@ -54,8 +55,16 @@ export class WithdrawWsSession {
       try {
         const token = await getJwtToken();
         if (!token) throw new Error('no_token');
-        const wsUrl = `${getWsBase()}ws/withdraw_session?token=${encodeURIComponent(token)}`;
-        console.log('[withdrawWs] Opening', wsUrl.replace(token, '***'));
+
+        // Fetch App Check token for connection security
+        let appCheckToken = '';
+        try {
+          const { token } = await appCheck().getToken();
+          if (token) appCheckToken = token;
+        } catch (e) { console.log('[withdrawWs] App Check token error', e); }
+
+        const wsUrl = `${getWsBase()}ws/withdraw_session?token=${encodeURIComponent(token)}&app_check_token=${encodeURIComponent(appCheckToken)}`;
+        console.log('[withdrawWs] Opening', wsUrl.replace(token, '***').replace(appCheckToken, '***'));
         const ws = new WebSocket(wsUrl);
         this.ws = ws;
         const timeout = setTimeout(() => { console.log('[withdrawWs] open timeout'); reject(new Error('open_timeout')); }, 3000);
@@ -102,6 +111,9 @@ export class WithdrawWsSession {
   async prepare(args: PrepareArgs, timeoutMs = 8000): Promise<PreparePack> {
     await this.open();
     if (!this.ws) throw new Error('not_open');
+
+
+
     return new Promise<PreparePack>((resolve, reject) => {
       this.pendingResolvers['prepare'] = resolve as any;
       this.pendingRejectors['prepare'] = reject as any;

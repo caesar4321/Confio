@@ -1,3 +1,5 @@
+import appCheck from '@react-native-firebase/app-check';
+
 /* Lightweight WS client for payment flow (prepare + submit) with fallback hooks */
 
 type PrepareRequest = {
@@ -64,8 +66,16 @@ export class PayWsSession {
       try {
         const token = await getJwtToken();
         if (!token) throw new Error('no_token');
-        const wsUrl = `${getWsBase()}ws/pay_session?token=${encodeURIComponent(token)}`;
-        console.log('[payWs] Opening', wsUrl.replace(token, '***'));
+
+        // Fetch App Check token
+        let appCheckToken = '';
+        try {
+          const { token } = await appCheck().getToken();
+          if (token) appCheckToken = token;
+        } catch (e) { console.log('[payWs] App Check token error', e); }
+
+        const wsUrl = `${getWsBase()}ws/pay_session?token=${encodeURIComponent(token)}&app_check_token=${encodeURIComponent(appCheckToken)}`;
+        console.log('[payWs] Opening', wsUrl.replace(token, '***').replace(appCheckToken, '***'));
         const ws = new WebSocket(wsUrl);
         this.ws = ws;
         const timeout = setTimeout(() => {

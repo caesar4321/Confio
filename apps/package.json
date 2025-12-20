@@ -19,6 +19,7 @@
     "@react-native-camera-roll/camera-roll": "^7.10.0",
     "@react-native-firebase/analytics": "^22.2.0",
     "@react-native-firebase/app": "^22.2.0",
+    "@react-native-firebase/app-check": "^22.2.0",
     "@react-native-firebase/auth": "^22.2.0",
     "@react-native-firebase/crashlytics": "^22.2.0",
     "@react-native-firebase/messaging": "22.2.0",

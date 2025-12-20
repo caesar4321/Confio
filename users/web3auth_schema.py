@@ -66,6 +66,8 @@ class Web3AuthLoginMutation(graphene.Mutation):
     @classmethod
     def mutate(cls, root, info, firebase_id_token, algorand_address=None, device_fingerprint=None, platform_os=None):
         try:
+
+
             from django.contrib.auth import get_user_model
             from graphql_jwt.utils import jwt_encode
             from users.jwt import jwt_payload_handler, refresh_token_payload_handler
@@ -128,7 +130,37 @@ class Web3AuthLoginMutation(graphene.Mutation):
                 is_valid, _ = validate_username(user.username or "")
                 if not is_valid:
                     user.username = generate_compliant_username(email or firebase_uid, exclude_user_id=user.id)
+                    user.username = generate_compliant_username(email or firebase_uid, exclude_user_id=user.id)
                     user.save(update_fields=['username'])
+            
+            # Firebase App Check (Warning Mode) - Post-User Resolution
+            try:
+                from security.integrity_service import app_check_service
+                # Use request.headers (added in Django 2.2+)
+                token_header = info.context.headers.get('X-Firebase-AppCheck', '')
+                
+                # Debug logging to investigate failure
+                token_status = "present" if token_header else "missing"
+                token_preview = token_header[:10] + "..." if token_header else "None"
+                debug_error = info.context.headers.get('X-AppCheck-Debug-Error', '')
+                logger.info(f"Web3Auth App Check Debug: Token {token_status} ({token_preview}), User {user.id}" + (f", Client Error: {debug_error}" if debug_error else ""))
+
+                # We can also capture device_fingerprint string if it was passed
+                fingerprint_str = device_fingerprint if isinstance(device_fingerprint, str) else str(device_fingerprint) if device_fingerprint else ''
+                
+                # Determine correct action based on flow
+                verdict_action = 'signup' if created else 'login'
+
+                app_check_service.verify_and_record(
+                    user=user,
+                    token=token_header,
+                    action=verdict_action,
+                    device_fingerprint=fingerprint_str,
+                    should_enforce=False
+                )
+            except Exception as e:
+                # Never block login on verification error during warning mode
+                logger.error(f"App Check verification failed: {e}")
             
             # Update user info and last_login
             if not created:

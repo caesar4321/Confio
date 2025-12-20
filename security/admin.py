@@ -7,7 +7,8 @@ from django.utils import timezone
 from django.db.models import Count, Q
 from .models import (
     IdentityVerification, SuspiciousActivity, UserBan,
-    IPAddress, UserSession, DeviceFingerprint, UserDevice, AMLCheck, IPDeviceUser
+    IPAddress, UserSession, DeviceFingerprint, UserDevice, AMLCheck, IPDeviceUser,
+    IntegrityVerdict
 )
 from notifications.utils import create_notification
 from notifications.models import NotificationType as NotificationTypeChoices
@@ -1475,3 +1476,87 @@ class AMLCheckAdmin(admin.ModelAdmin):
         count = queryset.update(status='escalated')
         self.message_user(request, f"{count} checks escalated for senior review.")
     escalate_checks.short_description = "Escalate for senior review"
+
+
+@admin.register(IntegrityVerdict)
+class IntegrityVerdictAdmin(admin.ModelAdmin):
+    """Admin for Firebase App Check / Play Integrity verdicts"""
+    list_display = (
+        'user_link', 'trigger_action', 'passed_badge', 'device_status',
+        'app_recognition', 'app_licensing', 'created_at'
+    )
+    list_filter = (
+        'passed', 'is_emulator', 'is_rooted', 'trigger_action',
+        'app_recognition', 'created_at'
+    )
+    search_fields = (
+        'user__username', 'user__email', 'device_fingerprint'
+    )
+    readonly_fields = (
+        'created_at', 'raw_response_display'
+    )
+    date_hierarchy = 'created_at'
+    ordering = ('-created_at',)
+    
+    fieldsets = (
+        ('User Information', {
+            'fields': ('user', 'device_fingerprint', 'trigger_action')
+        }),
+        ('Verification Result', {
+            'fields': (
+                'passed', 'is_emulator', 'is_rooted',
+                'app_recognition', 'app_licensing'
+            )
+        }),
+        ('Device Integrity Details', {
+            'fields': ('device_integrity',),
+            'classes': ('collapse',)
+        }),
+        ('Raw Response', {
+            'fields': ('raw_response_display', 'error_message'),
+            'classes': ('collapse',)
+        }),
+        ('Timestamps', {
+            'fields': ('created_at',),
+            'classes': ('collapse',)
+        })
+    )
+    
+    def user_link(self, obj):
+        url = reverse('admin:users_user_change', args=[obj.user.id])
+        return format_html('<a href="{}">{}</a>', url, obj.user.username)
+    user_link.short_description = 'User'
+    
+    def passed_badge(self, obj):
+        if obj.passed:
+            return format_html(
+                '<span style="background-color: #28A745; color: white; padding: 3px 10px; '
+                'border-radius: 3px; font-weight: bold;">✓ Passed</span>'
+            )
+        return format_html(
+            '<span style="background-color: #DC3545; color: white; padding: 3px 10px; '
+            'border-radius: 3px; font-weight: bold;">✗ Failed</span>'
+        )
+    passed_badge.short_description = 'Status'
+    
+    def device_status(self, obj):
+        indicators = []
+        if obj.is_emulator:
+            indicators.append('<span style="color: #DC3545;">📱 Emulator</span>')
+        if obj.is_rooted:
+            indicators.append('<span style="color: #FFA500;">🔓 Rooted</span>')
+        if not indicators:
+            return format_html('<span style="color: #28A745;">✓ Clean</span>')
+        return format_html(' | '.join(indicators))
+    device_status.short_description = 'Device'
+    
+    def raw_response_display(self, obj):
+        import json
+        if not obj.raw_response:
+            return "No raw response"
+        return format_html(
+            '<pre style="white-space: pre-wrap; max-height: 300px; overflow-y: auto;">{}</pre>',
+            json.dumps(obj.raw_response, indent=2)
+        )
+    raw_response_display.short_description = 'Raw Response'
+

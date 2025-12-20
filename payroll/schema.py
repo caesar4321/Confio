@@ -229,6 +229,10 @@ class CreatePayrollRun(graphene.Mutation):
     @graphql_require_kyc('send_money')
     @graphql_require_aml()
     def mutate(cls, root, info, items, token_type='CUSD', period_seconds=None, cap_amount=None, scheduled_at=None):
+        # Firebase App Check (Warning Mode)
+        from security.integrity_service import app_check_service
+        app_check_service.verify_request_header(info.context, action='payroll', should_enforce=False)
+
         user = getattr(info.context, 'user', None)
         if not (user and getattr(user, 'is_authenticated', False)):
             return CreatePayrollRun(run=None, success=False, errors=["Authentication required"])
@@ -575,6 +579,10 @@ class SubmitPayrollItemPayout(graphene.Mutation):
     @graphql_require_kyc('send_money')
     @graphql_require_aml()
     def mutate(cls, root, info, payroll_item_id, signed_transaction, sponsor_signature=None):
+        # Firebase App Check (Warning Mode)
+        from security.integrity_service import app_check_service
+        app_check_service.verify_request_header(info.context, action='payroll', should_enforce=False)
+
         user = getattr(info.context, 'user', None)
         if not (user and getattr(user, 'is_authenticated', False)):
             return SubmitPayrollItemPayout(item=None, run=None, success=False, errors=["Authentication required"])
@@ -814,6 +822,10 @@ class SubmitPayrollVaultFunding(graphene.Mutation):
     @graphql_require_kyc('send_money')
     @graphql_require_aml()
     def mutate(cls, root, info, signed_transactions, sponsor_app_call=None):
+        # Firebase App Check (Warning Mode)
+        from security.integrity_service import app_check_service
+        app_check_service.verify_request_header(info.context, action='payroll', should_enforce=False)
+
         user = getattr(info.context, 'user', None)
         if not (user and getattr(user, 'is_authenticated', False)):
             return SubmitPayrollVaultFunding(success=False, errors=["Authentication required"])

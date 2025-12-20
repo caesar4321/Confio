@@ -3903,6 +3903,15 @@ class SubmitReferralRewardClaim(graphene.Mutation):
 		if not (user and getattr(user, 'is_authenticated', False)):
 			return SubmitReferralRewardClaim(success=False, error="Necesitas iniciar sesión para desbloquear.")
 
+		# Firebase App Check Enforcement (Blocking Mode)
+		from security.integrity_service import app_check_service
+		ac_result = app_check_service.verify_request_header(info.context, 'reward_claim', should_enforce=True)
+		if not ac_result['success']:
+			return SubmitReferralRewardClaim(
+				success=False, 
+				error="Dispositivo no verificado (App Check failed). Por favor, usa la app oficial."
+			)
+
 		cache_key = _referral_claim_cache_key(claim_token)
 		session = cache.get(cache_key)
 		if not session or session.get("user_id") != user.id:

@@ -180,6 +180,14 @@ def guardarian_transaction_proxy(request):
     if not auth_header.startswith('JWT '):
         return JsonResponse({'error': 'Unauthorized'}, status=401)
 
+    # Firebase App Check (Warning Mode)
+    try:
+        from security.integrity_service import app_check_service
+        # should_enforce=False means it logs failures but returns success=True
+        app_check_service.verify_request_header(request, 'topup_sell', should_enforce=False)
+    except Exception as e:
+        logger.warning(f"Guardarian App Check error: {e}")
+
     try:
         token = auth_header.split(' ', 1)[1]
         payload = jwt_decode(token)

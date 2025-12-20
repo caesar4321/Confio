@@ -48,19 +48,38 @@ const buildRedirects = () => ({
   failed: 'https://confio.lat/checkout/failed',
 });
 
+import appCheck from '@react-native-firebase/app-check';
+
 async function getAuthHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = {};
+
   try {
+    // 1. JWT Authorization
     const credentials = await Keychain.getGenericPassword({
       service: AUTH_KEYCHAIN_SERVICE,
       username: AUTH_KEYCHAIN_USERNAME,
     });
-    if (!credentials || !credentials.password) return {};
-    const parsed = JSON.parse(credentials.password);
-    if (!parsed?.accessToken) return {};
-    return { Authorization: `JWT ${parsed.accessToken}` };
+    if (credentials && credentials.password) {
+      const parsed = JSON.parse(credentials.password);
+      if (parsed?.accessToken) {
+        headers['Authorization'] = `JWT ${parsed.accessToken}`;
+      }
+    }
+
+    // 2. Firebase App Check
+    try {
+      const tokenResult = await appCheck().getToken();
+      if (tokenResult?.token) {
+        headers['X-Firebase-AppCheck'] = tokenResult.token;
+      }
+    } catch (acErr) {
+      console.warn('App Check token error in Guardarian service', acErr);
+    }
+
+    return headers;
   } catch (err) {
     console.warn('Guardarian proxy auth header error', err);
-    return {};
+    return headers;
   }
 }
 

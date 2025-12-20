@@ -105,5 +105,8 @@ project(':@react-native-firebase_analytics').projectDir = new File(rootProject.p
 include ':@react-native-firebase_crashlytics'
 project(':@react-native-firebase_crashlytics').projectDir = new File(rootProject.projectDir, '../node_modules/@react-native-firebase/crashlytics/android')
 
+include ':@react-native-firebase_appcheck'
+project(':@react-native-firebase_appcheck').projectDir = new File(rootProject.projectDir, '../node_modules/@react-native-firebase/app-check/android')
+
 include ':react-native-share'
 project(':react-native-share').projectDir = new File(rootProject.projectDir, '../node_modules/react-native-share/android')

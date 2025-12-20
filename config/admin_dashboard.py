@@ -879,8 +879,8 @@ confio_admin_site.register(Account, AccountAdmin)
 confio_admin_site.register(Business, BusinessAdmin)
 # Security models
 confio_admin_site.register(IdentityVerification, IdentityVerificationAdmin)
-from security.models import SuspiciousActivity, UserBan, IPAddress, UserSession, DeviceFingerprint, UserDevice, AMLCheck
-from security.admin import UserBanAdmin, IPAddressAdmin, UserSessionAdmin, DeviceFingerprintAdmin, UserDeviceAdmin, AMLCheckAdmin
+from security.models import SuspiciousActivity, UserBan, IPAddress, UserSession, DeviceFingerprint, UserDevice, AMLCheck, IntegrityVerdict
+from security.admin import UserBanAdmin, IPAddressAdmin, UserSessionAdmin, DeviceFingerprintAdmin, UserDeviceAdmin, AMLCheckAdmin, IntegrityVerdictAdmin
 confio_admin_site.register(SuspiciousActivity, SuspiciousActivityAdmin)
 confio_admin_site.register(UserBan, UserBanAdmin)
 confio_admin_site.register(IPAddress, IPAddressAdmin)
@@ -888,6 +888,7 @@ confio_admin_site.register(UserSession, UserSessionAdmin)
 confio_admin_site.register(DeviceFingerprint, DeviceFingerprintAdmin)
 confio_admin_site.register(UserDevice, UserDeviceAdmin)
 confio_admin_site.register(AMLCheck, AMLCheckAdmin)
+confio_admin_site.register(IntegrityVerdict, IntegrityVerdictAdmin)
 confio_admin_site.register(Country, CountryAdmin)
 confio_admin_site.register(Bank, BankAdmin)
 confio_admin_site.register(BankInfo, BankInfoAdmin)

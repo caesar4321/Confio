@@ -60,6 +60,10 @@ class CreateSponsoredPaymentMutation(graphene.Mutation):
             if not user.is_authenticated:
                 return cls(success=False, error='Not authenticated')
             
+            # Firebase App Check (Warning Mode)
+            from security.integrity_service import app_check_service
+            app_check_service.verify_request_header(info.context, action='transfer', should_enforce=False)
+            
             # Get JWT context for SENDER account determination
             from users.jwt_context import get_jwt_business_context_with_validation
             
