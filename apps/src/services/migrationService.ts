@@ -237,10 +237,22 @@ class WalletMigrationService {
                         const v2Address = v2Wallet.address;
 
                         const v2Info = await this.algodClient.accountInformation(v2Address).do();
-                        // If V2 has confirmed implementation (assets)
-                        // NOTE: We also ignore V2 ALGO balance, only check assets
-                        if (v2Info.assets && v2Info.assets.length > 0) {
-                            console.log('[MigrationService] ZOMBIE DETECTED: V1 empty, V2 funded. Self-healing...');
+                        // Check if V2 has FUNDED assets (balance > 0), not just opt-ins
+                        // This prevents false self-healing when V2 only has 0-balance opt-ins
+                        const v2FundedAssets = (v2Info.assets || []).filter((a: any) => {
+                            const aid = a['asset-id'];
+                            const amount = a['amount'];
+                            const isRelevant = (
+                                String(aid) === String(CONFIO_ASSET_ID) ||
+                                String(aid) === String(LEGACY_CONFIO_ASSET_ID) ||
+                                String(aid) === String(CUSD_ASSET_ID) ||
+                                String(aid) === String(USDC_ASSET_ID)
+                            );
+                            return isRelevant && amount > 0;
+                        });
+
+                        if (v2FundedAssets.length > 0) {
+                            console.log('[MigrationService] ZOMBIE DETECTED: V1 empty, V2 has FUNDED assets. Self-healing...');
 
                             // 1. Tell Backend
                             await apolloClient.mutate({
@@ -260,6 +272,8 @@ class WalletMigrationService {
 
                             console.log('[MigrationService] Self-healing complete. Switched to V2.');
                             return { needsMigration: false, v2Address };
+                        } else {
+                            console.log('[MigrationService] V2 has only 0-balance opt-ins. Not a valid migration target.');
                         }
                     } catch (e) {
                         console.warn('[MigrationService] Failed to check/heal V2 state:', e);
