@@ -3,6 +3,7 @@ import React
 import GoogleSignIn
 import FirebaseCore
 import FirebaseAppCheck
+import Firebase // Force import main module for static linking coverage
 
 @main
 class AppDelegate: UIResponder, UIApplicationDelegate, RCTBridgeDelegate {
@@ -17,8 +18,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate, RCTBridgeDelegate {
       // Use Debug provider for development builds
       let providerFactory = AppCheckDebugProviderFactory()
     #else
-      // Use App Attest for production builds
-      let providerFactory = AppAttestProviderFactory()
+      #if targetEnvironment(simulator)
+        let providerFactory = AppCheckDebugProviderFactory()
+      #else
+        // Use custom factory to instantiate AppAttestProvider directly
+        let providerFactory = ConfioAppCheckProviderFactory()
+      #endif
     #endif
     AppCheck.setAppCheckProviderFactory(providerFactory)
     
@@ -68,10 +73,25 @@ class AppDelegate: UIResponder, UIApplicationDelegate, RCTBridgeDelegate {
     if GIDSignIn.sharedInstance.handle(url) {
       return true
     }
+
+
     return RCTLinkingManager.application(app, open: url, options: options)
   }
 
   func application(_ application: UIApplication, continue userActivity: NSUserActivity, restorationHandler: @escaping ([UIUserActivityRestoring]?) -> Void) -> Bool {
     return RCTLinkingManager.application(application, continue: userActivity, restorationHandler: restorationHandler)
+  }
+}
+
+// Custom Provider Factory to handle App Attest availability
+class ConfioAppCheckProviderFactory: NSObject, AppCheckProviderFactory {
+  func createProvider(with app: FirebaseApp) -> AppCheckProvider? {
+    if #available(iOS 14.0, *) {
+      // Use App Attest on iOS 14+
+      return AppAttestProvider(app: app)
+    } else {
+      // Fallback to DeviceCheck on iOS < 14
+      return DeviceCheckProvider(app: app)
+    }
   }
 }

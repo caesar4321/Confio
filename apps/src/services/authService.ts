@@ -952,19 +952,26 @@ export class AuthService {
 
 
   // Get the user's Algorand address (renamed from Sui/Aptos address)
-  public async getAlgorandAddress(): Promise<string> {
+  public async getAlgorandAddress(context?: AccountContext): Promise<string> {
     if (!this.firebaseIsInitialized) {
       await this.initialize();
     }
 
-    // Get current account context
+    // Get current account context - prefer explicit context, fallback to stored
     const accountManager = AccountManager.getInstance();
-    const accountContext = await accountManager.getActiveAccountContext();
+    let accountContext: AccountContext;
 
-    console.log('🔎 getAlgorandAddress - Current account context:', {
+    if (context) {
+      accountContext = context;
+    } else {
+      accountContext = await accountManager.getActiveAccountContext();
+    }
+
+    console.log('🔎 getAlgorandAddress - Account context:', {
       type: accountContext.type,
       index: accountContext.index,
-      businessId: accountContext.businessId
+      businessId: accountContext.businessId,
+      source: context ? 'explicit' : 'stored'
     });
 
     // Generate cache key for this account
