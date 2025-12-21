@@ -104,6 +104,7 @@ class UnifiedUSDCTransactionType(DjangoObjectType):
     # Explicit alias for camelCase field expected by clients
     transaction_hash_gql = graphene.String(name='transactionHash')
     internal_id_gql = graphene.String(name='internalId')
+    internal_id = graphene.String()  # Explicitly define model property to silence warning
     formatted_title = graphene.String()
     icon_name = graphene.String()
     icon_color = graphene.String()
