@@ -44,6 +44,9 @@ class SendTransactionType(DjangoObjectType):
             'invitation_reverted',
             'invitation_expires_at'
         )
+    
+
+
 
 class Query(graphene.ObjectType):
     """GraphQL queries for send transactions"""

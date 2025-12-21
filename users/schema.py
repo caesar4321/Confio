@@ -338,35 +338,68 @@ def jwt_payload_handler(user):
 	return payload
 
 class UserType(DjangoObjectType):
-	# Define computed fields explicitly
+	# Define explicit safe fields
 	is_identity_verified = graphene.Boolean()
 	last_verified_date = graphene.DateTime()
 	verification_status = graphene.String()
 	accounts = graphene.List(lambda: AccountType)
 	
+	# Explicitly define sensitive fields to enforce security
+	phone_number = graphene.String()
+	email = graphene.String()
+	
 	class Meta:
 		model = User
+		# Include all fields, but our explicit definitions above take precedence
 		fields = ('id', 'username', 'email', 'first_name', 'last_name', 'phone_country', 'phone_number', 'backup_provider')
-	
+
+	def resolve_phone_number(self, info):
+		"""
+		SECURITY: Only return phone_number if the requesting user IS this user.
+		Prevents PII leakage through related objects (e.g., recipient_user in transactions).
+		"""
+		user = info.context.user
+		if not user.is_authenticated:
+			return None
+		# Allow if it's the user's own data
+		if str(user.id) == str(self.id):
+			return self.phone_number
+		# Otherwise hide it
+		return None
+
+	def resolve_email(self, info):
+		"""
+		SECURITY: Only return email if the requesting user IS this user.
+		"""
+		user = info.context.user
+		if not user.is_authenticated:
+			return None
+		# Allow if it's the user's own data
+		if str(user.id) == str(self.id):
+			return self.email
+		# Otherwise hide it
+		return None
+
+
 	def resolve_is_identity_verified(self, info):
 		return self.is_identity_verified
 	
-		def resolve_last_verified_date(self, info):
-			# Compute directly from IdentityVerification to avoid any serialization edge cases
-			try:
-				from security.models import IdentityVerification
-				# Personal-context verified record ONLY — account_type key missing or null
-				iv = (
-					IdentityVerification.objects
-					.filter(user=self, status='verified', risk_factors__account_type__isnull=True)
-					.order_by('-verified_at', '-updated_at', '-created_at')
-					.first()
-				)
-				if not iv:
-					return None
-				return iv.verified_at or iv.updated_at or iv.created_at
-			except Exception:
+	def resolve_last_verified_date(self, info):
+		# Compute directly from IdentityVerification to avoid any serialization edge cases
+		try:
+			from security.models import IdentityVerification
+			# Personal-context verified record ONLY — account_type key missing or null
+			iv = (
+				IdentityVerification.objects
+				.filter(user=self, status='verified', risk_factors__account_type__isnull=True)
+				.order_by('-verified_at', '-updated_at', '-created_at')
+				.first()
+			)
+			if not iv:
 				return None
+			return iv.verified_at or iv.updated_at or iv.created_at
+		except Exception:
+			return None
 	
 	def resolve_verification_status(self, info):
 		return self.verification_status
@@ -1052,24 +1085,16 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		payment = None
 		transfer = None
 
-		# Try Integer Lookup (Primary Key)
-		if input_str.isdigit():
-			pk = int(input_str)
-			payroll = PayrollItem.objects.select_related('payroll_run__business', 'employee__user').filter(id=pk).first()
-			if not payroll:
-				payment = PaymentTransaction.objects.select_related('merchant', 'payer_user').filter(id=pk).first()
-			if not payroll and not payment:
-				transfer = SendTransaction.objects.select_related('sender_user', 'recipient_user').filter(id=pk).first()
-
-		# Try Custom ID Lookup (if not found yet)
-		if not (payroll or payment or transfer):
-			payroll = PayrollItem.objects.select_related('run__business', 'recipient_user').filter(internal_id=input_str).first()
-			
-		if not (payroll or payment or transfer):
-			payment = PaymentTransaction.objects.select_related('merchant_business', 'payer_user').filter(internal_id=input_str).first()
-			
-		if not (payroll or payment or transfer):
-			transfer = SendTransaction.objects.select_related('sender_user', 'recipient_user').filter(internal_id=input_str).first()
+        # Try Custom ID Lookup (UUID/internal_id only)
+        # We explicitly skip Integer PK lookup to prevent enumeration attacks.
+        if not (payroll or payment or transfer):
+            payroll = PayrollItem.objects.select_related('run__business', 'recipient_user').filter(internal_id=input_str).first()
+            
+        if not (payroll or payment or transfer):
+            payment = PaymentTransaction.objects.select_related('merchant_business', 'payer_user').filter(internal_id=input_str).first()
+            
+        if not (payroll or payment or transfer):
+            transfer = SendTransaction.objects.select_related('sender_user', 'recipient_user').filter(internal_id=input_str).first()
 
 		# If found, format response
 		if payroll:

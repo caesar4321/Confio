@@ -127,8 +127,39 @@ class InvoiceType(DjangoObjectType):
         return self.qr_code_data
     
     def resolve_payment_transactions(self, info):
-        """Resolve payment transactions for this invoice"""
-        return self.payment_transactions.all()
+        """
+        Resolve payment transactions for this invoice with strict access control.
+        - Merchant (Owner/Employee): Can see all transactions.
+        - Payer: Can see ONLY their own transactions.
+        - Public/Others: Can see NONE.
+        """
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return []
+            
+        # 1. Merchant access (Owner)
+        if user == self.created_by_user:
+            return self.payment_transactions.all()
+            
+        # Merchant access (Employee)
+        # We need to check if user is an active employee of the merchant business
+        try:
+            from users.models_employee import BusinessEmployee
+            if self.merchant_business:
+                is_employee = BusinessEmployee.objects.filter(
+                    business=self.merchant_business,
+                    user=user,
+                    is_active=True,
+                    deleted_at__isnull=True
+                ).exists()
+                if is_employee:
+                    return self.payment_transactions.all()
+        except ImportError:
+            pass
+
+        # 2. Payer access (See own payments only)
+        return self.payment_transactions.filter(payer_user=user)
+
 
 class CreateInvoice(graphene.Mutation):
     """Mutation for creating a new invoice"""
