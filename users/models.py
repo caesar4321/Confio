@@ -257,15 +257,7 @@ class User(AbstractUser, SoftDeleteModel):
             .first()
         )
 
-    @property
-    def is_verified(self):
-        """Check if user has any verified identity records"""
-        from security.models import IdentityVerification
-        # Personal verification only; exclude business-context records
-        return IdentityVerification.objects.filter(
-            user=self,
-            status='verified'
-        ).filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business')).exists()
+
     
     @property
     def is_phone_verified(self):

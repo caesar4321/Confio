@@ -3,6 +3,7 @@ Custom Admin Dashboard for Confío
 Provides a comprehensive overview of platform metrics and quick actions
 """
 from django.contrib import admin
+from two_factor.admin import AdminSiteOTPRequired
 from django.urls import path
 from django.shortcuts import render, redirect
 from django.utils import timezone
@@ -31,7 +32,7 @@ from payments.models import PaymentTransaction
 from blockchain.constants import REFERRAL_ACHIEVEMENT_SLUGS
 
 
-class ConfioAdminSite(admin.AdminSite):
+class ConfioAdminSite(AdminSiteOTPRequired):
     """Custom admin site with enhanced dashboard"""
     site_header = 'Confío Admin Panel'
     site_title = 'Confío Admin'

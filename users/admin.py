@@ -404,7 +404,7 @@ class BankInfoAdmin(admin.ModelAdmin):
     masked_account.short_description = "Account Number"
     
     def verification_status(self, obj):
-        if obj.is_verified:
+        if obj.is_identity_verified:
             return format_html('<span style="color: green;">✓ Verified</span>')
         return format_html('<span style="color: orange;">Unverified</span>')
     verification_status.short_description = "Verification"

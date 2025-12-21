@@ -13,6 +13,7 @@ from django.views.generic import TemplateView
 from django.views.generic.base import RedirectView
 from django.conf import settings
 from django.conf.urls.static import static
+from two_factor.urls import urlpatterns as tf_urls
 import json
 import logging
 
@@ -106,8 +107,9 @@ from .admin_dashboard import confio_admin_site
 
 urlpatterns = [
     # Ensure /admin (no trailing slash) redirects to /admin/
-    path('admin', RedirectView.as_view(url='/admin/', permanent=True)),
-    path('admin/', confio_admin_site.urls),
+    # path('admin', RedirectView.as_view(url='/admin/', permanent=True)), # Disabled for security obfuscation
+    path('', include(tf_urls)),
+    path('confio-control-panel/', confio_admin_site.urls),
     path('graphql/', csrf_exempt(LoggingGraphQLView.as_view(graphiql=True))),
     path('terms/', terms_view, name='terms'),
     path('privacy/', privacy_view, name='privacy'),

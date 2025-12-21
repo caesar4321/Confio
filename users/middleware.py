@@ -23,7 +23,12 @@ class AuthTokenVersionMiddleware:
 
     def __call__(self, request):
         # Skip for admin and static/media URLs
-        if request.path.startswith('/admin/') or request.path.startswith('/static/') or request.path.startswith('/media/'):
+        # Skip for admin, account (2FA), and static/media URLs
+        if (request.path.startswith('/admin/') or 
+            request.path.startswith('/confio-control-panel/') or 
+            request.path.startswith('/account/') or 
+            request.path.startswith('/static/') or 
+            request.path.startswith('/media/')):
             return self.get_response(request)
 
         # Skip authentication only for explicitly whitelisted operations (strict)

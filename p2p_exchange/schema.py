@@ -219,7 +219,7 @@ class P2POfferType(DjangoObjectType):
             try:
                 is_verified_personal = bool(getattr(user, 'is_identity_verified', None) and user.is_identity_verified)
                 if not is_verified_personal and hasattr(user, 'is_verified'):
-                    is_verified_personal = bool(user.is_verified)
+                    is_verified_personal = bool(user.is_identity_verified)
                 stats.is_verified = is_verified_personal
             except Exception:
                 pass
@@ -1064,7 +1064,7 @@ class CreateP2POffer(graphene.Mutation):
                 try:
                     is_verified_personal = bool(getattr(user, 'is_identity_verified', None) and user.is_identity_verified)
                     if not is_verified_personal and hasattr(user, 'is_verified'):
-                        is_verified_personal = bool(user.is_verified)
+                        is_verified_personal = bool(user.is_identity_verified)
                 except Exception:
                     is_verified_personal = False
                 if not is_verified_personal:

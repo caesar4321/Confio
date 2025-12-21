@@ -1,0 +1,49 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+    /* basic styling to match admin aesthetics for the 2fa forms */
+    .login-form {
+        margin-top: 20px;
+    }
+
+    .form-row {
+        padding: 10px 0;
+        border-bottom: 1px solid #eee;
+    }
+
+    input[type="submit"] {
+        background: #417690;
+        color: white;
+        padding: 10px 15px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        margin-top: 15px;
+    }
+
+    input[type="submit"]:hover {
+        background: #205067;
+    }
+
+    .errorlist {
+        color: #ba2121;
+        list-style: none;
+        padding: 0;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+    {% block content_title %}{% endblock %}
+
+    <div class="module">
+        {% block two_factor_content %}
+        {# The specific 2FA content (wizard, login, etc.) will be injected here #}
+        {% endblock %}
+    </div>
+</div>
+{% endblock %}
