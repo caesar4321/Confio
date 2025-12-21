@@ -552,6 +552,37 @@ def sync_referral_reward_for_event(user, event_ctx: EventContext) -> Optional[Us
                 )
 
             if referral.referrer_user and referrer_confio > Decimal("0"):
+                # First, update ALL existing referrer events for this referral to eligible
+                # This fixes any events created earlier with pending status
+                existing_referrer_events = ReferralRewardEvent.objects.filter(
+                    user=referral.referrer_user,
+                    actor_role="referrer",
+                    referral=referral,
+                    reward_status__in=["pending", "skipped"],
+                )
+                for existing_event in existing_referrer_events:
+                    existing_event.reward_status = "eligible"
+                    existing_event.reward_tx_id = result.tx_id
+                    existing_event.referee_confio = referee_confio
+                    existing_event.referrer_confio = referrer_confio
+                    existing_event.error = ""
+                    existing_event.save(
+                        update_fields=[
+                            "reward_status",
+                            "reward_tx_id",
+                            "referee_confio",
+                            "referrer_confio",
+                            "error",
+                            "updated_at",
+                        ]
+                    )
+                    logger.info(
+                        "Updated existing referrer event %s to eligible (referral=%s)",
+                        existing_event.id,
+                        referral.id,
+                    )
+
+                # Then ensure at least one referrer event exists
                 ref_event, _ = ReferralRewardEvent.objects.get_or_create(
                     user=referral.referrer_user,
                     trigger="referral_pending",
