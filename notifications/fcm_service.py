@@ -58,8 +58,86 @@ def send_push_notification(
     
     if notification.is_broadcast:
         return send_broadcast_push(notification, additional_data)
+    elif notification.business:
+        # If notification is for a business, send to all active employees of that business
+        return send_business_push(notification, additional_data)
     else:
         return send_user_push(notification, additional_data)
+
+
+def send_business_push(
+    notification,
+    additional_data: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """Send push notification to all employees of a business"""
+    business = notification.business
+    if not business:
+        logger.warning(f"No business specified for notification {notification.id}")
+        return {'success': False, 'error': 'No business specified'}
+    
+    logger.info(f"Sending business push notification for business {business.id} ({business.name})")
+    
+    # 1. Get all users associated with this business via Accounts
+    # excluding the one who triggered it if needed, but usually everyone wants to know.
+    # We should filter by account_type='business' and business=business
+    from users.models import Account
+    
+    employee_users = Account.objects.filter(
+        business=business,
+        account_type='business',
+        user__is_active=True,
+        deleted_at__isnull=True
+    ).select_related('user').distinct()
+    
+    valid_tokens = []
+    
+    for account in employee_users:
+        user = account.user
+        
+        # Check user preferences
+        try:
+            prefs = user.notification_preferences
+            if not prefs.push_enabled:
+                continue
+            
+            # Check category-specific preferences
+            if not should_send_push(prefs, notification.notification_type):
+                continue
+        except NotificationPreference.DoesNotExist:
+            # No preferences = send by default
+            pass
+        
+        # Get active tokens for this user
+        user_tokens = FCMDeviceToken.objects.filter(
+            user=user,
+            is_active=True
+        ).values_list('token', 'id')
+        
+        for token_data in user_tokens:
+            valid_tokens.append(token_data)
+        
+    if not valid_tokens:
+        logger.info(f"No valid employee tokens found for business {business.id}")
+        return {'success': False, 'error': 'No valid employee tokens'}
+        
+    logger.info(f"Found {len(valid_tokens)} valid tokens for business {business.id}")
+    
+    # Prepare notification data
+    push_data = prepare_push_data(notification, additional_data)
+    
+    # Send batch (badge count is tricky here since it's per user, 
+    # we'll skip badge count for business broadcast for now or perform individual counts if critical. 
+    # Given potentially many employees, individual queries might be slow. 
+    # Let's send without badge count update for now, or just send 1 to indicate 'something new')
+    
+    return send_batch_notifications(
+        tokens=valid_tokens,
+        title=notification.title,
+        body=notification.message,
+        data=push_data,
+        badge_count=None, 
+        notification=notification
+    )
 
 
 def send_user_push(

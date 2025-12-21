@@ -310,18 +310,30 @@ class Query(graphene.ObjectType):
         # Filter by account context from JWT
         if account_type == 'business' and business_id:
             # Show business-specific notifications
+            # For business context, we want ALL notifications for the business,
+            # regardless of which user they were originally assigned to (e.g. the creatore/owner).
+            # This allows employees to see business activities.
             personal_notifications &= Q(business_id=business_id)
+            # Remove the user filter for business notifications so employees can see them
+            # We still filter by personal_notifications logic but we need to reconstruct the Q object
+            # to NOT filter by user for business hits, but keeping the base structure.
+            
+            # Re-building the query for business context:
+            # 1. Notifications explicitly for this business
+            # 2. Broadcasts (already handled below)
+            # We explicitly DO NOT filter by user=user here for the business part.
+            qs = Notification.objects.filter(
+                Q(business_id=business_id) | broadcast_notifications
+            )
         else:
             # Show personal account notifications
             # For personal accounts, just filter by user and exclude business notifications
             personal_notifications &= Q(business__isnull=True)
-        
-        # Include broadcast notifications
-        broadcast_notifications = Q(is_broadcast=True)
-        
-        qs = Notification.objects.filter(
-            personal_notifications | broadcast_notifications
-        )
+            
+            # Combine with broadcasts
+            qs = Notification.objects.filter(
+                personal_notifications | broadcast_notifications
+            )
         
         # Only show notifications created after the user joined
         qs = qs.filter(created_at__gte=user.date_joined)
@@ -409,12 +421,25 @@ class Query(graphene.ObjectType):
         try:
             notification = Notification.objects.get(id=id)
             
-            # Check access: user must own the notification or it must be a broadcast
-            if notification.is_broadcast or notification.user == user:
-                # Get JWT context to determine current account
-                jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
-                business_id = jwt_context.get('business_id')
-                
+            # Check access:
+            # 1. Broadcast notification (public to targets)
+            # 2. User owns the notification (personal context)
+            # 3. Notification belongs to the current business context (business context)
+            
+            # Get JWT context to determine current account
+            jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+            business_id = jwt_context.get('business_id')
+            
+            has_access = False
+            if notification.is_broadcast:
+                has_access = True
+            elif notification.user == user:
+                has_access = True
+            elif business_id and notification.business_id == business_id:
+                # Allow access if we are in the context of the business that owns this notification
+                has_access = True
+
+            if has_access:
                 # Check read status based on account context
                 if business_id:
                     is_read = NotificationRead.objects.filter(
@@ -477,7 +502,8 @@ class Query(graphene.ObjectType):
         # Filter by account context from JWT
         if account_type == 'business' and business_id:
             # Count business-specific notifications
-            personal_query &= Q(business_id=business_id)
+            # Relaxed constraint: count ALL notifications for this business
+            personal_query = Q(business_id=business_id)
         else:
             # Count personal account notifications
             # For personal accounts, include both account-specific and user-level notifications
