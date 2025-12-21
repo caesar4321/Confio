@@ -77,22 +77,24 @@ def send_business_push(
     
     logger.info(f"Sending business push notification for business {business.id} ({business.name})")
     
-    # 1. Get all users associated with this business via Accounts
-    # excluding the one who triggered it if needed, but usually everyone wants to know.
-    # We should filter by account_type='business' and business=business
-    from users.models import Account
+    # 1. Get all users associated with this business via BusinessEmployee model
+    # This includes the owner (role='owner') and all employees (role='cashier', 'admin', 'manager')
+    from users.models_employee import BusinessEmployee
     
-    employee_users = Account.objects.filter(
+    employee_records = BusinessEmployee.objects.filter(
         business=business,
-        account_type='business',
-        user__is_active=True,
+        is_active=True,
         deleted_at__isnull=True
     ).select_related('user').distinct()
     
     valid_tokens = []
     
-    for account in employee_users:
-        user = account.user
+    for employee_record in employee_records:
+        user = employee_record.user
+        
+        # Skip inactive users
+        if not user.is_active:
+            continue
         
         # Check user preferences
         try:
