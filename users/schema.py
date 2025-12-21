@@ -1085,16 +1085,16 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		payment = None
 		transfer = None
 
-        # Try Custom ID Lookup (UUID/internal_id only)
-        # We explicitly skip Integer PK lookup to prevent enumeration attacks.
-        if not (payroll or payment or transfer):
-            payroll = PayrollItem.objects.select_related('run__business', 'recipient_user').filter(internal_id=input_str).first()
-            
-        if not (payroll or payment or transfer):
-            payment = PaymentTransaction.objects.select_related('merchant_business', 'payer_user').filter(internal_id=input_str).first()
-            
-        if not (payroll or payment or transfer):
-            transfer = SendTransaction.objects.select_related('sender_user', 'recipient_user').filter(internal_id=input_str).first()
+		# Try Custom ID Lookup (UUID/internal_id only)
+		# We explicitly skip Integer PK lookup to prevent enumeration attacks.
+		if not (payroll or payment or transfer):
+			payroll = PayrollItem.objects.select_related('run__business', 'recipient_user').filter(internal_id=input_str).first()
+			
+		if not (payroll or payment or transfer):
+			payment = PaymentTransaction.objects.select_related('merchant_business', 'payer_user').filter(internal_id=input_str).first()
+			
+		if not (payroll or payment or transfer):
+			transfer = SendTransaction.objects.select_related('sender_user', 'recipient_user').filter(internal_id=input_str).first()
 
 		# If found, format response
 		if payroll:
