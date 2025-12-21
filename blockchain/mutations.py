@@ -2436,3 +2436,31 @@ class PrepareAtomicMigrationMutation(graphene.Mutation):
         except Exception as e:
             logger.error(f'Error preparing atomic migration: {str(e)}')
             return cls(success=False, error=str(e))
+
+
+class LogMigrationDebug(graphene.Mutation):
+    """
+    Debug mutation to log V1 address derivation for troubleshooting migration issues.
+    This helps diagnose when derived V1 address doesn't match expected funded address.
+    """
+    class Arguments:
+        v1_address = graphene.String(required=True)
+        v2_address = graphene.String()
+        context = graphene.String()
+    
+    success = graphene.Boolean()
+    
+    @classmethod
+    def mutate(cls, root, info, v1_address, v2_address=None, context=None):
+        user = getattr(info.context, 'user', None)
+        if not user or not user.is_authenticated:
+            return cls(success=False)
+        
+        # Log to server for debugging
+        logger.info(
+            f"[MigrationDebug] User={user.id} ({user.username}) "
+            f"V1={v1_address} V2_hint={v2_address} Context={context}"
+        )
+        
+        return cls(success=True)
+

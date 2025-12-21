@@ -17,6 +17,7 @@ from .mutations import (
     CompleteBusinessOptInMutation,
     SubmitBusinessOptInGroupMutation,
     PrepareAtomicMigrationMutation,
+    LogMigrationDebug,
 )
 from .payment_mutations import (
     CreateSponsoredPaymentMutation,
@@ -96,6 +97,7 @@ class Mutation(graphene.ObjectType):
     algorand_sponsored_opt_in = AlgorandSponsoredOptInMutation.Field()
     submit_sponsored_group = SubmitSponsoredGroupMutation.Field()
     prepare_atomic_migration = PrepareAtomicMigrationMutation.Field()
+    log_migration_debug = LogMigrationDebug.Field()
     
     # Business opt-in mutations
     check_business_opt_in = CheckBusinessOptInMutation.Field()
