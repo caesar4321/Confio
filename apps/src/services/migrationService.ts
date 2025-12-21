@@ -97,33 +97,10 @@ class WalletMigrationService {
             const v1Address = v1Wallet.address;
             let v1Info;
 
-            // TELEMETRY: Log derived V1 address for debugging migration mismatches
-            console.log(`[MigrationService] 📍 Derived V1 Address: ${v1Address}`);
-            try {
-                // Send to backend for debugging (non-blocking)
-                apolloClient.mutate({
-                    mutation: gql`
-                        mutation LogMigrationDebug($v1Address: String!, $v2Address: String, $context: String) {
-                            logMigrationDebug(v1Address: $v1Address, v2Address: $v2Address, context: $context) {
-                                success
-                            }
-                        }
-                    `,
-                    variables: {
-                        v1Address,
-                        v2Address: v2Secret ? 'has_secret' : 'no_secret',
-                        context: `sub_prefix:${sub?.substring(0, 10) || 'none'}`
-                    }
-                }).catch(() => { }); // Ignore errors, this is just telemetry
-            } catch (e) {
-                // Ignore telemetry errors
-            }
-
             try {
                 v1Info = await this.algodClient.accountInformation(v1Address).do();
             } catch (e) {
                 // Account not found on chain -> Treat as empty/new
-                console.log(`[MigrationService] V1 ${v1Address} not found on chain, treating as empty`);
                 return { needsMigration: false, v1Address: undefined };
             }
 
