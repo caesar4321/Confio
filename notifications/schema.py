@@ -307,6 +307,9 @@ class Query(graphene.ObjectType):
         # Build the query based on account context
         personal_notifications = Q(user=user, is_broadcast=False)
         
+        # Include broadcast notifications (defined here to be available in both branches)
+        broadcast_notifications = Q(is_broadcast=True)
+        
         # Filter by account context from JWT
         if account_type == 'business' and business_id:
             # Show business-specific notifications
