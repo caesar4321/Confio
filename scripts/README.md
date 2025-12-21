@@ -1,8 +1,119 @@
 # Confío Scripts
 
-This directory contains production scripts and utilities for managing the Confío platform, focusing on Algorand blockchain operations, rewards system, and deployment tasks.
+This directory contains production scripts and utilities for managing the Confío platform, focusing on Algorand blockchain operations, database management, debugging, and system maintenance.
 
 ## Directory Structure
+
+```
+scripts/
+├── admin/          # Administrative & heavy maintenance scripts
+├── analytics/      # Data analysis and metrics scripts
+├── audit/          # Auditing, verification, and inspection scripts
+├── backfill/       # Data backfill and population scripts
+├── config/         # Configuration files for deployments
+├── contracts/      # Smart contract interaction scripts (bootstrap, fund, etc.)
+├── debug/          # Debugging tools and one-off diagnostic scripts
+├── deployment/     # Infrastructure and contract deployment scripts
+├── migration/      # User migration and account transition scripts
+└── utils/          # General utility and cleanup scripts
+```
+
+## Contracts Scripts (`contracts/`)
+
+Scripts for interacting with Algorand smart contracts (Payment, Rewards, Presale).
+
+| Script | Purpose | Usage |
+|--------|---------|-------|
+| `bootstrap_rewards.py` | Bootstrap the rewards system | Deploy/init rewards infrastructure |
+| `fund_vault.py` | Fund vault account | Ensure vault has ALGO/ASAs |
+| `withdraw_*.py` | Withdrawal operations | Managing contract funds |
+| `update_*.py` | Update contract parameters | Updating prices, limits, etc. |
+
+## Audit Scripts (`audit/`)
+
+Scripts for verifying system integrity and inspecting state.
+
+| Script | Purpose |
+|--------|---------|
+| `audit_balances.py` | Verify user balances against chain |
+| `check_user.py` | Inspect user account status |
+| `inspect_event_*.py` | Debug specific event logs |
+| `verify_graphql_security.py` | Security audit tool |
+
+## Deployment Scripts (`deployment/`)
+
+Infrastructure deployment and server setup.
+
+| Script | Purpose |
+|--------|---------|
+| `deploy_ec2_systemd.sh` | Deploy systemd services to EC2 |
+| `setup_pgbouncer.sh` | Configure database connection pooling |
+| `local_rebuild.sh` | Rebuild local development environment |
+
+## Migration Scripts (`migration/`)
+
+Tools for managing user migration between V1/V2 architectures.
+
+| Script | Purpose |
+|--------|---------|
+| `check_migration_status.py` | Check user migration state |
+| `reset_migration.py` | Reset migration flags for testing |
+| `investigate_user_migration.py` | Daignose migration issues |
+
+## Debug Scripts (`debug/`)
+
+One-off scripts for diagnosing specific production issues.
+
+| Script | Purpose |
+|--------|---------|
+| `debug_guardarian.py` | Debug Guardarian transaction flow |
+| `debug_ws_flow.py` | Test WebSocket connectivity |
+| `dump_user.py` | Dump full user profile JSON |
+
+## Running Scripts
+
+All python scripts require Django environment to be set up. They use the following pattern:
+
+```python
+#!/usr/bin/env python3
+import os
+import django
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
+django.setup()
+
+# Script logic here...
+```
+
+### Prerequisites
+
+1. **Virtual Environment**: Use `myvenv/bin/python`
+2. **Django Settings**: Scripts use `config.settings`
+3. **Environment Variables**: Ensure `.env` or `.env.mainnet` is configured
+4. **Algorand Access**: Scripts require ALGORAND_ALGOD_ADDRESS and ALGORAND_ALGOD_TOKEN
+
+### Common Patterns
+
+```bash
+# Run from project root
+cd /Users/julian/Confio
+
+# Run a contract interaction script
+myvenv/bin/python scripts/contracts/bootstrap_rewards.py
+
+# Run an audit script
+myvenv/bin/python scripts/audit/check_user.py
+
+# Make executable (optional)
+chmod +x scripts/audit/check_user.py
+./scripts/audit/check_user.py
+```
+
+## Important Safety Notes
+
+1. **Production Impact**: Most scripts in `contracts/` and `admin/` modify state on the blockchain or database. Always verify you are running against the intended environment (Mainnet vs Testnet).
+2. **Backups**: Before running `backfill/` or `migration/` scripts that modify the DB in bulk, ensure a snapshot exists.
+3. **Executables**: Bash scripts in `deployment/` should be reviewed before execution.
 
 ```
 scripts/

@@ -191,22 +191,6 @@ class AlgorandKMSManager:
                     },
                     "Action": "kms:*",
                     "Resource": "*"
-                },
-                {
-                    "Sid": "Allow use of the key for Parameter Store",
-                    "Effect": "Allow",
-                    "Principal": {
-                        "AWS": f"arn:aws:iam::{account_id}:user/Julian"
-                    },
-                    "Action": [
-                        "kms:Encrypt",
-                        "kms:Decrypt",
-                        "kms:ReEncrypt*",
-                        "kms:GenerateDataKey*",
-                        "kms:CreateGrant",
-                        "kms:DescribeKey"
-                    ],
-                    "Resource": "*"
                 }
             ]
         }

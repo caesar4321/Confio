@@ -530,6 +530,12 @@ export const HomeScreen = () => {
   useFocusEffect(
     useCallback(() => {
       const checkDeposit = async () => {
+        // Skip if still loading data to prevent false positives (0 -> Actual Balance)
+        if (myBalancesLoading) {
+          console.log('HomeScreen - Balances loading, skipping deposit check');
+          return;
+        }
+
         try {
           // Validate usdcBalance is a valid number
           const currentBalance = Number(usdcBalance) || 0;
@@ -537,7 +543,17 @@ export const HomeScreen = () => {
           console.log('HomeScreen - Deposit Check:', { usdcBalance, currentBalance });
 
           const storedBalance = await Keychain.getGenericPassword({ service: 'com.confio.usdc_last_balance' });
-          const lastBalance = storedBalance ? parseFloat(storedBalance.password) : 0;
+
+          // First run check: If no balance is stored, assume this is the first login/install.
+          // We set the current balance as baseline and DON'T show the modal to avoid flashing it
+          // for existing balances.
+          if (!storedBalance) {
+            console.log('HomeScreen - First balance check, initializing baseline:', currentBalance);
+            await Keychain.setGenericPassword('balance', currentBalance.toString(), { service: 'com.confio.usdc_last_balance' });
+            return;
+          }
+
+          const lastBalance = parseFloat(storedBalance.password);
 
           console.log('HomeScreen - Balance comparison:', { lastBalance, currentBalance });
 
@@ -557,7 +573,7 @@ export const HomeScreen = () => {
       // Run the check
       checkDeposit();
 
-    }, [usdcBalance])
+    }, [usdcBalance, myBalancesLoading])
   );
 
   // No more mock accounts - we fetch from server
