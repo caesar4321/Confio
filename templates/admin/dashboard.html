@@ -665,9 +665,8 @@
                             <span
                                 style="background: #8b5cf6; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">UPCOMING</span>
                             {% else %}
-                            <span
-                                style="background: #6b7280; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">{{
-                                phase.status|upper }}</span>
+                            style="background: #6b7280; color: white; padding: 2px 8px; border-radius: 4px; font-size:
+                            12px; font-weight: 600;">{{ phase.status|upper }}</span>
                             {% endif %}
                         </td>
                         <td style="padding: 12px; text-align: right;">${{ phase.total_raised|floatformat:2|intcomma }}
@@ -737,7 +736,7 @@
             <div class="metric-card">
                 <div class="metric-label">Available for Withdrawal</div>
                 <div class="metric-value" style="color: #16a34a;">{{
-                    fraud_stats.available_total|default:"0"|floatformat:2}} CONFIO</div>
+                    fraud_stats.available_total|default:"0"|floatformat:2 }} CONFIO</div>
                 <div class="metric-change">Withdrawn to date: {{ fraud_stats.total_withdrawn|default:"0"|floatformat:2
                     }} CONFIO</div>
             </div>
@@ -745,7 +744,7 @@
             <div class="metric-card">
                 <div class="metric-label">Withdrawal Velocity</div>
                 <div class="metric-value" style="color: #2563eb;">{{
-                    fraud_stats.daily_withdrawn|default:"0"|floatformat:2}} CONFIO</div>
+                    fraud_stats.daily_withdrawn|default:"0"|floatformat:2 }} CONFIO</div>
                 <div class="metric-change">Last 7 days: {{ fraud_stats.weekly_withdrawn|default:"0"|floatformat:2 }}
                     CONFIO</div>
             </div>
@@ -1042,8 +1041,8 @@
                 <tr>
                     <td><a href="{% url 'confio_admin:p2p_exchange_p2pdispute_change' dispute.id %}">#{{ dispute.id
                             }}</a></td>
-                    <td><a href="{% url 'confio_admin:p2p_exchange_p2ptrade_change' dispute.trade.id %}">Trade
-                            #{{ dispute.trade.id }}</a></td>
+                    <td><a href="{% url 'confio_admin:p2p_exchange_p2ptrade_change' dispute.trade.id %}">Trade #{{
+                            dispute.trade.id }}</a></td>
                     <td>
                         {% if dispute.initiator_business %}🏢 {{ dispute.initiator_business.name }}
                         {% elif dispute.initiator_user %}👤 {{ dispute.initiator_user.username }}
@@ -1091,8 +1090,8 @@
                 {% for v in recent_verifications %}
                 <tr>
                     <td>{% if v.obj.id %}<a
-                            href="{% url 'confio_admin:security_identityverification_change' v.obj.id %}">#{{
-                            v.obj.id }}</a>{% else %}-{% endif %}</td>
+                            href="{% url 'confio_admin:security_identityverification_change' v.obj.id %}">#{{ v.obj.id
+                            }}</a>{% else %}-{% endif %}</td>
                     <td><a href="{% url 'confio_admin:users_user_change' v.obj.user.id %}">{{ v.obj.user.username }}</a>
                     </td>
                     <td>{% if v.context == 'business' %}Business{% else %}Personal{% endif %}</td>
@@ -1228,7 +1227,7 @@
 
     // V2 Safety Score Chart
     var safetyCtx = document.getElementById('safetyChart').getContext('2d');
-    var safetyPct = {{ security_stats.safe_v2_pct|default:"0" }};
+    var safetyPct = {{ security_stats.safe_v2_pct|default: "0" }};
     var safetyData = {
         labels: ['Safe (V2)', 'At Risk'],
         datasets: [{
