@@ -91,8 +91,8 @@ export const BiometricSetupScreen = () => {
     const ok = await completeBiometricAndEnter();
     if (!ok) {
       setError(Platform.OS === 'ios'
-        ? 'Activa Face ID o Touch ID en los ajustes del dispositivo y vuelve a intentar.'
-        : 'Activa tu huella digital en los ajustes del dispositivo y vuelve a intentar.');
+        ? 'Activa tu biometría o código en los ajustes del dispositivo y vuelve a intentar.'
+        : 'Activa tu biometría o código de acceso en los ajustes del dispositivo y vuelve a intentar.');
       setShowSettingsButton(true);
       setIsProcessing(false);
     }
@@ -122,8 +122,8 @@ export const BiometricSetupScreen = () => {
           <Text style={styles.heading}>Protege tus operaciones sensibles</Text>
           <Text style={styles.body}>
             {Platform.OS === 'ios'
-              ? 'Usaremos Face ID o Touch ID para desbloquear Confío y confirmar envíos, pagos y otros movimientos críticos. Tus datos biométricos nunca salen del dispositivo: iOS solo nos indica si la coincidencia fue exitosa.'
-              : 'Usaremos tu huella digital para desbloquear Confío y confirmar envíos, pagos y otros movimientos críticos. Tus datos biométricos nunca salen del dispositivo: Android solo nos indica si la coincidencia fue exitosa.'
+              ? 'Usaremos tu biometría (o tu código) para desbloquear Confío y confirmar envíos, pagos y otros movimientos críticos. Tus datos de seguridad nunca salen del dispositivo.'
+              : 'Usaremos tu huella digital (o tu PIN/Patrón) para desbloquear Confío y confirmar envíos, pagos y otros movimientos críticos. Tus datos de seguridad nunca salen del dispositivo.'
             }
           </Text>
 
@@ -148,8 +148,8 @@ export const BiometricSetupScreen = () => {
           {!supportedHint && (
             <Text style={styles.hint}>
               {Platform.OS === 'ios'
-                ? 'Si aún no tienes Face ID o Touch ID configurado, actívalo en los ajustes del dispositivo y vuelve a intentar.'
-                : 'Si aún no tienes tu huella digital configurada, actívala en los ajustes del dispositivo y vuelve a intentar.'
+                ? 'Si aún no tienes seguridad configurada, actívala en los ajustes del dispositivo y vuelve a intentar.'
+                : 'Si aún no tienes seguridad configurada, actívala en los ajustes del dispositivo y vuelve a intentar.'
               }
             </Text>
           )}

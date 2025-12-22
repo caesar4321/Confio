@@ -543,7 +543,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       if (!enabledNow) {
         Alert.alert(
           'Activa tu biometría',
-          Platform.OS === 'ios' ? 'Necesitamos Face ID o Touch ID para proteger tus operaciones críticas (envíos, pagos, retiros).' : 'Necesitamos tu huella digital para proteger tus operaciones críticas (envíos, pagos, retiros).',
+          Platform.OS === 'ios' ? 'Necesitamos tu autenticación (Biometría o Código) para proteger tus operaciones críticas.' : 'Necesitamos tu autenticación (Biometría, PIN o Patrón) para proteger tus operaciones críticas.',
           [{ text: 'OK' }]
         );
         return { ok: false, alreadyEnabled: false, didAuthenticate: false };
@@ -668,7 +668,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
         true
       );
     if (!authOk) {
-      Alert.alert('Biometría requerida', Platform.OS === 'ios' ? 'Confirma con Face ID o Touch ID para continuar.' : 'Confirma con tu huella digital para continuar.', [{ text: 'OK' }]);
+      Alert.alert('Autenticación requerida', Platform.OS === 'ios' ? 'Confirma con Biometría o Código para continuar.' : 'Confirma con tu biometría o código del dispositivo para continuar.', [{ text: 'OK' }]);
       return false;
     }
 
@@ -787,8 +787,26 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
               console.error('Pre-navigation refresh failed:', e);
             }
 
+
             // Align access token context with active account before navigating
             try {
+              // CRITICAL FIX: Enforce biometric check BEFORE setting isAuthenticated(true)
+              // This prevents the "iOS bypass" where a user kills the app and reopens it to skip the resume prompt.
+              const bioEnabled = await biometricAuthService.isEnabled();
+              if (bioEnabled) {
+                console.log('[AuthContext] Biometrics enabled, enforcing check on startup...');
+                const bioOk = await biometricAuthService.authenticate('Desbloquea Confío');
+                if (!bioOk) {
+                  console.log('[AuthContext] Startup biometric authentication failed or cancelled');
+                  setIsAuthenticated(false);
+                  setProfileData(null);
+                  navigateToScreen('Auth');
+                  return;
+                }
+                console.log('[AuthContext] Startup biometric authentication successful');
+                lastBiometricSuccessRef.current = Date.now();
+              }
+
               const authService = AuthService.getInstance();
               const accountContext = await authService.getActiveAccountContext();
               if (accountContext.type === 'business' && accountContext.businessId) {

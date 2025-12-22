@@ -1,5 +1,6 @@
 import * as Keychain from 'react-native-keychain';
 import { Platform } from 'react-native';
+import { isPinOrFingerprintSet } from 'react-native-device-info';
 
 const BIOMETRIC_SECRET_SERVICE = 'com.confio.biometric.guard';
 const BIOMETRIC_PREFS_SERVICE = 'com.confio.biometric.prefs';
@@ -30,9 +31,15 @@ class BiometricAuthService {
     if (this.cachedSupported !== null) return this.cachedSupported;
     try {
       const biometryType = await Keychain.getSupportedBiometryType();
-      const supported = !!biometryType;
-      this.cachedSupported = supported;
-      return supported;
+      if (biometryType) {
+        this.cachedSupported = true;
+        return true;
+      }
+
+      // Fallback: Check if device has a PIN/Passcode set (since we allow device credential)
+      const hasDeviceSecurity = await isPinOrFingerprintSet();
+      this.cachedSupported = hasDeviceSecurity;
+      return hasDeviceSecurity;
     } catch (error) {
       console.error('[BiometricAuthService] Failed to check biometry support:', error);
       this.cachedSupported = false;
@@ -86,10 +93,8 @@ class BiometricAuthService {
         {
           service: BIOMETRIC_SECRET_SERVICE,
           accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED,
-          accessControl: Platform.OS === 'android'
-            ? Keychain.ACCESS_CONTROL.BIOMETRY_ANY
-            : Keychain.ACCESS_CONTROL.BIOMETRY_CURRENT_SET,
-          authenticationType: Keychain.AUTHENTICATION_TYPE.BIOMETRICS,
+          accessControl: Keychain.ACCESS_CONTROL.BIOMETRY_CURRENT_SET_OR_DEVICE_PASSCODE,
+          authenticationType: Keychain.AUTHENTICATION_TYPE.DEVICE_PASSCODE_OR_BIOMETRICS,
           securityLevel: Keychain.SECURITY_LEVEL.SECURE_SOFTWARE,
           storage: Keychain.STORAGE_TYPE.AUTOMATIC,
         }
@@ -189,10 +194,8 @@ class BiometricAuthService {
           // More security-focused description
           description: 'Protege tus fondos',
         },
-        accessControl: Platform.OS === 'android'
-          ? Keychain.ACCESS_CONTROL.BIOMETRY_ANY
-          : Keychain.ACCESS_CONTROL.BIOMETRY_CURRENT_SET,
-        authenticationType: Keychain.AUTHENTICATION_TYPE.BIOMETRICS,
+        accessControl: Keychain.ACCESS_CONTROL.BIOMETRY_CURRENT_SET_OR_DEVICE_PASSCODE,
+        authenticationType: Keychain.AUTHENTICATION_TYPE.DEVICE_PASSCODE_OR_BIOMETRICS,
         storage: Keychain.STORAGE_TYPE.AUTOMATIC,
       });
 

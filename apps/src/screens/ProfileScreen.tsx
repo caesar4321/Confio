@@ -631,7 +631,7 @@ export const ProfileScreen = () => {
             >
               <Icon name="smartphone" size={18} color={biometricAvailable ? "#10B981" : "#9CA3AF"} />
               <View style={styles.biometricTextContainer}>
-                <Text style={styles.biometricTitle}>Biometría</Text>
+                <Text style={styles.biometricTitle}>Biometría / PIN</Text>
                 {biometricLoading ? (
                   <Text style={styles.biometricStatusText}>Verificando...</Text>
                 ) : !biometricAvailable ? (
