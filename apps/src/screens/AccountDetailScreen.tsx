@@ -288,7 +288,7 @@ export const AccountDetailScreen = () => {
     addressShort: accountAddress ? `${accountAddress.slice(0, 6)}...${accountAddress.slice(-6)}` : '',
     exchangeRate: "1 USDC = 1 cUSD",
     description: route.params.accountType === 'cusd'
-      ? "Moneda estable respaldada 1:1 por dólares estadounidenses (USD)"
+      ? "Dólar digital estable respaldado 1:1 por USDC"
       : "Moneda de gobernanza de Confío"
   };
 
