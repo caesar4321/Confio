@@ -1228,7 +1228,7 @@
 
     // V2 Safety Score Chart
     var safetyCtx = document.getElementById('safetyChart').getContext('2d');
-    var safetyPct = {{ security_stats.safe_v2_pct|default: "0" }};
+    var safetyPct = {{ security_stats.safe_v2_pct|default:"0" }};
     var safetyData = {
         labels: ['Safe (V2)', 'At Risk'],
         datasets: [{
