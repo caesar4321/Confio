@@ -2281,9 +2281,11 @@ class PrepareAtomicMigrationMutation(graphene.Mutation):
             # 2. V2 Opt-Ins (N * Axfer)
             # 3. V1 Asset Closes (M * Axfer)
             # 3b. Legacy Asset Burns (L * Axfer)
+            # 3c. Clear App Local States (K * Appl)
             # 4. V1 Close Algo (1 * Pay) - OR - V1 Max Send (1 * Pay)
             
-            op_count = 1 + len(needed_opt_ins) + len(assets_to_migrate) + len(legacy_assets_to_burn) + 1
+            v1_apps = v1_info.get('apps-local-state', [])
+            op_count = 1 + len(needed_opt_ins) + len(assets_to_migrate) + len(legacy_assets_to_burn) + len(v1_apps) + 1
             min_fee = 1000
             total_group_fee = op_count * min_fee
             
@@ -2337,6 +2339,22 @@ class PrepareAtomicMigrationMutation(graphene.Mutation):
                 )
                 burn_asset.fee = 0
                 txns.append({'txn': burn_asset, 'signer': 'v1', 'desc': f'Burn Legacy Asset {aid}'})
+            
+            # Txn Group 3c: Clear App Local States
+            # Check for apps that prevent account closure
+            from algosdk.transaction import ApplicationClearStateTxn
+            # v1_apps fetched above
+            
+            for app in v1_apps:
+                app_id = app['id']
+                # Create Clear State checking
+                clear_app = ApplicationClearStateTxn(
+                    sender=v1_address,
+                    sp=params,
+                    index=app_id
+                )
+                clear_app.fee = 0
+                txns.append({'txn': clear_app, 'signer': 'v1', 'desc': f'Clear App {app_id}'})
                 
             # Txn Group 4: V1 Algo Transfer (Close or Max Send)
             if not has_leftover_assets:
@@ -2355,7 +2373,7 @@ class PrepareAtomicMigrationMutation(graphene.Mutation):
                 # Send Max ALGO (Balance - MinBalance - Fee)
                 # Fee is 0 (sponsored), so Balance - MinBalance
                 # We need to recalculate MinBalance based on REMAINING assets
-                # V1 Min Balance = 100,000 (Base) + 100,000 * len(Assets)
+                # V1 Min Balance = 100,000 (Base) + 100,000 * len(Assets) + 100,000 * len(Apps) + ...
                 # Assets count = Total Assets - Migrated Assets
                 
                 remaining_assets_count = len(v1_assets) - len(assets_to_migrate) - len(legacy_assets_to_burn)
