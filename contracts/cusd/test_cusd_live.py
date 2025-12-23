@@ -128,6 +128,17 @@ def run_tests():
     wait_for_confirmation(client, optin_a.get_txid(), 4)
     print("✅ Users Opted into cUSD Asset")
 
+    # Fund users with actual cUSD from sponsor
+    print("\nFunding users with cUSD from Sponsor...")
+    cusd_fund_amount = 1_000_000  # 1 cUSD (6 decimals)
+    sp_cusd = client.suggested_params()
+    cusd_fund_a = AssetTransferTxn(admin_addr, sp_cusd, user_a, cusd_fund_amount, CUSD_ID)
+    cusd_fund_b = AssetTransferTxn(admin_addr, sp_cusd, user_b, cusd_fund_amount, CUSD_ID)
+    client.send_transaction(kms_signer.sign_transaction(cusd_fund_a))
+    client.send_transaction(kms_signer.sign_transaction(cusd_fund_b))
+    wait_for_confirmation(client, cusd_fund_a.get_txid(), 4)
+    print(f"✅ Users Funded with {cusd_fund_amount / 1_000_000} cUSD each")
+
     # Opt-in Users to App
     print("\nOpting In Users...")
     atc = AtomicTransactionComposer()
@@ -190,15 +201,16 @@ def run_tests():
         return
     
     # Attempt transfer from FROZEN User A (should FAIL at ASA level)
-    # NOTE: ASA freeze is already verified above. This is an additional behavioral check.
-    print("\nAttempting cUSD transfer from FROZEN User A...")
+    # Now testing with actual non-zero balance.
+    transfer_amount = 100_000  # 0.1 cUSD
+    print(f"\nAttempting {transfer_amount/1_000_000} cUSD transfer from FROZEN User A...")
     try:
         sp_tx = client.suggested_params()
-        frozen_tx = AssetTransferTxn(user_a, sp_tx, user_b, 0, CUSD_ID)
+        frozen_tx = AssetTransferTxn(user_a, sp_tx, user_b, transfer_amount, CUSD_ID)
         client.send_transaction(frozen_tx.sign(priv_a))
         wait_for_confirmation(client, frozen_tx.get_txid(), 4)
-        # 0-amount transfers may be allowed in some edge cases; not a critical failure
-        print("⚠️ WARNING: 0-amount transfer succeeded despite freeze (edge case behavior)")
+        print("❌ FAIL: Frozen user should NOT be able to transfer")
+        return
     except Exception as e:
         if "frozen" in str(e).lower():
             print(f"✅ Transfer Blocked (Expected): {e}")
@@ -207,14 +219,14 @@ def run_tests():
     
     # Attempt transfer from UNFROZEN User B (during PAUSE - should also FAIL if system affects ASA)
     # Note: Global pause only affects CONTRACT operations, not raw ASA transfers!
-    # Raw ASA transfers should still work for unfrozen users.
-    print("\nAttempting cUSD transfer from UNFROZEN User B (during pause)...")
+    # Note: User A is frozen, so cannot receive. Sending to admin instead.
+    print(f"\nAttempting {transfer_amount/1_000_000} cUSD transfer from UNFROZEN User B to ADMIN (during pause)...")
     try:
         sp_tx = client.suggested_params()
-        unfrozen_tx = AssetTransferTxn(user_b, sp_tx, user_a, 0, CUSD_ID)
+        unfrozen_tx = AssetTransferTxn(user_b, sp_tx, admin_addr, transfer_amount, CUSD_ID)
         client.send_transaction(unfrozen_tx.sign(priv_b))
         wait_for_confirmation(client, unfrozen_tx.get_txid(), 4)
-        print("✅ Unfrozen User B CAN transfer (raw ASA transfer, not contract call)")
+        print("✅ Unfrozen User B CAN transfer (raw ASA transfer bypasses contract pause)")
     except Exception as e:
         print(f"❌ FAIL: Unfrozen User B should be able to transfer: {e}")
         return
