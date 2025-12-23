@@ -27,6 +27,12 @@ from typing import Final
 # Note: USDC asset ID is now stored in global state via setup_assets
 # No compile-time configuration needed
 
+# Constant for 1:1 Peg
+COLLATERAL_RATIO = Int(1000000)
+# Minimum amounts to prevent drain attacks (1 USDC / 1 cUSD)
+MIN_MINT = Int(1000000)
+MIN_BURN = Int(1000000)
+
 class CUSDState:
     """Global and local state for Confío Dollar management"""
     
@@ -55,13 +61,6 @@ class CUSDState:
         stack_type=TealType.uint64,
         default=Int(0),
         descr="USDC asset ID (e.g., 31566704 on mainnet)"
-    )
-    
-    # Collateral ratio (1e6 = 1:1)
-    collateral_ratio: Final[GlobalStateValue] = GlobalStateValue(
-        stack_type=TealType.uint64,
-        default=Int(1000000),  # 1:1 ratio for user minting/burning
-        descr="Collateral ratio (1e6 = 100%)"
     )
     
     # Statistics
@@ -117,12 +116,6 @@ class CUSDState:
         default=Int(0),
         descr="Account freeze status (0=active, 1=frozen)"
     )
-    
-    is_vault: Final[LocalStateValue] = LocalStateValue(
-        stack_type=TealType.uint64,
-        default=Int(0),
-        descr="Vault status (0=not vault, 1=is vault)"
-    )
 
 app = Application("ConfioDollar", state=CUSDState())
 
@@ -133,7 +126,6 @@ def create():
         Assert(Txn.rekey_to() == Global.zero_address()),
         app.state.admin.set(Txn.sender()),
         app.state.is_paused.set(Int(0)),
-        app.state.collateral_ratio.set(Int(1000000)),  # 1:1 ratio for user operations
         Approve()
     )
 
@@ -287,67 +279,24 @@ def opt_in():
     return Seq(
         Assert(Txn.rekey_to() == Global.zero_address()),
         app.state.is_frozen[Txn.sender()].set(Int(0)),
-        app.state.is_vault[Txn.sender()].set(Int(0)),
         Approve()
     )
 
-@app.external
-def add_vault(vault_address: abi.Address):
-    """Add a vault address"""
-    return Seq(
-        Assert(
-            And(
-                Txn.sender() == app.state.admin,
-                app.state.is_paused == Int(0)
-            )
-        ),
-        Assert(Txn.rekey_to() == Global.zero_address()),
-        # cUSD ASA manager must be permanently locked to zero
-        (mgr := AssetParam.manager(app.state.cusd_asset_id)),
-        Assert(mgr.hasValue()),
-        Assert(mgr.value() == Global.zero_address()),
-        # Ensure vault has opted into the app
-        Assert(App.optedIn(vault_address.get(), Global.current_application_id())),
-        app.state.is_vault[vault_address.get()].set(Int(1)),
-        Log(Concat(Bytes("vault_added:"), vault_address.get())),
-        Approve()
-    )
 
-@app.external
-def remove_vault(vault_address: abi.Address):
-    """Remove a vault address"""
-    return Seq(
-        Assert(
-            And(
-                Txn.sender() == app.state.admin,
-                app.state.is_paused == Int(0)
-            )
-        ),
-        Assert(Txn.rekey_to() == Global.zero_address()),
-        # cUSD ASA manager must be permanently locked to zero
-        (mgr := AssetParam.manager(app.state.cusd_asset_id)),
-        Assert(mgr.hasValue()),
-        Assert(mgr.value() == Global.zero_address()),
-        app.state.is_vault[vault_address.get()].set(Int(0)),
-        Log(Concat(Bytes("vault_removed:"), vault_address.get())),
-        Approve()
-    )
 
 @app.external
 def freeze_address(target_address: abi.Address):
     """Freeze an address from transacting"""
     return Seq(
-        Assert(
-            And(
-                Txn.sender() == app.state.admin,
-                app.state.is_paused == Int(0)
-            )
-        ),
+        Assert(Txn.sender() == app.state.admin),
+        # Removed checks to allow freezing during pause
         Assert(Txn.rekey_to() == Global.zero_address()),
         # cUSD ASA manager must be permanently locked to zero
         (mgr := AssetParam.manager(app.state.cusd_asset_id)),
         Assert(mgr.hasValue()),
         Assert(mgr.value() == Global.zero_address()),
+        # Testnet asset manager not cleared yet
+        # Assert(mgr.value() == Global.zero_address()),
         
         # Re-assert freeze authority before freezing
         (freeze := AssetParam.freeze(app.state.cusd_asset_id)),
@@ -383,17 +332,15 @@ def freeze_address(target_address: abi.Address):
 def unfreeze_address(target_address: abi.Address):
     """Unfreeze an address"""
     return Seq(
-        Assert(
-            And(
-                Txn.sender() == app.state.admin,
-                app.state.is_paused == Int(0)
-            )
-        ),
+        Assert(Txn.sender() == app.state.admin),
+        # Removed checks to allow unfreezing during pause
         Assert(Txn.rekey_to() == Global.zero_address()),
         # cUSD ASA manager must be permanently locked to zero
         (mgr := AssetParam.manager(app.state.cusd_asset_id)),
         Assert(mgr.hasValue()),
         Assert(mgr.value() == Global.zero_address()),
+        # Testnet asset manager not cleared yet
+        # Assert(mgr.value() == Global.zero_address()),
         
         # Re-assert freeze authority before unfreezing
         (freeze := AssetParam.freeze(app.state.cusd_asset_id)),
@@ -459,6 +406,8 @@ def mint_with_collateral():
         (mgr := AssetParam.manager(app.state.cusd_asset_id)),
         Assert(mgr.hasValue()),
         Assert(mgr.value() == Global.zero_address()),
+        # Testnet asset manager not cleared yet
+        # Assert(mgr.value() == Global.zero_address()),
         
         # Re-assert clawback authority before minting
         (claw := AssetParam.clawback(app.state.cusd_asset_id)),
@@ -481,10 +430,14 @@ def mint_with_collateral():
                 # Verify sponsor payment (Tx 0)
                 Assert(Gtxn[0].type_enum() == TxnType.Payment),
                 Assert(Gtxn[0].sender() == app.state.sponsor_address.get()),
-                Assert(Gtxn[0].amount() >= Int(0)),  # Can be 0 if just covering fees
+                Assert(Gtxn[0].rekey_to() == Global.zero_address()),
+                Assert(Gtxn[0].close_remainder_to() == Global.zero_address()),
+                Assert(Gtxn[0].amount() >= Global.min_txn_fee()),  # Ensure sponsor pays real fees
+                Assert(Gtxn[0].amount() >= Global.min_txn_fee()),  # Ensure sponsor pays real fees
+                # Allow payment to app (fees) OR user (MBR top up)
                 Assert(Or(
-                    Gtxn[0].receiver() == Gtxn[1].sender(),  # Payment to asset sender (the user)
-                    Gtxn[0].receiver() == Global.current_application_address()  # Payment to app
+                    Gtxn[0].receiver() == Global.current_application_address(),
+                    Gtxn[0].receiver() == Gtxn[usdc_tx_index.load()].sender()
                 )),
             ),
             Seq(
@@ -529,6 +482,7 @@ def mint_with_collateral():
         
         # Guard against zero amount after ratio math
         Assert(cusd_to_mint.load() > Int(0)),
+        Assert(cusd_to_mint.load() >= MIN_MINT),
         
         # Verify reserve address hasn't changed
         (reserve := AssetParam.reserve(app.state.cusd_asset_id)),
@@ -607,6 +561,8 @@ def burn_for_collateral():
         (mgr := AssetParam.manager(app.state.cusd_asset_id)),
         Assert(mgr.hasValue()),
         Assert(mgr.value() == Global.zero_address()),
+        # Testnet asset manager not cleared yet
+        # Assert(mgr.value() == Global.zero_address()),
         
         # Re-assert clawback authority before burning
         (claw := AssetParam.clawback(app.state.cusd_asset_id)),
@@ -629,10 +585,14 @@ def burn_for_collateral():
                 # Verify sponsor payment (Tx 0)
                 Assert(Gtxn[0].type_enum() == TxnType.Payment),
                 Assert(Gtxn[0].sender() == app.state.sponsor_address.get()),
-                Assert(Gtxn[0].amount() >= Int(0)),  # Can be 0 if just covering fees
+                Assert(Gtxn[0].rekey_to() == Global.zero_address()),
+                Assert(Gtxn[0].close_remainder_to() == Global.zero_address()),
+                Assert(Gtxn[0].amount() >= Global.min_txn_fee()),  # Ensure sponsor pays real fees
+                Assert(Gtxn[0].amount() >= Global.min_txn_fee()),  # Ensure sponsor pays real fees
+                # Allow payment to app (fees) OR user (MBR top up)
                 Assert(Or(
-                    Gtxn[0].receiver() == Gtxn[1].sender(),  # Payment to asset sender (the user)
-                    Gtxn[0].receiver() == Global.current_application_address()  # Payment to app
+                    Gtxn[0].receiver() == Global.current_application_address(),
+                    Gtxn[0].receiver() == Gtxn[cusd_tx_index.load()].sender()
                 )),
             ),
             Seq(
@@ -673,6 +633,7 @@ def burn_for_collateral():
         
         # Guard against zero amount after ratio math
         Assert(usdc_to_redeem.load() > Int(0)),
+        Assert(cusd_amount.load() >= MIN_BURN),
         
         # Verify sufficient USDC reserves
         (usdc_balance := AssetHolding.balance(
@@ -801,50 +762,7 @@ def update_admin(new_admin: abi.Address):
         Approve()
     )
 
-@app.external
-def update_collateral_ratio(new_ratio: abi.Uint64):
-    """
-    Update collateral ratio (admin only)
-    1000000 = 1:1, 1500000 = 1.5:1 (150% collateralized)
-    Range: 100%-200%
-    """
-    return Seq(
-        Assert(Txn.sender() == app.state.admin),
-        Assert(Txn.rekey_to() == Global.zero_address()),
-        Assert(app.state.is_paused == Int(0)),
-        Assert(new_ratio.get() >= Int(1000000)),  # Minimum 100% collateral
-        Assert(new_ratio.get() <= Int(2000000)),  # Maximum 200% collateral
-        
-        app.state.collateral_ratio.set(new_ratio.get()),
-        
-        Log(Concat(
-            Bytes("ratio:"),
-            Itob(new_ratio.get())
-        )),
-        
-        Approve()
-    )
 
-@app.external
-def refresh_reserve():
-    """
-    Refresh the stored reserve address from ASA parameters
-    Admin only - use if ASA reserve was intentionally rotated
-    """
-    return Seq(
-        Assert(Txn.sender() == app.state.admin),
-        Assert(Txn.rekey_to() == Global.zero_address()),
-        
-        # Read current reserve from ASA
-        (reserve := AssetParam.reserve(app.state.cusd_asset_id)),
-        Assert(reserve.hasValue()),
-        
-        # Update stored reserve
-        app.state.reserve_address.set(reserve.value()),
-        
-        Log(Bytes("reserve_refreshed")),
-        Approve()
-    )
 
 
 @app.external(read_only=True)
@@ -874,7 +792,7 @@ def get_reserves(*, output: abi.Tuple5[abi.Uint64, abi.Uint64, abi.Uint64, abi.U
         usdc.set(app.state.total_usdc_locked),
         cusd_collateral.set(app.state.cusd_circulating_supply),
         tbills.set(app.state.tbills_backed_supply),
-        ratio.set(app.state.collateral_ratio),
+        ratio.set(COLLATERAL_RATIO),
         total.set(app.state.cusd_circulating_supply + app.state.tbills_backed_supply),
         output.set(usdc, cusd_collateral, tbills, ratio, total)
     )
@@ -920,7 +838,7 @@ def verify_policy_target(*, output: abi.Tuple2[abi.Bool, abi.Uint64]):
         # Compare USDC * 1e6 >= circulating * ratio
         result.set(
             WideRatio([usdc_bal.value(), Int(1_000_000)], [Int(1)]) >=
-            WideRatio([app.state.cusd_circulating_supply, app.state.collateral_ratio], [Int(1)])
+            WideRatio([app.state.cusd_circulating_supply, COLLATERAL_RATIO], [Int(1)])
         ),
         output.set(result, actual_balance)
     )
@@ -932,16 +850,14 @@ def is_frozen(address: abi.Address, *, output: abi.Bool):
         output.set(app.state.is_frozen[address.get()] == Int(1))
     )
 
-@app.external(read_only=True)
-def is_vault(address: abi.Address, *, output: abi.Bool):
-    """Check if an address is a vault"""
-    return Seq(
-        output.set(app.state.is_vault[address.get()] == Int(1))
-    )
+
 
 @app.update
 def update():
-    """Only admin can update the application"""
+    """
+    Development: Admin update allowed
+    Once functionality and operations are verified stable in production: Change this to return Reject() and compile!
+    """
     return Seq(
         Assert(Txn.sender() == app.state.admin),
         Assert(Txn.rekey_to() == Global.zero_address()),
@@ -950,40 +866,10 @@ def update():
 
 @app.delete
 def delete():
-    """Only admin can delete - require no outstanding supply and ASA reconfigured"""
-    return Seq(
-        Assert(Txn.sender() == app.state.admin),
-        Assert(Txn.rekey_to() == Global.zero_address()),
-        
-        # Defensive: ensure assets were configured
-        Assert(app.state.cusd_asset_id != Int(0)),
-        
-        # Require no outstanding cUSD (tracked counters)
-        Assert(app.state.cusd_circulating_supply == Int(0)),
-        Assert(app.state.tbills_backed_supply == Int(0)),
-        
-        # Also verify on-chain: app holds no cUSD
-        (app_bal := AssetHolding.balance(Global.current_application_address(), app.state.cusd_asset_id)),
-        Assert(app_bal.hasValue()),
-        Assert(app_bal.value() == Int(0)),
-        
-        # Verify all supply is back in reserve (use live reserve address)
-        (total := AssetParam.total(app.state.cusd_asset_id)),
-        Assert(total.hasValue()),
-        # Read current reserve address in case it was rotated
-        (reserve := AssetParam.reserve(app.state.cusd_asset_id)),
-        Assert(reserve.hasValue()),
-        (res_bal := AssetHolding.balance(reserve.value(), app.state.cusd_asset_id)),
-        Assert(res_bal.hasValue()),
-        Assert(res_bal.value() == total.value()),
-        
-        # Manager must be zero-address (immutability); claw/freeze may remain app
-        (manager := AssetParam.manager(app.state.cusd_asset_id)),
-        Assert(manager.hasValue()),
-        Assert(manager.value() == Global.zero_address()),
-        
-        Approve()
-    )
+    """
+    Immutable: Deletion is permanently disabled to ensure trust.
+    """
+    return Reject()
 
 if __name__ == "__main__":
     import json

@@ -198,7 +198,9 @@ export const SellScreen = () => {
                     await Keychain.setGenericPassword('guardarian_sell', timestamp, { service: 'com.confio.guardarian_pending' });
                     console.log('SellScreen - Guardarian pending flag SET:', timestamp);
 
-                    await Linking.openURL(tx.redirect_url);
+                    if (tx.redirect_url) {
+                        await Linking.openURL(tx.redirect_url);
+                    }
                     return;
                 } catch (openErr) {
                     console.warn('Failed to open Guardarian redirect', openErr);

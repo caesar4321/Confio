@@ -64,32 +64,6 @@
             "desc": "Allow accounts to opt-in"
         },
         {
-            "name": "add_vault",
-            "args": [
-                {
-                    "type": "address",
-                    "name": "vault_address"
-                }
-            ],
-            "returns": {
-                "type": "void"
-            },
-            "desc": "Add a vault address"
-        },
-        {
-            "name": "remove_vault",
-            "args": [
-                {
-                    "type": "address",
-                    "name": "vault_address"
-                }
-            ],
-            "returns": {
-                "type": "void"
-            },
-            "desc": "Remove a vault address"
-        },
-        {
             "name": "freeze_address",
             "args": [
                 {
@@ -162,27 +136,6 @@
             "desc": "Transfer admin rights to a new address (can be a multi-sig wallet)\nOnly current admin can transfer rights"
         },
         {
-            "name": "update_collateral_ratio",
-            "args": [
-                {
-                    "type": "uint64",
-                    "name": "new_ratio"
-                }
-            ],
-            "returns": {
-                "type": "void"
-            },
-            "desc": "Update collateral ratio (admin only)\n1000000 = 1:1, 1500000 = 1.5:1 (150% collateralized) Range: 100%-200%"
-        },
-        {
-            "name": "refresh_reserve",
-            "args": [],
-            "returns": {
-                "type": "void"
-            },
-            "desc": "Refresh the stored reserve address from ASA parameters\nAdmin only - use if ASA reserve was intentionally rotated"
-        },
-        {
             "name": "get_stats",
             "args": [],
             "returns": {
@@ -228,25 +181,12 @@
             "desc": "Check if an address is frozen"
         },
         {
-            "name": "is_vault",
-            "args": [
-                {
-                    "type": "address",
-                    "name": "address"
-                }
-            ],
-            "returns": {
-                "type": "bool"
-            },
-            "desc": "Check if an address is a vault"
-        },
-        {
             "name": "update",
             "args": [],
             "returns": {
                 "type": "void"
             },
-            "desc": "Only admin can update the application"
+            "desc": "Development: Admin update allowed\nOnce functionality and operations are verified stable in production: Change this to return Reject() and compile!"
         },
         {
             "name": "delete",
@@ -254,7 +194,7 @@
             "returns": {
                 "type": "void"
             },
-            "desc": "Only admin can delete - require no outstanding supply and ASA reconfigured"
+            "desc": "Immutable: Deletion is permanently disabled to ensure trust."
         }
     ],
     "networks": {}

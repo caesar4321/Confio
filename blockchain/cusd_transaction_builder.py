@@ -241,6 +241,11 @@ class CUSDTransactionBuilder:
             else:
                 logger.info(f"User has sufficient balance")
 
+            # Contract requires Gtxn[0].amount() >= Global.min_txn_fee()
+            if funding_needed < min_fee:
+                funding_needed = min_fee
+                logger.info(f"Adjusting funding to min_fee ({min_fee}) to satisfy contract assertion")
+
             # Sponsor payment parameters
             sponsor_params = transaction.SuggestedParams(
                 fee=sponsor_payment_fee,  # Sponsor payment pays its own fee
@@ -432,6 +437,11 @@ class CUSDTransactionBuilder:
                 logger.info(f"User needs {funding_needed} microAlgos for min balance")
             else:
                 logger.info(f"User has sufficient balance")
+
+            # Contract requires Gtxn[0].amount() >= Global.min_txn_fee()
+            if funding_needed < min_fee:
+                funding_needed = min_fee
+                logger.info(f"Adjusting funding to min_fee ({min_fee}) to satisfy contract assertion")
 
             # Sponsor payment parameters
             sponsor_params = SuggestedParams(

@@ -84,6 +84,10 @@ class ConvertUSDCToCUSD(graphene.Mutation):
             # Validate amount
             validate_transaction_amount(amount)
             amount_decimal = Decimal(amount)
+
+            # Enforce minimum amount of 1 unit (1,000,000 micro-units) to match contract constraints
+            if amount_decimal < 1:
+                raise ValidationError("El monto debe ser al menos 1")
             
             # Get JWT context with validation and permission check
             from users.jwt_context import get_jwt_business_context_with_validation
@@ -277,7 +281,7 @@ class ConvertUSDCToCUSD(graphene.Mutation):
             return ConvertUSDCToCUSD(
                 conversion=None,
                 success=False,
-                errors=[str(e)]
+                errors=e.messages
             )
         except Exception as e:
             print(f"[CONVERSION] Exception during conversion: {e}")
@@ -317,6 +321,10 @@ class ConvertCUSDToUSDC(graphene.Mutation):
             # Validate amount
             validate_transaction_amount(amount)
             amount_decimal = Decimal(amount)
+
+            # Enforce minimum amount of 1 unit (1,000,000 micro-units) to match contract constraints
+            if amount_decimal < 1:
+                raise ValidationError("El monto debe ser al menos 1")
             
             # Get JWT context with validation and permission check
             from users.jwt_context import get_jwt_business_context_with_validation
@@ -505,7 +513,7 @@ class ConvertCUSDToUSDC(graphene.Mutation):
             return ConvertCUSDToUSDC(
                 conversion=None,
                 success=False,
-                errors=[str(e)]
+                errors=e.messages
             )
         except Exception as e:
             return ConvertCUSDToUSDC(
