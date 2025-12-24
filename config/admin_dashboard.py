@@ -333,6 +333,13 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         from blockchain.models import Balance
         context['cached_balances'] = Balance.objects.count()
         context['stale_balances'] = Balance.objects.filter(is_stale=True).count()
+        
+        # Add time-based staleness (older than 24h) since background task is disabled
+        stale_threshold_time = timezone.now() - timedelta(hours=24)
+        context['stale_balances'] = Balance.objects.filter(
+            Q(is_stale=True) | Q(last_synced__lt=stale_threshold_time)
+        ).count()
+
         context['balance_cache_health'] = {
             'total': context['cached_balances'],
             'stale': context['stale_balances'],
