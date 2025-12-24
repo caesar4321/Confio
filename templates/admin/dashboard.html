@@ -319,11 +319,7 @@
             <div class="metric-value">{{ active_offers|intcomma }}</div>
             <div class="metric-change">{{ trades_today }} trades today</div>
         </div>
-        <div class="metric-card">
-            <div class="metric-label">Active P2P Offers</div>
-            <div class="metric-value">{{ active_offers|intcomma }}</div>
-            <div class="metric-change">{{ trades_today }} trades today</div>
-        </div>
+
     </div>
 
     <!-- V2 Security & Migration Metrics -->
@@ -387,370 +383,364 @@
         <div class="metric-card">
             <div class="metric-label">Abandoned (Window Shopping)</div>
             <div class="metric-value" style="color: #6b7280;">{{ guardarian_stats.abandoned_count }}</div>
-            <div class="metric-change">> 1h Idle</div>
+            <div class="metric-change">&gt; 1h Idle</div>
         </div>
 
         <div class="metric-card">
             <div class="metric-label">Active (Processing)</div>
             <div class="metric-value" style="color: #f59e0b;">{{ guardarian_stats.real_active_count }}</div>
-            <div class="metric-change">
-                < 1h New/Pending</div>
+            <div class="metric-change">&lt; 1h New/Pending</div>
+        </div>
+    </div>
+
+    <!-- Failure Breakdown -->
+    <div style="background: white; border: 1px solid #e5e7eb; border-radius: 12px; padding: 15px; margin-bottom: 20px;">
+        <div style="font-weight: 600; font-size: 14px; color: #6b7280; margin-bottom: 10px;">Drop-off Breakdown
+        </div>
+        <div style="display: flex; gap: 20px;">
+            <div style="flex: 1; padding: 10px; background: #fef2f2; border-radius: 8px;">
+                <div style="font-size: 12px; color: #ef4444;">Failed / Declined</div>
+                <div style="font-weight: 700; font-size: 18px;">{{ guardarian_stats.failed_count }}</div>
+            </div>
+            <div style="flex: 1; padding: 10px; background: #fff7ed; border-radius: 8px;">
+                <div style="font-size: 12px; color: #f97316;">Expired (Timeout)</div>
+                <div style="font-weight: 700; font-size: 18px;">{{ guardarian_stats.expired_count }}</div>
+            </div>
+            <div style="flex: 1; padding: 10px; background: #f3f4f6; border-radius: 8px;">
+                <div style="font-size: 12px; color: #4b5563;">Refunded</div>
+                <div style="font-weight: 700; font-size: 18px;">{{ guardarian_stats.refunded_count }}</div>
             </div>
         </div>
+    </div>
 
-        <!-- Failure Breakdown -->
-        <div
-            style="background: white; border: 1px solid #e5e7eb; border-radius: 12px; padding: 15px; margin-bottom: 20px;">
-            <div style="font-weight: 600; font-size: 14px; color: #6b7280; margin-bottom: 10px;">Drop-off Breakdown
+    <!-- Guardarian Breakdowns -->
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px;">
+        <div class="data-table" style="margin-bottom: 0;">
+            <div
+                style="padding: 12px 16px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-weight: 600; color: #4b5563;">
+                Top Currencies (Volume)
             </div>
-            <div style="display: flex; gap: 20px;">
-                <div style="flex: 1; padding: 10px; background: #fef2f2; border-radius: 8px;">
-                    <div style="font-size: 12px; color: #ef4444;">Failed / Declined</div>
-                    <div style="font-weight: 700; font-size: 18px;">{{ guardarian_stats.failed_count }}</div>
-                </div>
-                <div style="flex: 1; padding: 10px; background: #fff7ed; border-radius: 8px;">
-                    <div style="font-size: 12px; color: #f97316;">Expired (Timeout)</div>
-                    <div style="font-weight: 700; font-size: 18px;">{{ guardarian_stats.expired_count }}</div>
-                </div>
-                <div style="flex: 1; padding: 10px; background: #f3f4f6; border-radius: 8px;">
-                    <div style="font-size: 12px; color: #4b5563;">Refunded</div>
-                    <div style="font-weight: 700; font-size: 18px;">{{ guardarian_stats.refunded_count }}</div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Guardarian Breakdowns -->
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px;">
-            <div class="data-table" style="margin-bottom: 0;">
-                <div
-                    style="padding: 12px 16px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-weight: 600; color: #4b5563;">
-                    Top Currencies (Volume)
-                </div>
-                <table>
-                    <tbody>
-                        {% for curr in guardarian_currencies %}
-                        <tr>
-                            <td style="font-weight: 500;">{{ curr.from_currency }}</td>
-                            <td style="text-align: right;">${{ curr.volume|floatformat:0|intcomma }}</td>
-                            <td style="text-align: right; color: #6b7280;">{{ curr.count }} txs</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            <div class="data-table" style="margin-bottom: 0;">
-                <div
-                    style="padding: 12px 16px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-weight: 600; color: #4b5563;">
-                    Top Countries
-                </div>
-                <table>
-                    <tbody>
-                        {% for country in guardarian_countries %}
-                        <tr>
-                            <td style="font-weight: 500;">
-                                <span class="country-flag">
-                                    {% if country.user__phone_country == 'VE' %}🇻🇪
-                                    {% elif country.user__phone_country == 'CO' %}🇨🇴
-                                    {% elif country.user__phone_country == 'US' %}🇺🇸
-                                    {% elif country.user__phone_country == 'GT' %}🇬🇹
-                                    {% elif country.user__phone_country == 'ES' %}🇪🇸
-                                    {% elif country.user__phone_country == 'AR' %}🇦🇷
-                                    {% elif country.user__phone_country == 'MX' %}🇲🇽
-                                    {% elif country.user__phone_country == 'PE' %}🇵🇪
-                                    {% elif country.user__phone_country == 'CL' %}🇨🇱
-                                    {% elif country.user__phone_country == 'BR' %}🇧🇷
-                                    {% else %}🌐{% endif %}
-                                </span>
-                                {{ country.user__phone_country }}
-                            </td>
-                            <td style="text-align: right;">{{ country.count }} users</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <!-- Recent Guardarian Transactions -->
-        <h3 class="section-title" style="font-size: 18px;">Recent Guardarian Activity</h3>
-        <div class="data-table">
             <table>
-                <thead>
-                    <tr>
-                        <th>ID</th>
-                        <th>User</th>
-                        <th>Amount</th>
-                        <th>Status</th>
-                        <th>Date</th>
-                    </tr>
-                </thead>
                 <tbody>
-                    {% for tx in guardarian_recent %}
+                    {% for curr in guardarian_currencies %}
                     <tr>
-                        <td>{{ tx.guardarian_id|slice:":8" }}...</td>
-                        <td>{{ tx.user.email }}</td>
-                        <td>{{ tx.from_amount }} {{ tx.from_currency }}</td>
-                        <td>
-                            <span
-                                class="status-badge {% if tx.status == 'finished' %}completed{% elif tx.status == 'failed' or tx.status == 'expired' %}disputed{% else %}pending{% endif %}">
-                                {{ tx.status }}
-                            </span>
-                        </td>
-                        <td>{{ tx.created_at|timesince }} ago</td>
+                        <td style="font-weight: 500;">{{ curr.from_currency }}</td>
+                        <td style="text-align: right;">${{ curr.volume|floatformat:0|intcomma }}</td>
+                        <td style="text-align: right; color: #6b7280;">{{ curr.count }} txs</td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
-
-        <h2 class="section-title">📱 Device OS Stats</h2>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px;">
-            <div class="metrics-grid" style="margin-bottom: 0;">
-                <div class="metric-card">
-                    <div class="metric-label">iOS Users</div>
-                    <div class="metric-value">{{ os_stats.ios_count|intcomma }}</div>
-                    <div class="metric-change">{{ os_stats.ios_pct|floatformat:1 }}% of users</div>
-                </div>
-                <div class="metric-card">
-                    <div class="metric-label">Android Users</div>
-                    <div class="metric-value">{{ os_stats.android_count|intcomma }}</div>
-                    <div class="metric-change">{{ os_stats.android_pct|floatformat:1 }}% of users</div>
-                </div>
+        <div class="data-table" style="margin-bottom: 0;">
+            <div
+                style="padding: 12px 16px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-weight: 600; color: #4b5563;">
+                Top Countries
             </div>
-            <div class="chart-container" style="margin-bottom: 0;">
-                <h3 class="section-title" style="margin-top: 0; font-size: 18px;">Platform Distribution</h3>
-                <div style="height: 200px; position: relative;">
-                    <canvas id="osChart"></canvas>
-                </div>
+            <table>
+                <tbody>
+                    {% for country in guardarian_countries %}
+                    <tr>
+                        <td style="font-weight: 500;">
+                            <span class="country-flag">
+                                {% if country.user__phone_country == 'VE' %}🇻🇪
+                                {% elif country.user__phone_country == 'CO' %}🇨🇴
+                                {% elif country.user__phone_country == 'US' %}🇺🇸
+                                {% elif country.user__phone_country == 'GT' %}🇬🇹
+                                {% elif country.user__phone_country == 'ES' %}🇪🇸
+                                {% elif country.user__phone_country == 'AR' %}🇦🇷
+                                {% elif country.user__phone_country == 'MX' %}🇲🇽
+                                {% elif country.user__phone_country == 'PE' %}🇵🇪
+                                {% elif country.user__phone_country == 'CL' %}🇨🇱
+                                {% elif country.user__phone_country == 'BR' %}🇧🇷
+                                {% else %}🌐{% endif %}
+                            </span>
+                            {{ country.user__phone_country }}
+                        </td>
+                        <td style="text-align: right;">{{ country.count }} users</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Recent Guardarian Transactions -->
+    <h3 class="section-title" style="font-size: 18px;">Recent Guardarian Activity</h3>
+    <div class="data-table">
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>User</th>
+                    <th>Amount</th>
+                    <th>Status</th>
+                    <th>Date</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for tx in guardarian_recent %}
+                <tr>
+                    <td>{{ tx.guardarian_id|slice:":8" }}...</td>
+                    <td>{{ tx.user.email }}</td>
+                    <td>{{ tx.from_amount }} {{ tx.from_currency }}</td>
+                    <td>
+                        <span
+                            class="status-badge {% if tx.status == 'finished' %}completed{% elif tx.status == 'failed' or tx.status == 'expired' %}disputed{% else %}pending{% endif %}">
+                            {{ tx.status }}
+                        </span>
+                    </td>
+                    <td>{{ tx.created_at|timesince }} ago</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <h2 class="section-title">📱 Device OS Stats</h2>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px;">
+        <div class="metrics-grid" style="margin-bottom: 0;">
+            <div class="metric-card">
+                <div class="metric-label">iOS Users</div>
+                <div class="metric-value">{{ os_stats.ios_count|intcomma }}</div>
+                <div class="metric-change">{{ os_stats.ios_pct|floatformat:1 }}% of users</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Android Users</div>
+                <div class="metric-value">{{ os_stats.android_count|intcomma }}</div>
+                <div class="metric-change">{{ os_stats.android_pct|floatformat:1 }}% of users</div>
             </div>
         </div>
-
-        {% if referral_stats %}
-        <h2 class="section-title">👥 Referral Program</h2>
-        <div class="metrics-grid" style="margin-top: 20px;">
-            <div class="metric-card">
-                <div class="metric-label">Referral Signups</div>
-                <div class="metric-value">{{ referral_stats.total|default:"0"|intcomma }}</div>
-                <div class="metric-change">Converted: {{ referral_stats.converted|default:"0"|intcomma }}</div>
-            </div>
-            <div class="metric-card">
-                <div class="metric-label">Activation Rate</div>
-                <div class="metric-value">{{ referral_stats.conversion_rate|floatformat:1 }}%</div>
-                <div class="metric-change">Engaged referrers: {{ referral_stats.engaged|default:"0"|intcomma }}
-                </div>
-            </div>
-            <div class="metric-card">
-                <div class="metric-label">New Referrals (7d)</div>
-                <div class="metric-value">{{ referral_stats.new_week|default:"0"|intcomma }}</div>
-                <div class="metric-change">Converted (7d): {{ referral_stats.converted_week|default:"0"|intcomma }}
-                </div>
-            </div>
-            <div class="metric-card">
-                <div class="metric-label">Avg Reward / Converted</div>
-                <div class="metric-value">{{ referral_stats.avg_rewards_per_converted|floatformat:2 }}</div>
-                <div class="metric-change">Eligible rewards: {{ referral_stats.eligible_events|default:"0"|intcomma }}
-                </div>
+        <div class="chart-container" style="margin-bottom: 0;">
+            <h3 class="section-title" style="margin-top: 0; font-size: 18px;">Platform Distribution</h3>
+            <div style="height: 200px; position: relative;">
+                <canvas id="osChart"></canvas>
             </div>
         </div>
-        <p style="font-size: 13px; color: #4b5563; margin: -10px 0 30px;">
-            Referral metrics reflect balances earned via invites only. cUSD, USDC, and presale funds remain
-            unrestricted.
-        </p>
+    </div>
+
+    {% if referral_stats %}
+    <h2 class="section-title">👥 Referral Program</h2>
+    <div class="metrics-grid" style="margin-top: 20px;">
+        <div class="metric-card">
+            <div class="metric-label">Referral Signups</div>
+            <div class="metric-value">{{ referral_stats.total|default:"0"|intcomma }}</div>
+            <div class="metric-change">Converted: {{ referral_stats.converted|default:"0"|intcomma }}</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Activation Rate</div>
+            <div class="metric-value">{{ referral_stats.conversion_rate|floatformat:1 }}%</div>
+            <div class="metric-change">Engaged referrers: {{ referral_stats.engaged|default:"0"|intcomma }}
+            </div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">New Referrals (7d)</div>
+            <div class="metric-value">{{ referral_stats.new_week|default:"0"|intcomma }}</div>
+            <div class="metric-change">Converted (7d): {{ referral_stats.converted_week|default:"0"|intcomma }}
+            </div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Avg Reward / Converted</div>
+            <div class="metric-value">{{ referral_stats.avg_rewards_per_converted|floatformat:2 }}</div>
+            <div class="metric-change">Eligible rewards: {{ referral_stats.eligible_events|default:"0"|intcomma }}
+            </div>
+        </div>
+    </div>
+    <p style="font-size: 13px; color: #4b5563; margin: -10px 0 30px;">
+        Referral metrics reflect balances earned via invites only. cUSD, USDC, and presale funds remain
+        unrestricted.
+    </p>
+    {% endif %}
+
+    <!-- Presale Status -->
+    <h2 class="section-title">🚀 CONFIO Token Presale</h2>
+    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px;">
+        <span style="font-weight: 600;">Global Presale Switch:</span>
+        {% if presale_global_enabled %}
+        <span style="background: #10b981; color: white; padding: 4px 12px; border-radius: 6px; font-weight: 600;">✓
+            ENABLED</span>
+        {% else %}
+        <span style="background: #6b7280; color: white; padding: 4px 12px; border-radius: 6px; font-weight: 600;">○
+            DISABLED</span>
         {% endif %}
+        <a href="{% url 'confio_admin:presale_presalesettings_changelist' %}"
+            style="margin-left: auto; color: #3b82f6; text-decoration: none; font-size: 14px;">⚙️
+            Settings</a>
+    </div>
 
-        <!-- Presale Status -->
-        <h2 class="section-title">🚀 CONFIO Token Presale</h2>
-        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px;">
-            <span style="font-weight: 600;">Global Presale Switch:</span>
-            {% if presale_global_enabled %}
-            <span style="background: #10b981; color: white; padding: 4px 12px; border-radius: 6px; font-weight: 600;">✓
-                ENABLED</span>
-            {% else %}
-            <span style="background: #6b7280; color: white; padding: 4px 12px; border-radius: 6px; font-weight: 600;">○
-                DISABLED</span>
-            {% endif %}
-            <a href="{% url 'confio_admin:presale_presalesettings_changelist' %}"
-                style="margin-left: auto; color: #3b82f6; text-decoration: none; font-size: 14px;">⚙️
-                Settings</a>
+    {% if presale_active %}
+    <!-- Active Presale Phase -->
+    <h3 style="font-size: 20px; color: #1f2937; margin-bottom: 16px;">📊 Active Phase {{ presale_phase }}: {{ presale_name }}</h3>
+    <div class="metrics-grid">
+        <div class="metric-card">
+            <div class="metric-label">Total Raised</div>
+            <div class="metric-value">${{ presale_raised|floatformat:2|intcomma }}</div>
+            <div class="metric-change">Goal: ${{ presale_goal|floatformat:0|intcomma }}</div>
         </div>
 
-        {% if presale_active %}
-        <!-- Active Presale Phase -->
-        <h3 style="font-size: 20px; color: #1f2937; margin-bottom: 16px;">📊 Active Phase {{ presale_phase }}: {{ presale_name }}</h3>
-        <div class="metrics-grid">
-            <div class="metric-card">
-                <div class="metric-label">Total Raised</div>
-                <div class="metric-value">${{ presale_raised|floatformat:2|intcomma }}</div>
-                <div class="metric-change">Goal: ${{ presale_goal|floatformat:0|intcomma }}</div>
-            </div>
-
-            <div class="metric-card">
-                <div class="metric-label">Progress</div>
-                <div class="metric-value">{{ presale_progress|floatformat:1 }}%</div>
-                <div class="metric-progress">
-                    <div class="progress-bar">
-                        <div class="progress-fill" style="width: {{ presale_progress }}%; background: #8b5cf6;">
-                        </div>
+        <div class="metric-card">
+            <div class="metric-label">Progress</div>
+            <div class="metric-value">{{ presale_progress|floatformat:1 }}%</div>
+            <div class="metric-progress">
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width: {{ presale_progress }}%; background: #8b5cf6;">
                     </div>
                 </div>
             </div>
-
-            <div class="metric-card">
-                <div class="metric-label">Participants</div>
-                <div class="metric-value">{{ presale_participants|intcomma }}</div>
-                <div class="metric-change">Unique buyers</div>
-            </div>
-
-            <div class="metric-card">
-                <div class="metric-label">Price per Token</div>
-                <div class="metric-value">${{ presale_price }}</div>
-                <div class="metric-change">CONFIO/cUSD</div>
-            </div>
         </div>
+
+        <div class="metric-card">
+            <div class="metric-label">Participants</div>
+            <div class="metric-value">{{ presale_participants|intcomma }}</div>
+            <div class="metric-change">Unique buyers</div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">Price per Token</div>
+            <div class="metric-value">${{ presale_price }}</div>
+            <div class="metric-change">CONFIO/cUSD</div>
+        </div>
+    </div>
+    {% else %}
+    <div class="alert"
+        style="background: #fef3c7; color: #92400e; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
+        <strong>⚠️ No Active Presale</strong>
+        {% if not presale_global_enabled %}
+        - Global switch is disabled. Enable it in <a
+            href="{% url 'confio_admin:presale_presalesettings_changelist' %}">Settings</a> and
+        activate a
+        phase.
         {% else %}
-        <div class="alert"
-            style="background: #fef3c7; color: #92400e; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
-            <strong>⚠️ No Active Presale</strong>
-            {% if not presale_global_enabled %}
-            - Global switch is disabled. Enable it in <a
-                href="{% url 'confio_admin:presale_presalesettings_changelist' %}">Settings</a> and
-            activate a
-            phase.
-            {% else %}
-            - <a href="{% url 'confio_admin:presale_presalephase_changelist' %}">Activate a presale phase</a>
-            {% endif %}
-        </div>
+        - <a href="{% url 'confio_admin:presale_presalephase_changelist' %}">Activate a presale phase</a>
         {% endif %}
+    </div>
+    {% endif %}
 
-        <!-- All Presale Phases Summary -->
-        {% if all_presale_phases %}
-        <h3 style="font-size: 18px; color: #1f2937; margin: 24px 0 12px;">All Presale Phases</h3>
-        <div style="background: white; border-radius: 8px; overflow: hidden; border: 1px solid #e5e7eb;">
-            <table style="width: 100%; border-collapse: collapse;">
-                <thead style="background: #f9fafb;">
-                    <tr>
-                        <th style="padding: 12px; text-align: left; font-weight: 600; color: #6b7280; font-size: 13px;">
-                            Phase</th>
-                        <th style="padding: 12px; text-align: left; font-weight: 600; color: #6b7280; font-size: 13px;">
-                            Name
-                        </th>
-                        <th style="padding: 12px; text-align: left; font-weight: 600; color: #6b7280; font-size: 13px;">
-                            Status</th>
-                        <th
-                            style="padding: 12px; text-align: right; font-weight: 600; color: #6b7280; font-size: 13px;">
-                            Raised</th>
-                        <th
-                            style="padding: 12px; text-align: right; font-weight: 600; color: #6b7280; font-size: 13px;">
-                            Participants</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for phase in all_presale_phases %}
-                    <tr style="border-top: 1px solid #e5e7eb;">
-                        <td style="padding: 12px;">Phase {{ phase.phase_number }}</td>
-                        <td style="padding: 12px; font-weight: 500;">{{ phase.name }}</td>
-                        <td style="padding: 12px;">
-                            {% if phase.status == 'active' %}
-                            <span
-                                style="background: #10b981; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">ACTIVE</span>
-                            {% elif phase.status == 'completed' %}
-                            <span
-                                style="background: #3b82f6; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">COMPLETED</span>
-                            {% elif phase.status == 'paused' %}
-                            <span
-                                style="background: #f59e0b; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">PAUSED</span>
-                            {% elif phase.status == 'upcoming' %}
-                            <span
-                                style="background: #8b5cf6; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">UPCOMING</span>
-                            {% else %}
-                            <span
-                                style="background: #6b7280; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">{{ phase.status|upper }}</span>
-                            {% endif %}
-                        </td>
-                        <td style="padding: 12px; text-align: right;">${{ phase.total_raised|floatformat:2|intcomma }}
-                        </td>
-                        <td style="padding: 12px; text-align: right;">{{ phase.total_participants|intcomma }}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% endif %}
+    <!-- All Presale Phases Summary -->
+    {% if all_presale_phases %}
+    <h3 style="font-size: 18px; color: #1f2937; margin: 24px 0 12px;">All Presale Phases</h3>
+    <div style="background: white; border-radius: 8px; overflow: hidden; border: 1px solid #e5e7eb;">
+        <table style="width: 100%; border-collapse: collapse;">
+            <thead style="background: #f9fafb;">
+                <tr>
+                    <th style="padding: 12px; text-align: left; font-weight: 600; color: #6b7280; font-size: 13px;">
+                        Phase</th>
+                    <th style="padding: 12px; text-align: left; font-weight: 600; color: #6b7280; font-size: 13px;">
+                        Name
+                    </th>
+                    <th style="padding: 12px; text-align: left; font-weight: 600; color: #6b7280; font-size: 13px;">
+                        Status</th>
+                    <th style="padding: 12px; text-align: right; font-weight: 600; color: #6b7280; font-size: 13px;">
+                        Raised</th>
+                    <th style="padding: 12px; text-align: right; font-weight: 600; color: #6b7280; font-size: 13px;">
+                        Participants</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for phase in all_presale_phases %}
+                <tr style="border-top: 1px solid #e5e7eb;">
+                    <td style="padding: 12px;">Phase {{ phase.phase_number }}</td>
+                    <td style="padding: 12px; font-weight: 500;">{{ phase.name }}</td>
+                    <td style="padding: 12px;">
+                        {% if phase.status == 'active' %}
+                        <span
+                            style="background: #10b981; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">ACTIVE</span>
+                        {% elif phase.status == 'completed' %}
+                        <span
+                            style="background: #3b82f6; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">COMPLETED</span>
+                        {% elif phase.status == 'paused' %}
+                        <span
+                            style="background: #f59e0b; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">PAUSED</span>
+                        {% elif phase.status == 'upcoming' %}
+                        <span
+                            style="background: #8b5cf6; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">UPCOMING</span>
+                        {% else %}
+                        <span
+                            style="background: #6b7280; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;">{{ phase.status|upper }}</span>
+                        {% endif %}
+                    </td>
+                    <td style="padding: 12px; text-align: right;">${{ phase.total_raised|floatformat:2|intcomma }}
+                    </td>
+                    <td style="padding: 12px; text-align: right;">{{ phase.total_participants|intcomma }}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
 
-        <div class="quick-actions" style="margin-top: 20px;">
-            <a href="{% url 'confio_admin:presale_presalephase_changelist' %}" class="action-button">
-                Manage Presale Phases
-            </a>
-            <a href="{% url 'confio_admin:presale_presalepurchase_changelist' %}" class="action-button secondary">
-                View All Purchases
-            </a>
-        </div>
+    <div class="quick-actions" style="margin-top: 20px;">
+        <a href="{% url 'confio_admin:presale_presalephase_changelist' %}" class="action-button">
+            Manage Presale Phases
+        </a>
+        <a href="{% url 'confio_admin:presale_presalepurchase_changelist' %}" class="action-button secondary">
+            View All Purchases
+        </a>
+    </div>
 
-        <!-- Presale Waitlist Metrics -->
-        <h3 class="section-title" style="font-size: 18px; margin-top: 30px;">📋 Presale Waitlist</h3>
-        <div class="metrics-grid">
-            <div class="metric-card">
-                <div class="metric-label">Total Waitlist</div>
-                <div class="metric-value">{{ presale_waitlist_total|intcomma }}</div>
-                <div class="metric-change">Users interested in presale</div>
-            </div>
-
-            <div class="metric-card">
-                <div class="metric-label">Unnotified</div>
-                <div class="metric-value" style="color: #f59e0b;">{{ presale_waitlist_unnotified|intcomma }}
-                </div>
-                <div class="metric-change">Ready to notify</div>
-            </div>
-
-            <div class="metric-card">
-                <div class="metric-label">Notified</div>
-                <div class="metric-value" style="color: #10b981;">{{ presale_waitlist_notified|intcomma }}</div>
-                <div class="metric-change">Already informed</div>
-            </div>
+    <!-- Presale Waitlist Metrics -->
+    <h3 class="section-title" style="font-size: 18px; margin-top: 30px;">📋 Presale Waitlist</h3>
+    <div class="metrics-grid">
+        <div class="metric-card">
+            <div class="metric-label">Total Waitlist</div>
+            <div class="metric-value">{{ presale_waitlist_total|intcomma }}</div>
+            <div class="metric-change">Users interested in presale</div>
         </div>
 
-        <div class="quick-actions">
-            <a href="{% url 'confio_admin:presale_presalewaitlist_changelist' %}" class="action-button">
-                Manage Waitlist
-            </a>
+        <div class="metric-card">
+            <div class="metric-label">Unnotified</div>
+            <div class="metric-value" style="color: #f59e0b;">{{ presale_waitlist_unnotified|intcomma }}
+            </div>
+            <div class="metric-change">Ready to notify</div>
         </div>
 
-        <!-- $CONFIO Reward Security -->
-        {% if fraud_stats %}
-        <h2 class="section-title">🔍 $CONFIO Reward Security</h2>
-        <p style="margin-bottom: 18px; color: #1f2937;">
-            Monitoring referral-earned $CONFIO balances and withdrawal limits. Presale and externally deposited
-            tokens stay
-            unrestricted.
-        </p>
-        <div class="metrics-grid">
-            <div class="metric-card">
-                <div class="metric-label">Referral Rewards Earned</div>
-                <div class="metric-value">{{ fraud_stats.earned_total|default:"0"|floatformat:2 }} CONFIO</div>
-                <div class="metric-change">Lifetime referral earnings</div>
-            </div>
+        <div class="metric-card">
+            <div class="metric-label">Notified</div>
+            <div class="metric-value" style="color: #10b981;">{{ presale_waitlist_notified|intcomma }}</div>
+            <div class="metric-change">Already informed</div>
+        </div>
+    </div>
 
-            <div class="metric-card">
-                <div class="metric-label">Available for Withdrawal</div>
-                <div class="metric-value" style="color: #16a34a;">{{ fraud_stats.available_total|default:"0"|floatformat:2 }} CONFIO</div>
-                <div class="metric-change">Withdrawn to date: {{ fraud_stats.total_withdrawn|default:"0"|floatformat:2 }} CONFIO</div>
-            </div>
+    <div class="quick-actions">
+        <a href="{% url 'confio_admin:presale_presalewaitlist_changelist' %}" class="action-button">
+            Manage Waitlist
+        </a>
+    </div>
 
-            <div class="metric-card">
-                <div class="metric-label">Withdrawal Velocity</div>
-                <div class="metric-value" style="color: #2563eb;">{{ fraud_stats.daily_withdrawn|default:"0"|floatformat:2 }} CONFIO</div>
-                <div class="metric-change">Last 7 days: {{ fraud_stats.weekly_withdrawn|default:"0"|floatformat:2 }}
-                    CONFIO</div>
+    <!-- $CONFIO Reward Security -->
+    {% if fraud_stats %}
+    <h2 class="section-title">🔍 $CONFIO Reward Security</h2>
+    <p style="margin-bottom: 18px; color: #1f2937;">
+        Monitoring referral-earned $CONFIO balances and withdrawal limits. Presale and externally deposited
+        tokens stay
+        unrestricted.
+    </p>
+    <div class="metrics-grid">
+        <div class="metric-card">
+            <div class="metric-label">Referral Rewards Earned</div>
+            <div class="metric-value">{{ fraud_stats.earned_total|default:"0"|floatformat:2 }} CONFIO</div>
+            <div class="metric-change">Lifetime referral earnings</div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">Available for Withdrawal</div>
+            <div class="metric-value" style="color: #16a34a;">{{ fraud_stats.available_total|default:"0"|floatformat:2 }} CONFIO</div>
+            <div class="metric-change">Withdrawn to date: {{ fraud_stats.total_withdrawn|default:"0"|floatformat:2 }}
+                CONFIO</div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">Withdrawal Velocity</div>
+            <div class="metric-value" style="color: #2563eb;">{{ fraud_stats.daily_withdrawn|default:"0"|floatformat:2 }} CONFIO</div>
+            <div class="metric-change">Last 7 days: {{ fraud_stats.weekly_withdrawn|default:"0"|floatformat:2 }} CONFIO
             </div>
         </div>
 
         <div class="metric-card">
             <div class="metric-label">Reviews & High Value</div>
-            <div class="metric-value" style="color: #dc2626;">{{ fraud_stats.pending_review|default:"0" }}
-            </div>
-            <div class="metric-change">High-value (&gt;500 CONFIO): {{ fraud_stats.high_value|default:"0" }}
-            </div>
+            <div class="metric-value" style="color: #dc2626;">{{ fraud_stats.pending_review|default:"0" }}</div>
+            <div class="metric-change">High-value (&gt;500 CONFIO): {{ fraud_stats.high_value|default:"0" }}</div>
         </div>
 
         <div class="metric-card">
@@ -1063,7 +1053,8 @@
     {% endif %}
 
     <!-- New ID Verification Submissions -->
-    <h2 class="section-title">New ID Verifications{% if pending_verifications_count %} ({{ pending_verifications_count }} pending){% endif %}</h2>
+    <h2 class="section-title">New ID Verifications{% if pending_verifications_count %} ({{ pending_verifications_count }}
+        pending){% endif %}</h2>
     <div class="data-table">
         <table>
             <thead>
