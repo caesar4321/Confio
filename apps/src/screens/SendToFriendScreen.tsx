@@ -9,6 +9,7 @@ import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useAuth } from '../contexts/AuthContext';
+import { useBackupEnforcement } from '../hooks/useBackupEnforcement';
 
 const colors = {
   primary: '#34D399', // emerald-400
@@ -69,6 +70,7 @@ export const SendToFriendScreen = () => {
   // Safe area handled with SafeAreaView
   const { formatNumber } = useNumberFormat();
   const { userProfile } = useAuth();
+  const { checkBackupEnforcement, BackupEnforcementModal } = useBackupEnforcement();
 
   const friend: Friend = (route.params as any)?.friend || { name: 'Friend', avatar: 'F', isOnConfio: true, phone: '' };
 
@@ -173,6 +175,10 @@ export const SendToFriendScreen = () => {
       setShowError(true);
       return;
     }
+
+    // Check for backup enforcement
+    const canProceed = await checkBackupEnforcement('transaction');
+    if (!canProceed) return;
 
     setIsProcessing(true);
     navLock.current = true;
@@ -383,6 +389,7 @@ export const SendToFriendScreen = () => {
           )}
         </View>
       </ScrollView>
+      <BackupEnforcementModal />
     </View>
   );
 };

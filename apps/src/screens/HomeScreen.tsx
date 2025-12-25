@@ -50,6 +50,7 @@ import { inviteSendService } from '../services/inviteSendService';
 import { GET_PENDING_PAYROLL_ITEMS } from '../apollo/queries';
 import { LoadingOverlay } from '../components/LoadingOverlay';
 import { ReferralInputModal } from '../components/ReferralInputModal';
+import { useBackupEnforcement } from '../hooks/useBackupEnforcement';
 import { ReferralSuccessModal } from '../components/ReferralSuccessModal';
 import { deepLinkHandler } from '../utils/deepLinkHandler';
 import { TextInput } from 'react-native';
@@ -125,6 +126,7 @@ export const HomeScreen = () => {
   const { currency, formatAmount, exchangeRate } = useCurrency();
   const { rate: marketRate, loading: rateLoading } = useSelectedCountryRate();
   const apollo = useApolloClient();
+  const { checkBackupEnforcement, BackupEnforcementModal } = useBackupEnforcement();
   const [algorandAddress, setAlgorandAddress] = React.useState<string>('');
   // Show local currency by default if not in US and rate is available
   const [showLocalCurrency, setShowLocalCurrency] = useState(false);
@@ -575,6 +577,18 @@ export const HomeScreen = () => {
 
     }, [usdcBalance, myBalancesLoading])
   );
+
+  // App Launch Backup Enforcement
+  useEffect(() => {
+    if (isAuthenticated && !myBalancesLoading) {
+      // Small delay to let data settle and not conflict with other modals
+      const t = setTimeout(() => {
+        // Pass the total calculated USD value from HomeScreen
+        checkBackupEnforcement('app_launch', totalUSDValue);
+      }, 2000);
+      return () => clearTimeout(t);
+    }
+  }, [isAuthenticated, myBalancesLoading, totalUSDValue]); // Should run once when auth/balances are ready
 
   // No more mock accounts - we fetch from server
 
@@ -1868,6 +1882,7 @@ export const HomeScreen = () => {
         }}
         onCancel={() => setShowConvertModal(false)}
       />
+      <BackupEnforcementModal />
     </View>
   );
 };

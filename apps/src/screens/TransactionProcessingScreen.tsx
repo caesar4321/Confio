@@ -415,19 +415,14 @@ export const TransactionProcessingScreen = () => {
           console.log('TransactionProcessingScreen: Loading stored Algorand wallet...');
           const loaded = await algorandService.loadStoredWallet();
           if (!loaded) {
-            console.error('TransactionProcessingScreen: No Algorand wallet found in storage');
-            setTransactionError('No Algorand wallet connected. Please set up your wallet first.');
-            setIsComplete(true);
-            return;
+            console.warn('TransactionProcessingScreen: No stored wallet found, but proceeding to allow auto-healing via signTransactionBytes...');
+            // We do NOT return here anymore. We let signTransactionBytes try to restore the wallet context derived from Auth.
           }
           currentAccount = algorandService.getCurrentAccount();
         }
 
         if (!currentAccount) {
-          console.error('TransactionProcessingScreen: Failed to load Algorand account');
-          setTransactionError('Failed to load Algorand wallet. Please try again.');
-          setIsComplete(true);
-          return;
+          console.warn('TransactionProcessingScreen: Wallet still not loaded, hoping signTransactionBytes heals it...');
         }
 
         // Decode user transaction (base64 -> bytes)

@@ -14,6 +14,7 @@ import algorandService from '../services/algorandService';
 import { formatNumber } from '../utils/numberFormatting';
 import { useCountry } from '../contexts/CountryContext';
 import { LoadingOverlay } from '../components/LoadingOverlay';
+import { useBackupEnforcement } from '../hooks/useBackupEnforcement';
 
 const colors = {
   primary: '#34d399',
@@ -35,6 +36,7 @@ export const ConfioPresaleScreen = () => {
   const navigation = useNavigation<ConfioPresaleScreenNavigationProp>();
   const { selectedCountry } = useCountry();
   const apollo = useApolloClient();
+  const { checkBackupEnforcement, BackupEnforcementModal } = useBackupEnforcement();
 
   // Fetch presale phases from server
   const { data, loading, error } = useQuery(GET_ALL_PRESALE_PHASES, {
@@ -380,6 +382,10 @@ export const ConfioPresaleScreen = () => {
               onPress={async () => {
                 if (!checkEligibility()) return;
 
+                // Check backup enforcement (strict)
+                const canProceed = await checkBackupEnforcement('presale');
+                if (!canProceed) return;
+
                 // Check presale eligibility via WebSocket (backup check, V1 migration, etc.)
                 try {
                   setBusy(true);
@@ -459,6 +465,7 @@ export const ConfioPresaleScreen = () => {
 
         <View style={styles.bottomPadding} />
       </ScrollView>
+      <BackupEnforcementModal />
     </SafeAreaView>
   );
 };

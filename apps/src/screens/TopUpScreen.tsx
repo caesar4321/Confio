@@ -33,6 +33,7 @@ import { getFlagForCurrency } from '../utils/currencyFlags';
 import { useMutation, gql } from '@apollo/client';
 import algorandService from '../services/algorandService';
 import PreFlightModal from '../components/PreFlightModal';
+import { useBackupEnforcement } from '../hooks/useBackupEnforcement';
 
 
 // GraphQL mutation for USDC opt-in
@@ -60,6 +61,7 @@ const TopUpScreen = () => {
   const { userProfile } = useAuth() as any;
   const { activeAccount } = useAccount();
   const { selectedCountry, userCountry } = useCountry();
+  const { checkBackupEnforcement, BackupEnforcementModal } = useBackupEnforcement();
 
   const derivedCurrencyCode = useMemo(() => {
     let localCurrency = 'USD';
@@ -288,6 +290,9 @@ const TopUpScreen = () => {
       Alert.alert('Monto inválido', 'Ingresa un monto mayor a 0.');
       return;
     }
+    // Check for backup enforcement
+    const canProceed = await checkBackupEnforcement('transaction');
+    if (!canProceed) return;
 
     // Check and opt-in to USDC before proceeding
     const usdcOptInSuccess = await handleUSDCOptIn();
@@ -515,6 +520,7 @@ const TopUpScreen = () => {
         onCancel={() => setShowPreFlightModal(false)}
       />
 
+      <BackupEnforcementModal />
     </SafeAreaView>
   );
 };

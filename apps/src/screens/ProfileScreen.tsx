@@ -274,16 +274,16 @@ export const ProfileScreen = () => {
       setBiometricLoading(true);
       checkBiometricSupport();
 
-      // Check Drive status (but don't overwrite if manually enabled or userProfile says enabled)
-      const backupProvider = (userProfile as any)?.backupProvider?.toLowerCase();
-      const hasAnyBackup = backupProvider === 'google_drive' || backupProvider === 'icloud';
-      if (!driveBackupManuallyEnabled.current && !hasAnyBackup) {
-        authService.checkDriveBackupEnabled().then(enabled => {
-          if (!driveBackupManuallyEnabled.current) {
-            setDriveBackupEnabled(enabled);
-          }
-        });
-      }
+      // 3. Removed local check to strictly enforce backend status
+      // const backupProvider = (userProfile as any)?.backupProvider?.toLowerCase();
+      // const hasAnyBackup = backupProvider === 'google_drive' || backupProvider === 'icloud';
+      // if (!driveBackupManuallyEnabled.current && !hasAnyBackup) {
+      //   authService.checkDriveBackupEnabled().then(enabled => {
+      //     if (!driveBackupManuallyEnabled.current) {
+      //       setDriveBackupEnabled(enabled);
+      //     }
+      //   });
+      // }
 
       // Reset the check flag when screen loses focus
       return () => {

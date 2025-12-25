@@ -448,15 +448,15 @@ export async function checkExistingBackups(
           deviceHint,
           hasAndroidMarker,
           hasIOSMarker,
-          currentPlatform,
-          isCrossPlatform: (currentPlatform === 'ios' && hasAndroidMarker) ||
-            (currentPlatform === 'android' && hasIOSMarker)
+          currentPlatform: Platform.OS,
+          isCrossPlatform: (Platform.OS === 'ios' && hasAndroidMarker) ||
+            (Platform.OS === 'android' && hasIOSMarker)
         });
 
-        if (currentPlatform === 'ios' && hasAndroidMarker && !hasIOSMarker) {
+        if (Platform.OS === 'ios' && hasAndroidMarker && !hasIOSMarker) {
           return true;
         }
-        if (currentPlatform === 'android' && hasIOSMarker && !hasAndroidMarker) {
+        if (Platform.OS === 'android' && hasIOSMarker && !hasAndroidMarker) {
           return true;
         }
         return false;
@@ -469,7 +469,7 @@ export async function checkExistingBackups(
         hasLegacy,
         hasCrossPlatformBackup,
         crossPlatformCount: crossPlatformEntries.length,
-        currentPlatform
+        currentPlatform: Platform.OS
       });
 
       return {

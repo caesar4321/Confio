@@ -9,6 +9,7 @@ import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNumberFormat } from '../utils/numberFormatting';
+import { useBackupEnforcement } from '../hooks/useBackupEnforcement';
 
 const colors = {
   primary: '#34D399', // emerald-400
@@ -140,6 +141,8 @@ export const SendWithAddressScreen = () => {
     return () => { alive = false; };
   }, [amount, destination, tokenType]);
 
+  const { checkBackupEnforcement, BackupEnforcementModal } = useBackupEnforcement();
+
   const handleSend = async () => {
     console.log('SendWithAddressScreen: handleSend called');
 
@@ -183,6 +186,10 @@ export const SendWithAddressScreen = () => {
       setShowError(true);
       return;
     }
+
+    // Check for backup enforcement
+    const canProceed = await checkBackupEnforcement('transaction');
+    if (!canProceed) return;
 
     setIsProcessing(true);
     navLock.current = true;
@@ -383,6 +390,7 @@ export const SendWithAddressScreen = () => {
           </View>
         </View>
       )}
+      <BackupEnforcementModal />
     </View>
   );
 };

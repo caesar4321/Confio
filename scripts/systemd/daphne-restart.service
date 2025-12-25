@@ -1,0 +1,7 @@
+[Unit]
+Description=Restart Daphne Service
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl try-restart daphne.service
