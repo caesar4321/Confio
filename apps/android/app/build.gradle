@@ -73,16 +73,17 @@ println "Final properties: $envProperties"
 
 android {
     ndkVersion "27.1.12297006"
-    buildToolsVersion "35.0.0"  // Update to match AGP requirement
-    compileSdkVersion rootProject.ext.compileSdkVersion
+    // Hardcoded SDK versions to ensure compliance with 16KB page support
+    compileSdk 35
+    buildToolsVersion "35.0.0"
 
     namespace "com.Confio.Confio"
     defaultConfig {
         applicationId "com.Confio.Confio"
-        minSdkVersion rootProject.ext.minSdkVersion
-        targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 50
-        versionName "2.5.2"
+        minSdkVersion 24
+        targetSdkVersion 35
+        versionCode 51
+        versionName "2.5.4"
         buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", rootProject.ext.newArchEnabled.toString()
         if (rootProject.ext.newArchEnabled) {
             buildConfigField "boolean", "IS_TURBOMODULE_ENABLED", "true"

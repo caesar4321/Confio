@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity, Dimensions, Image } from 'react-native';
+import { View, Text, StyleSheet, Modal, TouchableOpacity, Dimensions, Image, ScrollView } from 'react-native';
 // Use MaterialCommunityIcons for cloud-lock icon (now linked in iOS Info.plist)
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
@@ -22,51 +22,53 @@ export const BackupConsentModal: React.FC<BackupConsentModalProps> = ({ visible,
         >
             <View style={styles.centeredView}>
                 <View style={styles.modalView}>
-                    <View style={styles.iconContainer}>
-                        <Icon name="cloud-lock-outline" size={64} color="#4F46E5" />
-                    </View>
-
-                    <Text style={styles.modalTitle}>Protección de Activos</Text>
-
-                    <Text style={styles.modalText}>
-                        Para asegurar que <Text style={styles.bold}>nunca pierdas tu dinero</Text>, Confío guardará una copia cifrada de tu llave maestra en tu <Text style={styles.bold}>Google Drive personal</Text>.
-                    </Text>
-
-                    <View style={styles.bulletPoints}>
-                        <View style={styles.bulletRow}>
-                            <Icon name="check-circle" size={20} color="#10B981" style={styles.bulletIcon} />
-                            <Text style={styles.bulletText}>Solo TÚ tienes acceso con tu cuenta Google.</Text>
+                    <ScrollView contentContainerStyle={styles.modalContent}>
+                        <View style={styles.iconContainer}>
+                            <Icon name="cloud-lock-outline" size={64} color="#4F46E5" />
                         </View>
-                        <View style={styles.bulletRow}>
-                            <Icon name="check-circle" size={20} color="#10B981" style={styles.bulletIcon} />
-                            <Text style={styles.bulletText}>Recupera tu billetera automáticamente si cambias de teléfono.</Text>
-                        </View>
-                        <View style={styles.bulletRow}>
-                            <Icon name="shield-check" size={20} color="#10B981" style={styles.bulletIcon} />
-                            <Text style={styles.bulletText}>Sin contraseñas extra que recordar.</Text>
-                        </View>
-                    </View>
 
-                    <View style={styles.warningContainer}>
-                        <Icon name="alert-circle-outline" size={20} color="#F59E0B" />
-                        <Text style={styles.warningText}>
-                            Verás una solicitud de permiso para acceder a "configuración de la aplicación". Es 100% privado.
+                        <Text style={styles.modalTitle}>Protección de Activos</Text>
+
+                        <Text style={styles.modalText}>
+                            Para asegurar que <Text style={styles.bold}>nunca pierdas tu dinero</Text>, Confío guardará una copia cifrada de tu llave maestra en tu <Text style={styles.bold}>Google Drive personal</Text>.
                         </Text>
-                    </View>
 
-                    <TouchableOpacity
-                        style={[styles.button, styles.buttonContinue]}
-                        onPress={onContinue}
-                    >
-                        <Text style={styles.textStyle}>Continuar y Proteger</Text>
-                    </TouchableOpacity>
+                        <View style={styles.bulletPoints}>
+                            <View style={styles.bulletRow}>
+                                <Icon name="check-circle" size={20} color="#10B981" style={styles.bulletIcon} />
+                                <Text style={styles.bulletText}>Solo TÚ tienes acceso con tu cuenta Google.</Text>
+                            </View>
+                            <View style={styles.bulletRow}>
+                                <Icon name="check-circle" size={20} color="#10B981" style={styles.bulletIcon} />
+                                <Text style={styles.bulletText}>Recupera tu billetera automáticamente si cambias de teléfono.</Text>
+                            </View>
+                            <View style={styles.bulletRow}>
+                                <Icon name="shield-check" size={20} color="#10B981" style={styles.bulletIcon} />
+                                <Text style={styles.bulletText}>Sin contraseñas extra que recordar.</Text>
+                            </View>
+                        </View>
 
-                    <TouchableOpacity
-                        style={[styles.button, styles.buttonCancel]}
-                        onPress={onCancel}
-                    >
-                        <Text style={styles.textStyleCancel}>Más tarde (Sin respaldo)</Text>
-                    </TouchableOpacity>
+                        <View style={styles.warningContainer}>
+                            <Icon name="alert-circle-outline" size={20} color="#F59E0B" />
+                            <Text style={styles.warningText}>
+                                Verás una solicitud de permiso para acceder a "configuración de la aplicación". Es 100% privado.
+                            </Text>
+                        </View>
+
+                        <TouchableOpacity
+                            style={[styles.button, styles.buttonContinue]}
+                            onPress={onContinue}
+                        >
+                            <Text style={styles.textStyle}>Continuar y Proteger</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                            style={[styles.button, styles.buttonCancel]}
+                            onPress={onCancel}
+                        >
+                            <Text style={styles.textStyleCancel}>Más tarde (Sin respaldo)</Text>
+                        </TouchableOpacity>
+                    </ScrollView>
                 </View>
             </View>
         </Modal>
@@ -82,10 +84,9 @@ const styles = StyleSheet.create({
     },
     modalView: {
         width: width * 0.9,
+        maxHeight: '85%',
         backgroundColor: 'white',
         borderRadius: 24,
-        padding: 24,
-        alignItems: 'center',
         shadowColor: '#000',
         shadowOffset: {
             width: 0,
@@ -94,6 +95,11 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.25,
         shadowRadius: 4,
         elevation: 5,
+        overflow: 'hidden',
+    },
+    modalContent: {
+        padding: 24,
+        alignItems: 'center',
     },
     iconContainer: {
         marginBottom: 16,
