@@ -29,13 +29,30 @@ class SecurityMiddleware:
                 from django.http import HttpResponseForbidden
                 return HttpResponseForbidden("Your account has been suspended. Please contact support.")
         
-        # Track IP address
+        # Get client IP string first
+        ip_str = self.get_client_ip(request)
+        
+        # Check Redis for blocked status (Performance Optimization)
+        # Only if Redis cache is enabled
+        if ip_str and getattr(settings, 'USE_REDIS_CACHE', False):
+            try:
+                from django_redis import get_redis_connection
+                redis_conn = get_redis_connection("default")
+                if redis_conn.sismember("blocked_ips", ip_str):
+                     from django.http import HttpResponseForbidden
+                     return HttpResponseForbidden("Access denied.")
+            except Exception as e:
+                logger.warning(f"Redis IP check failed: {e}")
+
+        # Track IP address (DB Write/Read)
         ip_address = self.track_ip_address(request)
         
-        # Check if IP is blocked
+        # Fallback check: if IP wasn't in Redis but is blocked in DB (e.g. sync issue)
+        # track_ip_address returns the object, so we can check the flag.
         if ip_address and ip_address.is_blocked:
-            from django.http import HttpResponseForbidden
-            return HttpResponseForbidden("Access denied.")
+             from django.http import HttpResponseForbidden
+             return HttpResponseForbidden("Access denied.")
+
         
         # Track session and device
         if request.user.is_authenticated:
