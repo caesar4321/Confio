@@ -209,6 +209,20 @@ class InitiateSMSVerification(graphene.Mutation):
                      cache.set(cache_key_phone, 1, 3600)
                      
             # --- End Rate Limiting ---
+            
+            # --- Carrier Lookup Check (VoIP/Landline Blocking) ---
+            # Perform this check AFTER rate limiting to save costs on Lookup API calls
+            from .twilio_verify import check_phone_line_type
+            
+            line_type = check_phone_line_type(phone_e164)
+            logger.info(f"Carrier Lookup for {phone_e164}: {line_type}")
+            
+            # Block known non-mobile types
+            if line_type in ['landline', 'voip', 'nonFixedVoip']:
+                 logger.warning(f"Blocked SMS to non-mobile line type: {line_type} for {phone_e164}")
+                 return InitiateSMSVerification(success=False, error="Solo se permiten números móviles. No se admiten líneas fijas o VoIP.")
+            
+            # Allow: 'mobile', 'fixedVoip' (sometimes legitimate mobile in some countries), or None (failed lookup)
 
             # Start Twilio Verify SMS
             verification_sid, status = send_verification_sms(phone_e164)
