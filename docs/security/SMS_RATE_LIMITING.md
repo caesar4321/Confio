@@ -37,3 +37,36 @@ The rate limiting is implemented in `sms_verification/schema.py` using Django's 
     *   `sms_limit:ip:{ip_address}`
     *   `sms_limit:phone:{phone_number}`
 *   **Logs:** Warning logs are generated when the IP limit is hit (`SMS Rate limit exceeded for IP ...`).
+
+## Additional Security Measures
+
+### 1. IP Blocking
+*   **Mechanism:** Middleware (`SecurityMiddleware`) checks every request against the `IPAddress` table.
+*   **Enforcement:** If `is_blocked=True`, the request is immediately rejected with `403 Forbidden`.
+*   **Management:** IPs can be blocked via the admin panel or automated scripts (`scripts/ban_attacker.py`).
+
+### 2. Twilio Carrier Lookup (VoIP/Landline Blocking)
+To prevent bot farms from using cheap virtual numbers or landlines, we validate the line type before sending an SMS.
+
+*   **API:** Twilio Lookups v2 (`line_type_intelligence`).
+*   **Trigger:** Executed **after** rate limiting checks (to save API costs).
+*   **Allowed Types:** `mobile`, `fixedVoip` (case-by-case), or `null` (if API fails, we fail open).
+*   **Blocked Types:**
+    *   `landline`
+    *   `voip`
+    *   `nonFixedVoip`
+*   **Error Message:** "Solo se permiten números móviles. No se admiten líneas fijas o VoIP."
+
+### 3. Geographic Blocking (High-Risk Countries)
+We have disabled SMS traffic to specific high-risk countries in Asia and Africa that are not relevant to our LATAM diaspora user base but are frequent sources of SMS pumping fraud.
+
+*   **Asia:**
+    *   Afghanistan (+93)
+    *   Myanmar (+95)
+*   **Africa:**
+    *   Cote d'Ivoire (+225)
+    *   Somalia (+252)
+    *   Tanzania (+255)
+    *   Zimbabwe (+263)
+
+These blocks are configured directly in the Twilio Console (Messaging > Settings > Geo permissions).
