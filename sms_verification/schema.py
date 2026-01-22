@@ -138,6 +138,78 @@ class InitiateSMSVerification(graphene.Mutation):
             # Clean up previous unverified for this phone (housekeeping)
             SMSVerification.objects.filter(user=user, phone_number=phone_e164, is_verified=False).delete()
 
+            # --- Rate Limiting Checks ---
+            from django.core.cache import cache
+            
+            # Helper to get client IP
+            def get_client_ip(info):
+                req = info.context
+                x_forwarded_for = req.META.get('HTTP_X_FORWARDED_FOR')
+                if x_forwarded_for:
+                    return x_forwarded_for.split(',')[0].strip()
+                return req.META.get('REMOTE_ADDR')
+
+            ip_addr = get_client_ip(info)
+            
+            # 1. Cooldown per phone number (60s)
+            cache_key_cooldown = f"sms_limit:cooldown:{phone_e164}"
+            if cache.get(cache_key_cooldown):
+                return InitiateSMSVerification(success=False, error="Por favor espera un minuto antes de intentar nuevamente.")
+            
+            # 2. Limit per User (5 per hour)
+            cache_key_user = f"sms_limit:user:{user.id}"
+            user_count = cache.get(cache_key_user, 0)
+            if user_count >= 5:
+                return InitiateSMSVerification(success=False, error="Has excedido el límite de intentos por hora.")
+            
+            # 3. Limit per IP (20 per hour)
+            if ip_addr:
+                cache_key_ip = f"sms_limit:ip:{ip_addr}"
+                ip_count = cache.get(cache_key_ip, 0)
+                if ip_count >= 20:
+                    logger.warning(f"SMS Rate limit exceeded for IP {ip_addr}")
+                    return InitiateSMSVerification(success=False, error="Demasiados intentos desde esta dirección IP.")
+            
+            # 4. Limit per Phone Number (3 per hour)
+            cache_key_phone = f"sms_limit:phone:{phone_e164}"
+            phone_count = cache.get(cache_key_phone, 0)
+            if phone_count >= 3:
+                return InitiateSMSVerification(success=False, error="Demasiados intentos para este número. Intenta más tarde.")
+
+            # --- Updates Counters ---
+            # Set cooldown
+            cache.set(cache_key_cooldown, True, 60)
+            
+            # Increment and set expiry if new (User)
+            if user_count == 0:
+                cache.set(cache_key_user, 1, 3600)
+            else:
+                try:
+                    cache.incr(cache_key_user)
+                except ValueError:
+                     cache.set(cache_key_user, 1, 3600)
+
+            # Increment and set expiry if new (IP)
+            if ip_addr:
+                if ip_count == 0:
+                    cache.set(cache_key_ip, 1, 3600)
+                else:
+                    try:
+                        cache.incr(cache_key_ip)
+                    except ValueError:
+                         cache.set(cache_key_ip, 1, 3600)
+
+            # Increment and set expiry if new (Phone)
+            if phone_count == 0:
+                cache.set(cache_key_phone, 1, 3600)
+            else:
+                try:
+                    cache.incr(cache_key_phone)
+                except ValueError:
+                     cache.set(cache_key_phone, 1, 3600)
+                     
+            # --- End Rate Limiting ---
+
             # Start Twilio Verify SMS
             verification_sid, status = send_verification_sms(phone_e164)
             logger.info("Twilio Verify started sid=%s status=%s", verification_sid, status)
