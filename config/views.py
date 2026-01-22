@@ -314,10 +314,11 @@ def guardarian_transaction_proxy(request):
         guardarian_payload['email'] = final_email
 
     # Log the payload for debugging
-    logger.debug(f'Guardarian transaction request for user {user_id}: '
+    # Log the payload for debugging
+    logger.info(f'Guardarian transaction request for user {user_id}: '
                 f'amount={amount}, currency={from_currency}, '
                 f'email={bool(user.email)}, address={bool(payout_address)}')
-    logger.debug(f'Guardarian payload: {json.dumps(guardarian_payload, indent=2)}')
+    logger.info(f'Guardarian payload: {json.dumps(guardarian_payload, indent=2)}')
 
     try:
         resp = requests.post(
@@ -335,10 +336,11 @@ def guardarian_transaction_proxy(request):
         return JsonResponse({'error': 'Servicio no disponible temporalmente. Por favor intenta más tarde.'}, status=502)
 
     # Log response for debugging
-    logger.debug(f'Guardarian response status: {resp.status_code}')
+    logger.info(f'Guardarian response status: {resp.status_code}')
 
     try:
         data = resp.json()
+        logger.info(f"Guardarian response body: {json.dumps(data)}")
         if resp.ok:
             g_id = data.get('id')
             if g_id:
