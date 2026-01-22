@@ -32,6 +32,11 @@ class SecurityMiddleware:
         # Track IP address
         ip_address = self.track_ip_address(request)
         
+        # Check if IP is blocked
+        if ip_address and ip_address.is_blocked:
+            from django.http import HttpResponseForbidden
+            return HttpResponseForbidden("Access denied.")
+        
         # Track session and device
         if request.user.is_authenticated:
             self.track_user_session(request, ip_address)

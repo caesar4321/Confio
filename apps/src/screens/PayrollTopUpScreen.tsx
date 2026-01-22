@@ -148,6 +148,32 @@ const PayrollTopUpScreen = () => {
 
       setProcessingMessage('Firmando transacción…');
 
+      // Ensure wallet is initialized before signing (Critical for cold starts)
+      try {
+        const { oauthStorage } = await import('../services/oauthStorageService');
+        const { secureDeterministicWallet } = await import('../services/secureDeterministicWallet');
+        const oauthData = await oauthStorage.getOAuthSubject();
+
+        if (oauthData && oauthData.subject && oauthData.provider) {
+          const { GOOGLE_CLIENT_IDS } = await import('../config/env');
+          const GOOGLE_WEB_CLIENT_ID = GOOGLE_CLIENT_IDS.production.web;
+          const iss = oauthData.provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
+          const aud = oauthData.provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
+
+          await secureDeterministicWallet.createOrRestoreWallet(
+            iss,
+            oauthData.subject,
+            aud,
+            oauthData.provider,
+            activeAccount?.type || 'business',
+            activeAccount?.index || 0,
+            activeAccount?.id?.startsWith('business_') ? (activeAccount.id.split('_')[1] || undefined) : undefined
+          );
+        }
+      } catch (err) {
+        console.error('[PayrollTopUpScreen] Error restoring wallet:', err);
+      }
+
       // With sponsored transactions, we only sign the business AXFER transaction
       // The sponsor has already signed the app call transaction
       const signedTxns: string[] = [];

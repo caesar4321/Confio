@@ -1,0 +1,10 @@
+[Unit]
+Description=Daphne Health Check Timer (every 2 minutes)
+Requires=daphne.service
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+
+[Install]
+WantedBy=timers.target

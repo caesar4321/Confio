@@ -364,17 +364,7 @@ export const USDCConversionScreen = () => {
       }
 
       // Ensure wallet is ready for signing
-      setLoadingMessage('Preparando wallet...');
-      try {
-        const oauthData = await oauthStorage.getOAuthSubject();
-        if (oauthData && oauthData.subject && oauthData.provider) {
-          const { GOOGLE_CLIENT_IDS } = await import('../config/env');
-          const GOOGLE_WEB_CLIENT_ID = GOOGLE_CLIENT_IDS.production.web;
-          const iss = oauthData.provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
-          const aud = oauthData.provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
-          await secureDeterministicWallet.createOrRestoreWallet(iss, oauthData.subject, aud, oauthData.provider, activeAccount?.type || 'personal', activeAccount?.index || 0, activeAccount?.id?.startsWith('business_') ? (activeAccount.id.split('_')[1] || undefined) : undefined);
-        }
-      } catch { }
+
 
       // Sign and submit group
       setLoadingMessage('Firmando transacción...');

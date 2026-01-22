@@ -32,6 +32,8 @@ import { useCurrencyByCode } from '../hooks/useCurrency';
 import { getFlagForCurrency } from '../utils/currencyFlags';
 import { useMutation, gql } from '@apollo/client';
 import algorandService from '../services/algorandService';
+import { secureDeterministicWallet } from '../services/secureDeterministicWallet';
+import { oauthStorage } from '../services/oauthStorageService';
 import PreFlightModal from '../components/PreFlightModal';
 import { useBackupEnforcement } from '../hooks/useBackupEnforcement';
 
@@ -294,6 +296,10 @@ const TopUpScreen = () => {
     const canProceed = await checkBackupEnforcement('transaction');
     if (!canProceed) return;
 
+    // Ensure wallet is initialized before opting in (Critical for cold starts)
+    // Ensure wallet is initialized before opting in (Critical for cold starts)
+
+
     // Check and opt-in to USDC before proceeding
     const usdcOptInSuccess = await handleUSDCOptIn();
     if (!usdcOptInSuccess) {
@@ -478,7 +484,7 @@ const TopUpScreen = () => {
           </View>
 
           <Text style={styles.legalText}>
-            Guardance UAB es una empresa registrada en Lituania (código de registro: 306353686), con dirección en Zalgirio St. 90-100, Vilnius, Lituania. Está registrada bajo el número 306353686 por el Centro Estatal de Registros de la República de Lituania como Operador de Intercambio de Moneda Virtual.
+            Guardarian es operado por FinSeven CZ s.r.o., una empresa registrada en la República Checa (código de registro: 22304681), con su dirección en Na Čečeličce 425/4, Smíchov, 15000, Praga, República Checa, registrada como Proveedor de Servicios de Activos Virtuales (VASP).
           </Text>
         </View>
       </ScrollView>

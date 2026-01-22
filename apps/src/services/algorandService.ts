@@ -362,12 +362,83 @@ class AlgorandService {
 
   // (Removed legacy: checkConfioOptInStatus and createSponsoredSendTransaction)
 
+  /**
+   * Helper to ensure the wallet is restored from keychain/storage if not currently in memory.
+   * This handles "cold start" scenarios where the app is launched and immediately attempts a transaction.
+   */
+  private async ensureWalletRestored(): Promise<boolean> {
+    try {
+      await this.ensureInitialized();
+
+      // If we already have a wallet in memory, we are good
+      if (this.currentAccount) {
+        return true;
+      }
+
+      console.log('[AlgorandService] Wallet not in memory, attempting auto-healed restoration...');
+
+      // Try loading a previously stored wallet address first
+      const loaded = await this.loadStoredWallet();
+      if (loaded && this.currentAccount) {
+        // We loaded the address, but do we have the private key/seed capability?
+        // loadStoredWallet only sets address. We need the actual capability to sign.
+        // If secureDeterministicWallet is used, we need to ensure IT has the seed.
+        // But we don't know if it does.
+        // Safer to force a full restore if we are about to sign.
+      }
+
+      // Explicitly restore using OAuth subject from storage
+      const { oauthStorage } = await import('./oauthStorageService');
+      const oauthData = await oauthStorage.getOAuthSubject();
+
+      if (!oauthData || !oauthData.subject || !oauthData.provider) {
+        console.warn('[AlgorandService] Cannot auto-heal: Missing OAuth subject/provider');
+        return false;
+      }
+
+      const provider: 'google' | 'apple' = oauthData.provider;
+      const sub: string = oauthData.subject;
+
+      // Get active account context (type/index/businessId)
+      // This allows us to restore the CORRECT wallet for the current user context
+      const { AuthService } = await import('./authService');
+      const authService = AuthService.getInstance();
+      const accountContext = await authService.getActiveAccountContext();
+
+      const { GOOGLE_CLIENT_IDS } = await import('../config/env');
+      const GOOGLE_WEB_CLIENT_ID = GOOGLE_CLIENT_IDS.production.web;
+      const iss = provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
+      const aud = provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
+
+      console.log('[AlgorandService] Auto-restoring wallet for context:', { type: accountContext.type, index: accountContext.index });
+
+      const wallet = await secureDeterministicWallet.createOrRestoreWallet(
+        iss,
+        sub,
+        aud,
+        provider,
+        accountContext.type,
+        accountContext.index,
+        accountContext.businessId
+      );
+
+      this.currentAccount = { addr: wallet.address, sk: null };
+      console.log('[AlgorandService] Wallet auto-healed successfully');
+      return true;
+
+    } catch (error) {
+      console.error('[AlgorandService] Failed to ensure wallet restored:', error);
+      return false;
+    }
+  }
+
   async signAndSubmitSponsoredTransaction(
     userTransaction: string | Uint8Array,
     sponsorTransaction: string | Uint8Array
   ): Promise<string | null> {
     try {
-      await this.ensureInitialized();
+      // Auto-heal: Ensure wallet is restored before attempting to sign
+      await this.ensureWalletRestored();
 
       // Convert base64 strings to Uint8Array if needed
       const userTxnBytes = typeof userTransaction === 'string'
@@ -378,7 +449,7 @@ class AlgorandService {
         : sponsorTransaction;
 
       console.log('[AlgorandService] Signing user transaction...');
-      // signTransactionBytes will handle wallet initialization
+      // signTransactionBytes will ALSO attempt to heal, but doing it upfront is safer for the group logic
       const signedUserTxn = await this.signTransactionBytes(userTxnBytes);
       // Encode for submission (RN compatible)
       const signedUserTxnB64 = Buffer.from(signedUserTxn).toString('base64');
@@ -437,48 +508,15 @@ class AlgorandService {
     assetIdOrTransactions?: number | any[] // Can be assetId or array of opt-in transactions
   ): Promise<boolean> {
     try {
-      await this.ensureInitialized();
+      // Auto-heal: Ensure wallet is restored before attempting to opt-in
+      await this.ensureWalletRestored();
 
       // Ensure a wallet is available for the active account context (personal/business)
       if (!this.currentAccount) {
-        try {
-          // Try loading a previously stored wallet address first
-          const loaded = await this.loadStoredWallet();
-          if (!loaded) {
-            // Fall back to creating/restoring from active context + OAuth subject
-            const { AuthService } = await import('./authService');
-            const authService = AuthService.getInstance();
-            const accountContext = await authService.getActiveAccountContext();
-
-            const { oauthStorage } = await import('./oauthStorageService');
-            const oauthData = await oauthStorage.getOAuthSubject();
-            if (!oauthData || !oauthData.subject || !oauthData.provider) {
-              throw new Error('Missing OAuth subject/provider for wallet context');
-            }
-
-            const provider: 'google' | 'apple' = oauthData.provider;
-            const sub: string = oauthData.subject;
-            const { GOOGLE_CLIENT_IDS } = await import('../config/env');
-            const GOOGLE_WEB_CLIENT_ID = GOOGLE_CLIENT_IDS.production.web;
-            const iss = provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
-            const aud = provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
-
-            // Create/restore deterministic wallet for the active context
-            const wallet = await secureDeterministicWallet.createOrRestoreWallet(
-              iss,
-              sub,
-              aud,
-              provider,
-              accountContext.type,
-              accountContext.index,
-              accountContext.businessId
-            );
-            this.currentAccount = { addr: wallet.address, sk: null };
-          }
-        } catch (e) {
-          console.error('[AlgorandService] Failed to initialize wallet context for opt-in:', e);
-          return false;
-        }
+        // Calling ensureWalletRestored above should have fixed this, but double check
+        // If still null, we iterate the logic again (or just rely on signTransactionBytes later)
+        console.warn('[AlgorandService] processSponsoredOptIn: Wallet still null after ensureWalletRestored');
+        return false;
       }
 
       // Check if we received an array of transactions from backend

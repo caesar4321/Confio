@@ -382,6 +382,9 @@ export const ReferralRewardClaimScreen: React.FC = () => {
 
         const unsigned = payload.unsignedTransaction;
         const token = payload.claimToken;
+
+
+
         setLoadingMessage('Firmando transacción...');
         const unsignedBytes = Buffer.from(unsigned, 'base64');
         const signedBytes = await algorandService.signTransactionBytes(

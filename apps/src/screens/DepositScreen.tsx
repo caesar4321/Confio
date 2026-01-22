@@ -349,6 +349,9 @@ const DepositScreen = () => {
         console.log('[DepositScreen] User transaction:', userTxn ? 'present' : 'missing');
         console.log('[DepositScreen] Sponsor transaction:', sponsorTxn ? 'present' : 'missing');
 
+        // Ensure wallet is initialized before signing (Critical for cold starts)
+
+
         // Sign and submit the transaction
         console.log('[DepositScreen] Signing and submitting transaction...');
         const txId = await algorandService.signAndSubmitSponsoredTransaction(

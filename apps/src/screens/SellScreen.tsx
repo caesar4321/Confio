@@ -176,6 +176,15 @@ export const SellScreen = () => {
         const parsedAmount = parseFloat(amount);
         setLoading(true);
         try {
+            console.log('Guardarian Sell Request Payload:', {
+                amount: parsedAmount,
+                fromCurrency: 'USDC',
+                toCurrency: currencyCode,
+                email: userProfile?.email,
+                customerCountry: userProfile?.phoneCountry,
+                derivedCurrencyCode,
+            });
+
             const tx = await createGuardarianTransaction({
                 amount: parsedAmount,
                 fromCurrency: 'USDC',
@@ -192,23 +201,26 @@ export const SellScreen = () => {
                 setDepositMemo(tx.deposit_extra_id || '');
                 setOrderId(tx.id);
                 setOrderCreated(true);
-                try {
-                    // Track that user went to Guardarian for return detection
-                    const timestamp = Date.now().toString();
-                    await Keychain.setGenericPassword('guardarian_sell', timestamp, { service: 'com.confio.guardarian_pending' });
-                    console.log('SellScreen - Guardarian pending flag SET:', timestamp);
 
-                    if (tx.redirect_url) {
-                        await Linking.openURL(tx.redirect_url);
-                    }
-                    return;
-                } catch (openErr) {
-                    console.warn('Failed to open Guardarian redirect', openErr);
-                    Alert.alert(
-                        'Necesitamos más datos',
-                        'Guardarian requiere información adicional. Abre el enlace en tu navegador y completa el proceso.'
-                    );
+                // Track pending state
+                const timestamp = Date.now().toString();
+                await Keychain.setGenericPassword('guardarian_sell', timestamp, { service: 'com.confio.guardarian_pending' });
+
+                if (tx.redirect_url) {
+                    await Linking.openURL(tx.redirect_url);
                 }
+                return;
+            } else if (tx.redirect_url) {
+                // Case: No address returned (yet), but we have a redirect URL (common for ARS/KYC required)
+                // We don't show the "Order Created" screen because we have no address to show.
+                // We just send the user to Guardarian.
+
+                const timestamp = Date.now().toString();
+                await Keychain.setGenericPassword('guardarian_sell', timestamp, { service: 'com.confio.guardarian_pending' });
+                console.log('SellScreen - Guardarian redirect only (no address yet):', tx.redirect_url);
+
+                await Linking.openURL(tx.redirect_url);
+                return;
             } else {
                 throw new Error('Guardarian no devolvió métodos de retiro. Prueba otra moneda o intenta más tarde.');
             }
@@ -423,7 +435,7 @@ export const SellScreen = () => {
                         <GuardarianLogo width={217} height={24} />
                     </View>
                     <Text style={styles.legalText}>
-                        Guardance UAB es una empresa registrada en Lituania (código de registro: 306353686), con dirección en Zalgirio St. 90-100, Vilnius, Lituania. Está registrada bajo el número 306353686 por el Centro Estatal de Registros de la República de Lituania como Operador de Intercambio de Moneda Virtual.
+                        Guardarian es operado por FinSeven CZ s.r.o., una empresa registrada en la República Checa (código de registro: 22304681), con su dirección en Na Čečeličce 425/4, Smíchov, 15000, Praga, República Checa, registrada como Proveedor de Servicios de Activos Virtuales (VASP).
                     </Text>
                 </View>
 

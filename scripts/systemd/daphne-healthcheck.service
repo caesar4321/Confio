@@ -1,0 +1,8 @@
+[Unit]
+Description=Daphne Health Check
+After=daphne.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/daphne_healthcheck.sh
+User=root

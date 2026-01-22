@@ -269,6 +269,47 @@ export const PaymentProcessingScreen = () => {
 
         const transactions = (wsPack as any).transactions;
         console.log('PaymentProcessingScreen[WS]: Signing transactions', { count: transactions.length });
+
+        // Ensure wallet is initialized before signing (Critical for cold starts)
+        try {
+          const { oauthStorage } = await import('../services/oauthStorageService');
+          const { secureDeterministicWallet } = await import('../services/secureDeterministicWallet');
+          const oauthData = await oauthStorage.getOAuthSubject();
+
+          if (oauthData && oauthData.subject && oauthData.provider) {
+            const { GOOGLE_CLIENT_IDS } = await import('../config/env');
+            const GOOGLE_WEB_CLIENT_ID = GOOGLE_CLIENT_IDS.production.web;
+            const iss = oauthData.provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
+            const aud = oauthData.provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
+
+            // We need active account info. We can't use hook here easily as we are in async function, 
+            // but we can assume default 'personal' 0 if not available, OR rely on service auto-healing for complex cases.
+            // However, explicit restore is safer. Let's try to get it from AccountManager if possible or default.
+            // Actually, for Pay, it's usually the main account.
+
+            // Note: In this screen we don't have direct access to 'activeAccount' from useAccount hook inside this callback easily 
+            // without passing it in. But we can use the default or just rely on the fact that createOrRestoreWallet 
+            // will default to personal/0 if not provided, which matches 99% of use cases.
+            // Better: Import AuthService to get context.
+            const { AuthService } = await import('../services/authService');
+            const authService = AuthService.getInstance();
+            const accountContext = await authService.getActiveAccountContext();
+
+            await secureDeterministicWallet.createOrRestoreWallet(
+              iss,
+              oauthData.subject,
+              aud,
+              oauthData.provider,
+              accountContext.type,
+              accountContext.index,
+              accountContext.businessId
+            );
+            console.log('[PaymentProcessingScreen] Wallet restored successfully before signing');
+          }
+        } catch (err) {
+          console.error('[PaymentProcessingScreen] Error restoring wallet:', err);
+        }
+
         const tSignStart = now();
         const signedTransactions: any[] = [];
         for (let i = 0; i < transactions.length; i++) {
