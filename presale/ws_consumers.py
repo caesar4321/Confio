@@ -466,22 +466,35 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
         # Ensure user's ALGO balance can cover app opt-in MBR; top-up if needed (standalone)
         try:
             algod_client = _algod.AlgodClient(AlgorandAccountManager.ALGOD_TOKEN, AlgorandAccountManager.ALGOD_ADDRESS)
-            acct = algod_client.account_info(account.algorand_address)
-            bal = int(acct.get('amount') or 0)
-            minb = int(acct.get('min-balance') or 0)
             
-            # Calculate opt-in cost: 100k (basic) + 28.5k (schema)
-            OPTIN_COST = 100_000 + 28_500
-            SAFETY_BUFFER = 200_000
-            target = minb + OPTIN_COST + SAFETY_BUFFER
+            # RETRY LOOP: Try funding up to 3 times if verification fails
+            MAX_ATTEMPTS = 3
+            funding_success = False
             
-            fund = max(target - bal, 0)
-            
-            # Ensure meaningful top-up
-            if fund > 0 and fund < 200_000:
-                fund = 200_000
+            for attempt in range(MAX_ATTEMPTS):
+                acct = algod_client.account_info(account.algorand_address)
+                bal = int(acct.get('amount') or 0)
+                minb = int(acct.get('min-balance') or 0)
                 
-            if fund > 0:
+                # Calculate opt-in cost: 100k (basic) + 28.5k (schema)
+                OPTIN_COST = 100_000 + 28_500
+                # Increase safety buffer to 300k to be absolutely sure
+                SAFETY_BUFFER = 300_000
+                target = minb + OPTIN_COST + SAFETY_BUFFER
+                
+                fund = max(target - bal, 0)
+                
+                # If funded, we are good
+                if fund == 0:
+                    funding_success = True
+                    break
+
+                _log.getLogger(__name__).info(f"[PRESALE][WS][OPTIN_PREPARE] Attempt {attempt+1}/{MAX_ATTEMPTS}: funding needed={fund}")
+
+                # Ensure meaningful top-up
+                if fund > 0 and fund < 300_000:
+                    fund = 300_000
+                    
                 sp = algod_client.suggested_params(); sp.flat_fee = True; sp.fee = max(getattr(sp, 'min_fee', 1000) or 1000, 1000)
                 sponsor_sk = _mn.to_private_key(AlgorandAccountManager.SPONSOR_MNEMONIC)
                 pay = _Pay(sender=AlgorandAccountManager.SPONSOR_ADDRESS, sp=sp, receiver=account.algorand_address, amt=int(fund))
@@ -490,14 +503,44 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
                 
                 _log.getLogger(__name__).info(f"[PRESALE][WS][OPTIN_PREPARE] funding user={account.algorand_address} amt={fund} txid={txid} ... waiting")
                 
-                # CRITICAL: Wait for confirmation to avoid race conditions with the building step
+                # Wait for confirmation
                 from algosdk.transaction import wait_for_confirmation as _wfc
-                _wfc(algod_client, txid, 4)
+                try:
+                    _wfc(algod_client, txid, 5)
+                except Exception:
+                    # If confirmation times out, we still proceed to check balance; maybe it landed
+                    pass
                 
-                _log.getLogger(__name__).info(f"[PRESALE][WS][OPTIN_PREPARE] funding confirmed")
+                # VERIFY BALANCE UPDATE LOOP (Hard Requirement)
+                # Sometimes wfc returns but indexer/node isn't barely updated for next query
+                import asyncio
+                verified = False
+                for _ in range(5):
+                    try:
+                        # short sleep to ensure node state propagation
+                        await asyncio.sleep(1.0)
+                        acct_verify = algod_client.account_info(account.algorand_address)
+                        new_bal = int(acct_verify.get('amount') or 0)
+                        if new_bal >= target:
+                            verified = True
+                            _log.getLogger(__name__).info(f"[PRESALE][WS][OPTIN_PREPARE] balance verified: {new_bal} >= {target}")
+                            break
+                    except Exception:
+                        pass
+                
+                if verified:
+                    funding_success = True
+                    break
+                else:
+                    _log.getLogger(__name__).warning(f"[PRESALE][WS][OPTIN_PREPARE] Attempt {attempt+1} verification failed. Retrying...")
+            
+            if not funding_success:
+                _log.getLogger(__name__).error(f"[PRESALE][WS][OPTIN_PREPARE] FAILED to verify balance after {MAX_ATTEMPTS} attempts!")
+                return {"success": False, "error": "funding_verification_failed"}
+                    
         except Exception as e:
             _log.getLogger(__name__).warning(f"[PRESALE][WS][OPTIN_PREPARE] funding failed or timed out: {e}")
-            pass
+            return {"success": False, "error": "funding_exception"}
 
         builder = PresaleTransactionBuilder()
         tx_pack = builder.build_app_opt_in(account.algorand_address)
