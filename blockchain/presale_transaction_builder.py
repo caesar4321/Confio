@@ -232,6 +232,48 @@ class PresaleTransactionBuilder:
         except Exception as e:
             logger.error("Failed to auto opt-in sponsor to app %s: %s", self.config.app_id, e)
 
+    def send_mb_funding(self, target_address: str, amount: int) -> Optional[str]:
+        """
+        Send ALGO funding to a user from the sponsor (using KMS or mnemonic).
+        
+        Args:
+            target_address: The recipient address (user needing MBR top-up).
+            amount: MicroAlgos to send.
+            
+        Returns:
+            Transaction ID on success, None on failure.
+        """
+        if not self.config.sponsor_address:
+            logger.error("[PRESALE] No sponsor address execution disabled for funding")
+            return None
+            
+        try:
+            params = self.algod.suggested_params()
+            min_fee = getattr(params, 'min_fee', 1000) or 1000
+            sp = params
+            sp.flat_fee = True
+            sp.fee = min_fee
+            
+            pay = PaymentTxn(
+                sender=self.config.sponsor_address,
+                sp=sp,
+                receiver=target_address,
+                amt=int(amount),
+                note=b"Presale MBR funding"
+            )
+            
+            stx = self._sign_sponsor(pay)
+            if not stx:
+                logger.error("[PRESALE] Failed to sign funding txn (no signer)")
+                return None
+                
+            txid = self.algod.send_transaction(stx)
+            logger.info(f"[PRESALE] Sent MBR funding to {target_address} amt={amount} txid={txid}")
+            return txid
+        except Exception as e:
+            logger.error(f"[PRESALE] Failed to send funding: {e}")
+            return None
+
     def build_buy_group(self, user_address: str, cusd_amount_base: int) -> Dict[str, Any]:
         """
         Build the sponsored 3-txn group for buying CONFIO with cUSD.

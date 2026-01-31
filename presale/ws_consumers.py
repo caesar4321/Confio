@@ -471,6 +471,8 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
             MAX_ATTEMPTS = 3
             funding_success = False
             
+            builder = PresaleTransactionBuilder() # Instantiate early for funding helper
+
             for attempt in range(MAX_ATTEMPTS):
                 acct = algod_client.account_info(account.algorand_address)
                 bal = int(acct.get('amount') or 0)
@@ -495,13 +497,14 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
                 if fund > 0 and fund < 300_000:
                     fund = 300_000
                     
-                sp = algod_client.suggested_params(); sp.flat_fee = True; sp.fee = max(getattr(sp, 'min_fee', 1000) or 1000, 1000)
-                sponsor_sk = _mn.to_private_key(AlgorandAccountManager.SPONSOR_MNEMONIC)
-                pay = _Pay(sender=AlgorandAccountManager.SPONSOR_ADDRESS, sp=sp, receiver=account.algorand_address, amt=int(fund))
-                stx = pay.sign(sponsor_sk)
-                txid = algod_client.send_transaction(stx)
+                # Use Builder to send funding (handles KMS signing properly)
+                txid = builder.send_mb_funding(account.algorand_address, int(fund))
                 
-                _log.getLogger(__name__).info(f"[PRESALE][WS][OPTIN_PREPARE] funding user={account.algorand_address} amt={fund} txid={txid} ... waiting")
+                if not txid:
+                    _log.getLogger(__name__).error(f"[PRESALE][WS][OPTIN_PREPARE] Failed to send funding transaction")
+                    continue # Retry or eventually fail
+                
+                _log.getLogger(__name__).info(f"[PRESALE][WS][OPTIN_PREPARE] funding txid={txid} ... waiting")
                 
                 # Wait for confirmation
                 from algosdk.transaction import wait_for_confirmation as _wfc
