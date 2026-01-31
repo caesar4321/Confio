@@ -463,9 +463,41 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
                 "error": "Por favor, realiza un respaldo en Google Drive para proteger tu cuenta antes de participar."
             }
 
-        # Ensure user's ALGO balance can cover app opt-in MBR
-        # Checking logic is now fully handled inside builder.build_app_opt_in atomically
-        # to avoid race conditions found with standalone pre-funding transactions.
+        # Ensure user's ALGO balance can cover app opt-in MBR; top-up if needed (standalone)
+        try:
+            algod_client = _algod.AlgodClient(AlgorandAccountManager.ALGOD_TOKEN, AlgorandAccountManager.ALGOD_ADDRESS)
+            acct = algod_client.account_info(account.algorand_address)
+            bal = int(acct.get('amount') or 0)
+            minb = int(acct.get('min-balance') or 0)
+            
+            # Calculate opt-in cost: 100k (basic) + 28.5k (schema)
+            OPTIN_COST = 100_000 + 28_500
+            SAFETY_BUFFER = 200_000
+            target = minb + OPTIN_COST + SAFETY_BUFFER
+            
+            fund = max(target - bal, 0)
+            
+            # Ensure meaningful top-up
+            if fund > 0 and fund < 200_000:
+                fund = 200_000
+                
+            if fund > 0:
+                sp = algod_client.suggested_params(); sp.flat_fee = True; sp.fee = max(getattr(sp, 'min_fee', 1000) or 1000, 1000)
+                sponsor_sk = _mn.to_private_key(AlgorandAccountManager.SPONSOR_MNEMONIC)
+                pay = _Pay(sender=AlgorandAccountManager.SPONSOR_ADDRESS, sp=sp, receiver=account.algorand_address, amt=int(fund))
+                stx = pay.sign(sponsor_sk)
+                txid = algod_client.send_transaction(stx)
+                
+                _log.getLogger(__name__).info(f"[PRESALE][WS][OPTIN_PREPARE] funding user={account.algorand_address} amt={fund} txid={txid} ... waiting")
+                
+                # CRITICAL: Wait for confirmation to avoid race conditions with the building step
+                from algosdk.transaction import wait_for_confirmation as _wfc
+                _wfc(algod_client, txid, 4)
+                
+                _log.getLogger(__name__).info(f"[PRESALE][WS][OPTIN_PREPARE] funding confirmed")
+        except Exception as e:
+            _log.getLogger(__name__).warning(f"[PRESALE][WS][OPTIN_PREPARE] funding failed or timed out: {e}")
+            pass
 
         builder = PresaleTransactionBuilder()
         tx_pack = builder.build_app_opt_in(account.algorand_address)

@@ -402,7 +402,23 @@ class PresaleTransactionBuilder:
         params = self.algod.suggested_params()
         min_fee = getattr(params, 'min_fee', 1000) or 1000
 
-        # [1] User ApplicationOptInTx (fee=0)
+        # [0] Sponsor payment (MBR funding if needed, otherwise self-payment) and fee
+        sp0 = SuggestedParams(
+            fee=min_fee * 2,
+            first=params.first,
+            last=params.last,
+            gh=params.gh,
+            flat_fee=True,
+        )
+        sponsor_bump = PaymentTxn(
+            sender=self.config.sponsor_address,
+            sp=sp0,
+            receiver=self.config.sponsor_address,  # Contract requires self-payment and amount==0
+            amt=0,
+            note=b"Presale app opt-in fee bump",
+        )
+
+        # [1] User ApplicationOptInTx is sponsored; allow fee=0 (group budget carried by sponsor bump)
         sp1 = SuggestedParams(
             fee=0,
             first=params.first,
@@ -414,57 +430,6 @@ class PresaleTransactionBuilder:
             sender=user_address,
             sp=sp1,
             index=int(self.config.app_id),
-        )
-
-        # Check user balance vs min-balance + opt-in cost; fund shortfall if needed
-        funding_needed = 0
-        try:
-            acct = self.algod.account_info(user_address)
-            current_balance = int(acct.get('amount') or 0)
-            min_balance = int(acct.get('min-balance') or 0)
-            
-            # Calculate opt-in cost for this specific app
-            # Schema: 5 ints, 0 bytes (per user) -> 28500 microAlgos increase
-            # Plus 100,000 basic min balance increase for a new entry
-            # Total increase: 128,500
-            OPTIN_COST = 100_000 + (28_500 * 1) # 1 schema chunk
-            
-            # Use a robust safety buffer
-            SAFETY_BUFFER = 200_000
-            
-            # Target is current MBR + Cost + Buffer
-            target = min_balance + OPTIN_COST + SAFETY_BUFFER
-            funding_needed = max(target - current_balance, 0)
-            
-            # Ensure meaningful top-up if any shortfall is detected
-            if funding_needed > 0 and funding_needed < 250_000:
-                funding_needed = 250_000
-                
-            if funding_needed > 0:
-                logger.info(
-                    f"[PRESALE] Opt-in MBR check user={user_address} bal={current_balance} min={min_balance} "
-                    f"funding={funding_needed}"
-                )
-        except Exception as e:
-            # Conservative fallback top-up if account query fails
-            funding_needed = 350_000
-            logger.warning(f"[PRESALE] account_info failed during opt-in build; default funding={funding_needed} err={e}")
-
-        # [0] Sponsor payment (MBR funding if needed, otherwise self-payment)
-        sp0 = SuggestedParams(
-            fee=min_fee * 2,
-            first=params.first,
-            last=params.last,
-            gh=params.gh,
-            flat_fee=True,
-        )
-        sponsor_bump = PaymentTxn(
-            sender=self.config.sponsor_address,
-            sp=sp0,
-            # If funding needed, send to user; else send 0 to self (fee bump)
-            receiver=user_address if funding_needed > 0 else self.config.sponsor_address,
-            amt=int(funding_needed),
-            note=b"Presale app opt-in fee bump",
         )
 
         gid = transaction.calculate_group_id([sponsor_bump, app_opt_in])
