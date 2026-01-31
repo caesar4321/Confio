@@ -463,27 +463,9 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
                 "error": "Por favor, realiza un respaldo en Google Drive para proteger tu cuenta antes de participar."
             }
 
-        # Ensure user's ALGO balance can cover app opt-in MBR; top-up if needed (standalone)
-        try:
-            algod_client = _algod.AlgodClient(AlgorandAccountManager.ALGOD_TOKEN, AlgorandAccountManager.ALGOD_ADDRESS)
-            acct = algod_client.account_info(account.algorand_address)
-            bal = int(acct.get('amount') or 0)
-            minb = int(acct.get('min-balance') or 0)
-            SAFETY_BUFFER = 250_000
-            target = max(minb + SAFETY_BUFFER, 0)
-            fund = max(target - bal, 0)
-            if fund > 0 and fund < 200_000:
-                fund = 200_000
-            if fund > 0:
-                sp = algod_client.suggested_params(); sp.flat_fee = True; sp.fee = max(getattr(sp, 'min_fee', 1000) or 1000, 1000)
-                sponsor_sk = _mn.to_private_key(AlgorandAccountManager.SPONSOR_MNEMONIC)
-                pay = _Pay(sender=AlgorandAccountManager.SPONSOR_ADDRESS, sp=sp, receiver=account.algorand_address, amt=int(fund))
-                stx = pay.sign(sponsor_sk)
-                txid = algod_client.send_transaction(stx)
-                # Do not wait for confirmation here
-                _log.getLogger(__name__).info(f"[PRESALE][WS][OPTIN_PREPARE] prefund user={account.algorand_address} amt={fund}")
-        except Exception:
-            pass
+        # Ensure user's ALGO balance can cover app opt-in MBR
+        # Checking logic is now fully handled inside builder.build_app_opt_in atomically
+        # to avoid race conditions found with standalone pre-funding transactions.
 
         builder = PresaleTransactionBuilder()
         tx_pack = builder.build_app_opt_in(account.algorand_address)
