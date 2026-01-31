@@ -513,12 +513,12 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
                 
                 # VERIFY BALANCE UPDATE LOOP (Hard Requirement)
                 # Sometimes wfc returns but indexer/node isn't barely updated for next query
-                import asyncio
+                import time
                 verified = False
                 for _ in range(5):
                     try:
                         # short sleep to ensure node state propagation
-                        await asyncio.sleep(1.0)
+                        time.sleep(1.0)
                         acct_verify = algod_client.account_info(account.algorand_address)
                         new_bal = int(acct_verify.get('amount') or 0)
                         if new_bal >= target:
