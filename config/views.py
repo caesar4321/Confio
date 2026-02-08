@@ -489,9 +489,9 @@ def guardarian_fiat_currencies(request):
     if error_response:
         return error_response
 
-    # Temporary: Filter out ARS for Buy/TopUp flows because Guardarian returns no payment methods
-    # This forces the App to fallback to USD for Argentine users.
+    # Temporary: Filter out ARS and CRC for Buy/TopUp flows because Guardarian returns no payment methods
+    # This forces the App to fallback to USD for Argentine and Costa Rican users.
     if isinstance(data, list):
-        data = [currency for currency in data if currency.get('ticker') != 'ARS']
+        data = [currency for currency in data if currency.get('ticker') not in ['ARS', 'CRC']]
 
     return JsonResponse(data, safe=False)
