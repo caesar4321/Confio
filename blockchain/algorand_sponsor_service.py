@@ -491,58 +491,74 @@ class AlgorandSponsorService:
             Dict with transaction result
         """
         try:
-            # Decode transactions from base64
-            logger.info(f"Received signed_user_txn length: {len(signed_user_txn)}")
-            logger.info(f"Received signed_sponsor_txn length: {len(signed_sponsor_txn)}")
-            logger.info(f"First 50 chars of user txn: {signed_user_txn[:50]}")
-            
+            # Enhanced debugging for transaction inputs
+            logger.info(f"submit_sponsored_group called with:")
+            logger.info(f"  signed_user_txn type: {type(signed_user_txn)} len={len(signed_user_txn) if signed_user_txn else 0}")
+            logger.info(f"  signed_sponsor_txn type: {type(signed_sponsor_txn)} len={len(signed_sponsor_txn) if signed_sponsor_txn else 0}")
+
+            # Decode user transaction(s)
             try:
-                user_stxn = base64.b64decode(signed_user_txn)
+                if isinstance(signed_user_txn, bytes):
+                    user_stxn = signed_user_txn
+                else:
+                    # Strip potential whitespace
+                    clean_user_txn = signed_user_txn.strip()
+                    user_stxn = base64.b64decode(clean_user_txn)
             except Exception as e:
                 logger.error(f"Failed to decode user transaction: {e}")
+                logger.error(f"User txn content preview: {signed_user_txn[:50] if signed_user_txn else 'None'}")
                 return {
                     'success': False,
                     'error': f'Failed to decode user transaction: {e}'
                 }
             
+            # Decode sponsor transaction
             try:
                 # Check if it's already raw bytes or base64
                 if isinstance(signed_sponsor_txn, bytes):
                     sponsor_stxn = signed_sponsor_txn
                 else:
-                    sponsor_stxn = base64.b64decode(signed_sponsor_txn)
+                     # Strip potential whitespace
+                    clean_sponsor_txn = signed_sponsor_txn.strip()
+                    sponsor_stxn = base64.b64decode(clean_sponsor_txn)
             except Exception as e:
                 logger.error(f"Failed to decode sponsor transaction: {e}")
-                logger.error(f"Sponsor txn type: {type(signed_sponsor_txn)}, length: {len(signed_sponsor_txn)}")
+                logger.error(f"Sponsor txn content preview: {signed_sponsor_txn[:50] if signed_sponsor_txn else 'None'}")
                 return {
                     'success': False,
                     'error': f'Failed to decode sponsor transaction: {e}'
                 }
             
-            # The transactions are already properly encoded as msgpack
-            # For atomic group submission in Algorand, we concatenate the raw transaction bytes
-            logger.info(f"User transaction bytes length: {len(user_stxn)}")
-            logger.info(f"Sponsor transaction bytes length: {len(sponsor_stxn)}")
+            logger.info(f"Decoded bytes length - User: {len(user_stxn)}, Sponsor: {len(sponsor_stxn)}")
             
-            # Submit atomic group as base64-concatenated signed bytes (previous working behavior)
+            # Submit atomic group as base64-concatenated signed bytes
             try:
-                logger.info(f"About to submit atomic group to Algorand network (base64 payload)...")
+                logger.info(f"Concatenating raw bytes: Sponsor ({len(sponsor_stxn)}) + User ({len(user_stxn)})")
+                
+                # IMPORTANT: Sponsor first!
+                combined_group = sponsor_stxn + user_stxn
+                combined_b64 = base64.b64encode(combined_group).decode('utf-8')
+                
+                logger.info(f"Submitting {len(combined_group)} bytes to Algorand network via send_raw_transaction...")
+                
                 import time
                 start_time = time.time()
-                combined_b64 = base64.b64encode(sponsor_stxn + user_stxn).decode('utf-8')
                 tx_id = self.algod.send_raw_transaction(combined_b64)
                 elapsed_time = time.time() - start_time
+                
                 logger.info(f"Successfully submitted atomic group, tx_id: {tx_id}, took {elapsed_time:.2f} seconds")
             except Exception as e:
                 logger.error(f"Failed to submit atomic group: {e}")
-                if "msgpack decode error" in str(e):
-                    logger.error("Transaction format error - transactions may not be properly encoded")
-                    logger.error(f"First 20 bytes of user txn: {user_stxn[:20].hex() if len(user_stxn) >= 20 else user_stxn.hex()}")
-                    logger.error(f"First 20 bytes of sponsor txn: {sponsor_stxn[:20].hex() if len(sponsor_stxn) >= 20 else sponsor_stxn.hex()}")
+                
+                # Aggressive debug logging on failure
+                try:
+                    logger.error(f"FAIL_DEBUG: User Txn B64: {base64.b64encode(user_stxn).decode('utf-8')}")
+                    logger.error(f"FAIL_DEBUG: Sponsor Txn B64: {base64.b64encode(sponsor_stxn).decode('utf-8')}")
+                except:
+                    pass
                 raise
             
             # Don't wait for confirmation - just return the tx_id immediately
-            # Confirmation can be handled asynchronously via Celery or polling
             logger.info(f"Transaction submitted, not waiting for confirmation")
             
             # Update stats asynchronously (don't await)
@@ -551,22 +567,21 @@ class AlgorandSponsorService:
             return {
                 'success': True,
                 'tx_id': tx_id,
-                'confirmed_round': None,  # Will be confirmed asynchronously
+                'confirmed_round': None,
                 'sponsored': True,
-                'fees_saved': 2000 / 1_000_000,  # Convert to ALGO
+                'fees_saved': 2000 / 1_000_000,
                 'pending': True
             }
             
         except Exception as e:
             msg = str(e)
             logger.error(f"Error submitting sponsored group: {msg}")
-            # Idempotency: treat duplicate/already-opted-in app calls as success
+            
+            # Idempotency checks
             if 'transaction already in ledger' in msg:
                 logger.warning(f"Transaction already in ledger (idempotent success): {msg}")
-                # Try to extract txid from message if present, e.g. "transaction already in ledger: <txid>"
                 parts = msg.split(':')
                 tx_id = parts[-1].strip() if len(parts) > 1 else None
-                
                 return {
                     'success': True,
                     'tx_id': tx_id,
@@ -577,10 +592,7 @@ class AlgorandSponsorService:
                     'pending': False,
                 }
 
-            if (
-                'has already opted in to app' in msg
-                or 'already opted in' in msg.lower()
-            ):
+            if 'has already opted in to app' in msg or 'already opted in' in msg.lower():
                 logger.info("Treating 'already opted in' submission error as success (idempotent app opt-in)")
                 return {
                     'success': True,
@@ -591,6 +603,7 @@ class AlgorandSponsorService:
                     'already_opted_in': True,
                     'pending': False,
                 }
+                
             return {
                 'success': False,
                 'error': msg

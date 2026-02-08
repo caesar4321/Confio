@@ -383,6 +383,16 @@ export class AuthService {
       console.log('Play Services check passed');
 
       console.log('Attempting Google Sign-In...');
+
+      // CRITICAL FIX: Force sign-out to ensure we get a fresh token (avoid stale ID token errors)
+      try {
+        await GoogleSignin.signOut();
+        console.log('Forced local sign-out to ensure fresh token');
+      } catch (e) {
+        // Ignore if already signed out
+        console.log('Local sign-out ignored (not signed in)');
+      }
+
       perfLog('Before GoogleSignin.signIn()');
       const userInfo = await GoogleSignin.signIn();
       perfLog('After GoogleSignin.signIn()');

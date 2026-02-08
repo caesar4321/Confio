@@ -31,7 +31,7 @@ import com.horcrux.svg.SvgPackage
 import com.oblador.vectoricons.VectorIconsPackage
 import fr.greweb.reactnativeviewshot.RNViewShotPackage
 import com.mrousavy.camera.react.CameraPackage
-import com.worklets.WorkletsPackage
+import com.worklets.WorkletsCorePackage
 import com.rt2zz.reactnativecontacts.ReactNativeContacts
 import com.learnium.RNDeviceInfo.RNDeviceInfo
 import com.Confio.Confio.MediaPickerPackage
@@ -73,7 +73,7 @@ class MainApplication : Application(), ReactApplication {
             VectorIconsPackage(),
             RNViewShotPackage(),
             CameraPackage(),
-            WorkletsPackage(),
+            WorkletsCorePackage(),
             ReactNativeContacts(),
             RNDeviceInfo(),
             MediaPickerPackage(),
