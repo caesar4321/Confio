@@ -69,7 +69,7 @@ export class SendWsSession {
         console.log('[sendWs] Opening', wsUrl.replace(token, '***').replace(appCheckToken, '***'));
         const ws = new WebSocket(wsUrl);
         this.ws = ws;
-        const timeout = setTimeout(() => { console.log('[sendWs] open timeout'); reject(new Error('open_timeout')); }, 2500);
+        const timeout = setTimeout(() => { console.log('[sendWs] open timeout'); reject(new Error('open_timeout')); }, 15000);
         ws.onopen = () => { clearTimeout(timeout); console.log('[sendWs] open'); resolve(); };
         ws.onerror = (e) => { clearTimeout(timeout); console.log('[sendWs] error', e); if (!this.closeRequested) reject(e); };
         ws.onclose = (e) => {

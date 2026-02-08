@@ -49,7 +49,7 @@ export class PresaleWsSession {
         const wsUrl = `${getWsBase()}ws/presale_session?token=${encodeURIComponent(token)}`;
         const ws = new WebSocket(wsUrl);
         this.ws = ws;
-        const t = setTimeout(() => reject(new Error('open_timeout')), 4000);
+        const t = setTimeout(() => reject(new Error('open_timeout')), 15000);
         ws.onopen = () => { clearTimeout(t); resolve(); };
         ws.onerror = (e) => { clearTimeout(t); if (!this.closed) reject(e); };
         ws.onclose = () => { if (!this.closed) Object.values(this.rejectors).forEach(r => r(new Error('ws_closed'))); };

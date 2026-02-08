@@ -1,7 +1,7 @@
 /* Lightweight WS client for P2P flows (prepare + submit) */
 
 type PrepareArgs = {
-  action: 'create'|'accept'|'mark_paid'|'confirm_received'|'cancel'|'open_dispute'|string;
+  action: 'create' | 'accept' | 'mark_paid' | 'confirm_received' | 'cancel' | 'open_dispute' | string;
   tradeId: string | number;
   amount?: number;
   assetType?: string; // CUSD/CONFIO/USDC
@@ -21,7 +21,7 @@ type SubmitArgs = {
   tradeId: string | number;
   signedUserTxns?: string[];      // for create
   signedUserTxn?: string;         // for accept/mark_paid/confirm_received/cancel/open_dispute
-  sponsorTransactions?: (string|{txn:string;index:number})[];
+  sponsorTransactions?: (string | { txn: string; index: number })[];
 };
 
 type SubmitResult = { txid?: string; transaction_id?: string };
@@ -64,7 +64,7 @@ export class P2PWsSession {
         console.log('[p2pWs] Opening', wsUrl.replace(token, '***'));
         const ws = new WebSocket(wsUrl);
         this.ws = ws;
-        const timeout = setTimeout(() => { console.log('[p2pWs] open timeout'); reject(new Error('open_timeout')); }, 3000);
+        const timeout = setTimeout(() => { console.log('[p2pWs] open timeout'); reject(new Error('open_timeout')); }, 15000);
         ws.onopen = () => { clearTimeout(timeout); console.log('[p2pWs] open'); resolve(); };
         ws.onerror = (e) => { clearTimeout(timeout); console.log('[p2pWs] error', e); if (!this.closeRequested) reject(e); };
         ws.onclose = (e) => {
@@ -86,7 +86,7 @@ export class P2PWsSession {
               console.log('[p2pWs] server error', msg?.message);
               this.rejectAll(new Error(msg.message || 'ws_error'));
             }
-          } catch {}
+          } catch { }
         };
       } catch (e) {
         console.log('[p2pWs] open failed', e);

@@ -67,7 +67,7 @@ export class WithdrawWsSession {
         console.log('[withdrawWs] Opening', wsUrl.replace(token, '***').replace(appCheckToken, '***'));
         const ws = new WebSocket(wsUrl);
         this.ws = ws;
-        const timeout = setTimeout(() => { console.log('[withdrawWs] open timeout'); reject(new Error('open_timeout')); }, 3000);
+        const timeout = setTimeout(() => { console.log('[withdrawWs] open timeout'); reject(new Error('open_timeout')); }, 15000);
         ws.onopen = () => { clearTimeout(timeout); console.log('[withdrawWs] open'); resolve(); };
         ws.onerror = (e) => { clearTimeout(timeout); console.log('[withdrawWs] error', e); if (!this.closeRequested) reject(e); };
         ws.onclose = (e) => {

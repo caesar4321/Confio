@@ -81,7 +81,7 @@ export class PayWsSession {
         const timeout = setTimeout(() => {
           console.log('[payWs] open timeout');
           reject(new Error('open_timeout'));
-        }, 2500);
+        }, 15000);
         ws.onopen = () => { clearTimeout(timeout); console.log('[payWs] open'); resolve(); };
         ws.onerror = (e) => { clearTimeout(timeout); console.log('[payWs] error', e); if (!this.closeRequested) reject(e); };
         ws.onclose = (e) => {
