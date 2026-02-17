@@ -306,8 +306,13 @@ class Web3AuthLoginMutation(graphene.Mutation):
                  # New User -> V2 Native
                  is_keyless_migrated_status = True
             elif existing_account:
-                 # Existing User -> Use stored status
-                 is_keyless_migrated_status = existing_account.is_keyless_migrated
+                 # Existing User logging in via Web3Auth -> Auto-migrate to V2
+                 if not existing_account.is_keyless_migrated:
+                     existing_account.is_keyless_migrated = True
+                     existing_account.save(update_fields=['is_keyless_migrated'])
+                     logger.info(f"Auto-migrated existing user {user.id} to V2 (Native Keyless) on login")
+                 
+                 is_keyless_migrated_status = True
             
             if algorand_address:
                 # Use AlgorandAccountManager to ensure auto opt-ins happen
@@ -358,6 +363,7 @@ class Web3AuthLoginMutation(graphene.Mutation):
                         logger.info(f"Account {algorand_address} not on chain yet: {e}")
                         balance = 0
                         current_assets = []
+                        account_info = {}
                     
                     current_asset_ids = [asset['asset-id'] for asset in current_assets]
                     num_assets = len(current_assets)
