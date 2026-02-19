@@ -777,8 +777,9 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
                 found_user = User.objects.filter(phone_number=cleaned_phone).first()
                 
                 if found_user:
+                    recipient_user = found_user
                     # Get recipient's personal account
-                    recipient_user_account = found_user.accounts.filter(
+                    recipient_user_account = recipient_user.accounts.filter(
                         account_type='personal',
                         account_index=0
                     ).first()
@@ -799,9 +800,24 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
                     return cls(success=False, error='Invalid recipient Algorand address format')
                 resolved_recipient_address = recipient_address
                 logger.info(f"Using direct Algorand address: {resolved_recipient_address[:10]}...")
+                
+                # Attempt to look up the user by their Algorand address
+                from users.models import Account
+                try:
+                    matching_account = Account.objects.filter(algorand_address=resolved_recipient_address).select_related('user').first()
+                    if matching_account:
+                        recipient_user = matching_account.user
+                except Exception:
+                    pass
             
             else:
                 return cls(success=False, error='Recipient identification required (user_id, phone, or address)')
+            
+            # Enforce backup check if the recipient is an Android user
+            if recipient_user:
+                if getattr(recipient_user, 'platform_os', None) == 'android' and not getattr(recipient_user, 'backup_provider', None):
+                    logger.warning(f"Blocked P2P send: Recipient {recipient_user.id} is an unbacked Android user.")
+                    return cls(success=False, error="Por motivos de seguridad, no es posible enviar fondos a billeteras sin respaldo. Por favor, pídele al destinatario que asegure su cuenta desde la configuración de su app.")
             
             # Determine asset ID based on type
             asset_id = None
