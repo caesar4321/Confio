@@ -99,5 +99,7 @@
 	<string>Confio uses Face ID or Touch ID to unlock the app and confirm transactions.</string>
 	<key>NSUserNotificationsUsageDescription</key>
 	<string>Confío will send you important notifications about your transactions, received payments, and security alerts.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Confío requires your location for enhanced account security and optional camera features.</string>
 </dict>
 </plist>
