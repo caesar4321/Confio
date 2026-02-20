@@ -34,8 +34,8 @@ import { useMutation, gql } from '@apollo/client';
 import algorandService from '../services/algorandService';
 import { secureDeterministicWallet } from '../services/secureDeterministicWallet';
 import { oauthStorage } from '../services/oauthStorageService';
+import { apolloClient } from '../apollo/client';
 import PreFlightModal from '../components/PreFlightModal';
-import { useBackupEnforcement } from '../hooks/useBackupEnforcement';
 
 
 // GraphQL mutation for USDC opt-in
@@ -63,7 +63,6 @@ const TopUpScreen = () => {
   const { userProfile } = useAuth() as any;
   const { activeAccount } = useAccount();
   const { selectedCountry, userCountry } = useCountry();
-  const { checkBackupEnforcement, BackupEnforcementModal } = useBackupEnforcement();
 
   const derivedCurrencyCode = useMemo(() => {
     let localCurrency = 'USD';
@@ -84,7 +83,7 @@ const TopUpScreen = () => {
   }, [selectedCountry, userCountry, userProfile?.phoneCountry]);
 
   const [amount, setAmount] = useState('');
-  const [currencyCode, setCurrencyCode] = useState(derivedCurrencyCode);
+  const [currencyCode, setCurrencyCode] = useState<string>('USD');
   const [loading, setLoading] = useState(false);
   const [fiatOptions, setFiatOptions] = useState<GuardarianFiatCurrency[]>([]);
   const [fiatLoading, setFiatLoading] = useState(false);
@@ -292,10 +291,6 @@ const TopUpScreen = () => {
       Alert.alert('Monto inválido', 'Ingresa un monto mayor a 0.');
       return;
     }
-    // Check for backup enforcement
-    const canProceed = await checkBackupEnforcement('transaction');
-    if (!canProceed) return;
-
     // Ensure wallet is initialized before opting in (Critical for cold starts)
     // Ensure wallet is initialized before opting in (Critical for cold starts)
 
@@ -525,8 +520,6 @@ const TopUpScreen = () => {
         onContinue={handleProceedToGuardarian}
         onCancel={() => setShowPreFlightModal(false)}
       />
-
-      <BackupEnforcementModal />
     </SafeAreaView>
   );
 };

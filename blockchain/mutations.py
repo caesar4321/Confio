@@ -812,12 +812,7 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
             
             else:
                 return cls(success=False, error='Recipient identification required (user_id, phone, or address)')
-            
-            # Enforce backup check if the recipient is an Android user
-            if recipient_user:
-                if getattr(recipient_user, 'platform_os', None) == 'android' and not getattr(recipient_user, 'backup_provider', None):
-                    logger.warning(f"Blocked P2P send: Recipient {recipient_user.id} is an unbacked Android user.")
-                    return cls(success=False, error="Por motivos de seguridad, no es posible enviar fondos a billeteras sin respaldo. Por favor, pídele al destinatario que asegure su cuenta desde la configuración de su app.")
+
             
             # Determine asset ID based on type
             asset_id = None

@@ -22,7 +22,6 @@ import { colors } from '../config/theme';
 import { formatNumber } from '../utils/numberFormatting';
 import { useMutation } from '@apollo/client';
 import { GET_INVOICE } from '../apollo/queries';
-import { useBackupEnforcement } from '../hooks/useBackupEnforcement';
 
 type PaymentConfirmationRouteProp = RouteProp<{
   PaymentConfirmation: {
@@ -67,7 +66,6 @@ export const PaymentConfirmationScreen = () => {
   const navigation = useNavigation();
   const route = useRoute<PaymentConfirmationRouteProp>();
   const { activeAccount } = useAccount();
-  const { checkBackupEnforcement, BackupEnforcementModal } = useBackupEnforcement();
   const [isProcessing, setIsProcessing] = useState(false);
   const [prepared, setPrepared] = useState<any | null>(null);
   const [prepareError, setPrepareError] = useState<string | null>(null);
@@ -365,10 +363,6 @@ export const PaymentConfirmationScreen = () => {
       Alert.alert('Saldo Insuficiente', 'No tienes suficiente saldo para realizar este pago.');
       return;
     }
-
-    // Check for backup enforcement
-    const canProceed = await checkBackupEnforcement('transaction');
-    if (!canProceed) return;
 
     setIsProcessing(true);
     navLock.current = true;
@@ -676,7 +670,6 @@ export const PaymentConfirmationScreen = () => {
           </View>
         </View>
       </ScrollView>
-      <BackupEnforcementModal />
     </SafeAreaView>
   );
 };

@@ -8,7 +8,7 @@ import { BackupConsentModal } from '../components/BackupConsentModal';
 import { ExistingBackupModal } from '../components/ExistingBackupModal';
 import { AnalyticsService } from '../services/analyticsService';
 
-type EnforcementAction = 'presale' | 'transaction' | 'app_launch';
+type EnforcementAction = 'presale' | 'transaction' | 'app_launch' | 'deposit';
 
 export const useBackupEnforcement = () => {
     const { userProfile, refreshProfile } = useAuth();
@@ -62,10 +62,11 @@ export const useBackupEnforcement = () => {
         // If we get here, enforcement is needed.
         // Configure strictness based on action
         // Presale: Block participation ("참여를 못 하도록")
+        // Deposit: Block viewing the deposit address
         // Transaction: "매번 송금/페이 시" (Prompt every time)
         // App Launch: "앱 킬때마다 팝업" (Prompt)
 
-        setStrictMode(action === 'presale');
+        setStrictMode(action === 'presale' || action === 'deposit');
         setModalVisible(true);
 
         // Return a promise that resolves when user makes a choice
@@ -115,19 +116,6 @@ export const useBackupEnforcement = () => {
         }
     };
 
-    const handleCancel = () => {
-        setModalVisible(false);
-        if (strictMode) {
-            // Presale -> Blocked
-            resolveRef.current?.(false);
-        } else {
-            // Transaction/Launch -> Nag only, allow proceed
-            resolveRef.current?.(true);
-        }
-    };
-
-    // --- Handlers for ExistingBackupModal ---
-
     const handleRestore = async (entry: any | null) => {
         setExistingBackupModalVisible(false);
         try {
@@ -169,22 +157,12 @@ export const useBackupEnforcement = () => {
         }
     };
 
-    const handleCancelExistingModal = () => {
-        setExistingBackupModalVisible(false);
-        // If they cancel the choice, it's a fail or fallback depending on strict mode
-        if (strictMode) {
-            resolveRef.current?.(false);
-        } else {
-            resolveRef.current?.(true);
-        }
-    };
-
     const BackupEnforcementModal = () => (
         <>
             <BackupConsentModal
                 visible={modalVisible}
                 onContinue={handleContinue}
-                onCancel={handleCancel}
+                onCancel={() => { }}
             />
             <ExistingBackupModal
                 visible={existingBackupModalVisible}
@@ -192,7 +170,7 @@ export const useBackupEnforcement = () => {
                 hasLegacy={hasLegacyBackup}
                 onRestore={handleRestore}
                 onUseCurrentWallet={handleUseCurrentWallet}
-                onCancel={handleCancelExistingModal}
+                onCancel={() => { }}
             />
         </>
     );

@@ -63,7 +63,7 @@ export const ExistingBackupModal: React.FC<ExistingBackupModalProps> = ({
             visible={visible}
             transparent
             animationType="fade"
-            onRequestClose={onCancel}
+            onRequestClose={() => { }}
         >
             <View style={styles.overlay}>
                 <View style={styles.container}>
@@ -112,24 +112,14 @@ export const ExistingBackupModal: React.FC<ExistingBackupModalProps> = ({
                             })}
                         </ScrollView>
                     )}
-
-                    <View style={styles.buttonContainer}>
-                        <TouchableOpacity
-                            style={[styles.button, styles.secondaryButton]}
-                            onPress={onUseCurrentWallet}
-                        >
-                            <Text style={styles.secondaryButtonText}>
-                                Usar billetera actual
-                            </Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                            style={styles.cancelButton}
-                            onPress={onCancel}
-                        >
-                            <Text style={styles.cancelButtonText}>Cancelar</Text>
-                        </TouchableOpacity>
-                    </View>
+                    <TouchableOpacity
+                        style={[styles.button, styles.secondaryButton]}
+                        onPress={onUseCurrentWallet}
+                    >
+                        <Text style={styles.secondaryButtonText}>
+                            Usar billetera actual
+                        </Text>
+                    </TouchableOpacity>
 
                     <Text style={styles.warning}>
                         ⚠️ Restaurar otra billetera reemplazará tu billetera actual.

@@ -1,10 +1,8 @@
 
 import React from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity, Dimensions, Image, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, Modal, TouchableOpacity, Image, ScrollView } from 'react-native';
 // Use MaterialCommunityIcons for cloud-lock icon (now linked in iOS Info.plist)
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-
-const { width } = Dimensions.get('window');
 
 interface BackupConsentModalProps {
     visible: boolean;
@@ -18,11 +16,12 @@ export const BackupConsentModal: React.FC<BackupConsentModalProps> = ({ visible,
             animationType="fade"
             transparent={true}
             visible={visible}
-            onRequestClose={onCancel}
+            // By passing an empty function, Android back button will not dismiss this mandatory modal
+            onRequestClose={() => { }}
         >
             <View style={styles.centeredView}>
                 <View style={styles.modalView}>
-                    <ScrollView contentContainerStyle={styles.modalContent}>
+                    <ScrollView contentContainerStyle={styles.modalContent} bounces={false} showsVerticalScrollIndicator={false}>
                         <View style={styles.iconContainer}>
                             <Icon name="cloud-lock-outline" size={64} color="#4F46E5" />
                         </View>
@@ -61,13 +60,6 @@ export const BackupConsentModal: React.FC<BackupConsentModalProps> = ({ visible,
                         >
                             <Text style={styles.textStyle}>Continuar y Proteger</Text>
                         </TouchableOpacity>
-
-                        <TouchableOpacity
-                            style={[styles.button, styles.buttonCancel]}
-                            onPress={onCancel}
-                        >
-                            <Text style={styles.textStyleCancel}>Más tarde (Sin respaldo)</Text>
-                        </TouchableOpacity>
                     </ScrollView>
                 </View>
             </View>
@@ -81,9 +73,11 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
         backgroundColor: 'rgba(0, 0, 0, 0.6)',
+        padding: 20,
     },
     modalView: {
-        width: width * 0.9,
+        width: '100%',
+        maxWidth: 360,
         maxHeight: '85%',
         backgroundColor: 'white',
         borderRadius: 24,
@@ -106,6 +100,10 @@ const styles = StyleSheet.create({
         backgroundColor: '#EEF2FF',
         padding: 16,
         borderRadius: 50,
+        height: 96, // Fixed height to prevent shift
+        width: 96,  // Fixed width to prevent shift
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     modalTitle: {
         fontSize: 22,
@@ -133,6 +131,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'flex-start',
         marginBottom: 10,
+        height: 40, // Ensure fixed height for bullet row to stop text wrap calculations from shifting layout
     },
     bulletIcon: {
         marginRight: 10,
@@ -151,6 +150,7 @@ const styles = StyleSheet.create({
         borderRadius: 12,
         marginBottom: 24,
         width: '100%',
+        height: 60, // Fixed height to stop text wrap calculation jump
         alignItems: 'center',
     },
     warningText: {
@@ -162,7 +162,8 @@ const styles = StyleSheet.create({
     },
     button: {
         borderRadius: 16,
-        padding: 16,
+        height: 56, // Fixed height for buttons
+        justifyContent: 'center',
         width: '100%',
         alignItems: 'center',
     },
@@ -171,19 +172,10 @@ const styles = StyleSheet.create({
         marginBottom: 12,
         elevation: 2,
     },
-    buttonCancel: {
-        backgroundColor: 'transparent',
-    },
     textStyle: {
         color: 'white',
         fontWeight: 'bold',
         textAlign: 'center',
         fontSize: 16,
-    },
-    textStyleCancel: {
-        color: '#6B7280',
-        fontWeight: '600',
-        textAlign: 'center',
-        fontSize: 15,
     },
 });

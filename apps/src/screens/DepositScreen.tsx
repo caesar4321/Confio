@@ -12,6 +12,7 @@ import { gql, useMutation, useQuery } from '@apollo/client';
 import algorandService from '../services/algorandService';
 import businessOptInService from '../services/businessOptInService';
 import { cusdAppOptInService } from '../services/cusdAppOptInService';
+import { useBackupEnforcement } from '../hooks/useBackupEnforcement';
 
 // GraphQL mutation for USDC opt-in specifically
 const OPT_IN_TO_USDC = gql`
@@ -810,7 +811,7 @@ const DepositScreen = () => {
           </>
         )}
       </ScrollView>
-    </View>
+    </View >
   );
 };
 
