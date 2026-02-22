@@ -2523,11 +2523,20 @@ class BuildAutoSwapTransactionsMutation(graphene.Mutation):
                 # Use actual on-chain USDC balance to avoid underflow from stale cache.
                 # The client amount is a hint; the real balance may differ slightly
                 # (e.g., right after an ALGO→USDC swap with slippage, or USDC already consumed).
-                from blockchain.algorand_client import AlgorandClient
                 try:
-                    algo_client = AlgorandClient()
-                    snapshot = algo_client.get_balances_snapshot(account.algorand_address)
-                    actual_usdc = snapshot.get('USDC', Decimal('0'))
+                    account_info = algod_client.account_info(account.algorand_address)
+                    usdc_asset_id = getattr(settings, 'ALGORAND_USDC_ASSET_ID', None)
+                    actual_usdc = Decimal('0')
+                    if usdc_asset_id:
+                        for a in (account_info.get('assets') or []):
+                            if a.get('asset-id') == usdc_asset_id:
+                                actual_usdc = Decimal(str(a.get('amount', 0))) / Decimal('1000000')
+                                break
+                    logger.info(
+                        "[AutoSwap USDC] on-chain balance=%s requested=%s",
+                        actual_usdc,
+                        amount_decimal,
+                    )
                 except Exception as e:
                     logger.warning(f"[AutoSwap USDC] Failed to fetch on-chain USDC balance: {e}")
                     actual_usdc = None
@@ -2537,9 +2546,9 @@ class BuildAutoSwapTransactionsMutation(graphene.Mutation):
                     logger.info(f"[AutoSwap USDC] Client sent {amount_decimal}, actual on-chain is {actual_usdc}. Using actual.")
                     amount_decimal = actual_usdc
                 
-                # Reject dust amounts — no point minting < 10¢ of cUSD
-                if amount_decimal < Decimal('0.10'):
-                    logger.info(f"[AutoSwap USDC] Amount {amount_decimal} below minimum 0.10, skipping.")
+                # Contract minimum is 1 USDC for mint_with_collateral.
+                if amount_decimal < Decimal('1.0'):
+                    logger.info(f"[AutoSwap USDC] Amount {amount_decimal} below minimum 1.0, skipping.")
                     return cls(success=False, error='amount_below_minimum')
                 
                 # We need to make sure the user has a transaction hash reference eventually
@@ -2564,6 +2573,10 @@ class BuildAutoSwapTransactionsMutation(graphene.Mutation):
                 )
                 
                 if not tx_result.get('success'):
+                    logger.warning(
+                        "[AutoSwap USDC] build_mint_transactions failed: %s",
+                        tx_result.get('error', 'unknown_error'),
+                    )
                     # Could be needs app opt-in, handle gracefully
                     if tx_result.get('requires_app_optin'):
                         return cls(success=False, error='requires_app_optin', transactions=None)
@@ -2600,6 +2613,11 @@ class BuildAutoSwapTransactionsMutation(graphene.Mutation):
                 
                 amount_decimal = Decimal(amount) / Decimal('1000000')
                 tx_builder = CUSDTransactionBuilder()
+
+                # Contract minimum is 1 cUSD for burn_for_collateral.
+                if amount_decimal < Decimal('1.0'):
+                    logger.info(f"[AutoSwap CUSD] Amount {amount_decimal} below minimum 1.0, skipping.")
+                    return cls(success=False, error='amount_below_minimum')
                 
                 conversion = Conversion.objects.create(
                     actor_type='user',
@@ -2659,8 +2677,30 @@ class BuildAutoSwapTransactionsMutation(graphene.Mutation):
                 from algosdk.abi import Method, Returns
                 from blockchain.kms_manager import get_kms_signer_from_settings
                 
+                # Keep these policy numbers aligned with the client auto-swap hook.
+                ALGO_RESERVE_THRESHOLD = Decimal('3')
+                ALGO_MIN_SWAP_AMOUNT = Decimal('1')
+                logger.debug(
+                    "[AutoSwap ALGO] policy reserve=%s min_swap=%s",
+                    ALGO_RESERVE_THRESHOLD,
+                    ALGO_MIN_SWAP_AMOUNT,
+                )
+
                 amount_micro = int(amount)
                 amount_decimal = Decimal(amount) / Decimal('1000000')
+
+                # Validate and clamp by actual on-chain ALGO excess over reserve.
+                account_info = algod_client.account_info(account.algorand_address)
+                current_algo_balance = Decimal(account_info.get('amount', 0)) / Decimal('1000000')
+                max_swappable_algo = max(Decimal('0'), current_algo_balance - ALGO_RESERVE_THRESHOLD)
+                if max_swappable_algo < ALGO_MIN_SWAP_AMOUNT:
+                    return cls(success=False, error='algo_amount_below_minimum')
+                if amount_decimal > max_swappable_algo:
+                    amount_decimal = max_swappable_algo
+                    amount_micro = int(amount_decimal * Decimal('1000000'))
+
+                if amount_decimal < ALGO_MIN_SWAP_AMOUNT:
+                    return cls(success=False, error='algo_amount_below_minimum')
                 
                 is_mainnet = getattr(settings, 'ALGORAND_NETWORK', 'testnet') == 'mainnet'
                 if is_mainnet:
@@ -2692,21 +2732,22 @@ class BuildAutoSwapTransactionsMutation(graphene.Mutation):
                     return cls(success=False, error='amount_below_minimum')
 
                 # Ensure user is opted into cUSD app before composing the combined group.
-                account_info = algod_client.account_info(account.algorand_address)
                 apps_local_state = account_info.get('apps-local-state', [])
                 app_opted_in = any(app.get('id') == settings.ALGORAND_CUSD_APP_ID for app in apps_local_state)
                 if not app_opted_in:
                     return cls(success=False, error='requires_app_optin', transactions=None)
                 
+                # Persist this as the final visible conversion leg (USDC -> cUSD),
+                # since history/rendering layers only model usdc_to_cusd/cusd_to_usdc.
                 conversion = Conversion.objects.create(
                     actor_type='user',
                     actor_user=user,
                     actor_display_name=user.username,
                     actor_address=account.algorand_address,
-                    conversion_type='algo_to_usdc',
-                    from_amount=amount_decimal,
+                    conversion_type='usdc_to_cusd',
+                    from_amount=usdc_out_decimal,
                     to_amount=usdc_out_decimal,
-                    exchange_rate=exchange_rate,
+                    exchange_rate=Decimal('1.0'),
                     fee_amount=Decimal('0.0'),
                     status='PENDING_SIG'
                 )

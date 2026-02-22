@@ -265,7 +265,7 @@ def create_unified_transaction_from_conversion(conversion):
                 'sender_business': conversion.actor_business,
                 'sender_type': conversion.actor_type,
                 'sender_display_name': conversion.actor_display_name,
-                'sender_phone': conversion.actor_user.phone_number if conversion.actor_user else '',
+                'sender_phone': (conversion.actor_user.phone_number or '') if conversion.actor_user else '',
                 'sender_address': conversion.actor_address,
                 
                 # No real counterparty for conversions (self-transaction)

@@ -14,11 +14,31 @@ Usage:
 
 from django.utils import timezone
 from django.db.models import Count, Q
-from datetime import date, timedelta, datetime
+from datetime import date, timedelta, datetime, timezone as dt_timezone
 from decimal import Decimal
 import logging
 
 logger = logging.getLogger(__name__)
+
+try:
+    import pytz  # type: ignore
+except ImportError:  # pragma: no cover - depends on runtime environment
+    pytz = None
+
+if pytz is not None:
+    ARG_TZ = pytz.timezone('America/Argentina/Buenos_Aires')
+    UTC_TZ = pytz.UTC
+else:
+    from zoneinfo import ZoneInfo
+    ARG_TZ = ZoneInfo('America/Argentina/Buenos_Aires')
+    UTC_TZ = dt_timezone.utc
+
+
+def _localize_arg(naive_dt: datetime) -> datetime:
+    """Attach Argentina timezone to a naive datetime for DB window math."""
+    if pytz is not None:
+        return ARG_TZ.localize(naive_dt)
+    return naive_dt.replace(tzinfo=ARG_TZ)
 
 
 def calculate_dau(target_date=None):
@@ -37,24 +57,19 @@ def calculate_dau(target_date=None):
     """
     from users.models import User
     
-    import pytz
-    
     if target_date is None:
         # Default to yesterday in Argentina time
-        tz = pytz.timezone('America/Argentina/Buenos_Aires')
-        now_arg = timezone.now().astimezone(tz)
+        now_arg = timezone.now().astimezone(ARG_TZ)
         target_date = (now_arg - timedelta(days=1)).date()
-    else:
-        tz = pytz.timezone('America/Argentina/Buenos_Aires')
     
     # Convert date to datetime range in Argentina time
     naive_start = datetime.combine(target_date, datetime.min.time())
-    start_time_arg = tz.localize(naive_start)
-    start_time = start_time_arg.astimezone(pytz.UTC)
+    start_time_arg = _localize_arg(naive_start)
+    start_time = start_time_arg.astimezone(UTC_TZ)
 
     naive_end = datetime.combine(target_date, datetime.max.time())
-    end_time_arg = tz.localize(naive_end)
-    end_time = end_time_arg.astimezone(pytz.UTC)
+    end_time_arg = _localize_arg(naive_end)
+    end_time = end_time_arg.astimezone(UTC_TZ)
     
     dau = User.objects.filter(
         phone_number__isnull=False,
@@ -82,26 +97,21 @@ def calculate_wau(target_date=None):
     """
     from users.models import User
     
-    import pytz
-    
     if target_date is None:
-        tz = pytz.timezone('America/Argentina/Buenos_Aires')
-        now_arg = timezone.now().astimezone(tz)
+        now_arg = timezone.now().astimezone(ARG_TZ)
         target_date = (now_arg - timedelta(days=1)).date()
-    else:
-        tz = pytz.timezone('America/Argentina/Buenos_Aires')
     
     # Convert date to datetime range in Argentina time
     # WAU: End of today back 7 days
     naive_end = datetime.combine(target_date, datetime.max.time())
-    end_time_arg = tz.localize(naive_end)
-    end_time = end_time_arg.astimezone(pytz.UTC)
+    end_time_arg = _localize_arg(naive_end)
+    end_time = end_time_arg.astimezone(UTC_TZ)
     
     # Start: 6 days ago start of day (total 7 days including today)
     start_date = target_date - timedelta(days=6)
     naive_start = datetime.combine(start_date, datetime.min.time())
-    start_time_arg = tz.localize(naive_start)
-    start_time = start_time_arg.astimezone(pytz.UTC)
+    start_time_arg = _localize_arg(naive_start)
+    start_time = start_time_arg.astimezone(UTC_TZ)
     
     wau = User.objects.filter(
         phone_number__isnull=False,
@@ -129,26 +139,21 @@ def calculate_mau(target_date=None):
     """
     from users.models import User
     
-    import pytz
-    
     if target_date is None:
-        tz = pytz.timezone('America/Argentina/Buenos_Aires')
-        now_arg = timezone.now().astimezone(tz)
+        now_arg = timezone.now().astimezone(ARG_TZ)
         target_date = (now_arg - timedelta(days=1)).date()
-    else:
-        tz = pytz.timezone('America/Argentina/Buenos_Aires')
     
     # Convert date to datetime range in Argentina time
     # MAU: End of today back 30 days
     naive_end = datetime.combine(target_date, datetime.max.time())
-    end_time_arg = tz.localize(naive_end)
-    end_time = end_time_arg.astimezone(pytz.UTC)
+    end_time_arg = _localize_arg(naive_end)
+    end_time = end_time_arg.astimezone(UTC_TZ)
     
     # Start: 29 days ago start of day (total 30 days including today)
     start_date = target_date - timedelta(days=29)
     naive_start = datetime.combine(start_date, datetime.min.time())
-    start_time_arg = tz.localize(naive_start)
-    start_time = start_time_arg.astimezone(pytz.UTC)
+    start_time_arg = _localize_arg(naive_start)
+    start_time = start_time_arg.astimezone(UTC_TZ)
     
     mau = User.objects.filter(
         phone_number__isnull=False,
@@ -179,34 +184,30 @@ def calculate_country_metrics(target_date=None):
         }
     """
     from users.models import User
-    import pytz
-    
-    tz = pytz.timezone('America/Argentina/Buenos_Aires')
-    
     if target_date is None:
         target_date = (timezone.now() - timedelta(days=1)).date()
     
     # Convert date to datetime range in Argentina time
     naive_end = datetime.combine(target_date, datetime.max.time())
-    end_time_arg = tz.localize(naive_end)
-    end_time = end_time_arg.astimezone(pytz.UTC)
+    end_time_arg = _localize_arg(naive_end)
+    end_time = end_time_arg.astimezone(UTC_TZ)
     
     # DAU: Today
     naive_start_dau = datetime.combine(target_date, datetime.min.time())
-    start_arg_dau = tz.localize(naive_start_dau)
-    dau_start = start_arg_dau.astimezone(pytz.UTC)
+    start_arg_dau = _localize_arg(naive_start_dau)
+    dau_start = start_arg_dau.astimezone(UTC_TZ)
 
     # WAU: Last 7 days
     start_date_wau = target_date - timedelta(days=6)
     naive_start_wau = datetime.combine(start_date_wau, datetime.min.time())
-    start_arg_wau = tz.localize(naive_start_wau)
-    wau_start = start_arg_wau.astimezone(pytz.UTC)
+    start_arg_wau = _localize_arg(naive_start_wau)
+    wau_start = start_arg_wau.astimezone(UTC_TZ)
 
     # MAU: Last 30 days
     start_date_mau = target_date - timedelta(days=29)
     naive_start_mau = datetime.combine(start_date_mau, datetime.min.time())
-    start_arg_mau = tz.localize(naive_start_mau)
-    mau_start = start_arg_mau.astimezone(pytz.UTC)
+    start_arg_mau = _localize_arg(naive_start_mau)
+    mau_start = start_arg_mau.astimezone(UTC_TZ)
     
     # Get all countries with users
     countries = User.objects.filter(
@@ -281,14 +282,9 @@ def snapshot_daily_metrics(target_date=None):
     from users.models import User
     from users.models_analytics import DailyMetrics
     
-    import pytz
-    
     if target_date is None:
-        tz = pytz.timezone('America/Argentina/Buenos_Aires')
-        now_arg = timezone.now().astimezone(tz)
+        now_arg = timezone.now().astimezone(ARG_TZ)
         target_date = (now_arg - timedelta(days=1)).date()
-    else:
-        tz = pytz.timezone('America/Argentina/Buenos_Aires')
     
     logger.info(f"Creating daily metrics snapshot for {target_date} (Argentina Time)")
     
@@ -301,16 +297,16 @@ def snapshot_daily_metrics(target_date=None):
     # end_time is end of target_date in Argentina, converted to UTC
     # end_time is end of target_date in Argentina, converted to UTC
     naive_end = datetime.combine(target_date, datetime.max.time())
-    end_time_arg = tz.localize(naive_end)
-    end_time = end_time_arg.astimezone(pytz.UTC)
+    end_time_arg = _localize_arg(naive_end)
+    end_time = end_time_arg.astimezone(UTC_TZ)
     
     total_users = User.objects.filter(phone_number__isnull=False, created_at__lte=end_time).count()
     
     # Calculate new users on target date
     # start_time is start of target_date in Argentina
     naive_start = datetime.combine(target_date, datetime.min.time())
-    start_time_arg = tz.localize(naive_start)
-    start_time = start_time_arg.astimezone(pytz.UTC)
+    start_time_arg = _localize_arg(naive_start)
+    start_time = start_time_arg.astimezone(UTC_TZ)
     new_users_today = User.objects.filter(
         phone_number__isnull=False,
         created_at__gte=start_time,

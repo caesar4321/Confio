@@ -39,6 +39,11 @@ interface UseAutoSwapProps {
     refreshAccountBalance: () => void;
 }
 
+const USDC_THRESHOLD = 1;  // contract minimum: do not auto-convert below 1 USDC
+const ALGO_RESERVE_THRESHOLD = 3; // Keep 3 ALGO in wallet before auto-swapping excess
+const ALGO_MIN_SWAP_AMOUNT = 1; // Require at least 1 whole ALGO of excess to trigger
+const MIN_MODAL_VISIBLE_MS = 1200;
+
 export const useAutoSwap = ({
     isAuthenticated,
     myBalancesLoading,
@@ -50,7 +55,7 @@ export const useAutoSwap = ({
     const [submitAutoSwapTransactions] = useMutation(SUBMIT_AUTO_SWAP_TRANSACTIONS);
 
     // Auto-Swap Background Detection Trigger
-    // Triggers a silent conversion when USDC > 0 or ALGO > 5.
+    // Triggers a silent conversion when USDC > 0 or ALGO exceeds reserve.
     const isSwappingRef = useRef(false);
     const [swapModalAsset, setSwapModalAsset] = useState<'ALGO' | 'USDC' | null>(null);
 
@@ -68,11 +73,6 @@ export const useAutoSwap = ({
                 const currentUsdc = Number(usdcBalanceStr) || 0;
                 const currentAlgo = parseFloat(algoBalanceStr) || 0;
 
-                // Define limits — USDC_THRESHOLD avoids swapping dust left over from slippage
-                const USDC_THRESHOLD = 0.10;  // ignore dust < 10¢
-                const ALGO_THRESHOLD = 5;
-                const ALGO_MIN_SWAP_AMOUNT = 1; // Require at least 1 whole ALGO of excess to trigger
-
                 // Determine input asset and amount
                 let swapAssetType = null;
                 let swapAmount = '0';
@@ -80,13 +80,20 @@ export const useAutoSwap = ({
                 if (currentUsdc > USDC_THRESHOLD) {
                     swapAssetType = 'USDC';
                     swapAmount = Math.floor(currentUsdc * 1000000).toString();
-                } else if (currentAlgo >= ALGO_THRESHOLD + ALGO_MIN_SWAP_AMOUNT) {
-                    swapAssetType = 'ALGO';
-                    const excessAlgo = currentAlgo - ALGO_THRESHOLD;
-                    swapAmount = Math.floor(excessAlgo * 1000000).toString();
+                } else {
+                    // Keep a hard reserve in ALGO and only swap true excess.
+                    const excessAlgo = Math.max(0, currentAlgo - ALGO_RESERVE_THRESHOLD);
+                    if (excessAlgo >= ALGO_MIN_SWAP_AMOUNT) {
+                        swapAssetType = 'ALGO';
+                        swapAmount = Math.floor(excessAlgo * 1000000).toString();
+                    }
                 }
 
                 if (!swapAssetType) return;
+                if (!Number.isFinite(Number(swapAmount)) || Number(swapAmount) <= 0) {
+                    console.log(`[AutoSwap Hook] Invalid swap amount (${swapAmount}), skipping.`);
+                    return;
+                }
 
                 const swapKey = `${swapAssetType}-${swapAmount}`;
                 const now = Date.now();
@@ -99,8 +106,9 @@ export const useAutoSwap = ({
                 lastAttemptTimestamps.current[swapKey] = now;
 
                 console.log(`[AutoSwap Hook] Threshold met for ${swapAssetType}. Amount: ${swapAmount}`);
-                setSwapModalAsset(swapAssetType as 'ALGO' | 'USDC');
                 isSwappingRef.current = true;
+                const modalStartTs = Date.now();
+                setSwapModalAsset(swapAssetType as 'ALGO' | 'USDC');
 
                 try {
                     // 1. Build swap txns
@@ -171,6 +179,10 @@ export const useAutoSwap = ({
                 } catch (e) {
                     console.error('[AutoSwap Hook] Exception during auto-swap flow:', e);
                 } finally {
+                    const elapsedMs = Date.now() - modalStartTs;
+                    if (elapsedMs < MIN_MODAL_VISIBLE_MS) {
+                        await new Promise(resolve => setTimeout(resolve, MIN_MODAL_VISIBLE_MS - elapsedMs));
+                    }
                     isSwappingRef.current = false;
                     setSwapModalAsset(null);
                 }
