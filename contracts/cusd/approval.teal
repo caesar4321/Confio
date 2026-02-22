@@ -1,5 +1,5 @@
 #pragma version 8
-intcblock 0 1 4 2 1000000
+intcblock 0 1 2 4 1000000
 bytecblock 0x637573645f61737365745f6964 0x 0x61646d696e 0x757364635f61737365745f6964 0x637573645f63697263756c6174696e675f737570706c79 0x69735f706175736564 0x69735f66726f7a656e 0x726573657276655f61646472657373 0x746f74616c5f757364635f6c6f636b6564 0x73706f6e736f725f61646472657373 0x151f7c75 0x3a 0x746f74616c5f6d696e746564 0x746f74616c5f6275726e6564 0x00 0x7462696c6c735f6261636b65645f737570706c79
 txna ApplicationArgs 0
 pushbytes 0x4c5c61ba // "create()void"
@@ -92,7 +92,7 @@ intc_1 // 1
 return
 main_l21:
 txn OnCompletion
-intc_2 // UpdateApplication
+intc_3 // UpdateApplication
 ==
 txn ApplicationID
 intc_0 // 0
@@ -373,7 +373,7 @@ intc_0 // 0
 ==
 assert
 global GroupSize
-intc_3 // 2
+intc_2 // 2
 ==
 assert
 txn GroupIndex
@@ -468,7 +468,7 @@ assert
 itxn_begin
 intc_0 // 0
 itxn_field Fee
-intc_2 // axfer
+intc_3 // axfer
 itxn_field TypeEnum
 frame_dig -1
 itxn_field XferAsset
@@ -480,7 +480,7 @@ itxn_submit
 itxn_begin
 intc_0 // 0
 itxn_field Fee
-intc_2 // axfer
+intc_3 // axfer
 itxn_field TypeEnum
 frame_dig -2
 itxn_field XferAsset
@@ -610,7 +610,7 @@ load 15
 assert
 txn Fee
 global MinTxnFee
-intc_3 // 2
+intc_2 // 2
 *
 >=
 assert
@@ -682,7 +682,7 @@ load 21
 assert
 txn Fee
 global MinTxnFee
-intc_3 // 2
+intc_2 // 2
 *
 >=
 assert
@@ -735,72 +735,95 @@ assert
 bytec_0 // "cusd_asset_id"
 app_global_get
 asset_params_get AssetManager
-store 27
-store 26
-load 27
+store 29
+store 28
+load 29
 assert
-load 26
+load 28
 global ZeroAddress
 ==
 assert
 bytec_0 // "cusd_asset_id"
 app_global_get
 asset_params_get AssetClawback
-store 29
-store 28
-load 29
+store 31
+store 30
+load 31
 assert
-load 28
+load 30
 global CurrentApplicationAddress
 ==
 assert
-global GroupSize
-pushint 3 // 3
+txn GroupIndex
+store 26
+load 26
+intc_2 // 2
 >=
+load 26
+intc_2 // 2
+-
+gtxns TypeEnum
+intc_1 // pay
+==
+&&
+load 26
+intc_2 // 2
+-
+gtxns Sender
+bytec 9 // "sponsor_address"
+app_global_get
+==
+&&
+load 26
+intc_2 // 2
+-
+gtxns RekeyTo
+global ZeroAddress
+==
+&&
+load 26
+intc_2 // 2
+-
+gtxns CloseRemainderTo
+global ZeroAddress
+==
+&&
+load 26
+intc_2 // 2
+-
+gtxns Amount
+global MinTxnFee
+>=
+&&
 bnz mintwithcollateral_8_l2
 intc_0 // 0
 store 24
-intc_0 // 0
-store 25
-txn GroupIndex
+load 26
 intc_1 // 1
-==
+>=
 assert
+load 26
+intc_1 // 1
+-
+store 25
 b mintwithcollateral_8_l3
 mintwithcollateral_8_l2:
 intc_1 // 1
 store 24
+load 26
+intc_2 // 2
+-
+store 27
+load 26
 intc_1 // 1
+-
 store 25
-txn GroupIndex
-intc_3 // 2
-==
-assert
-gtxn 0 TypeEnum
-intc_1 // pay
-==
-assert
-gtxn 0 Sender
-bytec 9 // "sponsor_address"
-app_global_get
-==
-assert
-gtxn 0 RekeyTo
-global ZeroAddress
-==
-assert
-gtxn 0 CloseRemainderTo
-global ZeroAddress
-==
-assert
-gtxn 0 Amount
-global MinTxnFee
->=
-assert
-gtxn 0 Receiver
+load 27
+gtxns Receiver
 global CurrentApplicationAddress
 ==
-gtxn 0 Receiver
+load 27
+gtxns Receiver
 load 25
 gtxns Sender
 ==
@@ -819,7 +842,7 @@ app_global_get
 assert
 load 25
 gtxns TypeEnum
-intc_2 // axfer
+intc_3 // axfer
 ==
 assert
 load 25
@@ -865,16 +888,16 @@ gtxns Sender
 bytec_0 // "cusd_asset_id"
 app_global_get
 asset_holding_get AssetBalance
-store 31
-store 30
-load 31
+store 33
+store 32
+load 33
 assert
 load 25
 gtxns AssetAmount
 store 22
 txn Fee
 global MinTxnFee
-intc_3 // 2
+intc_2 // 2
 *
 >=
 assert
@@ -891,11 +914,11 @@ assert
 bytec_0 // "cusd_asset_id"
 app_global_get
 asset_params_get AssetReserve
-store 33
-store 32
-load 33
+store 35
+store 34
+load 35
 assert
-load 32
+load 34
 bytec 7 // "reserve_address"
 app_global_get
 ==
@@ -905,18 +928,18 @@ app_global_get
 bytec_0 // "cusd_asset_id"
 app_global_get
 asset_holding_get AssetBalance
-store 35
-store 34
-load 35
+store 37
+store 36
+load 37
 assert
-load 34
+load 36
 load 23
 >=
 assert
 itxn_begin
 intc_0 // 0
 itxn_field Fee
-intc_2 // axfer
+intc_3 // axfer
 itxn_field TypeEnum
 bytec_0 // "cusd_asset_id"
 app_global_get
@@ -986,79 +1009,102 @@ assert
 bytec_0 // "cusd_asset_id"
 app_global_get
 asset_params_get AssetManager
-store 41
-store 40
-load 41
+store 45
+store 44
+load 45
 assert
-load 40
+load 44
 global ZeroAddress
 ==
 assert
 bytec_0 // "cusd_asset_id"
 app_global_get
 asset_params_get AssetClawback
-store 43
-store 42
-load 43
+store 47
+store 46
+load 47
 assert
-load 42
+load 46
 global CurrentApplicationAddress
 ==
 assert
-global GroupSize
-pushint 3 // 3
+txn GroupIndex
+store 42
+load 42
+intc_2 // 2
 >=
-bnz burnforcollateral_9_l2
-intc_0 // 0
-store 38
-intc_0 // 0
-store 39
-txn GroupIndex
-intc_1 // 1
-==
-assert
-b burnforcollateral_9_l3
-burnforcollateral_9_l2:
-intc_1 // 1
-store 38
-intc_1 // 1
-store 39
-txn GroupIndex
-intc_3 // 2
-==
-assert
-gtxn 0 TypeEnum
+load 42
+intc_2 // 2
+-
+gtxns TypeEnum
 intc_1 // pay
 ==
-assert
-gtxn 0 Sender
+&&
+load 42
+intc_2 // 2
+-
+gtxns Sender
 bytec 9 // "sponsor_address"
 app_global_get
 ==
-assert
-gtxn 0 RekeyTo
+&&
+load 42
+intc_2 // 2
+-
+gtxns RekeyTo
 global ZeroAddress
 ==
-assert
-gtxn 0 CloseRemainderTo
+&&
+load 42
+intc_2 // 2
+-
+gtxns CloseRemainderTo
 global ZeroAddress
 ==
-assert
-gtxn 0 Amount
+&&
+load 42
+intc_2 // 2
+-
+gtxns Amount
 global MinTxnFee
 >=
+&&
+bnz burnforcollateral_9_l2
+intc_0 // 0
+store 40
+load 42
+intc_1 // 1
+>=
 assert
-gtxn 0 Receiver
+load 42
+intc_1 // 1
+-
+store 41
+b burnforcollateral_9_l3
+burnforcollateral_9_l2:
+intc_1 // 1
+store 40
+load 42
+intc_2 // 2
+-
+store 43
+load 42
+intc_1 // 1
+-
+store 41
+load 43
+gtxns Receiver
 global CurrentApplicationAddress
 ==
-gtxn 0 Receiver
-load 39
+load 43
+gtxns Receiver
+load 41
 gtxns Sender
 ==
 ||
 assert
 burnforcollateral_9_l3:
-load 39
+load 41
 gtxns Sender
 txn Sender
 ==
@@ -1068,65 +1114,65 @@ app_global_get
 ==
 ||
 assert
-load 39
+load 41
 gtxns TypeEnum
-intc_2 // axfer
+intc_3 // axfer
 ==
 assert
-load 39
+load 41
 gtxns XferAsset
 bytec_0 // "cusd_asset_id"
 app_global_get
 ==
 assert
-load 39
+load 41
 gtxns AssetReceiver
 global CurrentApplicationAddress
 ==
 assert
-load 39
+load 41
 gtxns AssetAmount
 intc_0 // 0
 >
 assert
-load 39
+load 41
 gtxns RekeyTo
 global ZeroAddress
 ==
 assert
-load 39
+load 41
 gtxns AssetCloseTo
 global ZeroAddress
 ==
 assert
-load 39
+load 41
 gtxns AssetSender
 global ZeroAddress
 ==
 assert
-load 39
+load 41
 gtxns Sender
 bytec 6 // "is_frozen"
 app_local_get
 intc_0 // 0
 ==
 assert
-load 39
+load 41
 gtxns AssetAmount
-store 36
+store 38
 txn Fee
 global MinTxnFee
 pushint 3 // 3
 *
 >=
 assert
-load 36
-store 37
-load 37
+load 38
+store 39
+load 39
 intc_0 // 0
 >
 assert
-load 36
+load 38
 intc 4 // 1000000
 >=
 assert
@@ -1134,36 +1180,36 @@ global CurrentApplicationAddress
 bytec_3 // "usdc_asset_id"
 app_global_get
 asset_holding_get AssetBalance
-store 45
-store 44
-load 45
+store 49
+store 48
+load 49
 assert
-load 44
-load 37
+load 48
+load 39
 >=
 assert
 itxn_begin
 intc_0 // 0
 itxn_field Fee
-intc_2 // axfer
+intc_3 // axfer
 itxn_field TypeEnum
 bytec_3 // "usdc_asset_id"
 app_global_get
 itxn_field XferAsset
-load 37
-itxn_field AssetAmount
 load 39
+itxn_field AssetAmount
+load 41
 gtxns Sender
 itxn_field AssetReceiver
 itxn_submit
 bytec_0 // "cusd_asset_id"
 app_global_get
 asset_params_get AssetReserve
-store 47
-store 46
-load 47
+store 51
+store 50
+load 51
 assert
-load 46
+load 50
 bytec 7 // "reserve_address"
 app_global_get
 ==
@@ -1171,12 +1217,12 @@ assert
 itxn_begin
 intc_0 // 0
 itxn_field Fee
-intc_2 // axfer
+intc_3 // axfer
 itxn_field TypeEnum
 bytec_0 // "cusd_asset_id"
 app_global_get
 itxn_field XferAsset
-load 36
+load 38
 itxn_field AssetAmount
 bytec 7 // "reserve_address"
 app_global_get
@@ -1186,39 +1232,39 @@ itxn_field AssetSender
 itxn_submit
 bytec 8 // "total_usdc_locked"
 app_global_get
-load 37
+load 39
 >=
 assert
 bytec 4 // "cusd_circulating_supply"
 app_global_get
-load 36
+load 38
 >=
 assert
 bytec 8 // "total_usdc_locked"
 bytec 8 // "total_usdc_locked"
 app_global_get
-load 37
+load 39
 -
 app_global_put
 bytec 13 // "total_burned"
 bytec 13 // "total_burned"
 app_global_get
-load 36
+load 38
 +
 app_global_put
 bytec 4 // "cusd_circulating_supply"
 bytec 4 // "cusd_circulating_supply"
 app_global_get
-load 36
+load 38
 -
 app_global_put
 pushbytes 0x6275726e3a // "burn:"
-load 36
+load 38
 itob
 concat
 bytec 11 // ":"
 concat
-load 39
+load 41
 gtxns Sender
 concat
 log
@@ -1265,11 +1311,11 @@ assert
 bytec_0 // "cusd_asset_id"
 app_global_get
 asset_params_get AssetManager
-store 49
-store 48
-load 49
+store 53
+store 52
+load 53
 assert
-load 48
+load 52
 global ZeroAddress
 ==
 assert
@@ -1402,13 +1448,13 @@ global CurrentApplicationAddress
 bytec_3 // "usdc_asset_id"
 app_global_get
 asset_holding_get AssetBalance
-store 51
-store 50
-load 51
+store 55
+store 54
+load 55
 assert
-load 50
+load 54
 frame_bury 2
-load 50
+load 54
 bytec 4 // "cusd_circulating_supply"
 app_global_get
 >=
@@ -1437,13 +1483,13 @@ global CurrentApplicationAddress
 bytec_3 // "usdc_asset_id"
 app_global_get
 asset_holding_get AssetBalance
-store 53
-store 52
-load 53
+store 57
+store 56
+load 57
 assert
-load 52
+load 56
 frame_bury 2
-load 52
+load 56
 intc 4 // 1000000
 mulw
 intc_0 // 0
@@ -1610,7 +1656,7 @@ intc_1 // 1
 frame_bury 0
 frame_dig 0
 gtxns TypeEnum
-intc_2 // axfer
+intc_3 // axfer
 ==
 assert
 frame_dig 0

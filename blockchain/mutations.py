@@ -2653,6 +2653,11 @@ class BuildAutoSwapTransactionsMutation(graphene.Mutation):
                 from conversion.models import Conversion
                 from tinyman.v2.client import TinymanV2MainnetClient, TinymanV2TestnetClient
                 from tinyman.assets import AssetAmount
+                from algosdk import transaction as algo_txn
+                from algosdk.transaction import PaymentTxn, AssetTransferTxn, ApplicationCallTxn
+                from algosdk.logic import get_application_address
+                from algosdk.abi import Method, Returns
+                from blockchain.kms_manager import get_kms_signer_from_settings
                 
                 amount_micro = int(amount)
                 amount_decimal = Decimal(amount) / Decimal('1000000')
@@ -2673,9 +2678,25 @@ class BuildAutoSwapTransactionsMutation(graphene.Mutation):
                     amount_in=AssetAmount(algo_asset, amount_micro)
                 )
                 
+                # Use conservative output for atomic minting.
+                # If swap output is below this minimum the whole group fails, which is correct.
                 usdc_out_micro = quote.amount_out_with_slippage.amount
+                if usdc_out_micro <= 0:
+                    return cls(success=False, error='invalid_swap_quote')
+
                 usdc_out_decimal = Decimal(usdc_out_micro) / Decimal('1000000')
                 exchange_rate = usdc_out_decimal / amount_decimal if amount_decimal > 0 else Decimal('0')
+
+                # Reject dust amounts — no point minting < 10 cents.
+                if usdc_out_decimal < Decimal('0.10'):
+                    return cls(success=False, error='amount_below_minimum')
+
+                # Ensure user is opted into cUSD app before composing the combined group.
+                account_info = algod_client.account_info(account.algorand_address)
+                apps_local_state = account_info.get('apps-local-state', [])
+                app_opted_in = any(app.get('id') == settings.ALGORAND_CUSD_APP_ID for app in apps_local_state)
+                if not app_opted_in:
+                    return cls(success=False, error='requires_app_optin', transactions=None)
                 
                 conversion = Conversion.objects.create(
                     actor_type='user',
@@ -2690,19 +2711,141 @@ class BuildAutoSwapTransactionsMutation(graphene.Mutation):
                     status='PENDING_SIG'
                 )
                 
-                txn_group = pool.prepare_swap_transactions_from_quote(
+                # Build Tinyman ALGO -> USDC leg
+                tinyman_group = pool.prepare_swap_transactions_from_quote(
                     quote=quote,
                     user_address=account.algorand_address,
                     suggested_params=params
                 )
-                
-                txs_norm = [algo_encoding.msgpack_encode(txn) for txn in txn_group.transactions]
+
+                # Canonicalize Tinyman txns before grouping.
+                # Some SDK/provider txn objects may not preserve direct field assignment
+                # exactly as encoded, which can cause "incomplete group" at submission.
+                tinyman_txns = []
+                for t in list(tinyman_group.transactions):
+                    if hasattr(t, 'dictify'):
+                        tinyman_txns.append(algo_txn.Transaction.undictify(t.dictify()))
+                    else:
+                        tinyman_txns.append(t)
+
+                # Build sponsored USDC -> cUSD leg appended to the same atomic group:
+                # [... Tinyman txns ..., sponsor pay, USDC transfer, cUSD app call]
+                min_fee = getattr(params, 'min_fee', 1000) or 1000
+                app_call_fee = 3 * min_fee  # mint app call + 1 inner transfer safety budget
+                sponsor_payment_fee = min_fee
+
+                current_balance = account_info.get('amount', 0)
+                min_balance_required = account_info.get('min-balance', 0)
+                funding_needed = 0
+                if current_balance < min_balance_required:
+                    funding_needed = min_balance_required - current_balance
+                if funding_needed < min_fee:
+                    funding_needed = min_fee
+
+                app_address = get_application_address(settings.ALGORAND_CUSD_APP_ID)
+                sponsor_address = settings.ALGORAND_SPONSOR_ADDRESS
+
+                sponsor_params = algo_txn.SuggestedParams(
+                    fee=sponsor_payment_fee,
+                    first=params.first,
+                    last=params.last,
+                    gh=params.gh,
+                    gen=params.gen,
+                    flat_fee=True
+                )
+                sponsor_payment = PaymentTxn(
+                    sender=sponsor_address,
+                    sp=sponsor_params,
+                    receiver=account.algorand_address,
+                    amt=funding_needed,
+                    note=b"Min balance top-up for cUSD"
+                )
+
+                usdc_params = algo_txn.SuggestedParams(
+                    fee=0,
+                    first=params.first,
+                    last=params.last,
+                    gh=params.gh,
+                    gen=params.gen,
+                    flat_fee=True
+                )
+                usdc_transfer = AssetTransferTxn(
+                    sender=account.algorand_address,
+                    sp=usdc_params,
+                    receiver=app_address,
+                    amt=int(usdc_out_micro),
+                    index=settings.ALGORAND_USDC_ASSET_ID
+                )
+
+                mint_selector = Method(
+                    name="mint_with_collateral",
+                    args=[],
+                    returns=Returns("void")
+                ).get_selector()
+
+                app_params = algo_txn.SuggestedParams(
+                    fee=app_call_fee,
+                    first=params.first,
+                    last=params.last,
+                    gh=params.gh,
+                    gen=params.gen,
+                    flat_fee=True
+                )
+                app_call = ApplicationCallTxn(
+                    sender=sponsor_address,
+                    sp=app_params,
+                    index=settings.ALGORAND_CUSD_APP_ID,
+                    on_complete=algo_txn.OnComplete.NoOpOC,
+                    app_args=[mint_selector],
+                    foreign_assets=[settings.ALGORAND_USDC_ASSET_ID, settings.ALGORAND_CUSD_ASSET_ID],
+                    accounts=[account.algorand_address]
+                )
+
+                combined_txns = tinyman_txns + [sponsor_payment, usdc_transfer, app_call]
+                if len(combined_txns) > 16:
+                    conversion.status = 'FAILED'
+                    conversion.error_message = f'atomic_group_too_large:{len(combined_txns)}'
+                    conversion.save(update_fields=['status', 'error_message', 'updated_at'])
+                    return cls(success=False, error='atomic_group_too_large')
+
+                # Tinyman txns may already include a prior group id; clear before recomputing.
+                for txn in combined_txns:
+                    txn.group = None
+
+                group_id = calculate_group_id(combined_txns)
+                for txn in combined_txns:
+                    txn.group = group_id
+
+                signer = get_kms_signer_from_settings()
+                signer.assert_matches_address(sponsor_address)
+                sponsor_payment_signed = signer.sign_transaction_msgpack(sponsor_payment)
+                app_call_signed = signer.sign_transaction_msgpack(app_call)
+
+                sponsor_idx = len(tinyman_txns)
+                usdc_idx = sponsor_idx + 1
+                app_idx = sponsor_idx + 2
+
+                # User signs all non-sponsor txns in group order.
+                txs_norm = [algo_encoding.msgpack_encode(txn) for txn in tinyman_txns]
+                txs_norm.append(algo_encoding.msgpack_encode(usdc_transfer))
                 
                 response_data = {
                     'internal_id': conversion.internal_id.hex,
                     'transactions': txs_norm,
-                    'sponsor_transactions': [],
-                    'group_id': str(txn_group.id) if txn_group.id else None
+                    'sponsor_transactions': [
+                        {
+                            'txn': algo_encoding.msgpack_encode(sponsor_payment),
+                            'signed': sponsor_payment_signed,
+                            'index': sponsor_idx
+                        },
+                        {
+                            'txn': algo_encoding.msgpack_encode(app_call),
+                            'signed': app_call_signed,
+                            'index': app_idx
+                        }
+                    ],
+                    'group_id': base64.b64encode(group_id).decode('utf-8'),
+                    'mint_usdc_tx_index': usdc_idx,
                 }
                 
                 return cls(
@@ -2984,4 +3127,3 @@ class BuildBurnAndSendMutation(graphene.Mutation):
         except Exception as e:
             logger.error(f'Error building burn+send: {str(e)}')
             return cls(success=False, error=str(e))
-

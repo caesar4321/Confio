@@ -395,6 +395,8 @@ def mint_with_collateral():
     cusd_to_mint = ScratchVar(TealType.uint64)
     is_sponsored = ScratchVar(TealType.uint64)
     usdc_tx_index = ScratchVar(TealType.uint64)
+    app_tx_index = ScratchVar(TealType.uint64)
+    sponsor_tx_index = ScratchVar(TealType.uint64)
     
     return Seq(
         # Verify system state
@@ -418,29 +420,33 @@ def mint_with_collateral():
         # implicitly enforce the minimum size, and extra transactions at
         # higher indices don't affect contract logic.
         
-        # Determine if sponsored and set indexes
-        If(Global.group_size() >= Int(3),
+        # Use relative indexing so mint can be embedded in larger atomic groups.
+        # Sponsored form: [ ... sponsor pay, USDC axfer, app call ]
+        # Non-sponsored: [ ... USDC axfer, app call ]
+        app_tx_index.store(Txn.group_index()),
+        If(
+            And(
+                app_tx_index.load() >= Int(2),
+                Gtxn[app_tx_index.load() - Int(2)].type_enum() == TxnType.Payment,
+                Gtxn[app_tx_index.load() - Int(2)].sender() == app.state.sponsor_address.get(),
+                Gtxn[app_tx_index.load() - Int(2)].rekey_to() == Global.zero_address(),
+                Gtxn[app_tx_index.load() - Int(2)].close_remainder_to() == Global.zero_address(),
+                Gtxn[app_tx_index.load() - Int(2)].amount() >= Global.min_txn_fee()
+            ),
             Seq(
                 is_sponsored.store(Int(1)),
-                usdc_tx_index.store(Int(1)),  # USDC transfer is at index 1 in sponsored
-                Assert(Txn.group_index() == Int(2)),  # App call is always at index 2
-                
-                # Verify sponsor payment (Tx 0)
-                Assert(Gtxn[0].type_enum() == TxnType.Payment),
-                Assert(Gtxn[0].sender() == app.state.sponsor_address.get()),
-                Assert(Gtxn[0].rekey_to() == Global.zero_address()),
-                Assert(Gtxn[0].close_remainder_to() == Global.zero_address()),
-                Assert(Gtxn[0].amount() >= Global.min_txn_fee()),  # Ensure sponsor pays real fees
+                sponsor_tx_index.store(app_tx_index.load() - Int(2)),
+                usdc_tx_index.store(app_tx_index.load() - Int(1)),
                 # Allow payment to app (fees) OR user (MBR top up)
                 Assert(Or(
-                    Gtxn[0].receiver() == Global.current_application_address(),
-                    Gtxn[0].receiver() == Gtxn[usdc_tx_index.load()].sender()
+                    Gtxn[sponsor_tx_index.load()].receiver() == Global.current_application_address(),
+                    Gtxn[sponsor_tx_index.load()].receiver() == Gtxn[usdc_tx_index.load()].sender()
                 )),
             ),
             Seq(
                 is_sponsored.store(Int(0)),
-                usdc_tx_index.store(Int(0)),  # USDC transfer is at index 0 in non-sponsored
-                Assert(Txn.group_index() == Int(1)),  # App call is at index 1
+                Assert(app_tx_index.load() >= Int(1)),
+                usdc_tx_index.store(app_tx_index.load() - Int(1)),
             )
         ),
         
@@ -547,6 +553,8 @@ def burn_for_collateral():
     usdc_to_redeem = ScratchVar(TealType.uint64)
     is_sponsored = ScratchVar(TealType.uint64)
     cusd_tx_index = ScratchVar(TealType.uint64)
+    app_tx_index = ScratchVar(TealType.uint64)
+    sponsor_tx_index = ScratchVar(TealType.uint64)
     
     return Seq(
         # Verify system state
@@ -570,29 +578,33 @@ def burn_for_collateral():
         # implicitly enforce the minimum size, and extra transactions at
         # higher indices don't affect contract logic.
         
-        # Determine if sponsored and set indexes
-        If(Global.group_size() >= Int(3),
+        # Use relative indexing so burn can be embedded in larger atomic groups.
+        # Sponsored form: [ ... sponsor pay, cUSD axfer, app call ]
+        # Non-sponsored: [ ... cUSD axfer, app call ]
+        app_tx_index.store(Txn.group_index()),
+        If(
+            And(
+                app_tx_index.load() >= Int(2),
+                Gtxn[app_tx_index.load() - Int(2)].type_enum() == TxnType.Payment,
+                Gtxn[app_tx_index.load() - Int(2)].sender() == app.state.sponsor_address.get(),
+                Gtxn[app_tx_index.load() - Int(2)].rekey_to() == Global.zero_address(),
+                Gtxn[app_tx_index.load() - Int(2)].close_remainder_to() == Global.zero_address(),
+                Gtxn[app_tx_index.load() - Int(2)].amount() >= Global.min_txn_fee()
+            ),
             Seq(
                 is_sponsored.store(Int(1)),
-                cusd_tx_index.store(Int(1)),  # cUSD transfer is at index 1 in sponsored
-                Assert(Txn.group_index() == Int(2)),  # App call is always at index 2
-                
-                # Verify sponsor payment (Tx 0)
-                Assert(Gtxn[0].type_enum() == TxnType.Payment),
-                Assert(Gtxn[0].sender() == app.state.sponsor_address.get()),
-                Assert(Gtxn[0].rekey_to() == Global.zero_address()),
-                Assert(Gtxn[0].close_remainder_to() == Global.zero_address()),
-                Assert(Gtxn[0].amount() >= Global.min_txn_fee()),  # Ensure sponsor pays real fees
+                sponsor_tx_index.store(app_tx_index.load() - Int(2)),
+                cusd_tx_index.store(app_tx_index.load() - Int(1)),
                 # Allow payment to app (fees) OR user (MBR top up)
                 Assert(Or(
-                    Gtxn[0].receiver() == Global.current_application_address(),
-                    Gtxn[0].receiver() == Gtxn[cusd_tx_index.load()].sender()
+                    Gtxn[sponsor_tx_index.load()].receiver() == Global.current_application_address(),
+                    Gtxn[sponsor_tx_index.load()].receiver() == Gtxn[cusd_tx_index.load()].sender()
                 )),
             ),
             Seq(
                 is_sponsored.store(Int(0)),
-                cusd_tx_index.store(Int(0)),  # cUSD transfer is at index 0 in non-sponsored
-                Assert(Txn.group_index() == Int(1)),  # App call is at index 1
+                Assert(app_tx_index.load() >= Int(1)),
+                cusd_tx_index.store(app_tx_index.load() - Int(1)),
             )
         ),
         
