@@ -114,7 +114,7 @@ class BalanceService:
     @classmethod
     def get_all_balances(cls, account: Account, verify_critical: bool = False, force_refresh: bool = False) -> Dict[str, Dict]:
         """Get all token balances for an account using a single chain snapshot when needed."""
-        tokens = ['CUSD', 'CONFIO', 'USDC', 'CONFIO_PRESALE']
+        tokens = ['ALGO', 'CUSD', 'CONFIO', 'USDC', 'CONFIO_PRESALE']
         # Quick path: if not forcing, try cached values and decide if refresh is needed
         if not force_refresh:
             cached = {t: cls._get_cached_balance(account, t) for t in tokens}
@@ -125,6 +125,7 @@ class BalanceService:
             )
             if not needs:
                 return {
+                    'algo': cls._format_return(cached['ALGO']),
                     'cusd': cls._format_return(cached['CUSD']),
                     'confio': cls._format_return(cached['CONFIO']),
                     'usdc': cls._format_return(cached['USDC']),
@@ -138,6 +139,7 @@ class BalanceService:
         now = timezone.now()
         # Return formatted dict
         return {
+            'algo': {'amount': data.get('ALGO', Decimal('0')), 'available': data.get('ALGO', Decimal('0')), 'pending': Decimal('0'), 'last_synced': now, 'is_stale': False},
             'cusd': {'amount': data.get('CUSD', Decimal('0')), 'available': data.get('CUSD', Decimal('0')), 'pending': Decimal('0'), 'last_synced': now, 'is_stale': False},
             'confio': {'amount': data.get('CONFIO', Decimal('0')), 'available': data.get('CONFIO', Decimal('0')), 'pending': Decimal('0'), 'last_synced': now, 'is_stale': False},
             'usdc': {'amount': data.get('USDC', Decimal('0')), 'available': data.get('USDC', Decimal('0')), 'pending': Decimal('0'), 'last_synced': now, 'is_stale': False},
@@ -181,7 +183,7 @@ class BalanceService:
             # Mark all balances as stale
             Balance.objects.filter(account=account).update(is_stale=True)
             # Clear Redis cache for all known tokens for this account
-            for t in ['CUSD', 'CONFIO', 'USDC', 'CONFIO_PRESALE']:
+            for t in ['ALGO', 'CUSD', 'CONFIO', 'USDC', 'CONFIO_PRESALE']:
                 cache.delete(f"balance:{account.id}:{t}")
     
     @classmethod
@@ -209,7 +211,7 @@ class BalanceService:
             blockchain_balances = cls._fetch_all_from_blockchain(account)
 
             # Process each token
-            for token in ['CUSD', 'CONFIO', 'USDC', 'CONFIO_PRESALE']:
+            for token in ['ALGO', 'CUSD', 'CONFIO', 'USDC', 'CONFIO_PRESALE']:
                 try:
                     blockchain_amount = blockchain_balances.get(token, Decimal('0'))
 
@@ -242,7 +244,7 @@ class BalanceService:
         except Exception as e:
             logger.error(f"Failed to fetch blockchain balances for {account}: {e}")
             # Mark all as failed
-            for token in ['CUSD', 'CONFIO', 'USDC', 'CONFIO_PRESALE']:
+            for token in ['ALGO', 'CUSD', 'CONFIO', 'USDC', 'CONFIO_PRESALE']:
                 results[token] = False
 
         return results

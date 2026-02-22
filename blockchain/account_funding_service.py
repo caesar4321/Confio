@@ -48,11 +48,11 @@ class AccountFundingService:
             # Check if user is already opted into the cUSD app
             if for_app_optin:
                 apps_local_state = account_info.get('apps-local-state', [])
-                already_opted_in = any(app['id'] == settings.ALGORAND_CUSD_APP_ID for app in apps_local_state)
+                c_usd_opted_in = any(app['id'] == settings.ALGORAND_CUSD_APP_ID for app in apps_local_state)
                 
-                if already_opted_in:
+                app_min_increase = 0
+                if c_usd_opted_in:
                     logger.info(f"User already opted into cUSD app {settings.ALGORAND_CUSD_APP_ID}, no additional min balance needed")
-                    new_min_balance = current_min_balance
                 else:
                     # Each app opt-in increases min balance by at least 100,000 microAlgos (0.1 ALGO)
                     # But apps with local state may require more
@@ -61,8 +61,21 @@ class AccountFundingService:
                     # Each bytes in local state adds 50,000 microAlgos
                     # cUSD has 2 uint64 fields: is_frozen and is_vault
                     app_min_increase = 100_000 + (2 * 28_500)  # 157,000 microAlgos total
-                    new_min_balance = current_min_balance + app_min_increase
-                    logger.info(f"User needs to opt into app, new min balance will be {new_min_balance} microAlgos")
+                    logger.info(f"User needs to opt into app, increasing min balance by {app_min_increase} microAlgos")
+
+                # Also fund for USDC asset opt-in
+                assets = account_info.get('assets', [])
+                usdc_opted_in = any(asset['asset-id'] == settings.ALGORAND_USDC_ASSET_ID for asset in assets)
+                
+                asset_min_increase = 0
+                if not usdc_opted_in:
+                    asset_min_increase = 100_000  # Basic asset opt-in adds 0.1 ALGO
+                    logger.info(f"User needs to opt into USDC asset, increasing min balance by {asset_min_increase} microAlgos")
+                else:
+                    logger.info("User already opted into USDC asset")
+
+                new_min_balance = current_min_balance + app_min_increase + asset_min_increase
+                logger.info(f"Total new min balance will be {new_min_balance} microAlgos")
             else:
                 new_min_balance = current_min_balance
             

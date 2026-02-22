@@ -314,6 +314,9 @@ class GenerateOptInTransactionsMutation(graphene.Mutation):
                 # Only add cUSD if it exists and user hasn't opted in
                 if AlgorandAccountManager.CUSD_ASSET_ID and AlgorandAccountManager.CUSD_ASSET_ID not in current_assets:
                     asset_ids.append(AlgorandAccountManager.CUSD_ASSET_ID)
+                # Only add USDC if it exists and user hasn't opted in
+                if AlgorandAccountManager.USDC_ASSET_ID and AlgorandAccountManager.USDC_ASSET_ID not in current_assets:
+                    asset_ids.append(AlgorandAccountManager.USDC_ASSET_ID)
             
             # Coerce incoming string IDs to ints
             coerced_ids = []
@@ -802,7 +805,6 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
                 logger.info(f"Using direct Algorand address: {resolved_recipient_address[:10]}...")
                 
                 # Attempt to look up the user by their Algorand address
-                from users.models import Account
                 try:
                     matching_account = Account.objects.filter(algorand_address=resolved_recipient_address).select_related('user').first()
                     if matching_account:
@@ -1005,7 +1007,6 @@ class SubmitSponsoredGroupMutation(graphene.Mutation):
                 from decimal import Decimal
                 from django.conf import settings
                 from send.models import SendTransaction
-                from users.models import Account
 
                 raw = base64.b64decode(signed_user_txn)
                 try:
@@ -2465,3 +2466,522 @@ class PrepareAtomicMigrationMutation(graphene.Mutation):
         except Exception as e:
             logger.error(f'Error preparing atomic migration: {str(e)}')
             return cls(success=False, error=str(e))
+
+class BuildAutoSwapTransactionsMutation(graphene.Mutation):
+    """
+    Builds an unsigned transaction group for auto-swapping.
+    Handles two cases:
+    1. USDC -> cUSD swap (direct).
+    2. ALGO -> cUSD swap (two steps via Tinyman: ALGO -> USDC -> cUSD).
+
+    Returns a base64 encoded msgpack of the transaction group that the client must sign and submit.
+    """
+    class Arguments:
+        input_asset_type = graphene.String(required=True) # 'USDC' or 'ALGO'
+        amount = graphene.String(required=True) # Amount in base units (microAlgos or microUSDC)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    transactions = graphene.JSONString() # List of transactions (some maybe sponsor-signed for fees)
+
+    @classmethod
+    def mutate(cls, root, info, input_asset_type, amount):
+        try:
+            user = info.context.user
+            if not user.is_authenticated:
+                return cls(success=False, error='Not authenticated')
+
+            # Get user's personal account
+            account = Account.objects.filter(
+                user=user,
+                account_type='personal',
+                deleted_at__isnull=True
+            ).first()
+
+            if not account or not account.algorand_address:
+                return cls(success=False, error='No Algorand address found')
+
+            from algosdk.v2client import algod
+            from blockchain.algorand_client import get_algod_client
+            from blockchain.algorand_sponsor_service import algorand_sponsor_service
+            import base64
+            import msgpack
+            from algosdk import encoding as algo_encoding
+            from algosdk.transaction import calculate_group_id
+
+            algod_client = get_algod_client()
+            params = algod_client.suggested_params()
+
+            if input_asset_type == 'USDC':
+                from decimal import Decimal
+                from blockchain.cusd_transaction_builder import CUSDTransactionBuilder
+                from conversion.models import Conversion
+                
+                amount_decimal = Decimal(amount) / Decimal('1000000')
+                tx_builder = CUSDTransactionBuilder()
+                
+                # Use actual on-chain USDC balance to avoid underflow from stale cache.
+                # The client amount is a hint; the real balance may differ slightly
+                # (e.g., right after an ALGO→USDC swap with slippage, or USDC already consumed).
+                from blockchain.algorand_client import AlgorandClient
+                try:
+                    algo_client = AlgorandClient()
+                    snapshot = algo_client.get_balances_snapshot(account.algorand_address)
+                    actual_usdc = snapshot.get('USDC', Decimal('0'))
+                except Exception as e:
+                    logger.warning(f"[AutoSwap USDC] Failed to fetch on-chain USDC balance: {e}")
+                    actual_usdc = None
+                
+                # NOTE: Decimal('0') is falsy in Python, so we MUST use 'is not None'
+                if actual_usdc is not None and actual_usdc < amount_decimal:
+                    logger.info(f"[AutoSwap USDC] Client sent {amount_decimal}, actual on-chain is {actual_usdc}. Using actual.")
+                    amount_decimal = actual_usdc
+                
+                # Reject dust amounts — no point minting < 10¢ of cUSD
+                if amount_decimal < Decimal('0.10'):
+                    logger.info(f"[AutoSwap USDC] Amount {amount_decimal} below minimum 0.10, skipping.")
+                    return cls(success=False, error='amount_below_minimum')
+                
+                # We need to make sure the user has a transaction hash reference eventually
+                # We'll create a PENDING conversion
+                conversion = Conversion.objects.create(
+                    actor_type='user',
+                    actor_user=user,
+                    actor_display_name=user.username,
+                    actor_address=account.algorand_address,
+                    conversion_type='usdc_to_cusd',
+                    from_amount=amount_decimal,
+                    to_amount=amount_decimal,
+                    exchange_rate=Decimal('1.0'),
+                    fee_amount=Decimal('0.0'),
+                    status='PENDING_SIG'
+                )
+
+                tx_result = tx_builder.build_mint_transactions(
+                    user_address=account.algorand_address,
+                    usdc_amount=amount_decimal,
+                    algod_client=algod_client
+                )
+                
+                if not tx_result.get('success'):
+                    # Could be needs app opt-in, handle gracefully
+                    if tx_result.get('requires_app_optin'):
+                        return cls(success=False, error='requires_app_optin', transactions=None)
+                    
+                    conversion.status = 'FAILED'
+                    conversion.save()
+                    return cls(success=False, error=tx_result.get('error', 'Failed to build transactions'))
+
+                # Normalize sponsor transactions array of JSON strings and user transactions
+                sponsors_norm = []
+                for s in tx_result.get('sponsor_transactions', []):
+                    sponsors_norm.append(s) # Usually dicts, we serialize to JSON? No, frontend needs them as objects
+                    
+                txs_norm = []
+                for t in tx_result.get('transactions_to_sign', []):
+                    txs_norm.append(t.get('txn')) # Just the base64 txn string
+                
+                response_data = {
+                    'internal_id': conversion.internal_id.hex,
+                    'transactions': txs_norm,
+                    'sponsor_transactions': sponsors_norm,
+                    'group_id': tx_result.get('group_id')
+                }
+
+                return cls(
+                    success=True, 
+                    transactions=response_data  # graphene.JSONString serializes this
+                )
+
+            elif input_asset_type == 'CUSD':
+                from decimal import Decimal
+                from blockchain.cusd_transaction_builder import CUSDTransactionBuilder
+                from conversion.models import Conversion
+                
+                amount_decimal = Decimal(amount) / Decimal('1000000')
+                tx_builder = CUSDTransactionBuilder()
+                
+                conversion = Conversion.objects.create(
+                    actor_type='user',
+                    actor_user=user,
+                    actor_display_name=user.username,
+                    actor_address=account.algorand_address,
+                    conversion_type='cusd_to_usdc',
+                    from_amount=amount_decimal,
+                    to_amount=amount_decimal,
+                    exchange_rate=Decimal('1.0'),
+                    fee_amount=Decimal('0.0'),
+                    status='PENDING_SIG'
+                )
+
+                tx_result = tx_builder.build_burn_transactions(
+                    user_address=account.algorand_address,
+                    cusd_amount=amount_decimal,
+                    algod_client=algod_client
+                )
+                
+                if not tx_result.get('success'):
+                    if tx_result.get('requires_app_optin'):
+                        return cls(success=False, error='requires_app_optin', transactions=None)
+                    
+                    conversion.status = 'FAILED'
+                    conversion.save()
+                    return cls(success=False, error=tx_result.get('error', 'Failed to build transactions'))
+
+                sponsors_norm = []
+                for s in tx_result.get('sponsor_transactions', []):
+                    sponsors_norm.append(s)
+                    
+                txs_norm = []
+                for t in tx_result.get('transactions_to_sign', []):
+                    txs_norm.append(t.get('txn'))
+                
+                response_data = {
+                    'internal_id': conversion.internal_id.hex,
+                    'transactions': txs_norm,
+                    'sponsor_transactions': sponsors_norm,
+                    'group_id': tx_result.get('group_id')
+                }
+
+                return cls(
+                    success=True, 
+                    transactions=response_data  # graphene.JSONString serializes this
+                )
+
+            elif input_asset_type == 'ALGO':
+                from decimal import Decimal
+                from conversion.models import Conversion
+                from tinyman.v2.client import TinymanV2MainnetClient, TinymanV2TestnetClient
+                from tinyman.assets import AssetAmount
+                
+                amount_micro = int(amount)
+                amount_decimal = Decimal(amount) / Decimal('1000000')
+                
+                is_mainnet = getattr(settings, 'ALGORAND_NETWORK', 'testnet') == 'mainnet'
+                if is_mainnet:
+                    tm_client = TinymanV2MainnetClient(algod_client=algod_client)
+                else:
+                    tm_client = TinymanV2TestnetClient(algod_client=algod_client)
+                
+                algo_id = 0
+                usdc_id = settings.ALGORAND_USDC_ASSET_ID
+                
+                pool = tm_client.fetch_pool(algo_id, usdc_id)
+                algo_asset = tm_client.fetch_asset(algo_id)
+                
+                quote = pool.fetch_fixed_input_swap_quote(
+                    amount_in=AssetAmount(algo_asset, amount_micro)
+                )
+                
+                usdc_out_micro = quote.amount_out_with_slippage.amount
+                usdc_out_decimal = Decimal(usdc_out_micro) / Decimal('1000000')
+                exchange_rate = usdc_out_decimal / amount_decimal if amount_decimal > 0 else Decimal('0')
+                
+                conversion = Conversion.objects.create(
+                    actor_type='user',
+                    actor_user=user,
+                    actor_display_name=user.username,
+                    actor_address=account.algorand_address,
+                    conversion_type='algo_to_usdc',
+                    from_amount=amount_decimal,
+                    to_amount=usdc_out_decimal,
+                    exchange_rate=exchange_rate,
+                    fee_amount=Decimal('0.0'),
+                    status='PENDING_SIG'
+                )
+                
+                txn_group = pool.prepare_swap_transactions_from_quote(
+                    quote=quote,
+                    user_address=account.algorand_address,
+                    suggested_params=params
+                )
+                
+                txs_norm = [algo_encoding.msgpack_encode(txn) for txn in txn_group.transactions]
+                
+                response_data = {
+                    'internal_id': conversion.internal_id.hex,
+                    'transactions': txs_norm,
+                    'sponsor_transactions': [],
+                    'group_id': str(txn_group.id) if txn_group.id else None
+                }
+                
+                return cls(
+                    success=True,
+                    transactions=response_data  # graphene.JSONString serializes this
+                )
+        except Exception as e:
+            logger.error(f'Error preparing auto swap: {str(e)}')
+            return cls(success=False, error=str(e))
+
+class SubmitAutoSwapTransactionsMutation(graphene.Mutation):
+    """
+    Submits an auto-swap transaction group to the Algorand network.
+    Receives base64-encoded signed user transactions and sponsor transactions.
+    Optionally accepts a withdrawal_id to also record the USDC send in transaction history.
+    """
+    class Arguments:
+        internal_id = graphene.String(required=True)
+        signed_transactions = graphene.List(graphene.String, required=True)
+        sponsor_transactions = graphene.List(graphene.String, required=True)
+        withdrawal_id = graphene.String(required=False)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    txid = graphene.String()
+
+    @classmethod
+    def mutate(cls, root, info, internal_id, signed_transactions, sponsor_transactions, withdrawal_id=None):
+        try:
+            from conversion.models import Conversion
+            from blockchain.algorand_client import get_algod_client
+            import base64
+            import json as _json
+
+            try:
+                conv = Conversion.objects.get(internal_id=internal_id)
+            except Conversion.DoesNotExist:
+                return cls(success=False, error='conversion_not_found')
+
+            if not isinstance(signed_transactions, list) or not signed_transactions:
+                return cls(success=False, error='signed_transactions_required')
+
+            parsed_sponsors = []
+            for s in (sponsor_transactions or []):
+                parsed_sponsors.append(_json.loads(s) if isinstance(s, str) else s)
+                
+            raw_txs_by_idx = {}
+
+            # Process Sponsor Transactions
+            for e in parsed_sponsors:
+                idx = int(e.get('index', 0))
+                signed_b64 = e.get('signed')
+                if signed_b64:
+                    raw_txs_by_idx[idx] = base64.b64decode(signed_b64)
+                else:
+                    txn_b64 = e.get('txn')
+                    if txn_b64:
+                         raw_txs_by_idx[idx] = base64.b64decode(txn_b64)
+
+            # Process User Signed Transactions
+            total_txs = len(raw_txs_by_idx) + len(signed_transactions)
+            ordered_bytes = []
+            user_ptr = 0
+            
+            for i in range(total_txs):
+                if i in raw_txs_by_idx:
+                    ordered_bytes.append(raw_txs_by_idx[i])
+                else:
+                    if user_ptr >= len(signed_transactions):
+                        return cls(success=False, error='group_shape_mismatch')
+                    
+                    try:
+                        user_blob = base64.b64decode(signed_transactions[user_ptr])
+                        ordered_bytes.append(user_blob)
+                        user_ptr += 1
+                    except Exception:
+                        return cls(success=False, error='invalid_user_txn_encoding')
+
+            combined_group = b''.join(ordered_bytes)
+            combined_b64 = base64.b64encode(combined_group).decode('utf-8')
+
+            algod_client = get_algod_client()
+            txid = algod_client.send_raw_transaction(combined_b64)
+            
+            conv.status = 'SUBMITTED'
+            conv.to_transaction_hash = txid
+            conv.save(update_fields=['status', 'to_transaction_hash', 'updated_at'])
+
+            # If this is a burn+send, also finalize the withdrawal record
+            # and create a proper SendTransaction (post_save signal in users/signals.py
+            # automatically creates the linked UnifiedTransactionTable row, and
+            # scan_outbound_confirmations Celery task confirms it)
+            if withdrawal_id:
+                try:
+                    from usdc_transactions.models import USDCWithdrawal
+                    from send.models import SendTransaction
+                    from users.models import Account
+                    from django.utils import timezone as dj_tz
+
+                    w = USDCWithdrawal.objects.get(internal_id=withdrawal_id)
+                    w.status = 'PROCESSING'
+                    w.updated_at = dj_tz.now()
+                    w.save(update_fields=['status', 'updated_at'])
+
+                    # Try to resolve recipient user from their address
+                    recipient_user = None
+                    recipient_display = w.destination_address[:8] + '...'
+                    recipient_type = 'external'
+                    try:
+                        recipient_acct = Account.objects.filter(
+                            algorand_address=w.destination_address,
+                            deleted_at__isnull=True
+                        ).select_related('user').first()
+                        if recipient_acct and recipient_acct.user:
+                            recipient_user = recipient_acct.user
+                            recipient_display = recipient_acct.user.get_full_name() or recipient_acct.user.username
+                            recipient_type = 'user'
+                    except Exception:
+                        pass
+
+                    # Create the SendTransaction — post_save signal creates UnifiedTransactionTable
+                    SendTransaction.objects.create(
+                        sender_user=w.actor_user,
+                        sender_business=w.actor_business,
+                        sender_type=w.actor_type,
+                        sender_display_name=w.actor_display_name,
+                        sender_address=w.actor_address,
+                        recipient_user=recipient_user,
+                        recipient_type=recipient_type,
+                        recipient_display_name=recipient_display,
+                        recipient_address=w.destination_address,
+                        amount=w.amount,
+                        token_type='USDC',
+                        status='SUBMITTED',
+                        transaction_hash=txid,
+                    )
+                except Exception as wdl_err:
+                    logger.warning(f"Failed to finalize withdrawal {withdrawal_id}: {wdl_err}")
+
+            return cls(success=True, txid=txid)
+            
+        except Exception as e:
+            logger.error(f"Error submitting auto-swap for {internal_id}: {e}")
+            # Mark the Conversion as FAILED so it doesn't stay stuck as 'Pendiente'
+            try:
+                from conversion.models import Conversion
+                Conversion.objects.filter(
+                    internal_id=internal_id,
+                    status__in=['PENDING_SIG', 'SUBMITTED']
+                ).update(status='FAILED', error_message=str(e)[:500])
+            except Exception as cleanup_err:
+                logger.warning(f"Failed to mark conversion {internal_id} as FAILED: {cleanup_err}")
+            # Also mark withdrawal as failed if applicable
+            if withdrawal_id:
+                try:
+                    from usdc_transactions.models import USDCWithdrawal
+                    USDCWithdrawal.objects.filter(
+                        internal_id=withdrawal_id,
+                        status='PENDING'
+                    ).update(status='FAILED')
+                except Exception:
+                    pass
+            return cls(success=False, error=str(e))
+
+
+class BuildBurnAndSendMutation(graphene.Mutation):
+    """
+    Builds an atomic 5-txn group: burn cUSD → USDC, then send USDC to recipient.
+    All in one Algorand atomic group so the USDC send uses the freshly-minted USDC.
+    Also creates a USDCWithdrawal record so the send appears in transaction history.
+    """
+    class Arguments:
+        amount = graphene.String(required=True)  # cUSD amount in base units (micro)
+        recipient_address = graphene.String(required=True)
+        note = graphene.String(required=False)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    transactions = graphene.JSONString()
+
+    @classmethod
+    def mutate(cls, root, info, amount, recipient_address, note=None):
+        try:
+            user = info.context.user
+            if not user.is_authenticated:
+                return cls(success=False, error='Not authenticated')
+
+            account = Account.objects.filter(
+                user=user,
+                account_type='personal',
+                deleted_at__isnull=True
+            ).first()
+
+            if not account or not account.algorand_address:
+                return cls(success=False, error='No Algorand address found')
+
+            from decimal import Decimal
+            from blockchain.cusd_transaction_builder import CUSDTransactionBuilder
+            from blockchain.algorand_client import get_algod_client
+            from conversion.models import Conversion
+            from usdc_transactions.models import USDCWithdrawal
+
+            algod_client = get_algod_client()
+            amount_decimal = Decimal(amount) / Decimal('1000000')
+
+            # Reject dust amounts
+            if amount_decimal < Decimal('0.10'):
+                return cls(success=False, error='amount_below_minimum')
+
+            # Create a PENDING conversion record (for the cUSD→USDC burn)
+            conversion = Conversion.objects.create(
+                actor_type='user',
+                actor_user=user,
+                actor_display_name=user.username,
+                actor_address=account.algorand_address,
+                conversion_type='cusd_to_usdc',
+                from_amount=amount_decimal,
+                to_amount=amount_decimal,
+                exchange_rate=Decimal('1.0'),
+                fee_amount=Decimal('0.0'),
+                status='PENDING_SIG'
+            )
+
+            # Create a PENDING withdrawal record (for the USDC send to recipient)
+            actor_business = getattr(account, 'business', None)
+            actor_type = 'business' if actor_business else 'user'
+            actor_display_name = actor_business.name if actor_business else (user.get_full_name() or user.username)
+            withdrawal = USDCWithdrawal.objects.create(
+                actor_user=user,
+                actor_business=actor_business,
+                actor_type=actor_type,
+                actor_display_name=actor_display_name,
+                actor_address=account.algorand_address,
+                amount=amount_decimal,
+                destination_address=recipient_address,
+                status='PENDING'
+            )
+
+            tx_builder = CUSDTransactionBuilder()
+            tx_result = tx_builder.build_burn_and_send_transactions(
+                user_address=account.algorand_address,
+                recipient_address=recipient_address,
+                cusd_amount=amount_decimal,
+                algod_client=algod_client,
+                note=note
+            )
+
+            if not tx_result.get('success'):
+                if tx_result.get('requires_app_optin'):
+                    return cls(success=False, error='requires_app_optin', transactions=None)
+                conversion.status = 'FAILED'
+                conversion.save()
+                withdrawal.status = 'FAILED'
+                withdrawal.save()
+                return cls(success=False, error=tx_result.get('error', 'Failed to build transactions'))
+
+            # Normalize for the client
+            sponsors_norm = []
+            for s in tx_result.get('sponsor_transactions', []):
+                sponsors_norm.append(s)
+
+            txs_norm = []
+            for t in tx_result.get('transactions_to_sign', []):
+                txs_norm.append(t.get('txn'))
+
+            response_data = {
+                'internal_id': conversion.internal_id.hex,
+                'withdrawal_id': str(withdrawal.internal_id),
+                'transactions': txs_norm,
+                'sponsor_transactions': sponsors_norm,
+                'group_id': tx_result.get('group_id')
+            }
+
+            return cls(
+                success=True,
+                transactions=response_data
+            )
+
+        except Exception as e:
+            logger.error(f'Error building burn+send: {str(e)}')
+            return cls(success=False, error=str(e))
+

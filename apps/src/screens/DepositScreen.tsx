@@ -58,122 +58,34 @@ const colors = {
   },
 };
 
-type TokenType = 'usdc' | 'cusd' | 'confio';
-
-interface RouteParams {
-  tokenType?: TokenType;
-}
-
-interface TokenConfig {
-  name: string;
-  fullName: string;
-  logo: any;
-  color: string;
-  description: string;
-  subtitle: string;
-  warning: string;
-  instructions: Array<{
-    step: string;
-    title: string;
-    description: string;
-  }>;
-}
-
-// Token configuration
-const tokenConfig: Record<TokenType, TokenConfig> = {
-  usdc: {
-    name: 'USDC',
-    fullName: 'USD Coin',
-    logo: USDCLogo,
-    color: colors.accent,
-    description: 'Recibe USDC desde cualquier wallet',
-    subtitle: 'Envía USDC desde tu wallet externo a esta dirección',
-    warning: 'Solo envía USDC en la red Algorand. Otras monedas o redes resultarán en pérdida permanente de fondos.',
-    instructions: [
-      {
-        step: '1',
-        title: 'Abre tu wallet externo',
-        description: 'Algorand Wallet, Pera Wallet, Binance, etc.'
-      },
-      {
-        step: '2',
-        title: 'Selecciona enviar USDC',
-        description: 'Asegúrate de estar en la red Algorand'
-      },
-      {
-        step: '3',
-        title: 'Pega la dirección de arriba',
-        description: 'O escanea el código QR'
-      },
-      {
-        step: '4',
-        title: 'Confirma la transacción',
-        description: 'El USDC aparecerá en 1-3 minutos'
-      }
-    ]
-  },
-  cusd: {
-    name: 'cUSD',
-    fullName: 'Confío Dollar',
-    logo: cUSDLogo,
-    color: colors.primary,
-    description: 'Recibe cUSD desde cualquier wallet',
-    subtitle: 'Envía cUSD desde tu wallet externo a esta dirección',
-    warning: 'Solo envía cUSD en la red Algorand. Otras monedas o redes resultarán en pérdida permanente de fondos.',
-    instructions: [
-      {
-        step: '1',
-        title: 'Abre tu wallet externo',
-        description: 'Algorand Wallet, Pera Wallet, Binance, etc.'
-      },
-      {
-        step: '2',
-        title: 'Selecciona enviar cUSD',
-        description: 'Asegúrate de estar en la red Algorand'
-      },
-      {
-        step: '3',
-        title: 'Pega la dirección de arriba',
-        description: 'O escanea el código QR'
-      },
-      {
-        step: '4',
-        title: 'Confirma la transacción',
-        description: 'El cUSD aparecerá en 1-3 minutos'
-      }
-    ]
-  },
-  confio: {
-    name: 'CONFIO',
-    fullName: 'Confío',
-    logo: CONFIOLogo,
-    color: colors.secondary,
-    description: 'Recibe CONFIO desde cualquier wallet',
-    subtitle: 'Envía CONFIO desde tu wallet externo a esta dirección',
-    warning: 'Solo envía CONFIO en la red Algorand. Otras monedas o redes resultarán en pérdida permanente de fondos.',
-    instructions: [
-      {
-        step: '1',
-        title: 'Abre tu wallet externo',
-        description: 'Algorand Wallet, Pera Wallet, Binance, etc.'
-      },
-      {
-        step: '2',
-        title: 'Selecciona enviar CONFIO',
-        description: 'Asegúrate de estar en la red Algorand'
-      },
-      {
-        step: '3',
-        title: 'Pega la dirección de arriba',
-        description: 'O escanea el código QR'
-      },
-      {
-        step: '4',
-        title: 'Confirma la transacción',
-        description: 'El CONFIO aparecerá en 1-3 minutos'
-      }
-    ]
-  }
+// Unified deposit configuration — same address for all tokens
+const depositConfig = {
+  description: 'Recibe cUSD, USDC o CONFIO en la red de Algorand',
+  subtitle: 'Envía fondos desde tu wallet externo a esta dirección',
+  warning: '⚠️ Solo acepta cUSD, USDC y CONFIO en la red de Algorand. El depósito de cualquier otro activo resultará en pérdida permanente de fondos.',
+  autoConvertNote: 'Los depósitos de USDC se convierten automáticamente a cUSD como respaldo de reserva 1:1.',
+  instructions: [
+    {
+      step: '1',
+      title: 'Abre tu wallet externo',
+      description: 'Pera Wallet, Defly, Binance, etc.'
+    },
+    {
+      step: '2',
+      title: 'Selecciona enviar cUSD, USDC o CONFIO',
+      description: 'Asegúrate de estar en la red de Algorand'
+    },
+    {
+      step: '3',
+      title: 'Pega la dirección de arriba',
+      description: 'O escanea el código QR'
+    },
+    {
+      step: '4',
+      title: 'Confirma la transacción',
+      description: 'Tu saldo aparecerá en 1-3 minutos'
+    }
+  ]
 };
 
 import { AuthService } from '../services/authService';
@@ -193,9 +105,7 @@ const DepositScreen = () => {
 
   const { activeAccount, refreshAccounts } = useAccount();
 
-  // Get token type from route params, default to 'usdc' for backward compatibility
-  const tokenType: TokenType = (route.params as RouteParams)?.tokenType || 'usdc';
-  const config = tokenConfig[tokenType];
+  const config = depositConfig;
 
   // Fetch fresh address from Keychain (AuthService) to ensure we have V2 address post-migration
   useEffect(() => {
@@ -240,7 +150,6 @@ const DepositScreen = () => {
   // Check if user is opted in to USDC and whether additional setup is needed
   useEffect(() => {
     console.log('[DepositScreen] Checking opt-in status, optInData:', optInData);
-    console.log('[DepositScreen] Token type:', tokenType);
 
     if (optInData?.checkAssetOptIns) {
       const { assetDetails, optedInAssets } = optInData.checkAssetOptIns;
@@ -248,42 +157,32 @@ const DepositScreen = () => {
       console.log('[DepositScreen] Opted in assets:', optedInAssets);
       console.log('[DepositScreen] Asset details:', assetDetails);
 
-      // Only check opt-in for USDC token type
-      if (tokenType === 'usdc') {
-        // Parse assetDetails if it's a string
-        let parsedAssetDetails = assetDetails;
-        if (typeof assetDetails === 'string') {
-          try {
-            parsedAssetDetails = JSON.parse(assetDetails);
-          } catch (e) {
-            console.error('[DepositScreen] Failed to parse assetDetails:', e);
-            parsedAssetDetails = {};
-          }
+      // Parse assetDetails if it's a string
+      let parsedAssetDetails = assetDetails;
+      if (typeof assetDetails === 'string') {
+        try {
+          parsedAssetDetails = JSON.parse(assetDetails);
+        } catch (e) {
+          console.error('[DepositScreen] Failed to parse assetDetails:', e);
+          parsedAssetDetails = {};
         }
-
-        // Determine present assets
-        const values = parsedAssetDetails ? (Object.values(parsedAssetDetails) as any[]) : [];
-        const hasUSDC = values.some((asset: any) => asset.symbol === 'USDC');
-        const hasCUSD = values.some((asset: any) => asset.symbol === 'cUSD');
-        const hasCONFIO = values.some((asset: any) => asset.symbol === 'CONFIO');
-
-        console.log('[DepositScreen] Parsed asset details:', parsedAssetDetails);
-        console.log('[DepositScreen] Has USDC:', hasUSDC);
-        console.log('[DepositScreen] Has cUSD:', hasCUSD);
-        console.log('[DepositScreen] Has CONFIO:', hasCONFIO);
-        setIsOptedIn(hasUSDC);
-        setNeedsWalletSetup(Boolean(hasUSDC && (!hasCUSD || !hasCONFIO)));
-      } else {
-        // For other tokens (cUSD, CONFIO), assume they're always ready
-        setIsOptedIn(true);
-        setNeedsWalletSetup(false);
       }
+
+      // Check all required assets for unified deposit
+      const values = parsedAssetDetails ? (Object.values(parsedAssetDetails) as any[]) : [];
+      const hasUSDC = values.some((asset: any) => asset.symbol === 'USDC');
+      const hasCUSD = values.some((asset: any) => asset.symbol === 'cUSD');
+      const hasCONFIO = values.some((asset: any) => asset.symbol === 'CONFIO');
+
+      console.log('[DepositScreen] Has USDC:', hasUSDC, 'Has cUSD:', hasCUSD, 'Has CONFIO:', hasCONFIO);
+      setIsOptedIn(hasUSDC);
+      setNeedsWalletSetup(Boolean(hasUSDC && (!hasCUSD || !hasCONFIO)));
 
       setCheckingOptIn(false);
     } else if (!loadingOptIns) {
       setCheckingOptIn(false);
     }
-  }, [optInData, loadingOptIns, tokenType]);
+  }, [optInData, loadingOptIns]);
 
   // Ensure we always re-check opt-in status when returning to this screen
   useFocusEffect(
@@ -398,15 +297,15 @@ const DepositScreen = () => {
       return;
     }
     try {
-      const message = `Esta es mi dirección ${config.name} en Confío:\n${depositAddress}`;
+      const message = `Esta es mi dirección Confío:\n${depositAddress}`;
       await Share.share({
-        title: `Dirección ${config.name}`,
+        title: 'Dirección Confío',
         message,
       });
     } catch (error) {
       console.error('[DepositScreen] Error al compartir dirección:', error);
     }
-  }, [depositAddress, config.name]);
+  }, [depositAddress]);
 
   // Move styles inside the component to use insets
   const styles = StyleSheet.create({
@@ -446,14 +345,28 @@ const DepositScreen = () => {
       alignItems: 'center',
     },
     logoContainer: {
-      width: 64,
-      height: 64,
-      borderRadius: 32,
-      backgroundColor: '#ffffff',
+      flexDirection: 'row',
       justifyContent: 'center',
       alignItems: 'center',
       marginBottom: 16,
-      padding: 8,
+    },
+    logoCircle: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      backgroundColor: '#ffffff',
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: 6,
+      borderWidth: 2,
+      borderColor: 'rgba(255,255,255,0.6)',
+      marginHorizontal: -4,
+    },
+    logoCircleCenter: {
+      width: 56,
+      height: 56,
+      borderRadius: 28,
+      zIndex: 1,
     },
     logo: {
       width: '100%',
@@ -689,46 +602,56 @@ const DepositScreen = () => {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <SafeAreaView edges={['top']} style={{ backgroundColor: config.color }}>
-        <View style={[styles.header, { backgroundColor: config.color }]}>
+      {/* Fixed back-button bar */}
+      <SafeAreaView edges={['top']} style={{ backgroundColor: colors.primary }}>
+        <View style={[styles.header, { backgroundColor: colors.primary, paddingBottom: 12 }]}>
           <View style={styles.headerContent}>
             <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
               <Icon name="arrow-left" size={24} color="#ffffff" />
             </TouchableOpacity>
-            <Text style={styles.headerTitle}>Depositar {config.name}</Text>
+            <Text style={styles.headerTitle}>Depositar</Text>
             <View style={styles.placeholder} />
-          </View>
-
-          <View style={styles.headerInfo}>
-            <View style={styles.logoContainer}>
-              <Image source={config.logo} style={styles.logo} />
-            </View>
-            <Text style={styles.headerSubtitle}>{config.description}</Text>
-            <Text style={styles.headerDescription}>{config.subtitle}</Text>
           </View>
         </View>
       </SafeAreaView>
 
       <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
-        {/* Show loading state while checking opt-in status for USDC */}
-        {tokenType === 'usdc' && checkingOptIn ? (
+        {/* Hero section */}
+        <View style={{ backgroundColor: colors.primary, paddingBottom: 32, paddingHorizontal: 16 }}>
+          <View style={styles.headerInfo}>
+            <View style={styles.logoContainer}>
+              <View style={styles.logoCircle}>
+                <Image source={cUSDLogo} style={styles.logo} />
+              </View>
+              <View style={[styles.logoCircle, styles.logoCircleCenter]}>
+                <Image source={USDCLogo} style={styles.logo} />
+              </View>
+              <View style={styles.logoCircle}>
+                <Image source={CONFIOLogo} style={styles.logo} />
+              </View>
+            </View>
+            <Text style={styles.headerSubtitle}>{config.description}</Text>
+            <Text style={styles.headerDescription}>{config.subtitle}</Text>
+          </View>
+        </View>
+        {/* Show loading state while checking opt-in status */}
+        {checkingOptIn ? (
           <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={config.color} />
+            <ActivityIndicator size="large" color={colors.primary} />
             <Text style={styles.loadingText}>Verificando configuración...</Text>
           </View>
-        ) : tokenType === 'usdc' && ((isOptedIn !== true) || needsWalletSetup === true) ? (
-          /* Single friendly CTA for USDC; background handles everything else */
+        ) : ((isOptedIn !== true) || needsWalletSetup === true) ? (
+          /* Single friendly CTA for USDC opt-in */
           <View style={styles.optInContainer}>
-            <View style={[styles.optInIcon, { backgroundColor: config.color + '20' }]}>
-              <Icon name="unlock" size={40} color={config.color} />
+            <View style={[styles.optInIcon, { backgroundColor: colors.primary + '20' }]}>
+              <Icon name="unlock" size={40} color={colors.primary} />
             </View>
-            <Text style={styles.optInTitle}>Activa tu dirección USDC</Text>
+            <Text style={styles.optInTitle}>Activa tu dirección</Text>
             <Text style={styles.optInDescription}>
-              Activa tu dirección para recibir USDC. Es un paso único y gratis.
+              Activa tu dirección para recibir depósitos. Es un paso único y gratis.
             </Text>
             <TouchableOpacity
-              style={[styles.optInButton, { backgroundColor: config.color }]}
+              style={[styles.optInButton, { backgroundColor: colors.primary }]}
               onPress={handleOptIn}
               disabled={optingIn}
             >
@@ -737,7 +660,7 @@ const DepositScreen = () => {
               ) : (
                 <>
                   <Icon name="check-circle" size={20} color="#ffffff" />
-                  <Text style={styles.optInButtonText}>Activar USDC</Text>
+                  <Text style={styles.optInButtonText}>Activar dirección</Text>
                 </>
               )}
             </TouchableOpacity>
@@ -755,9 +678,20 @@ const DepositScreen = () => {
               </View>
             </View>
 
+            {/* Auto-convert note */}
+            <View style={[styles.warningContainer, { backgroundColor: '#EBF5FF', borderColor: '#93C5FD' }]}>
+              <Icon name="refresh-cw" size={20} color="#2563EB" style={styles.warningIcon} />
+              <View style={styles.warningContent}>
+                <Text style={[styles.warningTitle, { color: '#1E40AF' }]}>Conversión automática</Text>
+                <Text style={[styles.warningText, { color: '#1E40AF' }]}>
+                  {config.autoConvertNote}
+                </Text>
+              </View>
+            </View>
+
             {/* Address Section */}
             <View style={styles.addressCard}>
-              <Text style={styles.addressTitle}>Tu dirección {config.name}</Text>
+              <Text style={styles.addressTitle}>Tu dirección de depósito</Text>
 
               {/* QR Code */}
               <View style={styles.qrContainer}>
@@ -787,7 +721,7 @@ const DepositScreen = () => {
                 </View>
               </View>
 
-              <TouchableOpacity style={[styles.shareButton, { backgroundColor: config.color }]} onPress={handleShare}>
+              <TouchableOpacity style={[styles.shareButton, { backgroundColor: colors.primary }]} onPress={handleShare}>
                 <Text style={styles.shareButtonText}>Compartir dirección</Text>
               </TouchableOpacity>
             </View>
@@ -798,7 +732,7 @@ const DepositScreen = () => {
 
               {config.instructions.map((instruction, index) => (
                 <View key={index} style={styles.instructionStep}>
-                  <View style={[styles.stepNumber, { backgroundColor: config.color }]}>
+                  <View style={[styles.stepNumber, { backgroundColor: colors.primary }]}>
                     <Text style={styles.stepNumberText}>{instruction.step}</Text>
                   </View>
                   <View style={styles.stepContent}>

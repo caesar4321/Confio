@@ -7,6 +7,7 @@ import { GET_ACCOUNT_BALANCE } from '../apollo/queries';
 import { apolloClient } from '../apollo/client';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
+import USDCLogo from '../assets/png/USDC.png';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNumberFormat } from '../utils/numberFormatting';
 
@@ -28,7 +29,7 @@ const colors = {
   },
 };
 
-type TokenType = 'cusd' | 'confio';
+type TokenType = 'cusd' | 'confio' | 'usdc';
 
 const tokenConfig = {
   cusd: {
@@ -49,6 +50,16 @@ const tokenConfig = {
     minSend: 1,
     fee: 0,  // Sponsored transactions
     description: 'Envía CONFIO a cualquier dirección Algorand',
+    quickAmounts: ['10.00', '50.00', '100.00'],
+  },
+  usdc: {
+    name: 'USDC',
+    fullName: 'USD Coin',
+    logo: USDCLogo,
+    color: '#2775CA', // USDC Blue
+    minSend: 1,
+    fee: 0,  // Sponsored transactions via swap
+    description: 'Envía USDC a cualquier dirección Algorand',
     quickAmounts: ['10.00', '50.00', '100.00'],
   },
 };
@@ -75,6 +86,8 @@ export const SendWithAddressScreen = () => {
   // Balance snapshot + background refresh
   const [balanceSnapshot, setBalanceSnapshot] = useState<string | null>(null);
   const [balanceLoading, setBalanceLoading] = useState<boolean>(false);
+  const [cusdBalanceSnapshot, setCusdBalanceSnapshot] = useState<string | null>(null);
+
   useEffect(() => {
     let mounted = true;
     const tok = tokenType.toUpperCase();
@@ -84,7 +97,16 @@ export const SendWithAddressScreen = () => {
         variables: { tokenType: tok }
       });
       if (cached?.accountBalance && mounted) setBalanceSnapshot(cached.accountBalance);
+
+      if (tokenType === 'usdc') {
+        const cachedCusd = apolloClient.readQuery<{ accountBalance: string }>({
+          query: GET_ACCOUNT_BALANCE,
+          variables: { tokenType: 'CUSD' }
+        });
+        if (cachedCusd?.accountBalance && mounted) setCusdBalanceSnapshot(cachedCusd.accountBalance);
+      }
     } catch { }
+
     setBalanceLoading(true);
     apolloClient.query<{ accountBalance: string }>({
       query: GET_ACCOUNT_BALANCE,
@@ -94,9 +116,23 @@ export const SendWithAddressScreen = () => {
       if (!mounted) return;
       setBalanceSnapshot(res.data?.accountBalance ?? null);
     }).catch(() => { }).finally(() => mounted && setBalanceLoading(false));
+
+    if (tokenType === 'usdc') {
+      apolloClient.query<{ accountBalance: string }>({
+        query: GET_ACCOUNT_BALANCE,
+        variables: { tokenType: 'CUSD' },
+        fetchPolicy: 'network-only'
+      }).then(res => {
+        if (!mounted) return;
+        setCusdBalanceSnapshot(res.data?.accountBalance ?? null);
+      }).catch(() => { });
+    }
+
     return () => { mounted = false; };
   }, [tokenType]);
+
   const availableBalance = React.useMemo(() => parseFloat(balanceSnapshot || '0'), [balanceSnapshot]);
+  const availableCusdBalance = React.useMemo(() => parseFloat(cusdBalanceSnapshot || '0'), [cusdBalanceSnapshot]);
 
   // Prevent overstatement: floor display to 2 decimals
   const floorToDecimals = React.useCallback((value: number, decimals: number) => {
@@ -121,7 +157,7 @@ export const SendWithAddressScreen = () => {
         const amt = parseFloat(String(amount || '0'));
         const isAlgorandAddress = destination.length === 58 && /^[A-Z2-7]{58}$/.test(destination);
         if (!(isFinite(amt) && amt > 0 && isAlgorandAddress)) return;
-        const assetType = tokenType.toUpperCase() === 'CUSD' ? 'CUSD' : 'CONFIO';
+        const assetType = tokenType.toUpperCase();
         const { prepareSendViaWs } = await import('../services/sendWs');
         const pack = await prepareSendViaWs({
           amount: amt,
@@ -184,6 +220,24 @@ export const SendWithAddressScreen = () => {
       return;
     }
 
+    // Determine if we need to swap cUSD to USDC
+    let needsCusdSwap = false;
+    const amountNumFloat = parseFloat(amount || '0');
+
+    if (tokenType === 'usdc' && availableBalance < amountNumFloat) {
+      if (availableCusdBalance >= amountNumFloat) {
+        needsCusdSwap = true;
+      } else {
+        setErrorMessage('Saldo insuficiente en USDC y cUSD');
+        setShowError(true);
+        return;
+      }
+    } else if (availableBalance < amountNumFloat) {
+      setErrorMessage('Saldo insuficiente');
+      setShowError(true);
+      return;
+    }
+
     setIsProcessing(true);
     navLock.current = true;
 
@@ -209,6 +263,7 @@ export const SendWithAddressScreen = () => {
           idempotencyKey: idempotencyKey,
           prepared: prepared,
           tokenType: tokenType.toUpperCase(), // Add token type for blockchain transaction
+          needsCusdSwap: needsCusdSwap, // Pass the swap flag to processing screen
         }
       });
     } catch (error) {
@@ -253,11 +308,24 @@ export const SendWithAddressScreen = () => {
             <ActivityIndicator size="small" color={config.color} style={{ marginVertical: 8 }} />
           ) : (
             <Text style={styles.balanceAmount}>
-              {formatFixedFloor(availableBalance, 2)} {config.name}
+              {tokenType === 'usdc'
+                ? `${formatFixedFloor(availableCusdBalance, 2)} cUSD`
+                : `${formatFixedFloor(availableBalance, 2)} ${config.name}`}
             </Text>
           )}
           <Text style={styles.balanceMin}>Mínimo para enviar: {config.minSend} {config.name}</Text>
         </View>
+
+        {tokenType === 'usdc' && (
+          <View style={styles.warningContainer}>
+            <Icon name="info" size={20} color="#2563EB" style={styles.warningIcon} />
+            <View style={styles.warningContent}>
+              <Text style={styles.warningText}>
+                Tu saldo se muestra en cUSD. Al enviar, tus cUSD se convertirán automáticamente a USDC y se enviarán a la dirección destino.
+              </Text>
+            </View>
+          </View>
+        )}
 
         {/* Send Form */}
         <View style={styles.formCard}>
@@ -325,11 +393,11 @@ export const SendWithAddressScreen = () => {
           style={[
             styles.sendButton,
             { backgroundColor: config.color },
-            (isProcessing || !amount || !destination || parseFloat(amount || '0') > availableBalance) &&
+            (isProcessing || !amount || !destination || parseFloat(amount || '0') > (tokenType === 'usdc' ? Math.max(availableBalance, availableCusdBalance) : availableBalance)) &&
             styles.sendButtonDisabled
           ]}
           onPress={handleSend}
-          disabled={isProcessing || !amount || !destination || parseFloat(amount || '0') > availableBalance}
+          disabled={isProcessing || !amount || !destination || parseFloat(amount || '0') > (tokenType === 'usdc' ? Math.max(availableBalance, availableCusdBalance) : availableBalance)}
         >
           {isProcessing ? (
             <ActivityIndicator color="white" />
@@ -337,7 +405,7 @@ export const SendWithAddressScreen = () => {
             <>
               <Icon name="send" size={20} color="#ffffff" style={{ marginRight: 8 }} />
               <Text style={styles.sendButtonText}>
-                {balanceSnapshot == null ? 'Cargando saldo…' : parseFloat(amount || '0') > availableBalance ? 'Saldo insuficiente' : 'Enviar'}
+                {balanceSnapshot == null ? 'Cargando saldo…' : parseFloat(amount || '0') > (tokenType === 'usdc' ? Math.max(availableBalance, availableCusdBalance) : availableBalance) ? 'Saldo insuficiente' : 'Enviar'}
               </Text>
             </>
           )}
@@ -357,7 +425,7 @@ export const SendWithAddressScreen = () => {
             </Text>
             <TouchableOpacity
               style={[styles.modalButton, { backgroundColor: config.color }]}
-              onPress={() => navigation.navigate('Home' as any)}
+              onPress={() => (navigation as any).navigate('Home')}
             >
               <Text style={styles.modalButtonText}>Listo</Text>
             </TouchableOpacity>
@@ -674,5 +742,27 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#ffffff',
+  },
+  warningContainer: {
+    backgroundColor: '#EBF5FF',
+    borderColor: '#93C5FD',
+    borderWidth: 1,
+    marginHorizontal: 16,
+    marginTop: 16,
+    padding: 16,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  warningIcon: {
+    marginRight: 12,
+  },
+  warningContent: {
+    flex: 1,
+  },
+  warningText: {
+    color: '#1E40AF',
+    fontSize: 14,
+    lineHeight: 20,
   },
 });

@@ -15,6 +15,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, RCTBridgeDelegate {
   ) -> Bool {
     // Configure App Check BEFORE FirebaseApp.configure()
     #if DEBUG
+      // Set a static App Check debug token to avoid registering a new one in Firebase Console on every reinstall
+      setenv("FIRAAppCheckDebugToken", "8DB1A0DF-B3C2-4E9D-A480-281CBEB933E1", 1)
       // Use Debug provider for development builds
       let providerFactory = AppCheckDebugProviderFactory()
     #else

@@ -1234,6 +1234,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 					confio_lock_val += pending_referral_amount
 
 			return BalancesType(
+				algo=f"{all_balances['algo']['amount']:.6f}",
 				cusd=f"{all_balances['cusd']['amount']:.2f}",
 				confio=f"{all_balances['confio']['amount']:.2f}",
 				confioPresaleLocked=f"{all_balances.get('confio_presale', {}).get('amount', 0):.2f}",
@@ -1243,7 +1244,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			)
 		except Exception:
 			# Graceful fallback to zeros to avoid client crashes
-			return BalancesType(cusd="0.00", confio="0.00", confioPresaleLocked="0.00", confioLocked="0.00", pendingReferralReward="0.00", usdc="0.00")
+			return BalancesType(algo="0.000000", cusd="0.00", confio="0.00", confioPresaleLocked="0.00", confioLocked="0.00", pendingReferralReward="0.00", usdc="0.00")
 
 	def resolve_stats_summary(self, info):
 		"""Compute small set of aggregates with a short cache TTL."""
@@ -2796,11 +2797,13 @@ class UpdateAccountAlgorandAddress(graphene.Mutation):
 
                 current_asset_ids = [a.get('asset-id') for a in current_assets if isinstance(a, dict)]
 
-                # Only track CONFIO and cUSD assets (exclude app opt-ins here)
+                # Only track CONFIO, cUSD, and USDC assets (exclude app opt-ins here)
                 if AlgorandAccountManager.CONFIO_ASSET_ID and AlgorandAccountManager.CONFIO_ASSET_ID not in current_asset_ids:
                     needs_ids_int.append(AlgorandAccountManager.CONFIO_ASSET_ID)
                 if AlgorandAccountManager.CUSD_ASSET_ID and AlgorandAccountManager.CUSD_ASSET_ID not in current_asset_ids:
                     needs_ids_int.append(AlgorandAccountManager.CUSD_ASSET_ID)
+                if AlgorandAccountManager.USDC_ASSET_ID and AlgorandAccountManager.USDC_ASSET_ID not in current_asset_ids:
+                    needs_ids_int.append(AlgorandAccountManager.USDC_ASSET_ID)
                 # Prepare string list for GraphQL response
                 needs_opt_in = [str(a) for a in needs_ids_int]
 
@@ -2972,6 +2975,9 @@ class SwitchAccountToken(graphene.Mutation):
 						if AlgorandAccountManager.CUSD_ASSET_ID:
 							required_assets.append(AlgorandAccountManager.CUSD_ASSET_ID)
 							asset_names[AlgorandAccountManager.CUSD_ASSET_ID] = "cUSD"
+						if AlgorandAccountManager.USDC_ASSET_ID:
+							required_assets.append(AlgorandAccountManager.USDC_ASSET_ID)
+							asset_names[AlgorandAccountManager.USDC_ASSET_ID] = "USDC"
 						
 						# Create sponsored opt-in transactions for missing assets
 						for asset_id in required_assets:
@@ -3382,6 +3388,7 @@ class DeleteBankInfo(graphene.Mutation):
 
 class BalancesType(graphene.ObjectType):
     """Token balances object"""
+    algo = graphene.String()
     cusd = graphene.String()
     confio = graphene.String()
     confioPresaleLocked = graphene.String()

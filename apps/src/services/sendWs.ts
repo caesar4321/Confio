@@ -166,7 +166,7 @@ export class SendWsSession {
   }
 }
 
-export async function prepareSendViaWs(args: PrepareArgs): Promise<SendPreparePack | null> {
+export async function prepareSendViaWs(args: PrepareArgs): Promise<SendPreparePack> {
   const s = new SendWsSession();
   try {
     await s.open();
@@ -175,11 +175,11 @@ export async function prepareSendViaWs(args: PrepareArgs): Promise<SendPreparePa
     return pack;
   } catch (e) {
     try { s.close(); } catch { }
-    return null;
+    throw e;
   }
 }
 
-export async function submitSendViaWs(signedUserTxn: string, sponsorTxn: string): Promise<SubmitResult | null> {
+export async function submitSendViaWs(signedUserTxn: string, sponsorTxn: string): Promise<SubmitResult> {
   const s = new SendWsSession();
   try {
     await s.open();
@@ -188,6 +188,6 @@ export async function submitSendViaWs(signedUserTxn: string, sponsorTxn: string)
     return res;
   } catch (e) {
     try { s.close(); } catch { }
-    return null;
+    throw e;
   }
 }

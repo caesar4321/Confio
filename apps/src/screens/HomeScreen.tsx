@@ -40,10 +40,11 @@ import { PushNotificationService } from '../services/pushNotificationService';
 import { AccountSwitchOverlay } from '../components/AccountSwitchOverlay';
 import { getCountryByIso } from '../utils/countries';
 import { WalletCardSkeleton } from '../components/SkeletonLoader';
-import { useQuery, useMutation, useApolloClient } from '@apollo/client';
+import { gql, useQuery, useMutation, useApolloClient } from '@apollo/client';
 import { GET_PRESALE_STATUS, GET_MY_BALANCES, GET_USER_ACCOUNTS, GET_ACTIVE_PRESALE, GET_ALL_PRESALE_PHASES, CHECK_REFERRAL_STATUS } from '../apollo/queries';
 import { REFRESH_ACCOUNT_BALANCE, SET_REFERRER } from '../apollo/mutations';
 import { useCountry } from '../contexts/CountryContext';
+import algorandService from '../services/algorandService';
 import { useCurrency } from '../hooks/useCurrency';
 import { useSelectedCountryRate } from '../hooks/useExchangeRate';
 import { inviteSendService } from '../services/inviteSendService';
@@ -51,6 +52,8 @@ import { GET_PENDING_PAYROLL_ITEMS } from '../apollo/queries';
 import { LoadingOverlay } from '../components/LoadingOverlay';
 import { ReferralInputModal } from '../components/ReferralInputModal';
 import { ReferralSuccessModal } from '../components/ReferralSuccessModal';
+import AutoSwapModal from '../components/AutoSwapModal';
+import { useAutoSwap } from '../hooks/useAutoSwap';
 import { deepLinkHandler } from '../utils/deepLinkHandler';
 import { TextInput } from 'react-native';
 
@@ -141,7 +144,7 @@ export const HomeScreen = () => {
 
 
   // New UX State
-  const [showConvertModal, setShowConvertModal] = useState(false);
+  // const [showConvertModal, setShowConvertModal] = useState(false); // Removed for auto-swap
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.95)).current;
@@ -174,6 +177,15 @@ export const HomeScreen = () => {
   const [refreshAccountBalance] = useMutation(REFRESH_ACCOUNT_BALANCE);
   const [checkReferralStatus, { data: referralStatusData }] = useMutation(CHECK_REFERRAL_STATUS);
   const [setReferrerMutation] = useMutation(SET_REFERRER);
+
+  // Use the auto-swap hook for both ALGO and USDC detection
+  const { swapModalAsset } = useAutoSwap({
+    isAuthenticated,
+    myBalancesLoading,
+    usdcBalanceStr: (myBalancesData as any)?.myBalances?.usdc || '0',
+    algoBalanceStr: (myBalancesData as any)?.myBalances?.algo || '0',
+    refreshAccountBalance
+  });
 
   // Check if presale is globally active / claims unlocked
   const { data: presaleStatusData } = useQuery(GET_PRESALE_STATUS, {
@@ -450,11 +462,11 @@ export const HomeScreen = () => {
   }, [activePresaleData, allPresalePhasesData]);
 
   const confioLocked = React.useMemo(() =>
-    parseFloat(myBalancesData?.myBalances?.confioLocked || '0'),
-    [myBalancesData?.myBalances?.confioLocked]
+    parseFloat(myBalancesData?.myBalances?.confioLocked || myBalancesData?.myBalances?.confioPresaleLocked || '0'),
+    [myBalancesData?.myBalances?.confioLocked, myBalancesData?.myBalances?.confioPresaleLocked]
   );
 
-  const confioTotal = React.useMemo(() => confioLive + confioPresaleLocked + confioLocked, [confioLive, confioPresaleLocked, confioLocked]);
+  const confioTotal = React.useMemo(() => confioLive + confioLocked, [confioLive, confioLocked]);
 
   const confioUsdValue = React.useMemo(() => confioTotal * confioPriceUsd, [confioTotal, confioPriceUsd]);
 
@@ -525,58 +537,8 @@ export const HomeScreen = () => {
     }
   }, [isInitialized, myBalancesLoading, myBalancesData, myBalancesError]);
 
-  // Deposit Detection & Guardarian Return Logic
-  // Inserted here to have access to usdcBalance and totalUSDValue
-  useFocusEffect(
-    useCallback(() => {
-      const checkDeposit = async () => {
-        // Skip if still loading data to prevent false positives (0 -> Actual Balance)
-        if (myBalancesLoading) {
-          console.log('HomeScreen - Balances loading, skipping deposit check');
-          return;
-        }
 
-        try {
-          // Validate usdcBalance is a valid number
-          const currentBalance = Number(usdcBalance) || 0;
-
-          console.log('HomeScreen - Deposit Check:', { usdcBalance, currentBalance });
-
-          const storedBalance = await Keychain.getGenericPassword({ service: 'com.confio.usdc_last_balance' });
-
-          // First run check: If no balance is stored, assume this is the first login/install.
-          // We set the current balance as baseline and DON'T show the modal to avoid flashing it
-          // for existing balances.
-          if (!storedBalance) {
-            console.log('HomeScreen - First balance check, initializing baseline:', currentBalance);
-            await Keychain.setGenericPassword('balance', currentBalance.toString(), { service: 'com.confio.usdc_last_balance' });
-            return;
-          }
-
-          const lastBalance = parseFloat(storedBalance.password);
-
-          console.log('HomeScreen - Balance comparison:', { lastBalance, currentBalance });
-
-          // Only show modal if balance INCREASED and is now positive
-          if (currentBalance > lastBalance && currentBalance > 0) {
-            console.log('HomeScreen - USDC Deposit Detected! Showing Modal.');
-            setShowConvertModal(true);
-          }
-
-          // ALWAYS update last seen balance (even if 0, to track decreases)
-          await Keychain.setGenericPassword('balance', currentBalance.toString(), { service: 'com.confio.usdc_last_balance' });
-        } catch (e) {
-          console.error('HomeScreen - Error checking deposit:', e);
-        }
-      };
-
-      // Run the check
-      checkDeposit();
-
-    }, [usdcBalance, myBalancesLoading])
-  );
-
-
+  // Auto-Swap logic has been refactored into the useAutoSwap hook
 
   // No more mock accounts - we fetch from server
 
@@ -1037,7 +999,7 @@ export const HomeScreen = () => {
           case 'pay':
             return permissions.sendFunds === true;
           case 'exchange':
-            return permissions.manageP2p === true;
+            return (permissions as any).manageP2p === true;
           case 'withdraw':
             // Assuming withdraw requires sendFunds or manageP2p? 
             // Currently Retirar (Sell) lets you send USDC to bank. It involves sending funds.
@@ -1861,15 +1823,11 @@ export const HomeScreen = () => {
         onClose={() => setShowDeferredReferralSuccess(false)}
       />
 
-      {/* Convert Modal */}
-      <ConvertModal
-        visible={showConvertModal}
-        onConvert={() => {
-          setShowConvertModal(false);
-          navigation.navigate('USDCConversion');
-        }}
-        onCancel={() => setShowConvertModal(false)}
+      <AutoSwapModal
+        visible={swapModalAsset !== null}
+        assetType={swapModalAsset}
       />
+
     </View>
   );
 };

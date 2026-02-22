@@ -141,7 +141,7 @@ export type MainStackParamList = {
     };
   };
   AccountDetail: {
-    accountType: 'cusd' | 'confio';
+    accountType: 'cusd' | 'confio' | 'usdc';
     accountName: string;
     accountSymbol: string;
     accountBalance: string;
@@ -155,7 +155,7 @@ export type MainStackParamList = {
   USDCHistory: undefined;
   USDCConversion: undefined;
   SendWithAddress: {
-    tokenType: 'cusd' | 'confio';
+    tokenType: 'cusd' | 'confio' | 'usdc';
     prefilledAddress?: string;
     prefilledAmount?: string;
   };
@@ -403,7 +403,7 @@ export type RootStackParamList = {
   Auth: NavigatorScreenParams<AuthStackParamList>;
   Main: NavigatorScreenParams<MainStackParamList>;
   AccountDetail: {
-    accountType: 'cusd' | 'confio';
+    accountType: 'cusd' | 'confio' | 'usdc';
     accountName: string;
     accountSymbol: string;
     accountBalance: string;

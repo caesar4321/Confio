@@ -414,25 +414,22 @@ def mint_with_collateral():
         Assert(claw.hasValue()),
         Assert(claw.value() == Global.current_application_address()),
         
-        # Verify atomic group - support both 2-tx and 3-tx groups
-        Assert(Or(
-            Global.group_size() == Int(2),  # Non-sponsored
-            Global.group_size() == Int(3)   # Sponsored
-        )),
+        # No group_size restriction — the Txn.group_index() checks below
+        # implicitly enforce the minimum size, and extra transactions at
+        # higher indices don't affect contract logic.
         
         # Determine if sponsored and set indexes
-        If(Global.group_size() == Int(3),
+        If(Global.group_size() >= Int(3),
             Seq(
                 is_sponsored.store(Int(1)),
                 usdc_tx_index.store(Int(1)),  # USDC transfer is at index 1 in sponsored
-                Assert(Txn.group_index() == Int(2)),  # App call is at index 2
+                Assert(Txn.group_index() == Int(2)),  # App call is always at index 2
                 
                 # Verify sponsor payment (Tx 0)
                 Assert(Gtxn[0].type_enum() == TxnType.Payment),
                 Assert(Gtxn[0].sender() == app.state.sponsor_address.get()),
                 Assert(Gtxn[0].rekey_to() == Global.zero_address()),
                 Assert(Gtxn[0].close_remainder_to() == Global.zero_address()),
-                Assert(Gtxn[0].amount() >= Global.min_txn_fee()),  # Ensure sponsor pays real fees
                 Assert(Gtxn[0].amount() >= Global.min_txn_fee()),  # Ensure sponsor pays real fees
                 # Allow payment to app (fees) OR user (MBR top up)
                 Assert(Or(
@@ -569,25 +566,22 @@ def burn_for_collateral():
         Assert(claw.hasValue()),
         Assert(claw.value() == Global.current_application_address()),
         
-        # Verify atomic group - support both 2-tx and 3-tx groups
-        Assert(Or(
-            Global.group_size() == Int(2),  # Non-sponsored
-            Global.group_size() == Int(3)   # Sponsored
-        )),
+        # No group_size restriction — the Txn.group_index() checks below
+        # implicitly enforce the minimum size, and extra transactions at
+        # higher indices don't affect contract logic.
         
         # Determine if sponsored and set indexes
-        If(Global.group_size() == Int(3),
+        If(Global.group_size() >= Int(3),
             Seq(
                 is_sponsored.store(Int(1)),
                 cusd_tx_index.store(Int(1)),  # cUSD transfer is at index 1 in sponsored
-                Assert(Txn.group_index() == Int(2)),  # App call is at index 2
+                Assert(Txn.group_index() == Int(2)),  # App call is always at index 2
                 
                 # Verify sponsor payment (Tx 0)
                 Assert(Gtxn[0].type_enum() == TxnType.Payment),
                 Assert(Gtxn[0].sender() == app.state.sponsor_address.get()),
                 Assert(Gtxn[0].rekey_to() == Global.zero_address()),
                 Assert(Gtxn[0].close_remainder_to() == Global.zero_address()),
-                Assert(Gtxn[0].amount() >= Global.min_txn_fee()),  # Ensure sponsor pays real fees
                 Assert(Gtxn[0].amount() >= Global.min_txn_fee()),  # Ensure sponsor pays real fees
                 # Allow payment to app (fees) OR user (MBR top up)
                 Assert(Or(

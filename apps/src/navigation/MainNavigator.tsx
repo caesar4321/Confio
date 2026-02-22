@@ -14,7 +14,6 @@ import PhoneVerificationScreen from '../screens/PhoneVerificationScreen';
 import { AccountDetailScreen } from '../screens/AccountDetailScreen';
 import DepositScreen from '../screens/DepositScreen';
 import USDCManageScreen from '../screens/USDCManageScreen';
-import { USDCWithdrawScreen } from '../screens/USDCWithdrawScreen';
 import { USDCHistoryScreen } from '../screens/USDCHistoryScreen';
 import { USDCConversionScreen } from '../screens/USDCConversionScreen';
 import TopUpScreen from '../screens/TopUpScreen';
@@ -212,11 +211,6 @@ export const MainNavigator = () => {
         <Stack.Screen
           name="USDCManage"
           component={USDCManageScreen}
-          options={{ headerShown: false }}
-        />
-        <Stack.Screen
-          name="USDCWithdraw"
-          component={USDCWithdrawScreen}
           options={{ headerShown: false }}
         />
         <Stack.Screen

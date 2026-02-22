@@ -252,7 +252,7 @@ export const SellScreen = () => {
         // Navigate to SendWithAddress with prefilled data
         // @ts-ignore
         navigation.navigate('SendWithAddress', {
-            tokenType: 'cusd', // TODO: Update SendWithAddress to support USDC config
+            tokenType: 'usdc',
             prefilledAddress: depositAddress,
             prefilledAmount: amount,
         });
@@ -260,7 +260,8 @@ export const SellScreen = () => {
 
     const handleNavigateToWithdraw = () => {
         // @ts-ignore
-        navigation.navigate('USDCWithdraw', {
+        navigation.navigate('SendWithAddress', {
+            tokenType: 'usdc',
             prefilledAddress: depositAddress,
             prefilledAmount: amount
         });
@@ -463,7 +464,7 @@ export const SellScreen = () => {
                     try {
                         await Keychain.resetGenericPassword({ service: 'com.confio.guardarian_pending' });
                     } catch { }
-                    navigation.navigate('USDCWithdraw' as any);
+                    navigation.navigate('SendWithAddress' as any, { tokenType: 'usdc' });
                 }}
                 onCancel={async () => {
                     setShowGuardarianReturnModal(false);

@@ -20,7 +20,6 @@ import messagingService from './services/messagingService';
 import { pushNotificationService } from './services/pushNotificationService';
 import { navigationRef } from './navigation/RootNavigation';
 import { initializeNotifee } from './services/notifeeConfig';
-import { USDCConversionNotice } from './components/USDCConversionNotice';
 import linking from './navigation/linking'; // Import linking config
 // Dev: attach derivation verifier helper
 if (__DEV__) {
@@ -113,7 +112,6 @@ const AppContent: React.FC = () => {
                 <HeaderProvider>
                   <ScanProvider>
                     <View style={{ flex: 1 }}>
-                      <USDCConversionNotice />
                       <View style={{ flex: 1 }}>
                         <Navigation />
                       </View>

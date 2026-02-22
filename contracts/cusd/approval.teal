@@ -755,16 +755,8 @@ global CurrentApplicationAddress
 ==
 assert
 global GroupSize
-intc_3 // 2
-==
-global GroupSize
 pushint 3 // 3
-==
-||
-assert
-global GroupSize
-pushint 3 // 3
-==
+>=
 bnz mintwithcollateral_8_l2
 intc_0 // 0
 store 24
@@ -800,10 +792,6 @@ assert
 gtxn 0 CloseRemainderTo
 global ZeroAddress
 ==
-assert
-gtxn 0 Amount
-global MinTxnFee
->=
 assert
 gtxn 0 Amount
 global MinTxnFee
@@ -1018,16 +1006,8 @@ global CurrentApplicationAddress
 ==
 assert
 global GroupSize
-intc_3 // 2
-==
-global GroupSize
 pushint 3 // 3
-==
-||
-assert
-global GroupSize
-pushint 3 // 3
-==
+>=
 bnz burnforcollateral_9_l2
 intc_0 // 0
 store 38
@@ -1063,10 +1043,6 @@ assert
 gtxn 0 CloseRemainderTo
 global ZeroAddress
 ==
-assert
-gtxn 0 Amount
-global MinTxnFee
->=
 assert
 gtxn 0 Amount
 global MinTxnFee

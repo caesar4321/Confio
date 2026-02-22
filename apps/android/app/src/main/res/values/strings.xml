@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Confío</string>
+    <!-- Static App Check debug token to avoid regenerating on every reinstall -->
+    <string name="firebase_app_check_debug_token" translatable="false">8DB1A0DF-B3C2-4E9D-A480-281CBEB933E1</string>
 </resources>

@@ -120,6 +120,16 @@ class AlgorandAccountManager:
                         logger.info(f"Successfully auto-opted existing user into cUSD")
                     else:
                         errors.append(f"Failed to auto opt-in to cUSD (Asset ID: {cls.CUSD_ASSET_ID})")
+
+                # Auto opt-in to USDC if missing
+                if cls.USDC_ASSET_ID and cls.USDC_ASSET_ID not in currently_opted_in:
+                    logger.info(f"User needs USDC opt-in, attempting auto opt-in...")
+                    opt_in_success, _ = cls._opt_in_to_asset(algod_client, account.algorand_address, cls.USDC_ASSET_ID)
+                    if opt_in_success:
+                        opted_in_assets.append(cls.USDC_ASSET_ID)
+                        logger.info(f"Successfully auto-opted existing user into USDC")
+                    else:
+                        errors.append(f"Failed to auto opt-in to USDC (Asset ID: {cls.USDC_ASSET_ID})")
                 
                 return {
                     'account': account,
@@ -188,7 +198,14 @@ class AlgorandAccountManager:
                 else:
                     errors.append(f"Failed to opt-in to cUSD (Asset ID: {cls.CUSD_ASSET_ID})")
             
-            # Note: NOT auto-opting in to USDC - traders will opt-in when they deposit
+            # Auto opt-in to USDC
+            if cls.USDC_ASSET_ID:
+                opt_in_success, _ = cls._opt_in_to_asset(algod_client, algorand_address, cls.USDC_ASSET_ID)
+                if opt_in_success:
+                    opted_in_assets.append(cls.USDC_ASSET_ID)
+                    logger.info(f"Successfully opted in to USDC (Asset ID: {cls.USDC_ASSET_ID})")
+                else:
+                    errors.append(f"Failed to opt-in to USDC (Asset ID: {cls.USDC_ASSET_ID})")
             
             logger.info(f"Account setup complete for {user.email}. Opted into assets: {opted_in_assets}")
             
@@ -273,6 +290,10 @@ class AlgorandAccountManager:
                 success, _ = cls._opt_in_to_asset(algod_client, addr, cls.CUSD_ASSET_ID)
                 if success:
                     opted.append(cls.CUSD_ASSET_ID)
+            if cls.USDC_ASSET_ID:
+                success, _ = cls._opt_in_to_asset(algod_client, addr, cls.USDC_ASSET_ID)
+                if success:
+                    opted.append(cls.USDC_ASSET_ID)
 
             return {
                 'account': account,

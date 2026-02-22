@@ -14,6 +14,47 @@ import * as nacl from 'tweetnacl';
 import * as msgpack from 'algorand-msgpack';
 import { Buffer } from 'buffer';
 import { biometricAuthService } from '../services/biometricAuthService';
+import { gql } from '@apollo/client';
+
+const BUILD_AUTO_SWAP_TRANSACTIONS = gql`
+  mutation BuildAutoSwapTransactions($inputAssetType: String!, $amount: String!) {
+    buildAutoSwapTransactions(inputAssetType: $inputAssetType, amount: $amount) {
+      success
+      error
+      transactions
+    }
+  }
+`;
+
+const SUBMIT_AUTO_SWAP_TRANSACTIONS = gql`
+  mutation SubmitAutoSwapTransactions(
+    $internalId: String!
+    $signedTransactions: [String]!
+    $sponsorTransactions: [String]!
+    $withdrawalId: String
+  ) {
+    submitAutoSwapTransactions(
+      internalId: $internalId
+      signedTransactions: $signedTransactions
+      sponsorTransactions: $sponsorTransactions
+      withdrawalId: $withdrawalId
+    ) {
+      success
+      error
+      txid
+    }
+  }
+`;
+
+const BUILD_BURN_AND_SEND = gql`
+  mutation BuildBurnAndSend($amount: String!, $recipientAddress: String!, $note: String) {
+    buildBurnAndSend(amount: $amount, recipientAddress: $recipientAddress, note: $note) {
+      success
+      error
+      transactions
+    }
+  }
+`;
 
 const colors = {
   primary: '#34D399', // emerald-400
@@ -82,6 +123,9 @@ export const TransactionProcessingScreen = () => {
 
   // GraphQL mutations
   const [payInvoice] = useMutation(PAY_INVOICE);
+  const [buildAutoSwapTransactions] = useMutation(BUILD_AUTO_SWAP_TRANSACTIONS);
+  const [submitAutoSwapTransactions] = useMutation(SUBMIT_AUTO_SWAP_TRANSACTIONS);
+  const [buildBurnAndSend] = useMutation(BUILD_BURN_AND_SEND);
   // Removed GraphQL send mutations to enforce WS-only for Send
 
   // Ref to prevent duplicate transaction processing within this session
@@ -393,9 +437,18 @@ export const TransactionProcessingScreen = () => {
               try { session.close(); } catch { }
             }
           }
-        } catch (wsErr) {
+        } catch (wsErr: any) {
           console.error('TransactionProcessingScreen: WS prepare failed:', wsErr);
-          setTransactionError('No se pudo preparar la transacción. Revisa tu conexión e inténtalo de nuevo.');
+          const errMsg = typeof wsErr === 'string' ? wsErr : (wsErr?.message || '');
+          if (errMsg.includes('must optin') || errMsg.includes('missing from')) {
+            const assetName = transactionData.tokenType || transactionData.currency || 'este token';
+            setTransactionError(`La billetera de destino no está configurada para recibir ${assetName}. Deben agregar el token primero.`);
+          } else if (errMsg.includes('Insufficient') && errMsg.includes('balance')) {
+            const assetName = transactionData.tokenType || transactionData.currency || 'fondos';
+            setTransactionError(`Saldo insuficiente. No tienes suficientes ${assetName} para realizar este envío.`);
+          } else {
+            setTransactionError('No se pudo preparar la transacción. Revisa tu conexión e inténtalo de nuevo.');
+          }
           setIsComplete(true);
           return;
         }
@@ -452,9 +505,18 @@ export const TransactionProcessingScreen = () => {
           if (transactionData) {
             (transactionData as any).internalId = internalId;
           }
-        } catch (wsSubmitErr) {
+        } catch (wsSubmitErr: any) {
           console.error('TransactionProcessingScreen: WS submit failed:', wsSubmitErr);
-          setTransactionError('No se pudo enviar la transacción. Revisa tu conexión e inténtalo de nuevo.');
+          const errMsg = typeof wsSubmitErr === 'string' ? wsSubmitErr : (wsSubmitErr?.message || '');
+          if (errMsg.includes('must optin') || errMsg.includes('missing from')) {
+            const assetName = transactionData.tokenType || transactionData.currency || 'este token';
+            setTransactionError(`La billetera de destino no está configurada para recibir ${assetName}. Deben agregar el token primero.`);
+          } else if (errMsg.includes('Insufficient') && errMsg.includes('balance')) {
+            const assetName = transactionData.tokenType || transactionData.currency || 'fondos';
+            setTransactionError(`Saldo insuficiente. No tienes suficientes ${assetName} para realizar este envío.`);
+          } else {
+            setTransactionError('No se pudo enviar la transacción. Revisa tu conexión e inténtalo de nuevo.');
+          }
           setIsComplete(true);
           return;
         }
@@ -520,6 +582,149 @@ export const TransactionProcessingScreen = () => {
       }
     };
 
+    const processCusdSwap = async () => {
+      try {
+        console.log('TransactionProcessingScreen: Starting cUSD to USDC swap step');
+        let amountBaseUnits = Math.floor(parseFloat(transactionData.amount) * 1_000_000).toString();
+
+        const res = await buildAutoSwapTransactions({
+          variables: {
+            inputAssetType: 'CUSD',
+            amount: amountBaseUnits
+          }
+        });
+
+        const data = res.data?.buildAutoSwapTransactions;
+        if (!data?.success) {
+          throw new Error(data?.error || 'Failed to build intermediate swap');
+        }
+
+        const parsedData = JSON.parse(data.transactions);
+        const { internal_id, transactions, sponsor_transactions } = parsedData;
+
+        // Sign user transactions
+        const signedUserTxns = [];
+        for (let i = 0; i < transactions.length; i++) {
+          const userTxnB64 = transactions[i];
+          const userTxnBytes = Uint8Array.from(Buffer.from(userTxnB64, 'base64'));
+          const signedBytes = await algorandService.signTransactionBytes(userTxnBytes);
+          const signedB64 = Buffer.from(signedBytes).toString('base64');
+          signedUserTxns.push(signedB64);
+        }
+
+        // Submit the swap group
+        const submitRes = await submitAutoSwapTransactions({
+          variables: {
+            internalId: internal_id,
+            signedTransactions: signedUserTxns,
+            sponsorTransactions: (sponsor_transactions || []).map((s: any) => typeof s === 'string' ? s : JSON.stringify(s))
+          }
+        });
+
+        if (!submitRes.data?.submitAutoSwapTransactions?.success) {
+          throw new Error(submitRes.data?.submitAutoSwapTransactions?.error || 'Failed to submit intermediate swap');
+        }
+        console.log('TransactionProcessingScreen: Swap to USDC succeeded', submitRes.data.submitAutoSwapTransactions.txid);
+      } catch (err: any) {
+        console.error('TransactionProcessingScreen: Error in cUSD to USDC swap:', err);
+        throw new Error('Error al intercambiar el saldo a USDC. ' + err.message);
+      }
+    };
+
+    const processAtomicBurnAndSend = async () => {
+      try {
+        console.log('TransactionProcessingScreen: Starting ATOMIC cUSD burn + USDC send');
+        setCurrentStep(1);
+
+        const amountBaseUnits = Math.floor(parseFloat(transactionData.amount) * 1_000_000).toString();
+        const recipientAddr = transactionData.recipientAddress;
+
+        if (!recipientAddr) {
+          throw new Error('No recipient address for atomic burn+send');
+        }
+
+        // Step 1: Build the atomic transaction group on the backend
+        const res = await buildBurnAndSend({
+          variables: {
+            amount: amountBaseUnits,
+            recipientAddress: recipientAddr,
+            note: transactionData.memo || undefined
+          }
+        });
+
+        const data = res.data?.buildBurnAndSend;
+        if (!data?.success) {
+          const errMsg = data?.error || 'Failed to build burn+send';
+          if (errMsg.includes('must optin') || errMsg.includes('Recipient must optin')) {
+            const assetName = transactionData.tokenType || transactionData.currency || 'USDC';
+            throw new Error(`La billetera de destino no está configurada para recibir ${assetName}. Deben agregar el token primero.`);
+          }
+          throw new Error(errMsg);
+        }
+
+        const parsedData = JSON.parse(data.transactions);
+        const { internal_id, withdrawal_id, transactions, sponsor_transactions } = parsedData;
+
+        // Step 2: Sign the user transactions (indices 1 and 4)
+        setCurrentStep(2);
+        console.log('TransactionProcessingScreen: Signing', transactions.length, 'user transactions...');
+
+        // Load wallet if needed
+        let currentAccount = algorandService.getCurrentAccount();
+        if (!currentAccount) {
+          await algorandService.loadStoredWallet();
+        }
+
+        const signedUserTxns: string[] = [];
+        for (let i = 0; i < transactions.length; i++) {
+          const txnB64 = transactions[i];
+          const txnBytes = Uint8Array.from(Buffer.from(txnB64, 'base64'));
+          const signedBytes = await algorandService.signTransactionBytes(txnBytes);
+          const signedB64 = Buffer.from(signedBytes).toString('base64');
+          signedUserTxns.push(signedB64);
+        }
+
+        // Step 3: Submit the complete atomic group
+        const submitRes = await submitAutoSwapTransactions({
+          variables: {
+            internalId: internal_id,
+            signedTransactions: signedUserTxns,
+            sponsorTransactions: (sponsor_transactions || []).map((s: any) => typeof s === 'string' ? s : JSON.stringify(s)),
+            withdrawalId: withdrawal_id || undefined
+          }
+        });
+
+        if (!submitRes.data?.submitAutoSwapTransactions?.success) {
+          throw new Error(submitRes.data?.submitAutoSwapTransactions?.error || 'Failed to submit atomic burn+send');
+        }
+
+        const txid = submitRes.data.submitAutoSwapTransactions.txid;
+        console.log('TransactionProcessingScreen: Atomic burn+send succeeded', txid);
+
+        // Store transaction details for success screen
+        if (transactionData) {
+          (transactionData as any).transactionId = txid || '';
+          (transactionData as any).transactionHash = txid || '';
+          (transactionData as any).internalId = internal_id;
+          (transactionData as any).status = 'SUBMITTED';
+        }
+
+        setTransactionSuccess(true);
+        setIsComplete(true);
+      } catch (err: any) {
+        console.error('TransactionProcessingScreen: Error in atomic burn+send:', err);
+        const errMsg = err?.message || '';
+        if (errMsg.includes('La billetera de destino')) {
+          setTransactionError(errMsg);
+        } else if (errMsg.includes('Insufficient') && errMsg.includes('balance')) {
+          setTransactionError('Saldo insuficiente. No tienes suficientes cUSD para realizar este envío.');
+        } else {
+          setTransactionError('Error al procesar el envío. ' + errMsg);
+        }
+        setIsComplete(true);
+      }
+    };
+
     const processUnifiedSend = async () => {
       try {
         // Step 1: Verifying transaction
@@ -531,11 +736,17 @@ export const TransactionProcessingScreen = () => {
           console.log('TransactionProcessingScreen: Processing InviteSend flow for non-Confío friend');
           await processInviteSend();
         } else {
-          // Sponsored direct send for Confío friends or direct address
-          console.log('TransactionProcessingScreen: Processing Algorand sponsored send...');
-          await processAlgorandSponsoredSend();
+          // Pre-flight check: if we need to swap cUSD to USDC first
+          if ((transactionData as any)?.needsCusdSwap) {
+            console.log('TransactionProcessingScreen: Using ATOMIC burn+send flow');
+            await processAtomicBurnAndSend();
+          } else {
+            // Sponsored direct send for Confío friends or direct address
+            console.log('TransactionProcessingScreen: Processing Algorand sponsored send...');
+            await processAlgorandSponsoredSend();
+          }
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error('TransactionProcessingScreen: Error processing send:', error);
         console.error('TransactionProcessingScreen: Error details:', {
           message: error.message,

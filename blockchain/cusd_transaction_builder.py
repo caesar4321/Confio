@@ -562,3 +562,228 @@ class CUSDTransactionBuilder:
                 'success': False,
                 'error': str(e)
             }
+
+    def build_burn_and_send_transactions(
+        self,
+        user_address: str,
+        recipient_address: str,
+        cusd_amount: Decimal,
+        algod_client,
+        note: Optional[str] = None
+    ) -> Dict:
+        """
+        Build ATOMIC transaction group: burn cUSD → receive USDC → send USDC to recipient.
+        5 transactions, single group_id.
+
+        Transaction structure:
+        0. Payment from sponsor to user (MBR top-up + fee coverage)
+        1. cUSD transfer from user to app (user signs)
+        2. App call burn_for_collateral (sponsor signs, releases USDC to user)
+        3. Payment from sponsor for send fee (sponsor signs)
+        4. USDC transfer from user to recipient (user signs)
+
+        Returns:
+            Dict with unsigned user transactions and signed sponsor transactions
+        """
+        try:
+            # Check if user is opted into the application
+            account_info = algod_client.account_info(user_address)
+            apps_local_state = account_info.get('apps-local-state', [])
+            app_opted_in = any(app['id'] == self.app_id for app in apps_local_state)
+
+            if not app_opted_in:
+                logger.warning(f"User {user_address} not opted into app {self.app_id}")
+                return {
+                    'success': False,
+                    'error': 'USER_NOT_OPTED_INTO_APP',
+                    'app_id': self.app_id,
+                    'requires_app_optin': True,
+                    'message': 'User needs to opt into the cUSD application first.'
+                }
+
+            # Check recipient has opted into USDC
+            try:
+                recipient_info = algod_client.account_info(recipient_address)
+                recipient_assets = recipient_info.get('assets', [])
+                has_usdc = any(a['asset-id'] == self.usdc_asset_id for a in recipient_assets)
+                if not has_usdc:
+                    return {
+                        'success': False,
+                        'error': f'Recipient must optin to USDC (asset {self.usdc_asset_id})'
+                    }
+            except Exception as e:
+                return {
+                    'success': False,
+                    'error': f'Cannot verify recipient: {str(e)}'
+                }
+
+            # Convert amount to microunits
+            cusd_microunits = int(cusd_amount * 1_000_000)
+            usdc_microunits = cusd_microunits  # 1:1 ratio
+
+            # Get suggested params
+            params = algod_client.suggested_params()
+            min_fee = getattr(params, 'min_fee', 1000) or 1000
+
+            # Get app address
+            app_address = get_application_address(self.app_id)
+
+            # Check user's balance and minimum balance requirement
+            current_balance = account_info.get('amount', 0)
+            min_balance_required = account_info.get('min-balance', 0)
+
+            logger.info(f"[BurnAndSend] User {user_address}: balance={current_balance}, "
+                        f"min_balance={min_balance_required}, cusd={cusd_amount}, recipient={recipient_address}")
+
+            # --- Transaction 0: Sponsor payment (MBR top-up) ---
+            from algosdk.transaction import SuggestedParams
+
+            app_call_fee = 4 * min_fee  # Budget for app call + up to 3 inner txns
+            sponsor_payment_fee = min_fee
+            send_sponsor_fee = min_fee * 2  # Fee for the send sponsorship (covers txn 3 + txn 4)
+
+            funding_needed = 0
+            if current_balance < min_balance_required:
+                funding_needed = min_balance_required - current_balance
+            if funding_needed < min_fee:
+                funding_needed = min_fee  # Contract requires Gtxn[0].amount() >= Global.min_txn_fee()
+
+            sponsor_params_0 = SuggestedParams(
+                fee=sponsor_payment_fee,
+                first=params.first, last=params.last,
+                gh=params.gh, gen=params.gen,
+                flat_fee=True
+            )
+            sponsor_payment = PaymentTxn(
+                sender=self.sponsor_address,
+                sp=sponsor_params_0,
+                receiver=user_address,
+                amt=funding_needed,
+                note=b"Burn+Send fee sponsorship"
+            )
+
+            # --- Transaction 1: cUSD transfer from user to app (user signs) ---
+            cusd_params = SuggestedParams(
+                fee=0, first=params.first, last=params.last,
+                gh=params.gh, gen=params.gen, flat_fee=True
+            )
+            cusd_transfer = AssetTransferTxn(
+                sender=user_address,
+                sp=cusd_params,
+                receiver=app_address,
+                amt=cusd_microunits,
+                index=self.cusd_asset_id
+            )
+
+            # --- Transaction 2: App call burn_for_collateral (sponsor signs) ---
+            from algosdk.abi import Method, Returns
+
+            app_params = SuggestedParams(
+                fee=app_call_fee,
+                first=params.first, last=params.last,
+                gh=params.gh, gen=params.gen, flat_fee=True
+            )
+            selector = Method(
+                name="burn_for_collateral",
+                args=[],
+                returns=Returns("void")
+            ).get_selector()
+
+            app_call = ApplicationCallTxn(
+                sender=self.sponsor_address,
+                sp=app_params,
+                index=self.app_id,
+                on_complete=transaction.OnComplete.NoOpOC,
+                app_args=[selector],
+                foreign_assets=[self.usdc_asset_id, self.cusd_asset_id],
+                accounts=[user_address]
+            )
+
+            # --- Transaction 3: Sponsor payment for the USDC send fee ---
+            send_sponsor_params = SuggestedParams(
+                fee=send_sponsor_fee,
+                first=params.first, last=params.last,
+                gh=params.gh, gen=params.gen, flat_fee=True
+            )
+            send_fee_payment = PaymentTxn(
+                sender=self.sponsor_address,
+                sp=send_sponsor_params,
+                receiver=user_address,
+                amt=0,
+                note=b"USDC send fee sponsorship"
+            )
+
+            # --- Transaction 4: USDC transfer from user to recipient (user signs) ---
+            usdc_params = SuggestedParams(
+                fee=0, first=params.first, last=params.last,
+                gh=params.gh, gen=params.gen, flat_fee=True
+            )
+            usdc_transfer = AssetTransferTxn(
+                sender=user_address,
+                sp=usdc_params,
+                receiver=recipient_address,
+                amt=usdc_microunits,
+                index=self.usdc_asset_id,
+                note=note.encode() if note else None
+            )
+
+            # --- Group all 5 transactions ---
+            txn_list = [sponsor_payment, cusd_transfer, app_call, send_fee_payment, usdc_transfer]
+            group_id = transaction.calculate_group_id(txn_list)
+            for txn in txn_list:
+                txn.group = group_id
+
+            # --- Sign sponsor transactions (indices 0, 2, 3) via KMS ---
+            sponsor_payment_signed = self.signer.sign_transaction_msgpack(sponsor_payment)
+            app_call_signed = self.signer.sign_transaction_msgpack(app_call)
+            send_fee_signed = self.signer.sign_transaction_msgpack(send_fee_payment)
+
+            # User signs indices 1 and 4
+            transactions_to_sign = [
+                {
+                    'txn': algo_encoding.msgpack_encode(cusd_transfer),
+                    'signers': [user_address],
+                    'message': 'cUSD transfer for burning',
+                    'index': 1
+                },
+                {
+                    'txn': algo_encoding.msgpack_encode(usdc_transfer),
+                    'signers': [user_address],
+                    'message': 'USDC transfer to recipient',
+                    'index': 4
+                }
+            ]
+
+            return {
+                'success': True,
+                'transactions_to_sign': transactions_to_sign,
+                'sponsor_transactions': [
+                    {
+                        'txn': algo_encoding.msgpack_encode(sponsor_payment),
+                        'signed': sponsor_payment_signed,
+                        'index': 0
+                    },
+                    {
+                        'txn': algo_encoding.msgpack_encode(app_call),
+                        'signed': app_call_signed,
+                        'index': 2
+                    },
+                    {
+                        'txn': algo_encoding.msgpack_encode(send_fee_payment),
+                        'signed': send_fee_signed,
+                        'index': 3
+                    }
+                ],
+                'group_id': base64.b64encode(group_id).decode('utf-8'),
+                'total_fee': str(sponsor_payment_fee + app_call_fee + send_sponsor_fee),
+                'cusd_amount': str(cusd_amount),
+                'usdc_amount': str(cusd_amount),
+                'recipient': recipient_address
+            }
+
+        except Exception as e:
+            logger.error(f"Error building burn+send transactions: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }

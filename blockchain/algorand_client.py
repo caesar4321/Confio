@@ -206,16 +206,16 @@ class AlgorandClient:
         return balances.get(str(self.CONFIO_ASSET_ID), Decimal('0'))
 
     async def get_balances_snapshot(self, address: str, skip_cache: bool = False) -> Dict[str, Decimal]:
-        """Fetch cUSD, CONFIO, USDC, and presale-locked in one algod.account_info call.
+        """Fetch ALGO, cUSD, CONFIO, USDC, and presale-locked in one algod.account_info call.
 
         Returns a dict with Decimal values in human units (6 decimals for all).
-        Keys: 'CUSD', 'CONFIO', 'USDC', 'CONFIO_PRESALE'
+        Keys: 'ALGO', 'CUSD', 'CONFIO', 'USDC', 'CONFIO_PRESALE'
         """
         try:
             info = self.algod.account_info(address)
         except Exception as e:
             logger.error("[snapshot] failed to fetch account_info for %s: %s", address, e)
-            return {k: Decimal('0') for k in ['CUSD', 'CONFIO', 'USDC', 'CONFIO_PRESALE']}
+            return {k: Decimal('0') for k in ['ALGO', 'CUSD', 'CONFIO', 'USDC', 'CONFIO_PRESALE']}
 
         def asset_amount(asset_id: Optional[int]) -> Decimal:
             if not asset_id:
@@ -241,7 +241,12 @@ class AlgorandClient:
             except Exception as e:
                 logger.error("[snapshot] presale decode error for %s: %s", address, e)
 
+        # Native ALGO balance (microAlgos -> ALGOs)
+        algo_micro = info.get('amount', 0)
+        algo = Decimal(str(algo_micro)) / Decimal('1000000')
+
         return {
+            'ALGO': algo,
             'CUSD': cusd,
             'CONFIO': confio,
             'USDC': usdc,

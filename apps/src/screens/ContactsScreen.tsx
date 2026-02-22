@@ -7,6 +7,7 @@ import { MainStackParamList } from '../types/navigation';
 import Icon from 'react-native-vector-icons/Feather';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
+import USDCLogo from '../assets/png/USDC.png';
 import ContactService, { contactService } from '../services/contactService';
 import { ContactPermissionModal } from '../components/ContactPermissionModal';
 import { InviteEmployeeModal } from '../components/InviteEmployeeModal';
@@ -19,7 +20,7 @@ import { getCountryByIso } from '../utils/countries';
 // Utility function to format phone number with country code
 const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string => {
   if (!phoneNumber) return '';
-  
+
   // If we have a country code, format it
   if (phoneCountry) {
     const country = getCountryByIso(phoneCountry);
@@ -28,7 +29,7 @@ const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string 
       return `${countryCode} ${phoneNumber}`;
     }
   }
-  
+
   return phoneNumber;
 };
 
@@ -80,7 +81,7 @@ const getRoleLabel = (role: string) => {
 const EmployeeCard = memo(({ contact, onPress, onRemove, onCancelInvitation }: EmployeeCardProps) => {
   const isInvitation = contact.isInvitation;
   const role = getRoleLabel(contact.role);
-  
+
   return (
     <TouchableOpacity style={styles.contactCard} onPress={() => onPress(contact)}>
       <View style={[
@@ -94,13 +95,13 @@ const EmployeeCard = memo(({ contact, onPress, onRemove, onCancelInvitation }: E
           {contact.avatar}
         </Text>
       </View>
-      
+
       <View style={styles.contactInfo}>
         <Text style={styles.contactName}>{contact.name}</Text>
         <Text style={styles.contactPhone}>{contact.phone}</Text>
         <Text style={styles.employeeRole}>{role}</Text>
       </View>
-      
+
       <View style={styles.employeeActionContainer}>
         {isInvitation ? (
           <TouchableOpacity
@@ -141,12 +142,12 @@ const ContactCard = memo(({ contact, isOnConfio = false, onPress, onSendPress, o
         {contact.avatar}
       </Text>
     </View>
-    
+
     <View style={styles.contactInfo}>
       <Text style={styles.contactName}>{contact.name}</Text>
       <Text style={styles.contactPhone}>{contact.phone}</Text>
     </View>
-    
+
     {isOnConfio ? (
       <TouchableOpacity
         style={styles.sendButton}
@@ -173,34 +174,34 @@ const ContactCard = memo(({ contact, isOnConfio = false, onPress, onSendPress, o
 ), (prevProps, nextProps) => {
   // Custom comparison to prevent unnecessary re-renders
   return prevProps.contact.id === nextProps.contact.id &&
-         prevProps.isOnConfio === nextProps.isOnConfio;
+    prevProps.isOnConfio === nextProps.isOnConfio;
 });
 
 // Create isolated SearchInput component to prevent keyboard issues
-const SearchInput = React.memo(({ 
+const SearchInput = React.memo(({
   onSearchChange,
-  isBusinessAccount 
-}: { 
+  isBusinessAccount
+}: {
   onSearchChange: (text: string) => void;
   isBusinessAccount: boolean;
 }) => {
   const [localValue, setLocalValue] = useState('');
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
-  
+
   // Update local state when typing
   const handleLocalChange = useCallback((text: string) => {
     setLocalValue(text);
-    
+
     // Debounce the parent update
     if (debounceTimer.current) {
       clearTimeout(debounceTimer.current);
     }
-    
+
     debounceTimer.current = setTimeout(() => {
       onSearchChange(text);
     }, 300); // 300ms debounce
   }, [onSearchChange]);
-  
+
   // Cleanup timer on unmount
   useEffect(() => {
     return () => {
@@ -209,11 +210,11 @@ const SearchInput = React.memo(({
       }
     };
   }, []);
-  
+
   return (
-    <TextInput 
+    <TextInput
       style={styles.searchInput}
-      placeholder={isBusinessAccount ? "Buscar empleados..." : "Buscar contactos..."} 
+      placeholder={isBusinessAccount ? "Buscar empleados..." : "Buscar contactos..."}
       placeholderTextColor="#6b7280"
       value={localValue}
       onChangeText={handleLocalChange}
@@ -229,16 +230,16 @@ export const ContactsScreen = () => {
   const navigation = useNavigation<ContactsScreenNavigationProp>();
   const apolloClient = useApolloClient();
   const [searchTerm, setSearchTerm] = useState('');
-  
+
   // Test users mutation
-  
+
   // Import useAccount to check account type
   const { activeAccount, user } = useAccount();
 
   // Check if this is a business account or confirmed personal account
   const isBusinessAccount = activeAccount?.type === 'business';
   const isPersonalAccount = activeAccount?.type === 'personal';
-  
+
   // Debug logging for business account
   React.useEffect(() => {
     if (isBusinessAccount) {
@@ -251,7 +252,7 @@ export const ContactsScreen = () => {
         isEmployee: activeAccount?.isEmployee,
         employeeRole: activeAccount?.employeeRole
       });
-      
+
       // Log query status
       console.log('ContactsScreen - Query status:', {
         employeesLoading,
@@ -264,7 +265,7 @@ export const ContactsScreen = () => {
       });
     }
   }, [isBusinessAccount, activeAccount, employeesLoading, employeesError, employeesData, invitationsLoading, invitationsError, invitationsData]);
-  
+
   // State for employee pagination
   const [employeesState, setEmployeesState] = useState({
     employees: [],
@@ -276,7 +277,7 @@ export const ContactsScreen = () => {
 
   // Fetch employees and invitations for business accounts using JWT context
   const { data: employeesData, loading: employeesLoading, error: employeesError, refetch: refetchEmployees, fetchMore } = useQuery(GET_CURRENT_BUSINESS_EMPLOYEES, {
-    variables: { 
+    variables: {
       includeInactive: false,
       first: 20 // Initial page size
     },
@@ -301,7 +302,7 @@ export const ContactsScreen = () => {
       setEmployeesState(prev => ({ ...prev, loading: false, refreshing: false }));
     }
   });
-  
+
   const { data: invitationsData, loading: invitationsLoading, error: invitationsError, refetch: refetchInvitations } = useQuery(GET_CURRENT_BUSINESS_INVITATIONS, {
     variables: { status: 'pending' },
     skip: !isBusinessAccount,
@@ -321,7 +322,7 @@ export const ContactsScreen = () => {
 
   const [inviteEmployee] = useMutation(INVITE_EMPLOYEE);
   const [cancelInvitation] = useMutation(CANCEL_INVITATION);
-  
+
   // Stable callback for search updates
   const handleSearchChange = useCallback((text: string) => {
     setSearchTerm(text);
@@ -337,7 +338,7 @@ export const ContactsScreen = () => {
   const [contactsFromDevice, setContactsFromDevice] = useState<any[]>([]);
   const [hasContactPermission, setHasContactPermission] = useState<boolean | null>(null);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
-  
+
   // Batch all contact state into a single object for performance
   const [contactsData, setContactsData] = useState<{
     friends: any[];
@@ -364,17 +365,17 @@ export const ContactsScreen = () => {
     if (!isPersonalAccount || !isInitialLoad || !hasContactPermission || contactsData.isLoaded) {
       return;
     }
-    
+
     console.log('[PERF] Starting contact loading monitor');
     let checkCount = 0;
-    
+
     // Check for contacts every 100ms until loaded
     const checkInterval = setInterval(async () => {
       checkCount++;
       const checkStart = Date.now();
       const contacts = await contactService.getAllContacts();
       console.log(`[PERF] Check #${checkCount}: getAllContacts took ${Date.now() - checkStart}ms, got ${contacts.length} contacts`);
-      
+
       if (contacts.length > 0) {
         const displayStart = Date.now();
         await displayContacts(contacts);
@@ -398,15 +399,15 @@ export const ContactsScreen = () => {
     try {
       const hasPermission = await contactService.hasContactPermission();
       setHasContactPermission(hasPermission);
-      
+
       if (hasPermission) {
         console.log('[PERF] Has permission, getting initial contacts');
         const getContactsStart = Date.now();
-        
+
         // Get initial contacts (may be empty if still loading)
         const contacts = await contactService.getAllContacts();
         console.log(`[PERF] Initial getAllContacts took ${Date.now() - getContactsStart}ms, got ${contacts.length} contacts`);
-        
+
         if (contacts.length > 0) {
           // Display immediately if available
           const displayStart = Date.now();
@@ -414,7 +415,7 @@ export const ContactsScreen = () => {
           console.log(`[PERF] Initial displayContacts took ${Date.now() - displayStart}ms`);
           setIsInitialLoad(false);
         }
-        
+
         // No automatic sync - users will use pull-to-refresh or sync button
         // iOS: if permission exists but explicit upload consent hasn't been granted yet, show consent modal
         if (Platform.OS === 'ios') {
@@ -443,16 +444,16 @@ export const ContactsScreen = () => {
   // Display contacts from cache or fresh sync - OPTIMIZED WITH SINGLE STATE UPDATE
   const displayContacts = async (allContacts: any[]) => {
     const startTime = Date.now();
-    
+
     if (allContacts.length === 0) {
       console.log('No contacts to display');
       setContactsData({ friends: [], nonConfioFriends: [], allContacts: [], isLoaded: true });
       return;
     }
-    
+
     console.log(`[PERF] Starting to format ${allContacts.length} contacts`);
     const formatStart = Date.now();
-    
+
     // Format contacts using the cached Confío status
     const formattedContacts = allContacts.map((contact, index) => ({
       id: contact.isOnConfio && contact.confioUserId ? contact.confioUserId : `contact_${index}`,
@@ -463,17 +464,17 @@ export const ContactsScreen = () => {
       userId: contact.confioUserId || null,
       algorandAddress: contact.confioAlgorandAddress || null
     }));
-    
+
     console.log(`[PERF] Formatting took ${Date.now() - formatStart}ms`);
-    
+
     // Split into Confío users and non-Confío users
     const splitStart = Date.now();
     const confioUsers = formattedContacts.filter(contact => contact.isOnConfio);
     const nonConfioUsers = formattedContacts.filter(contact => !contact.isOnConfio);
-    
+
     console.log(`[PERF] Found ${confioUsers.length} Confío users and ${nonConfioUsers.length} non-Confío users`);
     console.log(`[PERF] Splitting contacts took ${Date.now() - splitStart}ms`);
-    
+
     // SINGLE STATE UPDATE - This is the key optimization!
     const setStateStart = Date.now();
     setContactsData({
@@ -483,7 +484,7 @@ export const ContactsScreen = () => {
       isLoaded: true
     });
     console.log(`[PERF] setState call took ${Date.now() - setStateStart}ms`);
-    
+
     console.log(`[PERF] Total displayContacts time: ${Date.now() - startTime}ms`);
   };
 
@@ -493,17 +494,17 @@ export const ContactsScreen = () => {
     if (!isPersonalAccount) {
       return;
     }
-    
+
     setIsLoadingContacts(true);
     try {
       const success = await contactService.syncContacts(apolloClient);
       console.log('Sync success:', success);
-      
+
       if (success) {
         // Get all contacts from device
         const allContacts = await contactService.getAllContacts();
         console.log('Retrieved contacts:', allContacts.length);
-        
+
         await displayContacts(allContacts);
       }
     } catch (error) {
@@ -523,7 +524,7 @@ export const ContactsScreen = () => {
       await contactService.setUploadConsent(true);
     }
     const granted = await contactService.requestContactPermission();
-    
+
     if (granted) {
       setHasContactPermission(true);
       await contactService.storePermissionStatus('granted');
@@ -555,23 +556,23 @@ export const ContactsScreen = () => {
   // Handle pull to refresh
   const handleRefresh = async () => {
     setRefreshing(true);
-    
+
     if (isBusinessAccount) {
       // Use the dedicated employee refresh function for business accounts
       await refreshEmployees();
       return;
     }
-    
+
     if (!isPersonalAccount) {
       setRefreshing(false);
       return;
     }
-    
+
     setIsLoadingContacts(true);
-    
+
     // Clear existing contacts to show loading state
     setContactsData({ friends: [], nonConfioFriends: [], allContacts: [], isLoaded: false });
-    
+
     if (hasContactPermission) {
       // On iOS, ensure we have explicit upload consent before triggering a sync that may upload data
       if (Platform.OS === 'ios') {
@@ -602,7 +603,7 @@ export const ContactsScreen = () => {
         }
       }
     }
-    
+
     setRefreshing(false);
     setIsLoadingContacts(false);
   };
@@ -616,19 +617,15 @@ export const ContactsScreen = () => {
   );
 
   const handleReceiveWithAddress = () => {
-    setShowTokenSelection(true);
-  };
-
-  const handleTokenSelection = (tokenType: 'cusd' | 'confio') => {
-    setShowTokenSelection(false);
-    navigation.navigate('USDCDeposit', { tokenType });
+    // Unified deposit screen — same address for all tokens, no selector needed
+    navigation.navigate('USDCDeposit');
   };
 
   const handleSendWithAddress = () => {
     setShowSendTokenSelection(true);
   };
 
-  const handleSendTokenSelection = (tokenType: 'cusd' | 'confio') => {
+  const handleSendTokenSelection = (tokenType: 'cusd' | 'confio' | 'usdc') => {
     setShowSendTokenSelection(false);
     navigation.navigate('SendWithAddress', { tokenType });
   };
@@ -659,13 +656,13 @@ export const ContactsScreen = () => {
   };
 
   // Filter friends based on search term - Memoized to prevent keyboard dismissal
-  const filteredConfioFriends = useMemo(() => 
+  const filteredConfioFriends = useMemo(() =>
     contactsData.friends
       .filter(friend =>
         friend.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         friend.phone.includes(searchTerm)
       )
-      .sort((a, b) => a.name.localeCompare(b.name)), 
+      .sort((a, b) => a.name.localeCompare(b.name)),
     [contactsData.friends, searchTerm]
   );
 
@@ -694,11 +691,11 @@ export const ContactsScreen = () => {
   const handleFriendPressCallback = useCallback((contact: any) => {
     handleFriendPress(contact);
   }, []);
-  
+
   const handleSendToFriendCallback = useCallback((contact: any) => {
     handleSendToFriend(contact);
   }, []);
-  
+
   const handleInviteFriendCallback = useCallback((contact: any) => {
     handleInviteFriend(contact);
   }, []);
@@ -753,8 +750,8 @@ export const ContactsScreen = () => {
       `¿Estás seguro de que quieres remover a ${contact.name} como empleado?`,
       [
         { text: 'Cancelar', style: 'cancel' },
-        { 
-          text: 'Remover', 
+        {
+          text: 'Remover',
           style: 'destructive',
           onPress: async () => {
             // TODO: Implement employee removal
@@ -822,13 +819,13 @@ export const ContactsScreen = () => {
     if (!isBusinessAccount) return;
 
     setEmployeesState(prev => ({ ...prev, refreshing: true }));
-    
+
     try {
       const result = await refetchEmployees({
         includeInactive: false,
         first: 20
       });
-      
+
       if (result.data?.currentBusinessEmployees) {
         const employees = result.data.currentBusinessEmployees;
         setEmployeesState({
@@ -839,7 +836,7 @@ export const ContactsScreen = () => {
           refreshing: false
         });
       }
-      
+
       // Also refresh invitations
       refetchInvitations();
     } catch (error) {
@@ -848,72 +845,6 @@ export const ContactsScreen = () => {
     }
   }, [isBusinessAccount, refetchEmployees, refetchInvitations]);
 
-  const TokenSelectionModal = () => (
-    <Modal
-      visible={showTokenSelection}
-      transparent
-      animationType="fade"
-      onRequestClose={() => setShowTokenSelection(false)}
-    >
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Selecciona la moneda</Text>
-            <TouchableOpacity onPress={() => setShowTokenSelection(false)}>
-              <Icon name="x" size={24} color="#6B7280" />
-            </TouchableOpacity>
-          </View>
-          
-          <Text style={styles.modalSubtitle}>
-            ¿Qué moneda quieres recibir?
-          </Text>
-
-          <View style={styles.tokenOptions}>
-            <TouchableOpacity 
-              style={styles.tokenOption}
-              onPress={() => handleTokenSelection('cusd')}
-            >
-              <View style={styles.tokenInfo}>
-                <Image source={cUSDLogo} style={styles.tokenLogo} />
-                <View style={styles.tokenDetails}>
-                  <Text style={styles.tokenName}>Confío Dollar</Text>
-                  <Text style={styles.tokenSymbol}>$cUSD</Text>
-                  <Text style={styles.tokenDescription}>
-                    Moneda estable para pagos diarios
-                  </Text>
-                </View>
-              </View>
-              <Icon name="chevron-right" size={20} color="#6B7280" />
-            </TouchableOpacity>
-
-            <TouchableOpacity 
-              style={styles.tokenOption}
-              onPress={() => handleTokenSelection('confio')}
-            >
-              <View style={styles.tokenInfo}>
-                <Image source={CONFIOLogo} style={styles.tokenLogo} />
-                <View style={styles.tokenDetails}>
-                  <Text style={styles.tokenName}>Confío</Text>
-                  <Text style={styles.tokenSymbol}>$CONFIO</Text>
-                  <Text style={styles.tokenDescription}>
-                    Moneda de gobernanza y utilidad
-                  </Text>
-                </View>
-              </View>
-              <Icon name="chevron-right" size={20} color="#6B7280" />
-            </TouchableOpacity>
-          </View>
-
-          <TouchableOpacity 
-            style={styles.cancelButton}
-            onPress={() => setShowTokenSelection(false)}
-          >
-            <Text style={styles.cancelButtonText}>Cancelar</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
-  );
 
   const SendTokenSelectionModal = () => (
     <Modal
@@ -932,7 +863,7 @@ export const ContactsScreen = () => {
           </View>
           <Text style={styles.modalSubtitle}>¿Qué moneda quieres enviar?</Text>
           <View style={styles.tokenOptions}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.tokenOption}
               onPress={() => handleSendTokenSelection('cusd')}
             >
@@ -946,7 +877,21 @@ export const ContactsScreen = () => {
               </View>
               <Icon name="chevron-right" size={20} color="#6B7280" />
             </TouchableOpacity>
-            <TouchableOpacity 
+            <TouchableOpacity
+              style={styles.tokenOption}
+              onPress={() => handleSendTokenSelection('usdc')}
+            >
+              <View style={styles.tokenInfo}>
+                <Image source={USDCLogo} style={styles.tokenLogo} />
+                <View style={styles.tokenDetails}>
+                  <Text style={styles.tokenName}>USD Coin</Text>
+                  <Text style={styles.tokenSymbol}>USDC</Text>
+                  <Text style={styles.tokenDescription}>Stablecoin en la red de Algorand</Text>
+                </View>
+              </View>
+              <Icon name="chevron-right" size={20} color="#6B7280" />
+            </TouchableOpacity>
+            <TouchableOpacity
               style={styles.tokenOption}
               onPress={() => handleSendTokenSelection('confio')}
             >
@@ -961,7 +906,7 @@ export const ContactsScreen = () => {
               <Icon name="chevron-right" size={20} color="#6B7280" />
             </TouchableOpacity>
           </View>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.cancelButton}
             onPress={() => setShowSendTokenSelection(false)}
           >
@@ -989,7 +934,7 @@ export const ContactsScreen = () => {
           </View>
           <Text style={styles.modalSubtitle}>¿Qué moneda quieres enviar a {selectedFriend?.name}?</Text>
           <View style={styles.tokenOptions}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.tokenOption}
               onPress={() => handleFriendTokenSelection('cusd')}
             >
@@ -1003,7 +948,7 @@ export const ContactsScreen = () => {
               </View>
               <Icon name="chevron-right" size={20} color="#6B7280" />
             </TouchableOpacity>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.tokenOption}
               onPress={() => handleFriendTokenSelection('confio')}
             >
@@ -1018,7 +963,7 @@ export const ContactsScreen = () => {
               <Icon name="chevron-right" size={20} color="#6B7280" />
             </TouchableOpacity>
           </View>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.cancelButton}
             onPress={() => setShowFriendTokenSelection(false)}
           >
@@ -1045,7 +990,7 @@ export const ContactsScreen = () => {
       }
       const employees = employeesState.employees || [];
       const invitations = invitationsData?.currentBusinessInvitations || [];
-      
+
       // Format employees for display - exclude the business owner
       const employeeContacts = employees
         .filter(employee => {
@@ -1064,7 +1009,7 @@ export const ContactsScreen = () => {
           isEmployee: true,
           employeeData: employee
         }));
-      
+
       // Format pending invitations
       const invitationContacts = invitations.map(invitation => ({
         id: `invitation-${invitation.id}`,
@@ -1075,24 +1020,24 @@ export const ContactsScreen = () => {
         isInvitation: true,
         invitationData: invitation
       }));
-      
+
       // Filter by search term
       const filteredEmployees = searchTerm
         ? employeeContacts.filter(contact =>
-            contact.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            contact.phone.includes(searchTerm)
-          )
+          contact.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          contact.phone.includes(searchTerm)
+        )
         : employeeContacts;
-      
+
       const filteredInvitations = searchTerm
         ? invitationContacts.filter(contact =>
-            contact.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            contact.phone.includes(searchTerm)
-          )
+          contact.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          contact.phone.includes(searchTerm)
+        )
         : invitationContacts;
-      
+
       const sections = [];
-      
+
       if (filteredEmployees.length > 0 || filteredInvitations.length > 0) {
         sections.push({
           title: 'EMPLEADOS',
@@ -1101,12 +1046,12 @@ export const ContactsScreen = () => {
           isEmployees: true
         });
       }
-      
+
       return sections;
     }
-    
+
     const sectionData = [];
-    
+
     if (filteredConfioFriends.length > 0) {
       sectionData.push({
         title: 'Amigos en Confío',
@@ -1115,7 +1060,7 @@ export const ContactsScreen = () => {
         isConfio: true
       });
     }
-    
+
     if (filteredNonConfioFriends.length > 0) {
       sectionData.push({
         title: 'Invita a tus amigos',
@@ -1125,7 +1070,7 @@ export const ContactsScreen = () => {
         showInfo: true
       });
     }
-    
+
     return sectionData;
   }, [filteredConfioFriends, filteredNonConfioFriends, isBusinessAccount, activeAccount, employeesLoading, invitationsLoading, employeesData, invitationsData, searchTerm]);
 
@@ -1142,7 +1087,7 @@ export const ContactsScreen = () => {
             </View>
           )}
           {section.isEmployees && !section.isLoading && (
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.addEmployeeHeaderButton}
               onPress={() => setShowInviteModal(true)}
             >
@@ -1151,7 +1096,7 @@ export const ContactsScreen = () => {
           )}
         </View>
       </View>
-      
+
       {section.showInfo && (
         <View style={styles.infoCard}>
           <View style={styles.infoCardContent}>
@@ -1161,14 +1106,14 @@ export const ContactsScreen = () => {
             <View style={styles.infoTextContainer}>
               <Text style={styles.infoTitle}>Envío con invitación</Text>
               <Text style={styles.infoDescription}>
-                Envía dinero y tu amigo recibirá una invitación por WhatsApp. 
+                Envía dinero y tu amigo recibirá una invitación por WhatsApp.
                 Tendrá <Text style={styles.infoBold}>7 días</Text> para crear su cuenta y reclamar el dinero.
               </Text>
             </View>
           </View>
         </View>
       )}
-      
+
       {section.isEmployees && section.count === 0 && !activeAccount?.isEmployee && (
         <View style={styles.employeeInfoCard}>
           <View style={styles.infoCardContent}>
@@ -1182,8 +1127,8 @@ export const ContactsScreen = () => {
               </Text>
             </View>
           </View>
-          
-          <TouchableOpacity 
+
+          <TouchableOpacity
             style={styles.addEmployeeFromInfoButton}
             onPress={() => {
               setShowInviteModal(true);
@@ -1201,19 +1146,19 @@ export const ContactsScreen = () => {
     // For business accounts showing employees
     if (section.isEmployees) {
       return (
-        <EmployeeCard 
-          contact={item} 
+        <EmployeeCard
+          contact={item}
           onPress={handleEmployeePress}
           onRemove={handleEmployeeActions}
           onCancelInvitation={handleCancelInvitation}
         />
       );
     }
-    
+
     // For regular contacts
     return (
-      <ContactCard 
-        contact={item} 
+      <ContactCard
+        contact={item}
         isOnConfio={item.isOnConfio || false}
         onPress={handleFriendPressCallback}
         onSendPress={handleSendToFriendCallback}
@@ -1223,155 +1168,155 @@ export const ContactsScreen = () => {
   }, [handleFriendPressCallback, handleSendToFriendCallback, handleInviteFriendCallback, handleEmployeePress, handleEmployeeActions, handleCancelInvitation]);
 
   // Create a stable header component that won't cause re-renders
-const ListHeaderComponent = useMemo(() => {
-  const HeaderContent = () => (
-    <>
+  const ListHeaderComponent = useMemo(() => {
+    const HeaderContent = () => (
+      <>
 
-      {/* Pending payroll banner removed (handled elsewhere) */}
+        {/* Pending payroll banner removed (handled elsewhere) */}
 
-      {/* Send/Receive Options */}
-      <View style={styles.actionSection}>
-        {/* For business accounts, show the Add Employee button */}
-        {isBusinessAccount && (
-          <TouchableOpacity 
-            style={styles.addEmployeeActionButton}
-            onPress={() => {
-              setShowInviteModal(true);
-            }}
-          >
-            <View style={styles.actionButtonContent}>
-              <View style={[styles.actionIconContainer, { backgroundColor: colors.violet }]}>
-                <Icon name="user-plus" size={20} color="#fff" />
+        {/* Send/Receive Options */}
+        <View style={styles.actionSection}>
+          {/* For business accounts, show the Add Employee button */}
+          {isBusinessAccount && (
+            <TouchableOpacity
+              style={styles.addEmployeeActionButton}
+              onPress={() => {
+                setShowInviteModal(true);
+              }}
+            >
+              <View style={styles.actionButtonContent}>
+                <View style={[styles.actionIconContainer, { backgroundColor: colors.violet }]}>
+                  <Icon name="user-plus" size={20} color="#fff" />
+                </View>
+                <View style={styles.actionTextContainer}>
+                  <Text style={styles.actionButtonTitle}>Añadir empleado</Text>
+                  <Text style={styles.actionButtonSubtitle}>Gestiona tu equipo de trabajo</Text>
+                </View>
               </View>
-              <View style={styles.actionTextContainer}>
-                <Text style={styles.actionButtonTitle}>Añadir empleado</Text>
-                <Text style={styles.actionButtonSubtitle}>Gestiona tu equipo de trabajo</Text>
-              </View>
-            </View>
-            <Icon name="chevron-right" size={20} color="#9ca3af" />
-          </TouchableOpacity>
-        )}
+              <Icon name="chevron-right" size={20} color="#9ca3af" />
+            </TouchableOpacity>
+          )}
 
-        {isBusinessAccount && !activeAccount?.isEmployee && (
-          <TouchableOpacity
-            style={styles.addEmployeeActionButton}
-            onPress={() => navigation.navigate('PayrollHome' as any)}
-          >
-            <View style={styles.actionButtonContent}>
-              <View style={[styles.actionIconContainer, { backgroundColor: '#8B5CF6' }]}>
-                <Icon name="dollar-sign" size={20} color="#fff" />
+          {isBusinessAccount && !activeAccount?.isEmployee && (
+            <TouchableOpacity
+              style={styles.addEmployeeActionButton}
+              onPress={() => navigation.navigate('PayrollHome' as any)}
+            >
+              <View style={styles.actionButtonContent}>
+                <View style={[styles.actionIconContainer, { backgroundColor: '#8B5CF6' }]}>
+                  <Icon name="dollar-sign" size={20} color="#fff" />
+                </View>
+                <View style={styles.actionTextContainer}>
+                  <Text style={styles.actionButtonTitle}>Nómina</Text>
+                  <Text style={styles.actionButtonSubtitle}>Paga a tu equipo automáticamente</Text>
+                </View>
               </View>
-              <View style={styles.actionTextContainer}>
-                <Text style={styles.actionButtonTitle}>Nómina</Text>
-                <Text style={styles.actionButtonSubtitle}>Paga a tu equipo automáticamente</Text>
+              <Icon name="chevron-right" size={20} color="#9ca3af" />
+            </TouchableOpacity>
+          )}
+
+          {/* Show permission prompt if user denied but there are no contacts - only for personal accounts */}
+          {isPersonalAccount && hasContactPermission === false && contactsData.friends.length === 0 && contactsData.nonConfioFriends.length === 0 && (
+            <TouchableOpacity
+              style={styles.permissionPrompt}
+              onPress={async () => {
+                // Always check real system status to avoid stale stored flags after reinstall
+                const sysStatus = await Contacts.checkPermission();
+                if (sysStatus === 'undefined') {
+                  // Show explainer and then trigger system prompt
+                  setShowPermissionModal(true);
+                  return;
+                }
+                if (sysStatus === 'authorized') {
+                  setHasContactPermission(true);
+                  await syncContacts();
+                  return;
+                }
+                // sysStatus is 'denied' or 'restricted' on iOS -> guide to Settings
+                if (Platform.OS === 'ios') {
+                  Alert.alert(
+                    'Permisos de Contactos',
+                    'Para ver los nombres de tus amigos, ve a Configuración > Confío > Contactos y activa el acceso.',
+                    [
+                      { text: 'Cancelar', style: 'cancel' },
+                      { text: 'Abrir Configuración', onPress: () => Linking.openSettings() }
+                    ]
+                  );
+                } else {
+                  // On Android, re-request via modal flow
+                  setShowPermissionModal(true);
+                }
+              }}
+            >
+              <View style={styles.permissionPromptIcon}>
+                <Icon name="shield" size={20} color={colors.primary} />
               </View>
-            </View>
-            <Icon name="chevron-right" size={20} color="#9ca3af" />
-          </TouchableOpacity>
-        )}
-        
-        {/* Show permission prompt if user denied but there are no contacts - only for personal accounts */}
-        {isPersonalAccount && hasContactPermission === false && contactsData.friends.length === 0 && contactsData.nonConfioFriends.length === 0 && (
-          <TouchableOpacity 
-            style={styles.permissionPrompt}
-            onPress={async () => {
-              // Always check real system status to avoid stale stored flags after reinstall
-              const sysStatus = await Contacts.checkPermission();
-              if (sysStatus === 'undefined') {
-                // Show explainer and then trigger system prompt
-                setShowPermissionModal(true);
-                return;
-              }
-              if (sysStatus === 'authorized') {
-                setHasContactPermission(true);
-                await syncContacts();
-                return;
-              }
-              // sysStatus is 'denied' or 'restricted' on iOS -> guide to Settings
-              if (Platform.OS === 'ios') {
-                Alert.alert(
-                  'Permisos de Contactos',
-                  'Para ver los nombres de tus amigos, ve a Configuración > Confío > Contactos y activa el acceso.',
-                  [
-                    { text: 'Cancelar', style: 'cancel' },
-                    { text: 'Abrir Configuración', onPress: () => Linking.openSettings() }
-                  ]
-                );
-              } else {
-                // On Android, re-request via modal flow
-                setShowPermissionModal(true);
-              }
-            }}
-          >
-            <View style={styles.permissionPromptIcon}>
-              <Icon name="shield" size={20} color={colors.primary} />
-            </View>
-            <View style={styles.permissionPromptContent}>
-              <Text style={styles.permissionPromptTitle}>Activar contactos</Text>
-              <Text style={styles.permissionPromptText}>
-                Permite el acceso para ver los nombres de tus amigos
+              <View style={styles.permissionPromptContent}>
+                <Text style={styles.permissionPromptTitle}>Activar contactos</Text>
+                <Text style={styles.permissionPromptText}>
+                  Permite el acceso para ver los nombres de tus amigos
+                </Text>
+              </View>
+              <Icon name="chevron-right" size={20} color="#9ca3af" />
+            </TouchableOpacity>
+          )}
+
+          {activeAccount?.isEmployee ? (
+            // Employee welcome message
+            <View style={styles.employeeWelcomeContainer}>
+              <View style={styles.employeeWelcomeIcon}>
+                <Icon name="users" size={40} color="#7c3aed" />
+              </View>
+              <Text style={styles.employeeWelcomeTitle}>
+                Equipo {activeAccount?.business?.name}
+              </Text>
+              <Text style={styles.employeeWelcomeText}>
+                ¡Bienvenido! Como {activeAccount?.employeeRole === 'cashier' ? 'cajero' : activeAccount?.employeeRole === 'manager' ? 'gerente' : activeAccount?.employeeRole === 'admin' ? 'administrador' : 'parte del equipo'}, eres fundamental para el éxito del negocio.
+                {'\n\n'}
+                {activeAccount?.employeePermissions?.acceptPayments ?
+                  '💡 Consejo: Usa el botón "Cobrar" para recibir pagos de los clientes de forma rápida y segura.' :
+                  'Tu rol está enfocado en otras áreas importantes del negocio.'}
               </Text>
             </View>
-            <Icon name="chevron-right" size={20} color="#9ca3af" />
-          </TouchableOpacity>
-        )}
-        
-        {activeAccount?.isEmployee ? (
-          // Employee welcome message
-          <View style={styles.employeeWelcomeContainer}>
-            <View style={styles.employeeWelcomeIcon}>
-              <Icon name="users" size={40} color="#7c3aed" />
+          ) : (
+            <View style={styles.actionButtons}>
+              <TouchableOpacity
+                style={styles.actionButton}
+                onPress={handleSendWithAddress}
+              >
+                <View style={styles.actionButtonContent}>
+                  <View style={styles.actionIconContainer}>
+                    <Icon name="send" size={20} color="#fff" />
+                  </View>
+                  <View style={styles.actionTextContainer}>
+                    <Text style={styles.actionButtonTitle}>Enviar con dirección</Text>
+                    <Text style={styles.actionButtonSubtitle}>Envía a cualquier wallet</Text>
+                  </View>
+                </View>
+                <Icon name="chevron-right" size={20} color="#9ca3af" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.actionButton}
+                onPress={handleReceiveWithAddress}
+              >
+                <View style={styles.actionButtonContent}>
+                  <View style={styles.actionIconContainer}>
+                    <Icon name="download" size={20} color="#fff" />
+                  </View>
+                  <View style={styles.actionTextContainer}>
+                    <Text style={styles.actionButtonTitle}>Recibir con dirección</Text>
+                    <Text style={styles.actionButtonSubtitle}>Comparte tu dirección</Text>
+                  </View>
+                </View>
+                <Icon name="chevron-right" size={20} color="#9ca3af" />
+              </TouchableOpacity>
             </View>
-            <Text style={styles.employeeWelcomeTitle}>
-              Equipo {activeAccount?.business?.name}
-            </Text>
-            <Text style={styles.employeeWelcomeText}>
-              ¡Bienvenido! Como {activeAccount?.employeeRole === 'cashier' ? 'cajero' : activeAccount?.employeeRole === 'manager' ? 'gerente' : activeAccount?.employeeRole === 'admin' ? 'administrador' : 'parte del equipo'}, eres fundamental para el éxito del negocio.
-              {'\n\n'}
-              {activeAccount?.employeePermissions?.acceptPayments ? 
-                '💡 Consejo: Usa el botón "Cobrar" para recibir pagos de los clientes de forma rápida y segura.' : 
-                'Tu rol está enfocado en otras áreas importantes del negocio.'}
-            </Text>
-          </View>
-        ) : (
-          <View style={styles.actionButtons}>
-            <TouchableOpacity 
-              style={styles.actionButton}
-              onPress={handleSendWithAddress}
-            >
-              <View style={styles.actionButtonContent}>
-                <View style={styles.actionIconContainer}>
-                  <Icon name="send" size={20} color="#fff" />
-                </View>
-                <View style={styles.actionTextContainer}>
-                  <Text style={styles.actionButtonTitle}>Enviar con dirección</Text>
-                  <Text style={styles.actionButtonSubtitle}>Envía a cualquier wallet</Text>
-                </View>
-              </View>
-              <Icon name="chevron-right" size={20} color="#9ca3af" />
-            </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={styles.actionButton}
-              onPress={handleReceiveWithAddress}
-            >
-              <View style={styles.actionButtonContent}>
-                <View style={styles.actionIconContainer}>
-                  <Icon name="download" size={20} color="#fff" />
-                </View>
-                <View style={styles.actionTextContainer}>
-                  <Text style={styles.actionButtonTitle}>Recibir con dirección</Text>
-                  <Text style={styles.actionButtonSubtitle}>Comparte tu dirección</Text>
-                </View>
-              </View>
-              <Icon name="chevron-right" size={20} color="#9ca3af" />
-            </TouchableOpacity>
-          </View>
-        )}
-      </View>
-    </>
+          )}
+        </View>
+      </>
     );
-    
+
     return HeaderContent;
   }, [searchTerm, hasContactPermission, isLoadingContacts, refreshing, contactsData.friends.length, contactsData.nonConfioFriends.length, handleSendWithAddress, handleRefresh, isBusinessAccount, isPersonalAccount]);
 
@@ -1386,7 +1331,7 @@ const ListHeaderComponent = useMemo(() => {
           networkError: employeesError?.networkError,
           graphQLErrors: employeesError?.graphQLErrors
         });
-        
+
         return (
           <View style={styles.emptyState}>
             <View style={styles.emptyIconContainer}>
@@ -1397,7 +1342,7 @@ const ListHeaderComponent = useMemo(() => {
               No se pudieron cargar los empleados. Por favor, intenta de nuevo.
               {employeesError?.message && `\n\nError: ${employeesError.message}`}
             </Text>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.retryButton}
               onPress={() => {
                 refetchEmployees();
@@ -1410,12 +1355,12 @@ const ListHeaderComponent = useMemo(() => {
           </View>
         );
       }
-      
+
       // Check if user is an employee - just return null to hide the section
       if (activeAccount?.isEmployee) {
         return null;
       }
-      
+
       // Business owner view
       return (
         <View style={styles.emptyState}>
@@ -1426,8 +1371,8 @@ const ListHeaderComponent = useMemo(() => {
           <Text style={styles.emptyDescription}>
             Los empleados pueden recibir pagos en nombre de tu negocio. Solo tú, como propietario, tienes control para enviar dinero.
           </Text>
-          
-          <TouchableOpacity 
+
+          <TouchableOpacity
             style={styles.addEmployeeButton}
             onPress={() => {
               setShowInviteModal(true);
@@ -1439,7 +1384,7 @@ const ListHeaderComponent = useMemo(() => {
         </View>
       );
     }
-    
+
     if (searchTerm) {
       return (
         <View style={styles.emptyState}>
@@ -1453,7 +1398,7 @@ const ListHeaderComponent = useMemo(() => {
         </View>
       );
     }
-    
+
     if (!isInitialLoad && !isLoadingContacts) {
       return (
         <View style={styles.emptyState}>
@@ -1464,14 +1409,14 @@ const ListHeaderComponent = useMemo(() => {
             {hasContactPermission === false ? 'Acceso a contactos denegado' : 'No hay contactos'}
           </Text>
           <Text style={styles.emptyDescription}>
-            {hasContactPermission === false 
-              ? 'Permite el acceso a tus contactos para enviar dinero fácilmente a tus amigos' 
+            {hasContactPermission === false
+              ? 'Permite el acceso a tus contactos para enviar dinero fácilmente a tus amigos'
               : 'Sincroniza tus contactos para empezar a enviar dinero'}
           </Text>
-          
+
           <View style={styles.emptyButtonsContainer}>
             {hasContactPermission === false ? (
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.permissionButton}
                 onPress={async () => {
                   // Use actual system status to decide next step
@@ -1504,7 +1449,7 @@ const ListHeaderComponent = useMemo(() => {
                 <Text style={styles.permissionButtonText}>Permitir acceso a contactos</Text>
               </TouchableOpacity>
             ) : (
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.permissionButton}
                 onPress={handleRefresh}
               >
@@ -1512,10 +1457,10 @@ const ListHeaderComponent = useMemo(() => {
                 <Text style={styles.permissionButtonText}>Sincronizar contactos</Text>
               </TouchableOpacity>
             )}
-            
+
             {/* Button to guide to settings on iOS or show modal on Android */}
             {hasContactPermission === false && (
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.secondaryButton}
                 onPress={async () => {
                   const status = await contactService.getStoredPermissionStatus();
@@ -1535,7 +1480,7 @@ const ListHeaderComponent = useMemo(() => {
         </View>
       );
     }
-    
+
     return null;
   }, [searchTerm, isInitialLoad, isLoadingContacts, hasContactPermission, handleRefresh, isBusinessAccount, isPersonalAccount, activeAccount, employeesError, invitationsError, refetchEmployees, refetchInvitations]);
 
@@ -1544,63 +1489,63 @@ const ListHeaderComponent = useMemo(() => {
       <View style={styles.container}>
         {/* Move search bar outside of SectionList to prevent keyboard issues */}
         <View style={styles.searchSection}>
-            <View style={styles.searchBarContainer}>
-              <View style={styles.searchBar}>
-                <Icon name="search" size={20} color="#9ca3af" style={styles.searchIcon} />
-                <SearchInput 
-                  onSearchChange={handleSearchChange}
-                  isBusinessAccount={isBusinessAccount}
-                />
-              </View>
-              
-              {/* Manual sync button - always visible */}
-              <TouchableOpacity 
-                style={styles.syncButton}
-                onPress={async () => {
-                  if (isBusinessAccount) {
-                    // For business accounts, refresh employees
-                    handleRefresh();
-                    return;
-                  }
-                  
-                  if (!isPersonalAccount) {
-                    return;
-                  }
-                  
-                  if (hasContactPermission) {
-                    handleRefresh(); // This will sync contacts
-                  } else {
-                    // Check if permission was previously denied
-                    const status = await contactService.getStoredPermissionStatus();
-                    if (status === 'denied' && Platform.OS === 'ios') {
-                      // On iOS, guide to settings
-                      Alert.alert(
-                        'Permisos de Contactos',
-                        'Para sincronizar contactos, ve a Configuración > Confío > Contactos y activa el acceso.',
-                        [
-                          { text: 'Cancelar', style: 'cancel' },
-                          { text: 'Abrir Configuración', onPress: () => Linking.openSettings() }
-                        ]
-                      );
-                    } else {
-                      // First time or Android, show modal
-                      setShowPermissionModal(true);
-                    }
-                  }
-                }}
-                disabled={isLoadingContacts || refreshing}
-              >
-                <Icon 
-                  name={isBusinessAccount || hasContactPermission ? "refresh-cw" : "shield"} 
-                  size={20} 
-                  color={isLoadingContacts || refreshing ? "#9ca3af" : colors.primary} 
-                />
-              </TouchableOpacity>
+          <View style={styles.searchBarContainer}>
+            <View style={styles.searchBar}>
+              <Icon name="search" size={20} color="#9ca3af" style={styles.searchIcon} />
+              <SearchInput
+                onSearchChange={handleSearchChange}
+                isBusinessAccount={isBusinessAccount}
+              />
             </View>
-            
-            {/* Test user creation button removed */}
+
+            {/* Manual sync button - always visible */}
+            <TouchableOpacity
+              style={styles.syncButton}
+              onPress={async () => {
+                if (isBusinessAccount) {
+                  // For business accounts, refresh employees
+                  handleRefresh();
+                  return;
+                }
+
+                if (!isPersonalAccount) {
+                  return;
+                }
+
+                if (hasContactPermission) {
+                  handleRefresh(); // This will sync contacts
+                } else {
+                  // Check if permission was previously denied
+                  const status = await contactService.getStoredPermissionStatus();
+                  if (status === 'denied' && Platform.OS === 'ios') {
+                    // On iOS, guide to settings
+                    Alert.alert(
+                      'Permisos de Contactos',
+                      'Para sincronizar contactos, ve a Configuración > Confío > Contactos y activa el acceso.',
+                      [
+                        { text: 'Cancelar', style: 'cancel' },
+                        { text: 'Abrir Configuración', onPress: () => Linking.openSettings() }
+                      ]
+                    );
+                  } else {
+                    // First time or Android, show modal
+                    setShowPermissionModal(true);
+                  }
+                }
+              }}
+              disabled={isLoadingContacts || refreshing}
+            >
+              <Icon
+                name={isBusinessAccount || hasContactPermission ? "refresh-cw" : "shield"}
+                size={20}
+                color={isLoadingContacts || refreshing ? "#9ca3af" : colors.primary}
+              />
+            </TouchableOpacity>
           </View>
-        
+
+          {/* Test user creation button removed */}
+        </View>
+
         <SectionList
           sections={sections}
           renderItem={renderItem}
@@ -1609,7 +1554,7 @@ const ListHeaderComponent = useMemo(() => {
           ListEmptyComponent={ListEmptyComponent}
           keyExtractor={(item, index) => item.id || `contact-${index}`}
           getItemLayout={(data, index) => (
-            {length: 80, offset: 80 * index, index}
+            { length: 80, offset: 80 * index, index }
           )}
           removeClippedSubviews={true}
           maxToRenderPerBatch={10}
@@ -1635,8 +1580,7 @@ const ListHeaderComponent = useMemo(() => {
           windowSize={21}
           removeClippedSubviews={true}
         />
-        
-        <TokenSelectionModal />
+
         <SendTokenSelectionModal />
         <FriendTokenSelectionModal />
       </View>
@@ -1648,7 +1592,7 @@ const ListHeaderComponent = useMemo(() => {
         onDeny={handlePermissionDeny}
         onClose={() => setShowPermissionModal(false)}
       />
-      
+
       {/* Employee Invitation Modal */}
       {isBusinessAccount && (
         <InviteEmployeeModal
@@ -1663,7 +1607,7 @@ const ListHeaderComponent = useMemo(() => {
           }}
         />
       )}
-      
+
       {/* Loading overlay - only show for manual refresh and for personal accounts */}
       {isPersonalAccount && (isLoadingContacts || (isInitialLoad && hasContactPermission && !contactsData.isLoaded)) && (
         <View style={styles.loadingOverlay}>

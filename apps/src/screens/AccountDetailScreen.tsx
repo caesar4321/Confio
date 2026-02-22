@@ -45,6 +45,8 @@ import { useContactNameSync } from '../hooks/useContactName';
 import { TransactionFilterModal, TransactionFilters } from '../components/TransactionFilterModal';
 import { useAuth } from '../contexts/AuthContext';
 import { deepLinkHandler } from '../utils/deepLinkHandler';
+import { useAutoSwap } from '../hooks/useAutoSwap';
+import AutoSwapModal from '../components/AutoSwapModal';
 
 // Color palette
 const colors = {
@@ -318,6 +320,19 @@ export const AccountDetailScreen = () => {
     parseFloat(usdcBalanceData?.accountBalance || '0'),
     [usdcBalanceData?.accountBalance]
   );
+
+  const handleRefreshAccountBalance = useCallback(() => {
+    refetchBalances();
+    if (shouldFetchUSDC) refetchUSDC();
+  }, [refetchBalances, shouldFetchUSDC, refetchUSDC]);
+
+  const { swapModalAsset } = useAutoSwap({
+    isAuthenticated,
+    myBalancesLoading: balancesLoading,
+    usdcBalanceStr: (balancesData as any)?.myBalances?.usdc || '0',
+    algoBalanceStr: (balancesData as any)?.myBalances?.algo || '0',
+    refreshAccountBalance: handleRefreshAccountBalance
+  });
 
   // USDC balance data - HIDDEN for employees
   const usdcAccount = shouldFetchUSDC ? {
@@ -1031,7 +1046,7 @@ export const AccountDetailScreen = () => {
 
     // Apply status filters
     filtered = filtered.filter(tx => {
-      return transactionFilters.status[tx.status];
+      return transactionFilters.status[tx.status as keyof typeof transactionFilters.status];
     });
 
     // Apply time range filter
@@ -1722,7 +1737,7 @@ export const AccountDetailScreen = () => {
   return (
     <View style={styles.container}>
       <Header
-        navigation={navigation}
+        navigation={navigation as any}
         title={account.name}
         backgroundColor={account.color}
         isLight={true}
@@ -1874,7 +1889,7 @@ export const AccountDetailScreen = () => {
                 onPress={() => {
                   // @ts-ignore - Navigation type mismatch, but should work at runtime
                   const isBusinessAccount = activeAccount?.type?.toLowerCase() === 'business';
-                  navigation.navigate('BottomTabs', {
+                  (navigation as any).navigate('BottomTabs', {
                     screen: isBusinessAccount ? 'Charge' : 'Scan'
                   });
                 }}
@@ -2011,8 +2026,8 @@ export const AccountDetailScreen = () => {
         contentContainerStyle={filteredTransactions.length === 0 ? styles.emptyListContainer : undefined}
         ListHeaderComponent={() => (
           <>
-            {/* USDC Balance Section - Only show for cUSD account */}
-            {route.params.accountType === 'cusd' && usdcAccount && (
+            {/* USDC Balance Section (Gestión Avanzada) - commented out: USDC is auto-converted to cUSD */}
+            {/* {route.params.accountType === 'cusd' && usdcAccount && (
               <View style={styles.usdcSection}>
                 <View style={styles.sectionHeaderContainer}>
                   <Text style={styles.sectionTitle}>Gestión Avanzada</Text>
@@ -2057,7 +2072,7 @@ export const AccountDetailScreen = () => {
                       style={[styles.usdcActionButton, { backgroundColor: '#FEF3C7', borderWidth: 1, borderColor: '#F59E0B' }]}
                       onPress={() => navigation.navigate('Sell')}
                     >
-                      <FAIcon name="bank" size={14} color="#92400E" style={styles.actionIcon} />
+                      <FAIcon name="bank" size={14} color="#92400E" style={{ marginRight: 8 }} />
                       <View style={styles.actionTextContainer}>
                         <Text style={[styles.usdcActionButtonText, { color: '#92400E' }]}>Retirar</Text>
                         <Text style={[styles.usdcActionSubtext, { color: '#B45309' }]}>A tu banco</Text>
@@ -2072,7 +2087,7 @@ export const AccountDetailScreen = () => {
                           navigation.navigate('USDCConversion');
                         }}
                       >
-                        <Icon name="refresh-cw" size={16} color="#fff" style={styles.actionIcon} />
+                        <Icon name="refresh-cw" size={16} color="#fff" style={{ marginRight: 8 }} />
                         <View style={styles.actionTextContainer}>
                           <Text style={[styles.usdcActionButtonText, { color: '#ffffff' }]}>
                             Convertir
@@ -2097,7 +2112,7 @@ export const AccountDetailScreen = () => {
                   </Text>
                 </View>
               </View>
-            )}
+            )} */}
 
             {/* CONFIO Presale Section - Only show for CONFIO accounts and if presale is active */}
             {route.params.accountType === 'confio' && isPresaleActive && (
@@ -2120,7 +2135,7 @@ export const AccountDetailScreen = () => {
                     style={styles.confioPresaleButton}
                     onPress={() => navigation.navigate('ConfioPresale')}
                   >
-                    <Icon name="info" size={16} color="#fff" style={styles.actionIcon} />
+                    <Icon name="info" size={16} color="#fff" style={{ marginRight: 8 }} />
                     <View style={styles.actionTextContainer}>
                       <Text style={[styles.confioPresaleButtonText, { color: '#ffffff' }]}>
                         Ver Detalles
@@ -2320,7 +2335,8 @@ export const AccountDetailScreen = () => {
               style={styles.moreOptionsItem}
               onPress={() => {
                 setShowMoreOptionsModal(false);
-                navigation.navigate('USDCWithdraw');
+                // @ts-ignore
+                navigation.navigate('SendWithAddress', { tokenType: 'usdc' });
               }}
             >
               <Icon name="arrow-up-circle" size={20} color="#1f2937" />
@@ -2360,6 +2376,11 @@ export const AccountDetailScreen = () => {
           primary: account.color,
           secondary: colors.secondary,
         }}
+      />
+
+      <AutoSwapModal
+        visible={!!swapModalAsset}
+        assetType={swapModalAsset || 'USDC'}
       />
     </View>
   );
@@ -2670,9 +2691,6 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  actionIcon: {
-    marginRight: 6,
   },
   actionTextContainer: {
     alignItems: 'flex-start',

@@ -735,6 +735,7 @@ export const GET_MY_MIGRATION_STATUS = gql`
 export const GET_MY_BALANCES = gql`
   query GetMyBalances {
     myBalances {
+      algo
       cusd
       confio
       confioPresaleLocked
