@@ -24,7 +24,8 @@ class SendTransaction(SoftDeleteModel):
     TOKEN_TYPES = [
         ('CUSD', 'Confío Dollar'),
         ('CONFIO', 'Confío Token'),
-        ('USDC', 'USD Coin')
+        ('USDC', 'USD Coin'),
+        ('ALGO', 'ALGO'),
     ]
 
     # Unique identifier for the send transaction (internal)

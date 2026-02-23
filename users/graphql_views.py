@@ -24,7 +24,7 @@ class UnifiedTransactionType(DjangoObjectType):
     internal_id = graphene.String(description="Standardized Internal ID (UUID)")
     
     # Add conversion-specific computed fields
-    conversion_type = graphene.String(description="Conversion type (usdc_to_cusd or cusd_to_usdc)")
+    conversion_type = graphene.String(description="Conversion type (usdc_to_cusd, cusd_to_usdc)")
     from_amount = graphene.String(description="Amount being converted from")
     to_amount = graphene.String(description="Amount being converted to")
     from_token = graphene.String(description="Token being converted from")

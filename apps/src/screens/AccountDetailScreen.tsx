@@ -380,7 +380,7 @@ export const AccountDetailScreen = () => {
     limit: transactionLimit,
     offset: 0, // Always start with offset 0 for initial query
     tokenTypes: route.params.accountType === 'cusd'
-      ? (activeAccount?.isEmployee ? ['CUSD'] : ['CUSD', 'USDC'])
+      ? (activeAccount?.isEmployee ? ['CUSD'] : ['CUSD', 'USDC', 'ALGO'])
       : ['CONFIO']
   };
 
@@ -440,7 +440,7 @@ export const AccountDetailScreen = () => {
     if (!canQueryTransactions || !activeAccount) return;
 
     const tokenTypes = route.params.accountType === 'cusd'
-      ? (activeAccount?.isEmployee ? ['CUSD'] : ['CUSD', 'USDC'])
+      ? (activeAccount?.isEmployee ? ['CUSD'] : ['CUSD', 'USDC', 'ALGO'])
       : ['CONFIO'];
 
     setTransactionLimit(20);
@@ -467,7 +467,7 @@ export const AccountDetailScreen = () => {
         limit: transactionLimit,
         offset: 0,
         tokenTypes: route.params.accountType === 'cusd'
-          ? (activeAccount?.isEmployee ? ['CUSD'] : ['CUSD', 'USDC'])
+          ? (activeAccount?.isEmployee ? ['CUSD'] : ['CUSD', 'USDC', 'ALGO'])
           : ['CONFIO']
       });
     }
@@ -512,7 +512,7 @@ export const AccountDetailScreen = () => {
           limit: 20,
           offset: 0,
           tokenTypes: route.params.accountType === 'cusd' ?
-            (activeAccount?.isEmployee ? ['CUSD'] : ['CUSD', 'USDC']) :
+            (activeAccount?.isEmployee ? ['CUSD'] : ['CUSD', 'USDC', 'ALGO']) :
             ['CONFIO']
         })
       ];
@@ -724,8 +724,14 @@ export const AccountDetailScreen = () => {
         let toDisplay = undefined;
 
         if (isConversion) {
-          fromDisplay = conversionType === 'usdc_to_cusd' ? 'USDC' : conversionType === 'cusd_to_usdc' ? 'cUSD' : undefined;
-          toDisplay = conversionType === 'usdc_to_cusd' ? 'cUSD' : conversionType === 'cusd_to_usdc' ? 'USDC' : undefined;
+          fromDisplay =
+            conversionType === 'usdc_to_cusd' ? 'USDC' :
+            conversionType === 'cusd_to_usdc' ? 'cUSD' :
+            undefined;
+          toDisplay =
+            conversionType === 'usdc_to_cusd' ? 'cUSD' :
+            conversionType === 'cusd_to_usdc' ? 'USDC' :
+            undefined;
         } else if (isReward) {
           fromDisplay = tx.senderDisplayName || tx.displayCounterparty || 'Confío Rewards';
           toDisplay = tx.counterpartyDisplayName || 'Tú';
@@ -823,7 +829,11 @@ export const AccountDetailScreen = () => {
           amount: isConversion ? conversionAmount : signedDisplayAmount,
           // For conversions, show the currency of the amount displayed: the destination token for '+' and source for '-'
           currency: isConversion
-            ? (conversionType === 'usdc_to_cusd' ? 'cUSD' : conversionType === 'cusd_to_usdc' ? 'USDC' : undefined)
+            ? (
+              conversionType === 'usdc_to_cusd' ? 'cUSD' :
+              conversionType === 'cusd_to_usdc' ? 'USDC' :
+              undefined
+            )
             : (() => {
               const normalizedToken = (tx.tokenType || '').toUpperCase();
               const isCusdToken = normalizedToken === 'CUSD' || normalizedToken.includes('CONFIO DOLLAR') || normalizedToken.includes('CUSD ');
@@ -832,7 +842,15 @@ export const AccountDetailScreen = () => {
               }
               return tx.tokenType || route.params.accountSymbol || '';
             })(),
-          secondaryCurrency: isConversion ? (conversionToToken || (conversionType === 'usdc_to_cusd' ? 'cUSD' : conversionType === 'cusd_to_usdc' ? 'USDC' : undefined)) : undefined,
+          secondaryCurrency: isConversion
+            ? (
+              conversionToToken || (
+                conversionType === 'usdc_to_cusd' ? 'cUSD' :
+                conversionType === 'cusd_to_usdc' ? 'USDC' :
+                undefined
+              )
+            )
+            : undefined,
           conversionType: isConversion ? (conversionType || tx.conversionType) : undefined,
           conversion_type: isConversion ? (conversionType || tx.conversionType) : undefined,
           conversionFromToken: isConversion ? (conversionFromToken || tx.fromToken || tx.from_token) : undefined,
@@ -1279,7 +1297,8 @@ export const AccountDetailScreen = () => {
             transaction.type === 'conversion' ? '1' : undefined,
           conversionType: transaction.conversionType,
           formattedTitle: transaction.type === 'conversion' && transaction.conversionType === 'usdc_to_cusd' ? 'USDC → cUSD' :
-            transaction.type === 'conversion' && transaction.conversionType === 'cusd_to_usdc' ? 'cUSD → USDC' : undefined,
+            transaction.type === 'conversion' && transaction.conversionType === 'cusd_to_usdc' ? 'cUSD → USDC' :
+            undefined,
           isInvitedFriend: transaction.isInvitation || false, // true means friend is NOT on Confío
           invitationClaimed: transaction.invitationClaimed || false,
           invitationReverted: transaction.invitationReverted || false,
@@ -1689,7 +1708,7 @@ export const AccountDetailScreen = () => {
           limit: transactionLimit,
           offset: newOffset,
           tokenTypes: route.params.accountType === 'cusd' ?
-            (activeAccount?.isEmployee ? ['CUSD'] : ['CUSD', 'USDC']) :
+            (activeAccount?.isEmployee ? ['CUSD'] : ['CUSD', 'USDC', 'ALGO']) :
             ['CONFIO']
         },
         updateQuery: (prev, { fetchMoreResult }) => {

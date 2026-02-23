@@ -2737,8 +2737,7 @@ class BuildAutoSwapTransactionsMutation(graphene.Mutation):
                 if not app_opted_in:
                     return cls(success=False, error='requires_app_optin', transactions=None)
                 
-                # Persist this as the final visible conversion leg (USDC -> cUSD),
-                # since history/rendering layers only model usdc_to_cusd/cusd_to_usdc.
+                # Persist as standard USDC -> cUSD conversion for history consistency.
                 conversion = Conversion.objects.create(
                     actor_type='user',
                     actor_user=user,

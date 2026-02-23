@@ -237,13 +237,19 @@ def create_unified_transaction_from_conversion(conversion):
             except Exception:
                 pass
 
-        # Determine token type based on conversion type
+        # Determine token type and description based on conversion type
         if conversion.conversion_type == 'usdc_to_cusd':
             token_type = 'USDC'
             description = f"Conversión: {conversion.from_amount} USDC → {conversion.to_amount} cUSD"
-        else:
-            token_type = 'cUSD'
+            amount = str(conversion.from_amount)
+        elif conversion.conversion_type == 'cusd_to_usdc':
+            token_type = 'CUSD'
             description = f"Conversión: {conversion.from_amount} cUSD → {conversion.to_amount} USDC"
+            amount = str(conversion.from_amount)
+        else:
+            token_type = 'USDC'
+            description = f"Conversión: {conversion.from_amount} USDC → {conversion.to_amount} cUSD"
+            amount = str(conversion.from_amount)
         
         # Map status
         status = 'CONFIRMED' if conversion.status == 'COMPLETED' else conversion.status
@@ -254,7 +260,7 @@ def create_unified_transaction_from_conversion(conversion):
             conversion=conversion,
             defaults={
                 'transaction_type': 'conversion',
-                'amount': str(conversion.from_amount),
+                'amount': amount,
                 'token_type': token_type,
                 'status': status,
                 'transaction_hash': conversion.from_transaction_hash or conversion.to_transaction_hash or '',

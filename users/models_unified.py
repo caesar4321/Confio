@@ -34,7 +34,8 @@ class UnifiedTransactionTable(models.Model):
     TOKEN_TYPES = [
         ('CUSD', 'Confío Dollar'),
         ('CONFIO', 'Confío Token'),
-        ('USDC', 'USD Coin')
+        ('USDC', 'USD Coin'),
+        ('ALGO', 'ALGO'),
     ]
 
     ACCOUNT_TYPE_CHOICES = [
@@ -227,7 +228,10 @@ class UnifiedTransactionTable(models.Model):
             }
 
     def get_conversion_type(self):
-        """Extract conversion type from description"""
+        """Resolve conversion type from related Conversion first, then description fallback."""
+        if self.transaction_type == 'conversion':
+            if self.conversion_id and self.conversion:
+                return self.conversion.conversion_type
         if self.transaction_type == 'conversion' and self.description:
             if 'USDC → cUSD' in self.description:
                 return 'usdc_to_cusd'

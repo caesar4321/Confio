@@ -26,7 +26,8 @@ class UnifiedTransaction(models.Model):
     TOKEN_TYPES = [
         ('cUSD', 'Confío Dollar'),
         ('CONFIO', 'Confío Token'),
-        ('USDC', 'USD Coin')
+        ('USDC', 'USD Coin'),
+        ('ALGO', 'ALGO')
     ]
 
     ACCOUNT_TYPE_CHOICES = [

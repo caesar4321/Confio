@@ -294,10 +294,11 @@ def scan_inbound_deposits():
     Asset-centric scanner:
     - For each relevant asset (USDC, cUSD, CONFIO), sweep transactions from the
       last asset cursor to current round using Indexer search by asset-id.
+    - Sweep ALGO payment transactions in the same round window.
     - Filter in-memory for our user addresses (receiver or close-to), skipping
       internal Confío-to-Confío sends as deposits.
     - Idempotent via (txid, intra) markers.
-    - Create USDCDeposit for USDC; send notifications for all assets.
+    - Create send/unified entries + notifications for all inbound deposits.
     """
     # Prevent overlapping runs (in case of slow scans or multiple workers)
     from django.core.cache import cache as _cache
@@ -356,6 +357,83 @@ def scan_inbound_deposits():
             sponsor_address = get_kms_signer_from_settings().address
         except Exception:
             sponsor_address = None
+
+        def resolve_sender_name(sender_addr: str) -> str:
+            if not sender_addr:
+                return 'Billetera externa'
+            try:
+                sender_account = Account.objects.filter(
+                    algorand_address=sender_addr
+                ).select_related('user', 'business').first()
+                if sender_account:
+                    if sender_account.account_type == 'business' and sender_account.business:
+                        return sender_account.business.name
+                    if sender_account.user:
+                        full_name = f"{sender_account.user.first_name or ''} {sender_account.user.last_name or ''}".strip()
+                        return full_name or sender_account.user.username or 'Usuario'
+            except Exception:
+                pass
+            return 'Billetera externa'
+
+        def create_or_get_external_send_tx(
+            *,
+            account: Account,
+            sender: str,
+            to_addr: str,
+            amount_human: Decimal,
+            token_type: str,
+            txid: str,
+            intra: int,
+            cround: int,
+            round_time: int | None = None,
+            memo_prefix: str = 'Depósito'
+        ):
+            send_tx = None
+            internal_id = None
+            try:
+                from datetime import datetime, timezone as py_tz
+
+                created_at = None
+                if round_time:
+                    created_at = datetime.fromtimestamp(round_time, tz=py_tz.utc)
+
+                idempotency_key = f"ALG:{txid}:{intra or 0}"
+                send_kwargs = {
+                    'sender_user': None,
+                    'recipient_user': account.user if account.account_type == 'personal' else None,
+                    'sender_business': None,
+                    'recipient_business': account.business if account.account_type == 'business' else None,
+                    'sender_type': 'external',
+                    'recipient_type': 'business' if account.account_type == 'business' else 'user',
+                    'sender_display_name': resolve_sender_name(sender),
+                    'recipient_display_name': account.display_name,
+                    'sender_phone': '',
+                    'recipient_phone': getattr(account.user, 'phone_number', '') if account.account_type == 'personal' else '',
+                    'sender_address': sender or '',
+                    'recipient_address': to_addr or '',
+                    'amount': amount_human,
+                    'token_type': token_type,
+                    'memo': f'{memo_prefix} {token_type} recibido',
+                    'status': 'CONFIRMED',
+                    'transaction_hash': txid or None,
+                    'idempotency_key': idempotency_key,
+                    'error_message': '',
+                }
+                if created_at:
+                    send_kwargs['created_at'] = created_at
+
+                if txid:
+                    send_tx = SendTransaction.all_objects.filter(transaction_hash=txid).first()
+                if not send_tx:
+                    send_tx = SendTransaction.all_objects.filter(idempotency_key=idempotency_key).first()
+                if not send_tx:
+                    send_tx = SendTransaction.all_objects.create(**send_kwargs)
+
+                internal_id = str(send_tx.internal_id) if send_tx and send_tx.internal_id else None
+            except Exception as ue:
+                logger.warning(f"Failed to create SendTransaction for inbound {token_type}: {ue}")
+
+            return send_tx, internal_id
 
         def handle_one(axfer_tx: dict, cround: int, intra: int):
             nonlocal processed, skipped
@@ -454,20 +532,39 @@ def scan_inbound_deposits():
                         status='COMPLETED',
                         **kwargs,
                     )
-                    
-                    # Try to resolve sender name
-                    sender_name = 'Usuario desconocido'
+
+                    sender_name = resolve_sender_name(sender)
+                    _, internal_id = create_or_get_external_send_tx(
+                        account=account,
+                        sender=sender,
+                        to_addr=to_addr,
+                        amount_human=human_amt,
+                        token_type='USDC',
+                        txid=txid,
+                        intra=intra,
+                        cround=cround,
+                        round_time=axfer_tx.get('round-time'),
+                        memo_prefix='Depósito',
+                    )
+
                     try:
-                        sender_account = Account.objects.filter(algorand_address=sender).select_related('user', 'business').first()
-                        if sender_account:
-                            if sender_account.account_type == 'business' and sender_account.business:
-                                sender_name = sender_account.business.name
-                            elif sender_account.user:
-                                sender_name = f"{sender_account.user.first_name or ''} {sender_account.user.last_name or ''}".strip() or sender_account.user.username or 'Usuario'
-                    except Exception:
-                        pass
-                    
-                    try:
+                        notif_data = {
+                            'transaction_type': 'deposit',
+                            'type': 'deposit',
+                            'currency': 'USDC',
+                            'amount': str(human_amt),
+                            'sender': sender,
+                            'sender_name': sender_name,
+                            'receiver': to_addr,
+                            'txid': txid,
+                            'round': cround,
+                            'deposit_id': str(deposit.internal_id),
+                        }
+                        if internal_id:
+                            notif_data['transaction_id'] = internal_id
+                            notif_data['internal_id'] = internal_id
+                            notif_data['internalId'] = internal_id
+
                         notif_utils.create_notification(
                             user=account.user,
                             account=account,
@@ -475,21 +572,10 @@ def scan_inbound_deposits():
                             notification_type=NotificationTypeChoices.USDC_DEPOSIT_COMPLETED,
                             title="Depósito USDC recibido",
                             message=f"Recibiste {human_amt} USDC",
-                            data={
-                                'transaction_id': str(deposit.internal_id),
-                                'transaction_type': 'deposit',
-                                'type': 'deposit',
-                                'currency': 'USDC',
-                                'amount': str(human_amt),
-                                'sender': sender,
-                                'sender_name': sender_name,
-                                'receiver': to_addr,
-                                'txid': txid,
-                                'round': cround,
-                            },
-                            related_object_type='USDCDeposit',
-                            related_object_id=str(deposit.internal_id),
-                            action_url=f"confio://transaction/{deposit.internal_id}",
+                            data=notif_data,
+                            related_object_type='SendTransaction' if internal_id else 'USDCDeposit',
+                            related_object_id=internal_id or str(deposit.internal_id),
+                            action_url=f"confio://transaction/{internal_id}" if internal_id else f"confio://transaction/{deposit.internal_id}",
                         )
                     except Exception as ne:
                         logger.warning(f"Failed to create USDC deposit notification: {ne}")
@@ -501,57 +587,18 @@ def scan_inbound_deposits():
                 # Persist as a SendTransaction (external -> Confío) FIRST so we have the ID for the notification
                 # so unified picks it up via signals AND we can link the notification to it
                 internal_id = None
-                send_tx = None
-                try:
-                    from datetime import datetime, timezone as py_tz
-                    import uuid
-                    created_at = datetime.fromtimestamp(
-                        tx.get('round-time', cround) or cround,
-                        tz=py_tz.utc,
-                    )
-                    # Use indexer txid and intra for idempotency;
-                    # never use empty string for unique transaction_hash
-                    idempotency_key = f"ALG:{txid}:{intra or 0}"
-                    
-                    send_kwargs = {
-                        'sender_user': None,
-                        'recipient_user': account.user if account.account_type == 'personal' else None,
-                        'sender_business': None,
-                        'recipient_business': account.business if account.account_type == 'business' else None,
-                        'sender_type': 'external',
-                        'recipient_type': 'business' if account.account_type == 'business' else 'user',
-                        'sender_display_name': 'Billetera externa',
-                        'recipient_display_name': account.display_name,
-                        'sender_phone': '',
-                        'recipient_phone': getattr(account.user, 'phone_number', '') if account.account_type == 'personal' else '',
-                        'sender_address': sender or '',
-                        'recipient_address': to_addr or '',
-                        'amount': human_amt,
-                        'token_type': 'CUSD' if token_name == 'cUSD' else 'CONFIO',
-                        'memo': f'Depósito {token_name} recibido',
-                        'status': 'CONFIRMED',
-                        'transaction_hash': txid or None,
-                        'idempotency_key': idempotency_key,
-                        'error_message': '',
-                        'created_at': created_at,
-                    }
-                    
-                    # Create or update based on idempotency
-                    # Check by hash first
-                    if txid:
-                        send_tx = SendTransaction.all_objects.filter(transaction_hash=txid).first()
-                    
-                    if not send_tx:
-                        # Try by idempotency key
-                        send_tx = SendTransaction.all_objects.filter(idempotency_key=idempotency_key).first()
-
-                    if not send_tx:
-                        send_tx = SendTransaction.all_objects.create(**send_kwargs)
-                    
-                    internal_id = str(send_tx.internal_id) if send_tx and send_tx.internal_id else None
-
-                except Exception as ue:
-                    logger.warning(f"Failed to create SendTransaction for inbound {token_name}: {ue}")
+                _, internal_id = create_or_get_external_send_tx(
+                    account=account,
+                    sender=sender,
+                    to_addr=to_addr,
+                    amount_human=human_amt,
+                    token_type='CUSD' if token_name == 'cUSD' else 'CONFIO',
+                    txid=txid,
+                    intra=intra,
+                    cround=cround,
+                    round_time=axfer_tx.get('round-time'),
+                    memo_prefix='Depósito',
+                )
 
                 try:
                     notif_data = {
@@ -649,6 +696,149 @@ def scan_inbound_deposits():
             if new_round > (cursor.last_scanned_round or 0):
                 cursor.last_scanned_round = new_round
                 cursor.save(update_fields=['last_scanned_round', 'updated_at'])
+
+        # Sweep ALGO inbound payments (native coin)
+        ALGO_DEPOSIT_MIN_MICRO = 1_000_000  # 1 ALGO minimum to avoid sponsor/MBR noise
+        algo_cursor, _ = IndexerAssetCursor.objects.get_or_create(asset_id=0)
+        algo_min_round = max(0, (algo_cursor.last_scanned_round or 0) - 500)
+        algo_max_seen_round = algo_cursor.last_scanned_round or 0
+        logger.info(
+            f"[IndexerScan] asset=ALGO window {algo_min_round}->{current_round} addresses={len(addresses)}"
+        )
+
+        next_token = None
+        while True:
+            try:
+                resp = indexer_client.search_transactions(
+                    txn_type='pay',
+                    min_round=algo_min_round,
+                    max_round=current_round,
+                    limit=1000,
+                    next_page=next_token,
+                )
+            except Exception as e:
+                logger.error(f"Indexer search failed (asset=ALGO): {e}")
+                break
+
+            txs = resp.get('transactions', []) or []
+            next_token = resp.get('next-token')
+
+            for tx in txs:
+                try:
+                    if tx.get('tx-type') != 'pay':
+                        continue
+
+                    cround = tx.get('confirmed-round') or 0
+                    intra = tx.get('intra-round-offset', 0) or 0
+                    algo_max_seen_round = max(algo_max_seen_round, cround)
+
+                    pay = tx.get('payment-transaction', {}) or {}
+                    sender = tx.get('sender')
+                    txid = tx.get('id')
+                    receiver = pay.get('receiver')
+                    close_to = pay.get('close-remainder-to') or pay.get('close_remainder_to') or pay.get('close_to')
+                    amount_micro = int(pay.get('amount', 0) or 0)
+                    close_amount_micro = int(pay.get('close-amount', 0) or 0)
+
+                    to_addr = receiver if receiver in addresses else (close_to if close_to in addresses else None)
+                    if not to_addr:
+                        continue
+
+                    incoming_micro = amount_micro if to_addr == receiver else 0
+                    if to_addr == close_to:
+                        incoming_micro += close_amount_micro
+                    if incoming_micro < ALGO_DEPOSIT_MIN_MICRO:
+                        skipped += 1
+                        continue
+
+                    confio_sender = sender in addresses
+                    sponsor_sender = sponsor_address and sender == sponsor_address
+                    if confio_sender and not sponsor_sender:
+                        has_send_tx = SendTransaction.objects.filter(transaction_hash=txid).exists()
+                        if has_send_tx:
+                            skipped += 1
+                            continue
+                        logger.info(
+                            f"[IndexerScan] detecting internal ALGO without SendTransaction: {txid} from {sender} to {to_addr}. Processing as deposit."
+                        )
+
+                    if ProcessedIndexerTransaction.objects.filter(txid=txid, intra=intra or 0).exists():
+                        skipped += 1
+                        continue
+
+                    ProcessedIndexerTransaction.objects.create(
+                        txid=txid,
+                        asset_id=0,
+                        sender=sender or '',
+                        receiver=to_addr or '',
+                        confirmed_round=cround,
+                        intra=intra or 0,
+                    )
+
+                    account = addr_to_account.get(to_addr)
+                    if not account:
+                        continue
+
+                    human_amt = _amount_from_base(incoming_micro, 6)
+                    _, internal_id = create_or_get_external_send_tx(
+                        account=account,
+                        sender=sender,
+                        to_addr=to_addr,
+                        amount_human=human_amt,
+                        token_type='ALGO',
+                        txid=txid,
+                        intra=intra,
+                        cround=cround,
+                        round_time=tx.get('round-time'),
+                        memo_prefix='Depósito',
+                    )
+
+                    notif_data = {
+                        'token_type': 'ALGO',
+                        'amount': str(human_amt),
+                        'sender': sender,
+                        'receiver': to_addr,
+                        'txid': txid,
+                        'round': cround,
+                        'sender_name': resolve_sender_name(sender),
+                        'transaction_type': 'received',
+                    }
+                    if internal_id:
+                        notif_data['transaction_id'] = internal_id
+                        notif_data['internal_id'] = internal_id
+                        notif_data['internalId'] = internal_id
+
+                    try:
+                        notif_utils.create_notification(
+                            user=account.user,
+                            account=account,
+                            business=account.business if account.account_type == 'business' else None,
+                            notification_type=NotificationTypeChoices.SEND_FROM_EXTERNAL,
+                            title='Depósito ALGO recibido',
+                            message=f"Recibiste {human_amt} ALGO",
+                            data=notif_data,
+                            related_object_type='SendTransaction',
+                            related_object_id=internal_id,
+                            action_url=f"confio://transaction/{internal_id}" if internal_id else None
+                        )
+                    except Exception as ne:
+                        logger.warning(f"Failed to create inbound ALGO notification: {ne}")
+
+                    try:
+                        mark_transaction_balances_stale.delay(txid, sender_address=None, recipient_addresses=[to_addr])
+                    except Exception:
+                        pass
+                    processed += 1
+                except Exception as ie:
+                    logger.error(f"Error processing tx in ALGO sweep: {ie}")
+
+            if not next_token:
+                break
+
+        algo_new_round = max(algo_max_seen_round, current_round)
+        if algo_new_round > (algo_cursor.last_scanned_round or 0):
+            algo_cursor.last_scanned_round = algo_new_round
+            algo_cursor.save(update_fields=['last_scanned_round', 'updated_at'])
 
         logger.info(f"Indexer scan complete: processed={processed}, skipped={skipped}")
         return {'processed': processed, 'skipped': skipped}
@@ -1417,12 +1607,13 @@ def scan_outbound_confirmations(max_batch: int = 50):
                 try:
                     from notifications.utils import create_transaction_notification
                     # Determine tokens and direction
-                    if c.conversion_type == 'usdc_to_cusd':
-                        from_token, to_token = 'USDC', 'cUSD'
+                    if c.conversion_type == 'cusd_to_usdc':
+                        from_token, to_token = 'cUSD', 'USDC'
                         amount_from = str(c.from_amount)
                         amount_to = str(c.to_amount)
                     else:
-                        from_token, to_token = 'cUSD', 'USDC'
+                        # Default to USDC -> cUSD for unknown legacy values to avoid inverted UX.
+                        from_token, to_token = 'USDC', 'cUSD'
                         amount_from = str(c.from_amount)
                         amount_to = str(c.to_amount)
 

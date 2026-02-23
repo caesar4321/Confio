@@ -40,11 +40,19 @@ class ConversionType(DjangoObjectType):
     
     def resolve_from_token(self, info):
         """Resolve the source token based on conversion type"""
-        return 'USDC' if self.conversion_type == 'usdc_to_cusd' else 'cUSD'
+        if self.conversion_type == 'usdc_to_cusd':
+            return 'USDC'
+        if self.conversion_type == 'cusd_to_usdc':
+            return 'cUSD'
+        return 'USDC'
     
     def resolve_to_token(self, info):
         """Resolve the destination token based on conversion type"""
-        return 'cUSD' if self.conversion_type == 'usdc_to_cusd' else 'USDC'
+        if self.conversion_type == 'usdc_to_cusd':
+            return 'cUSD'
+        if self.conversion_type == 'cusd_to_usdc':
+            return 'USDC'
+        return 'cUSD'
 
     def resolve_internal_id(self, info):
         """Standardize internal_id as 32-char hex string"""
@@ -679,12 +687,13 @@ class ExecutePendingConversion(graphene.Mutation):
                     from notifications.utils import create_transaction_notification
                     
                     # Determine the conversion direction for the notification
-                    if conversion.conversion_type == 'usdc_to_cusd':
-                        from_token = 'USDC'
-                        to_token = 'cUSD'
-                    else:
+                    if conversion.conversion_type == 'cusd_to_usdc':
                         from_token = 'cUSD'
                         to_token = 'USDC'
+                    else:
+                        # Default to USDC -> cUSD for unknown legacy values to avoid inverted UX.
+                        from_token = 'USDC'
+                        to_token = 'cUSD'
                     
                     create_transaction_notification(
                         transaction_type='conversion',

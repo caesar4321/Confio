@@ -11,7 +11,6 @@ class Conversion(models.Model):
     CONVERSION_TYPES = [
         ('usdc_to_cusd', 'USDC to cUSD'),
         ('cusd_to_usdc', 'cUSD to USDC'),
-        ('algo_to_usdc', 'ALGO to USDC (Tinyman)'),
     ]
     
     STATUS_CHOICES = [
