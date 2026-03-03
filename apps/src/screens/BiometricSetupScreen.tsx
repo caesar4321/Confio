@@ -111,7 +111,7 @@ export const BiometricSetupScreen = () => {
           <TouchableOpacity onPress={handleBack} disabled={isProcessing} style={styles.backButton}>
             <Icon name="arrow-left" size={22} color="#111827" />
           </TouchableOpacity>
-          <Text style={styles.title}>Activa tu biometría</Text>
+          <Text style={styles.title}>Activa la seguridad</Text>
           <View style={{ width: 22 }} />
         </View>
 
@@ -180,8 +180,8 @@ export const BiometricSetupScreen = () => {
                 if (Platform.OS === 'android') {
                   // Show instructions first for Android
                   Alert.alert(
-                    'Configurar biometría',
-                    'Para activar la biometría en tu dispositivo:\n\n1. Ve a Ajustes del dispositivo\n2. Busca "Seguridad" o "Bloqueo de pantalla"\n3. Toca "Huella digital" o "Face Unlock"\n4. Configura tu biometría\n5. Vuelve a Confío\n\nLa app detectará automáticamente que activaste la biometría.',
+                    'Configurar Seguridad (Biometría o PIN)',
+                    'Para activar la seguridad en tu dispositivo:\n\n1. Ve a Ajustes del dispositivo\n2. Busca "Seguridad" o "Bloqueo de pantalla"\n3. Configura tu "Huella digital", "Face Unlock" o "PIN / Patrón"\n4. Vuelve a Confío\n\nLa app detectará automáticamente que activaste la seguridad.',
                     [
                       { text: 'Cancelar', style: 'cancel' },
                       {
@@ -236,8 +236,8 @@ export const BiometricSetupScreen = () => {
                 } else {
                   // iOS - show instructions then open settings
                   Alert.alert(
-                    'Configurar Face ID / Touch ID',
-                    'Para activar la biometría en tu iPhone:\n\n1. Ve a Ajustes\n2. Busca "Face ID y código" o "Touch ID y código"\n3. Configura tu biometría\n4. Vuelve a Confío\n\nLa app detectará automáticamente que activaste la biometría.',
+                    'Configurar Face ID / Touch ID / Código',
+                    'Para activar la seguridad en tu iPhone:\n\n1. Ve a Ajustes\n2. Busca "Face ID y código" o "Touch ID y código"\n3. Configura tu biometría o código\n4. Vuelve a Confío\n\nLa app detectará automáticamente tu configuración.',
                     [
                       { text: 'Cancelar', style: 'cancel' },
                       {
@@ -256,7 +256,7 @@ export const BiometricSetupScreen = () => {
                 }
               }}
             >
-              <Text style={styles.settingsButtonText}>Abrir ajustes biometría</Text>
+              <Text style={styles.settingsButtonText}>Abrir ajustes de seguridad</Text>
             </TouchableOpacity>
           )}
         </View>

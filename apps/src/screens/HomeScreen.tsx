@@ -184,7 +184,8 @@ export const HomeScreen = () => {
     myBalancesLoading,
     usdcBalanceStr: (myBalancesData as any)?.myBalances?.usdc || '0',
     algoBalanceStr: (myBalancesData as any)?.myBalances?.algo || '0',
-    refreshAccountBalance
+    refreshAccountBalance,
+    activeAccount
   });
 
   // Check if presale is globally active / claims unlocked

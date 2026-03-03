@@ -331,7 +331,8 @@ export const AccountDetailScreen = () => {
     myBalancesLoading: balancesLoading,
     usdcBalanceStr: (balancesData as any)?.myBalances?.usdc || '0',
     algoBalanceStr: (balancesData as any)?.myBalances?.algo || '0',
-    refreshAccountBalance: handleRefreshAccountBalance
+    refreshAccountBalance: handleRefreshAccountBalance,
+    activeAccount
   });
 
   // USDC balance data - HIDDEN for employees

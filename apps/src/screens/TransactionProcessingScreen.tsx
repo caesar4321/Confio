@@ -10,6 +10,8 @@ import { PAY_INVOICE } from '../apollo/queries';
 import { AccountManager } from '../utils/accountManager';
 import algorandService from '../services/algorandService';
 import { inviteSendService } from '../services/inviteSendService';
+import { useAccount } from '../contexts/AccountContext';
+import { cusdAppOptInService } from '../services/cusdAppOptInService';
 import * as nacl from 'tweetnacl';
 import * as msgpack from 'algorand-msgpack';
 import { Buffer } from 'buffer';
@@ -98,6 +100,7 @@ export const TransactionProcessingScreen = () => {
   console.log('TransactionProcessingScreen: Component mounted');
   const navigation = useNavigation();
   const route = useRoute();
+  const { activeAccount } = useAccount();
   // const insets = useSafeAreaInsets();
 
   const transactionData: TransactionData = (route.params as any)?.transactionData || {
@@ -643,23 +646,40 @@ export const TransactionProcessingScreen = () => {
           throw new Error('No recipient address for atomic burn+send');
         }
 
-        // Step 1: Build the atomic transaction group on the backend
-        const res = await buildBurnAndSend({
-          variables: {
-            amount: amountBaseUnits,
-            recipientAddress: recipientAddr,
-            note: transactionData.memo || undefined
-          }
-        });
+        // Step 1: Build atomic group, retry once after cUSD app opt-in if required.
+        let data: any = null;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const res = await buildBurnAndSend({
+            variables: {
+              amount: amountBaseUnits,
+              recipientAddress: recipientAddr,
+              note: transactionData.memo || undefined
+            }
+          });
 
-        const data = res.data?.buildBurnAndSend;
-        if (!data?.success) {
+          data = res.data?.buildBurnAndSend;
+          if (data?.success) break;
+
           const errMsg = data?.error || 'Failed to build burn+send';
+          if (errMsg === 'requires_app_optin' && attempt === 0) {
+            console.log('TransactionProcessingScreen: cUSD app opt-in required, running opt-in flow...');
+            const optInResult = await cusdAppOptInService.handleAppOptIn(activeAccount);
+            if (!optInResult.success) {
+              throw new Error(optInResult.error || 'No se pudo completar la configuración inicial');
+            }
+            console.log('TransactionProcessingScreen: cUSD app opt-in completed, retrying atomic build...');
+            continue;
+          }
+
           if (errMsg.includes('must optin') || errMsg.includes('Recipient must optin')) {
             const assetName = transactionData.tokenType || transactionData.currency || 'USDC';
             throw new Error(`La billetera de destino no está configurada para recibir ${assetName}. Deben agregar el token primero.`);
           }
           throw new Error(errMsg);
+        }
+
+        if (!data?.success) {
+          throw new Error(data?.error || 'Failed to build burn+send');
         }
 
         const parsedData = JSON.parse(data.transactions);

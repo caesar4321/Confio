@@ -86,6 +86,11 @@ class BiometricAuthService {
    */
   private async storeBiometricSecret(): Promise<boolean> {
     try {
+      const biometryType = await Keychain.getSupportedBiometryType();
+      const accessControl = biometryType
+        ? Keychain.ACCESS_CONTROL.BIOMETRY_CURRENT_SET_OR_DEVICE_PASSCODE
+        : Keychain.ACCESS_CONTROL.BIOMETRY_ANY_OR_DEVICE_PASSCODE;
+
       const randomSecret = `${Date.now()}-${Math.random()}`;
       await Keychain.setGenericPassword(
         BIOMETRIC_SECRET_USERNAME,
@@ -93,7 +98,7 @@ class BiometricAuthService {
         {
           service: BIOMETRIC_SECRET_SERVICE,
           accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED,
-          accessControl: Keychain.ACCESS_CONTROL.BIOMETRY_CURRENT_SET_OR_DEVICE_PASSCODE,
+          accessControl,
           authenticationType: Keychain.AUTHENTICATION_TYPE.DEVICE_PASSCODE_OR_BIOMETRICS,
           securityLevel: Keychain.SECURITY_LEVEL.SECURE_SOFTWARE,
           storage: Keychain.STORAGE_TYPE.AUTOMATIC,
@@ -184,17 +189,22 @@ class BiometricAuthService {
 
       console.log('[BiometricAuthService] Prompting for biometric authentication:', reason);
 
+      const biometryType = await Keychain.getSupportedBiometryType();
+      const accessControl = biometryType
+        ? Keychain.ACCESS_CONTROL.BIOMETRY_CURRENT_SET_OR_DEVICE_PASSCODE
+        : Keychain.ACCESS_CONTROL.BIOMETRY_ANY_OR_DEVICE_PASSCODE;
+
       const authResult = await Keychain.getGenericPassword({
         service: BIOMETRIC_SECRET_SERVICE,
         authenticationPrompt: {
           title: 'Confirma tu identidad',
           subtitle: reason || (Platform.OS === 'ios'
-            ? 'Usa Face ID o Touch ID para firmar de forma segura'
-            : 'Usa tu huella digital para firmar de forma segura'),
+            ? 'Usa tu biometría o código para firmar de forma segura'
+            : 'Usa tu biometría o patrón para firmar de forma segura'),
           // More security-focused description
           description: 'Protege tus fondos',
         },
-        accessControl: Keychain.ACCESS_CONTROL.BIOMETRY_CURRENT_SET_OR_DEVICE_PASSCODE,
+        accessControl,
         authenticationType: Keychain.AUTHENTICATION_TYPE.DEVICE_PASSCODE_OR_BIOMETRICS,
         storage: Keychain.STORAGE_TYPE.AUTOMATIC,
       });

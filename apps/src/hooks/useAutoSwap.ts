@@ -2,6 +2,7 @@ import { useState, useRef, useCallback } from 'react';
 import { useMutation, gql } from '@apollo/client';
 import { useFocusEffect } from '@react-navigation/native';
 import algorandService from '../services/algorandService';
+import { cusdAppOptInService } from '../services/cusdAppOptInService';
 
 const BUILD_AUTO_SWAP_TRANSACTIONS = gql`
   mutation BuildAutoSwapTransactions($inputAssetType: String!, $amount: String!) {
@@ -37,6 +38,7 @@ interface UseAutoSwapProps {
     usdcBalanceStr: string;
     algoBalanceStr: string;
     refreshAccountBalance: () => void;
+    activeAccount?: any;
 }
 
 const USDC_THRESHOLD = 1;  // contract minimum: do not auto-convert below 1 USDC
@@ -49,7 +51,8 @@ export const useAutoSwap = ({
     myBalancesLoading,
     usdcBalanceStr,
     algoBalanceStr,
-    refreshAccountBalance
+    refreshAccountBalance,
+    activeAccount
 }: UseAutoSwapProps) => {
     const [buildAutoSwapTransactions] = useMutation(BUILD_AUTO_SWAP_TRANSACTIONS);
     const [submitAutoSwapTransactions] = useMutation(SUBMIT_AUTO_SWAP_TRANSACTIONS);
@@ -111,19 +114,34 @@ export const useAutoSwap = ({
                 setSwapModalAsset(swapAssetType as 'ALGO' | 'USDC');
 
                 try {
-                    // 1. Build swap txns
-                    const res = await buildAutoSwapTransactions({
-                        variables: {
-                            inputAssetType: swapAssetType,
-                            amount: swapAmount
-                        }
-                    });
+                    // 1) Build swap txns, with one retry after cUSD app opt-in when required.
+                    let data: any = null;
+                    for (let attempt = 0; attempt < 2; attempt++) {
+                        const res = await buildAutoSwapTransactions({
+                            variables: {
+                                inputAssetType: swapAssetType,
+                                amount: swapAmount
+                            }
+                        });
+                        data = res.data?.buildAutoSwapTransactions;
+                        if (data?.success) break;
 
-                    const data = res.data?.buildAutoSwapTransactions;
-                    if (!data?.success) {
+                        if (data?.error === 'requires_app_optin' && attempt === 0) {
+                            console.log('[AutoSwap Hook] cUSD app opt-in required. Running opt-in flow...');
+                            const optInResult = await cusdAppOptInService.handleAppOptIn(activeAccount);
+                            if (!optInResult.success) {
+                                console.warn('[AutoSwap Hook] cUSD app opt-in failed:', optInResult.error);
+                                return;
+                            }
+                            console.log('[AutoSwap Hook] cUSD app opt-in completed. Retrying auto-swap build...');
+                            continue;
+                        }
+
                         console.warn('[AutoSwap Hook] Backend failed to build swap transactions:', data?.error);
                         return;
                     }
+
+                    if (!data?.success) return;
 
                     if (!data.transactions) {
                         console.warn('[AutoSwap Hook] No transactions field returned from backend');
@@ -189,7 +207,7 @@ export const useAutoSwap = ({
             };
 
             checkAndTriggerSwap();
-        }, [usdcBalanceStr, algoBalanceStr, myBalancesLoading, isAuthenticated, buildAutoSwapTransactions, submitAutoSwapTransactions, refreshAccountBalance])
+        }, [usdcBalanceStr, algoBalanceStr, myBalancesLoading, isAuthenticated, buildAutoSwapTransactions, submitAutoSwapTransactions, refreshAccountBalance, activeAccount])
     );
 
     return {

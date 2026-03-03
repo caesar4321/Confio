@@ -542,7 +542,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       const enabledNow = await biometricAuthService.enable();
       if (!enabledNow) {
         Alert.alert(
-          'Activa tu biometría',
+          'Autenticación requerida',
           Platform.OS === 'ios' ? 'Necesitamos tu autenticación (Biometría o Código) para proteger tus operaciones críticas.' : 'Necesitamos tu autenticación (Biometría, PIN o Patrón) para proteger tus operaciones críticas.',
           [{ text: 'OK' }]
         );
@@ -554,8 +554,8 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     } catch (error) {
       console.error('[AuthContext] Failed to enforce biometric enrollment:', error);
       Alert.alert(
-        'Activa tu biometría',
-        'No pudimos activar la biometría. Inténtalo nuevamente.',
+        'Seguridad requerida',
+        'No pudimos activar la seguridad. Inténtalo nuevamente.',
         [{ text: 'OK' }]
       );
       return { ok: false, alreadyEnabled: false, didAuthenticate: false };
