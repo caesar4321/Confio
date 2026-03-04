@@ -1620,6 +1620,9 @@ class AlgorandSponsoredOptInMutation(graphene.Mutation):
     class Arguments:
         # Use String to avoid 32-bit GraphQL Int limit for large ASA IDs
         asset_id = graphene.String(required=False)  # Defaults to CONFIO
+        # BACKWARD COMPATIBILITY: Older mobile clients sent `appId: $appId` to this mutation!
+        # Do not remove this, otherwise old app versions will crash with a GraphQL validation error.
+        app_id = graphene.String(required=False)
     
     success = graphene.Boolean()
     error = graphene.String()
@@ -1630,10 +1633,27 @@ class AlgorandSponsoredOptInMutation(graphene.Mutation):
     group_id = graphene.String()
     asset_id = graphene.String()
     asset_name = graphene.String()
+    # BACKWARD COMPATIBILITY: Return app_id as well so old clients can parse it if needed
+    app_id = graphene.String()
     
     @classmethod
-    def mutate(cls, root, info, asset_id=None):
+    def mutate(cls, root, info, asset_id=None, app_id=None):
         try:
+            # BACKWARD COMPATIBILITY: If the old client sent app_id to this mutation,
+            # redirect the exact call to the actual GenerateAppOptInTransactionMutation!
+            if app_id is not None:
+                logger.info(f"Backward compatibility: Re-routing AlgorandSponsoredOptInMutation to GenerateAppOptInTransactionMutation for app_id={app_id}")
+                res = GenerateAppOptInTransactionMutation.mutate(root, info, app_id=app_id)
+                return cls(
+                    success=res.success,
+                    error=res.error,
+                    already_opted_in=res.already_opted_in,
+                    user_transaction=res.user_transaction,
+                    sponsor_transaction=res.sponsor_transaction,
+                    group_id=res.group_id,
+                    app_id=res.app_id
+                )
+
             user = info.context.user
             if not user.is_authenticated:
                 return cls(success=False, error='Not authenticated')
