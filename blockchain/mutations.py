@@ -2551,21 +2551,6 @@ class BuildAutoSwapTransactionsMutation(graphene.Mutation):
                     logger.info(f"[AutoSwap USDC] Amount {amount_decimal} below minimum 1.0, skipping.")
                     return cls(success=False, error='amount_below_minimum')
                 
-                # We need to make sure the user has a transaction hash reference eventually
-                # We'll create a PENDING conversion
-                conversion = Conversion.objects.create(
-                    actor_type='user',
-                    actor_user=user,
-                    actor_display_name=user.username,
-                    actor_address=account.algorand_address,
-                    conversion_type='usdc_to_cusd',
-                    from_amount=amount_decimal,
-                    to_amount=amount_decimal,
-                    exchange_rate=Decimal('1.0'),
-                    fee_amount=Decimal('0.0'),
-                    status='PENDING_SIG'
-                )
-
                 tx_result = tx_builder.build_mint_transactions(
                     user_address=account.algorand_address,
                     usdc_amount=amount_decimal,
@@ -2581,9 +2566,22 @@ class BuildAutoSwapTransactionsMutation(graphene.Mutation):
                     if tx_result.get('requires_app_optin'):
                         return cls(success=False, error='requires_app_optin', transactions=None)
                     
-                    conversion.status = 'FAILED'
-                    conversion.save()
                     return cls(success=False, error=tx_result.get('error', 'Failed to build transactions'))
+
+                # We need to make sure the user has a transaction hash reference eventually
+                # We'll create a PENDING conversion
+                conversion = Conversion.objects.create(
+                    actor_type='user',
+                    actor_user=user,
+                    actor_display_name=user.username,
+                    actor_address=account.algorand_address,
+                    conversion_type='usdc_to_cusd',
+                    from_amount=amount_decimal,
+                    to_amount=amount_decimal,
+                    exchange_rate=Decimal('1.0'),
+                    fee_amount=Decimal('0.0'),
+                    status='PENDING_SIG'
+                )
 
                 # Normalize sponsor transactions array of JSON strings and user transactions
                 sponsors_norm = []
