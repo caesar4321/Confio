@@ -230,8 +230,10 @@ class ConvertUSDCToCUSD(graphene.Mutation):
                     if not tx_result.get('success'):
                         # Check if it's an app opt-in issue
                         if tx_result.get('requires_app_optin'):
-                            # Don't save as failed - frontend will handle opt-in automatically
-                            # No need to show error message since it's handled automatically
+                            # Prevent stale PENDING rows for legacy clients that don't handle app opt-in.
+                            conversion.status = 'FAILED'
+                            conversion.error_message = 'requires_app_optin'
+                            conversion.save(update_fields=['status', 'error_message', 'updated_at'])
                             return ConvertUSDCToCUSD(
                                 conversion=None,
                                 success=False,
@@ -467,8 +469,10 @@ class ConvertCUSDToUSDC(graphene.Mutation):
                     if not tx_result.get('success'):
                         # Check if it's an app opt-in issue
                         if tx_result.get('requires_app_optin'):
-                            # Don't save as failed - frontend will handle opt-in automatically
-                            # No need to show error message since it's handled automatically
+                            # Prevent stale PENDING rows for legacy clients that don't handle app opt-in.
+                            conversion.status = 'FAILED'
+                            conversion.error_message = 'requires_app_optin'
+                            conversion.save(update_fields=['status', 'error_message', 'updated_at'])
                             return ConvertCUSDToUSDC(
                                 conversion=None,
                                 success=False,
