@@ -80,7 +80,7 @@ export const useAutoSwap = ({
                 let swapAssetType = null;
                 let swapAmount = '0';
 
-                if (currentUsdc > USDC_THRESHOLD) {
+                if (currentUsdc >= USDC_THRESHOLD) {
                     swapAssetType = 'USDC';
                     swapAmount = Math.floor(currentUsdc * 1000000).toString();
                 } else {
