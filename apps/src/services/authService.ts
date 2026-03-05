@@ -839,6 +839,12 @@ export class AuthService {
 
 
       // Now derive Algorand wallet (pepper fetch requires JWT)
+      // V2 MIGRATION: Ensure Master Secret is created for Apple users before derivation
+      // This prevents fallback to Legacy V1 Wallet generation.
+      const { getOrCreateMasterSecret } = await import('./secureDeterministicWallet');
+      await getOrCreateMasterSecret(appleSub);
+      console.log('Master secret checked/created for Apple user');
+
       const algorandService = (await import('./algorandService')).default;
       const algorandAddress = await algorandService.createOrRestoreWallet(firebaseToken, appleSub);
       console.log('Algorand wallet created (Apple):', algorandAddress);
