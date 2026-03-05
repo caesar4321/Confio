@@ -5,8 +5,17 @@ import { SUBMIT_SPONSORED_GROUP } from '../apollo/mutations';
 import { gql } from '@apollo/client';
 
 const UPDATE_ACCOUNT_ALGORAND_ADDRESS = gql`
-    mutation UpdateAccountAlgorandAddress($algorandAddress: String!, $isV2Wallet: Boolean) {
-        updateAccountAlgorandAddress(algorandAddress: $algorandAddress, isV2Wallet: $isV2Wallet) {
+    mutation UpdateAccountAlgorandAddress($algorandAddress: String!) {
+        updateAccountAlgorandAddress(algorandAddress: $algorandAddress) {
+            success
+            error
+        }
+    }
+`;
+
+const MARK_WALLET_MIGRATED = gql`
+    mutation MarkWalletMigrated {
+        markWalletMigrated {
             success
             error
         }
@@ -377,32 +386,37 @@ class WalletMigrationService {
             if (submitResult.data?.submitBusinessOptInGroup?.success) {
                 console.log('[MigrationService] Migration successful (TxID: ' + submitResult.data.submitBusinessOptInGroup.transactionId + ')');
 
-                // 5. Success! Mark as migrated in Backend AND Update Address
-                // We use UpdateAccountAlgorandAddress to ensure the DB knows the new V2 address
-                // for correct balance caching, while also setting isKeylessMigrated=True.
-                console.log('Marking V2 migration status in backend...');
+                // 5. Success! Update address AND mark as migrated via dedicated mutation
+                // Step A: Update the Algorand address on the backend
+                console.log('[MigrationService] Updating backend with V2 address...');
+                try {
+                    await apolloClient.mutate({
+                        mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS,
+                        variables: { algorandAddress: v2Address }
+                    });
+                    console.log('[MigrationService] Backend address updated to V2.');
+                } catch (addrErr) {
+                    console.error('[MigrationService] Failed to update address:', addrErr);
+                }
+
+                // Step B: Mark as migrated via the dedicated MarkWalletMigrated mutation
+                // This is the ONLY mutation that can set is_keyless_migrated=True.
+                console.log('[MigrationService] Marking wallet as V2 migrated...');
                 let markedSuccess = false;
                 for (let attempt = 1; attempt <= 3; attempt++) {
                     try {
-                        await apolloClient.mutate({
-                            mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS,
-                            variables: {
-                                algorandAddress: v2Address,
-                                isV2Wallet: true
-                            }
-                        });
+                        await apolloClient.mutate({ mutation: MARK_WALLET_MIGRATED });
                         markedSuccess = true;
-                        console.log(`[MigrationService] Marked as migrated on backend.`);
+                        console.log(`[MigrationService] Marked as V2 migrated on backend.`);
                         break;
                     } catch (err) {
                         console.warn(`[MigrationService] Attempt ${attempt} to mark migration failed:`, err);
-                        if (attempt < 3) await new Promise(r => setTimeout(r, 1000)); // Wait 1s
+                        if (attempt < 3) await new Promise(r => setTimeout(r, 1000));
                     }
                 }
 
                 if (!markedSuccess) {
                     console.error('[MigrationService] CRITICAL: Failed to mark migration on backend after 3 attempts. Local state will be updated, but backend might de-sync.');
-                    // We continue anyway to update local keychain so user can use the app
                 }
 
                 try {

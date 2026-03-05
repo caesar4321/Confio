@@ -849,10 +849,10 @@ export class AuthService {
       const algorandAddress = await algorandService.createOrRestoreWallet(firebaseToken, appleSub);
       console.log('Algorand wallet created (Apple):', algorandAddress);
 
-      // Update server with derived address (iOS uses V2 architecture via iCloud Keychain)
+      // Update server with derived address
       try {
         const { UPDATE_ACCOUNT_ALGORAND_ADDRESS } = await import('../apollo/queries');
-        const updRes = await apolloClient.mutate({ mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS, variables: { algorandAddress, isV2Wallet: true } });
+        const updRes = await apolloClient.mutate({ mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS, variables: { algorandAddress } });
         console.log('Updated server with Algorand address (Apple)');
         // If server prepared opt-in transactions (CONFIO/cUSD), sign and submit now
         try {
