@@ -2768,9 +2768,21 @@ class UpdateAccountAlgorandAddress(graphene.Mutation):
             account.algorand_address = algorand_address
             
             # If client indicates V2 wallet, mark as migrated
+            # SERVER-SIDE GUARD: Only accept V2 flag if the account does NOT have a
+            # legacy V1 WalletDerivationPepper. Old app versions blindly send
+            # isV2Wallet=true even for users who silently fell back to V1 derivation.
             if is_v2_wallet:
-                account.is_keyless_migrated = True
-                logger.info(f"Marking account {account.id} (user {user.id}) as V2 migrated")
+                from users.models_wallet import WalletDerivationPepper
+                pepper_key = f'user_{user.id}_{account.account_type}_{account.account_index}'
+                has_v1_pepper = WalletDerivationPepper.objects.filter(account_key=pepper_key).exists()
+                if has_v1_pepper:
+                    logger.warning(
+                        f"Rejecting V2 migration flag for account {account.id} (user {user.id}): "
+                        f"V1 pepper still exists. User must complete migration flow first."
+                    )
+                else:
+                    account.is_keyless_migrated = True
+                    logger.info(f"Marking account {account.id} (user {user.id}) as V2 migrated")
             
             account.save()
 
