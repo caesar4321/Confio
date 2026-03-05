@@ -2769,17 +2769,19 @@ class UpdateAccountAlgorandAddress(graphene.Mutation):
             
             # If client indicates V2 wallet, mark as migrated
             # SERVER-SIDE GUARD: Only accept V2 flag if the account does NOT have a
-            # legacy V1 WalletDerivationPepper, OR if the user has a verified backup
+            # legacy V1 WalletDerivationPepper, OR if the user has a verified Google Drive backup
             # (meaning they genuinely created a V2 master secret via getOrCreateMasterSecret).
+            # NOTE: iCloud backup flag is NOT reliable — it fires on every iOS app resume
+            # without verifying V2 secret existence. Only google_drive proves V2 creation.
             if is_v2_wallet:
                 from users.models_wallet import WalletDerivationPepper
                 pepper_key = f'user_{user.id}_{account.account_type}_{account.account_index}'
                 has_v1_pepper = WalletDerivationPepper.objects.filter(account_key=pepper_key).exists()
-                has_verified_backup = user.backup_provider in ('google_drive', 'icloud')
+                has_verified_backup = user.backup_provider == 'google_drive'
                 if has_v1_pepper and not has_verified_backup:
                     logger.warning(
                         f"Rejecting V2 migration flag for account {account.id} (user {user.id}): "
-                        f"V1 pepper exists and no verified backup. User must complete migration flow first."
+                        f"V1 pepper exists and no verified Drive backup. User must complete migration flow first."
                     )
                 else:
                     account.is_keyless_migrated = True
