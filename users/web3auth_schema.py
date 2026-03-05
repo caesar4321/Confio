@@ -306,13 +306,9 @@ class Web3AuthLoginMutation(graphene.Mutation):
                  # New User -> V2 Native
                  is_keyless_migrated_status = True
             elif existing_account:
-                 # Existing User logging in via Web3Auth -> Auto-migrate to V2
-                 if not existing_account.is_keyless_migrated:
-                     existing_account.is_keyless_migrated = True
-                     existing_account.save(update_fields=['is_keyless_migrated'])
-                     logger.info(f"Auto-migrated existing user {user.id} to V2 (Native Keyless) on login")
-                 
-                 is_keyless_migrated_status = True
+                 # Existing User logging in via Web3Auth
+                 # DO NOT auto-migrate here. They must complete the frontend migration flow first.
+                 is_keyless_migrated_status = existing_account.is_keyless_migrated
             
             if algorand_address:
                 # Use AlgorandAccountManager to ensure auto opt-ins happen
