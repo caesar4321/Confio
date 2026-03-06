@@ -85,7 +85,7 @@ class AlgorandAccountManager:
                 user=user,
                 account_type='personal',
                 account_index=0,
-                defaults={}
+                defaults={'is_keyless_migrated': True}
             )
             
             # Check if account already has an Algorand address

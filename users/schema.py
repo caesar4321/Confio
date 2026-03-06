@@ -2759,7 +2759,8 @@ class UpdateAccountAlgorandAddress(graphene.Mutation):
                         account = Account.objects.create(
                             user=user,
                             account_type='personal',
-                            account_index=account_index
+                            account_index=account_index,
+                            is_keyless_migrated=True
                         )
                     else:
                         return UpdateAccountAlgorandAddress(success=False, error="Cuenta no encontrada")
