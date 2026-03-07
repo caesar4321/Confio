@@ -146,15 +146,14 @@ export const TraderRatingScreen: React.FC = () => {
   };
 
   const handleGoBack = () => {
-    // Navigate to Exchange screen with refresh flag to update trade status
+    // Exchange is no longer exposed in the tab shell.
     navigation.reset({
       index: 0,
       routes: [
         { 
           name: 'BottomTabs',
           params: { 
-            screen: 'Exchange',
-            params: { refreshData: true }
+            screen: 'Discover'
           }
         }
       ],

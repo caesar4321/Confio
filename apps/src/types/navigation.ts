@@ -16,6 +16,7 @@ export type BottomTabParamList = {
   Employees: undefined;
   Scan: { mode?: 'cobrar' | 'pagar' };
   Charge: undefined;
+  Discover: undefined;
   Exchange: {
     showMyOffers?: boolean;
     refreshData?: boolean;

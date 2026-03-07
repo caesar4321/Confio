@@ -26,11 +26,11 @@ export function navigate(name: string, params?: any) {
       console.error('[RootNavigation] Navigation error:', error);
       // If navigation fails, try to navigate to a safe fallback
       if (name.includes('Trade') || name.includes('P2P')) {
-        console.log('[RootNavigation] Falling back to Exchange screen');
+        console.log('[RootNavigation] Falling back to Discover screen');
         navigationRef.navigate('Main' as never, {
           screen: 'BottomTabs',
           params: {
-            screen: 'Exchange'
+            screen: 'Discover'
           }
         } as never);
       }

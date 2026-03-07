@@ -1511,8 +1511,7 @@ export const TradeChatScreen: React.FC = () => {
   };
 
   const handleGoBack = () => {
-    // Navigate back to Exchange screen with active trades tab
-    navigation.navigate('BottomTabs', { screen: 'Exchange' });
+    navigation.navigate('BottomTabs', { screen: 'Discover' });
   };
 
   const handleAbandonTrade = () => {
@@ -1540,7 +1539,7 @@ export const TradeChatScreen: React.FC = () => {
                   return;
                 }
                 Alert.alert('Solicitud eliminada', 'Se eliminó la solicitud y el chat.');
-                navigation.navigate('BottomTabs', { screen: 'Exchange' });
+                navigation.navigate('BottomTabs', { screen: 'Discover' });
               } catch (e) {
                 Alert.alert('Error', 'No se pudo eliminar la solicitud.');
               }
@@ -1552,8 +1551,7 @@ export const TradeChatScreen: React.FC = () => {
   };
 
   const handleViewTrade = () => {
-    // Navigate to trade details or back to exchange
-    navigation.navigate('BottomTabs', { screen: 'Exchange' });
+    navigation.navigate('BottomTabs', { screen: 'Discover' });
   };
 
   const [showConfirmPaidModal, setShowConfirmPaidModal] = useState(false);
@@ -2379,7 +2377,7 @@ export const TradeChatScreen: React.FC = () => {
                       if (!res.success) throw new Error(res.error || 'No se pudo cancelar');
                     });
                     Alert.alert('Intercambio cancelado', 'Fondos recuperados y chat cerrado.');
-                    navigation.navigate('BottomTabs', { screen: 'Exchange' });
+                    navigation.navigate('BottomTabs', { screen: 'Discover' });
                   } catch (e) {
                     Alert.alert('Error', 'No se pudo cancelar y recuperar.');
                   }
@@ -2407,7 +2405,7 @@ export const TradeChatScreen: React.FC = () => {
                       if (!res.success) throw new Error(res.error || 'No se pudo cancelar');
                     });
                     Alert.alert('Cancelado', 'Tiempo agotado. Fondos recuperados y chat cerrado.');
-                    navigation.navigate('BottomTabs', { screen: 'Exchange' });
+                    navigation.navigate('BottomTabs', { screen: 'Discover' });
                   } catch (e) {
                     Alert.alert('Error', 'No se pudo cancelar por tiempo agotado.');
                   }

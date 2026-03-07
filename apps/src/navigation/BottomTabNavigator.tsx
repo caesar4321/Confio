@@ -10,14 +10,12 @@ import { ContactsScreen } from '../screens/ContactsScreen';
 import EmployeesScreen from '../screens/EmployeesScreen';
 import ScanTab from '../screens/ScanTab';
 import { ChargeScreen } from '../screens/ChargeScreen';
-import { ExchangeScreen } from '../screens/ExchangeScreen';
 import DiscoverScreen from '../screens/DiscoverScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { Header } from './Header';
 import { useHeader } from '../contexts/HeaderContext';
 import { useAccount } from '../contexts/AccountContext';
 import { Text } from 'react-native';
-import { useCountry } from '../contexts/CountryContext';
 
 // Single navigator instance
 const Tabs = createBottomTabNavigator<BottomTabParamList>();
@@ -28,7 +26,6 @@ export const BottomTabNavigator = () => {
   const navigation = useNavigation<TabNavigatorNavigationProp>();
   const { unreadNotifications, currentAccountAvatar, profileMenu } = useHeader();
   const { activeAccount, isLoading: accountsLoading } = useAccount();
-  const { userCountry } = useCountry();
 
   // 🔥 Fix: Normalize the account type to lowercase for comparison
   const accountType = (activeAccount?.type || 'personal').toLowerCase();
@@ -89,21 +86,6 @@ export const BottomTabNavigator = () => {
 
 
 
-  const ExchangeHeader = useCallback(() => (
-    <Header
-      navigation={navigation}
-      isHomeScreen={false}
-      title="Intercambio P2P"
-      onProfilePress={undefined}
-      onNotificationPress={undefined}
-      backgroundColor="#fff"
-      showBackButton={false}
-      isLight={false}
-      unreadNotifications={0}
-      currentAccountAvatar="U"
-    />
-  ), [navigation]);
-
   const DiscoverHeader = useCallback(() => (
     <Header
       navigation={navigation}
@@ -118,18 +100,6 @@ export const BottomTabNavigator = () => {
       currentAccountAvatar="U"
     />
   ), [navigation]);
-
-  const normalizedCountryIso = useMemo(() => {
-    return userCountry?.[2] || null;
-  }, [userCountry]);
-
-  const isP2PEnabled = useMemo(() => {
-    if (normalizedCountryIso !== 'VE') return false;
-    if (Platform.OS === 'android') return true;
-    // Allow on iOS only for debug builds
-    if (Platform.OS === 'ios' && __DEV__) return true;
-    return false;
-  }, [normalizedCountryIso]);
 
   const ProfileHeader = useCallback(() => (
     <Header
@@ -276,15 +246,13 @@ export const BottomTabNavigator = () => {
           options={{ ...chargeTabOptions, freezeOnBlur: true }}
         />
       )}
-        <Tabs.Screen 
-          name="Exchange" 
-          component={isP2PEnabled ? (ExchangeScreen as any) : (DiscoverScreen as any)}
+        <Tabs.Screen
+          name="Discover"
+          component={DiscoverScreen}
           options={{
-            header: () => (isP2PEnabled ? <ExchangeHeader /> : <DiscoverHeader />),
-            tabBarLabel: isP2PEnabled ? 'Intercambio' : 'Descubrir',
-            tabBarIcon: ({ color, size }: any) => (
-              <Icon name={isP2PEnabled ? 'repeat' : 'compass'} size={size} color={color} />
-            ),
+            header: () => <DiscoverHeader />,
+            tabBarLabel: 'Descubrir',
+            tabBarIcon: ({ color, size }: any) => <Icon name="compass" size={size} color={color} />
           }}
         />
         <Tabs.Screen 

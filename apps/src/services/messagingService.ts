@@ -729,11 +729,11 @@ class MessagingService {
               }
             } as never);
           } else if (parts[1] === 'offer' && parts[2]) {
-            // For now, navigate to Exchange tab as there's no dedicated offer detail screen
+            // Exchange is not exposed in the app shell; fall back to Discover.
             navigationRef.current?.navigate('Main' as never, {
               screen: 'BottomTabs',
               params: {
-                screen: 'Exchange'
+                screen: 'Discover'
               }
             } as never);
           }
@@ -824,11 +824,11 @@ class MessagingService {
         } as never);
         break;
       case 'P2POffer':
-        // Navigate to Exchange tab as there's no dedicated offer detail screen
+        // Exchange is not exposed in the app shell; fall back to Discover.
         navigationRef.current?.navigate('Main' as never, {
           screen: 'BottomTabs',
           params: {
-            screen: 'Exchange'
+            screen: 'Discover'
           }
         } as never);
         break;

@@ -234,11 +234,7 @@ export const CreateOfferScreen = () => {
               {
                 text: 'Ver Mis Ofertas',
                 onPress: () => {
-                  // Navigate back to ExchangeScreen and show user's offers
-                  navigation.navigate('BottomTabs', { 
-                    screen: 'Exchange', 
-                    params: { showMyOffers: true, refreshData: true } 
-                  });
+                  navigation.navigate('BottomTabs', { screen: 'Discover' });
                 },
               },
             ]
@@ -272,21 +268,13 @@ export const CreateOfferScreen = () => {
               {
                 text: 'Ver Mis Ofertas',
                 onPress: () => {
-                  // Navigate back to ExchangeScreen and show user's offers
-                  navigation.navigate('BottomTabs', { 
-                    screen: 'Exchange', 
-                    params: { showMyOffers: true, refreshData: true } 
-                  });
+                  navigation.navigate('BottomTabs', { screen: 'Discover' });
                 },
               },
               {
                 text: 'Continuar',
                 onPress: () => {
-                  // Navigate back and trigger refresh
-                  navigation.navigate('BottomTabs', { 
-                    screen: 'Exchange', 
-                    params: { refreshData: true } 
-                  });
+                  navigation.navigate('BottomTabs', { screen: 'Discover' });
                 },
                 style: 'cancel'
               },
@@ -329,10 +317,7 @@ export const CreateOfferScreen = () => {
                     {
                       text: 'OK',
                       onPress: () => {
-                        navigation.navigate('BottomTabs', { 
-                          screen: 'Exchange', 
-                          params: { showMyOffers: true, refreshData: true } 
-                        });
+                        navigation.navigate('BottomTabs', { screen: 'Discover' });
                       },
                     },
                   ]

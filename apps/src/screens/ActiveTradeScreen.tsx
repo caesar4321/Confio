@@ -409,7 +409,7 @@ export const ActiveTradeScreen: React.FC = () => {
           onPress: () => {
             // Here you would typically call an API to cancel the trade
             Alert.alert('Intercambio cancelado', 'El intercambio ha sido cancelado.');
-            navigation.navigate('BottomTabs', { screen: 'Exchange' });
+            navigation.navigate('BottomTabs', { screen: 'Discover' });
           },
         },
       ]
@@ -1325,7 +1325,7 @@ export const ActiveTradeScreen: React.FC = () => {
             </View>
             <TouchableOpacity
               style={styles.viewAllTradesHint}
-              onPress={() => navigation.navigate('BottomTabs', { screen: 'Exchange' })}
+              onPress={() => navigation.navigate('BottomTabs', { screen: 'Discover' })}
             >
               <Icon name="list" size={12} color="#2563EB" style={styles.hintIcon} />
               <Text style={styles.hintText}>Ver todos mis intercambios</Text>
