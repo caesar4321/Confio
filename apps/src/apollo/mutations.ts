@@ -262,6 +262,39 @@ export const REQUEST_IDENTITY_UPLOAD = gql`
   }
 `;
 
+export const CREATE_DIDIT_VERIFICATION_SESSION = gql`
+  mutation CreateDiditVerificationSession {
+    createDiditVerificationSession {
+      success
+      error
+      session {
+        sessionId
+        sessionToken
+        status
+      }
+      verification {
+        id
+        status
+      }
+    }
+  }
+`;
+
+export const SYNC_DIDIT_VERIFICATION_SESSION = gql`
+  mutation SyncDiditVerificationSession($sessionId: String!) {
+    syncDiditVerificationSession(sessionId: $sessionId) {
+      success
+      error
+      verificationStatus
+      verification {
+        id
+        status
+        verifiedAt
+      }
+    }
+  }
+`;
+
 export const SUBMIT_IDENTITY_VERIFICATION_S3 = gql`
   mutation SubmitIdentityVerificationS3(
     $frontKey: String!,

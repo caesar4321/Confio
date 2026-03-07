@@ -124,6 +124,12 @@ module.exports = {
         android: null,
         ios: null  // Disabled - only needed for Android frame processors
       }
+    },
+    '@didit-protocol/sdk-react-native': {
+      platforms: {
+        android: null,
+        ios: null
+      }
     }
   },
-}; 
+};

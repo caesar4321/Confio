@@ -89,6 +89,8 @@
 	<false/>
 	<key>NSCameraUsageDescription</key>
 	<string>We need access to your camera to scan QR codes</string>
+	<key>NFCReaderUsageDescription</key>
+	<string>Confío necesita usar NFC para leer chips de pasaportes o documentos compatibles durante la verificación.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>We need access to your microphone for video recording</string>
 	<key>NSPhotoLibraryUsageDescription</key>
@@ -101,5 +103,9 @@
 	<string>Confío will send you important notifications about your transactions, received payments, and security alerts.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Confío requires your location for enhanced account security and optional camera features.</string>
+	<key>com.apple.developer.nfc.readersession.iso7816.select-identifiers</key>
+	<array>
+		<string>A0000002471001</string>
+	</array>
 </dict>
 </plist>

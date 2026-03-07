@@ -67,6 +67,9 @@ allprojects {
             }
         }
         google()
+        maven {
+            url = uri("https://raw.githubusercontent.com/didit-protocol/sdk-android/main/repository")
+        }
         maven { url 'https://www.jitpack.io' }
     }
 }

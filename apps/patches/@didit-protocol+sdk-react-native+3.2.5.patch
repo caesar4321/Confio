@@ -1,0 +1,85 @@
+diff --git a/node_modules/@didit-protocol/sdk-react-native/ios/SdkReactNative.h b/node_modules/@didit-protocol/sdk-react-native/ios/SdkReactNative.h
+index 7234724..3308b50 100644
+--- a/node_modules/@didit-protocol/sdk-react-native/ios/SdkReactNative.h
++++ b/node_modules/@didit-protocol/sdk-react-native/ios/SdkReactNative.h
+@@ -1,5 +1,6 @@
++#import <React/RCTBridgeModule.h>
+ #import <SdkReactNativeSpec/SdkReactNativeSpec.h>
+ 
+-@interface SdkReactNative : NSObject <NativeSdkReactNativeSpec>
++@interface SdkReactNative : NSObject <NativeSdkReactNativeSpec, RCTBridgeModule>
+ 
+ @end
+diff --git a/node_modules/@didit-protocol/sdk-react-native/ios/SdkReactNative.mm b/node_modules/@didit-protocol/sdk-react-native/ios/SdkReactNative.mm
+index b6e27ee..46eca9f 100644
+--- a/node_modules/@didit-protocol/sdk-react-native/ios/SdkReactNative.mm
++++ b/node_modules/@didit-protocol/sdk-react-native/ios/SdkReactNative.mm
+@@ -1,4 +1,5 @@
+ #import "SdkReactNative.h"
++#import <React/RCTUtils.h>
+ 
+ // Import the Swift-generated header for the bridge class.
+ // The header name follows the pattern: <ProductModuleName>-Swift.h
+@@ -12,6 +13,8 @@
+ @implementation SdkReactNative {
+     DiditSdkBridge *_bridge;
+ }
++
++RCT_EXPORT_MODULE(SdkReactNative);
+ 
+ - (instancetype)init {
+     if (self = [super init]) {
+@@ -20,6 +23,11 @@
+     return self;
+ }
+ 
+++ (BOOL)requiresMainQueueSetup
++{
++    return YES;
++}
++
+ // MARK: - Codegen Struct → NSDictionary Helpers
+ 
+ - (NSDictionary *)configDictFrom:(JS::NativeSdkReactNative::VerificationConfig &)config
+@@ -122,9 +130,31 @@
+     return std::make_shared<facebook::react::NativeSdkReactNativeSpecJSI>(params);
+ }
+ 
+-+ (NSString *)moduleName
+-{
+-    return @"SdkReactNative";
+-}
+-
++RCT_REMAP_METHOD(startVerification,
++                 startVerificationLegacy:(NSString *)token
++                 config:(NSDictionary * _Nullable)config
++                 resolver:(RCTPromiseResolveBlock)resolve
++                 rejecter:(RCTPromiseRejectBlock)reject)
++{
++    [_bridge startVerificationWithToken:token
++                                 config:config
++                             completion:^(NSDictionary *result) {
++        resolve(result);
++    }];
++}
++
++RCT_REMAP_METHOD(startVerificationWithWorkflow,
++                 startVerificationWithWorkflowLegacy:(NSString *)workflowId
++                 vendorData:(NSString * _Nullable)vendorData
++                 metadata:(NSString * _Nullable)metadata
++                 contactDetails:(NSDictionary * _Nullable)contactDetails
++                 expectedDetails:(NSDictionary * _Nullable)expectedDetails
++                 config:(NSDictionary * _Nullable)config
++                 resolver:(RCTPromiseResolveBlock)resolve
++                 rejecter:(RCTPromiseRejectBlock)reject)
++{
++    [_bridge startVerificationWithWorkflowWithWorkflowId:workflowId
++                                              vendorData:vendorData
++                                                metadata:metadata
++                                          contactDetails:contactDetails
++                                         expectedDetails:expectedDetails
++                                                  config:config
++                                              completion:^(NSDictionary *result) { resolve(result); }];
++}
++
+ @end

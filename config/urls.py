@@ -124,9 +124,11 @@ if settings.DEBUG:
 # Import the index view
 from .views import index
 from .views import guardarian_transaction_proxy, guardarian_fiat_currencies
+from security.views import didit_webhook
 
 # Catch-all pattern should be last
 urlpatterns += [
+    path('api/didit/webhook/', didit_webhook, name='didit_webhook'),
     path('api/guardarian/fiat/', guardarian_fiat_currencies, name='guardarian_fiat_currencies'),
     path('api/guardarian/transaction/', guardarian_transaction_proxy, name='guardarian_transaction_proxy'),
     re_path(r'^.*$', index),

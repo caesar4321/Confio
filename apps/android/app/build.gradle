@@ -82,8 +82,8 @@ android {
         applicationId "com.Confio.Confio"
         minSdkVersion 24
         targetSdkVersion 35
-        versionCode 63
-        versionName "3.0.3"
+        versionCode 64
+        versionName "3.0.4"
         ndk {
             abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64"
         }
@@ -157,6 +157,14 @@ android {
         excludes = [
             // "**/libc++_shared.so" // Reverted to find conflict
         ]
+        exclude 'META-INF/BC1024KE.SF'
+        exclude 'META-INF/BC1024KE.DSA'
+        exclude 'META-INF/BC2048KE.SF'
+        exclude 'META-INF/BC2048KE.DSA'
+        exclude 'META-INF/*.RSA'
+        exclude 'META-INF/*.SF'
+        exclude 'META-INF/*.DSA'
+        exclude 'META-INF/versions/9/OSGI-INF/MANIFEST.MF'
         pickFirst '**/libjsi.so'
         pickFirst '**/libfbjni.so'
         pickFirst '**/libreact_nativemodule_core.so'
@@ -219,6 +227,7 @@ dependencies {
     implementation project(':@react-native-firebase_analytics')
     implementation project(':@react-native-firebase_crashlytics')
     implementation project(':@react-native-firebase_appcheck')
+    implementation project(':didit-sdk-react-native')
 
     implementation project(':react-native-play-install-referrer')
     implementation project(':react-native-block-store')

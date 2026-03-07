@@ -19,6 +19,9 @@ dependencyResolutionManagement {
             // Android JSC is installed from npm
             url("$rootDir/../node_modules/jsc-android/dist")
         }
+        maven {
+            url("https://raw.githubusercontent.com/didit-protocol/sdk-android/main/repository")
+        }
         mavenCentral {
             // We don't want to fetch react-native from Maven Central as there are
             // older versions over there.
@@ -92,6 +95,9 @@ project(':react-native-device-info').projectDir = new File(rootProject.projectDi
 
 include ':notifee_react-native'
 project(':notifee_react-native').projectDir = new File(rootProject.projectDir, '../node_modules/@notifee/react-native/android')
+
+include ':didit-sdk-react-native'
+project(':didit-sdk-react-native').projectDir = new File(rootProject.projectDir, '../node_modules/@didit-protocol/sdk-react-native/android')
 
 
 include ':react-native-play-install-referrer'

@@ -53,6 +53,13 @@ from security.s3_utils import (
     public_s3_url,
     generate_presigned_post,
 )
+from security.didit import (
+    DiditAPIError,
+    DiditConfigurationError,
+    build_didit_callback_url,
+    create_didit_session,
+    sync_didit_session,
+)
 from django.core.cache import cache
 import base64
 import secrets
@@ -2284,6 +2291,86 @@ class SubmitIdentityVerification(graphene.Mutation):
 			return SubmitIdentityVerification(success=True, error=None, verification=verification)
 		except Exception as e:
 			return SubmitIdentityVerification(success=False, error=str(e), verification=None)
+
+
+class DiditSessionInfo(graphene.ObjectType):
+    session_id = graphene.String()
+    session_token = graphene.String()
+    status = graphene.String()
+    vendor_data = graphene.JSONString()
+
+
+class CreateDiditVerificationSession(graphene.Mutation):
+    success = graphene.Boolean()
+    error = graphene.String()
+    session = graphene.Field(DiditSessionInfo)
+    verification = graphene.Field(IdentityVerificationType)
+
+    @classmethod
+    def mutate(cls, root, info):
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return CreateDiditVerificationSession(success=False, error="Authentication required", session=None, verification=None)
+
+        try:
+            from users.jwt_context import get_jwt_business_context_with_validation
+
+            account_ctx = get_jwt_business_context_with_validation(info, required_permission=None) or {}
+            account_type = account_ctx.get('account_type') or 'personal'
+            business_id = account_ctx.get('business_id')
+
+            session_data = create_didit_session(
+                user=user,
+                account_type=account_type,
+                business_id=business_id,
+                callback_url=build_didit_callback_url(info.context),
+            )
+            return CreateDiditVerificationSession(
+                success=True,
+                error=None,
+                session=DiditSessionInfo(
+                    session_id=session_data['session_id'],
+                    session_token=session_data['session_token'],
+                    status=session_data['status'],
+                    vendor_data=session_data['vendor_data'],
+                ),
+                verification=None,
+            )
+        except (DiditConfigurationError, DiditAPIError) as e:
+            return CreateDiditVerificationSession(success=False, error=str(e), session=None, verification=None)
+        except Exception as e:
+            logger.exception("CreateDiditVerificationSession failed")
+            return CreateDiditVerificationSession(success=False, error=str(e), session=None, verification=None)
+
+
+class SyncDiditVerificationSession(graphene.Mutation):
+    class Arguments:
+        session_id = graphene.String(required=True)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    verification = graphene.Field(IdentityVerificationType)
+    verification_status = graphene.String()
+
+    @classmethod
+    def mutate(cls, root, info, session_id):
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return SyncDiditVerificationSession(success=False, error="Authentication required", verification=None, verification_status=None)
+
+        try:
+            verification, _ = sync_didit_session(session_id=session_id, expected_user=user)
+            return SyncDiditVerificationSession(
+                success=True,
+                error=None,
+                verification=verification,
+                verification_status=verification.status,
+            )
+        except (DiditConfigurationError, DiditAPIError) as e:
+            return SyncDiditVerificationSession(success=False, error=str(e), verification=None, verification_status=None)
+        except Exception as e:
+            logger.exception("SyncDiditVerificationSession failed")
+            return SyncDiditVerificationSession(success=False, error=str(e), verification=None, verification_status=None)
 
 
 class PresignedUploadInfo(graphene.ObjectType):
@@ -4688,6 +4775,8 @@ class Mutation(EmployeeMutations, graphene.ObjectType):
     refresh_token = RefreshToken.Field()
     switch_account_token = SwitchAccountToken.Field()
     submit_identity_verification = SubmitIdentityVerification.Field()
+    create_didit_verification_session = CreateDiditVerificationSession.Field()
+    sync_didit_verification_session = SyncDiditVerificationSession.Field()
     request_identity_upload = RequestIdentityUpload.Field()
     submit_identity_verification_s3 = SubmitIdentityVerificationS3.Field()
     # BankInfo proof uploads removed; use integrated payout proof in ID verification
@@ -4752,6 +4841,3 @@ class Mutation(EmployeeMutations, graphene.ObjectType):
 
     # Trader Premium upgrade (verification level 2) — camelCase only
     requestPremiumUpgrade = RequestPremiumUpgrade.Field()
-
-
-

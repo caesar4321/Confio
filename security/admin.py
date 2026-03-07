@@ -23,6 +23,7 @@ class IdentityVerificationAdmin(admin.ModelAdmin):
         'risk_score_badge', 'verified_at', 'created_at',
         'front_url_link', 'back_url_link', 'selfie_url_link', 'payout_url_link'
     )
+    list_display_links = ('verified_name',)
     list_filter = (
         'status', 'document_type', 'document_issuing_country',
         'risk_score', 'created_at'
@@ -179,7 +180,7 @@ class IdentityVerificationAdmin(admin.ModelAdmin):
         for factor, details in obj.risk_factors.items():
             html += f'<li><strong>{factor}:</strong> {details}</li>'
         html += '</ul>'
-        return format_html(html)
+        return format_html("{}", mark_safe(html))
     risk_assessment_display.short_description = 'Risk Assessment'
     
     def document_preview(self, obj):
@@ -208,7 +209,7 @@ class IdentityVerificationAdmin(admin.ModelAdmin):
                 rows.append(f"<li>Payout ({label}): <a href='{url}' target='_blank'>{url}</a></li>")
         if not rows:
             return "No external links"
-        return format_html(f"<ul>{''.join(rows)}</ul>")
+        return format_html("{}", mark_safe(f"<ul>{''.join(rows)}</ul>"))
     external_document_links.short_description = 'External Document Links'
 
     # Context badge also shown in detail view
@@ -1559,4 +1560,3 @@ class IntegrityVerdictAdmin(admin.ModelAdmin):
             json.dumps(obj.raw_response, indent=2)
         )
     raw_response_display.short_description = 'Raw Response'
-

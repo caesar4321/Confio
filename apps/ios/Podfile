@@ -17,6 +17,9 @@ use_frameworks! :linkage => :static
 
 target 'Confio' do
   config = use_native_modules!
+
+  pod 'SdkReactNative', :path => '../node_modules/@didit-protocol/sdk-react-native'
+  pod 'DiditSDK', :podspec => 'https://raw.githubusercontent.com/didit-protocol/sdk-ios/main/DiditSDK.podspec'
   
   use_react_native!(
     :path => config[:reactNativePath],
