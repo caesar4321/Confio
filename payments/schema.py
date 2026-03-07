@@ -18,10 +18,10 @@ from security.utils import graphql_require_kyc, graphql_require_aml
 from payments.koywe_client import KoyweClient, KoyweConfigurationError, KoyweError
 from payments.koywe import (
     COUNTRY_METHODS,
-    MOCK_NETWORK_DISPLAY,
-    MOCK_NETWORK_SYMBOL,
-    MOCK_USDC_ALGORAND_NOTE,
-    MOCK_USDC_ALGORAND_SYMBOL,
+    RAMP_NETWORK_DISPLAY,
+    RAMP_NETWORK_SYMBOL,
+    RAMP_USDC_ALGORAND_NOTE,
+    RAMP_USDC_ALGORAND_SYMBOL,
     get_country_ramp_config,
     quote_ramp,
     sync_country_payment_methods,
@@ -395,7 +395,7 @@ class RampQuoteType(graphene.ObjectType):
         return self.asset_note
 
 
-class MockRampOrderType(graphene.ObjectType):
+class RampOrderType(graphene.ObjectType):
     success = graphene.Boolean()
     error = graphene.String()
     order_id = graphene.String()
@@ -466,37 +466,37 @@ class CreateRampOrder(graphene.Mutation):
         payment_method_code = graphene.String(required=True)
         bank_info_id = graphene.ID()
 
-    Output = MockRampOrderType
+    Output = RampOrderType
 
     def mutate(self, info, direction, amount, payment_method_code, country_code=None, fiat_currency=None, bank_info_id=None):
         user = getattr(info.context, "user", None)
         if not (user and getattr(user, 'is_authenticated', False)):
-            return MockRampOrderType(success=False, error='Authentication required')
+            return RampOrderType(success=False, error='Authentication required')
 
         resolved_country_code = _resolve_ramp_country_code(info, country_code)
         normalized_direction = (direction or '').strip().upper()
         if normalized_direction not in {'ON_RAMP', 'OFF_RAMP'}:
-            return MockRampOrderType(success=False, error='direction must be ON_RAMP or OFF_RAMP')
+            return RampOrderType(success=False, error='direction must be ON_RAMP or OFF_RAMP')
 
         try:
             decimal_amount = Decimal(str(amount))
         except (InvalidOperation, TypeError):
-            return MockRampOrderType(success=False, error='Invalid amount')
+            return RampOrderType(success=False, error='Invalid amount')
 
         if decimal_amount <= 0:
-            return MockRampOrderType(success=False, error='Amount must be greater than zero')
+            return RampOrderType(success=False, error='Amount must be greater than zero')
 
         current_account = _get_ramp_account_for_user(info, user)
         if not current_account:
-            return MockRampOrderType(success=False, error='No active account available for ramp operations')
+            return RampOrderType(success=False, error='No active account available for ramp operations')
 
         bank_info = None
         if normalized_direction == 'OFF_RAMP':
             if not bank_info_id:
-                return MockRampOrderType(success=False, error='A saved payout method is required')
+                return RampOrderType(success=False, error='A saved payout method is required')
             bank_info = _get_saved_bank_info(current_account=current_account, bank_info_id=bank_info_id)
             if not bank_info:
-                return MockRampOrderType(success=False, error='Saved payout method not found for the active account')
+                return RampOrderType(success=False, error='Saved payout method not found for the active account')
 
         client = KoyweClient()
         if not client.is_configured:
@@ -509,7 +509,7 @@ class CreateRampOrder(graphene.Mutation):
                     country_code=country_code,
                     fiat_currency=fiat_currency,
                 )
-            return MockRampOrderType(success=False, error='Koywe credentials are not configured on the server')
+            return RampOrderType(success=False, error='Koywe credentials are not configured on the server')
 
         try:
             result = client.create_ramp_order(
@@ -525,15 +525,15 @@ class CreateRampOrder(graphene.Mutation):
                 contact_profile=_get_koywe_contact_profile(user=user),
             )
         except KoyweConfigurationError as exc:
-            return MockRampOrderType(success=False, error=str(exc))
+            return RampOrderType(success=False, error=str(exc))
         except KoyweError as exc:
             logger.warning('Koywe ramp order failed: %s', exc)
-            return MockRampOrderType(success=False, error=str(exc))
+            return RampOrderType(success=False, error=str(exc))
         except Exception as exc:
             logger.exception('Unexpected Koywe ramp order failure')
-            return MockRampOrderType(success=False, error='Unexpected Koywe error while creating the order')
+            return RampOrderType(success=False, error='Unexpected Koywe error while creating the order')
 
-        return MockRampOrderType(
+        return RampOrderType(
             success=True,
             error=None,
             order_id=result.order_id,
@@ -559,34 +559,34 @@ class CreateMockRampOrder(graphene.Mutation):
         fiat_currency = graphene.String()
         payment_method_code = graphene.String(required=True)
 
-    Output = MockRampOrderType
+    Output = RampOrderType
 
     def mutate(self, info, direction, amount, payment_method_code, country_code=None, fiat_currency=None):
         resolved_country_code = _resolve_ramp_country_code(info, country_code)
         normalized_direction = (direction or "").strip().upper()
         if normalized_direction not in {"ON_RAMP", "OFF_RAMP"}:
-            return MockRampOrderType(success=False, error="direction must be ON_RAMP or OFF_RAMP")
+            return RampOrderType(success=False, error="direction must be ON_RAMP or OFF_RAMP")
 
         try:
             decimal_amount = Decimal(str(amount))
         except (InvalidOperation, TypeError):
-            return MockRampOrderType(success=False, error="Invalid amount")
+            return RampOrderType(success=False, error="Invalid amount")
 
         if decimal_amount <= 0:
-            return MockRampOrderType(success=False, error="Amount must be greater than zero")
+            return RampOrderType(success=False, error="Amount must be greater than zero")
 
         config = get_country_ramp_config(resolved_country_code)
         if not config:
-            return MockRampOrderType(success=False, error="Unsupported country for mock ramp")
+            return RampOrderType(success=False, error="Unsupported country for ramp")
 
         method = next((item for item in config["methods"] if item["code"] == payment_method_code), None)
         if not method:
-            return MockRampOrderType(success=False, error="Unsupported payment method for selected country")
+            return RampOrderType(success=False, error="Unsupported payment method for selected country")
 
         if normalized_direction == "ON_RAMP" and not method["supports_on_ramp"]:
-            return MockRampOrderType(success=False, error="Payment method does not support on-ramp")
+            return RampOrderType(success=False, error="Payment method does not support on-ramp")
         if normalized_direction == "OFF_RAMP" and not method["supports_off_ramp"]:
-            return MockRampOrderType(success=False, error="Payment method does not support off-ramp")
+            return RampOrderType(success=False, error="Payment method does not support off-ramp")
 
         quote = quote_ramp(
             direction=normalized_direction,
@@ -597,7 +597,7 @@ class CreateMockRampOrder(graphene.Mutation):
         order_id = f"mock-{normalized_direction.lower()}-{resolved_country_code.lower()}-{timezone.now().strftime('%Y%m%d%H%M%S%f')}"
         next_step = "SHOW_PAYMENT_INSTRUCTIONS" if normalized_direction == "ON_RAMP" else "WAIT_FOR_USDC_TRANSFER"
 
-        return MockRampOrderType(
+        return RampOrderType(
             success=True,
             error=None,
             order_id=order_id,
@@ -1206,11 +1206,11 @@ class Query(graphene.ObjectType):
         friend_user_id=graphene.ID(required=True),
         limit=graphene.Int()
     )
-    mock_ramp_availability = graphene.Field(
+    ramp_availability = graphene.Field(
         RampAvailabilityType,
         country_code=graphene.String(),
     )
-    mock_ramp_quote = graphene.Field(
+    ramp_quote = graphene.Field(
         RampQuoteType,
         direction=graphene.String(required=True),
         amount=graphene.String(required=True),
@@ -1363,7 +1363,7 @@ class Query(graphene.ObjectType):
             
         return queryset
 
-    def resolve_mock_ramp_availability(self, info, country_code=None):
+    def resolve_ramp_availability(self, info, country_code=None):
         resolved_country_code = _resolve_ramp_country_code(info, country_code)
         config = get_country_ramp_config(resolved_country_code)
         if not config:
@@ -1371,7 +1371,7 @@ class Query(graphene.ObjectType):
         koywe_client = KoyweClient()
         dynamic_limits = {}
         try:
-            dynamic_limits = koywe_client.get_dynamic_ramp_limits(
+            dynamic_limits = koywe_client.get_public_ramp_limits(
                 fiat_symbol=config["fiat_currency"],
             )
         except KoyweError as exc:
@@ -1409,17 +1409,16 @@ class Query(graphene.ObjectType):
             off_ramp_enabled=bool(off_ramp_methods),
             on_ramp_methods=on_ramp_methods,
             off_ramp_methods=off_ramp_methods,
-            token_symbol=MOCK_USDC_ALGORAND_SYMBOL,
-            network_symbol=MOCK_NETWORK_SYMBOL,
-            network_display=MOCK_NETWORK_DISPLAY,
-            asset_note=MOCK_USDC_ALGORAND_NOTE,
+            token_symbol=RAMP_USDC_ALGORAND_SYMBOL,
+            network_symbol=RAMP_NETWORK_SYMBOL,
+            network_display=RAMP_NETWORK_DISPLAY,
+            asset_note=RAMP_USDC_ALGORAND_NOTE,
             quote_disclaimer=(
-                "Mock Koywe quote. Rates and fees are estimated until real Koywe credentials "
-                "and Algorand support are connected."
+                "Cotización estimada con datos de Koywe. Se enruta por Solana hasta conectar Algorand."
             ),
         )
 
-    def resolve_mock_ramp_quote(self, info, direction, amount, country_code=None, fiat_currency=None):
+    def resolve_ramp_quote(self, info, direction, amount, country_code=None, fiat_currency=None):
         resolved_country_code = _resolve_ramp_country_code(info, country_code)
         normalized_direction = (direction or "").strip().upper()
         if normalized_direction not in {"ON_RAMP", "OFF_RAMP"}:

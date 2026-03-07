@@ -27,8 +27,8 @@ import { AddBankInfoModal } from '../components/AddBankInfoModal';
 import {
   GET_ME,
   GET_MY_BALANCES,
-  GET_MOCK_RAMP_AVAILABILITY,
-  GET_MOCK_RAMP_QUOTE,
+  GET_RAMP_AVAILABILITY,
+  GET_RAMP_QUOTE,
   GET_MY_KYC_STATUS,
   GET_MY_PERSONAL_KYC_STATUS,
   GET_USER_BANK_ACCOUNTS,
@@ -37,6 +37,7 @@ import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
 import { getCountryByIso } from '../utils/countries';
 import { Gradient } from '../components/common/Gradient';
 import { CREATE_RAMP_ORDER } from '../apollo/mutations';
+import { biometricAuthService } from '../services/biometricAuthService';
 import { SellScreen as LegacyGuardarianSellScreen } from './LegacyGuardarianSellScreen';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'Sell'>;
@@ -181,7 +182,7 @@ export const SellScreen = () => {
     data: availabilityData,
     loading: availabilityLoading,
     refetch: refetchAvailability,
-  } = useQuery(GET_MOCK_RAMP_AVAILABILITY, {
+  } = useQuery(GET_RAMP_AVAILABILITY, {
     variables: { countryCode },
     fetchPolicy: 'cache-and-network',
     skip: !isKoyweCountry,
@@ -194,7 +195,7 @@ export const SellScreen = () => {
     fetchPolicy: 'cache-and-network',
   });
 
-  const availability = availabilityData?.mockRampAvailability;
+  const availability = availabilityData?.rampAvailability;
   const methods: RampMethod[] = availability?.offRampMethods || [];
   const derivedCountryTuple = useMemo(() => getCountryByIso(countryCode), [countryCode]);
   const fiatCurrency = availability?.fiatCurrency || 'USD';
@@ -203,7 +204,7 @@ export const SellScreen = () => {
   const parsedAmount = Number((amount || '').replace(',', '.'));
   const quoteEnabled = Number.isFinite(parsedAmount) && parsedAmount > 0 && !!availability?.countryCode;
 
-  const { data: quoteData, loading: quoteLoading } = useQuery(GET_MOCK_RAMP_QUOTE, {
+  const { data: quoteData, loading: quoteLoading } = useQuery(GET_RAMP_QUOTE, {
     variables: {
       direction: 'OFF_RAMP',
       amount: String(parsedAmount || ''),
@@ -214,7 +215,7 @@ export const SellScreen = () => {
     fetchPolicy: 'cache-and-network',
   });
 
-  const quote = quoteData?.mockRampQuote;
+  const quote = quoteData?.rampQuote;
   const quoteHeadline = quote ? `Recibes aprox. ${formatMoney(quote.amountOut, fiatCurrency)}` : '';
   const quoteRateLine = quote ? `1 cUSD = ${formatRate(quote.exchangeRate, fiatCurrency)}` : '';
   const [createRampOrder] = useMutation(CREATE_RAMP_ORDER);
@@ -325,8 +326,56 @@ export const SellScreen = () => {
     setStep('review');
   };
 
-  const handleConfirm = () => {
+  const requestCriticalAuth = async () => {
+    const authMessage = parsedAmount > 0
+      ? `Autoriza el retiro de ${parsedAmount.toFixed(2)} cUSD`
+      : 'Autoriza este retiro';
+
+    let authenticated = await biometricAuthService.authenticate(authMessage, true, true);
+    if (authenticated) {
+      return true;
+    }
+
+    const lockout = biometricAuthService.isLockout();
+    if (lockout) {
+      Alert.alert(
+        'Biometría bloqueada',
+        'Desbloquea tu dispositivo con passcode y vuelve a intentar.',
+        [{ text: 'OK', style: 'default' }],
+      );
+      return false;
+    }
+
+    const shouldRetry = await new Promise<boolean>((resolve) => {
+      Alert.alert(
+        'Autenticación requerida',
+        'Debes autenticarte para confirmar este retiro.',
+        [
+          { text: 'Cancelar', style: 'cancel', onPress: () => resolve(false) },
+          { text: 'Reintentar', onPress: () => resolve(true) },
+        ],
+      );
+    });
+
+    if (!shouldRetry) {
+      return false;
+    }
+
+    authenticated = await biometricAuthService.authenticate(authMessage, true, true);
+    if (!authenticated) {
+      Alert.alert('No autenticado', 'No pudimos validar tu identidad. Intenta de nuevo en unos segundos.');
+      return false;
+    }
+
+    return true;
+  };
+
+  const handleConfirm = async () => {
     if (!selectedMethod || !selectedSavedMethod || !quote) {
+      return;
+    }
+    const authenticated = await requestCriticalAuth();
+    if (!authenticated) {
       return;
     }
 

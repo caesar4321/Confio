@@ -6,13 +6,13 @@ from p2p_exchange.models import P2PPaymentMethod
 from users.models import Country
 
 
-MOCK_USDC_ALGORAND_SYMBOL = "USDC-a"
-MOCK_USDC_ALGORAND_NOTE = (
-    "Mock USDC-a flow: we currently route through USDC on Solana. "
-    "Swap this to real USDC on Algorand once Koywe supports Algorand."
+RAMP_USDC_ALGORAND_SYMBOL = "USDC-a"
+RAMP_USDC_ALGORAND_NOTE = (
+    "USDC-a todavía se enruta por USDC en Solana. "
+    "Cámbialo a USDC en Algorand cuando Koywe soporte Algorand."
 )
-MOCK_NETWORK_SYMBOL = "USDC Solana"
-MOCK_NETWORK_DISPLAY = "Solana"
+RAMP_NETWORK_SYMBOL = "USDC Solana"
+RAMP_NETWORK_DISPLAY = "Solana"
 
 
 COUNTRY_METHODS = {
@@ -408,13 +408,13 @@ def quote_ramp(*, direction: str, amount: Decimal, country_code: str, fiat_curre
         amount_out = gross_usdc - fee_usdc - network_fee_usdc
         fee_amount = (amount * fee_percent).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
         network_fee_amount = network_fee_fiat.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
-        total_change_display = f"{_fmt(amount)} {fiat} -> {_fmt(amount_out)} {MOCK_USDC_ALGORAND_SYMBOL}"
+        total_change_display = f"{_fmt(amount)} {fiat} -> {_fmt(amount_out)} {RAMP_USDC_ALGORAND_SYMBOL}"
     else:
         gross_fiat = amount * rate
         fee_amount = (gross_fiat * fee_percent).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
         network_fee_amount = network_fee_fiat.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
         amount_out = gross_fiat - fee_amount - network_fee_amount
-        total_change_display = f"{_fmt(amount)} {MOCK_USDC_ALGORAND_SYMBOL} -> {_fmt(amount_out)} {fiat}"
+        total_change_display = f"{_fmt(amount)} {RAMP_USDC_ALGORAND_SYMBOL} -> {_fmt(amount_out)} {fiat}"
 
     return {
         "direction": direction,
@@ -427,12 +427,12 @@ def quote_ramp(*, direction: str, amount: Decimal, country_code: str, fiat_curre
         "fee_currency": fiat,
         "network_fee_amount": network_fee_amount,
         "network_fee_currency": fiat,
-        "rate_display": f"1 {MOCK_USDC_ALGORAND_SYMBOL} ~= {_fmt(rate)} {fiat}",
+        "rate_display": f"1 {RAMP_USDC_ALGORAND_SYMBOL} ~= {_fmt(rate)} {fiat}",
         "total_change_display": total_change_display,
-        "token_symbol": MOCK_USDC_ALGORAND_SYMBOL,
-        "network_symbol": MOCK_NETWORK_SYMBOL,
-        "network_display": MOCK_NETWORK_DISPLAY,
-        "asset_note": MOCK_USDC_ALGORAND_NOTE,
+        "token_symbol": RAMP_USDC_ALGORAND_SYMBOL,
+        "network_symbol": RAMP_NETWORK_SYMBOL,
+        "network_display": RAMP_NETWORK_DISPLAY,
+        "asset_note": RAMP_USDC_ALGORAND_NOTE,
     }
 
 

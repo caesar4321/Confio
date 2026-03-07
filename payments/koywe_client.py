@@ -136,6 +136,28 @@ class KoyweClient:
         cache.set(cache_key, result, timeout=_RAMP_LIMITS_CACHE_TTL)
         return result
 
+    def get_public_ramp_limits(self, *, fiat_symbol: str, crypto_symbol: str | None = None) -> dict[str, Decimal]:
+        normalized_fiat = (fiat_symbol or '').strip().upper()
+        normalized_crypto = (crypto_symbol or self.crypto_symbol or '').strip()
+        cache_key = f'koywe:public-ramp-limits:{normalized_fiat}:{normalized_crypto.replace(" ", "_")}'
+        cached = cache.get(cache_key)
+        if cached:
+            return cached
+
+        pair_limits = self._get_pair_limits(
+            fiat_symbol=normalized_fiat,
+            crypto_symbol=normalized_crypto,
+        )
+        if not pair_limits:
+            raise KoyweError(f'Koywe pair limits not found for {normalized_fiat} / {normalized_crypto}')
+
+        result = {
+            'on_ramp_min_amount': Decimal(str(pair_limits['min'])),
+            'on_ramp_max_amount': Decimal(str(pair_limits['max'])),
+        }
+        cache.set(cache_key, result, timeout=_RAMP_LIMITS_CACHE_TTL)
+        return result
+
     def _token_cache_key(self, email: str | None) -> str:
         return f'koywe:token:{email or "default"}'
 

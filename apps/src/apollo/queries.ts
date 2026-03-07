@@ -1342,9 +1342,9 @@ export const GET_P2P_PAYMENT_METHODS = gql`
   }
 `;
 
-export const GET_MOCK_RAMP_AVAILABILITY = gql`
-  query GetMockRampAvailability($countryCode: String) {
-    mockRampAvailability(countryCode: $countryCode) {
+export const GET_RAMP_AVAILABILITY = gql`
+  query GetRampAvailability($countryCode: String) {
+    rampAvailability(countryCode: $countryCode) {
       countryCode
       countryName
       fiatCurrency
@@ -1397,14 +1397,14 @@ export const GET_MOCK_RAMP_AVAILABILITY = gql`
   }
 `;
 
-export const GET_MOCK_RAMP_QUOTE = gql`
-  query GetMockRampQuote(
+export const GET_RAMP_QUOTE = gql`
+  query GetRampQuote(
     $direction: String!
     $amount: String!
     $countryCode: String
     $fiatCurrency: String
   ) {
-    mockRampQuote(
+    rampQuote(
       direction: $direction
       amount: $amount
       countryCode: $countryCode

@@ -23,8 +23,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { useCountry } from '../contexts/CountryContext';
 import {
   GET_ME,
-  GET_MOCK_RAMP_AVAILABILITY,
-  GET_MOCK_RAMP_QUOTE,
+  GET_RAMP_AVAILABILITY,
+  GET_RAMP_QUOTE,
   GET_MY_KYC_STATUS,
   GET_MY_PERSONAL_KYC_STATUS,
 } from '../apollo/queries';
@@ -32,6 +32,7 @@ import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
 import { getCountryByIso } from '../utils/countries';
 import { Gradient } from '../components/common/Gradient';
 import { CREATE_RAMP_ORDER } from '../apollo/mutations';
+import { biometricAuthService } from '../services/biometricAuthService';
 import LegacyGuardarianTopUpScreen from './LegacyGuardarianTopUpScreen';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'TopUp'>;
@@ -145,13 +146,13 @@ const TopUpScreen = () => {
   const { data: meData } = useQuery(GET_ME);
   const { data: kycData } = useQuery(GET_MY_KYC_STATUS);
   const { data: personalKycData } = useQuery(GET_MY_PERSONAL_KYC_STATUS);
-  const { data: availabilityData, loading: availabilityLoading } = useQuery(GET_MOCK_RAMP_AVAILABILITY, {
+  const { data: availabilityData, loading: availabilityLoading } = useQuery(GET_RAMP_AVAILABILITY, {
     variables: { countryCode },
     fetchPolicy: 'cache-and-network',
     skip: !isKoyweCountry,
   });
 
-  const availability = availabilityData?.mockRampAvailability;
+  const availability = availabilityData?.rampAvailability;
   const methods: RampMethod[] = availability?.onRampMethods || [];
   const derivedCountryTuple = useMemo(() => getCountryByIso(countryCode), [countryCode]);
   const fiatCurrency = availability?.fiatCurrency || 'USD';
@@ -160,7 +161,7 @@ const TopUpScreen = () => {
   const parsedAmount = Number((amount || '').replace(',', '.'));
   const quoteEnabled = Number.isFinite(parsedAmount) && parsedAmount > 0 && !!availability?.countryCode;
 
-  const { data: quoteData, loading: quoteLoading } = useQuery(GET_MOCK_RAMP_QUOTE, {
+  const { data: quoteData, loading: quoteLoading } = useQuery(GET_RAMP_QUOTE, {
     variables: {
       direction: 'ON_RAMP',
       amount: String(parsedAmount || ''),
@@ -171,7 +172,7 @@ const TopUpScreen = () => {
     fetchPolicy: 'cache-and-network',
   });
 
-  const quote = quoteData?.mockRampQuote;
+  const quote = quoteData?.rampQuote;
   const quoteHeadline = quote ? `Recibes aprox. ${formatMoney(quote.amountOut, 'cUSD')}` : '';
   const quoteRateLine = quote ? `1 cUSD = ${formatRate(quote.exchangeRate, fiatCurrency)}` : '';
   const [createRampOrder] = useMutation(CREATE_RAMP_ORDER);
@@ -243,8 +244,56 @@ const TopUpScreen = () => {
     setStep('review');
   };
 
-  const handleConfirm = () => {
+  const requestCriticalAuth = async () => {
+    const authMessage = parsedAmount > 0
+      ? `Autoriza la compra de ${parsedAmount.toFixed(2)} cUSD`
+      : 'Autoriza esta compra';
+
+    let authenticated = await biometricAuthService.authenticate(authMessage, true, true);
+    if (authenticated) {
+      return true;
+    }
+
+    const lockout = biometricAuthService.isLockout();
+    if (lockout) {
+      Alert.alert(
+        'Biometría bloqueada',
+        'Desbloquea tu dispositivo con passcode y vuelve a intentar.',
+        [{ text: 'OK', style: 'default' }],
+      );
+      return false;
+    }
+
+    const shouldRetry = await new Promise<boolean>((resolve) => {
+      Alert.alert(
+        'Autenticación requerida',
+        'Debes autenticarte para confirmar esta compra.',
+        [
+          { text: 'Cancelar', style: 'cancel', onPress: () => resolve(false) },
+          { text: 'Reintentar', onPress: () => resolve(true) },
+        ],
+      );
+    });
+
+    if (!shouldRetry) {
+      return false;
+    }
+
+    authenticated = await biometricAuthService.authenticate(authMessage, true, true);
+    if (!authenticated) {
+      Alert.alert('No autenticado', 'No pudimos validar tu identidad. Intenta de nuevo en unos segundos.');
+      return false;
+    }
+
+    return true;
+  };
+
+  const handleConfirm = async () => {
     if (!selectedMethod || !quote) {
+      return;
+    }
+    const authenticated = await requestCriticalAuth();
+    if (!authenticated) {
       return;
     }
 
