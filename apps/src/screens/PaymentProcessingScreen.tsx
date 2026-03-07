@@ -19,6 +19,8 @@ import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { colors } from '../config/theme';
 // Removed GET_INVOICES and AccountManager in WS-only flow
 import { biometricAuthService } from '../services/biometricAuthService';
+import { useAuth } from '../contexts/AuthContext';
+import { getSupportCopy } from '../utils/supportMessaging';
 
 type PaymentProcessingRouteProp = RouteProp<{
   PaymentProcessing: {
@@ -43,6 +45,8 @@ const { width } = Dimensions.get('window');
 export const PaymentProcessingScreen = () => {
   const navigation = useNavigation();
   const route = useRoute<PaymentProcessingRouteProp>();
+  const { userProfile } = useAuth();
+  const supportCopy = getSupportCopy(userProfile?.phoneCountry);
   const [currentStep, setCurrentStep] = useState(0);
   const [isComplete, setIsComplete] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
@@ -961,7 +965,7 @@ export const PaymentProcessingScreen = () => {
                 <Text style={styles.infoTitle}>¿Sabías que...?</Text>
                 <Text style={styles.infoText}>
                   Confío cubre las comisiones de red para que puedas transferir dinero completamente gratis.
-                  ¡Apoyamos a la comunidad venezolana! 🇻🇪
+                  {supportCopy.processingLine}
                 </Text>
               </View>
             </View>

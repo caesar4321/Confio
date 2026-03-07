@@ -19,6 +19,7 @@ import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { colors } from '../config/theme';
 import { formatLocalDate, formatLocalTime } from '../utils/dateUtils';
 import { useAuth } from '../contexts/AuthContext';
+import { getSupportCopy } from '../utils/supportMessaging';
 
 type PaymentSuccessRouteProp = RouteProp<{
   PaymentSuccess: {
@@ -51,6 +52,7 @@ export const PaymentSuccessScreen = () => {
   const [copied, setCopied] = useState(false);
   const [showTechnical, setShowTechnical] = useState(false);
   const { userProfile, profileData } = useAuth();
+  const supportCopy = getSupportCopy(userProfile?.phoneCountry);
 
   // Helper function to format currency for display
   const formatCurrency = (currency: string): string => {
@@ -311,7 +313,7 @@ export const PaymentSuccessScreen = () => {
                 <Text style={styles.valueHighlightText}>
                   💡 <Text style={styles.valueBold}>Confío: 0% para clientes, solo 0.9% para comerciantes</Text>{'\n'}
                   vs. tarjetas tradicionales <Text style={styles.valueBold}>(2.5-3.5% para comerciantes)</Text>{'\n'}
-                  Apoyamos a los argentinos 🇦🇷 con un ecosistema justo
+                  {supportCopy.ecosystemLine}
                 </Text>
               </View>
             </View>

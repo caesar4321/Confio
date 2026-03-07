@@ -9,6 +9,7 @@ import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useAuth } from '../contexts/AuthContext';
+import { getSupportCopy } from '../utils/supportMessaging';
 
 const colors = {
   primary: '#34D399', // emerald-400
@@ -69,6 +70,7 @@ export const SendToFriendScreen = () => {
   // Safe area handled with SafeAreaView
   const { formatNumber } = useNumberFormat();
   const { userProfile } = useAuth();
+  const supportCopy = getSupportCopy(userProfile?.phoneCountry);
 
   const friend: Friend = (route.params as any)?.friend || { name: 'Friend', avatar: 'F', isOnConfio: true, phone: '' };
 
@@ -337,8 +339,8 @@ export const SendToFriendScreen = () => {
             <View style={styles.valueHighlightBox}>
               <Text style={styles.valueHighlightText}>
                 💡 <Text style={styles.bold}>Confío: 0% comisión</Text>{'\n'}
-                vs. remesadoras tradicionales <Text style={styles.bold}>(5%-20%)</Text>{'\n'}
-                Apoyamos a los argentinos 🇦🇷 con transferencias gratuitas
+                vs. transferencias internacionales y remesadoras tradicionales <Text style={styles.bold}>(5%-20%)</Text>{'\n'}
+                {supportCopy.transferLine}
               </Text>
             </View>
           </View>

@@ -19,6 +19,8 @@ import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { colors } from '../config/theme';
 import { useMutation } from '@apollo/client';
 import { GET_INVOICE } from '../apollo/queries';
+import { useAuth } from '../contexts/AuthContext';
+import { getSupportCopy } from '../utils/supportMessaging';
 
 const { width } = Dimensions.get('window');
 
@@ -85,6 +87,8 @@ type BusinessPaymentSuccessRouteProp = RouteProp<{
 export const BusinessPaymentSuccessScreen = () => {
   const navigation = useNavigation();
   const route = useRoute<BusinessPaymentSuccessRouteProp>();
+  const { userProfile } = useAuth();
+  const supportCopy = getSupportCopy(userProfile?.phoneCountry);
   const [copied, setCopied] = useState(false);
   const [showTechnical, setShowTechnical] = useState(false);
   const [displayCustomerName, setDisplayCustomerName] = useState<string>('Cliente');
@@ -411,7 +415,7 @@ export const BusinessPaymentSuccessScreen = () => {
                 <Text style={[styles.comparisonText, { color: isCUSD ? '#065F46' : '#5B21B6' }]}>
                   💡 <Text style={styles.bold}>Confío: 0.9% para comerciantes</Text>
                   {'\n'}vs. tarjetas tradicionales <Text style={styles.bold}>(2.5-3.5%)</Text>
-                  {'\n'}Apoyamos a los comerciantes argentinos 🇦🇷
+                  {'\n'}{supportCopy.merchantLine}
                 </Text>
               </View>
             </View>

@@ -22,6 +22,8 @@ import { colors } from '../config/theme';
 import { formatNumber } from '../utils/numberFormatting';
 import { useMutation } from '@apollo/client';
 import { GET_INVOICE } from '../apollo/queries';
+import { useAuth } from '../contexts/AuthContext';
+import { getSupportCopy } from '../utils/supportMessaging';
 
 type PaymentConfirmationRouteProp = RouteProp<{
   PaymentConfirmation: {
@@ -66,6 +68,8 @@ export const PaymentConfirmationScreen = () => {
   const navigation = useNavigation();
   const route = useRoute<PaymentConfirmationRouteProp>();
   const { activeAccount } = useAccount();
+  const { userProfile } = useAuth();
+  const supportCopy = getSupportCopy(userProfile?.phoneCountry);
   const [isProcessing, setIsProcessing] = useState(false);
   const [prepared, setPrepared] = useState<any | null>(null);
   const [prepareError, setPrepareError] = useState<string | null>(null);
@@ -663,7 +667,7 @@ export const PaymentConfirmationScreen = () => {
                 <Text style={styles.valueHighlightText}>
                   💡 Confío: 0% para clientes, solo 0.9% para comerciantes{'\n'}
                   vs. tarjetas tradicionales (2.5-3.5% para comerciantes){'\n'}
-                  Apoyamos a los argentinos 🇦🇷 con un ecosistema justo
+                  {supportCopy.ecosystemLine}
                 </Text>
               </View>
             </View>

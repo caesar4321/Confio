@@ -32,6 +32,7 @@ import { useContactNameSync } from '../hooks/useContactName';
 import { getPreferredDisplayName, getPreferredSecondaryLine } from '../utils/contactDisplay';
 import { SHARE_LINKS } from '../config/shareLinks';
 import { useAuth } from '../contexts/AuthContext';
+import { getSupportCopy } from '../utils/supportMessaging';
 
 type TransactionDetailScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 type TransactionDetailScreenRouteProp = RouteProp<MainStackParamList, 'TransactionDetail'>;
@@ -162,6 +163,7 @@ export const TransactionDetailScreen = () => {
   const [copied, setCopied] = useState('');
   const [showBlockchainDetails, setShowBlockchainDetails] = useState(false);
   const { userProfile } = useAuth();
+  const supportCopy = getSupportCopy(userProfile?.phoneCountry);
   const styles = StyleSheet.create({
     container: {
       flex: 1,
@@ -2519,8 +2521,8 @@ export const TransactionDetailScreen = () => {
                 <View style={styles.valueHighlightBox}>
                   <Text style={styles.valueHighlightText}>
                     💡 <Text style={styles.bold}>Confío: 0% comisión</Text>{'\n'}
-                    vs. remesadoras tradicionales <Text style={styles.bold}>(5%-20%)</Text>{'\n'}
-                    Apoyamos a los argentinos 🇦🇷 con transferencias gratuitas
+                    vs. transferencias internacionales y remesadoras tradicionales <Text style={styles.bold}>(5%-20%)</Text>{'\n'}
+                    {supportCopy.transferLine}
                   </Text>
                 </View>
               </View>
@@ -2530,7 +2532,7 @@ export const TransactionDetailScreen = () => {
           {/* Merchant Support Message for Payments */}
           {currentTx.type === 'payment' && (
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>Apoyamos negocios argentinos</Text>
+              <Text style={styles.cardTitle}>{supportCopy.merchantTitle}</Text>
               <View style={styles.valuePropositionOuter}>
                 <View style={styles.valueRow}>
                   <Icon name="shopping-bag" size={20} color={colors.secondary} style={styles.valueIcon} />
@@ -2543,7 +2545,7 @@ export const TransactionDetailScreen = () => {
                   <Text style={styles.valueHighlightText}>
                     💡 <Text style={styles.bold}>Confío: 0.9% para comerciantes</Text>{'\n'}
                     vs. tarjetas y POS tradicionales <Text style={styles.bold}>(3%–8%)</Text>{'\n'}
-                    Apoyamos a los comerciantes argentinos 🇦🇷
+                    {supportCopy.merchantLine}
                   </Text>
                 </View>
               </View>

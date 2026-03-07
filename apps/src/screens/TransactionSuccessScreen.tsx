@@ -6,6 +6,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import { useFocusEffect } from '@react-navigation/native';
 import { SHARE_LINKS } from '../config/shareLinks';
 import { useAuth } from '../contexts/AuthContext';
+import { getSupportCopy } from '../utils/supportMessaging';
 
 const colors = {
   primary: '#34D399', // emerald-400
@@ -160,6 +161,7 @@ export const TransactionSuccessScreen = () => {
   };
 
   const { userProfile } = useAuth();
+  const supportCopy = getSupportCopy(userProfile?.phoneCountry);
 
   const handleShareInvitation = async () => {
     try {
@@ -513,8 +515,8 @@ export const TransactionSuccessScreen = () => {
               <View style={styles.valueHighlight}>
                 <Text style={styles.valueHighlightText}>
                   💡 <Text style={styles.valueBold}>Confío: 0% comisión</Text>{'\n'}
-                  vs. remesadoras tradicionales <Text style={styles.valueBold}>(5%-20%)</Text>{'\n'}
-                  Apoyamos a los argentinos 🇦🇷 con transferencias gratuitas
+                  vs. transferencias internacionales y remesadoras tradicionales <Text style={styles.valueBold}>(5%-20%)</Text>{'\n'}
+                  {supportCopy.transferLine}
                 </Text>
               </View>
             </View>

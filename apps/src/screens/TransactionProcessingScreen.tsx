@@ -17,6 +17,8 @@ import * as msgpack from 'algorand-msgpack';
 import { Buffer } from 'buffer';
 import { biometricAuthService } from '../services/biometricAuthService';
 import { gql } from '@apollo/client';
+import { useAuth } from '../contexts/AuthContext';
+import { getSupportCopy } from '../utils/supportMessaging';
 
 const BUILD_AUTO_SWAP_TRANSACTIONS = gql`
   mutation BuildAutoSwapTransactions($inputAssetType: String!, $amount: String!) {
@@ -101,6 +103,8 @@ export const TransactionProcessingScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
   const { activeAccount } = useAccount();
+  const { userProfile } = useAuth();
+  const supportCopy = getSupportCopy(userProfile?.phoneCountry);
   // const insets = useSafeAreaInsets();
 
   const transactionData: TransactionData = (route.params as any)?.transactionData || {
@@ -971,7 +975,7 @@ export const TransactionProcessingScreen = () => {
               <Text style={styles.infoTitle}>¿Sabías que...?</Text>
               <Text style={styles.infoText}>
                 Confío cubre las comisiones de red para que puedas transferir dinero completamente gratis.
-                ¡Apoyamos a la comunidad venezolana! 🇻🇪
+                {supportCopy.processingLine}
               </Text>
             </View>
           </View>
