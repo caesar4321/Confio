@@ -7,6 +7,7 @@ from django.db import models
 from django.utils import timezone
 from django.contrib import messages
 from config.admin_mixins import EnhancedAdminMixin, BulkUpdateMixin, InlineCountMixin
+from payments.koywe import get_country_ramp_config, sync_country_payment_methods
 from .models import (
     P2PPaymentMethod, 
     P2POffer, 
@@ -233,17 +234,21 @@ class P2POfferAdmin(EnhancedAdminMixin, admin.ModelAdmin):
         
         # Add help text showing available payment methods for the country
         if obj and obj.country_code:
-            from .default_payment_methods import get_payment_methods_for_country
-            available_methods = get_payment_methods_for_country(obj.country_code)
-            method_names = [m['display_name'] for m in available_methods]
-            
-            form.base_fields['payment_methods'].help_text = (
-                f"Available payment methods for {obj.country_code}: {', '.join(method_names)}. "
-                f"Missing methods will be created automatically when you save."
-            )
+            config = get_country_ramp_config(obj.country_code)
+            if config and config['methods']:
+                sync_country_payment_methods(obj.country_code)
+                method_names = [m['display_name'] for m in config['methods']]
+                form.base_fields['payment_methods'].help_text = (
+                    f"Métodos Koywe disponibles para {obj.country_code}: {', '.join(method_names)}. "
+                    "Se sincronizan automáticamente desde el catálogo soportado."
+                )
+            else:
+                form.base_fields['payment_methods'].help_text = (
+                    f"Koywe no tiene métodos de pago configurados para {obj.country_code}."
+                )
         else:
             form.base_fields['payment_methods'].help_text = (
-                "Payment methods will be filtered based on the selected country code."
+                "Los métodos se filtran según el catálogo soportado por Koywe para el país seleccionado."
             )
             
         return form
@@ -260,24 +265,15 @@ class P2POfferAdmin(EnhancedAdminMixin, admin.ModelAdmin):
                     pass
             
             if obj and obj.country_code:
-                # Ensure all payment methods for this country exist in the database
-                from .default_payment_methods import get_payment_methods_for_country
-                available_methods = get_payment_methods_for_country(obj.country_code)
-                
-                for method_data in available_methods:
-                    from .models import P2PPaymentMethod
-                    P2PPaymentMethod.objects.get_or_create(
-                        name=method_data['name'],
-                        defaults={
-                            'display_name': method_data['display_name'],
-                            'icon': method_data['icon'],
-                            'is_active': method_data['is_active'],
-                        }
-                    )
-                
-                # Filter queryset to show only methods available for this country
-                method_names = [m['name'] for m in available_methods]
-                kwargs["queryset"] = P2PPaymentMethod.objects.filter(name__in=method_names)
+                config = get_country_ramp_config(obj.country_code)
+                if config and config['methods']:
+                    sync_country_payment_methods(obj.country_code)
+                    kwargs["queryset"] = P2PPaymentMethod.objects.filter(
+                        country_code=obj.country_code,
+                        is_active=True,
+                    ).order_by('display_order', 'display_name')
+                else:
+                    kwargs["queryset"] = P2PPaymentMethod.objects.none()
         
         return super().formfield_for_manytomany(db_field, request, **kwargs)
     

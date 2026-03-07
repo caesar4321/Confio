@@ -1342,6 +1342,94 @@ export const GET_P2P_PAYMENT_METHODS = gql`
   }
 `;
 
+export const GET_MOCK_RAMP_AVAILABILITY = gql`
+  query GetMockRampAvailability($countryCode: String) {
+    mockRampAvailability(countryCode: $countryCode) {
+      countryCode
+      countryName
+      fiatCurrency
+      onRampEnabled
+      offRampEnabled
+      tokenSymbol
+      networkSymbol
+      networkDisplay
+      assetNote
+      quoteDisclaimer
+      onRampMethods {
+        paymentMethodId
+        code
+        displayName
+        description
+        providerType
+        icon
+        requiresPhone
+        requiresEmail
+        requiresAccountNumber
+        requiresIdentification
+        supportsOnRamp
+        supportsOffRamp
+        fiatCurrency
+        onRampMinAmount
+        onRampMaxAmount
+        offRampMinAmount
+        offRampMaxAmount
+      }
+      offRampMethods {
+        paymentMethodId
+        code
+        displayName
+        description
+        providerType
+        icon
+        requiresPhone
+        requiresEmail
+        requiresAccountNumber
+        requiresIdentification
+        supportsOnRamp
+        supportsOffRamp
+        fiatCurrency
+        onRampMinAmount
+        onRampMaxAmount
+        offRampMinAmount
+        offRampMaxAmount
+      }
+    }
+  }
+`;
+
+export const GET_MOCK_RAMP_QUOTE = gql`
+  query GetMockRampQuote(
+    $direction: String!
+    $amount: String!
+    $countryCode: String
+    $fiatCurrency: String
+  ) {
+    mockRampQuote(
+      direction: $direction
+      amount: $amount
+      countryCode: $countryCode
+      fiatCurrency: $fiatCurrency
+    ) {
+      direction
+      countryCode
+      fiatCurrency
+      amountIn
+      amountOut
+      exchangeRate
+      feeAmount
+      feeCurrency
+      networkFeeAmount
+      networkFeeCurrency
+      rateDisplay
+      totalChangeDisplay
+      tokenSymbol
+      networkSymbol
+      networkDisplay
+      assetNote
+    }
+  }
+`;
+
 // P2P Exchange Mutations
 export const CREATE_P2P_OFFER = gql`
   mutation CreateP2POffer($input: CreateP2POfferInput!) {
@@ -1866,6 +1954,7 @@ export const GET_USER_BANK_ACCOUNTS = gql`
       phoneNumber
       email
       username
+      providerMetadata
       isDefault
       isPublic
       isVerified
@@ -1912,6 +2001,8 @@ export const GET_BANK_INFO = gql`
       identificationNumber
       phoneNumber
       email
+      username
+      providerMetadata
       isDefault
       isPublic
       isVerified
@@ -1938,6 +2029,7 @@ export const CREATE_BANK_INFO = gql`
     $username: String
     $accountType: String
     $identificationNumber: String
+    $providerMetadata: JSONString
     $isDefault: Boolean
   ) {
     createBankInfo(
@@ -1949,6 +2041,7 @@ export const CREATE_BANK_INFO = gql`
       username: $username
       accountType: $accountType
       identificationNumber: $identificationNumber
+      providerMetadata: $providerMetadata
       isDefault: $isDefault
     ) {
       success
@@ -1957,6 +2050,10 @@ export const CREATE_BANK_INFO = gql`
         id
         accountHolderName
         accountNumber
+        phoneNumber
+        email
+        username
+        providerMetadata
         accountType
         identificationNumber
         isDefault
@@ -1996,6 +2093,7 @@ export const UPDATE_BANK_INFO = gql`
     $username: String
     $accountType: String
     $identificationNumber: String
+    $providerMetadata: JSONString
     $isDefault: Boolean
   ) {
     updateBankInfo(
@@ -2008,6 +2106,7 @@ export const UPDATE_BANK_INFO = gql`
       username: $username
       accountType: $accountType
       identificationNumber: $identificationNumber
+      providerMetadata: $providerMetadata
       isDefault: $isDefault
     ) {
       success
@@ -2019,6 +2118,7 @@ export const UPDATE_BANK_INFO = gql`
         phoneNumber
         email
         username
+        providerMetadata
         accountType
         identificationNumber
         isDefault

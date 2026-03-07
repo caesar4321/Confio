@@ -1,525 +1,480 @@
-import React, { useMemo, useState, useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  SafeAreaView,
-  TouchableOpacity,
-  TextInput,
   ActivityIndicator,
   Alert,
-  ScrollView,
+  Linking,
   Platform,
-  Modal,
-  Animated,
-  Easing,
-  Image,
+  SafeAreaView,
+  ScrollView,
   StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
-import { Linking } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useMutation, useQuery } from '@apollo/client';
+
 import { MainStackParamList } from '../types/navigation';
-import GuardarianLogo from '../assets/svg/guardarian.svg';
 import { useAuth } from '../contexts/AuthContext';
-import { useAccount } from '../contexts/AccountContext';
 import { useCountry } from '../contexts/CountryContext';
-import { getCurrencyForCountry, getCurrencySymbol } from '../utils/currencyMapping';
-import { countries, getCountryByIso } from '../utils/countries';
-import { createGuardarianTransaction, fetchGuardarianFiatCurrencies, GuardarianFiatCurrency } from '../services/guardarianService';
-import { useCurrencyByCode } from '../hooks/useCurrency';
-import { getFlagForCurrency } from '../utils/currencyFlags';
-import { useMutation, gql } from '@apollo/client';
-import algorandService from '../services/algorandService';
-import { secureDeterministicWallet } from '../services/secureDeterministicWallet';
-import { oauthStorage } from '../services/oauthStorageService';
-import { apolloClient } from '../apollo/client';
-import PreFlightModal from '../components/PreFlightModal';
-
-
-// GraphQL mutation for USDC opt-in
-const OPT_IN_TO_USDC = gql`
-  mutation OptInToAsset($assetType: String!) {
-    optInToAssetByType(assetType: $assetType) {
-      success
-      error
-      alreadyOptedIn
-      requiresUserSignature
-      userTransaction
-      sponsorTransaction
-      groupId
-      assetId
-      assetName
-    }
-  }
-`;
+import {
+  GET_ME,
+  GET_MOCK_RAMP_AVAILABILITY,
+  GET_MOCK_RAMP_QUOTE,
+  GET_MY_KYC_STATUS,
+  GET_MY_PERSONAL_KYC_STATUS,
+} from '../apollo/queries';
+import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
+import { getCountryByIso } from '../utils/countries';
+import { Gradient } from '../components/common/Gradient';
+import { CREATE_RAMP_ORDER } from '../apollo/mutations';
+import LegacyGuardarianTopUpScreen from './LegacyGuardarianTopUpScreen';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'TopUp'>;
 
-const TopUpScreen = () => {
+type RampMethod = {
+  paymentMethodId?: string | null;
+  code: string;
+  displayName: string;
+  description: string;
+  providerType: string;
+  icon?: string | null;
+  requiresPhone: boolean;
+  requiresEmail: boolean;
+  requiresAccountNumber: boolean;
+  requiresIdentification: boolean;
+  supportsOnRamp: boolean;
+  supportsOffRamp: boolean;
+  fiatCurrency: string;
+  onRampMinAmount?: string | null;
+  onRampMaxAmount?: string | null;
+  offRampMinAmount?: string | null;
+  offRampMaxAmount?: string | null;
+};
 
+const colors = {
+  dark: '#111827',
+  textPrimary: '#1f2937',
+  textMuted: '#6b7280',
+  textLight: '#9ca3af',
+  border: '#e5e7eb',
+  background: '#f0fdf4',
+  surface: '#ffffff',
+  primary: '#059669',
+  primaryDark: '#047857',
+  primaryLight: '#d1fae5',
+  accent: '#3b82f6',
+  accentLight: '#dbeafe',
+  heroFrom: '#059669',
+  heroTo: '#34d399',
+};
+
+const currencyNames: Record<string, string> = {
+  COP: 'pesos colombianos',
+  ARS: 'pesos argentinos',
+  PEN: 'soles peruanos',
+  CLP: 'pesos chilenos',
+  MXN: 'pesos mexicanos',
+  BRL: 'reales brasileños',
+  UYU: 'pesos uruguayos',
+  BOB: 'bolivianos',
+  PYG: 'guaraníes',
+  VES: 'bolívares',
+  USD: 'dólares',
+  EUR: 'euros',
+};
+
+const friendlyCurrency = (code: string) => currencyNames[code] || code;
+const KOYWE_SUPPORTED_COUNTRIES = new Set(['AR', 'BO', 'BR', 'CL', 'CO', 'MX', 'PE', 'US']);
+
+const formatMoney = (value?: string | null, code?: string | null) => {
+  const parsed = Number(value || 0);
+  if (!Number.isFinite(parsed)) {
+    return '--';
+  }
+  return `${parsed.toLocaleString('es-AR', {
+    minimumFractionDigits: parsed >= 100 ? 0 : 2,
+    maximumFractionDigits: 2,
+  })} ${code || ''}`.trim();
+};
+
+const cleanDisplay = (text?: string | null): string => {
+  if (!text) return '';
+  return text.replace(/->/g, ' ').replace(/\u2192/g, ' ').replace(/\s{2,}/g, ' ').trim();
+};
+
+const formatRate = (value?: string | null, code?: string | null) => {
+  const parsed = Number(value || 0);
+  if (!Number.isFinite(parsed)) {
+    return '--';
+  }
+  return `${parsed.toLocaleString('es-AR', {
+    minimumFractionDigits: parsed >= 100 ? 2 : 4,
+    maximumFractionDigits: 4,
+  })} ${code || ''}`.trim();
+};
+
+const StepBadge = ({ number }: { number: number }) => (
+  <View style={styles.stepBadge}>
+    <Text style={styles.stepBadgeText}>{number}</Text>
+  </View>
+);
+
+const TopUpScreen = () => {
   const navigation = useNavigation<NavigationProp>();
   const { userProfile } = useAuth() as any;
-  const { activeAccount } = useAccount();
   const { selectedCountry, userCountry } = useCountry();
 
-  const derivedCurrencyCode = useMemo(() => {
-    let localCurrency = 'USD';
+  const [amount, setAmount] = useState('');
+  const [selectedMethodCode, setSelectedMethodCode] = useState<string | null>(null);
+  const [step, setStep] = useState<'form' | 'review'>('form');
+  const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
 
-    if (userProfile?.phoneCountry) {
-      const country = getCountryByIso(userProfile.phoneCountry);
-      if (country) localCurrency = getCurrencyForCountry(country);
-    } else if (selectedCountry) {
-      localCurrency = getCurrencyForCountry(selectedCountry);
-    } else if (userCountry) {
-      localCurrency = getCurrencyForCountry(userCountry);
-    }
-
-    // Check if the currency will be available from Guardarian
-    // If fiatOptions is loaded, check against it
-    // Otherwise, default to the local currency and let the API load handle it
-    return localCurrency;
+  const countryCode = useMemo(() => {
+    const selectedIso = selectedCountry?.[2];
+    const userIso = userCountry?.[2];
+    return userProfile?.phoneCountry || selectedIso || userIso || 'AR';
   }, [selectedCountry, userCountry, userProfile?.phoneCountry]);
 
-  const [amount, setAmount] = useState('');
-  const [currencyCode, setCurrencyCode] = useState<string>('USD');
-  const [loading, setLoading] = useState(false);
-  const [fiatOptions, setFiatOptions] = useState<GuardarianFiatCurrency[]>([]);
-  const [fiatLoading, setFiatLoading] = useState(false);
-  const [fiatError, setFiatError] = useState<string | null>(null);
-  const [showCurrencyNotAvailableHint, setShowCurrencyNotAvailableHint] = useState(false);
-  const [loadingMessage, setLoadingMessage] = useState('');
-  const [showPreFlightModal, setShowPreFlightModal] = useState(false);
+  const isKoyweCountry = KOYWE_SUPPORTED_COUNTRIES.has(countryCode);
 
-  // USDC opt-in mutation
-  const [optInToUsdc] = useMutation(OPT_IN_TO_USDC);
-
-  // Animation for loading spinner
-  const spinValue = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    if (loadingMessage) {
-      // Start spinning animation when loading
-      Animated.loop(
-        Animated.timing(spinValue, {
-          toValue: 1,
-          duration: 2000,
-          easing: Easing.linear,
-          useNativeDriver: true,
-        })
-      ).start();
-    } else {
-      // Reset animation when not loading
-      spinValue.setValue(0);
-    }
-  }, [loadingMessage]);
-
-  const spin = spinValue.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0deg', '360deg'],
+  const { data: meData } = useQuery(GET_ME);
+  const { data: kycData } = useQuery(GET_MY_KYC_STATUS);
+  const { data: personalKycData } = useQuery(GET_MY_PERSONAL_KYC_STATUS);
+  const { data: availabilityData, loading: availabilityLoading } = useQuery(GET_MOCK_RAMP_AVAILABILITY, {
+    variables: { countryCode },
+    fetchPolicy: 'cache-and-network',
+    skip: !isKoyweCountry,
   });
 
-  const algorandAddress = activeAccount?.algorandAddress || '';
-  const email = userProfile?.email || '';
+  const availability = availabilityData?.mockRampAvailability;
+  const methods: RampMethod[] = availability?.onRampMethods || [];
+  const derivedCountryTuple = useMemo(() => getCountryByIso(countryCode), [countryCode]);
+  const fiatCurrency = availability?.fiatCurrency || 'USD';
+  const countryFlag = derivedCountryTuple ? (derivedCountryTuple as readonly string[])[3] || '' : '';
+  const isKoyweMapped = isKoyweCountry && !!availability?.onRampEnabled && methods.length > 0;
+  const parsedAmount = Number((amount || '').replace(',', '.'));
+  const quoteEnabled = Number.isFinite(parsedAmount) && parsedAmount > 0 && !!availability?.countryCode;
 
-  const { formatAmount } = useCurrencyByCode(currencyCode || 'USD');
+  const { data: quoteData, loading: quoteLoading } = useQuery(GET_MOCK_RAMP_QUOTE, {
+    variables: {
+      direction: 'ON_RAMP',
+      amount: String(parsedAmount || ''),
+      countryCode: availability?.countryCode,
+      fiatCurrency,
+    },
+    skip: !isKoyweMapped || !quoteEnabled,
+    fetchPolicy: 'cache-and-network',
+  });
+
+  const quote = quoteData?.mockRampQuote;
+  const quoteHeadline = quote ? `Recibes aprox. ${formatMoney(quote.amountOut, 'cUSD')}` : '';
+  const quoteRateLine = quote ? `1 cUSD = ${formatRate(quote.exchangeRate, fiatCurrency)}` : '';
+  const [createRampOrder] = useMutation(CREATE_RAMP_ORDER);
+
+  const isVerified = useMemo(() => {
+    const candidates = [
+      personalKycData?.myPersonalKycStatus?.status,
+      kycData?.myKycStatus?.status,
+      meData?.me?.verificationStatus,
+    ]
+      .filter(Boolean)
+      .map((status: string) => status.toLowerCase());
+    return candidates.includes('verified') || meData?.me?.isIdentityVerified;
+  }, [
+    kycData?.myKycStatus?.status,
+    meData?.me?.isIdentityVerified,
+    meData?.me?.verificationStatus,
+    personalKycData?.myPersonalKycStatus?.status,
+  ]);
+
+  const selectedMethod = useMemo(
+    () => methods.find((method) => method.code === selectedMethodCode) || methods[0] || null,
+    [methods, selectedMethodCode],
+  );
+  const selectedMethodMin = Number(selectedMethod?.onRampMinAmount || 0);
+  const selectedMethodMax = Number(selectedMethod?.onRampMaxAmount || 0);
+  const isBelowTopUpMin = quoteEnabled && selectedMethodMin > 0 && parsedAmount < selectedMethodMin;
+  const isAboveTopUpMax = quoteEnabled && selectedMethodMax > 0 && parsedAmount > selectedMethodMax;
+  const topUpAmountError = isBelowTopUpMin
+    ? `El mínimo por operación es ${formatMoney(String(selectedMethodMin), fiatCurrency)}.`
+    : isAboveTopUpMax
+      ? `El máximo por operación es ${formatMoney(String(selectedMethodMax), fiatCurrency)}.`
+      : null;
 
   useEffect(() => {
-    // When fiat options load, check if derived currency is available
-    if (fiatOptions.length > 0) {
-      const availableTickers = fiatOptions.map(f => f.ticker);
-      if (availableTickers.includes(derivedCurrencyCode)) {
-        setCurrencyCode(derivedCurrencyCode);
-        setShowCurrencyNotAvailableHint(false);
-      } else {
-        // Fallback to USD if local currency not available
-        setCurrencyCode('USD');
-        setShowCurrencyNotAvailableHint(derivedCurrencyCode !== 'USD');
-      }
-    } else {
-      setCurrencyCode(derivedCurrencyCode);
-      setShowCurrencyNotAvailableHint(false);
+    if (!selectedMethodCode && methods.length > 0) {
+      setSelectedMethodCode(methods[0].code);
     }
-  }, [derivedCurrencyCode, fiatOptions]);
+  }, [methods, selectedMethodCode]);
 
-  useEffect(() => {
-    const loadFiats = async () => {
-      setFiatLoading(true);
-      setFiatError(null);
-      try {
-        const res = await fetchGuardarianFiatCurrencies();
-        setFiatOptions(res || []);
-      } catch (err: any) {
-        console.warn('Guardarian fiat load failed', err);
-        setFiatError('No pudimos cargar todas las monedas. Usa las sugeridas.');
-      } finally {
-        setFiatLoading(false);
-      }
-    };
-    loadFiats();
-  }, []);
-
-
-  const parseAmount = (value: string) => {
-    const normalized = value.replace(/,/g, '.').replace(/[^0-9.]/g, '');
-    const parsed = parseFloat(normalized);
-    return isFinite(parsed) ? parsed : NaN;
+  const openVerificationPrompt = () => {
+    Alert.alert(
+      'Verificación requerida',
+      'Antes de confirmar tu compra, necesitamos validar tu identidad.',
+      [
+        { text: 'Ahora no', style: 'cancel' },
+        { text: 'Verificar ahora', onPress: () => navigation.navigate('Verification') },
+      ],
+    );
   };
 
-  const translateGuardarianError = (errorMessage: string): string => {
-    // Pattern matching for dynamic amount messages
-    // e.g., "USD amount must be higher than 19.185 and lower than 29069"
-    const amountRangePattern = /(\w+)\s+amount\s+must\s+be\s+higher\s+than\s+([\d.,]+)\s+and\s+lower\s+than\s+([\d.,]+)/i;
-    const amountRangeMatch = errorMessage.match(amountRangePattern);
-    if (amountRangeMatch) {
-      const [, currency, min, max] = amountRangeMatch;
-      return `El monto en ${currency} debe ser mayor a ${min} y menor a ${max}.`;
+  const handleContinue = () => {
+    if (!selectedMethod) {
+      Alert.alert('Selecciona un método', 'Elige un medio de pago disponible para continuar.');
+      return;
     }
-
-    // Pattern for minimum amount
-    // e.g., "Amount must be at least 20"
-    const minAmountPattern = /amount\s+must\s+be\s+at\s+least\s+([\d.,]+)/i;
-    const minAmountMatch = errorMessage.match(minAmountPattern);
-    if (minAmountMatch) {
-      const [, min] = minAmountMatch;
-      return `El monto mínimo es ${min}.`;
+    if (!quoteEnabled || !quote) {
+      Alert.alert('Monto inválido', 'Ingresa un monto válido para ver la cotización.');
+      return;
     }
-
-    // Pattern for maximum amount
-    // e.g., "Amount must be less than 30000"
-    const maxAmountPattern = /amount\s+must\s+be\s+less\s+than\s+([\d.,]+)/i;
-    const maxAmountMatch = errorMessage.match(maxAmountPattern);
-    if (maxAmountMatch) {
-      const [, max] = maxAmountMatch;
-      return `El monto máximo es ${max}.`;
+    if (topUpAmountError) {
+      Alert.alert('Monto fuera de rango', topUpAmountError);
+      return;
     }
-
-    // Common Guardarian error messages translation
-    const errorTranslations: { [key: string]: string } = {
-      'amount is too low': 'El monto es demasiado bajo. Por favor ingresa un monto mayor.',
-      'amount is too high': 'El monto es demasiado alto. Por favor ingresa un monto menor.',
-      'invalid amount': 'El monto ingresado no es válido.',
-      'currency not supported': 'Esta moneda no está soportada actualmente.',
-      'country not supported': 'Lo sentimos, tu país no está soportado en este momento.',
-      'invalid email': 'El correo electrónico no es válido.',
-      'invalid address': 'La dirección de billetera no es válida.',
-      'minimum amount': 'El monto mínimo de recarga no se ha alcanzado.',
-      'maximum amount': 'Has excedido el monto máximo permitido.',
-      'transaction failed': 'La transacción falló. Por favor intenta nuevamente.',
-      'rate limit exceeded': 'Demasiadas solicitudes. Por favor espera unos minutos.',
-      'service unavailable': 'El servicio no está disponible temporalmente.',
-    };
-
-    const lowerError = errorMessage.toLowerCase();
-
-    // Check for partial matches
-    for (const [englishError, spanishError] of Object.entries(errorTranslations)) {
-      if (lowerError.includes(englishError.toLowerCase())) {
-        return spanishError;
-      }
+    if (!isVerified) {
+      openVerificationPrompt();
+      return;
     }
-
-    // Return original if no translation found
-    return errorMessage;
+    setStep('review');
   };
 
-  // Helper function to handle USDC asset opt-in
-  const handleUSDCOptIn = async (): Promise<boolean> => {
-    try {
-      setLoadingMessage('Configurando acceso a USDC...');
-      console.log('[TopUpScreen] Calling optInToAsset mutation for USDC...');
+  const handleConfirm = () => {
+    if (!selectedMethod || !quote) {
+      return;
+    }
 
-      const { data, errors } = await optInToUsdc({
-        variables: { assetType: 'USDC' }
-      });
-
-      if (errors) {
-        console.error('[TopUpScreen] GraphQL errors:', errors);
-        setLoadingMessage('');
-        return false;
-      }
-
-      console.log('[TopUpScreen] USDC opt-in mutation response:', data);
-
-      if (data?.optInToAssetByType?.alreadyOptedIn) {
-        console.log('[TopUpScreen] User already opted in to USDC');
-        setLoadingMessage('');
-        return true;
-      }
-
-      if (data?.optInToAssetByType?.success && data.optInToAssetByType.requiresUserSignature) {
-        const userTxn = data.optInToAssetByType.userTransaction;
-        const sponsorTxn = data.optInToAssetByType.sponsorTransaction;
-
-        console.log('[TopUpScreen] Signing and submitting USDC opt-in...');
-        const txId = await algorandService.signAndSubmitSponsoredTransaction(
-          userTxn,
-          sponsorTxn
-        );
-
-        if (txId) {
-          console.log('[TopUpScreen] Successfully opted in to USDC:', txId);
-          setLoadingMessage('');
-          return true;
-        } else {
-          console.error('[TopUpScreen] Failed to submit USDC opt-in transaction');
-          setLoadingMessage('');
-          return false;
+    setIsSubmittingOrder(true);
+    createRampOrder({
+      variables: {
+        direction: 'ON_RAMP',
+        amount: String(parsedAmount),
+        countryCode: availability?.countryCode,
+        fiatCurrency,
+        paymentMethodCode: selectedMethod.code,
+      },
+    })
+      .then(({ data }) => {
+        const result = data?.createRampOrder;
+        if (!result?.success) {
+          Alert.alert('No se pudo crear la orden', result?.error || 'Inténtalo nuevamente.');
+          return;
         }
-      } else {
-        console.error('[TopUpScreen] Failed to generate USDC opt-in transaction:', data?.optInToAssetByType?.error);
-        setLoadingMessage('');
-        return false;
-      }
-    } catch (error) {
-      console.error('[TopUpScreen] Error during USDC opt-in:', error);
-      setLoadingMessage('');
-      return false;
-    }
-  };
 
-  const handleStartTopUp = async () => {
-
-    if (!email || !algorandAddress) {
-      Alert.alert('Faltan datos', 'Necesitamos tu correo y dirección de Algorand para continuar.');
-      return;
-    }
-
-    const parsedAmount = parseAmount(amount);
-    if (!amount.trim() || isNaN(parsedAmount) || parsedAmount <= 0) {
-      Alert.alert('Monto inválido', 'Ingresa un monto mayor a 0.');
-      return;
-    }
-    // Ensure wallet is initialized before opting in (Critical for cold starts)
-    // Ensure wallet is initialized before opting in (Critical for cold starts)
-
-
-    // Check and opt-in to USDC before proceeding
-    const usdcOptInSuccess = await handleUSDCOptIn();
-    if (!usdcOptInSuccess) {
-      console.log('[TopUpScreen] USDC opt-in failed, stopping top-up flow');
-      return;
-    }
-
-    // Show PreFlightModal instead of proceeding directly
-    setShowPreFlightModal(true);
-  };
-
-  const handleProceedToGuardarian = async () => {
-    setShowPreFlightModal(false);
-    setLoading(true);
-    const parsedAmount = parseAmount(amount);
-
-    try {
-      const tx = await createGuardarianTransaction({
-        amount: parsedAmount,
-        fromCurrency: currencyCode || 'USD',
-        toCurrency: 'USDC',
-        toNetwork: 'ALGO',
-        email,
-        payoutAddress: algorandAddress,
-        customerCountry: userProfile?.phoneCountry,
-        externalId: `confio-topup-${Date.now()}`,
+        Alert.alert(
+          'Orden creada',
+          `Orden ${result.orderId}\n\nPagarás con ${selectedMethod.displayName}.\nRecibirías aproximadamente ${formatMoney(result.amountOut, 'cUSD')}.`,
+          result.nextActionUrl
+            ? [
+                { text: 'Más tarde', style: 'cancel' },
+                { text: 'Abrir proveedor', onPress: () => Linking.openURL(result.nextActionUrl) },
+              ]
+            : [{ text: 'OK', onPress: () => setStep('form') }],
+        );
+      })
+      .catch((error) => {
+        Alert.alert('No se pudo crear la orden', error?.message || 'Inténtalo nuevamente.');
+      })
+      .finally(() => {
+        setIsSubmittingOrder(false);
       });
+  };
 
-      const checkoutUrl = tx.redirect_url;
-      if (!checkoutUrl) {
-        throw new Error('No recibimos el enlace de pago de Guardarian.');
-      }
+  if (!isKoyweCountry) {
+    return <LegacyGuardarianTopUpScreen />;
+  }
 
-      // DEBUG: Log the redirect URL to understand its structure
-      console.log('=== GUARDARIAN REDIRECT URL ===');
-      console.log(checkoutUrl);
-      console.log('==============================');
-
-      // Open directly in external browser
-      await Linking.openURL(checkoutUrl);
-
-    } catch (err: any) {
-      console.error('Guardarian top-up error', err);
-      const errorMessage = translateGuardarianError(err?.message || 'Error desconocido');
-      Alert.alert('No se pudo iniciar la recarga', errorMessage);
-    } finally {
-      setLoading(false);
-    }
+  const renderMethodCard = (method: RampMethod) => {
+    const selected = selectedMethod?.code === method.code;
+    return (
+      <TouchableOpacity
+        key={method.code}
+        style={[styles.methodCard, selected && styles.methodCardSelected]}
+        onPress={() => setSelectedMethodCode(method.code)}
+        activeOpacity={0.7}
+      >
+        <View style={[styles.methodIconWrap, selected && styles.methodIconWrapSelected]}>
+          <Icon
+            name={getPaymentMethodIcon(method.icon, method.providerType, method.displayName)}
+            size={18}
+            color={selected ? colors.surface : colors.primary}
+          />
+        </View>
+        <View style={styles.methodCopy}>
+          <Text style={[styles.methodTitle, selected && styles.methodTitleSelected]}>{method.displayName}</Text>
+          <Text style={[styles.methodDescription, selected && styles.methodDescriptionSelected]}>{method.description}</Text>
+        </View>
+        <View style={[styles.radioOuter, selected && styles.radioOuterSelected]}>
+          {selected && <View style={styles.radioInner} />}
+        </View>
+      </TouchableOpacity>
+    );
   };
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Icon name="arrow-left" size={22} color="#111827" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Recargar con Guardarian</Text>
-      </View>
-
+      <StatusBar barStyle="light-content" backgroundColor={colors.heroFrom} />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Hero Section */}
-        <View style={styles.heroSection}>
-          <View style={styles.heroIconContainer}>
-            <Icon name="credit-card" size={32} color="#72D9BC" />
-          </View>
-          <Text style={styles.heroTitle}>Recarga tu cuenta</Text>
-          <Text style={styles.heroSubtitle}>
-            Compra USDC con tu tarjeta o transferencia bancaria. Rápido, seguro y sin complicaciones.
-          </Text>
-          <Text style={styles.heroSubtitleSmall}>
-            Guardarian es un socio regulado. En algunos países solo está disponible la recarga (no el retiro) por regulación local. Retiros disponibles en EUR {getFlagForCurrency('EUR')} MXN {getFlagForCurrency('MXN')} CLP {getFlagForCurrency('CLP')} COP {getFlagForCurrency('COP')} ARS {getFlagForCurrency('ARS')} BRL {getFlagForCurrency('BRL')}.
-          </Text>
+        <View style={styles.heroWrapper}>
+          <Gradient fromColor={colors.heroFrom} toColor={colors.heroTo} style={styles.heroGradient}>
+            <View style={styles.heroPadding}>
+              <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+                <Icon name="arrow-left" size={20} color={colors.surface} />
+              </TouchableOpacity>
+              <Text style={styles.eyebrow}>Ingresar saldo</Text>
+              <Text style={styles.title}>Compra Confío Dollar</Text>
+              <Text style={styles.subtitle}>Elige tu medio de pago, revisa la cotización y confirma cuando estés listo.</Text>
+            </View>
+          </Gradient>
         </View>
 
-        {/* Info card */}
-        <View style={styles.infoCard}>
-          <View style={styles.infoIconContainer}>
-            <Icon name="info" size={16} color="#0EA5E9" />
+        <View style={styles.noticeCard}>
+          <View style={styles.noticeIconWrap}>
+            <Icon name="globe" size={16} color={colors.accent} />
           </View>
-          <View style={styles.infoContent}>
-            <Text style={styles.infoCardText}>
-              {email
-                ? `Abriremos Guardarian con tu correo (${email.length > 20 ? email.substring(0, 20) + '...' : email}) y tu billetera pre-configurados.`
-                : `Abriremos Guardarian con tu billetera pre-configurada. Deberás ingresar tu correo electrónico.`
-              }
-            </Text>
+          <View style={styles.noticeCopy}>
+            <Text style={styles.noticeTitle}>{countryFlag ? `${countryFlag} ` : ''}Según tu país</Text>
+            <Text style={styles.noticeText}>Te mostramos los medios de pago disponibles para {availability?.countryName || countryCode}.</Text>
           </View>
         </View>
 
-        {/* Info Notice if currency not available */}
-        {showCurrencyNotAvailableHint && (
-          <View style={styles.noticeCard}>
-            <View style={styles.noticeIconContainer}>
-              <Icon name="info" size={20} color="#0EA5E9" />
-            </View>
-            <View style={styles.noticeContent}>
-              <Text style={styles.noticeTitle}>Paga en tu moneda local</Text>
-              <Text style={styles.noticeText}>
-                Tu moneda local ({derivedCurrencyCode}) se convertirá automáticamente a USD. Guardarian acepta tu tarjeta o transferencia en {derivedCurrencyCode}.
-              </Text>
-            </View>
-          </View>
-        )}
-
-        {/* Amount Input Card */}
-        <View style={styles.inputCard}>
-          <Text style={styles.inputLabel}>¿Cuánto quieres recargar?</Text>
-
-          <View style={styles.amountInputContainer}>
-            <View style={styles.currencyBadge}>
-              <Text style={styles.flagEmoji}>{getFlagForCurrency(currencyCode)}</Text>
-              <Text style={styles.currencyCodeText}>{currencyCode}</Text>
-            </View>
-            <TextInput
-              style={styles.amountInput}
-              placeholder="0"
-              placeholderTextColor="#9CA3AF"
-              keyboardType="decimal-pad"
-              value={amount}
-              onChangeText={setAmount}
-            />
-          </View>
-
-          <View style={styles.conversionHint}>
-            <Icon name="arrow-down" size={14} color="#72D9BC" />
-            <Text style={styles.conversionText}>Recibirás USDC en tu cuenta</Text>
-          </View>
-        </View>
-
-        {/* Features */}
-        <View style={styles.featuresContainer}>
-          <View style={styles.featureItem}>
-            <View style={styles.featureIconCircle}>
-              <Icon name="zap" size={16} color="#72D9BC" />
-            </View>
-            <Text style={styles.featureText}>Instantáneo</Text>
-          </View>
-          <View style={styles.featureItem}>
-            <View style={styles.featureIconCircle}>
-              <Icon name="shield" size={16} color="#72D9BC" />
-            </View>
-            <Text style={styles.featureText}>Seguro</Text>
-          </View>
-          <View style={styles.featureItem}>
-            <View style={styles.featureIconCircle}>
-              <Icon name="credit-card" size={16} color="#72D9BC" />
-            </View>
-            <Text style={styles.featureText}>Tarjeta o banco</Text>
-          </View>
-        </View>
-
-        {/* CTA Button */}
-        <TouchableOpacity
-          style={[styles.ctaButton, (!amount || loading) && styles.ctaButtonDisabled]}
-          onPress={handleStartTopUp}
-          disabled={!amount || loading}
-        >
-          {loading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <>
-              <Text style={styles.ctaButtonText}>Continuar con Guardarian</Text>
-              <Icon name="arrow-right" size={20} color="#fff" />
-            </>
-          )}
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.supportButton}
-          onPress={() => Linking.openURL('https://t.me/confio4world')}
-        >
-          <Icon name="help-circle" size={16} color="#4B5563" />
-          <Text style={styles.supportButtonText}>¿Estás perdido? ¡Pide ayuda en soporte!</Text>
-        </TouchableOpacity>
-
-        {/* Powered by Guardarian */}
-        <View style={styles.poweredByContainer}>
-
-          <Text style={styles.poweredByLabel}>En alianza con</Text>
-          <View style={styles.guardarianLogoContainer}>
-            <GuardarianLogo width={217} height={24} />
-          </View>
-
-          <Text style={styles.legalText}>
-            Guardarian es operado por FinSeven CZ s.r.o., una empresa registrada en la República Checa (código de registro: 22304681), con su dirección en Na Čečeličce 425/4, Smíchov, 15000, Praga, República Checa, registrada como Proveedor de Servicios de Activos Virtuales (VASP).
-          </Text>
-        </View>
-      </ScrollView>
-
-      {/* Loading Modal */}
-      <Modal
-        visible={!!loadingMessage}
-        transparent={true}
-        animationType="fade"
-        statusBarTranslucent={true}
-      >
-        <View style={styles.loadingOverlay}>
+        {availabilityLoading ? (
           <View style={styles.loadingCard}>
-            {/* Animated Confío Logo */}
-            <Animated.View style={{ transform: [{ rotate: spin }] }}>
-              <Image
-                source={require('../assets/png/CONFIO.png')}
-                style={styles.loadingLogo}
-              />
-            </Animated.View>
-
-            {/* Loading Message */}
-            <Text style={styles.loadingText}>{loadingMessage}</Text>
-
-            {/* Progress Dots Animation */}
-            <View style={styles.dotsContainer}>
-              <View style={[styles.dot, { backgroundColor: '#72D9BC' }]} />
-              <View style={[styles.dot, { backgroundColor: '#72D9BC', opacity: 0.6 }]} />
-              <View style={[styles.dot, { backgroundColor: '#72D9BC', opacity: 0.3 }]} />
-            </View>
+            <ActivityIndicator color={colors.primary} size="small" />
+            <Text style={styles.loadingText}>Cargando opciones para {countryFlag ? `${countryFlag} ` : ''}{countryCode}...</Text>
           </View>
-        </View>
-      </Modal>
+        ) : !isKoyweMapped ? (
+          <View style={styles.loadingCard}>
+            <Text style={styles.loadingText}>Todavía no encontramos medios disponibles para este país.</Text>
+          </View>
+        ) : (
+          <>
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <View style={styles.sectionHeaderLeft}>
+                  <StepBadge number={1} />
+                  <Text style={styles.sectionTitle}>Monto</Text>
+                </View>
+                <Text style={styles.sectionMeta}>{countryFlag ? `${countryFlag} ` : ''}{availability.countryName} · {fiatCurrency}</Text>
+              </View>
+              <View style={styles.amountCard}>
+                <Text style={styles.inputLabel}>Monto estimado en {friendlyCurrency(fiatCurrency)}</Text>
+                <View style={styles.amountInputRow}>
+                  <TextInput
+                    style={styles.amountInput}
+                    value={amount}
+                    onChangeText={(value) => {
+                      setAmount(value);
+                      setStep('form');
+                    }}
+                    keyboardType="decimal-pad"
+                    placeholder="0"
+                    placeholderTextColor={colors.textLight}
+                  />
+                  <Text style={styles.currencySuffix}>{fiatCurrency}</Text>
+                </View>
+                <Text style={styles.helperText}>Verás cuánto recibirías y el tipo de cambio estimado antes de confirmar.</Text>
+                {selectedMethodMin > 0 || selectedMethodMax > 0 ? (
+                  <Text style={styles.limitText}>
+                    Mínimo: {selectedMethodMin > 0 ? formatMoney(String(selectedMethodMin), fiatCurrency) : '--'} · Máximo por operación: {selectedMethodMax > 0 ? formatMoney(String(selectedMethodMax), fiatCurrency) : '--'}
+                  </Text>
+                ) : null}
+                {topUpAmountError ? <Text style={styles.errorText}>{topUpAmountError}</Text> : null}
+              </View>
+            </View>
 
-      <PreFlightModal
-        visible={showPreFlightModal}
-        type="buy"
-        onContinue={handleProceedToGuardarian}
-        onCancel={() => setShowPreFlightModal(false)}
-      />
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <View style={styles.sectionHeaderLeft}>
+                  <StepBadge number={2} />
+                  <Text style={styles.sectionTitle}>Medio de pago</Text>
+                </View>
+              </View>
+              <Text style={styles.sectionHint}>Selecciona cómo quieres pagar.</Text>
+              <View style={styles.methodsGrid}>{methods.map(renderMethodCard)}</View>
+            </View>
+
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <View style={styles.sectionHeaderLeft}>
+                  <StepBadge number={3} />
+                  <Text style={styles.sectionTitle}>Resumen</Text>
+                </View>
+              </View>
+              <View style={styles.quoteCard}>
+                {quoteLoading ? (
+                  <ActivityIndicator color={colors.primary} />
+                ) : quote ? (
+                  <>
+                    <Text style={styles.quoteHeadline}>{quoteHeadline}</Text>
+                    <Text style={styles.quoteRate}>{quoteRateLine}</Text>
+                    <View style={styles.quoteDivider} />
+                    <View style={styles.quoteRow}>
+                      <Text style={styles.quoteLabel}>Pagas</Text>
+                      <Text style={styles.quoteValue}>{formatMoney(quote.amountIn, fiatCurrency)}</Text>
+                    </View>
+                    <View style={styles.quoteRow}>
+                      <Text style={styles.quoteLabel}>Recibes aprox.</Text>
+                      <Text style={styles.quoteValue}>{formatMoney(quote.amountOut, 'cUSD')}</Text>
+                    </View>
+                    <View style={styles.quoteRow}>
+                      <Text style={styles.quoteLabel}>{'Comisión del\nprocesador de pagos'}</Text>
+                      <Text style={styles.quoteValue}>
+                        {formatMoney(String(Number(quote.feeAmount || 0) + Number(quote.networkFeeAmount || 0)), quote.feeCurrency)}
+                      </Text>
+                    </View>
+                    <View style={styles.quoteRow}>
+                      <Text style={styles.quoteLabel}>Comisión de Confío</Text>
+                      <Text style={[styles.quoteValue, { color: colors.primary }]}>0 {quote.feeCurrency || fiatCurrency}</Text>
+                    </View>
+                  </>
+                ) : (
+                  <View style={styles.emptyQuote}>
+                    <Icon name="bar-chart-2" size={20} color={colors.textLight} />
+                    <Text style={styles.emptyText}>Ingresa un monto para ver el resumen estimado.</Text>
+                  </View>
+                )}
+              </View>
+            </View>
+
+            {step === 'review' ? (
+              <View style={styles.reviewCard}>
+                <Text style={styles.reviewTitle}>Revisión final</Text>
+                <View style={styles.reviewRow}>
+                  <Icon name="credit-card" size={16} color={colors.textMuted} />
+                  <Text style={styles.reviewLabel}>Medio de pago</Text>
+                  <Text style={styles.reviewValue}>{selectedMethod?.displayName}</Text>
+                </View>
+                <View style={styles.reviewRow}>
+                  <Icon name="dollar-sign" size={16} color={colors.textMuted} />
+                  <Text style={styles.reviewLabel}>Recibirías</Text>
+                  <Text style={styles.reviewValueHighlight}>{quoteHeadline}</Text>
+                </View>
+                <TouchableOpacity
+                  style={[styles.primaryButton, isSubmittingOrder && styles.primaryButtonDisabled]}
+                  onPress={handleConfirm}
+                  activeOpacity={0.8}
+                  disabled={isSubmittingOrder}
+                >
+                  {isSubmittingOrder ? <ActivityIndicator color={colors.surface} /> : <Text style={styles.primaryButtonText}>Confirmar compra</Text>}
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.ghostButton} onPress={() => setStep('form')} activeOpacity={0.7}>
+                  <Text style={styles.ghostButtonText}>Volver a editar</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity style={[styles.primaryButton, topUpAmountError && styles.primaryButtonDisabled]} onPress={handleContinue} activeOpacity={0.8} disabled={Boolean(topUpAmountError)}>
+                <Icon name={isVerified ? 'chevron-right' : 'shield'} size={18} color={colors.surface} style={styles.primaryButtonIcon} />
+                <Text style={styles.primaryButtonText}>{isVerified ? 'Continuar' : 'Continuar y verificar'}</Text>
+              </TouchableOpacity>
+            )}
+          </>
+        )}
+      </ScrollView>
     </SafeAreaView>
   );
 };
@@ -527,349 +482,378 @@ const TopUpScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F9FAFB',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) + 12 : 12,
-    paddingBottom: 12,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
-  },
-  backButton: {
-    padding: 8,
-    marginRight: 8,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#111827',
+    backgroundColor: colors.background,
   },
   content: {
-    paddingHorizontal: 20,
-    paddingTop: 24,
-    paddingBottom: 32,
+    paddingBottom: 60,
   },
-
-  // Hero Section
-  heroSection: {
-    alignItems: 'center',
+  heroWrapper: {
+    borderBottomLeftRadius: 28,
+    borderBottomRightRadius: 28,
+    overflow: 'hidden',
     marginBottom: 20,
   },
-  heroIconContainer: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: '#D1FAE5',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
+  heroGradient: {
+    borderBottomLeftRadius: 28,
+    borderBottomRightRadius: 28,
   },
-  heroTitle: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#111827',
-    marginBottom: 8,
-    textAlign: 'center',
+  heroPadding: {
+    paddingHorizontal: 24,
+    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 12 : 16,
+    paddingBottom: 28,
   },
-  heroSubtitle: {
-    fontSize: 15,
-    color: '#6B7280',
-    textAlign: 'center',
-    lineHeight: 22,
-    paddingHorizontal: 16,
-  },
-  heroSubtitleSmall: {
-    fontSize: 12,
-    color: '#6B7280',
-    textAlign: 'center',
-    lineHeight: 18,
-    paddingHorizontal: 20,
-    marginTop: 6,
-  },
-
-  // Info Card
-  infoCard: {
-    flexDirection: 'row',
-    backgroundColor: '#EFF6FF',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#DBEAFE',
-  },
-  infoIconContainer: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 10,
-    marginTop: 2,
-  },
-  infoContent: {
-    flex: 1,
-  },
-  infoCardText: {
-    fontSize: 12,
-    color: '#1F2937',
-    lineHeight: 16,
-  },
-
-  // Notice Card
-  noticeCard: {
-    flexDirection: 'row',
-    backgroundColor: '#EFF6FF',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: '#DBEAFE',
-  },
-  noticeIconContainer: {
+  backButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#fff',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    marginBottom: 16,
   },
-  noticeContent: {
+  eyebrow: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    color: 'rgba(255,255,255,0.75)',
+    marginBottom: 6,
+  },
+  title: {
+    fontSize: 26,
+    fontWeight: '800',
+    color: '#ffffff',
+    marginBottom: 8,
+  },
+  subtitle: {
+    fontSize: 14,
+    lineHeight: 21,
+    color: 'rgba(255,255,255,0.8)',
+  },
+  noticeCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: colors.accentLight,
+    borderRadius: 16,
+    padding: 16,
+    marginHorizontal: 22,
+    marginBottom: 20,
+    gap: 12,
+  },
+  noticeIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(59,130,246,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+  },
+  noticeCopy: {
     flex: 1,
   },
   noticeTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#1F2937',
+    color: colors.accent,
     marginBottom: 4,
   },
   noticeText: {
     fontSize: 13,
-    color: '#4B5563',
-    lineHeight: 18,
+    lineHeight: 19,
+    color: colors.textPrimary,
   },
-
-  // Amount Input Card
-  inputCard: {
-    backgroundColor: '#fff',
+  loadingCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 20,
+    padding: 28,
+    marginHorizontal: 22,
+    alignItems: 'center',
+    gap: 12,
+  },
+  loadingText: {
+    color: colors.textMuted,
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  section: {
+    marginBottom: 24,
+    paddingHorizontal: 22,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  sectionHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+  sectionMeta: {
+    fontSize: 13,
+    color: colors.textMuted,
+    fontWeight: '600',
+  },
+  sectionHint: {
+    fontSize: 13,
+    color: colors.textMuted,
+    marginBottom: 12,
+  },
+  stepBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepBadgeText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.primaryDark,
+  },
+  amountCard: {
+    backgroundColor: colors.surface,
     borderRadius: 20,
     padding: 20,
-    marginBottom: 24,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
   },
   inputLabel: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#111827',
-    marginBottom: 16,
+    color: colors.textPrimary,
+    marginBottom: 14,
   },
-  amountInputContainer: {
+  amountInputRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F9FAFB',
+    backgroundColor: '#f9fafb',
     borderRadius: 16,
     paddingHorizontal: 16,
-    paddingVertical: 16,
-    borderWidth: 2,
-    borderColor: '#E5E7EB',
-  },
-  currencySymbol: {
-    display: 'none',
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   amountInput: {
     flex: 1,
-    fontSize: 32,
+    fontSize: 28,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.textPrimary,
     padding: 0,
   },
-  currencyBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    gap: 6,
-    marginRight: 12,
-  },
-  flagEmoji: {
-    fontSize: 20,
-  },
-  currencyCodeText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#111827',
-  },
-  conversionHint: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 12,
-    gap: 6,
-  },
-  conversionText: {
-    fontSize: 13,
-    color: '#72D9BC',
-    fontWeight: '600',
-  },
-
-  // Features
-  featuresContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginBottom: 32,
-  },
-  featureItem: {
-    alignItems: 'center',
-    gap: 8,
-  },
-  featureIconCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#D1FAE5',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  featureText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#6B7280',
-  },
-
-  // CTA Button
-  ctaButton: {
-    backgroundColor: '#72D9BC',
-    borderRadius: 16,
-    paddingVertical: 18,
-    paddingHorizontal: 24,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    shadowColor: '#72D9BC',
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
-  },
-  ctaButtonDisabled: {
-    backgroundColor: '#D1D5DB',
-    shadowOpacity: 0,
-  },
-  ctaButtonText: {
+  currencySuffix: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#fff',
+    color: colors.textMuted,
+    marginLeft: 12,
   },
-
-  // Powered by Guardarian
-  poweredByContainer: {
-    alignItems: 'center',
-    marginTop: 24,
+  helperText: {
+    marginTop: 12,
+    fontSize: 13,
+    lineHeight: 18,
+    color: colors.textMuted,
+  },
+  limitText: {
+    marginTop: 10,
+    fontSize: 12,
+    lineHeight: 18,
+    color: colors.textMuted,
+  },
+  errorText: {
+    marginTop: 8,
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#b91c1c',
+    fontWeight: '600',
+  },
+  methodsGrid: {
     gap: 12,
   },
-  poweredByLabel: {
-    fontSize: 11,
-    color: '#9CA3AF',
-    fontWeight: '500',
-    textAlign: 'center',
-  },
-  guardarianLogoContainer: {
-    backgroundColor: '#fff',
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    borderRadius: 12,
+  methodCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 18,
+    padding: 16,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: 260,
-  },
-  legalText: {
-    fontSize: 9,
-    color: '#9CA3AF',
-    textAlign: 'center',
-    lineHeight: 13,
-    paddingHorizontal: 16,
-    marginTop: 4,
-  },
-  // Loading Modal Styles
-  loadingOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    padding: 32,
-    alignItems: 'center',
-    minWidth: 280,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 10,
-  },
-  loadingLogo: {
-    width: 80,
-    height: 80,
-    marginBottom: 24,
-  },
-  loadingText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1F2937',
-    textAlign: 'center',
-    marginBottom: 16,
-  },
-  dotsContainer: {
+    borderColor: colors.border,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
   },
-  dot: {
+  methodCardSelected: {
+    borderColor: colors.primary,
+    backgroundColor: '#f8fffb',
+  },
+  methodIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
+  },
+  methodIconWrapSelected: {
+    backgroundColor: colors.primary,
+  },
+  methodCopy: {
+    flex: 1,
+  },
+  methodTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    marginBottom: 4,
+  },
+  methodTitleSelected: {
+    color: colors.primaryDark,
+  },
+  methodDescription: {
+    fontSize: 13,
+    color: colors.textMuted,
+    lineHeight: 18,
+  },
+  methodDescriptionSelected: {
+    color: colors.textPrimary,
+  },
+  radioOuter: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 12,
+  },
+  radioOuterSelected: {
+    borderColor: colors.primary,
+  },
+  radioInner: {
     width: 8,
     height: 8,
     borderRadius: 4,
+    backgroundColor: colors.primary,
   },
-  supportButton: {
-    marginTop: 24,
-    marginBottom: 16,
+  quoteCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 20,
+    padding: 20,
+  },
+  quoteHeadline: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: colors.textPrimary,
+    marginBottom: 8,
+  },
+  quoteRate: {
+    fontSize: 14,
+    color: colors.textMuted,
+  },
+  quoteDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginVertical: 16,
+  },
+  quoteRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+    gap: 16,
+  },
+  quoteLabel: {
+    flex: 1,
+    fontSize: 13,
+    color: colors.textMuted,
+    lineHeight: 18,
+  },
+  quoteValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    textAlign: 'right',
+  },
+  emptyQuote: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+  },
+  emptyText: {
+    marginTop: 10,
+    fontSize: 13,
+    lineHeight: 18,
+    color: colors.textMuted,
+    textAlign: 'center',
+  },
+  reviewCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 20,
+    padding: 20,
+    marginHorizontal: 22,
+  },
+  reviewTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: colors.textPrimary,
+    marginBottom: 14,
+  },
+  reviewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 12,
+  },
+  reviewLabel: {
+    flex: 1,
+    fontSize: 14,
+    color: colors.textMuted,
+  },
+  reviewValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+  reviewValueHighlight: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: colors.primaryDark,
+  },
+  primaryButton: {
+    marginTop: 12,
+    marginHorizontal: 22,
+    backgroundColor: colors.primary,
+    borderRadius: 16,
+    paddingVertical: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F3F4F6',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-    alignSelf: 'center',
-    gap: 8,
   },
-  supportButtonText: {
+  primaryButtonDisabled: {
+    opacity: 0.7,
+  },
+  primaryButtonIcon: {
+    marginRight: 8,
+  },
+  primaryButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.surface,
+  },
+  ghostButton: {
+    marginTop: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+  },
+  ghostButtonText: {
     fontSize: 14,
-    color: '#4B5563',
-    fontWeight: '600',
+    fontWeight: '700',
+    color: colors.primary,
   },
 });
 

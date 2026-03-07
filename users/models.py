@@ -686,6 +686,12 @@ class BankInfo(SoftDeleteModel):
         null=True,
         help_text="Identification number (required for some countries/banks)"
     )
+
+    provider_metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Extra provider-specific fields required by some payout rails"
+    )
     
     # Privacy and sharing settings
     is_default = models.BooleanField(
@@ -825,7 +831,9 @@ class BankInfo(SoftDeleteModel):
             info['account_type'] = self.get_account_type_display()
         if self.identification_number:
             info['identification'] = self.identification_number
-        
+        if self.provider_metadata:
+            info['provider_metadata'] = self.provider_metadata
+
         return info
     
     def set_as_default(self):
@@ -938,6 +946,9 @@ class BankInfo(SoftDeleteModel):
                 'label': self.identification_label,
                 'number': self.identification_number
             }
+
+        if self.provider_metadata:
+            details['provider_metadata'] = self.provider_metadata
         
         # Add phone if available
         if self.phone_number:

@@ -1,3 +1,5 @@
+import json
+
 from django.contrib import admin
 from django.utils.html import format_html
 from django.urls import reverse
@@ -355,10 +357,30 @@ class BankAdmin(admin.ModelAdmin):
 
 @admin.register(BankInfo)
 class BankInfoAdmin(admin.ModelAdmin):
-    list_display = ('account', 'payment_method_display', 'account_holder_name', 'account_type', 'masked_account', 'verification_status', 'is_default', 'created_at')
+    list_display = (
+        'account',
+        'payment_method_display',
+        'account_holder_name',
+        'account_type',
+        'masked_account',
+        'provider_metadata_summary',
+        'verification_status',
+        'is_default',
+        'created_at',
+    )
     list_filter = ('account_type', 'is_verified', 'is_default', 'is_public', 'payment_method__country_code', 'created_at')
-    search_fields = ('account_holder_name', 'account__user__username', 'account__user__email', 'account_number', 'phone_number', 'email', 'payment_method__display_name')
-    readonly_fields = ('created_at', 'updated_at', 'masked_account', 'full_bank_name')
+    search_fields = (
+        'account_holder_name',
+        'account__user__username',
+        'account__user__email',
+        'account_number',
+        'phone_number',
+        'email',
+        'username',
+        'identification_number',
+        'payment_method__display_name',
+    )
+    readonly_fields = ('created_at', 'updated_at', 'masked_account', 'full_bank_name', 'provider_metadata_pretty')
     
     fieldsets = (
         ('Account Information', {
@@ -371,6 +393,10 @@ class BankInfoAdmin(admin.ModelAdmin):
         }),
         ('Payment Details', {
             'fields': ('account_number', 'phone_number', 'email', 'username', 'identification_number')
+        }),
+        ('Provider-specific Details', {
+            'fields': ('provider_metadata', 'provider_metadata_pretty'),
+            'description': 'Additional fields required by provider-specific payout rails such as PIX, CLABE, CCI, RUT, or wallet app details.'
         }),
         ('Settings', {
             'fields': ('is_default', 'is_public')
@@ -402,9 +428,29 @@ class BankInfoAdmin(admin.ModelAdmin):
     def masked_account(self, obj):
         return obj.get_masked_account_number()
     masked_account.short_description = "Account Number"
+
+    def provider_metadata_summary(self, obj):
+        if not obj.provider_metadata:
+            return "-"
+        items = []
+        for key, value in list(obj.provider_metadata.items())[:3]:
+            items.append(f"{key}: {value}")
+        if len(obj.provider_metadata) > 3:
+            items.append(f"+{len(obj.provider_metadata) - 3} more")
+        return ", ".join(items)
+    provider_metadata_summary.short_description = "Provider Data"
+
+    def provider_metadata_pretty(self, obj):
+        if not obj.provider_metadata:
+            return "-"
+        return format_html(
+            '<pre style="white-space: pre-wrap; margin: 0;">{}</pre>',
+            json.dumps(obj.provider_metadata, indent=2, sort_keys=True),
+        )
+    provider_metadata_pretty.short_description = "Provider Data Preview"
     
     def verification_status(self, obj):
-        if obj.is_identity_verified:
+        if obj.is_verified:
             return format_html('<span style="color: green;">✓ Verified</span>')
         return format_html('<span style="color: orange;">Unverified</span>')
     verification_status.short_description = "Verification"

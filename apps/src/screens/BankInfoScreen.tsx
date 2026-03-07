@@ -112,6 +112,7 @@ interface BankAccount {
   phoneNumber?: string;
   email?: string;
   username?: string;
+  providerMetadata?: Record<string, string> | string;
   isDefault: boolean;
   isPublic: boolean;
   isVerified: boolean;
@@ -160,7 +161,7 @@ export const BankInfoScreen = () => {
 
   // Check if user is an employee without manage_bank_accounts permission
   const isEmployee = activeAccount?.isEmployee || false;
-  const canManageBankAccounts = !isEmployee || activeAccount?.employeePermissions?.manageBankAccounts;
+  const canManageBankAccounts = !isEmployee || Boolean((activeAccount as any)?.employeePermissions?.manageBankAccounts);
 
 
   // GraphQL queries
@@ -482,8 +483,8 @@ export const BankInfoScreen = () => {
             setEditingBankInfo(null);
             refetchBankAccounts();
           }}
-          accountId={activeAccount?.id}
-          editingBankInfo={editingBankInfo}
+          accountId={activeAccount?.id || null}
+          editingBankInfo={editingBankInfo as any}
         />
       </Modal>
     </SafeAreaView>

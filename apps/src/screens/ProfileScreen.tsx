@@ -67,6 +67,7 @@ export const ProfileScreen = () => {
       '';
     return iso ? String(iso).toUpperCase() : null;
   }, [userProfile]);
+  const canManageBankAccounts = !activeAccount?.isEmployee || Boolean((activeAccount as any)?.employeePermissions?.manageBankAccounts);
   const needsFriendlyUsername = React.useMemo(() => {
     if (!rawUsername) return true;
     if (rawUsername.startsWith('user_')) return true;
@@ -586,9 +587,9 @@ export const ProfileScreen = () => {
               </TouchableOpacity>
             )}
 
-            {/* Payment methods menu: allow VE users; iOS only in debug */}
-            {normalizedCountryIso === 'VE' && (Platform.OS === 'android' || (Platform.OS === 'ios' && __DEV__)) &&
-              (!activeAccount?.isEmployee || activeAccount?.employeePermissions?.manageBankAccounts) && (
+            {/* Payment methods menu */}
+            {activeAccount?.type.toLowerCase() === 'personal' &&
+              canManageBankAccounts && (
                 <TouchableOpacity
                   style={styles.cardOption}
                   onPress={() => navigation.navigate('BankInfo')}

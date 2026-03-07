@@ -25,7 +25,7 @@ from .models import (
     P2PDispute,
     P2PFavoriteTrader
 )
-from .default_payment_methods import get_payment_methods_for_country
+from payments.koywe import get_country_ramp_config, sync_country_payment_methods
 from security.s3_utils import generate_presigned_put, public_s3_url, build_s3_key
 from django.conf import settings
 from security.utils import graphql_require_kyc, graphql_require_aml, perform_aml_check
@@ -3181,6 +3181,12 @@ class Query(graphene.ObjectType):
         import random
         request_id = random.randint(1000, 9999)
         print(f"🔍 DEBUG [{datetime.datetime.now()}] REQ-{request_id}: resolve_p2p_payment_methods called with country_code: '{country_code}'")
+
+        if country_code:
+            if not get_country_ramp_config(country_code):
+                print(f"⚠️ DEBUG REQ-{request_id}: Country '{country_code}' is not supported by Koywe payment methods")
+                return []
+            sync_country_payment_methods(country_code)
         
         # Get payment methods from database (only country-specific methods)
         # No global methods should exist per user requirements

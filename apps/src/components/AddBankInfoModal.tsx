@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -43,6 +43,23 @@ const colors = {
   warning: '#f59e0b',
 };
 
+const KOYWE_SUPPORTED_COUNTRY_CODES = ['AR', 'BO', 'BR', 'CL', 'CO', 'MX', 'PE'];
+const ACCOUNT_TYPE_METHOD_CODES = new Set(['BANCOLOMBIA']);
+const FIRST_NAME_ONLY_METHOD_CODES = new Set(['QRI-AR', 'QRI', 'QRI-BO', 'SIP-QR', 'QRI-PE', 'LIGO']);
+const SAVABLE_PAYMENT_METHOD_CODES = new Set([
+  'WIREAR',
+  'QRI-BO',
+  'SULPAYMENTS',
+  'WIRECL',
+  'NEQUI',
+  'BANCOLOMBIA',
+  'WIREMX',
+  'STP',
+  'WIREPE',
+  'QRI-PE',
+  'RECAUDO-PE',
+]);
+
 interface PaymentMethodAccount {
   id: string;
   account: {
@@ -60,6 +77,7 @@ interface PaymentMethodAccount {
     requiresEmail: boolean;
     requiresAccountNumber: boolean;
     icon: string;
+    isActive?: boolean;
     bank?: {
       id: string;
       name: string;
@@ -71,6 +89,7 @@ interface PaymentMethodAccount {
         flagEmoji: string;
         requiresIdentification: boolean;
         identificationName: string;
+        identificationFormat?: string;
       };
     };
   };
@@ -79,10 +98,41 @@ interface PaymentMethodAccount {
   phoneNumber?: string;
   email?: string;
   username?: string;
+  providerMetadata?: Record<string, string>;
   accountType?: string;
   identificationNumber?: string;
   isDefault: boolean;
 }
+
+interface ProviderFieldConfig {
+  key: string;
+  label: string;
+  placeholder: string;
+  required?: boolean;
+  keyboardType?: 'default' | 'numeric' | 'email-address' | 'phone-pad';
+  helpText?: string;
+}
+
+interface FieldConfig {
+  label: string;
+  placeholder: string;
+  show: boolean;
+  required: boolean;
+  keyboardType?: 'default' | 'numeric' | 'email-address' | 'phone-pad';
+}
+
+const normalizeProviderMetadata = (value: unknown): Record<string, string> => {
+  if (!value) return {};
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return typeof parsed === 'object' && parsed ? parsed as Record<string, string> : {};
+    } catch {
+      return {};
+    }
+  }
+  return typeof value === 'object' ? value as Record<string, string> : {};
+};
 
 interface Country {
   id: string;
@@ -96,7 +146,7 @@ interface Country {
 
 interface Bank {
   id: string;
-  code: string;
+  code?: string;
   name: string;
   shortName?: string;
   country: {
@@ -104,11 +154,14 @@ interface Bank {
     code: string;
     name: string;
     flagEmoji: string;
+    requiresIdentification?: boolean;
+    identificationName?: string;
+    identificationFormat?: string;
   };
-  supportsChecking: boolean;
-  supportsSavings: boolean;
-  supportsPayroll: boolean;
-  accountTypeChoices: string[];
+  supportsChecking?: boolean;
+  supportsSavings?: boolean;
+  supportsPayroll?: boolean;
+  accountTypeChoices?: string[];
 }
 
 interface P2PPaymentMethod {
@@ -123,6 +176,7 @@ interface P2PPaymentMethod {
   bank?: {
     id: string;
     name: string;
+    shortName?: string;
     country: {
       id: string;
       code: string;
@@ -130,9 +184,10 @@ interface P2PPaymentMethod {
       flagEmoji: string;
       requiresIdentification: boolean;
       identificationName: string;
+      identificationFormat?: string;
     };
   };
-  isActive: boolean;
+  isActive?: boolean;
 }
 
 interface AddBankInfoModalProps {
@@ -141,6 +196,13 @@ interface AddBankInfoModalProps {
   onSuccess: () => void;
   accountId: string | null;
   editingBankInfo: PaymentMethodAccount | null;
+  initialCountryCode?: string | null;
+  allowedCountryCodes?: string[] | null;
+  allowedPaymentMethodIds?: string[] | null;
+  initialPaymentMethodId?: string | null;
+  lockCountry?: boolean;
+  lockPaymentMethod?: boolean;
+  mode?: 'general' | 'off_ramp' | 'on_ramp';
 }
 
 export const AddBankInfoModal = ({
@@ -148,7 +210,14 @@ export const AddBankInfoModal = ({
   onClose,
   onSuccess,
   accountId,
-  editingBankInfo
+  editingBankInfo,
+  initialCountryCode = null,
+  allowedCountryCodes = null,
+  allowedPaymentMethodIds = null,
+  initialPaymentMethodId = null,
+  lockCountry = false,
+  lockPaymentMethod = false,
+  mode = 'general',
 }: AddBankInfoModalProps) => {
   // Safe area insets not required; use fixed padding where needed
   const isEditing = !!editingBankInfo;
@@ -166,6 +235,7 @@ export const AddBankInfoModal = ({
     phoneNumber: '',
     email: '',
     username: '',
+    providerMetadata: {} as Record<string, string>,
     isDefault: false,
   });
   const [showPaymentMethodPicker, setShowPaymentMethodPicker] = useState(false);
@@ -188,6 +258,7 @@ export const AddBankInfoModal = ({
         phoneNumber: editingBankInfo.phoneNumber || '',
         email: editingBankInfo.email || '',
         username: editingBankInfo.username || '',
+        providerMetadata: normalizeProviderMetadata(editingBankInfo.providerMetadata),
         isDefault: editingBankInfo.isDefault,
       });
     } else {
@@ -203,6 +274,7 @@ export const AddBankInfoModal = ({
         phoneNumber: '',
         email: '',
         username: '',
+        providerMetadata: {},
         isDefault: false,
       });
     }
@@ -264,7 +336,52 @@ export const AddBankInfoModal = ({
   });
 
   const countries: Country[] = countriesData?.countries || [];
-  const paymentMethods: P2PPaymentMethod[] = paymentMethodsData?.p2pPaymentMethods || [];
+  const filteredCountries = useMemo(() => {
+    if (!allowedCountryCodes?.length) {
+      const supported = new Set(KOYWE_SUPPORTED_COUNTRY_CODES);
+      return countries.filter((country) => supported.has(country.code.toUpperCase()));
+    }
+    const allowed = new Set(allowedCountryCodes.map((code) => code.toUpperCase()));
+    return countries.filter((country) => allowed.has(country.code.toUpperCase()));
+  }, [allowedCountryCodes, countries]);
+
+  const paymentMethods: P2PPaymentMethod[] = useMemo(() => {
+    const methods = (paymentMethodsData?.p2pPaymentMethods || []).filter((method: P2PPaymentMethod) => {
+      const code = (method.name || '').replace(/_/g, '-').toUpperCase();
+      if (mode === 'general' || mode === 'off_ramp') {
+        return SAVABLE_PAYMENT_METHOD_CODES.has(code);
+      }
+      return true;
+    });
+    if (!allowedPaymentMethodIds?.length) {
+      return methods;
+    }
+    const allowed = new Set(allowedPaymentMethodIds);
+    return methods.filter((method: P2PPaymentMethod) => allowed.has(method.id));
+  }, [allowedPaymentMethodIds, paymentMethodsData?.p2pPaymentMethods]);
+
+  useEffect(() => {
+    if (!isVisible || editingBankInfo || !initialCountryCode || !filteredCountries.length) {
+      return;
+    }
+    const matchingCountry = filteredCountries.find((country) => country.code === initialCountryCode);
+    if (matchingCountry) {
+      setSelectedCountry(matchingCountry);
+    }
+  }, [filteredCountries, editingBankInfo, initialCountryCode, isVisible]);
+
+  useEffect(() => {
+    if (!isVisible || editingBankInfo || !initialPaymentMethodId || !paymentMethods.length) {
+      return;
+    }
+    const matchingMethod = paymentMethods.find((method) => method.id === initialPaymentMethodId);
+    if (matchingMethod) {
+      setSelectedPaymentMethod(matchingMethod);
+      if (matchingMethod.bank) {
+        setSelectedBank(matchingMethod.bank);
+      }
+    }
+  }, [editingBankInfo, initialPaymentMethodId, isVisible, paymentMethods]);
 
   // Debug logging
   console.log('Countries loaded:', countries.length);
@@ -302,6 +419,241 @@ export const AddBankInfoModal = ({
     return labels[type] || type;
   };
 
+  const methodCode = (selectedPaymentMethod?.name || '').replace(/_/g, '-').toUpperCase();
+  const countryCode = selectedCountry?.code?.toUpperCase() || '';
+
+  const fieldCopy = useMemo(() => {
+    const defaultAccount: FieldConfig = {
+      label: selectedPaymentMethod?.providerType === 'bank' ? 'Número de cuenta' : 'Identificador',
+      placeholder: selectedPaymentMethod?.providerType === 'bank' ? 'Número de cuenta bancaria' : 'Identificador de cuenta',
+      show: Boolean(selectedPaymentMethod?.requiresAccountNumber),
+      required: Boolean(selectedPaymentMethod?.requiresAccountNumber),
+      keyboardType: 'default' as const,
+    };
+    const defaultPhone: FieldConfig = {
+      label: 'Teléfono',
+      placeholder: 'Número de teléfono',
+      show: Boolean(selectedPaymentMethod?.requiresPhone),
+      required: Boolean(selectedPaymentMethod?.requiresPhone),
+      keyboardType: 'phone-pad' as const,
+    };
+    const defaultEmail: FieldConfig = {
+      label: 'Email',
+      placeholder: 'Dirección de correo electrónico',
+      show: Boolean(selectedPaymentMethod?.requiresEmail),
+      required: Boolean(selectedPaymentMethod?.requiresEmail),
+      keyboardType: 'email-address' as const,
+    };
+
+    if (FIRST_NAME_ONLY_METHOD_CODES.has(methodCode)) {
+      return {
+        account: { ...defaultAccount, show: false, required: false },
+        phone: { ...defaultPhone, show: false, required: false },
+        email: { ...defaultEmail, show: false, required: false },
+        holderLabel: 'Nombre',
+      };
+    }
+
+    if (countryCode === 'AR' && methodCode === 'WIREAR') {
+      return {
+        account: { ...defaultAccount, label: 'CBU, CVU o alias', placeholder: 'Ingresa CBU, CVU o alias', show: true, required: true, keyboardType: 'default' as const },
+        phone: defaultPhone,
+        email: defaultEmail,
+        holderLabel: 'Titular de la cuenta',
+      };
+    }
+    if ((countryCode === 'AR' || countryCode === 'CL') && methodCode === 'KHIPU') {
+      return {
+        account: { ...defaultAccount, show: false, required: false },
+        phone: { ...defaultPhone, show: false, required: false },
+        email: { ...defaultEmail, show: true, required: true },
+        holderLabel: 'Nombre',
+      };
+    }
+    if (countryCode === 'MX' && (methodCode === 'WIREMX' || methodCode === 'STP')) {
+      return {
+        account: { ...defaultAccount, label: 'CLABE', placeholder: 'Ingresa la CLABE', show: true, required: true, keyboardType: 'numeric' as const },
+        phone: defaultPhone,
+        email: defaultEmail,
+        holderLabel: 'Titular de la cuenta',
+      };
+    }
+    if (countryCode === 'BR' && methodCode === 'SULPAYMENTS') {
+      return {
+        account: { ...defaultAccount, label: 'Llave PIX o cuenta', placeholder: 'CPF, email, teléfono o llave PIX', show: true, required: true, keyboardType: 'default' as const },
+        phone: { ...defaultPhone, label: 'Teléfono PIX', placeholder: 'Número asociado a PIX', show: false, required: false },
+        email: defaultEmail,
+        holderLabel: 'Titular de la cuenta',
+      };
+    }
+    if (countryCode === 'CO' && methodCode === 'NEQUI') {
+      return {
+        account: { ...defaultAccount, show: false, required: false },
+        phone: { ...defaultPhone, label: 'Número Nequi', placeholder: 'Número de Nequi', show: true, required: true },
+        email: defaultEmail,
+        holderLabel: 'Titular de la billetera',
+      };
+    }
+    if (countryCode === 'CO' && methodCode === 'PSE') {
+      return {
+        account: { ...defaultAccount, show: false, required: false },
+        phone: { ...defaultPhone, show: true, required: true },
+        email: { ...defaultEmail, show: true, required: true },
+        holderLabel: 'Nombre completo',
+      };
+    }
+    if (countryCode === 'PE' && methodCode === 'QRI-PE') {
+      return {
+        account: { ...defaultAccount, show: false, required: false },
+        phone: { ...defaultPhone, label: 'Teléfono de la billetera', placeholder: 'Número asociado a la billetera', show: false, required: false },
+        email: { ...defaultEmail, show: false, required: false },
+        holderLabel: 'Nombre',
+      };
+    }
+    return {
+      account: defaultAccount,
+      phone: defaultPhone,
+      email: defaultEmail,
+      holderLabel: selectedPaymentMethod?.providerType === 'fintech' ? 'Titular de la cuenta o billetera' : 'Titular de la cuenta',
+    };
+  }, [countryCode, methodCode, selectedPaymentMethod?.providerType]);
+
+  const showAccountTypeField = useMemo(() => {
+    if (!selectedPaymentMethod || selectedPaymentMethod.providerType !== 'bank') {
+      return false;
+    }
+
+    if (mode === 'off_ramp') {
+      return countryCode === 'CO' && ACCOUNT_TYPE_METHOD_CODES.has(methodCode);
+    }
+
+    return true;
+  }, [countryCode, methodCode, mode, selectedPaymentMethod]);
+
+  const accountTypeRequired = showAccountTypeField && mode === 'off_ramp' && countryCode === 'CO';
+
+  const providerFieldConfigs = useMemo<ProviderFieldConfig[]>(() => {
+    if (!selectedPaymentMethod) {
+      return [];
+    }
+
+    if (countryCode === 'CO' && methodCode === 'PSE') {
+      return [
+        {
+          key: 'firstName',
+          label: 'Nombre',
+          placeholder: 'Ingresa tu nombre',
+          required: true,
+        },
+        {
+          key: 'lastName',
+          label: 'Apellido',
+          placeholder: 'Ingresa tu apellido',
+          required: true,
+        },
+        {
+          key: 'documentType',
+          label: 'Tipo de documento',
+          placeholder: 'CC, CE, NIT, PASSPORT...',
+          required: true,
+        },
+        {
+          key: 'documentNumber',
+          label: 'Número de documento',
+          placeholder: 'Ingresa tu número de documento',
+          required: true,
+          keyboardType: 'numeric',
+        },
+      ];
+    }
+
+    if (mode !== 'off_ramp') {
+      return [];
+    }
+
+    if (countryCode === 'BR' && (methodCode === 'SULPAYMENTS' || methodCode === 'PIX-QR')) {
+      return [
+        {
+          key: 'pixKeyType',
+          label: 'Tipo de llave PIX',
+          placeholder: 'CPF, teléfono, email o aleatoria',
+          helpText: 'Si tu cuenta usa PIX, guarda el tipo de llave para completar el cobro.',
+        },
+      ];
+    }
+
+    if (countryCode === 'CL' && (methodCode === 'WIRECL' || methodCode === 'KHIPU')) {
+      return [
+        {
+          key: 'beneficiaryRut',
+          label: 'RUT del titular',
+          placeholder: 'Ingresa el RUT del titular',
+          helpText: 'Útil para transferencias y validaciones del beneficiario en Chile.',
+        },
+      ];
+    }
+
+    if (countryCode === 'MX' && (methodCode === 'WIREMX' || methodCode === 'STP')) {
+      return [
+        {
+          key: 'bankName',
+          label: 'Banco receptor',
+          placeholder: 'Nombre del banco',
+          helpText: 'Guarda el banco receptor para transferencias SPEI.',
+        },
+      ];
+    }
+
+    if (countryCode === 'PE' && ['WIREPE', 'RECAUDO-PE', 'WIREUSDPE', 'WIREUSDPE-INTERBANK'].includes(methodCode)) {
+      return [
+        {
+          key: 'bankName',
+          label: 'Banco receptor',
+          placeholder: 'Nombre del banco',
+        },
+        {
+          key: 'cci',
+          label: 'CCI (opcional)',
+          placeholder: 'Código de Cuenta Interbancario',
+          keyboardType: 'numeric',
+        },
+      ];
+    }
+
+    if (countryCode === 'BO' && methodCode === 'QRI-BO') {
+      return [
+        {
+          key: 'walletApp',
+          label: 'App o banco del QR',
+          placeholder: 'Banco o billetera que recibirá el QR',
+          helpText: 'Sirve para identificar la app que el usuario usará con el QR interoperable.',
+        },
+      ];
+    }
+
+    if (countryCode === 'PE' && methodCode === 'QRI-PE') {
+      return [
+        {
+          key: 'walletApp',
+          label: 'App de la billetera',
+          placeholder: 'Yape, Plin, Ligo u otra',
+        },
+      ];
+    }
+
+    if (countryCode === 'CO' && (methodCode === 'PSE' || methodCode === 'BANCOLOMBIA')) {
+      return [
+        {
+          key: 'bankName',
+          label: 'Banco receptor',
+          placeholder: 'Nombre del banco',
+        },
+      ];
+    }
+
+    return [];
+  }, [countryCode, methodCode, mode, selectedPaymentMethod]);
+
   const validateForm = () => {
     if (!selectedPaymentMethod) {
       Alert.alert('Error', 'Por favor selecciona un método de pago', [{ text: 'OK' }]);
@@ -315,17 +667,17 @@ export const AddBankInfoModal = ({
     }
 
     // Validate required fields based on payment method
-    if (selectedPaymentMethod.requiresAccountNumber && !formData.accountNumber.trim()) {
+    if (fieldCopy.account.required && !formData.accountNumber.trim()) {
       Alert.alert('Error', 'Por favor ingresa el número de cuenta', [{ text: 'OK' }]);
       return false;
     }
 
-    if (selectedPaymentMethod.requiresPhone && !formData.phoneNumber.trim()) {
+    if (fieldCopy.phone.required && !formData.phoneNumber.trim()) {
       Alert.alert('Error', 'Por favor ingresa el número de teléfono', [{ text: 'OK' }]);
       return false;
     }
 
-    if (selectedPaymentMethod.requiresEmail && !formData.email.trim()) {
+    if (fieldCopy.email.required && !formData.email.trim()) {
       Alert.alert('Error', 'Por favor ingresa el email', [{ text: 'OK' }]);
       return false;
     }
@@ -334,6 +686,14 @@ export const AddBankInfoModal = ({
     if (selectedPaymentMethod.bank?.country?.requiresIdentification && !formData.identificationNumber.trim()) {
       Alert.alert('Error', `Por favor ingresa tu ${selectedPaymentMethod.bank.country.identificationName}`, [{ text: 'OK' }]);
       return false;
+    }
+
+    for (const field of providerFieldConfigs) {
+      const value = formData.providerMetadata[field.key];
+      if (field.required && !value?.trim()) {
+        Alert.alert('Error', `Por favor completa ${field.label.toLowerCase()}`, [{ text: 'OK' }]);
+        return false;
+      }
     }
 
     return true;
@@ -347,13 +707,21 @@ export const AddBankInfoModal = ({
 
       const variables = {
         paymentMethodId: selectedPaymentMethod!.id,
-        accountHolderName: formData.accountHolderName.trim(),
+        accountHolderName:
+          methodCode === 'PSE' &&
+          formData.providerMetadata.firstName?.trim() &&
+          formData.providerMetadata.lastName?.trim()
+            ? `${formData.providerMetadata.firstName.trim()} ${formData.providerMetadata.lastName.trim()}`
+            : formData.accountHolderName.trim(),
         accountNumber: formData.accountNumber.trim() || null,
         phoneNumber: formData.phoneNumber.trim() || null,
         email: formData.email.trim() || null,
         username: formData.username.trim() || null,
-        accountType: formData.accountType || null,
+        accountType: showAccountTypeField ? (formData.accountType || null) : null,
         identificationNumber: formData.identificationNumber.trim() || null,
+        providerMetadata: Object.keys(formData.providerMetadata).length
+          ? JSON.stringify(formData.providerMetadata)
+          : null,
         isDefault: formData.isDefault,
       };
 
@@ -425,6 +793,10 @@ export const AddBankInfoModal = ({
   };
 
   const renderPaymentMethodPicker = () => {
+    if (!showPaymentMethodPicker) {
+      return null;
+    }
+
     // No need to filter by isActive - backend already returns only active methods
     const activePaymentMethods = paymentMethods;
 
@@ -444,6 +816,7 @@ export const AddBankInfoModal = ({
           } else {
             setSelectedBank(null);
           }
+          setFormData(prev => ({ ...prev, providerMetadata: {} }));
           setShowPaymentMethodPicker(false);
         }}
       >
@@ -466,7 +839,8 @@ export const AddBankInfoModal = ({
       <Modal
         visible={showPaymentMethodPicker}
         animationType="slide"
-        presentationStyle="pageSheet"
+        presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'}
+        onRequestClose={() => setShowPaymentMethodPicker(false)}
       >
         <View style={styles.pickerContainer}>
           <View style={styles.pickerHeader}>
@@ -511,6 +885,10 @@ export const AddBankInfoModal = ({
   };
 
   const renderCountryPicker = () => {
+    if (!showCountryPicker) {
+      return null;
+    }
+
     const renderCountryItem = ({ item: country }: { item: Country }) => (
       <TouchableOpacity
         style={styles.pickerItem}
@@ -518,6 +896,7 @@ export const AddBankInfoModal = ({
           setSelectedCountry(country);
           setSelectedBank(null);
           setSelectedPaymentMethod(null); // Reset payment method when country changes
+          setFormData(prev => ({ ...prev, providerMetadata: {} }));
           setShowCountryPicker(false);
         }}
       >
@@ -533,7 +912,8 @@ export const AddBankInfoModal = ({
       <Modal
         visible={showCountryPicker}
         animationType="slide"
-        presentationStyle="pageSheet"
+        presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'}
+        onRequestClose={() => setShowCountryPicker(false)}
       >
         <View style={styles.pickerContainer}>
           <View style={styles.pickerHeader}>
@@ -544,16 +924,8 @@ export const AddBankInfoModal = ({
             <View style={{ width: 60 }} />
           </View>
 
-          {countries.length > 10 && (
-            <View style={styles.scrollHint}>
-              <Text style={styles.scrollHintText}>
-                {countries.length} países disponibles - desliza para ver más
-              </Text>
-            </View>
-          )}
-
           <FlatList
-            data={countries}
+            data={filteredCountries}
             renderItem={renderCountryItem}
             keyExtractor={(item) => item.id}
             style={styles.pickerList}
@@ -578,18 +950,8 @@ export const AddBankInfoModal = ({
   };
 
 
-  // Auto-select Venezuela when countries load
-  useEffect(() => {
-    if (!isEditing && !selectedCountry && countries.length > 0) {
-      const ve = countries.find(c => c.code === 'VE');
-      if (ve) {
-        setSelectedCountry(ve);
-      }
-    }
-  }, [countries, isEditing, selectedCountry]);
-
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={[styles.header, { paddingTop: 8 }]}>
         <View style={styles.headerContent}>
@@ -597,7 +959,7 @@ export const AddBankInfoModal = ({
             <Icon name="x" size={24} color={colors.text.primary} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>
-            {isEditing ? 'Editar Método de Pago' : 'Agregar Método de Pago'}
+            {isEditing ? 'Editar método de pago' : mode === 'off_ramp' ? 'Agregar forma de cobro' : 'Agregar método de pago'}
           </Text>
           <TouchableOpacity
             onPress={handleSubmit}
@@ -620,8 +982,9 @@ export const AddBankInfoModal = ({
         <View style={styles.inputGroup}>
           <Text style={styles.label}>País *</Text>
           <TouchableOpacity
-            style={[styles.picker, styles.pickerDisabled]}
-            disabled={true}
+            style={[styles.picker, lockCountry && styles.pickerDisabled]}
+            onPress={() => !lockCountry && setShowCountryPicker(true)}
+            disabled={countriesLoading || lockCountry}
           >
             <View style={styles.pickerContent}>
               {selectedCountry ? (
@@ -630,10 +993,12 @@ export const AddBankInfoModal = ({
                   <Text style={styles.pickerText}>{selectedCountry.name}</Text>
                 </>
               ) : (
-                <Text style={styles.pickerPlaceholder}>Cargando...</Text>
+                <Text style={styles.pickerPlaceholder}>
+                  {countriesLoading ? 'Cargando países...' : 'Seleccionar país'}
+                </Text>
               )}
             </View>
-            <Icon name="lock" size={16} color={colors.text.secondary} />
+            <Icon name={lockCountry ? 'lock' : 'chevron-down'} size={16} color={colors.text.secondary} />
           </TouchableOpacity>
         </View>
 
@@ -641,9 +1006,9 @@ export const AddBankInfoModal = ({
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Método de Pago *</Text>
           <TouchableOpacity
-            style={[styles.picker, !selectedCountry && styles.pickerDisabled]}
-            onPress={() => selectedCountry && setShowPaymentMethodPicker(true)}
-            disabled={!selectedCountry}
+            style={[styles.picker, (!selectedCountry || lockPaymentMethod) && styles.pickerDisabled]}
+            onPress={() => selectedCountry && !lockPaymentMethod && setShowPaymentMethodPicker(true)}
+            disabled={!selectedCountry || lockPaymentMethod}
           >
             <View style={styles.pickerContent}>
               {selectedPaymentMethod ? (
@@ -657,7 +1022,7 @@ export const AddBankInfoModal = ({
                 </Text>
               )}
             </View>
-            <Icon name="chevron-down" size={20} color={colors.text.secondary} />
+            <Icon name={lockPaymentMethod ? 'lock' : 'chevron-down'} size={20} color={colors.text.secondary} />
           </TouchableOpacity>
         </View>
 
@@ -674,63 +1039,63 @@ export const AddBankInfoModal = ({
 
         {/* Account Holder Name */}
         <View style={styles.inputGroup}>
-          <Text style={styles.label}>Nombre del Titular *</Text>
+          <Text style={styles.label}>{fieldCopy.holderLabel} *</Text>
           <TextInput
             style={styles.textInput}
             value={formData.accountHolderName}
             onChangeText={(value) => setFormData(prev => ({ ...prev, accountHolderName: value }))}
-            placeholder="Nombre completo del titular"
+            placeholder={fieldCopy.holderLabel}
             autoCapitalize="words"
           />
         </View>
 
         {/* Account Number (conditional) */}
-        {selectedPaymentMethod?.requiresAccountNumber && (
+        {fieldCopy.account.show && (
           <View style={styles.inputGroup}>
             <Text style={styles.label}>
-              {selectedPaymentMethod.providerType === 'bank' ? 'Número de Cuenta *' : 'Número de Cuenta'}
+              {fieldCopy.account.label}{fieldCopy.account.required ? ' *' : ''}
             </Text>
             <TextInput
               style={styles.textInput}
               value={formData.accountNumber}
               onChangeText={(value) => setFormData(prev => ({ ...prev, accountNumber: value }))}
-              placeholder={selectedPaymentMethod.providerType === 'bank' ? 'Número de cuenta bancaria' : 'Identificador de cuenta'}
-              keyboardType="numeric"
+              placeholder={fieldCopy.account.placeholder}
+              keyboardType={fieldCopy.account.keyboardType}
             />
           </View>
         )}
 
         {/* Phone Number (conditional) */}
-        {selectedPaymentMethod?.requiresPhone && (
+        {fieldCopy.phone.show && (
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Teléfono *</Text>
+            <Text style={styles.label}>{fieldCopy.phone.label}{fieldCopy.phone.required ? ' *' : ''}</Text>
             <TextInput
               style={styles.textInput}
               value={formData.phoneNumber}
               onChangeText={(value) => setFormData(prev => ({ ...prev, phoneNumber: value }))}
-              placeholder="Número de teléfono"
-              keyboardType="phone-pad"
+              placeholder={fieldCopy.phone.placeholder}
+              keyboardType={fieldCopy.phone.keyboardType}
             />
           </View>
         )}
 
         {/* Email (conditional) */}
-        {selectedPaymentMethod?.requiresEmail && (
+        {fieldCopy.email.show && (
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Email *</Text>
+            <Text style={styles.label}>{fieldCopy.email.label}{fieldCopy.email.required ? ' *' : ''}</Text>
             <TextInput
               style={styles.textInput}
               value={formData.email}
               onChangeText={(value) => setFormData(prev => ({ ...prev, email: value }))}
-              placeholder="Dirección de correo electrónico"
-              keyboardType="email-address"
+              placeholder={fieldCopy.email.placeholder}
+              keyboardType={fieldCopy.email.keyboardType}
               autoCapitalize="none"
             />
           </View>
         )}
 
         {/* Username (always optional) */}
-        {selectedPaymentMethod && selectedPaymentMethod.providerType === 'fintech' && (
+        {selectedPaymentMethod && selectedPaymentMethod.providerType === 'fintech' && false && (
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Usuario (Opcional)</Text>
             <TextInput
@@ -744,9 +1109,11 @@ export const AddBankInfoModal = ({
         )}
 
         {/* Account Type (only for banks) */}
-        {selectedPaymentMethod?.providerType === 'bank' && (
+        {showAccountTypeField && (
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Tipo de Cuenta *</Text>
+            <Text style={styles.label}>
+              Tipo de Cuenta{accountTypeRequired ? ' *' : ''}
+            </Text>
             <View style={styles.radioGroup}>
               {getAccountTypeOptions().map((option) => (
                 <TouchableOpacity
@@ -775,13 +1142,13 @@ export const AddBankInfoModal = ({
             <Text style={styles.label}>
               {selectedPaymentMethod.bank.country.identificationName} *
             </Text>
-            <TextInput
-              style={styles.textInput}
-              value={formData.identificationNumber}
-              onChangeText={(value) => setFormData(prev => ({ ...prev, identificationNumber: value }))}
-              placeholder={`Ingresa tu ${selectedPaymentMethod.bank.country.identificationName}`}
-              keyboardType="numeric"
-            />
+          <TextInput
+            style={styles.textInput}
+            value={formData.identificationNumber}
+            onChangeText={(value) => setFormData(prev => ({ ...prev, identificationNumber: value }))}
+            placeholder={`Ingresa tu ${selectedPaymentMethod.bank.country.identificationName}`}
+            keyboardType="numeric"
+          />
             {selectedPaymentMethod.bank.country.identificationFormat && (
               <Text style={styles.helpText}>
                 Formato: {selectedPaymentMethod.bank.country.identificationFormat}
@@ -789,6 +1156,31 @@ export const AddBankInfoModal = ({
             )}
           </View>
         )}
+
+        {providerFieldConfigs.map((field) => (
+          <View style={styles.inputGroup} key={field.key}>
+            <Text style={styles.label}>
+              {field.label}{field.required ? ' *' : ''}
+            </Text>
+            <TextInput
+              style={styles.textInput}
+              value={formData.providerMetadata[field.key] || ''}
+              onChangeText={(value) =>
+                setFormData(prev => ({
+                  ...prev,
+                  providerMetadata: {
+                    ...prev.providerMetadata,
+                    [field.key]: value,
+                  },
+                }))
+              }
+              placeholder={field.placeholder}
+              keyboardType={field.keyboardType || 'default'}
+              autoCapitalize="none"
+            />
+            {field.helpText ? <Text style={styles.helpText}>{field.helpText}</Text> : null}
+          </View>
+        ))}
 
 
         {/* Set as Default */}
@@ -813,7 +1205,7 @@ export const AddBankInfoModal = ({
       {/* Pickers */}
       {renderPaymentMethodPicker()}
       {renderCountryPicker()}
-    </View>
+    </SafeAreaView>
   );
 };
 

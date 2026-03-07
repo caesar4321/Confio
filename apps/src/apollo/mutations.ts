@@ -1,5 +1,73 @@
 import { gql } from '@apollo/client';
 
+export const CREATE_RAMP_ORDER = gql`
+  mutation CreateRampOrder(
+    $direction: String!
+    $amount: String!
+    $countryCode: String
+    $fiatCurrency: String
+    $paymentMethodCode: String!
+    $bankInfoId: ID
+  ) {
+    createRampOrder(
+      direction: $direction
+      amount: $amount
+      countryCode: $countryCode
+      fiatCurrency: $fiatCurrency
+      paymentMethodCode: $paymentMethodCode
+      bankInfoId: $bankInfoId
+    ) {
+      success
+      error
+      orderId
+      direction
+      countryCode
+      fiatCurrency
+      paymentMethodCode
+      paymentMethodDisplay
+      amountIn
+      amountOut
+      totalChangeDisplay
+      rateDisplay
+      nextStep
+      nextActionUrl
+    }
+  }
+`;
+
+export const CREATE_MOCK_RAMP_ORDER = gql`
+  mutation CreateMockRampOrder(
+    $direction: String!
+    $amount: String!
+    $countryCode: String
+    $fiatCurrency: String
+    $paymentMethodCode: String!
+  ) {
+    createMockRampOrder(
+      direction: $direction
+      amount: $amount
+      countryCode: $countryCode
+      fiatCurrency: $fiatCurrency
+      paymentMethodCode: $paymentMethodCode
+    ) {
+      success
+      error
+      orderId
+      direction
+      countryCode
+      fiatCurrency
+      paymentMethodCode
+      paymentMethodDisplay
+      amountIn
+      amountOut
+      totalChangeDisplay
+      rateDisplay
+      nextStep
+      nextActionUrl
+    }
+  }
+`;
+
 // Web3Auth and Algorand mutations
 export const WEB3AUTH_LOGIN = gql`
   mutation Web3AuthLogin(

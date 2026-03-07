@@ -690,12 +690,13 @@ class BankInfoType(DjangoObjectType):
 	requires_identification = graphene.Boolean()
 	identification_label = graphene.String()
 	payment_details = graphene.JSONString()
+	provider_metadata = graphene.JSONString()
 	payment_method = graphene.Field('p2p_exchange.schema.P2PPaymentMethodType')
 	
 	class Meta:
 		model = BankInfo
 		fields = ('id', 'account', 'country', 'bank', 'account_holder_name', 'account_number',
-		         'account_type', 'identification_number', 'phone_number', 'email', 'username', 'is_default',
+		         'account_type', 'identification_number', 'phone_number', 'email', 'username', 'provider_metadata', 'is_default',
 		         'is_public', 'is_verified', 'verified_at', 'created_at', 'updated_at')
 	
 	def resolve_masked_account_number(self, info):
@@ -715,6 +716,9 @@ class BankInfoType(DjangoObjectType):
 	
 	def resolve_payment_details(self, info):
 		return self.get_payment_details()
+
+	def resolve_provider_metadata(self, info):
+		return self.provider_metadata or {}
 	
 	def resolve_payment_method(self, info):
 		return self.payment_method
@@ -783,6 +787,27 @@ class InfluencerReferralType(DjangoObjectType):
 
 	def resolve_referee_reward_event_id(self, info):
 		return _resolve_reward_event_id(self, getattr(self, 'referred_user', None), role='referee')
+
+
+def _normalize_provider_metadata(provider_metadata):
+	if not provider_metadata:
+		return {}
+	if isinstance(provider_metadata, str):
+		try:
+			parsed = json.loads(provider_metadata)
+		except ValueError:
+			return {}
+		provider_metadata = parsed
+	if not isinstance(provider_metadata, dict):
+		return {}
+	normalized = {}
+	for key, value in provider_metadata.items():
+		if value is None:
+			continue
+		cleaned = str(value).strip()
+		if cleaned:
+			normalized[str(key)] = cleaned
+	return normalized
 
 
 def _resolve_reward_event_id(referral_obj, user, role=None):
@@ -3237,6 +3262,7 @@ class CreateBankInfo(graphene.Mutation):
         username = graphene.String()
         account_type = graphene.String()
         identification_number = graphene.String()
+        provider_metadata = graphene.JSONString()
         is_default = graphene.Boolean()
 
     success = graphene.Boolean()
@@ -3246,7 +3272,7 @@ class CreateBankInfo(graphene.Mutation):
     @classmethod
     def mutate(cls, root, info, payment_method_id, account_holder_name,
                account_number=None, phone_number=None, email=None, username=None,
-               account_type=None, identification_number=None, is_default=False):
+               account_type=None, identification_number=None, provider_metadata=None, is_default=False):
         user = getattr(info.context, 'user', None)
         if not (user and getattr(user, 'is_authenticated', False)):
             return CreateBankInfo(success=False, error="Authentication required")
@@ -3317,6 +3343,7 @@ class CreateBankInfo(graphene.Mutation):
                 username=username.strip() if username else None,
                 account_type=account_type,
                 identification_number=identification_number.strip() if identification_number else None,
+                provider_metadata=_normalize_provider_metadata(provider_metadata),
                 is_default=is_default
             )
 
@@ -3340,10 +3367,15 @@ class CreateBankInfo(graphene.Mutation):
 class UpdateBankInfo(graphene.Mutation):
     class Arguments:
         bank_info_id = graphene.ID(required=True)
+        payment_method_id = graphene.ID()
         account_holder_name = graphene.String(required=True)
-        account_number = graphene.String(required=True)
-        account_type = graphene.String(required=True)
+        account_number = graphene.String()
+        phone_number = graphene.String()
+        email = graphene.String()
+        username = graphene.String()
+        account_type = graphene.String()
         identification_number = graphene.String()
+        provider_metadata = graphene.JSONString()
         is_default = graphene.Boolean()
 
     success = graphene.Boolean()
@@ -3351,18 +3383,27 @@ class UpdateBankInfo(graphene.Mutation):
     bank_info = graphene.Field(BankInfoType)
 
     @classmethod
-    def mutate(cls, root, info, bank_info_id, account_holder_name, account_number,
-               account_type, identification_number=None, is_default=False):
+    def mutate(cls, root, info, bank_info_id, account_holder_name, payment_method_id=None,
+               account_number=None, phone_number=None, email=None, username=None,
+               account_type=None, identification_number=None, provider_metadata=None, is_default=False):
         user = getattr(info.context, 'user', None)
         if not (user and getattr(user, 'is_authenticated', False)):
             return UpdateBankInfo(success=False, error="Authentication required")
 
         try:
             # Get bank info and verify ownership
-            bank_info = BankInfo.objects.select_related('country', 'bank', 'account').get(
+            bank_info = BankInfo.objects.select_related('country', 'bank', 'account', 'payment_method').get(
                 id=bank_info_id,
                 account__user=user
             )
+
+            if payment_method_id:
+                from p2p_exchange.models import P2PPaymentMethod
+                payment_method = P2PPaymentMethod.objects.get(id=payment_method_id, is_active=True)
+                bank_info.payment_method = payment_method
+                if payment_method.bank:
+                    bank_info.bank = payment_method.bank
+                    bank_info.country = payment_method.bank.country
 
             # Check employee permissions for business accounts
             if bank_info.account.account_type == 'business':
@@ -3390,17 +3431,27 @@ class UpdateBankInfo(graphene.Mutation):
                                     )
 
             # Validate identification requirement
-            if bank_info.country.requires_identification and not identification_number:
+            validation_country = None
+            if bank_info.payment_method and bank_info.payment_method.bank:
+                validation_country = bank_info.payment_method.bank.country
+            elif bank_info.country:
+                validation_country = bank_info.country
+
+            if validation_country and validation_country.requires_identification and not identification_number:
                 return UpdateBankInfo(
                     success=False,
-                    error=f"{bank_info.country.identification_name} es requerido para cuentas bancarias en {bank_info.country.name}"
+                    error=f"{validation_country.identification_name} es requerido para cuentas bancarias en {validation_country.name}"
                 )
 
             # Update bank info
             bank_info.account_holder_name = account_holder_name.strip()
-            bank_info.account_number = account_number.strip()
+            bank_info.account_number = account_number.strip() if account_number else None
+            bank_info.phone_number = phone_number.strip() if phone_number else None
+            bank_info.email = email.strip() if email else None
+            bank_info.username = username.strip() if username else None
             bank_info.account_type = account_type
             bank_info.identification_number = identification_number.strip() if identification_number else None
+            bank_info.provider_metadata = _normalize_provider_metadata(provider_metadata)
             bank_info.is_default = is_default
             bank_info.save()
 
