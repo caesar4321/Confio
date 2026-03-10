@@ -1,6 +1,6 @@
 # Firebase App Check Integration
 
-**Last Updated:** December 20, 2025
+**Last Updated:** March 10, 2026
 
 ## Overview
 
@@ -63,18 +63,18 @@ App Check verification is expensive (network call to Firebase public keys, signa
 
 ## Enforcement Strategy
 
-We employ a graded enforcement strategy to minimize disruption while securing critical paths.
+We employ a strict enforcement strategy to secure all critical paths against scripted abuse. Following a period of logging in "Warning Mode", we have now migrated entirely to **BLOCKING** mode for all mobile app origin endpoints.
 
 | Action | Transport | Level | Description |
 | :--- | :--- | :--- | :--- |
-| **Reward Claim** | GraphQL | **BLOCKING** | Prevents referral abuse. Fails if token is invalid or missing. |
-| **Login / Signup** | GraphQL | Warning | Logs verification status; does not block users yet. |
-| **Payments** | WebSocket | Warning | Verifies integrity on connection. Logs results. |
-| **Withdrawals** | WebSocket | Warning | Verifies integrity on connection. Logs results. |
-| **Guardarian** | REST/GQL | Warning | Logs verification status for fiat on/off-ramp. |
+| **All GraphQL Mutations** (e.g. Payroll, Transfers, Payments, Reward Claim) | GraphQL | **BLOCKING** | Prevents scripted/bot abuse. Fails if token is invalid or missing. |
+| **Login / Signup** | GraphQL | **BLOCKING** | Scripted login attempts without valid device proofs are instantly disabled. |
+| **Payments / USDC** | WebSocket | **BLOCKING** | Verifies integrity on initial connection sequence. Drops connection `code=4003` if unverified. |
+| **Guardarian On/Off-ramp proxies** | REST/GQL | **BLOCKING** | Protects the company's Guardarian integration parameters. |
+| **External Webhooks** | HTTP | **WARNING/Bypass** | Third-party webhooks (e.g. Koywe) cannot produce a mobile token and are explicitly excluded from enforcement. |
 
 *   **Blocking**: Request is rejected immediately if integrity check fails.
-*   **Warning**: Request proceeds, but failure is logged for analysis.
+*   **Warning/Bypass**: Used only for verified external service webhooks that do not originate from our app.
 
 ---
 
