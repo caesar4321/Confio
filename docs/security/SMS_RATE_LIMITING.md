@@ -18,7 +18,7 @@ The rate limiting is implemented in `sms_verification/schema.py` using Django's 
     *   **Message:** "Has excedido el límite de intentos por hora."
 
 3.  **IP Limit (20 per hour)**
-    *   **Scope:** Per Client IP Address (extracted from `HTTP_X_FORWARDED_FOR`)
+    *   **Scope:** Per Client IP Address (extracted securely from the *last* IP in `HTTP_X_FORWARDED_FOR`)
     *   **Effect:** Prevents a single IP (e.g., bot script) from flooding multiple numbers.
     *   **Message:** "Demasiados intentos desde esta dirección IP."
 
@@ -45,7 +45,14 @@ The rate limiting is implemented in `sms_verification/schema.py` using Django's 
 *   **Enforcement:** If `is_blocked=True`, the request is immediately rejected with `403 Forbidden`.
 *   **Management:** IPs can be blocked via the admin panel or automated scripts (`scripts/ban_attacker.py`).
 
-### 2. Twilio Carrier Lookup (VoIP/Landline Blocking)
+### 2. Firebase App Check Enforcement (Anti-Bot)
+To prevent automated scripts from bypassing the user limits (by creating fresh Firebase accounts continuously) and IP limits (by rotating proxies), we strictly enforce device attestation.
+
+*   **Mechanism:** The `InitiateSMSVerification` endpoint requires a valid `X-Firebase-AppCheck` header (verified via Play Integrity/App Attest).
+*   **Trigger:** Executed **before** any rate limiting or Twilio API calls to instantly drop scripted requests.
+*   **Enforcement:** Missing or mathematically invalid tokens are rejected with an error asking the user to update their app or try again later.
+
+### 3. Twilio Carrier Lookup (VoIP/Landline Blocking)
 To prevent bot farms from using cheap virtual numbers or landlines, we validate the line type before sending an SMS.
 
 *   **API:** Twilio Lookups v2 (`line_type_intelligence`).
@@ -57,7 +64,7 @@ To prevent bot farms from using cheap virtual numbers or landlines, we validate 
     *   `nonFixedVoip`
 *   **Error Message:** "Solo se permiten números móviles. No se admiten líneas fijas o VoIP."
 
-### 3. Geographic Blocking (High-Risk Countries)
+### 4. Geographic Blocking (High-Risk Countries)
 We have disabled SMS traffic to specific high-risk countries in Asia and Africa that are not relevant to our LATAM diaspora user base but are frequent sources of SMS pumping fraud.
 
 *   **Asia:**
