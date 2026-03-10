@@ -27,6 +27,11 @@ The rate limiting is implemented in `sms_verification/schema.py` using Django's 
     *   **Effect:** Prevents a single number from being spammed even if the attacker switches users or IPs (though unlikely without bypassing auth).
     *   **Message:** "Demasiados intentos para este número. Intenta más tarde."
 
+5.  **App Check Token Fingerprint Limit (5 per hour)**
+    *   **Scope:** Per `X-Firebase-AppCheck` JWT Token (via SHA-256 hash).
+    *   **Effect:** Explicitly prevents bot farms from extracting a mathematically valid App Check Token from a physical device and systematically spraying SMS requests using completely rotated user accounts, proxy IPs, and target phone numbers.
+    *   **Message:** "Demasiados intentos desde este dispositivo. Intenta más tarde."
+
 ### Bypass/Exemptions
 *   **Review Numbers:** Specific test numbers configured in environment variables (e.g., Apple Reviewer numbers) bypass the external API call entirely, so they do not consume credits, but they are still subject to local logic validation.
 
@@ -36,7 +41,8 @@ The rate limiting is implemented in `sms_verification/schema.py` using Django's 
     *   `sms_limit:user:{user_id}`
     *   `sms_limit:ip:{ip_address}`
     *   `sms_limit:phone:{phone_number}`
-*   **Logs:** Warning logs are generated when the IP limit is hit (`SMS Rate limit exceeded for IP ...`).
+    *   `sms_limit:token:{token_hash}`
+*   **Logs:** Warning logs are generated when the IP or Token limits are hit (`SMS Rate limit exceeded for IP/Token ...`).
 
 ## Additional Security Measures
 
