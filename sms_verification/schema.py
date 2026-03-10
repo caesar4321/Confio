@@ -138,6 +138,21 @@ class InitiateSMSVerification(graphene.Mutation):
             # Clean up previous unverified for this phone (housekeeping)
             SMSVerification.objects.filter(user=user, phone_number=phone_e164, is_verified=False).delete()
 
+            # --- Firebase App Check Enforcement ---
+            from security.integrity_service import app_check_service
+            
+            # Extract App Check token from headers
+            token_header = getattr(info.context, 'headers', {}).get('X-Firebase-AppCheck', getattr(info.context, 'META', {}).get('HTTP_X_FIREBASE_APPCHECK', ''))
+            
+            if not token_header:
+                logger.warning(f"SMS requested without App Check token by user {user.id} to {phone_e164}")
+                return InitiateSMSVerification(success=False, error="Actualiza la aplicación a la última versión para continuar.")
+                
+            verification = app_check_service.verify_token(token_header)
+            if not verification.get('valid', False):
+                logger.warning(f"SMS requested with INVALID App Check token by user {user.id} to {phone_e164}")
+                return InitiateSMSVerification(success=False, error="Límites de seguridad excedidos. Intenta más tarde o actualiza tu app.")
+
             # --- Rate Limiting Checks ---
             from django.core.cache import cache
             
