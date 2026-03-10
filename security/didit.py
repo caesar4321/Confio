@@ -140,12 +140,19 @@ def _didit_request(method: str, path: str, *, payload: dict[str, Any] | None = N
         raise DiditAPIError('Didit API returned invalid JSON') from exc
 
 
-def _workflow_id_for_account(account_type: str) -> str:
+def _workflow_id_for_account(account_type: str, phone_country: str | None = None) -> str:
     business_workflow = getattr(settings, 'DIDIT_BUSINESS_WORKFLOW_ID', '') or ''
-    default_workflow = getattr(settings, 'DIDIT_WORKFLOW_ID', '') or ''
-    workflow_id = business_workflow if account_type == 'business' and business_workflow else default_workflow
+    workflow_map = getattr(settings, 'DIDIT_WORKFLOW_IDS_BY_PHONE_COUNTRY', {}) or {}
+    normalized_phone_country = str(phone_country or '').strip().upper()
+    workflow_id = business_workflow if account_type == 'business' and business_workflow else ''
+    if not workflow_id and normalized_phone_country:
+        workflow_id = str(workflow_map.get(normalized_phone_country, '') or '')
     if not workflow_id:
-        raise DiditConfigurationError('Didit workflow is not configured')
+        if normalized_phone_country:
+            raise DiditConfigurationError(
+                'La verificación de identidad no está disponible por ahora para tu país.'
+            )
+        raise DiditConfigurationError('No pudimos identificar tu país para iniciar la verificación.')
     return workflow_id
 
 
@@ -159,6 +166,7 @@ def build_didit_callback_url(request=None) -> str | None:
 
 
 def create_didit_session(*, user, account_type: str = 'personal', business_id: str | None = None, callback_url: str | None = None) -> dict[str, Any]:
+    phone_country = str(getattr(user, 'phone_country', '') or '').strip().upper()
     vendor_data = {
         'user_id': user.id,
         'account_type': account_type,
@@ -167,7 +175,7 @@ def create_didit_session(*, user, account_type: str = 'personal', business_id: s
         vendor_data['business_id'] = str(business_id)
 
     payload: dict[str, Any] = {
-        'workflow_id': _workflow_id_for_account(account_type),
+        'workflow_id': _workflow_id_for_account(account_type, phone_country=phone_country),
         'vendor_data': json.dumps(vendor_data, separators=(',', ':')),
     }
     if callback_url:

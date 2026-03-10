@@ -5,6 +5,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 
 from security.didit import create_didit_session, sync_didit_session, verify_didit_webhook_signature
+from security.didit import DiditConfigurationError
 from security.models import IdentityVerification
 
 User = get_user_model()
@@ -12,7 +13,12 @@ User = get_user_model()
 
 @override_settings(
     DIDIT_API_KEY='test-api-key',
-    DIDIT_WORKFLOW_ID='workflow-personal',
+    DIDIT_WORKFLOW_IDS_BY_PHONE_COUNTRY={
+        'PY': 'workflow-paraguay',
+        'AR': 'workflow-argentina',
+        'PT': 'workflow-portugal',
+        'DE': 'workflow-europe',
+    },
     DIDIT_BUSINESS_WORKFLOW_ID='workflow-business',
 )
 class DiditIntegrationTests(TestCase):
@@ -23,6 +29,7 @@ class DiditIntegrationTests(TestCase):
             firebase_uid='firebase-didit-user',
             first_name='Ana',
             last_name='Perez',
+            phone_country='AR',
         )
 
     def _mock_response(self, payload):
@@ -56,6 +63,25 @@ class DiditIntegrationTests(TestCase):
         self.assertEqual(kwargs['json']['workflow_id'], 'workflow-business')
         self.assertEqual(kwargs['json']['callback'], 'https://confio.lat/api/didit/webhook/')
         self.assertEqual(kwargs['json']['vendor_data'], '{"user_id":1,"account_type":"business","business_id":"42"}')
+
+    @patch('security.didit.requests.request')
+    def test_create_session_uses_phone_country_workflow_for_personal_accounts(self, mock_request):
+        mock_request.return_value = self._mock_response({
+            'session_id': 'sess_456',
+            'session_token': 'token_xyz',
+            'status': 'In progress',
+        })
+
+        create_didit_session(user=self.user, account_type='personal')
+
+        kwargs = mock_request.call_args.kwargs
+        self.assertEqual(kwargs['json']['workflow_id'], 'workflow-argentina')
+
+    def test_create_session_rejects_unsupported_phone_country(self):
+        self.user.phone_country = 'JP'
+
+        with self.assertRaises(DiditConfigurationError):
+            create_didit_session(user=self.user, account_type='personal')
 
     @patch('security.didit.requests.request')
     def test_sync_session_updates_existing_pending_verification(self, mock_request):

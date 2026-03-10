@@ -146,7 +146,8 @@ class InitiateSMSVerification(graphene.Mutation):
                 req = info.context
                 x_forwarded_for = req.META.get('HTTP_X_FORWARDED_FOR')
                 if x_forwarded_for:
-                    return x_forwarded_for.split(',')[0].strip()
+                    # In standard proxy setups, the real client IP is appended to the *end* of the header list
+                    return x_forwarded_for.split(',')[-1].strip()
                 return req.META.get('REMOTE_ADDR')
 
             ip_addr = get_client_ip(info)
