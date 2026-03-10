@@ -192,6 +192,17 @@ class InitiateSMSVerification(graphene.Mutation):
             if phone_count >= 3:
                 return InitiateSMSVerification(success=False, error="Demasiados intentos para este número. Intenta más tarde.")
 
+            # 5. Limit per App Check Token (5 per hour)
+            if token_header:
+                import hashlib
+                token_hash = hashlib.sha256(token_header.encode('utf-8')).hexdigest()
+                cache_key_token = f"sms_limit:token:{token_hash}"
+                token_count = cache.get(cache_key_token, 0)
+                if token_count >= 5:
+                    logger.warning(f"SMS Rate limit exceeded for App Check Token {token_hash[:8]}")
+                    return InitiateSMSVerification(success=False, error="Demasiados intentos desde este dispositivo. Intenta más tarde.")
+                # We will increment this token count below
+
             # --- Updates Counters ---
             # Set cooldown
             cache.set(cache_key_cooldown, True, 60)
@@ -224,6 +235,16 @@ class InitiateSMSVerification(graphene.Mutation):
                 except ValueError:
                      cache.set(cache_key_phone, 1, 3600)
                      
+            # Increment and set expiry if new (Token)
+            if token_header:
+                if token_count == 0:
+                    cache.set(cache_key_token, 1, 3600)
+                else:
+                    try:
+                        cache.incr(cache_key_token)
+                    except ValueError:
+                        cache.set(cache_key_token, 1, 3600)
+                        
             # --- End Rate Limiting ---
             
             # --- Carrier Lookup Check (VoIP/Landline Blocking) ---
