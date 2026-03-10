@@ -151,16 +151,18 @@ class Web3AuthLoginMutation(graphene.Mutation):
                 # Determine correct action based on flow
                 verdict_action = 'signup' if created else 'login'
 
-                app_check_service.verify_and_record(
+                ac_result = app_check_service.verify_and_record(
                     user=user,
                     token=token_header,
                     action=verdict_action,
                     device_fingerprint=fingerprint_str,
-                    should_enforce=False
+                    should_enforce=True
                 )
+                if not ac_result.get('success', True):
+                    return cls(success=False, error="Dispositivo no verificado (App Check failed). Por favor, usa la app oficial.")
             except Exception as e:
-                # Never block login on verification error during warning mode
                 logger.error(f"App Check verification failed: {e}")
+                return cls(success=False, error="Error de seguridad. Intenta nuevamente o actualiza la app.")
             
             # Update user info and last_login
             if not created:

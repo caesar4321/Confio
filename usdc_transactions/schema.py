@@ -169,10 +169,11 @@ class CreateUSDCDeposit(graphene.Mutation):
                 errors=["Authentication required"]
             )
         
-        # Firebase App Check (Warning Mode)
+        # Firebase App Check
         from security.integrity_service import app_check_service
-        from security.integrity_service import app_check_service
-        app_check_service.verify_request_header(info.context, action='transfer', should_enforce=False)
+        ac_result = app_check_service.verify_request_header(info.context, action='transfer', should_enforce=True)
+        if not ac_result.get('success', True):
+            return CreateUSDCDeposit(deposit=None, success=False, errors=["Actualiza la aplicación a la última versión o usa la app oficial para continuar."])
 
         try:
             # Get JWT context with validation and permission check
@@ -313,10 +314,11 @@ class CreateUSDCWithdrawal(graphene.Mutation):
                 errors=["Authentication required"]
             )
 
-        # Firebase App Check (Warning Mode)
+        # Firebase App Check
         from security.integrity_service import app_check_service
-        from security.integrity_service import app_check_service
-        app_check_service.verify_request_header(info.context, action='transfer', should_enforce=False)
+        ac_result = app_check_service.verify_request_header(info.context, action='transfer', should_enforce=True)
+        if not ac_result.get('success', True):
+            return CreateUSDCWithdrawal(withdrawal=None, success=False, errors=["Actualiza la aplicación a la última versión o usa la app oficial para continuar."])
 
         try:
             # Get JWT context with validation and permission check

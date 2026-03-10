@@ -55,20 +55,24 @@ class PaySessionConsumer(AsyncJsonWebsocketConsumer):
         params = parse_qs(query_string)
         self._raw_token = (params.get("token", [None])[0]) or ""
         
-        # Firebase App Check (Warning Mode)
+        # Firebase App Check
         app_check_token = (params.get("app_check_token", [None])[0]) or ""
         try:
             from security.integrity_service import app_check_service
-            # should_enforce=False -> Warning Mode (log only)
-            # should_enforce=False -> Warning Mode (log only)
-            await database_sync_to_async(app_check_service.verify_and_record)(
+            ac_result = await database_sync_to_async(app_check_service.verify_and_record)(
                 user=user,
                 token=app_check_token,
                 action='payment',
-                should_enforce=False
+                should_enforce=True
             )
+            if not ac_result.get('success', True):
+                print(f"[ws/pay_session] App Check rejected connection")
+                await self.close(code=4003)
+                return
         except Exception as e:
             print(f"[ws/pay_session] App Check error: {e}")
+            await self.close(code=4003)
+            return
 
         print(f"[ws/pay_session] connect user={getattr(user, 'id', None)}")
         # Accept connection (no subprotocol required for RN WebSocket)
@@ -303,20 +307,24 @@ class SendSessionConsumer(AsyncJsonWebsocketConsumer):
         self._raw_token = (params.get("token", [None])[0]) or ""
         self._sponsor_txn = None  # keep last prepared sponsor txn for submit
 
-        # Firebase App Check (Warning Mode)
+        # Firebase App Check
         app_check_token = (params.get("app_check_token", [None])[0]) or ""
         try:
             from security.integrity_service import app_check_service
-            # should_enforce=False -> Warning Mode (log only)
-            # should_enforce=False -> Warning Mode (log only)
-            await database_sync_to_async(app_check_service.verify_and_record)(
+            ac_result = await database_sync_to_async(app_check_service.verify_and_record)(
                 user=user,
                 token=app_check_token,
                 action='transfer',
-                should_enforce=False
+                should_enforce=True
             )
+            if not ac_result.get('success', True):
+                print(f"[ws/send_session] App Check rejected connection")
+                await self.close(code=4003)
+                return
         except Exception as e:
             print(f"[ws/send_session] App Check error: {e}")
+            await self.close(code=4003)
+            return
 
         print(f"[ws/send_session] connect user={getattr(user, 'id', None)}")
         await self.accept()

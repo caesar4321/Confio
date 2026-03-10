@@ -180,13 +180,15 @@ def guardarian_transaction_proxy(request):
     if not auth_header.startswith('JWT '):
         return JsonResponse({'error': 'Unauthorized'}, status=401)
 
-    # Firebase App Check (Warning Mode)
+    # Firebase App Check
     try:
         from security.integrity_service import app_check_service
-        # should_enforce=False means it logs failures but returns success=True
-        app_check_service.verify_request_header(request, 'topup_sell', should_enforce=False)
+        ac_result = app_check_service.verify_request_header(request, 'topup_sell', should_enforce=True)
+        if not ac_result.get('success', True):
+            return JsonResponse({'error': 'Actualiza la aplicación a la última versión o usa la app oficial para continuar.'}, status=403)
     except Exception as e:
         logger.warning(f"Guardarian App Check error: {e}")
+        return JsonResponse({'error': 'Security check failed'}, status=403)
 
     try:
         token = auth_header.split(' ', 1)[1]

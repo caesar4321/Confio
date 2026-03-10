@@ -85,7 +85,7 @@ class AppCheckService:
         token: str,
         action: str,
         device_fingerprint: str = '',
-        should_enforce: bool = False
+        should_enforce: bool = True
     ) -> Dict[str, Any]:
         """
         Full verification flow:
@@ -173,7 +173,7 @@ class AppCheckService:
         
         return result
 
-    def verify_request_header(self, request, action: str, should_enforce: bool = False):
+    def verify_request_header(self, request, action: str, should_enforce: bool = True):
         """
         Helper to verify App Check token from Django request header X-Firebase-AppCheck.
         """
