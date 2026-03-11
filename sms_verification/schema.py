@@ -9,6 +9,7 @@ import hashlib
 import logging
 import re
 
+from security.request_utils import extract_client_ip_from_meta, extract_device_id
 from .models import SMSVerification
 from .twilio_verify import send_verification_sms, check_verification, TwilioVerifyError
 from users.country_codes import COUNTRY_CODES
@@ -159,11 +160,7 @@ class InitiateSMSVerification(graphene.Mutation):
             # Helper to get client IP
             def get_client_ip(info):
                 req = info.context
-                x_forwarded_for = req.META.get('HTTP_X_FORWARDED_FOR')
-                if x_forwarded_for:
-                    # In standard proxy setups, the real client IP is appended to the *end* of the header list
-                    return x_forwarded_for.split(',')[-1].strip()
-                return req.META.get('REMOTE_ADDR')
+                return extract_client_ip_from_meta(getattr(req, 'META', {}))
 
             ip_addr = get_client_ip(info)
             
@@ -222,17 +219,9 @@ class InitiateSMSVerification(graphene.Mutation):
                 
             # 7. Limit per Device Fingerprint (5 per hour)
             from security.models import IntegrityVerdict
-            import json
             
             latest_verdict = IntegrityVerdict.objects.filter(user=user).order_by('-created_at').first()
-            device_id = None
-            if latest_verdict and latest_verdict.device_fingerprint:
-                try:
-                    fingerprint_data = json.loads(latest_verdict.device_fingerprint) if isinstance(latest_verdict.device_fingerprint, str) else latest_verdict.device_fingerprint
-                    if isinstance(fingerprint_data, dict):
-                        device_id = fingerprint_data.get('deviceId')
-                except Exception:
-                    pass
+            device_id = extract_device_id(getattr(latest_verdict, 'device_fingerprint', None))
             
             if device_id:
                 cache_key_device = f"sms_limit:device:{device_id}"

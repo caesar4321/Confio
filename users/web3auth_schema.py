@@ -147,7 +147,12 @@ class Web3AuthLoginMutation(graphene.Mutation):
                 logger.info(f"Web3Auth App Check Debug: Token {token_status} ({token_preview}), User {user.id}" + (f", Client Error: {debug_error}" if debug_error else ""))
 
                 # We can also capture device_fingerprint string if it was passed
-                fingerprint_str = device_fingerprint if isinstance(device_fingerprint, str) else str(device_fingerprint) if device_fingerprint else ''
+                if isinstance(device_fingerprint, str):
+                    fingerprint_str = device_fingerprint
+                elif device_fingerprint:
+                    fingerprint_str = json.dumps(device_fingerprint, sort_keys=True)
+                else:
+                    fingerprint_str = ''
                 
                 # Determine correct action based on flow
                 verdict_action = 'signup' if created else 'login'

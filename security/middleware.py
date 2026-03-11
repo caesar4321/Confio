@@ -11,6 +11,7 @@ from django.core.cache import cache
 from user_agents import parse
 
 from .models import IPAddress, UserSession, DeviceFingerprint, UserDevice, UserBan
+from .request_utils import extract_client_ip_from_meta
 from .utils import calculate_device_fingerprint, check_ip_reputation
 
 logger = logging.getLogger(__name__)
@@ -89,13 +90,7 @@ class SecurityMiddleware:
     
     def get_client_ip(self, request) -> str:
         """Extract client IP from request"""
-        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
-        if x_forwarded_for:
-            # In standard proxy setups, the real client IP is appended to the *end* of the header list
-            ip = x_forwarded_for.split(',')[-1].strip()
-        else:
-            ip = request.META.get('REMOTE_ADDR', '')
-        return ip
+        return extract_client_ip_from_meta(getattr(request, 'META', {}))
     
     def track_ip_address(self, request) -> Optional[IPAddress]:
         """Track and analyze IP address"""

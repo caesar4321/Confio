@@ -15,6 +15,8 @@ from django.db.models import Q, Sum, Count, DecimalField
 from django.db.models.functions import Cast
 from functools import wraps
 
+from .request_utils import extract_client_ip_from_meta
+
 logger = logging.getLogger(__name__)
 
 
@@ -469,10 +471,8 @@ def track_user_device(user, device_fingerprint_data: Dict, request=None):
         # Track IP and create IP-Device-User association
         ip_obj = None
         if request and hasattr(request, 'META'):
-            ip_str = request.META.get('HTTP_X_FORWARDED_FOR', '').split(',')[0].strip()
-            if not ip_str:
-                ip_str = request.META.get('REMOTE_ADDR', '')
-            
+            ip_str = extract_client_ip_from_meta(request.META)
+
             if ip_str:
                 # Get or create IP address record
                 ip_obj, ip_created = IPAddress.objects.get_or_create(
