@@ -137,22 +137,28 @@ class Web3AuthLoginMutation(graphene.Mutation):
             # Firebase App Check (Warning Mode) - Post-User Resolution
             try:
                 from security.integrity_service import app_check_service
-                # Use request.headers (added in Django 2.2+)
-                token_header = info.context.headers.get('X-Firebase-AppCheck', '')
+                
+                # Safely get token and debug error from headers or META
+                token_header = ''
+                debug_error = ''
+                if hasattr(info.context, 'headers') and info.context.headers:
+                    token_header = info.context.headers.get('X-Firebase-AppCheck', '')
+                    debug_error = info.context.headers.get('X-AppCheck-Debug-Error', '')
+                elif hasattr(info.context, 'META') and info.context.META:
+                    token_header = info.context.META.get('HTTP_X_FIREBASE_APPCHECK', '')
+                    debug_error = info.context.META.get('HTTP_X_APPCHECK_DEBUG_ERROR', '')
                 
                 # Debug logging to investigate failure
                 token_status = "present" if token_header else "missing"
                 token_preview = token_header[:10] + "..." if token_header else "None"
-                debug_error = info.context.headers.get('X-AppCheck-Debug-Error', '')
                 logger.info(f"Web3Auth App Check Debug: Token {token_status} ({token_preview}), User {user.id}" + (f", Client Error: {debug_error}" if debug_error else ""))
 
-                # We can also capture device_fingerprint string if it was passed
-                if isinstance(device_fingerprint, str):
-                    fingerprint_str = device_fingerprint
-                elif device_fingerprint:
-                    fingerprint_str = json.dumps(device_fingerprint, sort_keys=True)
-                else:
-                    fingerprint_str = ''
+                # Ensure fingerprint_str doesn't exceed 255 chars (DB limit)
+                fingerprint_str = ''
+                if device_fingerprint:
+                    from security.utils import calculate_device_fingerprint
+                    fingerprint_data = json.loads(device_fingerprint) if isinstance(device_fingerprint, str) else device_fingerprint
+                    fingerprint_str = calculate_device_fingerprint(fingerprint_data)
                 
                 # Determine correct action based on flow
                 verdict_action = 'signup' if created else 'login'
