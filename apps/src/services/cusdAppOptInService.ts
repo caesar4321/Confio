@@ -36,7 +36,10 @@ class CUSDAppOptInService {
           const serverAddr = account?.algorandAddress;
           if (serverAddr && wallet?.address && wallet.address !== serverAddr) {
             console.warn('[CUSDAppOptInService] Derived address does not match server address; skipping app opt-in');
-            return { success: true };
+            return { 
+              success: false, 
+              error: 'No se pudo verificar la billetera. Por favor, asegúrate de haber restaurado tu copia de seguridad.' 
+            };
           }
         }
       } catch (prefError) {
