@@ -202,6 +202,28 @@ class InitiateSMSVerification(graphene.Mutation):
                     logger.warning(f"SMS Rate limit exceeded for App Check Token {token_hash[:8]}")
                     return InitiateSMSVerification(success=False, error="Demasiados intentos desde este dispositivo. Intenta más tarde.")
                 # We will increment this token count below
+                
+            # 6. Limit per Device Fingerprint (5 per hour)
+            from security.models import IntegrityVerdict
+            import json
+            
+            latest_verdict = IntegrityVerdict.objects.filter(user=user).order_by('-created_at').first()
+            device_id = None
+            if latest_verdict and latest_verdict.device_fingerprint:
+                try:
+                    fingerprint_data = json.loads(latest_verdict.device_fingerprint) if isinstance(latest_verdict.device_fingerprint, str) else latest_verdict.device_fingerprint
+                    if isinstance(fingerprint_data, dict):
+                        device_id = fingerprint_data.get('deviceId')
+                except Exception:
+                    pass
+            
+            if device_id:
+                cache_key_device = f"sms_limit:device:{device_id}"
+                device_count = cache.get(cache_key_device, 0)
+                if device_count >= 5:
+                    logger.warning(f"SMS Rate limit exceeded for Device ID {device_id}")
+                    return InitiateSMSVerification(success=False, error="Límites de seguridad de dispositivo excedidos. Intenta más tarde.")
+                # Increment cache below...
 
             # --- Updates Counters ---
             # Set cooldown
@@ -244,6 +266,16 @@ class InitiateSMSVerification(graphene.Mutation):
                         cache.incr(cache_key_token)
                     except ValueError:
                         cache.set(cache_key_token, 1, 3600)
+                        
+            # Increment and set expiry if new (Device Fingerprint)
+            if device_id:
+                if device_count == 0:
+                    cache.set(cache_key_device, 1, 3600)
+                else:
+                    try:
+                        cache.incr(cache_key_device)
+                    except ValueError:
+                        cache.set(cache_key_device, 1, 3600)
                         
             # --- End Rate Limiting ---
             
