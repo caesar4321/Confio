@@ -32,6 +32,11 @@ The rate limiting is implemented in `sms_verification/schema.py` using Django's 
     *   **Effect:** Explicitly prevents bot farms from extracting a mathematically valid App Check Token from a physical device and systematically spraying SMS requests using completely rotated user accounts, proxy IPs, and target phone numbers.
     *   **Message:** "Demasiados intentos desde este dispositivo. Intenta más tarde."
 
+6.  **Device Hardware ID Fingerprint Limit (5 per hour)**
+    *   **Scope:** Per `deviceId` extracted from the React Native `deviceFingerprint` provided during `Web3AuthLogin`.
+    *   **Effect:** Prevents an attacker using a single valid physical device from continuously requesting new App Check tokens up to the 10,000/day Play Integrity limit. Because the frontend device ID is static across multiple user logins, an attacker automating Android hardware is still restricted to 5 SMS per device per hour.
+    *   **Message:** "Límites de seguridad de dispositivo excedidos. Intenta más tarde."
+
 ### Bypass/Exemptions
 *   **Review Numbers:** Specific test numbers configured in environment variables (e.g., Apple Reviewer numbers) bypass the external API call entirely, so they do not consume credits, but they are still subject to local logic validation.
 
@@ -42,7 +47,8 @@ The rate limiting is implemented in `sms_verification/schema.py` using Django's 
     *   `sms_limit:ip:{ip_address}`
     *   `sms_limit:phone:{phone_number}`
     *   `sms_limit:token:{token_hash}`
-*   **Logs:** Warning logs are generated when the IP or Token limits are hit (`SMS Rate limit exceeded for IP/Token ...`).
+    *   `sms_limit:device:{device_id}`
+*   **Logs:** Warning logs are generated when the IP, Token, or Device limits are hit (`SMS Rate limit exceeded for IP/Token/Device ID ...`).
 
 ## Additional Security Measures
 
