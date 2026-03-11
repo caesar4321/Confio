@@ -38,6 +38,7 @@ import { API_URL, CONFIO_ASSET_ID, CUSD_ASSET_ID, USDC_ASSET_ID } from '../confi
 // Legacy CONFÍO asset ID from before token migration
 // Users who have this in V1 need it swept to V2
 const LEGACY_CONFIO_ASSET_ID = '3198568509';
+const MATERIAL_SPENDABLE_ALGO_MICROS = 100_000;
 
 
 // Use public AlgoNode API for client-side state checks (Read-Only)
@@ -66,6 +67,23 @@ class WalletMigrationService {
         const isMainnet = safeUrl.includes('confio.lat') || safeUrl.includes('mainnet');
         const server = isMainnet ? MAINNET_ALGOD : TESTNET_ALGOD;
         this.algodClient = new algosdk.Algodv2('', server, '');
+    }
+
+    private async hasMaterialBalanceAtRisk(address: string): Promise<boolean> {
+        const info = await this.algodClient.accountInformation(address).do();
+        const relevantAssets = (info.assets || []).filter((a: any) => {
+            const aid = String(a['asset-id']);
+            const amount = Number(a['amount'] || 0);
+            return amount > 0 && (
+                aid === String(CONFIO_ASSET_ID) ||
+                aid === String(LEGACY_CONFIO_ASSET_ID) ||
+                aid === String(CUSD_ASSET_ID) ||
+                aid === String(USDC_ASSET_ID)
+            );
+        });
+
+        const spendableAlgo = Math.max(0, Number(info.amount || 0) - Number(info['min-balance'] || 0));
+        return relevantAssets.length > 0 || spendableAlgo >= MATERIAL_SPENDABLE_ALGO_MICROS;
     }
 
     /**
@@ -385,6 +403,12 @@ class WalletMigrationService {
 
             if (submitResult.data?.submitBusinessOptInGroup?.success) {
                 console.log('[MigrationService] Migration successful (TxID: ' + submitResult.data.submitBusinessOptInGroup.transactionId + ')');
+
+                const v1StillHasValue = await this.hasMaterialBalanceAtRisk(v1Address);
+                if (v1StillHasValue) {
+                    console.error('[MigrationService] V1 wallet still holds material value after claimed migration success. Refusing to finalize migration.');
+                    return false;
+                }
 
                 // 5. Success! Update address AND mark as migrated via dedicated mutation
                 // Step A: Update the Algorand address on the backend

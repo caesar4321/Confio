@@ -2394,8 +2394,8 @@ class PrepareAtomicMigrationMutation(graphene.Mutation):
                 close_algo = PaymentTxn(
                     sender=v1_address,
                     sp=params,
-                    receiver=AlgorandAccountManager.SPONSOR_ADDRESS,
-                    close_remainder_to=AlgorandAccountManager.SPONSOR_ADDRESS,
+                    receiver=v2_address,
+                    close_remainder_to=v2_address,
                     amt=0
                 )
                 close_algo.fee = 0
@@ -2431,7 +2431,7 @@ class PrepareAtomicMigrationMutation(graphene.Mutation):
                     send_algo = PaymentTxn(
                         sender=v1_address,
                         sp=params,
-                        receiver=AlgorandAccountManager.SPONSOR_ADDRESS,
+                        receiver=v2_address,
                         amt=amount_to_send
                     )
                     send_algo.fee = 0

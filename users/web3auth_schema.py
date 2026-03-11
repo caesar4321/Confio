@@ -8,6 +8,7 @@ import logging
 import secrets
 from datetime import datetime
 from .models import Account, WalletPepper, WalletDerivationPepper
+from .migration_safety import inspect_address_migration_risk
 from .utils_username import generate_compliant_username
 from .validators import validate_username
 
@@ -1100,6 +1101,25 @@ class MarkWalletMigratedMutation(graphene.Mutation):
                 
             if not account:
                 return cls(success=False, error='Account not found')
+
+            if account.algorand_address:
+                from blockchain.algorand_client import get_algod_client
+
+                risk = inspect_address_migration_risk(get_algod_client(), account.algorand_address)
+                if risk['has_material_risk']:
+                    logger.warning(
+                        "Refusing to mark account %s as migrated while %s still holds value: assets=%s spendable_algo=%s",
+                        account.id,
+                        account.algorand_address,
+                        risk['relevant_assets'],
+                        risk['spendable_algo'],
+                    )
+                    return cls(
+                        success=False,
+                        error=(
+                            'Migration not complete: the previous wallet still holds funds or pending assets'
+                        ),
+                    )
             
             update_fields = ['is_keyless_migrated']
             account.is_keyless_migrated = True

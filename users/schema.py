@@ -74,6 +74,10 @@ from achievements.services.referral_rewards import get_primary_algorand_address,
 from algosdk import encoding as algo_encoding, transaction as algo_transaction
 from algosdk import error as algo_error
 from users.models_unified import UnifiedTransactionTable
+from users.migration_safety import (
+    get_address_reassignment_blocker,
+    inspect_address_migration_risk,
+)
 # Removed circular import - P2PPaymentMethodType will be referenced by string
 
 User = get_user_model()
@@ -2877,6 +2881,15 @@ class UpdateAccountAlgorandAddress(graphene.Mutation):
                     else:
                         return UpdateAccountAlgorandAddress(success=False, error="Cuenta no encontrada")
 
+            if account.algorand_address and account.algorand_address != algorand_address:
+                blocker = get_address_reassignment_blocker(
+                    get_algod_client(),
+                    account.algorand_address,
+                    algorand_address,
+                )
+                if blocker:
+                    return UpdateAccountAlgorandAddress(success=False, error=blocker)
+
             # Update the Algorand address
             account.algorand_address = algorand_address
             
@@ -4804,6 +4817,24 @@ class MarkWalletMigrated(graphene.Mutation):
             if not account:
                 logger.error("No account found for user %s with type=%s, index=%s", user.id, account_type, account_index)
                 return MarkWalletMigrated(success=False, error="Account not found")
+
+            if account.algorand_address:
+                risk = inspect_address_migration_risk(get_algod_client(), account.algorand_address)
+                if risk['has_material_risk']:
+                    logger.warning(
+                        "Refusing to mark account %s as migrated while %s still holds value: assets=%s spendable_algo=%s",
+                        account.id,
+                        account.algorand_address,
+                        risk['relevant_assets'],
+                        risk['spendable_algo'],
+                    )
+                    return MarkWalletMigrated(
+                        success=False,
+                        error=(
+                            "La migracion aun no termino. "
+                            "La direccion anterior todavia tiene fondos o activos pendientes."
+                        ),
+                    )
             
             account.is_keyless_migrated = True
             account.save(update_fields=['is_keyless_migrated'])

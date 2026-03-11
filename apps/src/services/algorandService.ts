@@ -200,6 +200,14 @@ class AlgorandService {
     return this.currentAccount;
   }
 
+  async setCurrentAddress(address: string): Promise<void> {
+    this.currentAccount = {
+      addr: address,
+      sk: null
+    };
+    await this.storeAddress(address);
+  }
+
   async signTransactionBytes(txnBytes: Uint8Array): Promise<Uint8Array> {
     // Sign a transaction using deterministic wallet derived from JWT + account context
     try {

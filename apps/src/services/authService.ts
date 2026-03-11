@@ -1,7 +1,7 @@
 import { GoogleSignin, User } from '@react-native-google-signin/google-signin';
 import { jwtDecode } from 'jwt-decode';
 import * as Keychain from 'react-native-keychain';
-import { GOOGLE_CLIENT_IDS, API_URL } from '../config/env';
+import { GOOGLE_CLIENT_IDS, API_URL, CONFIO_ASSET_ID, CUSD_ASSET_ID, USDC_ASSET_ID } from '../config/env';
 import auth from '@react-native-firebase/auth';
 import { Platform } from 'react-native';
 // Using Web3Auth mutations from mutations.ts
@@ -14,6 +14,10 @@ import { ApolloClient } from '@apollo/client';
 import { AccountManager, AccountContext } from '../utils/accountManager';
 import { DeviceFingerprint } from '../utils/deviceFingerprint';
 import algorandService from './algorandService';
+
+const LEGACY_CONFIO_ASSET_ID = '3198568509';
+const MATERIAL_SPENDABLE_ALGO_MICROS = 100_000;
+
 // Import OAuth storage - handle gracefully if module not found
 let oauthStorage: any = null;
 try {
@@ -57,6 +61,72 @@ export class AuthService {
   private token: string | null = null;
 
   private constructor() {
+  }
+
+  private getPublicAlgodServer(): string {
+    const safeUrl = API_URL || '';
+    return safeUrl.includes('confio.lat') || safeUrl.includes('mainnet')
+      ? 'https://mainnet-api.algonode.cloud'
+      : 'https://testnet-api.algonode.cloud';
+  }
+
+  private async getLegacyAddressIfMigrationPending(
+    iss: string,
+    oauthSubject: string,
+    aud: string,
+    provider: 'google' | 'apple',
+    accountContext: AccountContext
+  ): Promise<string | null> {
+    if (accountContext.type !== 'personal') return null;
+
+    try {
+      const { SecureDeterministicWalletService } = await import('./secureDeterministicWallet');
+      const secureDeterministicWallet = SecureDeterministicWalletService.getInstance();
+      const legacyWallet = await secureDeterministicWallet.restoreLegacyV1Wallet(
+        iss,
+        oauthSubject,
+        aud,
+        provider,
+        accountContext.type,
+        accountContext.index,
+        accountContext.businessId
+      );
+
+      const algosdk = await import('algosdk');
+      const algod = new algosdk.Algodv2('', this.getPublicAlgodServer(), '');
+
+      let info: any;
+      try {
+        info = await algod.accountInformation(legacyWallet.address).do();
+      } catch {
+        return null;
+      }
+
+      const relevantAssets = (info.assets || []).filter((asset: any) => {
+        const aid = String(asset['asset-id']);
+        const amount = Number(asset['amount'] || 0);
+        return amount > 0 && (
+          aid === String(CONFIO_ASSET_ID) ||
+          aid === String(LEGACY_CONFIO_ASSET_ID) ||
+          aid === String(CUSD_ASSET_ID) ||
+          aid === String(USDC_ASSET_ID)
+        );
+      });
+
+      const spendableAlgo = Math.max(0, Number(info.amount || 0) - Number(info['min-balance'] || 0));
+      if (relevantAssets.length > 0 || spendableAlgo >= MATERIAL_SPENDABLE_ALGO_MICROS) {
+        console.log('[AuthService] Legacy V1 wallet still holds value; preserving active address until migration completes.', {
+          legacyAddress: legacyWallet.address,
+          relevantAssetIds: relevantAssets.map((asset: any) => asset['asset-id']),
+          spendableAlgo,
+        });
+        return legacyWallet.address;
+      }
+    } catch (error) {
+      console.warn('[AuthService] Failed to inspect legacy migration state; falling back to default derivation:', error);
+    }
+
+    return null;
   }
 
   public static getInstance(): AuthService {
@@ -613,8 +683,24 @@ export class AuthService {
 
 
       // 7) Now derive Algorand wallet (pepper fetch requires JWT)
+      const googleContext: AccountContext = { type: 'personal', index: 0 };
+      const googleIss = 'https://accounts.google.com';
+      const googleAud = GOOGLE_CLIENT_IDS.production.web;
+      const legacyAddress = await this.getLegacyAddressIfMigrationPending(
+        googleIss,
+        googleSubject,
+        googleAud,
+        'google',
+        googleContext
+      );
+
       const algorandService = (await import('./algorandService')).default;
-      const algorandAddress = await algorandService.createOrRestoreWallet(firebaseToken, googleSubject);
+      const algorandAddress = legacyAddress
+        ? legacyAddress
+        : await algorandService.createOrRestoreWallet(firebaseToken, googleSubject);
+      if (legacyAddress) {
+        await algorandService.setCurrentAddress(legacyAddress);
+      }
       console.log('Algorand wallet created:', algorandAddress);
       perfLog('Algorand wallet created');
 
@@ -838,15 +924,32 @@ export class AuthService {
 
 
 
-      // Now derive Algorand wallet (pepper fetch requires JWT)
-      // V2 MIGRATION: Ensure Master Secret is created for Apple users before derivation
-      // This prevents fallback to Legacy V1 Wallet generation.
-      const { getOrCreateMasterSecret } = await import('./secureDeterministicWallet');
-      await getOrCreateMasterSecret(appleSub);
-      console.log('Master secret checked/created for Apple user');
+      const appleContext: AccountContext = { type: 'personal', index: 0 };
+      const appleIss = 'https://appleid.apple.com';
+      const appleAud = 'com.confio.app';
+      const legacyAddress = await this.getLegacyAddressIfMigrationPending(
+        appleIss,
+        appleSub,
+        appleAud,
+        'apple',
+        appleContext
+      );
 
+      // Now derive Algorand wallet (pepper fetch requires JWT)
+      let algorandAddress: string;
       const algorandService = (await import('./algorandService')).default;
-      const algorandAddress = await algorandService.createOrRestoreWallet(firebaseToken, appleSub);
+      if (legacyAddress) {
+        algorandAddress = legacyAddress;
+        await algorandService.setCurrentAddress(legacyAddress);
+        console.log('Using legacy Algorand wallet during pending migration (Apple):', algorandAddress);
+      } else {
+        // V2 MIGRATION: Ensure Master Secret is created only when we are not pinned to legacy.
+        const { getOrCreateMasterSecret } = await import('./secureDeterministicWallet');
+        await getOrCreateMasterSecret(appleSub);
+        console.log('Master secret checked/created for Apple user');
+
+        algorandAddress = await algorandService.createOrRestoreWallet(firebaseToken, appleSub);
+      }
       console.log('Algorand wallet created (Apple):', algorandAddress);
 
       // Update server with derived address
@@ -1102,32 +1205,44 @@ export class AuthService {
       const iss = provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
       const aud = provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
 
-      const wallet = await secureDeterministicWallet.createOrRestoreWallet(
-        iss,                    // OAuth issuer
-        oauthSubject,           // OAuth subject
-        aud,                    // OAuth audience
-        provider,               // Provider
-        accountContext.type,
-        accountContext.index,
-        accountContext.businessId
+      const legacyAddress = await this.getLegacyAddressIfMigrationPending(
+        iss,
+        oauthSubject,
+        aud,
+        provider,
+        accountContext
       );
+
+      const walletAddress = legacyAddress || (await (async () => {
+        const wallet = await secureDeterministicWallet.createOrRestoreWallet(
+          iss,                    // OAuth issuer
+          oauthSubject,           // OAuth subject
+          aud,                    // OAuth audience
+          provider,               // Provider
+          accountContext.type,
+          accountContext.index,
+          accountContext.businessId
+        );
+        return wallet.address;
+      })());
 
       console.log('🎯 Generated Algorand address for account:', {
         accountType: accountContext.type,
         accountIndex: accountContext.index,
         businessId: accountContext.businessId,
-        algorandAddress: wallet.address,
+        algorandAddress: walletAddress,
       });
 
       // Store the address for this account
-      await this.storeAlgorandAddress(wallet.address, accountContext);
+      await this.storeAlgorandAddress(walletAddress, accountContext);
+      await (await import('./algorandService')).default.setCurrentAddress(walletAddress);
 
       // Also update on server
       try {
         const { UPDATE_ACCOUNT_ALGORAND_ADDRESS } = await import('../apollo/queries');
         await apolloClient.mutate({
           mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS,
-          variables: { algorandAddress: wallet.address }
+          variables: { algorandAddress: walletAddress }
         });
         console.log('Updated server with new address');
       } catch (error) {
@@ -1135,7 +1250,7 @@ export class AuthService {
         // Continue even if server update fails
       }
 
-      return wallet.address;
+      return walletAddress;
     } catch (error) {
       console.error('Error computing Algorand address:', error);
       return '';
@@ -1886,25 +2001,36 @@ export class AuthService {
               const iss = provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
               const aud = provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
 
-              const { SecureDeterministicWalletService } = await import('./secureDeterministicWallet');
-              const secureDeterministicWallet = SecureDeterministicWalletService.getInstance();
-              const wallet = await secureDeterministicWallet.createOrRestoreWallet(
+              const legacyAddress = await this.getLegacyAddressIfMigrationPending(
                 iss,
                 oauthSubject,
                 aud,
                 provider,
-                accountContext.type,
-                accountContext.index,
-                accountContext.businessId
+                accountContext
               );
 
-              if (wallet && wallet.address) {
-                if (wallet.address !== storedAddress) {
+              const nextAddress = legacyAddress || (await (async () => {
+                const { SecureDeterministicWalletService } = await import('./secureDeterministicWallet');
+                const secureDeterministicWallet = SecureDeterministicWalletService.getInstance();
+                const wallet = await secureDeterministicWallet.createOrRestoreWallet(
+                  iss,
+                  oauthSubject,
+                  aud,
+                  provider,
+                  accountContext.type,
+                  accountContext.index,
+                  accountContext.businessId
+                );
+                return wallet?.address || '';
+              })());
+
+              if (nextAddress) {
+                if (nextAddress !== storedAddress) {
                   console.log('AuthService - Migrated to pepper-based address (updating cache and backend):', {
                     previous: storedAddress,
-                    next: wallet.address
+                    next: nextAddress
                   });
-                  finalAddress = wallet.address;
+                  finalAddress = nextAddress;
                   await this.storeAlgorandAddress(finalAddress, accountContext);
                 } else {
                   console.log('AuthService - Pepper-based derivation matches stored address; seed cached.');
@@ -1969,28 +2095,40 @@ export class AuthService {
         provider: provider
       });
 
-      const wallet = await secureDeterministicWallet.createOrRestoreWallet(
-        iss,                    // OAuth issuer
-        oauthSubject,           // OAuth subject
-        aud,                    // OAuth audience (Google web client ID or Apple bundle ID)
+      const legacyAddress = await this.getLegacyAddressIfMigrationPending(
+        iss,
+        oauthSubject,
+        aud,
         provider,
-        accountContext.type,    // Use the actual account type (personal or business)
-        accountContext.index,   // Use the actual account index
-        accountContext.businessId // Pass the businessId for business accounts
+        accountContext
       );
+
+      const walletAddress = legacyAddress || (await (async () => {
+        const wallet = await secureDeterministicWallet.createOrRestoreWallet(
+          iss,                    // OAuth issuer
+          oauthSubject,           // OAuth subject
+          aud,                    // OAuth audience (Google web client ID or Apple bundle ID)
+          provider,
+          accountContext.type,    // Use the actual account type (personal or business)
+          accountContext.index,   // Use the actual account index
+          accountContext.businessId // Pass the businessId for business accounts
+        );
+        return wallet.address;
+      })());
 
       console.log('🎯 GENERATED NEW Algorand address for account:', {
         accountId: accountId,
         accountType: accountContext.type,
         accountIndex: accountContext.index,
         businessId: accountContext.businessId,
-        algorandAddress: wallet.address,
+        algorandAddress: walletAddress,
         provider: provider,
-        isUnique: wallet.address !== 'U3A3SWOU7NHMS6UWZ3KCE5DHNYIFYQ2F4GASYJXCTYUQZ7FLUFD2ICVXUU' ? '✅ UNIQUE' : '❌ DUPLICATE'
+        isUnique: walletAddress !== 'U3A3SWOU7NHMS6UWZ3KCE5DHNYIFYQ2F4GASYJXCTYUQZ7FLUFD2ICVXUU' ? '✅ UNIQUE' : '❌ DUPLICATE'
       });
 
       // Store the address in keychain for future use
-      await this.storeAlgorandAddress(wallet.address, accountContext);
+      await this.storeAlgorandAddress(walletAddress, accountContext);
+      await (await import('./algorandService')).default.setCurrentAddress(walletAddress);
 
       // Update the current account's Algorand address in the backend if needed
       if (apolloClient) {
@@ -1998,7 +2136,7 @@ export class AuthService {
           const { UPDATE_ACCOUNT_ALGORAND_ADDRESS } = await import('../apollo/queries');
           await apolloClient.mutate({
             mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS,
-            variables: { algorandAddress: wallet.address }
+            variables: { algorandAddress: walletAddress }
           });
           console.log('AuthService - Updated backend with new Algorand address');
         } catch (updateError) {
