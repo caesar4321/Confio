@@ -12,27 +12,27 @@ The rate limiting is implemented in `sms_verification/schema.py` using Django's 
     *   **Effect:** Prevents the same phone number from requesting an SMS more than once every 60 seconds.
     *   **Message:** "Por favor espera un minuto antes de intentar nuevamente."
 
-2.  **User Limit (5 per hour)**
+3.  **User Limit (5 per hour)**
     *   **Scope:** Per Authenticated User ID
     *   **Effect:** Prevents a single compromised user account from draining credits.
     *   **Message:** "Has excedido el límite de intentos por hora."
 
-3.  **IP Limit (20 per hour)**
+4.  **IP Limit (20 per hour)**
     *   **Scope:** Per Client IP Address (extracted securely from the *last* IP in `HTTP_X_FORWARDED_FOR`)
     *   **Effect:** Prevents a single IP (e.g., bot script) from flooding multiple numbers.
     *   **Message:** "Demasiados intentos desde esta dirección IP."
 
-4.  **Phone Number Limit (3 per hour)**
+5.  **Phone Number Limit (3 per hour)**
     *   **Scope:** Per Phone Number
-    *   **Effect:** Prevents a single number from being spammed even if the attacker switches users or IPs (though unlikely without bypassing auth).
+    *   **Effect:** Prevents a single number from being spammed even if the attacker switches users or IPs.
     *   **Message:** "Demasiados intentos para este número. Intenta más tarde."
 
-5.  **App Check Token Fingerprint Limit (5 per hour)**
+6.  **App Check Token Fingerprint Limit (5 per hour)**
     *   **Scope:** Per `X-Firebase-AppCheck` JWT Token (via SHA-256 hash).
     *   **Effect:** Explicitly prevents bot farms from extracting a mathematically valid App Check Token from a physical device and systematically spraying SMS requests using completely rotated user accounts, proxy IPs, and target phone numbers.
     *   **Message:** "Demasiados intentos desde este dispositivo. Intenta más tarde."
 
-6.  **Device Hardware ID Fingerprint Limit (5 per hour)**
+7.  **Device Hardware ID Fingerprint Limit (5 per hour)**
     *   **Scope:** Per `deviceId` extracted from the React Native `deviceFingerprint` provided during `Web3AuthLogin`.
     *   **Effect:** Prevents an attacker using a single valid physical device from continuously requesting new App Check tokens up to the 10,000/day Play Integrity limit. Because the frontend device ID is static across multiple user logins, an attacker automating Android hardware is still restricted to 5 SMS per device per hour.
     *   **Message:** "Límites de seguridad de dispositivo excedidos. Intenta más tarde."
@@ -42,13 +42,14 @@ The rate limiting is implemented in `sms_verification/schema.py` using Django's 
 
 ## Maintenance
 *   **Cache Keys:**
+    *   `sms_limit:global_prefix:{prefix}`
     *   `sms_limit:cooldown:{phone_number}`
     *   `sms_limit:user:{user_id}`
     *   `sms_limit:ip:{ip_address}`
     *   `sms_limit:phone:{phone_number}`
     *   `sms_limit:token:{token_hash}`
     *   `sms_limit:device:{device_id}`
-*   **Logs:** Warning logs are generated when the IP, Token, or Device limits are hit (`SMS Rate limit exceeded for IP/Token/Device ID ...`).
+*   **Logs:** Warning logs are generated when the Prefix, IP, Token, or Device limits are hit.
 
 ## Additional Security Measures
 

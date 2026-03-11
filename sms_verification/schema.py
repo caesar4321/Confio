@@ -167,43 +167,60 @@ class InitiateSMSVerification(graphene.Mutation):
 
             ip_addr = get_client_ip(info)
             
+            # Helper for Atomic Rate Limiting
+            def check_and_increment(cache_key, limit, ttl):
+                try:
+                    count = cache.incr(cache_key)
+                except ValueError:
+                    cache.set(cache_key, 1, ttl)
+                    count = 1
+                return count > limit
+
             # 1. Cooldown per phone number (60s)
             cache_key_cooldown = f"sms_limit:cooldown:{phone_e164}"
             if cache.get(cache_key_cooldown):
                 return InitiateSMSVerification(success=False, error="Por favor espera un minuto antes de intentar nuevamente.")
-            
-            # 2. Limit per User (5 per hour)
+            # Set cooldown immediately (Not INCR, just a boolean flag)
+            cache.set(cache_key_cooldown, True, 60)
+
+            # 2. Global Velocity Limit for High-Risk Toll Fraud Destinations
+            # Attacker is spamming +380 (Ukraine), +996 (Kyrgyzstan), +998 (Uzbekistan)
+            high_risk_prefixes = ['+380', '+996', '+998']
+            if any(phone_e164.startswith(p) for p in high_risk_prefixes):
+                prefix = next(p for p in high_risk_prefixes if phone_e164.startswith(p))
+                cache_key_global = f"sms_limit:global_prefix:{prefix}"
+                # Limit: 10 signups per hour globally for this specific prefix
+                if check_and_increment(cache_key_global, 10, 3600):
+                    logger.warning(f"Global SMS Velocity limit exceeded for prefix {prefix}")
+                    return InitiateSMSVerification(success=False, error="Servicio temporalmente congestionado para esta región. Intenta más tarde.")
+
+            # 3. Limit per User (5 per hour)
             cache_key_user = f"sms_limit:user:{user.id}"
-            user_count = cache.get(cache_key_user, 0)
-            if user_count >= 5:
+            if check_and_increment(cache_key_user, 5, 3600):
                 return InitiateSMSVerification(success=False, error="Has excedido el límite de intentos por hora.")
             
-            # 3. Limit per IP (20 per hour)
+            # 4. Limit per IP (20 per hour)
             if ip_addr:
                 cache_key_ip = f"sms_limit:ip:{ip_addr}"
-                ip_count = cache.get(cache_key_ip, 0)
-                if ip_count >= 20:
+                if check_and_increment(cache_key_ip, 20, 3600):
                     logger.warning(f"SMS Rate limit exceeded for IP {ip_addr}")
                     return InitiateSMSVerification(success=False, error="Demasiados intentos desde esta dirección IP.")
             
-            # 4. Limit per Phone Number (3 per hour)
+            # 5. Limit per Phone Number (3 per hour)
             cache_key_phone = f"sms_limit:phone:{phone_e164}"
-            phone_count = cache.get(cache_key_phone, 0)
-            if phone_count >= 3:
+            if check_and_increment(cache_key_phone, 3, 3600):
                 return InitiateSMSVerification(success=False, error="Demasiados intentos para este número. Intenta más tarde.")
 
-            # 5. Limit per App Check Token (5 per hour)
+            # 6. Limit per App Check Token (5 per hour)
             if token_header:
                 import hashlib
                 token_hash = hashlib.sha256(token_header.encode('utf-8')).hexdigest()
                 cache_key_token = f"sms_limit:token:{token_hash}"
-                token_count = cache.get(cache_key_token, 0)
-                if token_count >= 5:
+                if check_and_increment(cache_key_token, 5, 3600):
                     logger.warning(f"SMS Rate limit exceeded for App Check Token {token_hash[:8]}")
                     return InitiateSMSVerification(success=False, error="Demasiados intentos desde este dispositivo. Intenta más tarde.")
-                # We will increment this token count below
                 
-            # 6. Limit per Device Fingerprint (5 per hour)
+            # 7. Limit per Device Fingerprint (5 per hour)
             from security.models import IntegrityVerdict
             import json
             
@@ -219,64 +236,10 @@ class InitiateSMSVerification(graphene.Mutation):
             
             if device_id:
                 cache_key_device = f"sms_limit:device:{device_id}"
-                device_count = cache.get(cache_key_device, 0)
-                if device_count >= 5:
+                if check_and_increment(cache_key_device, 5, 3600):
                     logger.warning(f"SMS Rate limit exceeded for Device ID {device_id}")
                     return InitiateSMSVerification(success=False, error="Límites de seguridad de dispositivo excedidos. Intenta más tarde.")
-                # Increment cache below...
 
-            # --- Updates Counters ---
-            # Set cooldown
-            cache.set(cache_key_cooldown, True, 60)
-            
-            # Increment and set expiry if new (User)
-            if user_count == 0:
-                cache.set(cache_key_user, 1, 3600)
-            else:
-                try:
-                    cache.incr(cache_key_user)
-                except ValueError:
-                     cache.set(cache_key_user, 1, 3600)
-
-            # Increment and set expiry if new (IP)
-            if ip_addr:
-                if ip_count == 0:
-                    cache.set(cache_key_ip, 1, 3600)
-                else:
-                    try:
-                        cache.incr(cache_key_ip)
-                    except ValueError:
-                         cache.set(cache_key_ip, 1, 3600)
-
-            # Increment and set expiry if new (Phone)
-            if phone_count == 0:
-                cache.set(cache_key_phone, 1, 3600)
-            else:
-                try:
-                    cache.incr(cache_key_phone)
-                except ValueError:
-                     cache.set(cache_key_phone, 1, 3600)
-                     
-            # Increment and set expiry if new (Token)
-            if token_header:
-                if token_count == 0:
-                    cache.set(cache_key_token, 1, 3600)
-                else:
-                    try:
-                        cache.incr(cache_key_token)
-                    except ValueError:
-                        cache.set(cache_key_token, 1, 3600)
-                        
-            # Increment and set expiry if new (Device Fingerprint)
-            if device_id:
-                if device_count == 0:
-                    cache.set(cache_key_device, 1, 3600)
-                else:
-                    try:
-                        cache.incr(cache_key_device)
-                    except ValueError:
-                        cache.set(cache_key_device, 1, 3600)
-                        
             # --- End Rate Limiting ---
             
             # --- Carrier Lookup Check (VoIP/Landline Blocking) ---
