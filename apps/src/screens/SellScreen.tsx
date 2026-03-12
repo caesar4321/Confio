@@ -126,6 +126,7 @@ const currencyNames: Record<string, string> = {
 };
 const friendlyCurrency = (code: string) => currencyNames[code] || code;
 const KOYWE_SUPPORTED_COUNTRIES = new Set(['AR', 'BO', 'BR', 'CL', 'CO', 'MX', 'PE', 'US']);
+const TEMPORARILY_USE_GUARDARIAN_FOR_ALL_COUNTRIES = true;
 
 /* ─── Clean server display strings ─── */
 const cleanDisplay = (text?: string | null): string => {
@@ -169,6 +170,12 @@ export const SellScreen = () => {
     const userIso = userCountry?.[2];
     return userProfile?.phoneCountry || selectedIso || userIso || 'AR';
   }, [selectedCountry, userCountry, userProfile?.phoneCountry]);
+
+  // Temporary fallback: keep all countries on Guardarian until Koywe credentials
+  // (secret + API key) are available on the server.
+  if (TEMPORARILY_USE_GUARDARIAN_FOR_ALL_COUNTRIES) {
+    return <LegacyGuardarianSellScreen />;
+  }
 
   const isKoyweCountry = KOYWE_SUPPORTED_COUNTRIES.has(countryCode);
 
