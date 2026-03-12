@@ -180,35 +180,43 @@ class InitiateSMSVerification(graphene.Mutation):
             # Set cooldown immediately (Not INCR, just a boolean flag)
             cache.set(cache_key_cooldown, True, 60)
 
-            # 2. Global Velocity Limit for High-Risk Toll Fraud Destinations
-            # Attacker is spamming +380 (Ukraine), +996 (Kyrgyzstan), +998 (Uzbekistan)
-            high_risk_prefixes = ['+380', '+996', '+998']
-            if any(phone_e164.startswith(p) for p in high_risk_prefixes):
-                prefix = next(p for p in high_risk_prefixes if phone_e164.startswith(p))
+            # 2. Emergency destination controls for active toll-fraud campaigns.
+            blocked_prefixes = ['+996']
+            if any(phone_e164.startswith(p) for p in blocked_prefixes):
+                prefix = next(p for p in blocked_prefixes if phone_e164.startswith(p))
+                logger.warning("Blocked SMS to emergency-disabled prefix %s", prefix)
+                return InitiateSMSVerification(success=False, error="Servicio temporalmente no disponible para esta región.")
+
+            # 3. Global Velocity Limit for High-Risk Toll Fraud Destinations
+            high_risk_prefix_limits = {
+                '+380': 3,
+                '+998': 3,
+            }
+            if any(phone_e164.startswith(p) for p in high_risk_prefix_limits):
+                prefix = next(p for p in high_risk_prefix_limits if phone_e164.startswith(p))
                 cache_key_global = f"sms_limit:global_prefix:{prefix}"
-                # Limit: 10 signups per hour globally for this specific prefix
-                if check_and_increment(cache_key_global, 10, 3600):
+                if check_and_increment(cache_key_global, high_risk_prefix_limits[prefix], 3600):
                     logger.warning(f"Global SMS Velocity limit exceeded for prefix {prefix}")
                     return InitiateSMSVerification(success=False, error="Servicio temporalmente congestionado para esta región. Intenta más tarde.")
 
-            # 3. Limit per User (5 per hour)
+            # 4. Limit per User (5 per hour)
             cache_key_user = f"sms_limit:user:{user.id}"
             if check_and_increment(cache_key_user, 5, 3600):
                 return InitiateSMSVerification(success=False, error="Has excedido el límite de intentos por hora.")
             
-            # 4. Limit per IP (20 per hour)
+            # 5. Limit per IP (20 per hour)
             if ip_addr:
                 cache_key_ip = f"sms_limit:ip:{ip_addr}"
                 if check_and_increment(cache_key_ip, 20, 3600):
                     logger.warning(f"SMS Rate limit exceeded for IP {ip_addr}")
                     return InitiateSMSVerification(success=False, error="Demasiados intentos desde esta dirección IP.")
             
-            # 5. Limit per Phone Number (3 per hour)
+            # 6. Limit per Phone Number (3 per hour)
             cache_key_phone = f"sms_limit:phone:{phone_e164}"
             if check_and_increment(cache_key_phone, 3, 3600):
                 return InitiateSMSVerification(success=False, error="Demasiados intentos para este número. Intenta más tarde.")
 
-            # 6. Limit per App Check Token (5 per hour)
+            # 7. Limit per App Check Token (5 per hour)
             if token_header:
                 import hashlib
                 token_hash = hashlib.sha256(token_header.encode('utf-8')).hexdigest()
@@ -217,7 +225,7 @@ class InitiateSMSVerification(graphene.Mutation):
                     logger.warning(f"SMS Rate limit exceeded for App Check Token {token_hash[:8]}")
                     return InitiateSMSVerification(success=False, error="Demasiados intentos desde este dispositivo. Intenta más tarde.")
                 
-            # 7. Limit per Device Fingerprint (5 per hour)
+            # 8. Limit per Device Fingerprint / Integrity fingerprint (3 per hour)
             from security.models import IntegrityVerdict
             
             latest_verdict = IntegrityVerdict.objects.filter(user=user).order_by('-created_at').first()
@@ -225,7 +233,7 @@ class InitiateSMSVerification(graphene.Mutation):
             
             if device_id:
                 cache_key_device = f"sms_limit:device:{device_id}"
-                if check_and_increment(cache_key_device, 5, 3600):
+                if check_and_increment(cache_key_device, 3, 3600):
                     logger.warning(f"SMS Rate limit exceeded for Device ID {device_id}")
                     return InitiateSMSVerification(success=False, error="Límites de seguridad de dispositivo excedidos. Intenta más tarde.")
 

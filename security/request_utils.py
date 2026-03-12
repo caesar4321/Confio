@@ -17,7 +17,7 @@ def extract_client_ip_from_meta(meta) -> str:
 
 
 def extract_device_id(device_fingerprint):
-    """Accept dicts, valid JSON, and legacy Python-dict strings."""
+    """Accept dicts, valid JSON, legacy Python-dict strings, and raw stable hashes."""
     if isinstance(device_fingerprint, dict):
         return device_fingerprint.get("deviceId")
 
@@ -35,9 +35,12 @@ def extract_device_id(device_fingerprint):
         try:
             parsed = ast.literal_eval(raw)
         except (SyntaxError, ValueError):
-            return None
+            return raw
 
     if isinstance(parsed, dict):
         return parsed.get("deviceId")
+
+    if isinstance(parsed, str) and parsed.strip():
+        return parsed.strip()
 
     return None
