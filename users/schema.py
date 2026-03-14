@@ -351,6 +351,7 @@ def jwt_payload_handler(user):
 class UserType(DjangoObjectType):
 	# Define explicit safe fields
 	is_identity_verified = graphene.Boolean()
+	is_otp_verified = graphene.Boolean()
 	last_verified_date = graphene.DateTime()
 	verification_status = graphene.String()
 	accounts = graphene.List(lambda: AccountType)
@@ -399,6 +400,15 @@ class UserType(DjangoObjectType):
 		if str(user.id) == str(self.id):
 			return bool(self.is_staff)
 		return bool(user.is_staff)
+
+	def resolve_is_otp_verified(self, info):
+		user = info.context.user
+		if not user.is_authenticated:
+			return False
+		if str(user.id) != str(self.id):
+			return False
+		is_verified = getattr(user, 'is_verified', None)
+		return bool(callable(is_verified) and is_verified())
 
 
 	def resolve_is_identity_verified(self, info):

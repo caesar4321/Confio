@@ -9,25 +9,45 @@ import Firebase // Force import main module for static linking coverage
 class AppDelegate: UIResponder, UIApplicationDelegate, RCTBridgeDelegate {
   var window: UIWindow?
 
+  private func shouldUseDebugAppCheck() -> Bool {
+    #if DEBUG
+      return true
+    #else
+      if ProcessInfo.processInfo.environment["CONFIO_FORCE_DEBUG_APP_CHECK"] == "1" {
+        return true
+      }
+
+      // Xcode/device-development installs include an embedded provisioning profile.
+      // App Store and TestFlight distributions do not, so they can use real attestation.
+      if Bundle.main.path(forResource: "embedded", ofType: "mobileprovision") != nil {
+        return true
+      }
+
+      return false
+    #endif
+  }
+
   func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
+    let useDebugAppCheck = shouldUseDebugAppCheck()
     // Configure App Check BEFORE FirebaseApp.configure()
-    #if DEBUG
+    if useDebugAppCheck {
       // Set a static App Check debug token to avoid registering a new one in Firebase Console on every reinstall
-      setenv("FIRAAppCheckDebugToken", "8DB1A0DF-B3C2-4E9D-A480-281CBEB933E1", 1)
-      // Use Debug provider for development builds
+      setenv("FIRAAppCheckDebugToken", "A2600262-DC63-4467-93A0-5840608F8738", 1)
+      // Use Debug provider for development-signed local builds.
       let providerFactory = AppCheckDebugProviderFactory()
-    #else
+      AppCheck.setAppCheckProviderFactory(providerFactory)
+    } else {
       #if targetEnvironment(simulator)
         let providerFactory = AppCheckDebugProviderFactory()
       #else
         // Use custom factory to instantiate AppAttestProvider directly
         let providerFactory = ConfioAppCheckProviderFactory()
       #endif
-    #endif
-    AppCheck.setAppCheckProviderFactory(providerFactory)
+      AppCheck.setAppCheckProviderFactory(providerFactory)
+    }
     
     // Initialize Firebase
     FirebaseApp.configure()

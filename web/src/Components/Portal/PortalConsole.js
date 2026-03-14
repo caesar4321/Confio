@@ -14,6 +14,7 @@ const GET_PORTAL_ME = gql`
       lastName
       email
       isStaff
+      isOtpVerified
     }
   }
 `;
@@ -403,16 +404,17 @@ export default function PortalConsole() {
   const meQuery = useQuery(GET_PORTAL_ME, {
     fetchPolicy: 'network-only',
   });
-  const shouldPollSupport = activeTab === 'support' && Boolean(meQuery.data?.me?.isStaff);
+  const isOtpVerified = Boolean(meQuery.data?.me?.isOtpVerified);
+  const shouldPollSupport = activeTab === 'support' && Boolean(meQuery.data?.me?.isStaff) && isOtpVerified;
   const supportQuery = useQuery(GET_PORTAL_SUPPORT_CONVERSATIONS, {
     variables: { status: supportStatus },
-    skip: !meQuery.data?.me?.isStaff,
+    skip: !meQuery.data?.me?.isStaff || !isOtpVerified,
     fetchPolicy: 'network-only',
     pollInterval: shouldPollSupport ? SUPPORT_POLL_INTERVAL_MS : 0,
   });
   const contentQuery = useQuery(GET_PORTAL_CONTENT_ITEMS, {
     variables: { channelSlug: contentChannelFilter || null, status: null },
-    skip: !meQuery.data?.me?.isStaff,
+    skip: !meQuery.data?.me?.isStaff || !isOtpVerified,
     fetchPolicy: 'network-only',
   });
 
@@ -436,6 +438,7 @@ export default function PortalConsole() {
   const backendOrigin = getBackendOrigin();
   const loginUrl = buildPortalAuthUrl(backendOrigin, '/portal/login/');
   const logoutUrl = buildPortalAuthUrl(backendOrigin, '/portal/logout/');
+  const setup2faUrl = buildPortalAuthUrl(backendOrigin, '/portal/setup-2fa/');
 
   useEffect(() => {
     if (!activeConversationId && conversations[0]?.id) {
@@ -732,6 +735,32 @@ export default function PortalConsole() {
           <h1>Acceso restringido</h1>
           <p>Tu usuario inició sesión correctamente, pero no tiene permisos de staff para este portal.</p>
           <div className="portal-inline-actions">
+            <button
+              className="portal-secondary-button"
+              onClick={() => window.location.assign(logoutUrl)}
+            >
+              Cerrar sesión
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isOtpVerified) {
+    return (
+      <div className="portal-shell">
+        <div className="portal-gate">
+          <div className="portal-eyebrow">Portal interno</div>
+          <h1>Configura tu autenticación en dos pasos</h1>
+          <p>Este portal solo está disponible para staff con 2FA activa.</p>
+          <div className="portal-inline-actions">
+            <button
+              className="portal-primary-button"
+              onClick={() => window.location.assign(setup2faUrl)}
+            >
+              Configurar 2FA
+            </button>
             <button
               className="portal-secondary-button"
               onClick={() => window.location.assign(logoutUrl)}

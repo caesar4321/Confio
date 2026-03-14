@@ -86,6 +86,9 @@ def require_staff_user(info):
     user = getattr(info.context, 'user', None)
     if not (user and user.is_authenticated and user.is_staff):
         raise GraphQLError('Staff access required')
+    is_verified = getattr(user, 'is_verified', None)
+    if not callable(is_verified) or not is_verified():
+        raise GraphQLError('OTP verification required for portal access')
     return user
 
 

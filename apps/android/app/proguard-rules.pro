@@ -55,3 +55,19 @@
 -keepattributes EnclosingMethod
 -keepattributes InnerClasses
 -keepattributes Exceptions
+
+# Didit SDK
+-keep class me.didit.** { *; }
+-dontwarn me.didit.**
+
+# Didit React Native bridge
+-keep class com.sdkreactnative.** { *; }
+
+# Preserve metadata used by reflective/generic parsing in release builds
+-keepattributes Signature
+-keepattributes *Annotation*
+-keep class kotlin.Metadata { *; }
+
+# Coroutines used by Didit SDK state observation
+-keep class kotlinx.coroutines.** { *; }
+-dontwarn kotlinx.coroutines.**

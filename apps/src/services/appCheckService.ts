@@ -11,6 +11,7 @@
 
 import { Platform } from 'react-native';
 import appCheck from '@react-native-firebase/app-check';
+import DeviceInfo from 'react-native-device-info';
 import {
     FIREBASE_APP_CHECK_DEBUG_TOKEN_ANDROID,
     FIREBASE_APP_CHECK_DEBUG_TOKEN_IOS,
@@ -27,6 +28,29 @@ class AppCheckService {
     private static readonly TOKEN_REUSE_MS = 5 * 60 * 1000;
     private static readonly FAILURE_BACKOFF_MS = 30 * 1000;
 
+    private async shouldUseDebugProvider(): Promise<boolean> {
+        if (Platform.OS === 'ios') {
+            return Boolean(FIREBASE_APP_CHECK_DEBUG_TOKEN_IOS);
+        }
+
+        if (Platform.OS === 'android') {
+            if (!FIREBASE_APP_CHECK_DEBUG_TOKEN_ANDROID) {
+                return false;
+            }
+
+            try {
+                const installer = await DeviceInfo.getInstallerPackageName();
+                console.log('[AppCheck] Android installer package:', installer || 'none');
+                return installer !== 'com.android.vending';
+            } catch (error: any) {
+                console.warn('[AppCheck] Failed to read Android installer package:', error?.message, error);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /**
      * Initialize Firebase App Check
      * Should be called once at app startup
@@ -41,7 +65,7 @@ class AppCheckService {
                 Platform.OS === 'android'
                     ? FIREBASE_APP_CHECK_DEBUG_TOKEN_ANDROID
                     : FIREBASE_APP_CHECK_DEBUG_TOKEN_IOS;
-            const useDebugProvider = Boolean(configuredDebugToken);
+            const useDebugProvider = await this.shouldUseDebugProvider();
 
             if (__DEV__ || useDebugProvider) {
                 console.log(

@@ -24,6 +24,11 @@ def _get_frontend_origin(request):
     return frontend_origin if frontend_origin in allowed else ''
 
 
+def _is_otp_verified(user):
+    is_verified = getattr(user, 'is_verified', None)
+    return bool(user and user.is_authenticated and callable(is_verified) and is_verified())
+
+
 def portal_login_redirect(request):
     login_url = reverse('two_factor:login')
     frontend_origin = _get_frontend_origin(request)
@@ -36,9 +41,24 @@ def portal_login_redirect(request):
 
 def portal_login_complete(request):
     frontend_origin = _get_frontend_origin(request)
+    if request.user.is_authenticated and request.user.is_staff and not _is_otp_verified(request.user):
+        setup_url = reverse('portal_setup_2fa')
+        if frontend_origin:
+            return redirect(f'{setup_url}?frontend_origin={quote(frontend_origin, safe="")}')
+        return redirect(setup_url)
     if frontend_origin:
         return redirect(f'{frontend_origin}/portal')
     return redirect('/portal')
+
+
+def portal_setup_2fa_redirect(request):
+    frontend_origin = _get_frontend_origin(request)
+    setup_url = reverse('two_factor:setup')
+    if frontend_origin:
+        next_url = f"/portal/login-complete/?frontend_origin={quote(frontend_origin, safe='')}"
+    else:
+        next_url = '/portal'
+    return redirect(f'{setup_url}?next={quote(next_url, safe="/?=&:%")}')
 
 
 def portal_logout(request):
