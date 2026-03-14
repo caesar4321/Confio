@@ -78,6 +78,22 @@ def _collect_active_tokens_for_users(user_ids: List[int]) -> Dict[int, List[Tupl
     return tokens_by_user
 
 
+def _collect_unique_tokens_for_users(
+    user_ids: List[int],
+    tokens_by_user: Dict[int, List[Tuple[str, int]]],
+) -> List[Tuple[str, int]]:
+    unique_tokens: List[Tuple[str, int]] = []
+    seen_tokens = set()
+    for user_id in user_ids:
+        for token, token_id in tokens_by_user.get(user_id, []):
+            dedupe_key = (user_id, token_id)
+            if dedupe_key in seen_tokens:
+                continue
+            seen_tokens.add(dedupe_key)
+            unique_tokens.append((token, token_id))
+    return unique_tokens
+
+
 def _build_context_payload(*, account_id=None, account_type=None, account_index=None, business_id=None, business_name=None):
     if business_id is not None:
         return {
@@ -254,6 +270,36 @@ def _send_channel_push(item: ContentItem) -> Dict[str, int]:
     user_ids = sorted({membership.user_id for membership in memberships})
     push_enabled_map = _get_user_push_enabled_map(user_ids)
     tokens_by_user = _collect_active_tokens_for_users(user_ids)
+
+    if not _channel_push_requires_context(item):
+        eligible_user_ids = [
+            user_id for user_id in user_ids
+            if push_enabled_map.get(user_id, True)
+        ]
+        tokens = _collect_unique_tokens_for_users(eligible_user_ids, tokens_by_user)
+        if not tokens:
+            return {'sent': 0, 'failed': 0}
+
+        body = item.title or item.body or item.channel.title
+        return send_batch_notifications(
+            tokens=tokens,
+            title=item.channel.title,
+            body=body[:180],
+            data={
+                'action_url': _build_channel_action_url(item),
+                'content_item_id': str(item.id),
+                'channel_id': item.channel.slug,
+                'data_channel_id': item.channel.slug,
+                'data_content_item_id': str(item.id),
+                'data_title': item.title or '',
+                'data_body': item.body or '',
+                'data_tag': item.tag or '',
+                'data_item_type': item.item_type.lower(),
+            },
+            badge_count=None,
+            notification=None,
+            channel_id=CHANNEL_ID_MESSAGES,
+        )
 
     total_sent = 0
     total_failed = 0
