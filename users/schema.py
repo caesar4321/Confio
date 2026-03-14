@@ -354,6 +354,7 @@ class UserType(DjangoObjectType):
 	last_verified_date = graphene.DateTime()
 	verification_status = graphene.String()
 	accounts = graphene.List(lambda: AccountType)
+	is_staff = graphene.Boolean()
 	
 	# Explicitly define sensitive fields to enforce security
 	phone_number = graphene.String()
@@ -390,6 +391,14 @@ class UserType(DjangoObjectType):
 			return self.email
 		# Otherwise hide it
 		return None
+
+	def resolve_is_staff(self, info):
+		user = info.context.user
+		if not user.is_authenticated:
+			return False
+		if str(user.id) == str(self.id):
+			return bool(self.is_staff)
+		return bool(user.is_staff)
 
 
 	def resolve_is_identity_verified(self, info):

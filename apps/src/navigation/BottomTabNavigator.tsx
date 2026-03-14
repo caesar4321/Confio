@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo } from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import Icon from 'react-native-vector-icons/Feather';
-import { View, StyleSheet, Platform } from 'react-native';
+import { View, StyleSheet, Platform, TouchableOpacity } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NavigationProp } from '@react-navigation/native';
 import { MainStackParamList, BottomTabParamList, RootStackParamList } from '../types/navigation';
@@ -15,6 +15,11 @@ import { ProfileScreen } from '../screens/ProfileScreen';
 import { Header } from './Header';
 import { useHeader } from '../contexts/HeaderContext';
 import { useAccount } from '../contexts/AccountContext';
+import { useAuth } from '../contexts/AuthContext';
+import { useQuery } from '@apollo/client';
+import { GET_MESSAGE_INBOX_UNREAD_COUNT, GET_NOTIFICATION_PREFERENCES } from '../apollo/queries';
+import { useMutation } from '@apollo/client';
+import { UPDATE_NOTIFICATION_PREFERENCES } from '../apollo/mutations';
 import { Text } from 'react-native';
 
 // Single navigator instance
@@ -26,6 +31,19 @@ export const BottomTabNavigator = () => {
   const navigation = useNavigation<TabNavigatorNavigationProp>();
   const { unreadNotifications, currentAccountAvatar, profileMenu } = useHeader();
   const { activeAccount, isLoading: accountsLoading } = useAccount();
+  const { isAuthenticated, isLoading: authLoading, accountContextTick } = useAuth();
+  const canQueryMessages = isAuthenticated && !authLoading;
+  const messageContextKey = activeAccount?.id || 'no-account';
+  const { data: messageUnreadData, refetch: refetchMessageUnread } = useQuery(GET_MESSAGE_INBOX_UNREAD_COUNT, {
+    variables: { contextKey: messageContextKey },
+    fetchPolicy: 'network-only',
+    nextFetchPolicy: 'cache-first',
+    skip: !canQueryMessages,
+  });
+  const { data: notificationPrefsData } = useQuery(GET_NOTIFICATION_PREFERENCES, {
+    skip: !isAuthenticated || authLoading,
+  });
+  const [updateNotificationPreferences] = useMutation(UPDATE_NOTIFICATION_PREFERENCES);
 
   // 🔥 Fix: Normalize the account type to lowercase for comparison
   const accountType = (activeAccount?.type || 'personal').toLowerCase();
@@ -47,6 +65,24 @@ export const BottomTabNavigator = () => {
     navigation.navigate('Notification' as any);
   }, [navigation]);
 
+  const handleMessagesPress = useCallback(() => {
+    navigation.navigate('HomeMessages' as any);
+  }, [navigation]);
+  const handleDiscoverMutePress = useCallback(() => {
+    void updateNotificationPreferences({
+      variables: {
+        pushAnnouncements: !Boolean(notificationPrefsData?.notificationPreferences?.pushAnnouncements),
+      },
+    });
+  }, [notificationPrefsData?.notificationPreferences?.pushAnnouncements, updateNotificationPreferences]);
+
+  React.useEffect(() => {
+    if (!canQueryMessages) {
+      return;
+    }
+    refetchMessageUnread();
+  }, [accountContextTick, canQueryMessages, refetchMessageUnread, messageContextKey]);
+
   // Create stable header components for each screen
   const HomeHeader = useCallback(() => (
     <Header
@@ -55,13 +91,15 @@ export const BottomTabNavigator = () => {
       title="Confío"
       onProfilePress={profileMenu.openProfileMenu}
       onNotificationPress={handleNotificationPress}
+      onMessagePress={handleMessagesPress}
       backgroundColor="#34d399"
       showBackButton={false}
       isLight={false}
       unreadNotifications={unreadNotifications}
+      unreadMessages={messageUnreadData?.messageInboxUnreadCount || 0}
       currentAccountAvatar={currentAccountAvatar}
     />
-  ), [navigation, profileMenu.openProfileMenu, handleNotificationPress, unreadNotifications, currentAccountAvatar]);
+  ), [navigation, profileMenu.openProfileMenu, handleNotificationPress, handleMessagesPress, unreadNotifications, currentAccountAvatar, messageUnreadData?.messageInboxUnreadCount]);
 
   // Dynamic scan header that updates based on account type
   const ScanHeader = useCallback(() => {
@@ -98,8 +136,23 @@ export const BottomTabNavigator = () => {
       isLight={false}
       unreadNotifications={0}
       currentAccountAvatar="U"
+      rightAccessory={(
+        <TouchableOpacity
+          onPress={handleDiscoverMutePress}
+          style={[
+            styles.headerIconButton,
+            !Boolean(notificationPrefsData?.notificationPreferences?.pushAnnouncements) && styles.headerIconButtonActive,
+          ]}
+        >
+          <Icon
+            name={!Boolean(notificationPrefsData?.notificationPreferences?.pushAnnouncements) ? 'volume-x' : 'bell-off'}
+            size={16}
+            color={!Boolean(notificationPrefsData?.notificationPreferences?.pushAnnouncements) ? '#FFFFFF' : '#667085'}
+          />
+        </TouchableOpacity>
+      )}
     />
-  ), [navigation]);
+  ), [navigation, handleDiscoverMutePress, notificationPrefsData?.notificationPreferences?.pushAnnouncements]);
 
   const ProfileHeader = useCallback(() => (
     <Header
@@ -270,6 +323,20 @@ export const BottomTabNavigator = () => {
 };
 
 const styles = StyleSheet.create({
+  headerIconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerIconButtonActive: {
+    backgroundColor: '#111827',
+    borderColor: '#111827',
+  },
   scanButton: {
     width: 56,
     height: 56,

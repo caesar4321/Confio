@@ -3,6 +3,8 @@ import { AppState, AppStateStatus } from 'react-native';
 import { useProfileMenu } from '../hooks/useProfileMenu';
 import { useQuery } from '@apollo/client';
 import { GET_UNREAD_NOTIFICATION_COUNT } from '../apollo/queries';
+import { useAccount } from './AccountContext';
+import { useAuth } from './AuthContext';
 
 interface HeaderContextType {
   unreadNotifications: number;
@@ -22,12 +24,18 @@ export const HeaderProvider: React.FC<HeaderProviderProps> = ({ children }) => {
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [currentAccountAvatar, setCurrentAccountAvatar] = useState('');
   const profileMenu = useProfileMenu();
+  const { activeAccount } = useAccount();
+  const { isAuthenticated, isLoading: authLoading, accountContextTick } = useAuth();
+  const notificationContextKey = activeAccount?.id || 'no-account';
+  const canQueryNotifications = isAuthenticated && !authLoading;
   
   // Query for unread notification count
   const { data: unreadCountData, refetch: refetchUnreadCount } = useQuery(GET_UNREAD_NOTIFICATION_COUNT, {
+    variables: { contextKey: notificationContextKey },
     fetchPolicy: 'cache-and-network',
     pollInterval: 30000, // Poll every 30 seconds
     notifyOnNetworkStatusChange: true,
+    skip: !canQueryNotifications,
   });
   
   // Update unread count when query data changes
@@ -36,6 +44,13 @@ export const HeaderProvider: React.FC<HeaderProviderProps> = ({ children }) => {
       setUnreadNotifications(unreadCountData.unreadNotificationCount);
     }
   }, [unreadCountData]);
+
+  useEffect(() => {
+    if (!canQueryNotifications) {
+      return;
+    }
+    refetchUnreadCount();
+  }, [accountContextTick, notificationContextKey, canQueryNotifications, refetchUnreadCount]);
   
   // Refetch notification count when app comes to foreground
   useEffect(() => {

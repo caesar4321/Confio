@@ -2,6 +2,17 @@ import { ApolloClient, InMemoryCache, createHttpLink, from } from '@apollo/clien
 import { onError } from '@apollo/client/link/error';
 import { setContext } from '@apollo/client/link/context';
 
+const isLocalWeb =
+  typeof window !== 'undefined' &&
+  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+const isPortalPath =
+  typeof window !== 'undefined' &&
+  window.location.pathname.startsWith('/portal');
+
+const defaultGraphqlUri = isLocalWeb
+  ? 'http://localhost:8000/graphql/'
+  : '/graphql/';
+
 // Error handling link
 const errorLink = onError(({ graphQLErrors, networkError, operation, forward }) => {
   if (graphQLErrors) {
@@ -39,11 +50,20 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }) 
 // HTTP link
 const httpLink = createHttpLink({
   // Use relative path by default to work in both dev (with proxy) and prod
-  uri: process.env.REACT_APP_GRAPHQL_URL || '/graphql/',
+  uri: isLocalWeb ? defaultGraphqlUri : (process.env.REACT_APP_GRAPHQL_URL || defaultGraphqlUri),
+  credentials: 'include',
 });
 
 // Auth link for adding headers
 const authLink = setContext((_, { headers }) => {
+  if (isPortalPath) {
+    return {
+      headers: {
+        ...headers,
+      }
+    };
+  }
+
   // Get the authentication token from local storage if it exists
   const token = localStorage.getItem('token');
 

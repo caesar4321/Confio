@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, Platform, StatusBar } from 'react-native';
+import { View, Text, TouchableOpacity, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { NavigationProp } from '@react-navigation/native';
@@ -13,12 +13,15 @@ interface HeaderProps {
   isHomeScreen?: boolean;
   onProfilePress?: () => void;
   onNotificationPress?: () => void;
+  onMessagePress?: () => void;
   onBackPress?: () => void;
   backgroundColor?: string;
   isLight?: boolean;
   showBackButton?: boolean;
   unreadNotifications?: number;
+  unreadMessages?: number;
   currentAccountAvatar?: string;
+  rightAccessory?: React.ReactNode;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -27,16 +30,18 @@ export const Header: React.FC<HeaderProps> = ({
   isHomeScreen = false,
   onProfilePress,
   onNotificationPress,
+  onMessagePress,
   onBackPress,
   backgroundColor,
   isLight = false,
   showBackButton = true,
   unreadNotifications = 0,
+  unreadMessages = 0,
   currentAccountAvatar = 'U',
+  rightAccessory,
 }) => {
-  // On iOS, SafeAreaView will handle the notch/status bar; add a small baseline padding.
-  // On Android, add StatusBar height + baseline padding.
-  const topPadding = (Platform.OS === 'ios' ? 12 : (StatusBar.currentHeight || 0) + 12);
+  // SafeAreaView already handles the top inset; keep only the baseline internal padding.
+  const topPadding = Platform.OS === 'ios' ? 12 : 12;
   const isLightTheme = isLight || isHomeScreen;
   const textColor = isLightTheme ? '#FFFFFF' : '#1F2937';
   
@@ -110,6 +115,44 @@ export const Header: React.FC<HeaderProps> = ({
               </View>
             )}
           </TouchableOpacity>
+          {onMessagePress && (
+            <TouchableOpacity
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: 20,
+                backgroundColor: 'rgba(255,255,255,0.2)',
+                justifyContent: 'center',
+                alignItems: 'center',
+                position: 'relative',
+              }}
+              onPress={onMessagePress}
+            >
+              <Icon name="inbox" size={20} color="#fff" />
+              {unreadMessages > 0 && (
+                <View style={{
+                  position: 'absolute',
+                  top: -2,
+                  right: -2,
+                  backgroundColor: '#EF4444',
+                  borderRadius: 10,
+                  minWidth: 20,
+                  height: 20,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  paddingHorizontal: 4,
+                }}>
+                  <Text style={{
+                    color: '#FFFFFF',
+                    fontSize: 10,
+                    fontWeight: 'bold',
+                  }}>
+                    {unreadMessages}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          )}
           <TouchableOpacity 
             style={{ 
               width: 36,
@@ -138,6 +181,11 @@ export const Header: React.FC<HeaderProps> = ({
           </TouchableOpacity>
         </View>
       )}
+      {!isHomeScreen && rightAccessory ? (
+        <View style={{ minWidth: 40, alignItems: 'flex-end' }}>
+          {rightAccessory}
+        </View>
+      ) : null}
       </View>
     </SafeAreaView>
   );

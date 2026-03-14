@@ -1,7 +1,10 @@
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 from django.utils.translation import get_language_from_request
 from django.views.generic import TemplateView
 from django.http import HttpResponse, JsonResponse
+from django.urls import reverse
+from django.contrib.auth import logout as django_logout
+from urllib.parse import quote
 import logging
 import os
 import json
@@ -13,6 +16,37 @@ import requests
 from graphql_jwt.utils import jwt_decode
 
 logger = logging.getLogger(__name__)
+
+
+def _get_frontend_origin(request):
+    frontend_origin = (request.GET.get('frontend_origin') or '').strip()
+    allowed = {'http://localhost:3000', 'http://127.0.0.1:3000'}
+    return frontend_origin if frontend_origin in allowed else ''
+
+
+def portal_login_redirect(request):
+    login_url = reverse('two_factor:login')
+    frontend_origin = _get_frontend_origin(request)
+    if frontend_origin:
+        next_url = f"/portal/login-complete/?frontend_origin={quote(frontend_origin, safe='')}"
+    else:
+        next_url = '/portal'
+    return redirect(f'{login_url}?next={quote(next_url, safe="/?=&:%")}')
+
+
+def portal_login_complete(request):
+    frontend_origin = _get_frontend_origin(request)
+    if frontend_origin:
+        return redirect(f'{frontend_origin}/portal')
+    return redirect('/portal')
+
+
+def portal_logout(request):
+    frontend_origin = _get_frontend_origin(request)
+    django_logout(request)
+    if frontend_origin:
+        return redirect(f'{frontend_origin}/portal')
+    return redirect('/portal')
 
 
 def _resolve_main_assets():

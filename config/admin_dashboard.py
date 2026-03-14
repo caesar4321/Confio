@@ -879,6 +879,30 @@ from send.admin import SendTransactionAdmin, PhoneInviteAdmin
 from conversion.admin import ConversionAdmin
 from payroll.admin import PayrollRunAdmin, PayrollItemAdmin, PayrollRecipientAdmin
 from payroll.models import PayrollRun, PayrollItem, PayrollRecipient
+from inbox.models import (
+    Channel,
+    ChannelMembership,
+    ContentItem,
+    ContentReadState,
+    ContentReaction,
+    ContentSurface,
+    ReactionType,
+    SupportConversation,
+    SupportConversationState,
+    SupportMessage,
+)
+from inbox.admin import (
+    ChannelAdmin,
+    ChannelMembershipAdmin,
+    ContentItemAdmin,
+    ContentReadStateAdmin,
+    ContentReactionAdmin,
+    ContentSurfaceAdmin,
+    ReactionTypeAdmin,
+    SupportConversationAdmin,
+    SupportConversationStateAdmin,
+    SupportMessageAdmin,
+)
 
 # Register with custom admin site
 confio_admin_site.register(Group)
@@ -1030,6 +1054,18 @@ from notifications.admin import NotificationAdmin, NotificationPreferenceAdmin, 
 confio_admin_site.register(Notification, NotificationAdmin)
 confio_admin_site.register(NotificationPreference, NotificationPreferenceAdmin)
 confio_admin_site.register(FCMDeviceToken, FCMDeviceTokenAdmin)
+
+# Inbox / editorial content models
+confio_admin_site.register(Channel, ChannelAdmin)
+confio_admin_site.register(ContentItem, ContentItemAdmin)
+confio_admin_site.register(ContentSurface, ContentSurfaceAdmin)
+confio_admin_site.register(ChannelMembership, ChannelMembershipAdmin)
+confio_admin_site.register(ContentReadState, ContentReadStateAdmin)
+confio_admin_site.register(ReactionType, ReactionTypeAdmin)
+confio_admin_site.register(ContentReaction, ContentReactionAdmin)
+confio_admin_site.register(SupportConversation, SupportConversationAdmin)
+confio_admin_site.register(SupportMessage, SupportMessageAdmin)
+confio_admin_site.register(SupportConversationState, SupportConversationStateAdmin)
 
 # Blockchain models (events and processing logs removed); add indexer cursor + processed markers
 from blockchain.models import Balance, ProcessedIndexerTransaction, IndexerAssetCursor

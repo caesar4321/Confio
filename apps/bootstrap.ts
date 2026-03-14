@@ -22,6 +22,17 @@ import { name as appName } from './app.json';
 // Ensure Buffer is available globally before anything else
 global.Buffer = Buffer;
 
+// Initialize Firebase App Check as early as possible so the first auth request
+// already carries a valid header.
+try {
+  const appCheckService = require('./src/services/appCheckService').default;
+  appCheckService.initialize().catch((error: unknown) => {
+    console.warn('Failed to pre-initialize App Check:', error);
+  });
+} catch (error) {
+  console.warn('Failed to load App Check service during bootstrap:', error);
+}
+
 // Import App component
 import App from './src/App';
 import React from 'react';

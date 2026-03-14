@@ -32,6 +32,12 @@ export type MainStackParamList = {
   BankInfo: undefined;
   ConfioAddress: undefined;
   Notification: undefined;
+  HomeMessages: {
+    initialChannelId?: 'julian' | 'confio' | 'soporte';
+  } | undefined;
+  DiscoverPostDetail: {
+    contentItemId: number;
+  };
   CreateBusiness: undefined;
   EditBusiness: undefined;
   EditProfile: undefined;

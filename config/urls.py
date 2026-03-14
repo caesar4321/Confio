@@ -8,7 +8,14 @@ from django.urls import path, include, re_path
 from django.views.decorators.csrf import csrf_exempt
 from django.contrib.admin.views.decorators import staff_member_required
 from graphene_django.views import GraphQLView
-from .views import terms_view, privacy_view, deletion_view
+from .views import (
+    terms_view,
+    privacy_view,
+    deletion_view,
+    portal_login_complete,
+    portal_login_redirect,
+    portal_logout,
+)
 from django.views.generic import TemplateView
 from django.views.generic.base import RedirectView
 from django.conf import settings
@@ -111,6 +118,9 @@ urlpatterns = [
     path('', include(tf_urls)),
     path('confio-control-panel/', confio_admin_site.urls),
     path('graphql/', csrf_exempt(LoggingGraphQLView.as_view(graphiql=True))),
+    path('portal/login/', portal_login_redirect, name='portal_login'),
+    path('portal/login-complete/', portal_login_complete, name='portal_login_complete'),
+    path('portal/logout/', portal_logout, name='portal_logout'),
     path('terms/', terms_view, name='terms'),
     path('privacy/', privacy_view, name='privacy'),
     path('deletion/', deletion_view, name='deletion'),

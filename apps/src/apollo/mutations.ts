@@ -132,6 +132,24 @@ export const GENERATE_OPT_IN_TRANSACTIONS = gql`
   }
 `;
 
+export const SEND_SUPPORT_MESSAGE = gql`
+  mutation SendSupportMessage($body: String!) {
+    sendSupportMessage(body: $body) {
+      success
+      message {
+        id
+        type
+        text
+        body
+        time
+        senderType
+        senderName
+        canReact
+      }
+    }
+  }
+`;
+
 export const ALGORAND_SPONSORED_SEND = gql`
   mutation AlgorandSponsoredSend(
     $recipientAddress: String
@@ -700,6 +718,39 @@ export const MARK_ALL_NOTIFICATIONS_READ = gql`
     markAllNotificationsRead {
       success
       markedCount
+    }
+  }
+`;
+
+export const MARK_MESSAGE_CHANNEL_SEEN = gql`
+  mutation MarkMessageChannelSeen($channelId: String!) {
+    markMessageChannelSeen(channelId: $channelId) {
+      success
+      totalUnreadCount
+    }
+  }
+`;
+
+export const REACT_TO_MESSAGE_CONTENT = gql`
+  mutation ReactToMessageContent($contentItemId: ID!, $emoji: String!) {
+    reactToMessageContent(contentItemId: $contentItemId, emoji: $emoji) {
+      success
+      contentItemId
+      viewerReaction
+      reactionSummary {
+        emoji
+        count
+      }
+    }
+  }
+`;
+
+export const UPDATE_MESSAGE_CHANNEL_MUTE = gql`
+  mutation UpdateMessageChannelMute($channelId: String!, $isMuted: Boolean!) {
+    updateMessageChannelMute(channelId: $channelId, isMuted: $isMuted) {
+      success
+      channelId
+      isMuted
     }
   }
 `;

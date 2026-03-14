@@ -10,12 +10,22 @@
  */
 
 import { Platform } from 'react-native';
-import appCheck, { firebase } from '@react-native-firebase/app-check';
-import { apolloClient } from '../apollo/client';
+import appCheck from '@react-native-firebase/app-check';
+import {
+    FIREBASE_APP_CHECK_DEBUG_TOKEN_ANDROID,
+    FIREBASE_APP_CHECK_DEBUG_TOKEN_IOS,
+} from '@env';
 
 
 class AppCheckService {
     private isInitialized = false;
+    private tokenPromise: Promise<string | null> | null = null;
+    private lastToken: string | null = null;
+    private lastTokenAt = 0;
+    private lastFailureAt = 0;
+
+    private static readonly TOKEN_REUSE_MS = 5 * 60 * 1000;
+    private static readonly FAILURE_BACKOFF_MS = 30 * 1000;
 
     /**
      * Initialize Firebase App Check
@@ -27,13 +37,27 @@ class AppCheckService {
         try {
             // Use the new modular API for App Check initialization
             const rnfbProvider = appCheck().newReactNativeFirebaseAppCheckProvider();
+            const configuredDebugToken =
+                Platform.OS === 'android'
+                    ? FIREBASE_APP_CHECK_DEBUG_TOKEN_ANDROID
+                    : FIREBASE_APP_CHECK_DEBUG_TOKEN_IOS;
+            const useDebugProvider = Boolean(configuredDebugToken);
+
+            if (__DEV__ || useDebugProvider) {
+                console.log(
+                    '[AppCheck] Configuring debug token suffix:',
+                    configuredDebugToken ? configuredDebugToken.slice(-6) : 'missing',
+                );
+            }
 
             rnfbProvider.configure({
                 android: {
-                    provider: __DEV__ ? 'debug' : 'playIntegrity',
+                    provider: useDebugProvider ? 'debug' : 'playIntegrity',
+                    debugToken: useDebugProvider ? FIREBASE_APP_CHECK_DEBUG_TOKEN_ANDROID : undefined,
                 },
                 apple: {
-                    provider: __DEV__ ? 'debug' : 'appAttest',
+                    provider: useDebugProvider ? 'debug' : 'appAttest',
+                    debugToken: useDebugProvider ? FIREBASE_APP_CHECK_DEBUG_TOKEN_IOS : undefined,
                 },
             });
 
@@ -43,7 +67,11 @@ class AppCheckService {
             });
 
             this.isInitialized = true;
-            console.log('[AppCheck] Initialized successfully on', Platform.OS, __DEV__ ? '(debug mode)' : '(production)');
+            console.log(
+                '[AppCheck] Initialized successfully on',
+                Platform.OS,
+                useDebugProvider ? '(debug token mode)' : '(production attestation mode)',
+            );
         } catch (error: any) {
             console.warn('[AppCheck] Failed to initialize:', error?.message, error);
             // Don't throw - allow app to continue in monitoring mode
@@ -54,21 +82,21 @@ class AppCheckService {
      * Get App Check token
      * Returns null if unavailable (which is logged but not blocked)
      */
-    private async getToken(): Promise<string | null> {
-        console.log('[AppCheck] getToken() called, isInitialized:', this.isInitialized);
+    private async fetchToken(): Promise<string | null> {
         try {
             if (!this.isInitialized) {
-                console.log('[AppCheck] Not initialized, calling initialize()...');
                 await this.initialize();
             }
 
-            // Force refresh to get a fresh token
-            console.log('[AppCheck] Calling appCheck().getToken(true)...');
-            const { token } = await appCheck().getToken(true);
-            console.log('[AppCheck] Token received, length:', token?.length || 0);
+            const { token } = await appCheck().getToken();
+            if (token) {
+                this.lastToken = token;
+                this.lastTokenAt = Date.now();
+            }
             return token;
         } catch (error: any) {
             console.warn('[AppCheck] Failed to get token:', error?.message, error);
+            this.lastFailureAt = Date.now();
             return null;
         }
     }
@@ -78,7 +106,23 @@ class AppCheckService {
      * Can be used to add X-Firebase-AppCheck header to requests
      */
     async getTokenForHeader(): Promise<string | null> {
-        return this.getToken();
+        const now = Date.now();
+
+        if (this.lastToken && now - this.lastTokenAt < AppCheckService.TOKEN_REUSE_MS) {
+            return this.lastToken;
+        }
+
+        if (this.lastFailureAt && now - this.lastFailureAt < AppCheckService.FAILURE_BACKOFF_MS) {
+            return this.lastToken;
+        }
+
+        if (!this.tokenPromise) {
+            this.tokenPromise = this.fetchToken().finally(() => {
+                this.tokenPromise = null;
+            });
+        }
+
+        return this.tokenPromise;
     }
 }
 

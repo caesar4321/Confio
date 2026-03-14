@@ -41,10 +41,6 @@ import com.sdkreactnative.SdkReactNativePackage
 import com.uerceg.play_install_referrer.PlayInstallReferrerPackage
 import com.blockstore.BlockStorePackage
 
-import com.google.firebase.appcheck.FirebaseAppCheck
-import com.google.firebase.appcheck.debug.DebugAppCheckProviderFactory
-import com.google.firebase.appcheck.playintegrity.PlayIntegrityAppCheckProviderFactory
-
 class MainApplication : Application(), ReactApplication {
 
   override val reactNativeHost: ReactNativeHost =
@@ -99,22 +95,6 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
-    
-    // Initialize Firebase App Check
-    try {
-        val firebaseAppCheck = FirebaseAppCheck.getInstance()
-        if (BuildConfig.DEBUG) {
-            firebaseAppCheck.installAppCheckProviderFactory(
-                DebugAppCheckProviderFactory.getInstance()
-            )
-        } else {
-            firebaseAppCheck.installAppCheckProviderFactory(
-                PlayIntegrityAppCheckProviderFactory.getInstance()
-            )
-        }
-    } catch (e: Exception) {
-        // Log error if needed
-    }
 
     SoLoader.init(this, OpenSourceMergedSoMapping)
     if (BuildConfig.IS_NEW_ARCHITECTURE_ENABLED) {

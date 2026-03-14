@@ -6,6 +6,23 @@ import boto3
 from botocore.client import Config
 from django.conf import settings
 
+
+def _build_s3_client_params(region: str) -> Dict[str, object]:
+    endpoint = f"https://s3.{region}.amazonaws.com" if region != 'us-east-1' else "https://s3.amazonaws.com"
+    params: Dict[str, object] = {
+        'region_name': region,
+        'config': Config(signature_version='s3v4'),
+        'endpoint_url': endpoint,
+    }
+    if settings.AWS_ACCESS_KEY_ID and settings.AWS_SECRET_ACCESS_KEY:
+        params.update({
+            'aws_access_key_id': settings.AWS_ACCESS_KEY_ID,
+            'aws_secret_access_key': settings.AWS_SECRET_ACCESS_KEY,
+        })
+        if getattr(settings, 'AWS_SESSION_TOKEN', None):
+            params['aws_session_token'] = settings.AWS_SESSION_TOKEN
+    return params
+
 def _resolve_bucket(explicit_bucket: Optional[str] = None) -> str:
     """Resolve target S3 bucket.
 
@@ -50,19 +67,7 @@ def generate_presigned_put(
     # Ensure we sign against the correct regional endpoint to avoid
     # IllegalLocationConstraintException when the bucket is in a non-default region
     region = settings.AWS_S3_REGION or 'eu-central-2'
-    endpoint = f"https://s3.{region}.amazonaws.com" if region != 'us-east-1' else "https://s3.amazonaws.com"
-
-    params = {
-        'region_name': region,
-        'config': Config(signature_version='s3v4'),
-        'endpoint_url': endpoint,
-    }
-    if settings.AWS_ACCESS_KEY_ID and settings.AWS_SECRET_ACCESS_KEY:
-        params.update({
-            'aws_access_key_id': settings.AWS_ACCESS_KEY_ID,
-            'aws_secret_access_key': settings.AWS_SECRET_ACCESS_KEY,
-        })
-    s3 = boto3.client('s3', **params)
+    s3 = boto3.client('s3', **_build_s3_client_params(region))
 
     target_bucket = _resolve_bucket(bucket)
 
@@ -117,18 +122,7 @@ def generate_presigned_get(*, key: str, expires_in_seconds: int = 300, bucket: O
     _ensure_bucket(bucket)
 
     region = settings.AWS_S3_REGION or 'eu-central-2'
-    endpoint = f"https://s3.{region}.amazonaws.com" if region != 'us-east-1' else "https://s3.amazonaws.com"
-    params = {
-        'region_name': region,
-        'config': Config(signature_version='s3v4'),
-        'endpoint_url': endpoint,
-    }
-    if settings.AWS_ACCESS_KEY_ID and settings.AWS_SECRET_ACCESS_KEY:
-        params.update({
-            'aws_access_key_id': settings.AWS_ACCESS_KEY_ID,
-            'aws_secret_access_key': settings.AWS_SECRET_ACCESS_KEY,
-        })
-    s3 = boto3.client('s3', **params)
+    s3 = boto3.client('s3', **_build_s3_client_params(region))
 
     target_bucket = _resolve_bucket(bucket)
 
@@ -179,18 +173,7 @@ def generate_presigned_post(
     _ensure_bucket(bucket)
 
     region = settings.AWS_S3_REGION or 'eu-central-2'
-    endpoint = f"https://s3.{region}.amazonaws.com" if region != 'us-east-1' else "https://s3.amazonaws.com"
-    params = {
-        'region_name': region,
-        'config': Config(signature_version='s3v4'),
-        'endpoint_url': endpoint,
-    }
-    if settings.AWS_ACCESS_KEY_ID and settings.AWS_SECRET_ACCESS_KEY:
-        params.update({
-            'aws_access_key_id': settings.AWS_ACCESS_KEY_ID,
-            'aws_secret_access_key': settings.AWS_SECRET_ACCESS_KEY,
-        })
-    s3 = boto3.client('s3', **params)
+    s3 = boto3.client('s3', **_build_s3_client_params(region))
 
     fields = {'Content-Type': content_type}
     if metadata:
@@ -228,18 +211,7 @@ def head_object(*, key: str, bucket: Optional[str] = None) -> Dict[str, any]:
     """Return HEAD metadata for an S3 object (ContentLength, ContentType, ETag, Metadata)."""
     _ensure_bucket(bucket)
     region = settings.AWS_S3_REGION or 'eu-central-2'
-    endpoint = f"https://s3.{region}.amazonaws.com" if region != 'us-east-1' else "https://s3.amazonaws.com"
-    params = {
-        'region_name': region,
-        'config': Config(signature_version='s3v4'),
-        'endpoint_url': endpoint,
-    }
-    if settings.AWS_ACCESS_KEY_ID and settings.AWS_SECRET_ACCESS_KEY:
-        params.update({
-            'aws_access_key_id': settings.AWS_ACCESS_KEY_ID,
-            'aws_secret_access_key': settings.AWS_SECRET_ACCESS_KEY,
-        })
-    s3 = boto3.client('s3', **params)
+    s3 = boto3.client('s3', **_build_s3_client_params(region))
     target_bucket = _resolve_bucket(bucket)
     resp = s3.head_object(Bucket=target_bucket, Key=key)
     return {

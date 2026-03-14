@@ -22,6 +22,8 @@ class AuthTokenVersionMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
+        existing_user = getattr(request, 'user', AnonymousUser())
+
         # Skip for admin and static/media URLs
         # Skip for admin, account (2FA), and static/media URLs
         if (request.path.startswith('/admin/') or 
@@ -78,16 +80,14 @@ class AuthTokenVersionMiddleware:
                 
             except PermissionDenied as e:
                 logger.warning("Token verification failed: %s", str(e))
-                # Set anonymous user instead of None
-                request.user = AnonymousUser()
+                request.user = existing_user if getattr(existing_user, 'is_authenticated', False) else AnonymousUser()
             except Exception as e:
                 # Log other errors but don't expose them
                 logger.error("JWT verification error: %s", str(e))
-                # Set anonymous user instead of None
-                request.user = AnonymousUser()
+                request.user = existing_user if getattr(existing_user, 'is_authenticated', False) else AnonymousUser()
         else:
             logger.info("No JWT token found in Authorization header")
-            request.user = AnonymousUser()
+            request.user = existing_user if getattr(existing_user, 'is_authenticated', False) else AnonymousUser()
             
         logger.info("Request user after middleware: %s", request.user)
         logger.info("Is authenticated: %s", getattr(request.user, 'is_authenticated', None))

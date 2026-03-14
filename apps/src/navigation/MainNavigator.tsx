@@ -66,6 +66,8 @@ import { VerifyTransactionScreen } from '../screens/VerifyTransactionScreen';
 import PayrollSetupWizard from '../screens/PayrollSetupWizard';
 import PayrollRecipientsManageScreen from '../screens/PayrollRecipientsManageScreen';
 import PayrollDelegatesManageScreen from '../screens/PayrollDelegatesManageScreen';
+import MessageScreen from '../screens/MessageScreen';
+import DiscoverPostDetailScreen from '../screens/DiscoverPostDetailScreen';
 // import NotificationSettingsScreen from '../screens/NotificationSettingsScreen'; // Hidden: Notifications mandatory
 
 import { MigrationModal } from '../components/MigrationModal';
@@ -120,6 +122,20 @@ export const MainNavigator = () => {
         <Stack.Screen
           name="Notification"
           component={NotificationScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="HomeMessages"
+          component={MessageScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="DiscoverPostDetail"
+          component={DiscoverPostDetailScreen}
           options={{
             headerShown: false,
           }}

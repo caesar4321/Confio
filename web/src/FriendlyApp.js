@@ -22,6 +22,7 @@ import PrivacyPage from './Components/LegalDocument/PrivacyPage';
 import DeletionPage from './Components/LegalDocument/DeletionPage';
 import TransactionVerificationPage from './Components/Verification/TransactionVerificationPage';
 import PaymentRedirectionPage from './Components/Payment/PaymentRedirectionPage';
+import PortalConsole from './Components/Portal/PortalConsole';
 
 import './FriendlyApp.css';
 
@@ -54,6 +55,31 @@ function FriendlyApp() {
     document.head.appendChild(link);
   }, []);
 
+  const backendOrigin = (() => {
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      return 'http://localhost:8000';
+    }
+    const graphqlUrl = process.env.REACT_APP_GRAPHQL_URL;
+    if (graphqlUrl) {
+      try {
+        return new URL(graphqlUrl, window.location.origin).origin;
+      } catch (error) {
+        console.warn('Failed to parse REACT_APP_GRAPHQL_URL', error);
+      }
+    }
+    return window.location.origin;
+  })();
+  const isLocalDevServer =
+    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') &&
+    window.location.port === '3000';
+
+  const RedirectToBackend = ({ path }) => {
+    useEffect(() => {
+      window.location.replace(`${backendOrigin}${path}`);
+    }, [path]);
+    return null;
+  };
+
   return (
     <ApolloProvider client={client}>
       <LanguageProvider>
@@ -81,6 +107,18 @@ function FriendlyApp() {
               <Route path="/deletion" element={<DeletionPage />} />
               <Route path="/verify/:hash" element={<TransactionVerificationPage />} />
               <Route path="/pay/:id" element={<PaymentRedirectionPage />} />
+              <Route
+                path="/portal"
+                element={isLocalDevServer ? <RedirectToBackend path="/portal" /> : <PortalConsole />}
+              />
+              <Route
+                path="/portal/login/"
+                element={<RedirectToBackend path="/portal/login/" />}
+              />
+              <Route
+                path="/portal/logout/"
+                element={<RedirectToBackend path="/portal/logout/" />}
+              />
             </Routes>
           </div>
         </Router>

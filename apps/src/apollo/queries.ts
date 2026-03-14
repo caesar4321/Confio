@@ -6,6 +6,7 @@ export const GET_ME = gql`
     me {
       id
       username
+      isStaff
       email
       firstName
       lastName
@@ -15,6 +16,50 @@ export const GET_ME = gql`
       lastVerifiedDate
       verificationStatus
       backupProvider
+    }
+  }
+`;
+
+export const GET_PORTAL_SUPPORT_CONVERSATIONS = gql`
+  query GetPortalSupportConversations($status: String) {
+    portalSupportConversations(status: $status) {
+      id
+      customerName
+      customerEmail
+      contextLabel
+      status
+      assignedToName
+      lastMessageAt
+      lastPreview
+      unreadCount
+      messages {
+        id
+        senderType
+        senderName
+        body
+        createdAt
+      }
+    }
+  }
+`;
+
+export const GET_PORTAL_CONTENT_ITEMS = gql`
+  query GetPortalContentItems($channelSlug: String, $status: String) {
+    portalContentItems(channelSlug: $channelSlug, status: $status) {
+      id
+      channelSlug
+      channelTitle
+      itemType
+      status
+      title
+      body
+      tag
+      publishedAt
+      sendPush
+      sendInApp
+      pushSentAt
+      surfaces
+      metadata
     }
   }
 `;
@@ -2343,8 +2388,113 @@ export const GET_NOTIFICATION_PREFERENCES = gql`
 `;
 
 export const GET_UNREAD_NOTIFICATION_COUNT = gql`
-  query GetUnreadNotificationCount {
-    unreadNotificationCount
+  query GetUnreadNotificationCount($contextKey: String) {
+    unreadNotificationCount(contextKey: $contextKey)
+  }
+`;
+
+export const GET_MESSAGE_INBOX = gql`
+  query GetMessageInbox($contextKey: String) {
+    messageInbox(contextKey: $contextKey) {
+      totalUnreadCount
+      channels {
+        id
+        name
+        subtitle
+        preview
+        time
+        unreadCount
+        isMuted
+        messages {
+          id
+          type
+          isPinned
+          occurredAt
+          tag
+          title
+          body
+          text
+          time
+          link
+          platforms
+          platformLinks {
+            platform
+            url
+          }
+          imageUrl
+          reactionSummary {
+            emoji
+            count
+          }
+          viewerReaction
+          canReact
+          senderType
+          senderName
+        }
+      }
+    }
+  }
+`;
+
+export const GET_MESSAGE_INBOX_UNREAD_COUNT = gql`
+  query GetMessageInboxUnreadCount($contextKey: String) {
+    messageInboxUnreadCount(contextKey: $contextKey)
+  }
+`;
+
+export const GET_DISCOVER_FEED = gql`
+  query GetDiscoverFeed($offset: Int, $limit: Int) {
+    discoverFeed(offset: $offset, limit: $limit) {
+      items {
+        id
+        type
+        tag
+        tagColor
+        title
+        body
+        time
+        thumbnail
+        platformLinks {
+          platform
+          url
+        }
+        imageUrl
+        reactionSummary {
+          emoji
+          count
+        }
+        viewerReaction
+        canReact
+      }
+      hasMore
+    }
+  }
+`;
+
+export const GET_DISCOVER_POST = gql`
+  query GetDiscoverPost($contentItemId: ID!) {
+    discoverPost(contentItemId: $contentItemId) {
+      id
+      type
+      tag
+      tagColor
+      title
+      body
+      time
+      thumbnail
+      platformLinks {
+        platform
+        url
+      }
+      imageUrl
+      blocks
+      reactionSummary {
+        emoji
+        count
+      }
+      viewerReaction
+      canReact
+    }
   }
 `;
 

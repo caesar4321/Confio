@@ -749,6 +749,31 @@ class MessagingService {
             } as never);
           }
           break;
+        case 'messages':
+          navigationRef.current?.navigate('Main' as never, {
+            screen: 'HomeMessages',
+            params: {
+              initialChannelId: parts[1] === 'confio-news' ? 'confio' : parts[1]
+            }
+          } as never);
+          break;
+        case 'discover':
+          if (parts[1] === 'post' && parts[2]) {
+            navigationRef.current?.navigate('Main' as never, {
+              screen: 'DiscoverPostDetail',
+              params: {
+                contentItemId: Number(parts[2]),
+              }
+            } as never);
+          } else {
+            navigationRef.current?.navigate('Main' as never, {
+              screen: 'BottomTabs',
+              params: {
+                screen: 'Discover'
+              }
+            } as never);
+          }
+          break;
         case 'settings':
           if (parts[1] === 'security') {
             // Navigate to Settings tab

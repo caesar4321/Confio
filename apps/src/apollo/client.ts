@@ -7,7 +7,7 @@ import { getApiUrl } from '../config/env';
 import { gql } from '@apollo/client';
 import { Observable as ApolloObservable } from '@apollo/client/utilities';
 import { AccountManager } from '../utils/accountManager';
-import appCheck from '@react-native-firebase/app-check';
+import appCheckService from '../services/appCheckService';
 
 // Extract constants to avoid circular dependency
 export const AUTH_KEYCHAIN_SERVICE = 'com.confio.auth';
@@ -192,8 +192,7 @@ const authLink = setContext(async (operation, previousContext) => {
 
   // 1. ALWAYS Try to attach Firebase App Check header (Public or Private)
   try {
-    // Get token without forceRefresh first to be fast
-    const { token: appCheckToken } = await appCheck().getToken();
+    const appCheckToken = await appCheckService.getTokenForHeader();
     if (appCheckToken) {
       nextHeaders['X-Firebase-AppCheck'] = appCheckToken;
       if (AUTH_DEBUG) console.log('[AuthLink] Attached X-Firebase-AppCheck header');
@@ -377,7 +376,19 @@ const authLink = setContext(async (operation, previousContext) => {
 
 export const apolloClient = new ApolloClient({
   link: from([authLink, errorLink, httpLink]),
-  cache: new InMemoryCache(),
+  cache: new InMemoryCache({
+    typePolicies: {
+      MessageInboxType: {
+        keyFields: false,
+      },
+      MessageChannelType: {
+        keyFields: false,
+      },
+      MessageThreadItemType: {
+        keyFields: false,
+      },
+    },
+  }),
   defaultOptions: {
     watchQuery: {
       fetchPolicy: 'network-only',

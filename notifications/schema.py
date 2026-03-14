@@ -285,7 +285,7 @@ class Query(graphene.ObjectType):
     
     notification_preferences = graphene.Field(NotificationPreferenceType)
     
-    unread_notification_count = graphene.Int()
+    unread_notification_count = graphene.Int(context_key=graphene.String(required=False))
     
     fcm_device_tokens = graphene.List(FCMDeviceTokenType)
     
@@ -485,7 +485,7 @@ class Query(graphene.ObjectType):
         return preferences
     
     @login_required
-    def resolve_unread_notification_count(self, info):
+    def resolve_unread_notification_count(self, info, context_key=None):
         """Get count of unread notifications based on JWT context"""
         user = info.context.user
         
