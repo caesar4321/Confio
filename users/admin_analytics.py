@@ -9,11 +9,13 @@ from django.utils.html import format_html
 from django.urls import reverse
 from django.utils.safestring import mark_safe
 from django.utils import timezone
-from django.db.models import F
+from django.db.models import Count, F, IntegerField, OuterRef, Subquery
+from django.db.models.functions import Coalesce
 from datetime import timedelta
 from decimal import Decimal
 
 from .models_analytics import DailyMetrics, CountryMetrics
+from .models import User
 
 
 @admin.register(DailyMetrics)
@@ -213,6 +215,7 @@ class CountryMetricsAdmin(admin.ModelAdmin):
         'dau_display',
         'wau_display',
         'mau_display',
+        'active_fcm_users_display',
         'total_users_display',
         'new_users_display',
         'engagement_ratio',
@@ -247,6 +250,26 @@ class CountryMetricsAdmin(admin.ModelAdmin):
     def has_delete_permission(self, request, obj=None):
         """Allow deletion for cleanup"""
         return request.user.is_superuser
+
+    def get_queryset(self, request):
+        """Annotate each country row with current distinct users who have an active FCM token."""
+        queryset = super().get_queryset(request)
+        active_fcm_users = (
+            User.objects.filter(
+                phone_country=OuterRef('country_code'),
+                is_active=True,
+                fcm_tokens__is_active=True,
+            )
+            .values('phone_country')
+            .annotate(count=Count('id', distinct=True))
+            .values('count')[:1]
+        )
+        return queryset.annotate(
+            active_fcm_users=Coalesce(
+                Subquery(active_fcm_users, output_field=IntegerField()),
+                0,
+            )
+        )
     
     def country_display(self, obj):
         """Display country with flag"""
@@ -278,6 +301,16 @@ class CountryMetricsAdmin(admin.ModelAdmin):
         )
     mau_display.short_description = 'MAU'
     mau_display.admin_order_field = 'mau'
+
+    def active_fcm_users_display(self, obj):
+        """Display current users in this country with at least one active FCM token."""
+        value = getattr(obj, 'active_fcm_users', 0)
+        return format_html(
+            '<strong style="color: #8B5CF6;">{}</strong>',
+            f"{value:,}"
+        )
+    active_fcm_users_display.short_description = 'FCM Activos'
+    active_fcm_users_display.admin_order_field = 'active_fcm_users'
     
     def total_users_display(self, obj):
         """Display total users"""
