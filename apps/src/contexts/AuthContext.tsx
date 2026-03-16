@@ -10,6 +10,7 @@ import { AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME } from '../apollo/client'
 import { GET_ME, GET_BUSINESS_PROFILE } from '../apollo/queries';
 import { pushNotificationService } from '../services/pushNotificationService';
 import { biometricAuthService } from '../services/biometricAuthService';
+import { deepLinkHandler } from '../utils/deepLinkHandler';
 
 // Simple auth readiness gate to coordinate token-dependent queries
 let __authReady = false;
@@ -91,6 +92,33 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   const lastInactiveAtRef = useRef<number | null>(null);
   const lastBiometricSuccessRef = useRef<number>(0);
   const bootstrapAuthRanRef = useRef<boolean>(false);
+
+  const waitForAppToBeActive = async (timeoutMs = 4000): Promise<boolean> => {
+    if (AppState.currentState === 'active') {
+      return true;
+    }
+
+    return await new Promise<boolean>((resolve) => {
+      let settled = false;
+      const timeout = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          subscription.remove();
+          console.warn('[AuthContext] Timed out waiting for app to become active before biometric prompt');
+          resolve(AppState.currentState === 'active');
+        }
+      }, timeoutMs);
+
+      const subscription = AppState.addEventListener('change', (state) => {
+        if (!settled && state === 'active') {
+          settled = true;
+          clearTimeout(timeout);
+          subscription.remove();
+          resolve(true);
+        }
+      });
+    });
+  };
 
   // Reset auth gate on mount so cold starts don't inherit a stale ready state
   useEffect(() => {
@@ -176,6 +204,9 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           console.log('[AuthContext] Navigated to Main, processing pending notifications...');
           setTimeout(() => {
             pushNotificationService.processPendingNotification();
+            deepLinkHandler.checkDeferredLinks().catch(error => {
+              console.error('[AuthContext] Failed to process deferred deep link:', error);
+            });
             import('../services/messagingService')
               .then(({ default: messagingService }) => {
                 messagingService.processPendingNotification();
@@ -795,11 +826,20 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
             }
 
 
+            const bioEnabled = await biometricAuthService.isEnabled();
+            if (bioEnabled) {
+              const appIsActive = await waitForAppToBeActive();
+              if (!appIsActive) {
+                console.warn('[AuthContext] App never became active for startup biometric prompt');
+                setIsAuthenticated(false);
+                setProfileData(null);
+                navigateToScreen('Auth');
+                return;
+              }
+            }
+
             // Align access token context with active account before navigating
             try {
-              // CRITICAL FIX: Enforce biometric check BEFORE setting isAuthenticated(true)
-              // This prevents the "iOS bypass" where a user kills the app and reopens it to skip the resume prompt.
-              const bioEnabled = await biometricAuthService.isEnabled();
               if (bioEnabled) {
                 console.log('[AuthContext] Biometrics enabled, enforcing check on startup...');
                 const bioOk = await biometricAuthService.authenticate('Desbloquea Confío');
@@ -853,9 +893,11 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
               return;
             }
 
-            const biometricOk = enrollmentResult.didAuthenticate
+            const biometricOk = bioEnabled
               ? true
-              : await biometricAuthService.authenticate('Desbloquea Confío');
+              : enrollmentResult.didAuthenticate
+                ? true
+                : await biometricAuthService.authenticate('Desbloquea Confío');
             if (!biometricOk) {
               Alert.alert(
                 'Confirma con biometría',

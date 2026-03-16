@@ -1,5 +1,5 @@
 import messaging from '@react-native-firebase/messaging';
-import notifee, { AndroidImportance } from '@notifee/react-native';
+import notifee, { AndroidImportance, EventType } from '@notifee/react-native';
 import notificationDedup from './notificationDeduplication';
 
 // Register background handler
@@ -48,5 +48,7 @@ messaging().setBackgroundMessageHandler(async remoteMessage => {
 // Background event handler for Notifee
 notifee.onBackgroundEvent(async ({ type, detail }) => {
   console.log('Background event:', type, detail);
-  // Handle notification interactions in background
+  if (type === EventType.PRESS && detail.notification) {
+    console.log('Background notification press received; app launch should recover it via notifee.getInitialNotification()');
+  }
 });

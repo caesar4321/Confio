@@ -25,6 +25,7 @@ class MessagingService {
   private instanceId: string;
   private channelCreated: boolean = false;
   private pendingNotificationData: any | null = null;
+  private pendingNotificationRetryTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     this.instanceId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -43,9 +44,11 @@ class MessagingService {
     return globalMessagingInstance;
   }
 
-  async initialize(forceTokenRefresh: boolean = false) {
+  async initialize(forceTokenRefresh: boolean = false, registerCurrentUser: boolean = true) {
     try {
-      console.log(`[MessagingService] Initializing with forceTokenRefresh=${forceTokenRefresh}`);
+      console.log(
+        `[MessagingService] Initializing with forceTokenRefresh=${forceTokenRefresh}, registerCurrentUser=${registerCurrentUser}`
+      );
 
       // Check current permission status
       const authStatus = await messaging().hasPermission();
@@ -63,15 +66,6 @@ class MessagingService {
         await notifee.requestPermission();
       }
 
-      // Get or generate device ID
-      this.deviceId = await this.getOrCreateDeviceId();
-      console.log(`[MessagingService] Using device ID: ${this.deviceId}`);
-
-      // Always get a fresh token and register it for the current user
-      // This is crucial for multi-user support on the same device
-      console.log('[MessagingService] Getting FCM token for current user...');
-      await this.getFCMToken();
-
       // Set up message handlers only once
       if (!this.messageHandlersSetup) {
         this.setupMessageHandlers();
@@ -83,10 +77,25 @@ class MessagingService {
         this.channelCreated = true;
       }
 
+      if (registerCurrentUser) {
+        // Get or generate device ID
+        this.deviceId = await this.getOrCreateDeviceId();
+        console.log(`[MessagingService] Using device ID: ${this.deviceId}`);
+
+        // Always get a fresh token and register it for the current user
+        // This is crucial for multi-user support on the same device
+        console.log('[MessagingService] Getting FCM token for current user...');
+        await this.getFCMToken();
+      }
+
       console.log('[MessagingService] Initialization complete');
     } catch (error) {
       console.error('[MessagingService] Error during initialization:', error);
     }
+  }
+
+  public handleNotificationPayload(data: any, skipAccountCheck: boolean = false) {
+    void this.handleNotificationData(data, skipAccountCheck);
   }
 
   processPendingNotification() {
@@ -95,11 +104,21 @@ class MessagingService {
     }
     if (!this.canNavigateIntoMain()) {
       console.log('[MessagingService] Main navigator still not ready for pending notification');
+      if (!this.pendingNotificationRetryTimer) {
+        this.pendingNotificationRetryTimer = setTimeout(() => {
+          this.pendingNotificationRetryTimer = null;
+          this.processPendingNotification();
+        }, 300);
+      }
       return;
     }
 
     const pendingData = this.pendingNotificationData;
     this.pendingNotificationData = null;
+    if (this.pendingNotificationRetryTimer) {
+      clearTimeout(this.pendingNotificationRetryTimer);
+      this.pendingNotificationRetryTimer = null;
+    }
     console.log('[MessagingService] Processing pending notification after app became ready');
     void this.handleNotificationData(pendingData);
   }
@@ -108,9 +127,32 @@ class MessagingService {
     if (!navigationRef.current || !navigationRef.current.isReady()) {
       return false;
     }
+    return this.isMainRouteActive();
+  }
+
+  private isMainRouteActive() {
+    if (!navigationRef.current || !navigationRef.current.isReady()) {
+      return false;
+    }
     const rootState = navigationRef.current.getRootState();
     const activeRootRoute = rootState?.routes?.[rootState.index ?? 0];
     return activeRootRoute?.name === 'Main';
+  }
+
+  private navigateInsideMain(name: string, params?: any) {
+    if (!navigationRef.current || !navigationRef.current.isReady()) {
+      return;
+    }
+
+    if (this.isMainRouteActive()) {
+      navigationRef.current.navigate(name as never, params as never);
+      return;
+    }
+
+    navigationRef.current.navigate('Main' as never, {
+      screen: name,
+      params,
+    } as never);
   }
 
   private async getOrCreateDeviceId(): Promise<string> {
@@ -379,7 +421,15 @@ class MessagingService {
         if (remoteMessage) {
           console.log('App opened from notification (killed state):', remoteMessage);
           this.handleNotificationOpen(remoteMessage);
+          return;
         }
+
+        notifee.getInitialNotification().then(initialNotification => {
+          if (initialNotification?.notification?.data) {
+            console.log('[MessagingService] App opened from Notifee notification (killed state):', initialNotification.notification);
+            this.handleNotificationData(initialNotification.notification.data);
+          }
+        });
       });
 
     // Handle token refresh
@@ -698,6 +748,37 @@ class MessagingService {
     const parts = path.split('/');
     console.log('[MessagingService] Parsed path parts:', parts);
 
+    if (parts[0] === 'app' && parts[1] === 'deeplink' && parts[2]) {
+      const deeplinkPayload = decodeURIComponent(parts.slice(2).join('/'));
+      const [screen, ...params] = deeplinkPayload.split('|');
+      const rawParam = params.join('|');
+
+      console.log('[MessagingService] Handling app/deeplink payload:', {
+        deeplinkPayload,
+        screen,
+        rawParam,
+      });
+
+      switch (screen) {
+        case 'DiscoverPostDetail':
+          this.navigateInsideMain('DiscoverPostDetail', {
+            contentItemId: Number(rawParam),
+          });
+          return;
+        case 'ActiveTrade':
+          this.navigateInsideMain('ActiveTrade', {
+            trade: {
+              id: rawParam,
+            },
+            allowAccountSwitch: true,
+          });
+          return;
+        default:
+          this.navigateInsideMain(screen, rawParam ? { params: rawParam } : undefined);
+          return;
+      }
+    }
+
     if (parts.length > 0) {
       switch (parts[0]) {
         case 'verification':
@@ -781,28 +862,19 @@ class MessagingService {
           }
           break;
         case 'messages':
-          navigationRef.current?.navigate('Main' as never, {
-            screen: 'HomeMessages',
-            params: {
-              initialChannelId: parts[1] === 'confio-news' ? 'confio' : parts[1]
-            }
-          } as never);
+          this.navigateInsideMain('HomeMessages', {
+            initialChannelId: parts[1] === 'confio-news' ? 'confio' : parts[1]
+          });
           break;
         case 'discover':
           if (parts[1] === 'post' && parts[2]) {
-            navigationRef.current?.navigate('Main' as never, {
-              screen: 'DiscoverPostDetail',
-              params: {
-                contentItemId: Number(parts[2]),
-              }
-            } as never);
+            this.navigateInsideMain('DiscoverPostDetail', {
+              contentItemId: Number(parts[2]),
+            });
           } else {
-            navigationRef.current?.navigate('Main' as never, {
-              screen: 'BottomTabs',
-              params: {
-                screen: 'Discover'
-              }
-            } as never);
+            this.navigateInsideMain('BottomTabs', {
+              screen: 'Discover'
+            });
           }
           break;
         case 'settings':

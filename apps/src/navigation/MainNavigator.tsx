@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
 import { BottomTabNavigator } from './BottomTabNavigator';
@@ -71,6 +71,9 @@ import DiscoverPostDetailScreen from '../screens/DiscoverPostDetailScreen';
 // import NotificationSettingsScreen from '../screens/NotificationSettingsScreen'; // Hidden: Notifications mandatory
 
 import { MigrationModal } from '../components/MigrationModal';
+import messagingService from '../services/messagingService';
+import { pushNotificationService } from '../services/pushNotificationService';
+import { deepLinkHandler } from '../utils/deepLinkHandler';
 
 console.log('MainNavigator: TransactionProcessingScreen imported:', !!TransactionProcessingScreen);
 console.log('MainNavigator: TransactionSuccessScreen imported:', !!TransactionSuccessScreen);
@@ -79,6 +82,19 @@ const Stack = createNativeStackNavigator<MainStackParamList>();
 
 export const MainNavigator = () => {
   console.log('MainNavigator: Component rendering at:', new Date().toISOString());
+
+  useEffect(() => {
+    console.log('[MainNavigator] Mounted, processing pending notification/deep-link work');
+    const timer = setTimeout(() => {
+      pushNotificationService.processPendingNotification();
+      messagingService.processPendingNotification();
+      deepLinkHandler.checkDeferredLinks().catch(error => {
+        console.error('[MainNavigator] Failed to process deferred deep link:', error);
+      });
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, []);
 
   return (
     <>

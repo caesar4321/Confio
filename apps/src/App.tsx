@@ -21,6 +21,7 @@ import { pushNotificationService } from './services/pushNotificationService';
 import { navigationRef } from './navigation/RootNavigation';
 import { initializeNotifee } from './services/notifeeConfig';
 import linking from './navigation/linking'; // Import linking config
+import { deepLinkHandler } from './utils/deepLinkHandler';
 // Dev: attach derivation verifier helper
 if (__DEV__) {
   import('./dev/derivationVerifier').catch(() => { });
@@ -94,6 +95,13 @@ const Navigation: React.FC = () => {
 };
 
 const AppContent: React.FC = () => {
+  useEffect(() => {
+    console.log('[App] Bootstrapping messaging handlers before auth');
+    messagingService.initialize(false, false).catch(error => {
+      console.error('Failed to bootstrap messaging handlers:', error);
+    });
+  }, []);
+
   return (
     <SafeAreaProvider>
       {/* Global default status bar; individual screens can override */}
@@ -103,6 +111,13 @@ const AppContent: React.FC = () => {
         <NavigationContainer
           ref={navigationRef}
           linking={linking as any}
+          onReady={() => {
+            console.log('[App] NavigationContainer ready, wiring deep link handler');
+            deepLinkHandler.setNavigation(navigationRef as NavigationContainerRef<any>);
+            deepLinkHandler.checkDeferredLinks().catch(error => {
+              console.error('[App] Failed to process deferred deep link on navigation ready:', error);
+            });
+          }}
         >
           <AuthProvider
             navigationRef={navigationRef as any}

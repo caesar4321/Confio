@@ -1,4 +1,5 @@
 import messaging, { FirebaseMessagingTypes } from '@react-native-firebase/messaging';
+import notifee from '@notifee/react-native';
 import { Platform, PermissionsAndroid } from 'react-native';
 import * as Keychain from 'react-native-keychain';
 import * as RootNavigation from '../navigation/RootNavigation';
@@ -202,6 +203,13 @@ export class PushNotificationService {
         extra_transactionType,
         notification_type
       });
+
+      if (action_url?.includes('app/deeplink/')) {
+        console.log('[PushNotificationService] Delegating app/deeplink notification to MessagingService');
+        const { messagingService } = require('./messagingService');
+        messagingService.handleNotificationPayload(remoteMessage.data, true);
+        return;
+      }
       
       // Parse action URL if it exists
       if (action_url) {
@@ -389,6 +397,21 @@ export class PushNotificationService {
         // Store the notification to be processed after app is fully initialized
         this.pendingNotification = initialNotification;
         console.log('[PushNotificationService] Stored initial notification as pending');
+      }
+
+      if (!this.pendingNotification) {
+        const notifeeInitialNotification = await notifee.getInitialNotification();
+        if (notifeeInitialNotification?.notification?.data) {
+          console.log('[PushNotificationService] Restoring initial notification from Notifee');
+          this.pendingNotification = {
+            data: notifeeInitialNotification.notification.data as Record<string, string>,
+            notification: {
+              title: notifeeInitialNotification.notification.title,
+              body: notifeeInitialNotification.notification.body,
+            },
+          } as FirebaseMessagingTypes.RemoteMessage;
+          console.log('[PushNotificationService] Stored Notifee initial notification as pending');
+        }
       }
 
       this.isInitialized = true;
