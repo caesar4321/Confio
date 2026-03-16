@@ -9,6 +9,7 @@
     <color name="mint">#3ADBBB</color>
     <color name="mint_light">#B8F0E4</color>
     <color name="notification_mint">#72D9BC</color>
+    <color name="splash_background">#FFFFFF</color>
     
     <!-- Notification Color -->
     <color name="notification_color">@color/accent</color>

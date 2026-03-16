@@ -154,6 +154,11 @@ android {
         }
     }
     packagingOptions {
+        jniLibs {
+            // Some devices fail to mmap libreactnative.so directly from the APK/AAB.
+            // Force legacy native lib packaging so Android extracts .so files on install.
+            useLegacyPackaging true
+        }
         excludes = [
             // "**/libc++_shared.so" // Reverted to find conflict
         ]

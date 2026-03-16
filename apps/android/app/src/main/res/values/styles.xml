@@ -10,8 +10,9 @@
     </style>
 
     <!-- Splash screen theme -->
-    <style name="SplashTheme" parent="Theme.AppCompat.Light.NoActionBar">
-        <item name="android:windowBackground">@drawable/splash_background</item>
+    <style name="SplashTheme" parent="AppTheme">
+        <!-- Keep startup background lightweight; decoding splash_image here crashes some devices on launch. -->
+        <item name="android:windowBackground">@color/splash_background</item>
     </style>
 
 </resources>

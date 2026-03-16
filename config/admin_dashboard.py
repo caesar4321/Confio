@@ -288,9 +288,9 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             created_at__gte=today_start,
             push_sent=True
         ).count()
-        context['active_fcm_tokens'] = FCMDeviceToken.objects.filter(
-            is_active=True
-        ).count()
+        active_fcm_queryset = FCMDeviceToken.objects.filter(is_active=True)
+        context['active_fcm_tokens'] = active_fcm_queryset.values('token').distinct().count()
+        context['reachable_push_users'] = active_fcm_queryset.values('user_id').distinct().count()
         context['last_broadcast'] = Notification.objects.filter(
             is_broadcast=True
         ).order_by('-created_at').first()
