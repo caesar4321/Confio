@@ -97,11 +97,14 @@ const DepositScreen = () => {
   const route = useRoute();
   // const insets = useSafeAreaInsets(); // Avoid hook to prevent crashes if provider not ready
   const [copied, setCopied] = useState(false);
+  const [hasDepositAccess, setHasDepositAccess] = useState(Platform.OS === 'ios');
+  const [checkingBackupAccess, setCheckingBackupAccess] = useState(Platform.OS !== 'ios');
   const [isOptedIn, setIsOptedIn] = useState<boolean | null>(null);
   const [checkingOptIn, setCheckingOptIn] = useState(true);
   const [optingIn, setOptingIn] = useState(false);
   const [needsWalletSetup, setNeedsWalletSetup] = useState(false);
   const [localAddress, setLocalAddress] = useState<string>('');
+  const { checkBackupEnforcement, BackupEnforcementModal } = useBackupEnforcement();
 
   const { activeAccount, refreshAccounts } = useAccount();
 
@@ -187,10 +190,38 @@ const DepositScreen = () => {
   // Ensure we always re-check opt-in status when returning to this screen
   useFocusEffect(
     useCallback(() => {
+      let isActive = true;
+
+      const enforceBackup = async () => {
+        if (Platform.OS === 'ios') {
+          setHasDepositAccess(true);
+          setCheckingBackupAccess(false);
+          return;
+        }
+
+        setCheckingBackupAccess(true);
+        const allowed = await checkBackupEnforcement('deposit');
+        if (!isActive) {
+          return;
+        }
+
+        setHasDepositAccess(allowed);
+        setCheckingBackupAccess(false);
+
+        if (!allowed) {
+          navigation.goBack();
+        }
+      };
+
+      void enforceBackup();
+
       if (typeof refetchOptIns === 'function') {
         refetchOptIns();
       }
-    }, [refetchOptIns])
+      return () => {
+        isActive = false;
+      };
+    }, [checkBackupEnforcement, navigation, refetchOptIns])
   );
 
   const handleOptIn = async () => {
@@ -635,7 +666,12 @@ const DepositScreen = () => {
           </View>
         </View>
         {/* Show loading state while checking opt-in status */}
-        {checkingOptIn ? (
+        {checkingBackupAccess || !hasDepositAccess ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={styles.loadingText}>Verificando respaldo...</Text>
+          </View>
+        ) : checkingOptIn ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={colors.primary} />
             <Text style={styles.loadingText}>Verificando configuración...</Text>
@@ -745,6 +781,7 @@ const DepositScreen = () => {
           </>
         )}
       </ScrollView>
+      <BackupEnforcementModal />
     </View >
   );
 };

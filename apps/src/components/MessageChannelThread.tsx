@@ -21,6 +21,7 @@ import FAIcon from 'react-native-vector-icons/FontAwesome';
 import founderImage from '../assets/png/JulianMoon_Founder.jpeg';
 import { Channel, ChannelMessage, ChannelAvatar, channelMeta, messageReactionOptions, tealLight, tealGreen } from './MessageInboxShared';
 import { MainStackParamList } from '../types/navigation';
+import { ResponsiveImage } from './ResponsiveImage';
 
 const platformButtonStyles: Record<'TikTok' | 'Instagram' | 'YouTube', { bg: string; fg: string }> = {
   TikTok: { bg: '#111111', fg: '#FFFFFF' },
@@ -128,7 +129,7 @@ function renderMessageContent(
           ))}
         </View>
         {message.imageUrl ? (
-          <Image source={{ uri: message.imageUrl }} style={styles.inlineImage} resizeMode="cover" />
+          <ResponsiveImage uri={message.imageUrl} style={styles.inlineImage} />
         ) : null}
         <View style={styles.reactionRow}>
           {topReactions.map(({ emoji, count }) => {
@@ -221,7 +222,7 @@ function renderMessageContent(
           </Text>
         </Pressable>
         {message.imageUrl ? (
-          <Image source={{ uri: message.imageUrl }} style={styles.inlineImage} resizeMode="cover" />
+          <ResponsiveImage uri={message.imageUrl} style={styles.inlineImage} />
         ) : null}
         <View style={styles.reactionRow}>
           {topReactions.map(({ emoji, count }) => {
@@ -297,7 +298,7 @@ function renderMessageContent(
           </Text>
         </Pressable>
         {message.imageUrl ? (
-          <Image source={{ uri: message.imageUrl }} style={styles.inlineImage} resizeMode="cover" />
+          <ResponsiveImage uri={message.imageUrl} style={styles.inlineImage} />
         ) : null}
         <View style={styles.reactionRow}>
           {topReactions.map(({ emoji, count }) => {
@@ -781,7 +782,6 @@ const styles = StyleSheet.create({
   },
   inlineImage: {
     width: '100%',
-    height: 172,
     borderRadius: 12,
     marginBottom: 10,
     backgroundColor: '#E5E7EB',

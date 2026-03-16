@@ -33,7 +33,7 @@ export const useBackupEnforcement = () => {
 
         // 2. Check if backup is already enabled in profile (fast check)
         const backupProvider = (userProfile as any)?.backupProvider?.toLowerCase();
-        if (backupProvider === 'google_drive') return true;
+        if (backupProvider === 'google_drive' || backupProvider === 'icloud') return true;
 
         // 3. Removed local check to strictly enforce backend status
         // const isDriveEnabled = await AuthService.getInstance().checkDriveBackupEnabled();

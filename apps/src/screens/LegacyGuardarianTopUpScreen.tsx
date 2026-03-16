@@ -36,6 +36,7 @@ import { secureDeterministicWallet } from '../services/secureDeterministicWallet
 import { oauthStorage } from '../services/oauthStorageService';
 import { apolloClient } from '../apollo/client';
 import PreFlightModal from '../components/PreFlightModal';
+import { useBackupEnforcement } from '../hooks/useBackupEnforcement';
 
 
 // GraphQL mutation for USDC opt-in
@@ -63,6 +64,7 @@ const TopUpScreen = () => {
   const { userProfile } = useAuth() as any;
   const { activeAccount } = useAccount();
   const { selectedCountry, userCountry } = useCountry();
+  const { checkBackupEnforcement, BackupEnforcementModal } = useBackupEnforcement();
 
   const derivedCurrencyCode = useMemo(() => {
     let localCurrency = 'USD';
@@ -280,6 +282,10 @@ const TopUpScreen = () => {
   };
 
   const handleStartTopUp = async () => {
+    const backupAllowed = await checkBackupEnforcement('deposit');
+    if (!backupAllowed) {
+      return;
+    }
 
     if (!email || !algorandAddress) {
       Alert.alert('Faltan datos', 'Necesitamos tu correo y dirección de Algorand para continuar.');
@@ -520,6 +526,7 @@ const TopUpScreen = () => {
         onContinue={handleProceedToGuardarian}
         onCancel={() => setShowPreFlightModal(false)}
       />
+      <BackupEnforcementModal />
     </SafeAreaView>
   );
 };

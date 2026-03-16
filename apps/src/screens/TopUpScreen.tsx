@@ -34,6 +34,7 @@ import { Gradient } from '../components/common/Gradient';
 import { CREATE_RAMP_ORDER } from '../apollo/mutations';
 import { biometricAuthService } from '../services/biometricAuthService';
 import LegacyGuardarianTopUpScreen from './LegacyGuardarianTopUpScreen';
+import { useBackupEnforcement } from '../hooks/useBackupEnforcement';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'TopUp'>;
 
@@ -130,6 +131,7 @@ const TopUpScreen = () => {
   const navigation = useNavigation<NavigationProp>();
   const { userProfile } = useAuth() as any;
   const { selectedCountry, userCountry } = useCountry();
+  const { checkBackupEnforcement, BackupEnforcementModal } = useBackupEnforcement();
 
   const [amount, setAmount] = useState('');
   const [selectedMethodCode, setSelectedMethodCode] = useState<string | null>(null);
@@ -232,23 +234,30 @@ const TopUpScreen = () => {
   };
 
   const handleContinue = () => {
-    if (!selectedMethod) {
-      Alert.alert('Selecciona un método', 'Elige un medio de pago disponible para continuar.');
-      return;
-    }
-    if (!quoteEnabled || !quote) {
-      Alert.alert('Monto inválido', 'Ingresa un monto válido para ver la cotización.');
-      return;
-    }
-    if (topUpAmountError) {
-      Alert.alert('Monto fuera de rango', topUpAmountError);
-      return;
-    }
-    if (!isVerified) {
-      openVerificationPrompt();
-      return;
-    }
-    setStep('review');
+    void (async () => {
+      const backupAllowed = await checkBackupEnforcement('deposit');
+      if (!backupAllowed) {
+        return;
+      }
+
+      if (!selectedMethod) {
+        Alert.alert('Selecciona un método', 'Elige un medio de pago disponible para continuar.');
+        return;
+      }
+      if (!quoteEnabled || !quote) {
+        Alert.alert('Monto inválido', 'Ingresa un monto válido para ver la cotización.');
+        return;
+      }
+      if (topUpAmountError) {
+        Alert.alert('Monto fuera de rango', topUpAmountError);
+        return;
+      }
+      if (!isVerified) {
+        openVerificationPrompt();
+        return;
+      }
+      setStep('review');
+    })();
   };
 
   const requestCriticalAuth = async () => {
@@ -372,7 +381,8 @@ const TopUpScreen = () => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <>
+      <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={colors.heroFrom} />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.heroWrapper}>
@@ -531,7 +541,9 @@ const TopUpScreen = () => {
           </>
         )}
       </ScrollView>
-    </SafeAreaView>
+      </SafeAreaView>
+      <BackupEnforcementModal />
+    </>
   );
 };
 

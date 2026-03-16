@@ -2,7 +2,6 @@ import React from 'react';
 import {
   ActivityIndicator,
   FlatList,
-  Image,
   Pressable,
   RefreshControl,
   StyleSheet,
@@ -10,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
+import { ResponsiveImage } from './ResponsiveImage';
 
 const tealGreen = '#1DB587';
 const tealLight = '#E8F8F2';
@@ -127,7 +127,7 @@ export function DiscoverFeed({
           )}
 
           {item.imageUrl ? (
-            <Image source={{ uri: item.imageUrl }} style={styles.postImage} resizeMode="cover" />
+            <ResponsiveImage uri={item.imageUrl} style={styles.postImage} />
           ) : null}
         </Pressable>
 
@@ -349,7 +349,6 @@ const styles = StyleSheet.create({
   },
   postImage: {
     width: '100%',
-    height: 176,
     borderRadius: 12,
     marginTop: 12,
     backgroundColor: '#E5E7EB',

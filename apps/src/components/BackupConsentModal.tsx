@@ -21,7 +21,12 @@ export const BackupConsentModal: React.FC<BackupConsentModalProps> = ({ visible,
         >
             <View style={styles.centeredView}>
                 <View style={styles.modalView}>
-                    <ScrollView contentContainerStyle={styles.modalContent} bounces={false} showsVerticalScrollIndicator={false}>
+                    <ScrollView
+                        style={styles.scrollView}
+                        contentContainerStyle={styles.modalContent}
+                        bounces={false}
+                        showsVerticalScrollIndicator
+                    >
                         <View style={styles.iconContainer}>
                             <Icon name="cloud-lock-outline" size={64} color="#4F46E5" />
                         </View>
@@ -53,14 +58,16 @@ export const BackupConsentModal: React.FC<BackupConsentModalProps> = ({ visible,
                                 Verás una solicitud de permiso para acceder a "configuración de la aplicación". Es 100% privado.
                             </Text>
                         </View>
+                    </ScrollView>
 
+                    <View style={styles.footer}>
                         <TouchableOpacity
                             style={[styles.button, styles.buttonContinue]}
                             onPress={onContinue}
                         >
                             <Text style={styles.textStyle}>Continuar y Proteger</Text>
                         </TouchableOpacity>
-                    </ScrollView>
+                    </View>
                 </View>
             </View>
         </Modal>
@@ -91,9 +98,13 @@ const styles = StyleSheet.create({
         elevation: 5,
         overflow: 'hidden',
     },
+    scrollView: {
+        flexShrink: 1,
+    },
     modalContent: {
         padding: 24,
         alignItems: 'center',
+        paddingBottom: 12,
     },
     iconContainer: {
         marginBottom: 16,
@@ -131,7 +142,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'flex-start',
         marginBottom: 10,
-        height: 40, // Ensure fixed height for bullet row to stop text wrap calculations from shifting layout
+        minHeight: 40,
     },
     bulletIcon: {
         marginRight: 10,
@@ -150,8 +161,8 @@ const styles = StyleSheet.create({
         borderRadius: 12,
         marginBottom: 24,
         width: '100%',
-        height: 60, // Fixed height to stop text wrap calculation jump
-        alignItems: 'center',
+        minHeight: 60,
+        alignItems: 'flex-start',
     },
     warningText: {
         flex: 1,
@@ -169,8 +180,11 @@ const styles = StyleSheet.create({
     },
     buttonContinue: {
         backgroundColor: '#4F46E5', // Indigo-600
-        marginBottom: 12,
         elevation: 2,
+    },
+    footer: {
+        paddingHorizontal: 24,
+        paddingBottom: 24,
     },
     textStyle: {
         color: 'white',

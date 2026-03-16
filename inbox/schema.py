@@ -27,7 +27,8 @@ from .models import (
     SupportMessage,
     VisibilityPolicy,
 )
-from .push_service import send_content_item_push, send_support_reply_push
+from .push_service import send_support_reply_push
+from .tasks import send_content_item_push_task
 
 logger = logging.getLogger(__name__)
 
@@ -1054,7 +1055,7 @@ class PortalSaveContentItem(graphene.Mutation):
         if should_send_push_now:
             def _send_portal_publish_push():
                 try:
-                    send_content_item_push(item.id)
+                    send_content_item_push_task.delay(item.id)
                 except Exception:
                     logger.exception(
                         'Failed to send portal publication push',

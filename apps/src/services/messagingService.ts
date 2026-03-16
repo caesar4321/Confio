@@ -24,6 +24,7 @@ class MessagingService {
   private unsubscribeHandlers: (() => void)[] = [];
   private instanceId: string;
   private channelCreated: boolean = false;
+  private pendingNotificationData: any | null = null;
 
   constructor() {
     this.instanceId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -86,6 +87,30 @@ class MessagingService {
     } catch (error) {
       console.error('[MessagingService] Error during initialization:', error);
     }
+  }
+
+  processPendingNotification() {
+    if (!this.pendingNotificationData) {
+      return;
+    }
+    if (!this.canNavigateIntoMain()) {
+      console.log('[MessagingService] Main navigator still not ready for pending notification');
+      return;
+    }
+
+    const pendingData = this.pendingNotificationData;
+    this.pendingNotificationData = null;
+    console.log('[MessagingService] Processing pending notification after app became ready');
+    void this.handleNotificationData(pendingData);
+  }
+
+  private canNavigateIntoMain() {
+    if (!navigationRef.current || !navigationRef.current.isReady()) {
+      return false;
+    }
+    const rootState = navigationRef.current.getRootState();
+    const activeRootRoute = rootState?.routes?.[rootState.index ?? 0];
+    return activeRootRoute?.name === 'Main';
   }
 
   private async getOrCreateDeviceId(): Promise<string> {
@@ -475,6 +500,12 @@ class MessagingService {
   private async handleNotificationData(data: any, skipAccountCheck: boolean = false) {
     console.log('[MessagingService] handleNotificationData called with:', data, { skipAccountCheck });
 
+    if (!skipAccountCheck && !this.canNavigateIntoMain()) {
+      console.log('[MessagingService] Deferring notification until Main navigator is available');
+      this.pendingNotificationData = data;
+      return;
+    }
+
     // LEGACY FORMAT DETECTION:
     // Handle old push notifications that may have been sent with the previous screen name.
     // Some notifications in the system might still reference 'P2PTradeDetail' which no longer exists.
@@ -626,7 +657,7 @@ class MessagingService {
 
     // Ensure navigation is ready before attempting to navigate
     const attemptNavigation = () => {
-      if (!navigationRef.current || !navigationRef.current.isReady()) {
+      if (!this.canNavigateIntoMain()) {
         console.log('Navigation not ready, retrying in 100ms...');
         setTimeout(attemptNavigation, 100);
         return;

@@ -176,6 +176,13 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           console.log('[AuthContext] Navigated to Main, processing pending notifications...');
           setTimeout(() => {
             pushNotificationService.processPendingNotification();
+            import('../services/messagingService')
+              .then(({ default: messagingService }) => {
+                messagingService.processPendingNotification();
+              })
+              .catch(error => {
+                console.error('[AuthContext] Failed to process messagingService pending notification:', error);
+              });
           }, 1000); // Give time for Main navigator to mount
         }
       } catch (error) {

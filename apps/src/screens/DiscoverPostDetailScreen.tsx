@@ -1,7 +1,6 @@
 import React from 'react';
 import {
   ActivityIndicator,
-  Image,
   Linking,
   Pressable,
   ScrollView,
@@ -18,6 +17,7 @@ import { Header } from '../navigation/Header';
 import { REACT_TO_MESSAGE_CONTENT } from '../apollo/mutations';
 import { GET_DISCOVER_POST } from '../apollo/queries';
 import { MainStackParamList } from '../types/navigation';
+import { ResponsiveImage } from '../components/ResponsiveImage';
 
 type Navigation = NativeStackNavigationProp<MainStackParamList>;
 type RouteProps = NativeStackScreenProps<MainStackParamList, 'DiscoverPostDetail'>['route'];
@@ -238,11 +238,10 @@ export const DiscoverPostDetailScreen = () => {
             {detailBlocks.map((block, index) => {
               if (block.type === 'image' && block.image?.url) {
                 return (
-                  <Image
+                  <ResponsiveImage
                     key={block.id || `image-${index}`}
-                    source={{ uri: block.image.url }}
+                    uri={block.image.url}
                     style={styles.postImage}
-                    resizeMode="cover"
                   />
                 );
               }
@@ -492,7 +491,6 @@ const styles = StyleSheet.create({
   },
   postImage: {
     width: '100%',
-    height: 240,
     borderRadius: 14,
     marginTop: 16,
     backgroundColor: '#E5E7EB',
