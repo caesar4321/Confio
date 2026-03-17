@@ -14,6 +14,9 @@ logger = logging.getLogger(__name__)
 @require_POST
 def didit_webhook(request):
     signature = request.headers.get('X-Signature-V2') or request.headers.get('X-Signature')
+    signature_v2 = request.headers.get('X-Signature-V2')
+    signature_simple = request.headers.get('X-Signature-Simple')
+    timestamp_header = request.headers.get('X-Timestamp')
     test_webhook = request.headers.get('X-Didit-Test-Webhook') == 'true'
 
     logger.info(
@@ -23,7 +26,13 @@ def didit_webhook(request):
         request.META.get('CONTENT_LENGTH'),
     )
 
-    if not verify_didit_webhook_signature(request.body, signature):
+    if not verify_didit_webhook_signature(
+        request.body,
+        signature,
+        signature_v2_header=signature_v2,
+        signature_simple_header=signature_simple,
+        timestamp_header=timestamp_header,
+    ):
         logger.warning('Didit webhook rejected due to invalid signature: test=%s', test_webhook)
         return JsonResponse({'ok': False, 'error': 'Invalid signature'}, status=403)
 

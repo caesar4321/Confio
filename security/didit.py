@@ -3,6 +3,7 @@ import hmac
 import json
 import logging
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Any
 
 import requests
@@ -103,6 +104,56 @@ def _safe_json_loads(value: Any) -> dict[str, Any]:
         return parsed if isinstance(parsed, dict) else {}
     except (TypeError, json.JSONDecodeError):
         return {}
+
+
+def _extract_signature_value(signature_header: str | None) -> str:
+    if not signature_header:
+        return ''
+    provided = signature_header.strip()
+    if ',' in provided:
+        last_piece = provided.split(',')[-1]
+        provided = last_piece.split('=')[-1].strip()
+    elif '=' in provided:
+        provided = provided.split('=')[-1].strip()
+    return provided
+
+
+def _normalize_didit_payload(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _normalize_didit_payload(value[key]) for key in sorted(value.keys())}
+    if isinstance(value, list):
+        return [_normalize_didit_payload(item) for item in value]
+    if isinstance(value, float):
+        decimal_value = Decimal(str(value))
+        normalized = decimal_value.normalize()
+        if normalized == normalized.to_integral():
+            return int(normalized)
+        return float(normalized)
+    return value
+
+
+def _canonicalize_didit_payload(raw_body: bytes) -> str | None:
+    try:
+        payload = json.loads(raw_body.decode('utf-8'))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    normalized = _normalize_didit_payload(payload)
+    return json.dumps(normalized, separators=(',', ':'), ensure_ascii=False)
+
+
+def _build_simple_signature_payload(raw_body: bytes) -> str | None:
+    try:
+        payload = json.loads(raw_body.decode('utf-8'))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+
+    session_id = payload.get('session_id')
+    status = payload.get('status')
+    webhook_type = payload.get('webhook_type')
+    timestamp = payload.get('timestamp')
+    if None in (timestamp, session_id, status, webhook_type):
+        return None
+    return f'{timestamp}:{session_id}:{status}:{webhook_type}'
 
 
 def _didit_headers() -> dict[str, str]:
@@ -413,19 +464,59 @@ def sync_didit_session(*, session_id: str, expected_user=None) -> tuple[Identity
     return verification, response_payload
 
 
-def verify_didit_webhook_signature(raw_body: bytes, signature_header: str | None) -> bool:
+def verify_didit_webhook_signature(
+    raw_body: bytes,
+    signature_header: str | None,
+    *,
+    signature_v2_header: str | None = None,
+    signature_simple_header: str | None = None,
+    timestamp_header: str | None = None,
+) -> bool:
     secret = (getattr(settings, 'DIDIT_WEBHOOK_SECRET', '') or '').strip()
     if not secret:
         return True
-    if not signature_header:
+
+    secret_bytes = secret.encode('utf-8')
+
+    if timestamp_header:
+        try:
+            timestamp = int(str(timestamp_header).strip())
+        except (TypeError, ValueError):
+            logger.warning('Didit webhook rejected due to invalid timestamp header')
+            return False
+        now_ts = int(timezone.now().timestamp())
+        if abs(now_ts - timestamp) > 300:
+            logger.warning('Didit webhook rejected due to stale timestamp header')
+            return False
+
+    provided_v2 = _extract_signature_value(signature_v2_header)
+    if provided_v2:
+        canonical_payload = _canonicalize_didit_payload(raw_body)
+        if not canonical_payload:
+            return False
+        expected_v2 = hmac.new(
+            secret_bytes,
+            canonical_payload.encode('utf-8'),
+            hashlib.sha256,
+        ).hexdigest()
+        if hmac.compare_digest(expected_v2, provided_v2):
+            return True
+
+    provided_simple = _extract_signature_value(signature_simple_header)
+    if provided_simple:
+        simple_payload = _build_simple_signature_payload(raw_body)
+        if not simple_payload:
+            return False
+        expected_simple = hmac.new(
+            secret_bytes,
+            simple_payload.encode('utf-8'),
+            hashlib.sha256,
+        ).hexdigest()
+        if hmac.compare_digest(expected_simple, provided_simple):
+            return True
+
+    provided_legacy = _extract_signature_value(signature_header)
+    if not provided_legacy:
         return False
-
-    provided = signature_header.strip()
-    if ',' in provided:
-        last_piece = provided.split(',')[-1]
-        provided = last_piece.split('=')[-1].strip()
-    elif '=' in provided:
-        provided = provided.split('=')[-1].strip()
-
-    expected = hmac.new(secret.encode('utf-8'), raw_body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, provided)
+    expected_legacy = hmac.new(secret_bytes, raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected_legacy, provided_legacy)
