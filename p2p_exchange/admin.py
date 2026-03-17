@@ -7,7 +7,7 @@ from django.db import models
 from django.utils import timezone
 from django.contrib import messages
 from config.admin_mixins import EnhancedAdminMixin, BulkUpdateMixin, InlineCountMixin
-from payments.koywe import get_country_ramp_config, sync_country_payment_methods
+from ramps.koywe import get_country_ramp_config, sync_country_payment_methods
 from .models import (
     P2PPaymentMethod, 
     P2POffer, 

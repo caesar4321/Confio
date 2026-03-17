@@ -31,6 +31,7 @@ export const CREATE_RAMP_ORDER = gql`
       rateDisplay
       nextStep
       nextActionUrl
+      paymentDetails
     }
   }
 `;
@@ -64,6 +65,7 @@ export const CREATE_MOCK_RAMP_ORDER = gql`
       rateDisplay
       nextStep
       nextActionUrl
+      paymentDetails
     }
   }
 `;

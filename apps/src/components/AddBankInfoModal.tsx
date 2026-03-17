@@ -456,7 +456,7 @@ export const AddBankInfoModal = ({
 
     if (countryCode === 'AR' && methodCode === 'WIREAR') {
       return {
-        account: { ...defaultAccount, label: 'CBU, CVU o alias', placeholder: 'Ingresa CBU, CVU o alias', show: true, required: true, keyboardType: 'default' as const },
+        account: { ...defaultAccount, label: 'CBU o CVU', placeholder: 'Ingresa tu CBU o CVU', show: true, required: true, keyboardType: 'number-pad' as const },
         phone: defaultPhone,
         email: defaultEmail,
         holderLabel: 'Titular de la cuenta',

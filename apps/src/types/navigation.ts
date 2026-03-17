@@ -156,6 +156,18 @@ export type MainStackParamList = {
   };
   TopUp: undefined;
   Sell: undefined;
+  RampInstructions: {
+    direction: 'ON_RAMP' | 'OFF_RAMP';
+    orderId: string;
+    countryCode?: string;
+    paymentMethodCode?: string;
+    paymentMethodDisplay?: string;
+    amountOut?: string;
+    fiatCurrency?: string;
+    destinationSummary?: string;
+    nextActionUrl?: string;
+    paymentDetails?: any;
+  };
   USDCDeposit: { tokenType?: 'usdc' | 'cusd' | 'confio' };
   USDCManage: undefined;
   USDCWithdraw: undefined;

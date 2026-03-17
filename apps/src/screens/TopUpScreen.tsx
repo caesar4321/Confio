@@ -2,8 +2,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Linking,
-  Platform,
   SafeAreaView,
   ScrollView,
   StatusBar,
@@ -11,6 +9,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
@@ -24,15 +23,19 @@ import { useCountry } from '../contexts/CountryContext';
 import {
   GET_ME,
   GET_RAMP_AVAILABILITY,
-  GET_RAMP_QUOTE,
   GET_MY_KYC_STATUS,
   GET_MY_PERSONAL_KYC_STATUS,
 } from '../apollo/queries';
 import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
 import { getCountryByIso } from '../utils/countries';
-import { Gradient } from '../components/common/Gradient';
+import { getFriendlyRampError } from '../utils/rampErrors';
+import { requestRampCriticalAuth } from '../utils/rampFlow';
+import { formatRampMoney, formatRampRate, useRampQuoteFlow, validateRampContinue } from '../hooks/useRampQuoteFlow';
+import { RampActionBar } from '../components/ramps/RampActionBar';
+import { RampHero } from '../components/ramps/RampHero';
+import { RampReveal } from '../components/ramps/RampReveal';
+import { RampStepHeader } from '../components/ramps/RampStepHeader';
 import { CREATE_RAMP_ORDER } from '../apollo/mutations';
-import { biometricAuthService } from '../services/biometricAuthService';
 import LegacyGuardarianTopUpScreen from './LegacyGuardarianTopUpScreen';
 import { useBackupEnforcement } from '../hooks/useBackupEnforcement';
 
@@ -92,43 +95,10 @@ const currencyNames: Record<string, string> = {
 
 const friendlyCurrency = (code: string) => currencyNames[code] || code;
 const KOYWE_SUPPORTED_COUNTRIES = new Set(['AR', 'BO', 'BR', 'CL', 'CO', 'MX', 'PE', 'US']);
-const TEMPORARILY_USE_GUARDARIAN_FOR_ALL_COUNTRIES = true;
-
-const formatMoney = (value?: string | null, code?: string | null) => {
-  const parsed = Number(value || 0);
-  if (!Number.isFinite(parsed)) {
-    return '--';
-  }
-  return `${parsed.toLocaleString('es-AR', {
-    minimumFractionDigits: parsed >= 100 ? 0 : 2,
-    maximumFractionDigits: 2,
-  })} ${code || ''}`.trim();
-};
-
-const cleanDisplay = (text?: string | null): string => {
-  if (!text) return '';
-  return text.replace(/->/g, ' ').replace(/\u2192/g, ' ').replace(/\s{2,}/g, ' ').trim();
-};
-
-const formatRate = (value?: string | null, code?: string | null) => {
-  const parsed = Number(value || 0);
-  if (!Number.isFinite(parsed)) {
-    return '--';
-  }
-  return `${parsed.toLocaleString('es-AR', {
-    minimumFractionDigits: parsed >= 100 ? 2 : 4,
-    maximumFractionDigits: 4,
-  })} ${code || ''}`.trim();
-};
-
-const StepBadge = ({ number }: { number: number }) => (
-  <View style={styles.stepBadge}>
-    <Text style={styles.stepBadgeText}>{number}</Text>
-  </View>
-);
 
 const TopUpScreen = () => {
   const navigation = useNavigation<NavigationProp>();
+  const { width } = useWindowDimensions();
   const { userProfile } = useAuth() as any;
   const { selectedCountry, userCountry } = useCountry();
   const { checkBackupEnforcement, BackupEnforcementModal } = useBackupEnforcement();
@@ -143,12 +113,6 @@ const TopUpScreen = () => {
     const userIso = userCountry?.[2];
     return userProfile?.phoneCountry || selectedIso || userIso || 'AR';
   }, [selectedCountry, userCountry, userProfile?.phoneCountry]);
-
-  // Temporary fallback: keep all countries on Guardarian until Koywe credentials
-  // (secret + API key) are available on the server.
-  if (TEMPORARILY_USE_GUARDARIAN_FOR_ALL_COUNTRIES) {
-    return <LegacyGuardarianTopUpScreen />;
-  }
 
   const isKoyweCountry = KOYWE_SUPPORTED_COUNTRIES.has(countryCode);
 
@@ -167,25 +131,11 @@ const TopUpScreen = () => {
   const fiatCurrency = availability?.fiatCurrency || 'USD';
   const countryFlag = derivedCountryTuple ? (derivedCountryTuple as readonly string[])[3] || '' : '';
   const isKoyweMapped = isKoyweCountry && !!availability?.onRampEnabled && methods.length > 0;
-  const parsedAmount = Number((amount || '').replace(',', '.'));
-  const quoteEnabled = Number.isFinite(parsedAmount) && parsedAmount > 0 && !!availability?.countryCode;
-
-  const { data: quoteData, loading: quoteLoading } = useQuery(GET_RAMP_QUOTE, {
-    variables: {
-      direction: 'ON_RAMP',
-      amount: String(parsedAmount || ''),
-      countryCode: availability?.countryCode,
-      fiatCurrency,
-    },
-    skip: !isKoyweMapped || !quoteEnabled,
-    fetchPolicy: 'cache-and-network',
-  });
-
-  const quote = quoteData?.rampQuote;
-  const quoteHeadline = quote ? `Recibes aprox. ${formatMoney(quote.amountOut, 'cUSD')}` : '';
-  const quoteRateLine = quote ? `1 cUSD = ${formatRate(quote.exchangeRate, fiatCurrency)}` : '';
+  const selectedMethod = useMemo(
+    () => methods.find((method) => method.code === selectedMethodCode) || methods[0] || null,
+    [methods, selectedMethodCode],
+  );
   const [createRampOrder] = useMutation(CREATE_RAMP_ORDER);
-
   const isVerified = useMemo(() => {
     const candidates = [
       personalKycData?.myPersonalKycStatus?.status,
@@ -201,20 +151,28 @@ const TopUpScreen = () => {
     meData?.me?.verificationStatus,
     personalKycData?.myPersonalKycStatus?.status,
   ]);
-
-  const selectedMethod = useMemo(
-    () => methods.find((method) => method.code === selectedMethodCode) || methods[0] || null,
-    [methods, selectedMethodCode],
-  );
   const selectedMethodMin = Number(selectedMethod?.onRampMinAmount || 0);
   const selectedMethodMax = Number(selectedMethod?.onRampMaxAmount || 0);
-  const isBelowTopUpMin = quoteEnabled && selectedMethodMin > 0 && parsedAmount < selectedMethodMin;
-  const isAboveTopUpMax = quoteEnabled && selectedMethodMax > 0 && parsedAmount > selectedMethodMax;
-  const topUpAmountError = isBelowTopUpMin
-    ? `El mínimo por operación es ${formatMoney(String(selectedMethodMin), fiatCurrency)}.`
-    : isAboveTopUpMax
-      ? `El máximo por operación es ${formatMoney(String(selectedMethodMax), fiatCurrency)}.`
-      : null;
+  const {
+    parsedAmount,
+    amountReady,
+    quote,
+    quoteLoading,
+    quoteError,
+    amountError: topUpAmountError,
+  } = useRampQuoteFlow({
+    direction: 'ON_RAMP',
+    amount,
+    countryCode: availability?.countryCode,
+    fiatCurrency,
+    paymentMethodCode: selectedMethod?.code,
+    enabled: isKoyweMapped,
+    minAmount: selectedMethodMin,
+    maxAmount: selectedMethodMax,
+  });
+  const quoteHeadline = quote ? `Recibes aprox. ${formatRampMoney(quote.amountOut, 'cUSD')}` : '';
+  const quoteRateLine = quote ? `1 cUSD = ${formatRampRate(quote.exchangeRate, fiatCurrency)}` : '';
+  const isCompact = width < 380;
 
   useEffect(() => {
     if (!selectedMethodCode && methods.length > 0) {
@@ -240,16 +198,23 @@ const TopUpScreen = () => {
         return;
       }
 
-      if (!selectedMethod) {
-        Alert.alert('Selecciona un método', 'Elige un medio de pago disponible para continuar.');
-        return;
-      }
-      if (!quoteEnabled || !quote) {
-        Alert.alert('Monto inválido', 'Ingresa un monto válido para ver la cotización.');
-        return;
-      }
-      if (topUpAmountError) {
-        Alert.alert('Monto fuera de rango', topUpAmountError);
+      const continueError = validateRampContinue({
+        hasSelectedMethod: !!selectedMethod,
+        amountReady,
+        quoteLoading,
+        quoteError,
+        quote,
+        amountError: topUpAmountError,
+      });
+      if (continueError) {
+        const title =
+          continueError === 'Selecciona un método' ? 'Selecciona un método'
+            : continueError === 'Monto inválido' ? 'Monto inválido'
+              : continueError === 'Cotización en proceso' ? 'Cotización en proceso'
+                : continueError === 'Cotización no disponible' ? 'Cotización no disponible'
+                  : continueError.includes('mínimo') || continueError.includes('máximo') ? 'Monto fuera de rango'
+                    : 'No pudimos cotizar';
+        Alert.alert(title, continueError);
         return;
       }
       if (!isVerified) {
@@ -260,55 +225,15 @@ const TopUpScreen = () => {
     })();
   };
 
-  const requestCriticalAuth = async () => {
-    const authMessage = parsedAmount > 0
-      ? `Autoriza la compra de ${parsedAmount.toFixed(2)} cUSD`
-      : 'Autoriza esta compra';
-
-    let authenticated = await biometricAuthService.authenticate(authMessage, true, true);
-    if (authenticated) {
-      return true;
-    }
-
-    const lockout = biometricAuthService.isLockout();
-    if (lockout) {
-      Alert.alert(
-        'Biometría bloqueada',
-        'Desbloquea tu dispositivo con passcode y vuelve a intentar.',
-        [{ text: 'OK', style: 'default' }],
-      );
-      return false;
-    }
-
-    const shouldRetry = await new Promise<boolean>((resolve) => {
-      Alert.alert(
-        'Autenticación requerida',
-        'Debes autenticarte para confirmar esta compra.',
-        [
-          { text: 'Cancelar', style: 'cancel', onPress: () => resolve(false) },
-          { text: 'Reintentar', onPress: () => resolve(true) },
-        ],
-      );
-    });
-
-    if (!shouldRetry) {
-      return false;
-    }
-
-    authenticated = await biometricAuthService.authenticate(authMessage, true, true);
-    if (!authenticated) {
-      Alert.alert('No autenticado', 'No pudimos validar tu identidad. Intenta de nuevo en unos segundos.');
-      return false;
-    }
-
-    return true;
-  };
-
   const handleConfirm = async () => {
     if (!selectedMethod || !quote) {
       return;
     }
-    const authenticated = await requestCriticalAuth();
+    const authenticated = await requestRampCriticalAuth({
+      amount: parsedAmount,
+      assetLabel: 'cUSD',
+      actionLabel: 'compra',
+    });
     if (!authenticated) {
       return;
     }
@@ -325,24 +250,24 @@ const TopUpScreen = () => {
     })
       .then(({ data }) => {
         const result = data?.createRampOrder;
-        if (!result?.success) {
-          Alert.alert('No se pudo crear la orden', result?.error || 'Inténtalo nuevamente.');
+        if (!result?.success || !result?.orderId) {
+          Alert.alert('No se pudo crear la orden', getFriendlyRampError(result?.error));
           return;
         }
-
-        Alert.alert(
-          'Orden creada',
-          `Orden ${result.orderId}\n\nPagarás con ${selectedMethod.displayName}.\nRecibirías aproximadamente ${formatMoney(result.amountOut, 'cUSD')}.`,
-          result.nextActionUrl
-            ? [
-                { text: 'Más tarde', style: 'cancel' },
-                { text: 'Abrir proveedor', onPress: () => Linking.openURL(result.nextActionUrl) },
-              ]
-            : [{ text: 'OK', onPress: () => setStep('form') }],
-        );
+        navigation.replace('RampInstructions', {
+          direction: 'ON_RAMP',
+          orderId: result.orderId,
+          countryCode: availability?.countryCode,
+          paymentMethodCode: selectedMethod.code,
+          paymentMethodDisplay: result.paymentMethodDisplay || selectedMethod.displayName,
+          amountOut: result.amountOut || undefined,
+          fiatCurrency,
+          nextActionUrl: result.nextActionUrl || undefined,
+          paymentDetails: result.paymentDetails,
+        });
       })
       .catch((error) => {
-        Alert.alert('No se pudo crear la orden', error?.message || 'Inténtalo nuevamente.');
+        Alert.alert('No se pudo crear la orden', getFriendlyRampError(error?.message));
       })
       .finally(() => {
         setIsSubmittingOrder(false);
@@ -385,19 +310,19 @@ const TopUpScreen = () => {
       <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={colors.heroFrom} />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.heroWrapper}>
-          <Gradient fromColor={colors.heroFrom} toColor={colors.heroTo} style={styles.heroGradient}>
-            <View style={styles.heroPadding}>
-              <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-                <Icon name="arrow-left" size={20} color={colors.surface} />
-              </TouchableOpacity>
-              <Text style={styles.eyebrow}>Ingresar saldo</Text>
-              <Text style={styles.title}>Compra Confío Dollar</Text>
-              <Text style={styles.subtitle}>Elige tu medio de pago, revisa la cotización y confirma cuando estés listo.</Text>
-            </View>
-          </Gradient>
-        </View>
+        <RampReveal delay={0}>
+        <RampHero
+          eyebrow="Ingresar saldo"
+          title="Compra Confío Dollar"
+          subtitle="Elige tu medio de pago, revisa la cotización y confirma cuando estés listo."
+          onBack={() => navigation.goBack()}
+          compact={isCompact}
+          fromColor={colors.heroFrom}
+          toColor={colors.heroTo}
+        />
+        </RampReveal>
 
+        <RampReveal delay={60}>
         <View style={styles.noticeCard}>
           <View style={styles.noticeIconWrap}>
             <Icon name="globe" size={16} color={colors.accent} />
@@ -407,6 +332,7 @@ const TopUpScreen = () => {
             <Text style={styles.noticeText}>Te mostramos los medios de pago disponibles para {availability?.countryName || countryCode}.</Text>
           </View>
         </View>
+        </RampReveal>
 
         {availabilityLoading ? (
           <View style={styles.loadingCard}>
@@ -419,14 +345,17 @@ const TopUpScreen = () => {
           </View>
         ) : (
           <>
+            <RampReveal delay={110}>
             <View style={styles.section}>
-              <View style={styles.sectionHeader}>
-                <View style={styles.sectionHeaderLeft}>
-                  <StepBadge number={1} />
-                  <Text style={styles.sectionTitle}>Monto</Text>
-                </View>
-                <Text style={styles.sectionMeta}>{countryFlag ? `${countryFlag} ` : ''}{availability.countryName} · {fiatCurrency}</Text>
-              </View>
+              <RampStepHeader
+                number={1}
+                title="Monto"
+                meta={`${countryFlag ? `${countryFlag} ` : ''}${availability.countryName} · ${fiatCurrency}`}
+                accentColor={colors.primaryDark}
+                accentBackground={colors.primaryLight}
+                titleColor={colors.textPrimary}
+                metaColor={colors.textMuted}
+              />
               <View style={styles.amountCard}>
                 <Text style={styles.inputLabel}>Monto estimado en {friendlyCurrency(fiatCurrency)}</Text>
                 <View style={styles.amountInputRow}>
@@ -446,51 +375,63 @@ const TopUpScreen = () => {
                 <Text style={styles.helperText}>Verás cuánto recibirías y el tipo de cambio estimado antes de confirmar.</Text>
                 {selectedMethodMin > 0 || selectedMethodMax > 0 ? (
                   <Text style={styles.limitText}>
-                    Mínimo: {selectedMethodMin > 0 ? formatMoney(String(selectedMethodMin), fiatCurrency) : '--'} · Máximo por operación: {selectedMethodMax > 0 ? formatMoney(String(selectedMethodMax), fiatCurrency) : '--'}
+                    Mínimo: {selectedMethodMin > 0 ? formatRampMoney(String(selectedMethodMin), fiatCurrency) : '--'} · Máximo por operación: {selectedMethodMax > 0 ? formatRampMoney(String(selectedMethodMax), fiatCurrency) : '--'}
                   </Text>
                 ) : null}
                 {topUpAmountError ? <Text style={styles.errorText}>{topUpAmountError}</Text> : null}
               </View>
             </View>
+            </RampReveal>
 
+            <RampReveal delay={150}>
             <View style={styles.section}>
-              <View style={styles.sectionHeader}>
-                <View style={styles.sectionHeaderLeft}>
-                  <StepBadge number={2} />
-                  <Text style={styles.sectionTitle}>Medio de pago</Text>
-                </View>
-              </View>
+              <RampStepHeader
+                number={2}
+                title="Medio de pago"
+                accentColor={colors.primaryDark}
+                accentBackground={colors.primaryLight}
+                titleColor={colors.textPrimary}
+              />
               <Text style={styles.sectionHint}>Selecciona cómo quieres pagar.</Text>
               <View style={styles.methodsGrid}>{methods.map(renderMethodCard)}</View>
             </View>
+            </RampReveal>
 
+            <RampReveal delay={190}>
             <View style={styles.section}>
-              <View style={styles.sectionHeader}>
-                <View style={styles.sectionHeaderLeft}>
-                  <StepBadge number={3} />
-                  <Text style={styles.sectionTitle}>Resumen</Text>
-                </View>
-              </View>
+              <RampStepHeader
+                number={3}
+                title="Resumen"
+                accentColor={colors.primaryDark}
+                accentBackground={colors.primaryLight}
+                titleColor={colors.textPrimary}
+              />
               <View style={styles.quoteCard}>
                 {quoteLoading ? (
                   <ActivityIndicator color={colors.primary} />
+                ) : quoteError ? (
+                  <View style={styles.emptyQuote}>
+                    <Icon name="alert-circle" size={20} color={colors.textLight} />
+                    <Text style={styles.emptyText}>{quoteError.message || 'No pudimos obtener la cotización de Koywe.'}</Text>
+                  </View>
                 ) : quote ? (
                   <>
-                    <Text style={styles.quoteHeadline}>{quoteHeadline}</Text>
+                    <Text style={styles.quoteEyebrow}>Estimado de ingreso</Text>
+                    <Text style={[styles.quoteHeadline, isCompact && styles.quoteHeadlineCompact]}>{quoteHeadline}</Text>
                     <Text style={styles.quoteRate}>{quoteRateLine}</Text>
                     <View style={styles.quoteDivider} />
                     <View style={styles.quoteRow}>
                       <Text style={styles.quoteLabel}>Pagas</Text>
-                      <Text style={styles.quoteValue}>{formatMoney(quote.amountIn, fiatCurrency)}</Text>
+                      <Text style={styles.quoteValue}>{formatRampMoney(quote.amountIn, fiatCurrency)}</Text>
                     </View>
                     <View style={styles.quoteRow}>
                       <Text style={styles.quoteLabel}>Recibes aprox.</Text>
-                      <Text style={styles.quoteValue}>{formatMoney(quote.amountOut, 'cUSD')}</Text>
+                      <Text style={styles.quoteValue}>{formatRampMoney(quote.amountOut, 'cUSD')}</Text>
                     </View>
                     <View style={styles.quoteRow}>
                       <Text style={styles.quoteLabel}>{'Comisión del\nprocesador de pagos'}</Text>
                       <Text style={styles.quoteValue}>
-                        {formatMoney(String(Number(quote.feeAmount || 0) + Number(quote.networkFeeAmount || 0)), quote.feeCurrency)}
+                        {formatRampMoney(String(Number(quote.feeAmount || 0) + Number(quote.networkFeeAmount || 0)), quote.feeCurrency)}
                       </Text>
                     </View>
                     <View style={styles.quoteRow}>
@@ -506,9 +447,12 @@ const TopUpScreen = () => {
                 )}
               </View>
             </View>
+            </RampReveal>
 
             {step === 'review' ? (
+              <RampReveal delay={230}>
               <View style={styles.reviewCard}>
+                <View style={styles.reviewAccent} />
                 <Text style={styles.reviewTitle}>Revisión final</Text>
                 <View style={styles.reviewRow}>
                   <Icon name="credit-card" size={16} color={colors.textMuted} />
@@ -520,23 +464,25 @@ const TopUpScreen = () => {
                   <Text style={styles.reviewLabel}>Recibirías</Text>
                   <Text style={styles.reviewValueHighlight}>{quoteHeadline}</Text>
                 </View>
-                <TouchableOpacity
-                  style={[styles.primaryButton, isSubmittingOrder && styles.primaryButtonDisabled]}
-                  onPress={handleConfirm}
-                  activeOpacity={0.8}
-                  disabled={isSubmittingOrder}
-                >
-                  {isSubmittingOrder ? <ActivityIndicator color={colors.surface} /> : <Text style={styles.primaryButtonText}>Confirmar compra</Text>}
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.ghostButton} onPress={() => setStep('form')} activeOpacity={0.7}>
-                  <Text style={styles.ghostButtonText}>Volver a editar</Text>
-                </TouchableOpacity>
+                <RampActionBar
+                  primaryLabel="Confirmar compra"
+                  onPrimaryPress={handleConfirm}
+                  primaryLoading={isSubmittingOrder}
+                  secondaryLabel="Volver a editar"
+                  onSecondaryPress={() => setStep('form')}
+                />
               </View>
+              </RampReveal>
+            
             ) : (
-              <TouchableOpacity style={[styles.primaryButton, topUpAmountError && styles.primaryButtonDisabled]} onPress={handleContinue} activeOpacity={0.8} disabled={Boolean(topUpAmountError)}>
-                <Icon name={isVerified ? 'chevron-right' : 'shield'} size={18} color={colors.surface} style={styles.primaryButtonIcon} />
-                <Text style={styles.primaryButtonText}>{isVerified ? 'Continuar' : 'Continuar y verificar'}</Text>
-              </TouchableOpacity>
+              <RampReveal delay={230}>
+              <RampActionBar
+                primaryLabel={isVerified ? 'Continuar' : 'Continuar y verificar'}
+                onPrimaryPress={handleContinue}
+                primaryDisabled={Boolean(topUpAmountError) || quoteLoading}
+                primaryIconName={isVerified ? 'chevron-right' : 'shield'}
+              />
+              </RampReveal>
             )}
           </>
         )}
@@ -555,49 +501,6 @@ const styles = StyleSheet.create({
   content: {
     paddingBottom: 60,
   },
-  heroWrapper: {
-    borderBottomLeftRadius: 28,
-    borderBottomRightRadius: 28,
-    overflow: 'hidden',
-    marginBottom: 20,
-  },
-  heroGradient: {
-    borderBottomLeftRadius: 28,
-    borderBottomRightRadius: 28,
-  },
-  heroPadding: {
-    paddingHorizontal: 24,
-    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 12 : 16,
-    paddingBottom: 28,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.18)',
-    marginBottom: 16,
-  },
-  eyebrow: {
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-    color: 'rgba(255,255,255,0.75)',
-    marginBottom: 6,
-  },
-  title: {
-    fontSize: 26,
-    fontWeight: '800',
-    color: '#ffffff',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 14,
-    lineHeight: 21,
-    color: 'rgba(255,255,255,0.8)',
-  },
   noticeCard: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -607,6 +510,13 @@ const styles = StyleSheet.create({
     marginHorizontal: 22,
     marginBottom: 20,
     gap: 12,
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
+    shadowColor: '#3b82f6',
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
   },
   noticeIconWrap: {
     width: 32,
@@ -648,49 +558,22 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     paddingHorizontal: 22,
   },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  sectionHeaderLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.textPrimary,
-  },
-  sectionMeta: {
-    fontSize: 13,
-    color: colors.textMuted,
-    fontWeight: '600',
-  },
   sectionHint: {
     fontSize: 13,
     color: colors.textMuted,
     marginBottom: 12,
   },
-  stepBadge: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: colors.primaryLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stepBadgeText: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: colors.primaryDark,
-  },
   amountCard: {
     backgroundColor: colors.surface,
     borderRadius: 20,
     padding: 20,
+    borderWidth: 1,
+    borderColor: '#ecfdf5',
+    shadowColor: '#111827',
+    shadowOpacity: 0.06,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 2,
   },
   inputLabel: {
     fontSize: 15,
@@ -751,10 +634,17 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     flexDirection: 'row',
     alignItems: 'center',
+    shadowColor: '#111827',
+    shadowOpacity: 0.04,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 1,
   },
   methodCardSelected: {
     borderColor: colors.primary,
     backgroundColor: '#f8fffb',
+    shadowColor: colors.primary,
+    shadowOpacity: 0.1,
   },
   methodIconWrap: {
     width: 40,
@@ -811,16 +701,37 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderRadius: 20,
     padding: 20,
+    borderWidth: 1,
+    borderColor: '#d1fae5',
+    shadowColor: '#111827',
+    shadowOpacity: 0.06,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 2,
+  },
+  quoteEyebrow: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    color: colors.primaryDark,
+    marginBottom: 8,
   },
   quoteHeadline: {
-    fontSize: 22,
+    fontSize: 28,
     fontWeight: '800',
     color: colors.textPrimary,
-    marginBottom: 8,
+    marginBottom: 6,
+    lineHeight: 34,
+  },
+  quoteHeadlineCompact: {
+    fontSize: 24,
+    lineHeight: 30,
   },
   quoteRate: {
     fontSize: 14,
     color: colors.textMuted,
+    lineHeight: 20,
   },
   quoteDivider: {
     height: 1,
@@ -863,65 +774,58 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 20,
     marginHorizontal: 22,
+    borderWidth: 1,
+    borderColor: '#d1fae5',
+    shadowColor: '#111827',
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 3,
+    overflow: 'hidden',
+  },
+  reviewAccent: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 4,
+    backgroundColor: colors.primary,
   },
   reviewTitle: {
     fontSize: 18,
     fontWeight: '800',
     color: colors.textPrimary,
     marginBottom: 14,
+    marginTop: 2,
   },
   reviewRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 10,
     marginBottom: 12,
+    paddingVertical: 4,
   },
   reviewLabel: {
-    flex: 1,
+    flex: 0.95,
     fontSize: 14,
     color: colors.textMuted,
+    lineHeight: 20,
   },
   reviewValue: {
+    flex: 1.15,
     fontSize: 14,
     fontWeight: '700',
     color: colors.textPrimary,
+    lineHeight: 20,
+    textAlign: 'right',
   },
   reviewValueHighlight: {
-    fontSize: 15,
+    flex: 1.15,
+    fontSize: 16,
     fontWeight: '800',
     color: colors.primaryDark,
-  },
-  primaryButton: {
-    marginTop: 12,
-    marginHorizontal: 22,
-    backgroundColor: colors.primary,
-    borderRadius: 16,
-    paddingVertical: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  primaryButtonDisabled: {
-    opacity: 0.7,
-  },
-  primaryButtonIcon: {
-    marginRight: 8,
-  },
-  primaryButtonText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.surface,
-  },
-  ghostButton: {
-    marginTop: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-  },
-  ghostButtonText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.primary,
+    lineHeight: 22,
+    textAlign: 'right',
   },
 });
 

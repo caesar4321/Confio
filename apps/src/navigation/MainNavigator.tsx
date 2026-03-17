@@ -18,6 +18,7 @@ import { USDCHistoryScreen } from '../screens/USDCHistoryScreen';
 import { USDCConversionScreen } from '../screens/USDCConversionScreen';
 import TopUpScreen from '../screens/TopUpScreen';
 import { SellScreen } from '../screens/SellScreen';
+import RampInstructionsScreen from '../screens/RampInstructionsScreen';
 
 // ... existing imports ...
 
@@ -229,6 +230,13 @@ export const MainNavigator = () => {
         <Stack.Screen
           name="Sell"
           component={SellScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="RampInstructions"
+          component={RampInstructionsScreen}
           options={{
             headerShown: false,
           }}

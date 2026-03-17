@@ -1448,12 +1448,14 @@ export const GET_RAMP_QUOTE = gql`
     $amount: String!
     $countryCode: String
     $fiatCurrency: String
+    $paymentMethodCode: String
   ) {
     rampQuote(
       direction: $direction
       amount: $amount
       countryCode: $countryCode
       fiatCurrency: $fiatCurrency
+      paymentMethodCode: $paymentMethodCode
     ) {
       direction
       countryCode
@@ -1471,6 +1473,20 @@ export const GET_RAMP_QUOTE = gql`
       networkSymbol
       networkDisplay
       assetNote
+    }
+  }
+`;
+
+export const GET_RAMP_ORDER_STATUS = gql`
+  query GetRampOrderStatus($orderId: String!, $countryCode: String) {
+    rampOrderStatus(orderId: $orderId, countryCode: $countryCode) {
+      success
+      error
+      orderId
+      status
+      statusDetails
+      nextActionUrl
+      paymentDetails
     }
   }
 `;

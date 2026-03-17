@@ -25,7 +25,7 @@ from .models import (
     P2PDispute,
     P2PFavoriteTrader
 )
-from payments.koywe import get_country_ramp_config, sync_country_payment_methods
+from ramps.koywe import get_country_ramp_config, sync_country_payment_methods
 from security.s3_utils import generate_presigned_put, public_s3_url, build_s3_key
 from django.conf import settings
 from security.utils import graphql_require_kyc, graphql_require_aml, perform_aml_check

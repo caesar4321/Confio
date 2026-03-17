@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Linking,
   Modal,
   Platform,
   SafeAreaView,
@@ -12,6 +11,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
@@ -28,16 +28,20 @@ import {
   GET_ME,
   GET_MY_BALANCES,
   GET_RAMP_AVAILABILITY,
-  GET_RAMP_QUOTE,
   GET_MY_KYC_STATUS,
   GET_MY_PERSONAL_KYC_STATUS,
   GET_USER_BANK_ACCOUNTS,
 } from '../apollo/queries';
 import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
 import { getCountryByIso } from '../utils/countries';
-import { Gradient } from '../components/common/Gradient';
+import { getFriendlyRampError } from '../utils/rampErrors';
+import { requestRampCriticalAuth } from '../utils/rampFlow';
+import { formatRampMoney, formatRampRate, useRampQuoteFlow, validateRampContinue } from '../hooks/useRampQuoteFlow';
+import { RampActionBar } from '../components/ramps/RampActionBar';
+import { RampHero } from '../components/ramps/RampHero';
+import { RampReveal } from '../components/ramps/RampReveal';
+import { RampStepHeader } from '../components/ramps/RampStepHeader';
 import { CREATE_RAMP_ORDER } from '../apollo/mutations';
-import { biometricAuthService } from '../services/biometricAuthService';
 import { SellScreen as LegacyGuardarianSellScreen } from './LegacyGuardarianSellScreen';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'Sell'>;
@@ -99,16 +103,6 @@ const colors = {
   heroTo: '#34d399',
 };
 
-const formatMoney = (value?: string | null, code?: string | null) => {
-  const parsed = Number(value || 0);
-  if (!Number.isFinite(parsed)) {
-    return '--';
-  }
-  return `${parsed.toLocaleString('es-AR', {
-    minimumFractionDigits: parsed >= 100 ? 0 : 2,
-    maximumFractionDigits: 2,
-  })} ${code || ''}`.trim();
-};
 /* ─── Friendly currency names ─── */
 const currencyNames: Record<string, string> = {
   COP: 'pesos colombianos',
@@ -126,34 +120,10 @@ const currencyNames: Record<string, string> = {
 };
 const friendlyCurrency = (code: string) => currencyNames[code] || code;
 const KOYWE_SUPPORTED_COUNTRIES = new Set(['AR', 'BO', 'BR', 'CL', 'CO', 'MX', 'PE', 'US']);
-const TEMPORARILY_USE_GUARDARIAN_FOR_ALL_COUNTRIES = true;
-
-/* ─── Clean server display strings ─── */
-const cleanDisplay = (text?: string | null): string => {
-  if (!text) return '';
-  return text.replace(/->/g, ' ').replace(/\u2192/g, ' ').replace(/\s{2,}/g, ' ').trim();
-};
-
-const formatRate = (value?: string | null, code?: string | null) => {
-  const parsed = Number(value || 0);
-  if (!Number.isFinite(parsed)) {
-    return '--';
-  }
-  return `${parsed.toLocaleString('es-AR', {
-    minimumFractionDigits: parsed >= 100 ? 2 : 4,
-    maximumFractionDigits: 4,
-  })} ${code || ''}`.trim();
-};
-
-/* ─── Step badge component ─── */
-const StepBadge = ({ number }: { number: number }) => (
-  <View style={styles.stepBadge}>
-    <Text style={styles.stepBadgeText}>{number}</Text>
-  </View>
-);
 
 export const SellScreen = () => {
   const navigation = useNavigation<NavigationProp>();
+  const { width } = useWindowDimensions();
   const { activeAccount } = useAccount();
   const { userProfile } = useAuth() as any;
   const { selectedCountry, userCountry } = useCountry();
@@ -170,12 +140,6 @@ export const SellScreen = () => {
     const userIso = userCountry?.[2];
     return userProfile?.phoneCountry || selectedIso || userIso || 'AR';
   }, [selectedCountry, userCountry, userProfile?.phoneCountry]);
-
-  // Temporary fallback: keep all countries on Guardarian until Koywe credentials
-  // (secret + API key) are available on the server.
-  if (TEMPORARILY_USE_GUARDARIAN_FOR_ALL_COUNTRIES) {
-    return <LegacyGuardarianSellScreen />;
-  }
 
   const isKoyweCountry = KOYWE_SUPPORTED_COUNTRIES.has(countryCode);
 
@@ -208,23 +172,10 @@ export const SellScreen = () => {
   const fiatCurrency = availability?.fiatCurrency || 'USD';
   const countryFlag = derivedCountryTuple ? (derivedCountryTuple as readonly string[])[3] || '' : '';
   const isKoyweMapped = isKoyweCountry && !!availability?.offRampEnabled && methods.length > 0;
-  const parsedAmount = Number((amount || '').replace(',', '.'));
-  const quoteEnabled = Number.isFinite(parsedAmount) && parsedAmount > 0 && !!availability?.countryCode;
-
-  const { data: quoteData, loading: quoteLoading } = useQuery(GET_RAMP_QUOTE, {
-    variables: {
-      direction: 'OFF_RAMP',
-      amount: String(parsedAmount || ''),
-      countryCode: availability?.countryCode,
-      fiatCurrency,
-    },
-    skip: !isKoyweMapped || !quoteEnabled,
-    fetchPolicy: 'cache-and-network',
-  });
-
-  const quote = quoteData?.rampQuote;
-  const quoteHeadline = quote ? `Recibes aprox. ${formatMoney(quote.amountOut, fiatCurrency)}` : '';
-  const quoteRateLine = quote ? `1 cUSD = ${formatRate(quote.exchangeRate, fiatCurrency)}` : '';
+  const selectedMethod = useMemo(
+    () => methods.find((method) => method.code === selectedMethodCode) || methods[0] || null,
+    [methods, selectedMethodCode],
+  );
   const [createRampOrder] = useMutation(CREATE_RAMP_ORDER);
   const isVerified = useMemo(() => {
     const candidates = [
@@ -244,10 +195,6 @@ export const SellScreen = () => {
     );
   }, [bankAccountsData?.userBankAccounts, methods]);
 
-  const selectedMethod = useMemo(
-    () => methods.find((method) => method.code === selectedMethodCode) || methods[0] || null,
-    [methods, selectedMethodCode],
-  );
   const availableCusdBalance = useMemo(() => Number(balancesData?.myBalances?.cusd || 0), [balancesData?.myBalances?.cusd]);
   const selectedMethodMin = Number(selectedMethod?.offRampMinAmount || 0);
   const selectedMethodMax = Number(selectedMethod?.offRampMaxAmount || 0);
@@ -258,14 +205,31 @@ export const SellScreen = () => {
     if (selectedMethodMax > 0) return selectedMethodMax;
     return availableCusdBalance;
   }, [availableCusdBalance, selectedMethodMax]);
-  const isBelowSellMin = quoteEnabled && selectedMethodMin > 0 && parsedAmount < selectedMethodMin;
-  const isAboveSellMax = quoteEnabled && effectiveSellMax > 0 && parsedAmount > effectiveSellMax;
+  const {
+    parsedAmount,
+    amountReady,
+    quote,
+    quoteLoading,
+    quoteError,
+  } = useRampQuoteFlow({
+    direction: 'OFF_RAMP',
+    amount,
+    countryCode: availability?.countryCode,
+    fiatCurrency,
+    paymentMethodCode: selectedMethod?.code,
+    enabled: isKoyweMapped,
+  });
+  const quoteHeadline = quote ? `Recibes aprox. ${formatRampMoney(quote.amountOut, fiatCurrency)}` : '';
+  const quoteRateLine = quote ? `1 cUSD = ${formatRampRate(quote.exchangeRate, fiatCurrency)}` : '';
+  const isCompact = width < 380;
+  const isBelowSellMin = amountReady && selectedMethodMin > 0 && parsedAmount < selectedMethodMin;
+  const isAboveSellMax = amountReady && effectiveSellMax > 0 && parsedAmount > effectiveSellMax;
   const sellAmountError = isBelowSellMin
-    ? `El mínimo por operación es ${formatMoney(String(selectedMethodMin), 'cUSD')}.`
+    ? `El mínimo por operación es ${formatRampMoney(String(selectedMethodMin), 'cUSD')}.`
     : isAboveSellMax
       ? availableCusdBalance > 0 && effectiveSellMax === availableCusdBalance && selectedMethodMax >= availableCusdBalance
-        ? `Tu saldo disponible es ${formatMoney(String(availableCusdBalance), 'cUSD')}.`
-        : `El máximo permitido es ${formatMoney(String(effectiveSellMax), 'cUSD')}.`
+        ? `Tu saldo disponible es ${formatRampMoney(String(availableCusdBalance), 'cUSD')}.`
+        : `El máximo permitido es ${formatRampMoney(String(effectiveSellMax), 'cUSD')}.`
       : null;
 
   const compatibleSavedMethods = useMemo(() => {
@@ -310,16 +274,23 @@ export const SellScreen = () => {
   };
 
   const handleContinue = () => {
-    if (!selectedMethod) {
-      Alert.alert('Selecciona un método', 'Elige cómo quieres recibir tu dinero.');
-      return;
-    }
-    if (!quoteEnabled || !quote) {
-      Alert.alert('Monto inválido', 'Ingresa cuánto quieres retirar.');
-      return;
-    }
-    if (sellAmountError) {
-      Alert.alert('Monto fuera de rango', sellAmountError);
+    const continueError = validateRampContinue({
+      hasSelectedMethod: !!selectedMethod,
+      amountReady,
+      quoteLoading,
+      quoteError,
+      quote,
+      amountError: sellAmountError,
+    });
+    if (continueError) {
+      const title =
+        continueError === 'Selecciona un método' ? 'Selecciona un método'
+          : continueError === 'Monto inválido' ? 'Monto inválido'
+            : continueError === 'Cotización en proceso' ? 'Cotización en proceso'
+              : continueError === 'Cotización no disponible' ? 'Cotización no disponible'
+                : continueError.includes('mínimo') || continueError.includes('máximo') || continueError.includes('saldo disponible') ? 'Monto fuera de rango'
+                  : 'No pudimos cotizar';
+      Alert.alert(title, continueError);
       return;
     }
     if (!selectedSavedMethod) {
@@ -333,55 +304,15 @@ export const SellScreen = () => {
     setStep('review');
   };
 
-  const requestCriticalAuth = async () => {
-    const authMessage = parsedAmount > 0
-      ? `Autoriza el retiro de ${parsedAmount.toFixed(2)} cUSD`
-      : 'Autoriza este retiro';
-
-    let authenticated = await biometricAuthService.authenticate(authMessage, true, true);
-    if (authenticated) {
-      return true;
-    }
-
-    const lockout = biometricAuthService.isLockout();
-    if (lockout) {
-      Alert.alert(
-        'Biometría bloqueada',
-        'Desbloquea tu dispositivo con passcode y vuelve a intentar.',
-        [{ text: 'OK', style: 'default' }],
-      );
-      return false;
-    }
-
-    const shouldRetry = await new Promise<boolean>((resolve) => {
-      Alert.alert(
-        'Autenticación requerida',
-        'Debes autenticarte para confirmar este retiro.',
-        [
-          { text: 'Cancelar', style: 'cancel', onPress: () => resolve(false) },
-          { text: 'Reintentar', onPress: () => resolve(true) },
-        ],
-      );
-    });
-
-    if (!shouldRetry) {
-      return false;
-    }
-
-    authenticated = await biometricAuthService.authenticate(authMessage, true, true);
-    if (!authenticated) {
-      Alert.alert('No autenticado', 'No pudimos validar tu identidad. Intenta de nuevo en unos segundos.');
-      return false;
-    }
-
-    return true;
-  };
-
   const handleConfirm = async () => {
     if (!selectedMethod || !selectedSavedMethod || !quote) {
       return;
     }
-    const authenticated = await requestCriticalAuth();
+    const authenticated = await requestRampCriticalAuth({
+      amount: parsedAmount,
+      assetLabel: 'cUSD',
+      actionLabel: 'retiro',
+    });
     if (!authenticated) {
       return;
     }
@@ -399,24 +330,25 @@ export const SellScreen = () => {
     })
       .then(({ data }) => {
         const result = data?.createRampOrder;
-        if (!result?.success) {
-          Alert.alert('No se pudo crear la orden', result?.error || 'Inténtalo nuevamente.');
+        if (!result?.success || !result?.orderId) {
+          Alert.alert('No se pudo crear la orden', getFriendlyRampError(result?.error));
           return;
         }
-
-        Alert.alert(
-          'Orden creada',
-          `Orden ${result.orderId}\n\nCobro por ${selectedMethod.displayName} hacia ${selectedSavedMethod.summaryText}.\nRecibirías aproximadamente ${formatMoney(result.amountOut, fiatCurrency)}.`,
-          result.nextActionUrl
-            ? [
-                { text: 'Más tarde', style: 'cancel' },
-                { text: 'Abrir proveedor', onPress: () => Linking.openURL(result.nextActionUrl) },
-              ]
-            : [{ text: 'OK', onPress: () => setStep('form') }],
-        );
+        navigation.replace('RampInstructions', {
+          direction: 'OFF_RAMP',
+          orderId: result.orderId,
+          countryCode: availability?.countryCode,
+          paymentMethodCode: selectedMethod.code,
+          paymentMethodDisplay: result.paymentMethodDisplay || selectedMethod.displayName,
+          amountOut: result.amountOut || undefined,
+          fiatCurrency,
+          destinationSummary: selectedSavedMethod?.summaryText || undefined,
+          nextActionUrl: result.nextActionUrl || undefined,
+          paymentDetails: result.paymentDetails,
+        });
       })
       .catch((error) => {
-        Alert.alert('No se pudo crear la orden', error?.message || 'Inténtalo nuevamente.');
+        Alert.alert('No se pudo crear la orden', getFriendlyRampError(error?.message));
       })
       .finally(() => {
         setIsSubmittingOrder(false);
@@ -432,20 +364,20 @@ export const SellScreen = () => {
       <StatusBar barStyle="light-content" backgroundColor={colors.heroFrom} />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* ─── Hero with gradient ─── */}
-        <View style={styles.heroWrapper}>
-          <Gradient fromColor={colors.heroFrom} toColor={colors.heroTo} style={styles.heroGradient}>
-            <View style={styles.heroPadding}>
-              <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-                <Icon name="arrow-left" size={20} color={colors.surface} />
-              </TouchableOpacity>
-              <Text style={styles.eyebrow}>Retirar saldo</Text>
-              <Text style={styles.title}>Vende tus Confío Dollar</Text>
-              <Text style={styles.subtitle}>Elige cómo quieres recibir tu dinero, revisa el estimado y confirma al final.</Text>
-            </View>
-          </Gradient>
-        </View>
+        <RampReveal delay={0}>
+        <RampHero
+          eyebrow="Retirar saldo"
+          title="Vende tus Confío Dollar"
+          subtitle="Elige cómo quieres recibir tu dinero, revisa el estimado y confirma al final."
+          onBack={() => navigation.goBack()}
+          compact={isCompact}
+          fromColor={colors.heroFrom}
+          toColor={colors.heroTo}
+        />
+        </RampReveal>
 
         {/* ─── Info banner ─── */}
+        <RampReveal delay={60}>
         <View style={styles.bannerCard}>
           <View style={styles.bannerIconWrap}>
             <Icon name="shield" size={16} color={colors.accent} />
@@ -457,6 +389,7 @@ export const SellScreen = () => {
             </Text>
           </View>
         </View>
+        </RampReveal>
 
         {availabilityLoading ? (
           <View style={styles.loadingCard}>
@@ -466,14 +399,17 @@ export const SellScreen = () => {
         ) : (
           <>
             {/* ─── Step 1: Amount ─── */}
+            <RampReveal delay={110}>
             <View style={styles.section}>
-              <View style={styles.sectionHeader}>
-                <View style={styles.sectionHeaderLeft}>
-                  <StepBadge number={1} />
-                  <Text style={styles.sectionTitle}>Monto</Text>
-                </View>
-                <Text style={styles.sectionMeta}>{countryFlag ? `${countryFlag} ` : ''}{availability.countryName} · {fiatCurrency}</Text>
-              </View>
+              <RampStepHeader
+                number={1}
+                title="Monto"
+                meta={`${countryFlag ? `${countryFlag} ` : ''}${availability.countryName} · ${fiatCurrency}`}
+                accentColor={colors.primaryDark}
+                accentBackground={colors.primaryLight}
+                titleColor={colors.dark}
+                metaColor={colors.textMuted}
+              />
               <View style={styles.inputCard}>
                 <Text style={styles.inputLabel}>Monto a retirar en cUSD</Text>
                 <View style={styles.amountInputRow}>
@@ -504,23 +440,26 @@ export const SellScreen = () => {
                 </View>
                 <Text style={styles.helperText}>Verás cuánto recibirías y el tipo de cambio estimado antes de confirmar.</Text>
                 <Text style={styles.limitText}>
-                  Saldo disponible: {balancesLoading ? 'Cargando...' : formatMoney(String(availableCusdBalance), 'cUSD')}
+                  Saldo disponible: {balancesLoading ? 'Cargando...' : formatRampMoney(String(availableCusdBalance), 'cUSD')}
                 </Text>
                 <Text style={styles.limitText}>
-                  Mínimo: {selectedMethodMin > 0 ? formatMoney(String(selectedMethodMin), 'cUSD') : '--'} · Máximo por operación: {effectiveSellMax > 0 ? formatMoney(String(effectiveSellMax), 'cUSD') : '--'}
+                  Mínimo: {selectedMethodMin > 0 ? formatRampMoney(String(selectedMethodMin), 'cUSD') : '--'} · Máximo por operación: {effectiveSellMax > 0 ? formatRampMoney(String(effectiveSellMax), 'cUSD') : '--'}
                 </Text>
                 {sellAmountError ? <Text style={styles.errorText}>{sellAmountError}</Text> : null}
               </View>
             </View>
+            </RampReveal>
 
             {/* ─── Step 2: Receive method ─── */}
+            <RampReveal delay={150}>
             <View style={styles.section}>
-              <View style={styles.sectionHeader}>
-                <View style={styles.sectionHeaderLeft}>
-                  <StepBadge number={2} />
-                  <Text style={styles.sectionTitle}>Cómo recibirás el dinero</Text>
-                </View>
-              </View>
+              <RampStepHeader
+                number={2}
+                title="Cómo recibirás el dinero"
+                accentColor={colors.primaryDark}
+                accentBackground={colors.primaryLight}
+                titleColor={colors.dark}
+              />
               <View style={styles.methodList}>
                 {methods.map((method) => {
                   const selected = selectedMethod?.code === method.code;
@@ -546,13 +485,20 @@ export const SellScreen = () => {
                 })}
               </View>
             </View>
+            </RampReveal>
 
             {/* ─── Step 3: Bank details ─── */}
+            <RampReveal delay={190}>
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
-                <View style={styles.sectionHeaderLeft}>
-                  <StepBadge number={3} />
-                  <Text style={styles.sectionTitle}>Datos de cobro</Text>
+                <View style={styles.sectionHeaderContent}>
+                  <RampStepHeader
+                    number={3}
+                    title="Datos de cobro"
+                    accentColor={colors.primaryDark}
+                    accentBackground={colors.primaryLight}
+                    titleColor={colors.dark}
+                  />
                 </View>
                 <TouchableOpacity style={styles.addButton} onPress={() => setShowAddMethodModal(true)}>
                   <Icon name="plus-circle" size={16} color={colors.accent} />
@@ -589,34 +535,43 @@ export const SellScreen = () => {
                 })
               )}
             </View>
+            </RampReveal>
 
             {/* ─── Step 4: Quote summary ─── */}
+            <RampReveal delay={230}>
             <View style={styles.section}>
-              <View style={styles.sectionHeader}>
-                <View style={styles.sectionHeaderLeft}>
-                  <StepBadge number={4} />
-                  <Text style={styles.sectionTitle}>Resumen</Text>
-                </View>
-              </View>
+              <RampStepHeader
+                number={4}
+                title="Resumen"
+                accentColor={colors.primaryDark}
+                accentBackground={colors.primaryLight}
+                titleColor={colors.dark}
+              />
               <View style={styles.quoteCard}>
                 {quoteLoading ? (
                   <ActivityIndicator color={colors.primary} />
+                ) : quoteError ? (
+                  <View style={styles.emptyQuote}>
+                    <Icon name="alert-circle" size={20} color={colors.textLight} />
+                    <Text style={styles.emptyText}>{quoteError.message || 'No pudimos obtener la cotización de Koywe.'}</Text>
+                  </View>
                 ) : quote ? (
                   <>
-                    <Text style={styles.quoteHeadline}>{quoteHeadline}</Text>
+                    <Text style={styles.quoteEyebrow}>Estimado de retiro</Text>
+                    <Text style={[styles.quoteHeadline, isCompact && styles.quoteHeadlineCompact]}>{quoteHeadline}</Text>
                     <Text style={styles.quoteRate}>{quoteRateLine}</Text>
                     <View style={styles.quoteDivider} />
                     <View style={styles.quoteRow}>
                       <Text style={styles.quoteLabel}>Envías</Text>
-                      <Text style={styles.quoteValue}>{formatMoney(quote.amountIn, 'cUSD')}</Text>
+                      <Text style={styles.quoteValue}>{formatRampMoney(quote.amountIn, 'cUSD')}</Text>
                     </View>
                     <View style={styles.quoteRow}>
                       <Text style={styles.quoteLabel}>Recibes aprox.</Text>
-                      <Text style={styles.quoteValue}>{formatMoney(quote.amountOut, fiatCurrency)}</Text>
+                      <Text style={styles.quoteValue}>{formatRampMoney(quote.amountOut, fiatCurrency)}</Text>
                     </View>
                     <View style={styles.quoteRow}>
                       <Text style={styles.quoteLabel}>{'Comisión del\nprocesador de pagos'}</Text>
-                      <Text style={styles.quoteValue}>{formatMoney(String(Number(quote.feeAmount || 0) + Number(quote.networkFeeAmount || 0)), quote.feeCurrency)}</Text>
+                      <Text style={styles.quoteValue}>{formatRampMoney(String(Number(quote.feeAmount || 0) + Number(quote.networkFeeAmount || 0)), quote.feeCurrency)}</Text>
                     </View>
                     <View style={styles.quoteRow}>
                       <Text style={styles.quoteLabel}>Comisión de Confío</Text>
@@ -635,9 +590,11 @@ export const SellScreen = () => {
                 )}
               </View>
             </View>
+            </RampReveal>
 
             {/* ─── Action buttons ─── */}
             {step === 'review' ? (
+              <RampReveal delay={270}>
               <View style={styles.reviewCard}>
                 <View style={styles.reviewAccent} />
                 <Text style={styles.reviewTitle}>Revisión final</Text>
@@ -656,23 +613,24 @@ export const SellScreen = () => {
                   <Text style={styles.reviewLabel}>Recibirías</Text>
                   <Text style={styles.reviewValueHighlight}>{quoteHeadline}</Text>
                 </View>
-                <TouchableOpacity
-                  style={[styles.primaryButton, isSubmittingOrder && styles.primaryButtonDisabled]}
-                  onPress={handleConfirm}
-                  activeOpacity={0.8}
-                  disabled={isSubmittingOrder}
-                >
-                  {isSubmittingOrder ? <ActivityIndicator color={colors.surface} /> : <Text style={styles.primaryButtonText}>Confirmar retiro</Text>}
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.ghostButton} onPress={() => setStep('form')} activeOpacity={0.7}>
-                  <Text style={styles.ghostButtonText}>Editar retiro</Text>
-                </TouchableOpacity>
+                <RampActionBar
+                  primaryLabel="Confirmar retiro"
+                  onPrimaryPress={handleConfirm}
+                  primaryLoading={isSubmittingOrder}
+                  secondaryLabel="Editar retiro"
+                  onSecondaryPress={() => setStep('form')}
+                />
               </View>
+              </RampReveal>
             ) : (
-              <TouchableOpacity style={[styles.primaryButton, (sellAmountError || balancesLoading) && styles.primaryButtonDisabled]} onPress={handleContinue} activeOpacity={0.8} disabled={Boolean(sellAmountError) || balancesLoading}>
-                <Icon name={isVerified ? 'chevron-right' : 'shield'} size={18} color={colors.surface} style={{ marginRight: 8 }} />
-                <Text style={styles.primaryButtonText}>{isVerified ? 'Continuar' : 'Continuar y verificar'}</Text>
-              </TouchableOpacity>
+              <RampReveal delay={270}>
+              <RampActionBar
+                primaryLabel={isVerified ? 'Continuar' : 'Continuar y verificar'}
+                onPrimaryPress={handleContinue}
+                primaryDisabled={Boolean(sellAmountError) || balancesLoading || quoteLoading}
+                primaryIconName={isVerified ? 'chevron-right' : 'shield'}
+              />
+              </RampReveal>
             )}
           </>
         )}
@@ -717,50 +675,6 @@ const styles = StyleSheet.create({
   },
 
   /* ── Hero ── */
-  heroWrapper: {
-    borderBottomLeftRadius: 28,
-    borderBottomRightRadius: 28,
-    overflow: 'hidden',
-    marginBottom: 20,
-  },
-  heroGradient: {
-    borderBottomLeftRadius: 28,
-    borderBottomRightRadius: 28,
-  },
-  heroPadding: {
-    paddingHorizontal: 24,
-    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 12 : 16,
-    paddingBottom: 28,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.18)',
-    marginBottom: 16,
-  },
-  eyebrow: {
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-    color: 'rgba(255,255,255,0.75)',
-    marginBottom: 6,
-  },
-  title: {
-    fontSize: 26,
-    fontWeight: '800',
-    color: '#ffffff',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 14,
-    lineHeight: 21,
-    color: 'rgba(255,255,255,0.8)',
-  },
-
   /* ── Banner card ── */
   bannerCard: {
     flexDirection: 'row',
@@ -874,43 +788,21 @@ const styles = StyleSheet.create({
   },
   sectionHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     marginBottom: 12,
+    gap: 12,
   },
-  sectionHeaderLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
+  sectionHeaderContent: {
+    flex: 1,
   },
-  stepBadge: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stepBadgeText: {
-    color: '#ffffff',
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  sectionTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: colors.dark,
-  },
-  sectionMeta: {
-    color: colors.textMuted,
-    fontSize: 13,
-  },
-
   /* ── Input card ── */
   inputCard: {
     backgroundColor: colors.surface,
     borderRadius: 20,
     padding: 20,
+    borderWidth: 1,
+    borderColor: '#d1fae5',
     shadowColor: '#111827',
     shadowOpacity: 0.06,
     shadowRadius: 16,
@@ -986,6 +878,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
+    borderWidth: 1,
+    borderColor: '#eef2f7',
     shadowColor: '#111827',
     shadowOpacity: 0.05,
     shadowRadius: 12,
@@ -994,6 +888,7 @@ const styles = StyleSheet.create({
   },
   methodCardSelected: {
     backgroundColor: colors.primaryUltraLight,
+    borderColor: '#a7f3d0',
     shadowColor: colors.primary,
     shadowOpacity: 0.12,
   },
@@ -1096,6 +991,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 14,
     marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#eef2f7',
     shadowColor: '#111827',
     shadowOpacity: 0.05,
     shadowRadius: 12,
@@ -1104,6 +1001,7 @@ const styles = StyleSheet.create({
   },
   savedCardSelected: {
     backgroundColor: colors.primaryUltraLight,
+    borderColor: '#a7f3d0',
     shadowColor: colors.primary,
     shadowOpacity: 0.12,
   },
@@ -1126,6 +1024,8 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 20,
     gap: 10,
+    borderWidth: 1,
+    borderColor: '#d1fae5',
     shadowColor: '#111827',
     shadowOpacity: 0.06,
     shadowRadius: 16,
@@ -1136,10 +1036,23 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: '800',
     color: colors.dark,
+    lineHeight: 34,
+  },
+  quoteHeadlineCompact: {
+    fontSize: 24,
+    lineHeight: 30,
+  },
+  quoteEyebrow: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    color: colors.primaryDark,
   },
   quoteRate: {
     color: colors.textMuted,
     fontSize: 14,
+    lineHeight: 20,
   },
   quoteDivider: {
     height: 1,
@@ -1149,17 +1062,23 @@ const styles = StyleSheet.create({
   quoteRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
+    gap: 18,
     paddingVertical: 4,
   },
   quoteLabel: {
     color: colors.textMuted,
     fontSize: 14,
+    lineHeight: 20,
+    flex: 1,
   },
   quoteValue: {
     color: colors.dark,
     fontWeight: '700',
     fontSize: 14,
+    lineHeight: 20,
+    flex: 1,
+    textAlign: 'right',
   },
   disclaimerPill: {
     flexDirection: 'row',
@@ -1215,60 +1134,30 @@ const styles = StyleSheet.create({
   },
   reviewRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 10,
     paddingVertical: 6,
   },
   reviewLabel: {
-    flex: 1,
+    flex: 0.95,
     color: colors.textMuted,
     fontSize: 14,
+    lineHeight: 20,
   },
   reviewValue: {
+    flex: 1.15,
     color: colors.dark,
     fontWeight: '600',
     fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'right',
   },
   reviewValueHighlight: {
+    flex: 1.15,
     color: colors.primary,
     fontWeight: '800',
     fontSize: 16,
-  },
-
-  /* ── Buttons ── */
-  primaryButton: {
-    backgroundColor: colors.primary,
-    borderRadius: 16,
-    paddingVertical: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    marginHorizontal: 22,
-    shadowColor: colors.primary,
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 4,
-  },
-  primaryButtonDisabled: {
-    opacity: 0.65,
-  },
-  primaryButtonText: {
-    color: colors.surface,
-    fontWeight: '700',
-    fontSize: 16,
-  },
-  ghostButton: {
-    borderRadius: 16,
-    paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: colors.border,
-  },
-  ghostButtonText: {
-    color: colors.textPrimary,
-    fontWeight: '700',
-    fontSize: 15,
+    lineHeight: 22,
+    textAlign: 'right',
   },
 });

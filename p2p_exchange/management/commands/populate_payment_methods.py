@@ -2,7 +2,7 @@ from django.core.management.base import BaseCommand
 from django.db.models.deletion import ProtectedError
 from django.db import transaction
 
-from payments.koywe import (
+from ramps.koywe import (
     deactivate_unsupported_payment_methods,
     get_country_ramp_config,
     get_supported_country_codes,

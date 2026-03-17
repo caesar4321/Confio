@@ -5,6 +5,7 @@ from telegram_verification import schema as telegram_verification_schema
 from sms_verification import schema as sms_verification_schema
 from send import schema as send_schema
 from payments import schema as payments_schema
+from ramps import schema as ramps_schema
 from payroll import schema as payroll_schema
 from p2p_exchange import schema as p2p_exchange_schema
 from exchange_rates import schema as exchange_rates_schema
@@ -20,7 +21,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-class Query(users_schema.Query, UnifiedTransactionQuery, send_schema.Query, payments_schema.Query, payroll_schema.Query, p2p_exchange_schema.Query, exchange_rates_schema.Query, conversion_schema.Query, usdc_transactions_schema.Query, security_schema.Query, presale_schema.PresaleQueries, notifications_schema.Query, inbox_schema.Query, blockchain_schema.Query, web3auth_schema.Web3AuthQuery, graphene.ObjectType):
+class Query(users_schema.Query, UnifiedTransactionQuery, send_schema.Query, payments_schema.Query, ramps_schema.Query, payroll_schema.Query, p2p_exchange_schema.Query, exchange_rates_schema.Query, conversion_schema.Query, usdc_transactions_schema.Query, security_schema.Query, presale_schema.PresaleQueries, notifications_schema.Query, inbox_schema.Query, blockchain_schema.Query, web3auth_schema.Web3AuthQuery, graphene.ObjectType):
 	# Override the legalDocument field to make it public
 	legalDocument = users_schema.Query.legalDocument
 	# Expose the user query
@@ -32,6 +33,7 @@ class Mutation(
 	sms_verification_schema.Mutation,
 	send_schema.Mutation,
 	payments_schema.Mutation,
+	ramps_schema.Mutation,
 	payroll_schema.Mutation,
 	p2p_exchange_schema.Mutation,
 	exchange_rates_schema.Mutation,
@@ -70,6 +72,11 @@ types = [
 	send_schema.SendTransactionType,
 	payments_schema.InvoiceType,
 	payments_schema.PaymentTransactionType,
+	ramps_schema.RampAvailabilityType,
+	ramps_schema.RampPaymentMethodType,
+	ramps_schema.RampQuoteType,
+	ramps_schema.RampOrderType,
+	ramps_schema.RampOrderStatusType,
 	p2p_exchange_schema.P2POfferType,
 	p2p_exchange_schema.P2PTradeType,
 	p2p_exchange_schema.P2PTradePaginatedType,

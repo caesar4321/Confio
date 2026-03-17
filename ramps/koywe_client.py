@@ -6,6 +6,7 @@ from typing import Any
 import requests
 from django.conf import settings
 from django.core.cache import cache
+from ramps.koywe import RAMP_NETWORK_DISPLAY, RAMP_USDC_ALGORAND_NOTE
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,15 @@ class KoyweOrderResult:
     raw_response: dict[str, Any] | None = None
 
 
+@dataclass
+class KoyweOrderStatusResult:
+    order_id: str
+    status: str
+    status_details: str | None = None
+    next_action_url: str | None = None
+    raw_response: dict[str, Any] | None = None
+
+
 _COUNTRY_ALPHA3 = {
     'AR': 'ARG',
     'BO': 'BOL',
@@ -47,9 +57,11 @@ _COUNTRY_ALPHA3 = {
 }
 
 _ACCOUNT_TYPE_MAP = {
-    'ahorro': 'SAVINGS',
-    'corriente': 'CHECKING',
-    'nomina': 'CHECKING',
+    'ahorro': 'savings',
+    'corriente': 'checking',
+    'nomina': 'checking',
+    'interbancaria': 'interbanking',
+    'interbanking': 'interbanking',
 }
 
 _DOCUMENT_TYPE_MAP = {
@@ -254,29 +266,82 @@ class KoyweClient:
             payload['paymentMethodId'] = payment_method_id
         return self._request('POST', '/rest/quotes', email=email, json_payload=payload)
 
-    def create_order(self, *, quote_id: str, email: str | None = None, destination_address: str | None = None, payment_method_id: str | None = None, bank_account_id: str | None = None, refund_address: str | None = None, external_id: str | None = None, contact_profile: dict[str, Any] | None = None) -> dict[str, Any]:
+    def get_ramp_quote(
+        self,
+        *,
+        direction: str,
+        amount: Decimal,
+        fiat_symbol: str,
+        payment_method_code: str | None = None,
+        email: str | None = None,
+    ) -> dict[str, Any]:
+        normalized_direction = direction.upper()
+        payment_method_id = None
+        if normalized_direction == 'ON_RAMP' and payment_method_code:
+            payment_method_id, _ = self.resolve_payment_provider(
+                fiat_symbol=fiat_symbol,
+                payment_method_code=payment_method_code,
+                email=email,
+            )
+        quote = self.create_quote(
+            direction=normalized_direction,
+            amount=amount,
+            fiat_symbol=fiat_symbol,
+            payment_method_id=payment_method_id,
+            email=email,
+        )
+        amount_in = Decimal(str(quote.get('amountIn') or amount))
+        amount_out = Decimal(str(quote.get('amountOut') or 0))
+        exchange_rate = Decimal(str(quote.get('exchangeRate') or 0))
+        koywe_fee = Decimal(str(quote.get('koyweFee') or 0))
+        network_fee = Decimal(str(quote.get('networkFee') or 0))
+        fee_currency = fiat_symbol if normalized_direction == 'ON_RAMP' else self.crypto_symbol
+        network_fee_currency = fiat_symbol if normalized_direction == 'ON_RAMP' else self.crypto_symbol
+        total_change_display = (
+            f'{amount_in.normalize()} {fiat_symbol} -> {amount_out.normalize()} {self.crypto_symbol}'
+            if normalized_direction == 'ON_RAMP'
+            else f'{amount_in.normalize()} {self.crypto_symbol} -> {amount_out.normalize()} {fiat_symbol}'
+        )
+        rate_display = (
+            f'1 {self.crypto_symbol} ~= {exchange_rate.normalize()} {fiat_symbol}'
+            if exchange_rate
+            else ''
+        )
+        return {
+            'direction': normalized_direction,
+            'country_code': '',
+            'fiat_currency': fiat_symbol,
+            'amount_in': amount_in,
+            'amount_out': amount_out,
+            'exchange_rate': exchange_rate,
+            'fee_amount': koywe_fee,
+            'fee_currency': fee_currency,
+            'network_fee_amount': network_fee,
+            'network_fee_currency': network_fee_currency,
+            'rate_display': rate_display,
+            'total_change_display': total_change_display,
+            'token_symbol': self.crypto_symbol,
+            'network_symbol': getattr(settings, 'KOYWE_CRYPTO_SYMBOL', self.crypto_symbol),
+            'network_display': RAMP_NETWORK_DISPLAY,
+            'asset_note': RAMP_USDC_ALGORAND_NOTE,
+        }
+
+    def create_order(self, *, quote_id: str, email: str | None = None, destination_address: str | None = None, bank_account_id: str | None = None, external_id: str | None = None) -> dict[str, Any]:
         payload: dict[str, Any] = {'quoteId': quote_id}
         if destination_address:
             payload['destinationAddress'] = destination_address
-        if payment_method_id:
-            payload['paymentMethodId'] = payment_method_id
         if bank_account_id:
             payload['bankAccountId'] = bank_account_id
             payload.setdefault('destinationAddress', bank_account_id)
-        if refund_address:
-            payload['refundAddress'] = refund_address
         if external_id:
             payload['externalId'] = external_id
-        if contact_profile:
-            for key in ('firstName', 'lastName', 'email', 'phone', 'documentNumber', 'documentType'):
-                value = contact_profile.get(key)
-                if value:
-                    payload[key] = value
         return self._request('POST', '/rest/orders', email=email, json_payload=payload)
 
-    def create_bank_account(self, *, bank_info: Any, email: str | None, country_code: str, contact_profile: dict[str, Any] | None = None) -> dict[str, Any]:
+    def get_order(self, *, order_id: str, email: str | None = None) -> dict[str, Any]:
+        return self._request('GET', f'/rest/orders/{order_id}', email=email)
+
+    def create_bank_account(self, *, bank_info: Any, email: str | None, country_code: str, fiat_symbol: str, contact_profile: dict[str, Any] | None = None) -> dict[str, Any]:
         alpha3 = _COUNTRY_ALPHA3.get((country_code or '').upper(), (country_code or '').upper())
-        first_name, last_name = self._split_name(bank_info.account_holder_name)
         provider_metadata = getattr(bank_info, 'provider_metadata', None) or {}
         account_number = (
             provider_metadata.get('pixKey')
@@ -286,37 +351,17 @@ class KoyweClient:
             or bank_info.email
             or bank_info.username
         )
-        normalized_contact = self._normalize_contact_profile(contact_profile=contact_profile, country_code=country_code)
         payload: dict[str, Any] = {
-            'name': bank_info.account_holder_name,
-            'type': 'INDIVIDUAL',
-            'firstName': normalized_contact.get('firstName') or first_name,
-            'lastName': normalized_contact.get('lastName') or last_name or first_name,
-            'country': alpha3,
+            'countryCode': alpha3,
+            'currencySymbol': fiat_symbol,
             'accountNumber': account_number,
         }
-        if normalized_contact.get('email') or email or getattr(bank_info, 'email', None):
-            payload['email'] = normalized_contact.get('email') or getattr(bank_info, 'email', None) or email
-        if provider_metadata.get('bankName'):
-            payload['bankName'] = provider_metadata['bankName']
-        elif getattr(bank_info, 'bank', None):
-            payload['bankName'] = bank_info.bank.name
-            if getattr(bank_info.bank, 'code', None):
-                payload['bankCode'] = bank_info.bank.code
-        elif getattr(bank_info, 'payment_method', None):
-            payload['bankName'] = bank_info.payment_method.display_name
         if provider_metadata.get('bankCode'):
             payload['bankCode'] = provider_metadata['bankCode']
+        elif getattr(bank_info, 'bank', None) and getattr(bank_info.bank, 'code', None):
+            payload['bankCode'] = bank_info.bank.code
         if getattr(bank_info, 'account_type', None):
             payload['accountType'] = _ACCOUNT_TYPE_MAP.get(bank_info.account_type, bank_info.account_type)
-        document_number = normalized_contact.get('documentNumber') or getattr(bank_info, 'identification_number', None)
-        if document_number:
-            payload['documentNumber'] = document_number
-            payload['documentType'] = (
-                normalized_contact.get('documentType')
-                or provider_metadata.get('documentType')
-                or _DOCUMENT_TYPE_MAP.get((country_code or '').upper(), 'PASS')
-            )
         return self._request('POST', '/rest/bank-accounts', email=email, json_payload=payload)
 
     def create_ramp_order(self, *, direction: str, amount: Decimal, fiat_symbol: str, payment_method_code: str, email: str | None, wallet_address: str | None, country_code: str, bank_info: Any = None, external_id: str | None = None, contact_profile: dict[str, Any] | None = None) -> KoyweOrderResult:
@@ -347,6 +392,7 @@ class KoyweClient:
                 bank_info=bank_info,
                 email=email,
                 country_code=country_code,
+                fiat_symbol=fiat_symbol,
                 contact_profile=contact_profile,
             )
             bank_account_id = str(bank_account.get('_id') or bank_account.get('id') or bank_account.get('bankAccountId') or '')
@@ -357,11 +403,8 @@ class KoyweClient:
             quote_id=quote_id,
             email=email,
             destination_address=wallet_address if normalized_direction == 'ON_RAMP' else None,
-            payment_method_id=payment_method_id if normalized_direction == 'ON_RAMP' else None,
             bank_account_id=bank_account_id,
-            refund_address=wallet_address,
             external_id=external_id,
-            contact_profile=self._normalize_contact_profile(contact_profile=contact_profile, country_code=country_code),
         )
 
         order_id = str(order.get('_id') or order.get('id') or order.get('orderId') or quote_id)
@@ -379,6 +422,20 @@ class KoyweClient:
             raw_response=order,
         )
 
+    def get_ramp_order_status(self, *, order_id: str, email: str | None = None) -> KoyweOrderStatusResult:
+        order = self.get_order(order_id=order_id, email=email)
+        resolved_order_id = str(order.get('orderId') or order.get('_id') or order.get('id') or order_id)
+        status = str(order.get('status') or '').strip().upper()
+        status_details = str(order.get('statusDetails') or '').strip() or None
+        next_action_url = self._extract_action_url(order)
+        return KoyweOrderStatusResult(
+            order_id=resolved_order_id,
+            status=status,
+            status_details=status_details,
+            next_action_url=next_action_url,
+            raw_response=order,
+        )
+
     def _normalize_contact_profile(self, *, contact_profile: dict[str, Any] | None, country_code: str) -> dict[str, Any]:
         if not contact_profile:
             return {}
@@ -391,12 +448,26 @@ class KoyweClient:
         return {key: value for key, value in normalized.items() if value}
 
     def _extract_action_url(self, payload: Any) -> str | None:
+        if isinstance(payload, str) and payload.startswith('http'):
+            return payload
         if isinstance(payload, dict):
-            for key in ('url', 'redirectUrl', 'redirect_url', 'actionUrl', 'actionURL', 'deeplink'):
+            for key in (
+                'providedAction',
+                'redirectUrl',
+                'redirect_url',
+                'actionUrl',
+                'actionURL',
+                'deeplink',
+                'url',
+            ):
                 value = payload.get(key)
+                if key in {'logoOut', 'logoIn', 'logo', 'image', 'icon'}:
+                    continue
                 if isinstance(value, str) and value.startswith('http'):
                     return value
-            for value in payload.values():
+            for key, value in payload.items():
+                if key in {'logoOut', 'logoIn', 'logo', 'image', 'icon'}:
+                    continue
                 found = self._extract_action_url(value)
                 if found:
                     return found
