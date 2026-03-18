@@ -19,10 +19,11 @@ export const formatRampMoney = (value?: string | number | null, code?: string | 
   if (!Number.isFinite(parsed)) {
     return '--';
   }
+  const displayCode = ['USDC Polygon', 'USDC Solana', 'USDC-a'].includes(code || '') ? 'cUSD' : code;
   return `${parsed.toLocaleString('es-AR', {
     minimumFractionDigits: parsed >= 100 ? 0 : 2,
     maximumFractionDigits: 2,
-  })} ${code || ''}`.trim();
+  })} ${displayCode || ''}`.trim();
 };
 
 export const formatRampRate = (value?: string | number | null, code?: string | null) => {
@@ -117,4 +118,3 @@ export const validateRampContinue = ({
   }
   return null;
 };
-

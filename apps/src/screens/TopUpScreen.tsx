@@ -436,7 +436,9 @@ const TopUpScreen = () => {
                     </View>
                     <View style={styles.quoteRow}>
                       <Text style={styles.quoteLabel}>Comisión de Confío</Text>
-                      <Text style={[styles.quoteValue, { color: colors.primary }]}>0 {quote.feeCurrency || fiatCurrency}</Text>
+                      <Text style={[styles.quoteValue, { color: colors.primary }]}>
+                        {formatRampMoney(0, quote.feeCurrency || fiatCurrency)}
+                      </Text>
                     </View>
                   </>
                 ) : (

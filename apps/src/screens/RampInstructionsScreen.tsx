@@ -165,6 +165,7 @@ export const RampInstructionsScreen = () => {
   const isTerminalError = statusCode === 'REJECTED' || statusCode === 'INVALID_WITHDRAWALS_DETAILS';
   const summaryLabel = direction === 'ON_RAMP' ? 'Recibirás aprox.' : 'Recibirás aprox.';
   const isCompact = width < 380;
+  const hasInstructionDetails = instructionView.rows.length > 0 || Boolean(instructionView.qrValue) || Boolean(instructionView.note);
 
   const copyInstructionValue = (label: string, value: string) => {
     Clipboard.setString(value);
@@ -275,51 +276,53 @@ export const RampInstructionsScreen = () => {
         </RampCard>
         </RampReveal>
 
-        <RampReveal delay={170}>
-        <RampCard style={styles.card}>
-          {instructionView.rows.length > 0 ? (
-            <>
-              {instructionView.rows.map((item, index) => (
-                <View key={`${item.label}-${index}`} style={styles.instructionRow}>
-                  <Text style={styles.instructionLabel}>{item.label}</Text>
-                  <Text style={styles.instructionValue}>{cleanDisplay(item.value)}</Text>
-                  <TouchableOpacity
-                    style={styles.copyPillInline}
-                    onPress={() => copyInstructionValue(item.label, cleanDisplay(item.value))}
-                    activeOpacity={0.7}
-                  >
-                    <Icon name="copy" size={12} color={colors.accent} />
-                    <Text style={styles.copyPillText}>Copiar</Text>
-                  </TouchableOpacity>
-                </View>
-              ))}
-            </>
-          ) : null}
+        {hasInstructionDetails ? (
+          <RampReveal delay={170}>
+          <RampCard style={styles.card}>
+            {instructionView.rows.length > 0 ? (
+              <>
+                {instructionView.rows.map((item, index) => (
+                  <View key={`${item.label}-${index}`} style={styles.instructionRow}>
+                    <Text style={styles.instructionLabel}>{item.label}</Text>
+                    <Text style={styles.instructionValue}>{cleanDisplay(item.value)}</Text>
+                    <TouchableOpacity
+                      style={styles.copyPillInline}
+                      onPress={() => copyInstructionValue(item.label, cleanDisplay(item.value))}
+                      activeOpacity={0.7}
+                    >
+                      <Icon name="copy" size={12} color={colors.accent} />
+                      <Text style={styles.copyPillText}>Copiar</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </>
+            ) : null}
 
-          {instructionView.qrValue ? (
-            <View style={styles.qrWrap}>
-              <QRCode value={instructionView.qrValue} size={190} />
-              <TouchableOpacity
-                style={styles.copyPill}
-                onPress={() => copyInstructionValue('Código QR', instructionView.qrValue!)}
-                activeOpacity={0.7}
-              >
-                <Icon name="copy" size={12} color={colors.accent} />
-                <Text style={styles.copyPillText}>Copiar código</Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
+            {instructionView.qrValue ? (
+              <View style={styles.qrWrap}>
+                <QRCode value={instructionView.qrValue} size={190} />
+                <TouchableOpacity
+                  style={styles.copyPill}
+                  onPress={() => copyInstructionValue('Código QR', instructionView.qrValue!)}
+                  activeOpacity={0.7}
+                >
+                  <Icon name="copy" size={12} color={colors.accent} />
+                  <Text style={styles.copyPillText}>Copiar código</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
 
-          {instructionView.note ? <Text style={styles.note}>{instructionView.note}</Text> : null}
-        </RampCard>
-        </RampReveal>
+            {instructionView.note ? <Text style={styles.note}>{instructionView.note}</Text> : null}
+          </RampCard>
+          </RampReveal>
+        ) : null}
 
-        {liveActionUrl && instructionView.allowExternalAction ? (
+        {instructionView.actionUrl && instructionView.allowExternalAction ? (
           <RampReveal delay={210}>
           <RampActionBar
             primaryLabel={instructionView.actionLabel || 'Abrir proveedor'}
             onPrimaryPress={() => {
-              void Linking.openURL(liveActionUrl);
+              void Linking.openURL(instructionView.actionUrl!);
             }}
           />
           </RampReveal>

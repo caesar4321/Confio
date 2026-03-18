@@ -16,6 +16,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import { useQuery, useMutation, useApolloClient } from '@apollo/client';
 import {
   GET_COUNTRIES,
+  GET_BANKS,
   GET_P2P_PAYMENT_METHODS,
   GET_USER_BANK_ACCOUNTS,
   CREATE_BANK_INFO,
@@ -44,7 +45,6 @@ const colors = {
 };
 
 const KOYWE_SUPPORTED_COUNTRY_CODES = ['AR', 'BO', 'BR', 'CL', 'CO', 'MX', 'PE'];
-const ACCOUNT_TYPE_METHOD_CODES = new Set(['BANCOLOMBIA']);
 const FIRST_NAME_ONLY_METHOD_CODES = new Set(['QRI-AR', 'QRI', 'QRI-BO', 'SIP-QR', 'QRI-PE', 'LIGO']);
 const SAVABLE_PAYMENT_METHOD_CODES = new Set([
   'WIREAR',
@@ -59,6 +59,28 @@ const SAVABLE_PAYMENT_METHOD_CODES = new Set([
   'QRI-PE',
   'RECAUDO-PE',
 ]);
+
+const PERU_BANK_CODE_ALIASES: Record<string, string> = {
+  BCP: 'CREDITO',
+  'BANCO DE CREDITO DEL PERU': 'CREDITO',
+  'BANCO DE CRÉDITO DEL PERÚ': 'CREDITO',
+  CREDITO: 'CREDITO',
+  BBVA: 'BBVA',
+  'BBVA PERU': 'BBVA',
+  'BBVA PERÚ': 'BBVA',
+  SCOTIABANK: 'SCOTIA',
+  'SCOTIABANK PERU': 'SCOTIA',
+  'SCOTIABANK PERÚ': 'SCOTIA',
+  INTERBANK: 'INTERBANK',
+  'BANCO DE LA NACION': 'NACION',
+  'BANCO DE LA NACIÓN': 'NACION',
+  NACION: 'NACION',
+  LIGO: 'LIGO',
+};
+
+const KOYWE_BANK_PICKER_ALLOWLIST: Record<string, Set<string>> = {
+  PE: new Set(['bcp', 'bbva_peru', 'scotiabank_peru', 'interbank', 'banco_nacion_peru', 'citibank_peru']),
+};
 
 interface PaymentMethodAccount {
   id: string;
@@ -230,7 +252,7 @@ export const AddBankInfoModal = ({
   const [formData, setFormData] = useState({
     accountHolderName: '',
     accountNumber: '',
-    accountType: 'ahorro',
+    accountType: '',
     identificationNumber: '',
     phoneNumber: '',
     email: '',
@@ -240,6 +262,7 @@ export const AddBankInfoModal = ({
   });
   const [showPaymentMethodPicker, setShowPaymentMethodPicker] = useState(false);
   const [showCountryPicker, setShowCountryPicker] = useState(false);
+  const [showProviderBankPicker, setShowProviderBankPicker] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Initialize form for editing
@@ -253,7 +276,7 @@ export const AddBankInfoModal = ({
       setFormData({
         accountHolderName: editingBankInfo.accountHolderName,
         accountNumber: editingBankInfo.accountNumber || '',
-        accountType: editingBankInfo.accountType || 'ahorro',
+        accountType: editingBankInfo.accountType || '',
         identificationNumber: editingBankInfo.identificationNumber || '',
         phoneNumber: editingBankInfo.phoneNumber || '',
         email: editingBankInfo.email || '',
@@ -269,7 +292,7 @@ export const AddBankInfoModal = ({
       setFormData({
         accountHolderName: '',
         accountNumber: '',
-        accountType: 'ahorro',
+        accountType: '',
         identificationNumber: '',
         phoneNumber: '',
         email: '',
@@ -309,6 +332,12 @@ export const AddBankInfoModal = ({
     }
   });
 
+  const { data: banksData } = useQuery(GET_BANKS, {
+    variables: { countryCode: selectedCountry?.code },
+    skip: !isVisible || !selectedCountry,
+    fetchPolicy: 'cache-and-network',
+  });
+
 
   // Mutations with cache update
   const [createBankInfo] = useMutation(CREATE_BANK_INFO, {
@@ -336,6 +365,14 @@ export const AddBankInfoModal = ({
   });
 
   const countries: Country[] = countriesData?.countries || [];
+  const countryBanks: Bank[] = banksData?.banks || [];
+  const koyweBankOptions = useMemo(() => {
+    const allowedCodes = KOYWE_BANK_PICKER_ALLOWLIST[(selectedCountry?.code || '').toUpperCase()];
+    if (!allowedCodes) {
+      return countryBanks;
+    }
+    return countryBanks.filter((bank) => allowedCodes.has((bank.code || '').toLowerCase()));
+  }, [countryBanks, selectedCountry?.code]);
   const filteredCountries = useMemo(() => {
     if (!allowedCountryCodes?.length) {
       const supported = new Set(KOYWE_SUPPORTED_COUNTRY_CODES);
@@ -421,6 +458,7 @@ export const AddBankInfoModal = ({
 
   const methodCode = (selectedPaymentMethod?.name || '').replace(/_/g, '-').toUpperCase();
   const countryCode = selectedCountry?.code?.toUpperCase() || '';
+  const isPayoutMode = mode !== 'on_ramp';
 
   const fieldCopy = useMemo(() => {
     const defaultAccount: FieldConfig = {
@@ -445,7 +483,7 @@ export const AddBankInfoModal = ({
       keyboardType: 'email-address' as const,
     };
 
-    if (FIRST_NAME_ONLY_METHOD_CODES.has(methodCode)) {
+    if (FIRST_NAME_ONLY_METHOD_CODES.has(methodCode) && !(isPayoutMode && (methodCode === 'QRI-BO' || methodCode === 'QRI-PE'))) {
       return {
         account: { ...defaultAccount, show: false, required: false },
         phone: { ...defaultPhone, show: false, required: false },
@@ -503,11 +541,27 @@ export const AddBankInfoModal = ({
       };
     }
     if (countryCode === 'PE' && methodCode === 'QRI-PE') {
+      if (isPayoutMode) {
+        return {
+          account: { ...defaultAccount, label: 'CCI o número interbancario', placeholder: 'Ingresa el número interbancario de 20 dígitos', show: true, required: true, keyboardType: 'numeric' as const },
+          phone: { ...defaultPhone, show: false, required: false },
+          email: { ...defaultEmail, show: false, required: false },
+          holderLabel: 'Titular de la cuenta',
+        };
+      }
       return {
         account: { ...defaultAccount, show: false, required: false },
         phone: { ...defaultPhone, label: 'Teléfono de la billetera', placeholder: 'Número asociado a la billetera', show: false, required: false },
         email: { ...defaultEmail, show: false, required: false },
         holderLabel: 'Nombre',
+      };
+    }
+    if (countryCode === 'BO' && methodCode === 'QRI-BO' && isPayoutMode) {
+      return {
+        account: { ...defaultAccount, show: false, required: false },
+        phone: { ...defaultPhone, label: 'Teléfono de la billetera', placeholder: 'Número asociado a la billetera', show: true, required: true },
+        email: { ...defaultEmail, show: false, required: false },
+        holderLabel: 'Titular de la billetera',
       };
     }
     return {
@@ -516,21 +570,16 @@ export const AddBankInfoModal = ({
       email: defaultEmail,
       holderLabel: selectedPaymentMethod?.providerType === 'fintech' ? 'Titular de la cuenta o billetera' : 'Titular de la cuenta',
     };
-  }, [countryCode, methodCode, selectedPaymentMethod?.providerType]);
+  }, [countryCode, isPayoutMode, methodCode, selectedPaymentMethod?.providerType]);
 
-  const showAccountTypeField = useMemo(() => {
-    if (!selectedPaymentMethod || selectedPaymentMethod.providerType !== 'bank') {
-      return false;
-    }
+const showAccountTypeField = useMemo(() => {
+  if (!selectedPaymentMethod || selectedPaymentMethod.providerType !== 'bank') {
+    return false;
+  }
+  return true;
+}, [countryCode, methodCode, selectedPaymentMethod]);
 
-    if (mode === 'off_ramp') {
-      return countryCode === 'CO' && ACCOUNT_TYPE_METHOD_CODES.has(methodCode);
-    }
-
-    return true;
-  }, [countryCode, methodCode, mode, selectedPaymentMethod]);
-
-  const accountTypeRequired = showAccountTypeField && mode === 'off_ramp' && countryCode === 'CO';
+  const accountTypeRequired = showAccountTypeField;
 
   const providerFieldConfigs = useMemo<ProviderFieldConfig[]>(() => {
     if (!selectedPaymentMethod) {
@@ -567,23 +616,35 @@ export const AddBankInfoModal = ({
       ];
     }
 
-    if (mode !== 'off_ramp') {
-      return [];
-    }
-
     if (countryCode === 'BR' && (methodCode === 'SULPAYMENTS' || methodCode === 'PIX-QR')) {
-      return [
-        {
-          key: 'pixKeyType',
-          label: 'Tipo de llave PIX',
-          placeholder: 'CPF, teléfono, email o aleatoria',
-          helpText: 'Si tu cuenta usa PIX, guarda el tipo de llave para completar el cobro.',
-        },
-      ];
+      const fields: ProviderFieldConfig[] = [];
+      if (isPayoutMode) {
+        fields.push({
+          key: 'bankName',
+          label: 'Institución receptora',
+          placeholder: 'Selecciona la institución',
+          required: true,
+          helpText: 'Selecciona la institución o banco asociado a la llave PIX donde recibirás el retiro.',
+        });
+      }
+      fields.push({
+        key: 'pixKeyType',
+        label: 'Tipo de llave PIX',
+        placeholder: 'CPF, teléfono, email o aleatoria',
+        helpText: 'Si tu cuenta usa PIX, guarda el tipo de llave para completar el cobro.',
+      });
+      return fields;
     }
 
     if (countryCode === 'CL' && (methodCode === 'WIRECL' || methodCode === 'KHIPU')) {
       return [
+        {
+          key: 'bankName',
+          label: 'Banco receptor',
+          placeholder: 'Selecciona el banco',
+          required: methodCode === 'WIRECL' && isPayoutMode,
+          helpText: methodCode === 'WIRECL' && isPayoutMode ? 'Selecciona el banco donde recibirás el retiro.' : undefined,
+        },
         {
           key: 'beneficiaryRut',
           label: 'RUT del titular',
@@ -593,13 +654,13 @@ export const AddBankInfoModal = ({
       ];
     }
 
-    if (countryCode === 'MX' && (methodCode === 'WIREMX' || methodCode === 'STP')) {
+    if (countryCode === 'MX' && methodCode === 'WIREMX') {
       return [
         {
           key: 'bankName',
-          label: 'Banco receptor',
-          placeholder: 'Nombre del banco',
-          helpText: 'Guarda el banco receptor para transferencias SPEI.',
+          label: 'Institución receptora',
+          placeholder: 'Nombre de la institución',
+          helpText: 'Guarda la institución receptora para transferencias SPEI.',
         },
       ];
     }
@@ -610,6 +671,8 @@ export const AddBankInfoModal = ({
           key: 'bankName',
           label: 'Banco receptor',
           placeholder: 'Nombre del banco',
+          required: methodCode !== 'RECAUDO-PE',
+          helpText: methodCode === 'RECAUDO-PE' ? 'Para Recaudo BCP usaremos BCP por defecto si no aplica otro banco.' : 'Ejemplos: BCP, Interbank, BBVA, Scotiabank.',
         },
         {
           key: 'cci',
@@ -618,6 +681,10 @@ export const AddBankInfoModal = ({
           keyboardType: 'numeric',
         },
       ];
+    }
+
+    if (!isPayoutMode) {
+      return [];
     }
 
     if (countryCode === 'BO' && methodCode === 'QRI-BO') {
@@ -641,7 +708,7 @@ export const AddBankInfoModal = ({
       ];
     }
 
-    if (countryCode === 'CO' && (methodCode === 'PSE' || methodCode === 'BANCOLOMBIA')) {
+    if (countryCode === 'CO' && methodCode === 'PSE') {
       return [
         {
           key: 'bankName',
@@ -652,7 +719,7 @@ export const AddBankInfoModal = ({
     }
 
     return [];
-  }, [countryCode, methodCode, mode, selectedPaymentMethod]);
+  }, [countryCode, isPayoutMode, methodCode, selectedPaymentMethod]);
 
   const validateForm = () => {
     if (!selectedPaymentMethod) {
@@ -696,6 +763,11 @@ export const AddBankInfoModal = ({
       }
     }
 
+    if (accountTypeRequired && !String(formData.accountType || '').trim()) {
+      Alert.alert('Error', 'Por favor selecciona el tipo de cuenta', [{ text: 'OK' }]);
+      return false;
+    }
+
     return true;
   };
 
@@ -704,7 +776,30 @@ export const AddBankInfoModal = ({
 
     setIsSubmitting(true);
     try {
-
+      const enrichedProviderMetadata = { ...formData.providerMetadata };
+      if (isPayoutMode && countryCode === 'CO') {
+        if (methodCode === 'NEQUI' && !enrichedProviderMetadata.bankCode) {
+          enrichedProviderMetadata.bankCode = 'NEQUI';
+        }
+        if (methodCode === 'BANCOLOMBIA' && !enrichedProviderMetadata.bankCode) {
+          enrichedProviderMetadata.bankCode = 'BANCOLOMBIA';
+        }
+      }
+      if (isPayoutMode && countryCode === 'PE') {
+        const normalizedBankName = (enrichedProviderMetadata.bankName || '').trim().toUpperCase();
+        if (!enrichedProviderMetadata.bankCode && normalizedBankName && PERU_BANK_CODE_ALIASES[normalizedBankName]) {
+          enrichedProviderMetadata.bankCode = PERU_BANK_CODE_ALIASES[normalizedBankName];
+        }
+        if (methodCode === 'QRI-PE' && !enrichedProviderMetadata.bankCode) {
+          enrichedProviderMetadata.bankCode = 'LIGO';
+        }
+        if (methodCode === 'RECAUDO-PE' && !enrichedProviderMetadata.bankCode) {
+          enrichedProviderMetadata.bankCode = 'CREDITO';
+        }
+      }
+      if (isPayoutMode && countryCode === 'MX' && methodCode === 'STP' && !enrichedProviderMetadata.bankCode) {
+        enrichedProviderMetadata.bankCode = 'STP';
+      }
       const variables = {
         paymentMethodId: selectedPaymentMethod!.id,
         accountHolderName:
@@ -719,8 +814,8 @@ export const AddBankInfoModal = ({
         username: formData.username.trim() || null,
         accountType: showAccountTypeField ? (formData.accountType || null) : null,
         identificationNumber: formData.identificationNumber.trim() || null,
-        providerMetadata: Object.keys(formData.providerMetadata).length
-          ? JSON.stringify(formData.providerMetadata)
+        providerMetadata: Object.keys(enrichedProviderMetadata).length
+          ? JSON.stringify(enrichedProviderMetadata)
           : null,
         isDefault: formData.isDefault,
       };
@@ -816,7 +911,7 @@ export const AddBankInfoModal = ({
           } else {
             setSelectedBank(null);
           }
-          setFormData(prev => ({ ...prev, providerMetadata: {} }));
+          setFormData(prev => ({ ...prev, providerMetadata: {}, accountType: '' }));
           setShowPaymentMethodPicker(false);
         }}
       >
@@ -896,7 +991,7 @@ export const AddBankInfoModal = ({
           setSelectedCountry(country);
           setSelectedBank(null);
           setSelectedPaymentMethod(null); // Reset payment method when country changes
-          setFormData(prev => ({ ...prev, providerMetadata: {} }));
+          setFormData(prev => ({ ...prev, providerMetadata: {}, accountType: '' }));
           setShowCountryPicker(false);
         }}
       >
@@ -940,6 +1035,79 @@ export const AddBankInfoModal = ({
             // Ensure all items are rendered
             getItemLayout={(data, index) => ({
               length: 60, // Approximate height of each item
+              offset: 60 * index,
+              index,
+            })}
+          />
+        </View>
+      </Modal>
+    );
+  };
+
+  const renderProviderBankPicker = () => {
+    if (!showProviderBankPicker) {
+      return null;
+    }
+
+    const renderBankItem = ({ item: bank }: { item: Bank }) => {
+      const isSelected =
+        formData.providerMetadata.bankCode === bank.code ||
+        formData.providerMetadata.bankName === bank.name;
+
+      return (
+        <TouchableOpacity
+          style={styles.pickerItem}
+          onPress={() => {
+            setFormData(prev => ({
+              ...prev,
+              providerMetadata: {
+                ...prev.providerMetadata,
+                bankName: bank.name,
+                bankCode: bank.code || '',
+              },
+            }));
+            setShowProviderBankPicker(false);
+          }}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={styles.pickerItemText}>{bank.name}</Text>
+            {bank.shortName ? <Text style={styles.providerTypeSubtext}>{bank.shortName}</Text> : null}
+          </View>
+          {isSelected ? <Icon name="check" size={20} color={colors.primary} /> : null}
+        </TouchableOpacity>
+      );
+    };
+
+    return (
+      <Modal
+        visible={showProviderBankPicker}
+        animationType="slide"
+        presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'}
+        onRequestClose={() => setShowProviderBankPicker(false)}
+      >
+        <View style={styles.pickerContainer}>
+          <View style={styles.pickerHeader}>
+            <TouchableOpacity onPress={() => setShowProviderBankPicker(false)}>
+              <Text style={styles.pickerCancel}>Cancelar</Text>
+            </TouchableOpacity>
+            <Text style={styles.pickerTitle}>Seleccionar Banco</Text>
+            <View style={{ width: 60 }} />
+          </View>
+
+          <FlatList
+            data={koyweBankOptions}
+            renderItem={renderBankItem}
+            keyExtractor={(item) => item.id}
+            style={styles.pickerList}
+            contentContainerStyle={styles.pickerListContent}
+            showsVerticalScrollIndicator={true}
+            initialNumToRender={20}
+            maxToRenderPerBatch={10}
+            windowSize={21}
+            removeClippedSubviews={true}
+            updateCellsBatchingPeriod={50}
+            getItemLayout={(data, index) => ({
+              length: 60,
               offset: 60 * index,
               index,
             })}
@@ -1157,30 +1325,75 @@ export const AddBankInfoModal = ({
           </View>
         )}
 
-        {providerFieldConfigs.map((field) => (
-          <View style={styles.inputGroup} key={field.key}>
-            <Text style={styles.label}>
-              {field.label}{field.required ? ' *' : ''}
-            </Text>
-            <TextInput
-              style={styles.textInput}
-              value={formData.providerMetadata[field.key] || ''}
-              onChangeText={(value) =>
-                setFormData(prev => ({
-                  ...prev,
-                  providerMetadata: {
-                    ...prev.providerMetadata,
-                    [field.key]: value,
-                  },
-                }))
-              }
-              placeholder={field.placeholder}
-              keyboardType={field.keyboardType || 'default'}
-              autoCapitalize="none"
-            />
-            {field.helpText ? <Text style={styles.helpText}>{field.helpText}</Text> : null}
-          </View>
-        ))}
+        {providerFieldConfigs.map((field) => {
+          if (field.key === 'bankName') {
+            const canUseBankPicker = koyweBankOptions.length > 0;
+            return (
+              <View style={styles.inputGroup} key={field.key}>
+                <Text style={styles.label}>
+                  {field.label}{field.required ? ' *' : ''}
+                </Text>
+                {canUseBankPicker ? (
+                  <TouchableOpacity
+                    style={styles.picker}
+                    onPress={() => setShowProviderBankPicker(true)}
+                  >
+                    <View style={styles.pickerContent}>
+                      {formData.providerMetadata.bankName ? (
+                        <Text style={styles.pickerText}>{formData.providerMetadata.bankName}</Text>
+                      ) : (
+                        <Text style={styles.pickerPlaceholder}>{field.placeholder}</Text>
+                      )}
+                    </View>
+                    <Icon name="chevron-down" size={16} color={colors.text.secondary} />
+                  </TouchableOpacity>
+                ) : (
+                  <TextInput
+                    style={styles.textInput}
+                    value={formData.providerMetadata[field.key] || ''}
+                    onChangeText={(value) =>
+                      setFormData(prev => ({
+                        ...prev,
+                        providerMetadata: {
+                          ...prev.providerMetadata,
+                          [field.key]: value,
+                        },
+                      }))
+                    }
+                    placeholder={field.placeholder}
+                    autoCapitalize="words"
+                  />
+                )}
+                {field.helpText ? <Text style={styles.helpText}>{field.helpText}</Text> : null}
+              </View>
+            );
+          }
+
+          return (
+            <View style={styles.inputGroup} key={field.key}>
+              <Text style={styles.label}>
+                {field.label}{field.required ? ' *' : ''}
+              </Text>
+              <TextInput
+                style={styles.textInput}
+                value={formData.providerMetadata[field.key] || ''}
+                onChangeText={(value) =>
+                  setFormData(prev => ({
+                    ...prev,
+                    providerMetadata: {
+                      ...prev.providerMetadata,
+                      [field.key]: value,
+                    },
+                  }))
+                }
+                placeholder={field.placeholder}
+                keyboardType={field.keyboardType || 'default'}
+                autoCapitalize="none"
+              />
+              {field.helpText ? <Text style={styles.helpText}>{field.helpText}</Text> : null}
+            </View>
+          );
+        })}
 
 
         {/* Set as Default */}
@@ -1205,6 +1418,7 @@ export const AddBankInfoModal = ({
       {/* Pickers */}
       {renderPaymentMethodPicker()}
       {renderCountryPicker()}
+      {renderProviderBankPicker()}
     </SafeAreaView>
   );
 };

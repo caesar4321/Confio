@@ -25,5 +25,39 @@ export const getFriendlyRampError = (rawError?: string | null): string => {
     return 'El servicio de compra y retiro no está disponible temporalmente. Inténtalo más tarde.';
   }
 
+  if (
+    normalized.includes('bankcode not valid nequi') ||
+    (normalized.includes('nequi') && normalized.includes('bankcode not valid'))
+  ) {
+    return 'Nequi todavía no está habilitado para retiros en este ambiente. Puedes intentar con otro método mientras coordinamos la activación con Koywe.';
+  }
+
+  if (
+    normalized.includes('bankcode not valid bancolombia') ||
+    (normalized.includes('bancolombia') && normalized.includes('bankcode not valid'))
+  ) {
+    return 'Bancolombia todavía no está habilitado para retiros en este ambiente. Puedes intentar con otro método mientras coordinamos la activación con Koywe.';
+  }
+
+  if (
+    normalized.includes('bankcode not valid') &&
+    (
+      normalized.includes('banco_btg_pactual') ||
+      normalized.includes('banbco_btg_pactual') ||
+      normalized.includes('nubank') ||
+      normalized.includes('banco_itau') ||
+      normalized.includes('banco_bradesco')
+    )
+  ) {
+    return 'Los retiros por PIX en Brasil todavía no están habilitados correctamente en este ambiente. Puedes intentar con otro método mientras coordinamos la activación con Koywe.';
+  }
+
+  if (
+    normalized.includes('accounttype is required') &&
+    normalized.includes('checking, savings, interbanking')
+  ) {
+    return 'Este método todavía requiere una configuración adicional del proveedor en este ambiente. Intenta con otro método mientras lo coordinamos con Koywe.';
+  }
+
   return message;
 };

@@ -64,6 +64,83 @@ _ACCOUNT_TYPE_MAP = {
     'interbanking': 'interbanking',
 }
 
+_BANK_CODE_ALIASES = {
+    'BRA': {
+        'BANCO_DO_BRASIL': 'BANCO_DO_BRASIL',
+        'BANCO DO BRASIL': 'BANCO_DO_BRASIL',
+        'BRADESCO': 'BANCO_BRADESCO',
+        'BANCO_BRADESCO': 'BANCO_BRADESCO',
+        'ITAU': 'BANCO_ITAU',
+        'ITAU UNIBANCO': 'BANCO_ITAU',
+        'ITAÚ': 'BANCO_ITAU',
+        'ITAÚ UNIBANCO': 'BANCO_ITAU',
+        'BANCO_ITAU': 'BANCO_ITAU',
+        'NUBANK': 'NUBANK',
+        'NU PAGAMENTOS': 'NUBANK',
+        'NU PAGAMENTOS (NUBANK)': 'NUBANK',
+        'BANCO_INTER': 'BANCO_INTER',
+        'BANCO INTER': 'BANCO_INTER',
+        'INTER': 'BANCO_INTER',
+        'SANTANDER': 'SANTANDER',
+        'BANCO SANTANDER BRASIL': 'SANTANDER',
+        'CAIXA': 'CAIXA_ECONOMICA_FEDERAL',
+        'CAIXA ECONOMICA FEDERAL': 'CAIXA_ECONOMICA_FEDERAL',
+        'CAIXA ECONÔMICA FEDERAL': 'CAIXA_ECONOMICA_FEDERAL',
+        'BANESTES': 'BANESTES',
+        'BTG_PACTUAL': 'BANCO_BTG_PACTUAL',
+        'BTG PACTUAL': 'BANCO_BTG_PACTUAL',
+        'BANCO_BTG_PACTUAL': 'BANCO_BTG_PACTUAL',
+        'BANCO BTG PACTUAL': 'BANCO_BTG_PACTUAL',
+        'BANCO SAFRA': 'BANCO_SAFRA',
+        'SAFRA': 'BANCO_SAFRA',
+        'CITIBANK': 'CITIBANK',
+        'BANCO ORIGINAL': 'BANCO_ORIGINAL',
+        'ORIGINAL': 'BANCO_ORIGINAL',
+        'SICREDI': 'BANCO_COOPERATIVO_SICREDI',
+        'BANCO COOPERATIVO SICREDI': 'BANCO_COOPERATIVO_SICREDI',
+        'MERCANTIL': 'BANCO_MERCANTIL_BRASIL',
+        'BANCO MERCANTIL DO BRASIL': 'BANCO_MERCANTIL_BRASIL',
+    },
+    'CHL': {
+        'BCI': 'BCI',
+        'BANCO_BCI': 'BCI',
+        'BANCO_CHILE': 'CHILE',
+        'BANCO DE CHILE': 'CHILE',
+        'BANCO_ESTADO': 'ESTADO',
+        'BANCOESTADO': 'ESTADO',
+        'SANTANDER_CHILE': 'SANTANDER',
+        'SCOTIABANK_CHILE': 'SCOTIABANK',
+        'BANCO_FALABELLA': 'FALABELLA',
+        'BANCO_CONSORCIO': 'CONSORCIO',
+        'ITAU_CHILE': 'ITAU',
+    },
+    'PER': {
+        'BCP': 'CREDITO',
+        'BCP_PERU': 'CREDITO',
+        'BCP': 'CREDITO',
+        'BANCO DE CREDITO DEL PERU': 'CREDITO',
+        'BANCO DE CRÉDITO DEL PERÚ': 'CREDITO',
+        'CREDITO': 'CREDITO',
+        'BBVA_PERU': 'BBVA',
+        'BBVA': 'BBVA',
+        'BBVA PERU': 'BBVA',
+        'BBVA PERÚ': 'BBVA',
+        'SCOTIABANK_PERU': 'SCOTIA',
+        'SCOTIABANK': 'SCOTIA',
+        'SCOTIABANK PERU': 'SCOTIA',
+        'SCOTIABANK PERÚ': 'SCOTIA',
+        'INTERBANK_PERU': 'INTERBANK',
+        'INTERBANK': 'INTERBANK',
+        'BANCO_NACION_PERU': 'NACION',
+        'BANCO DE LA NACION': 'NACION',
+        'BANCO DE LA NACIÓN': 'NACION',
+        'NACION': 'NACION',
+        'CITIBANK_PERU': 'CITIBANK',
+        'CITIBANK': 'CITIBANK',
+        'LIGO': 'LIGO',
+    },
+}
+
 _DOCUMENT_TYPE_MAP = {
     'AR': 'DNI',
     'BO': 'CED_CIU',
@@ -326,13 +403,10 @@ class KoyweClient:
             'asset_note': RAMP_USDC_ALGORAND_NOTE,
         }
 
-    def create_order(self, *, quote_id: str, email: str | None = None, destination_address: str | None = None, bank_account_id: str | None = None, external_id: str | None = None) -> dict[str, Any]:
+    def create_order(self, *, quote_id: str, email: str | None = None, destination_address: str | None = None, external_id: str | None = None) -> dict[str, Any]:
         payload: dict[str, Any] = {'quoteId': quote_id}
         if destination_address:
             payload['destinationAddress'] = destination_address
-        if bank_account_id:
-            payload['bankAccountId'] = bank_account_id
-            payload.setdefault('destinationAddress', bank_account_id)
         if external_id:
             payload['externalId'] = external_id
         return self._request('POST', '/rest/orders', email=email, json_payload=payload)
@@ -343,6 +417,12 @@ class KoyweClient:
     def create_bank_account(self, *, bank_info: Any, email: str | None, country_code: str, fiat_symbol: str, contact_profile: dict[str, Any] | None = None) -> dict[str, Any]:
         alpha3 = _COUNTRY_ALPHA3.get((country_code or '').upper(), (country_code or '').upper())
         provider_metadata = getattr(bank_info, 'provider_metadata', None) or {}
+        payment_method = getattr(bank_info, 'payment_method', None)
+        payment_method_code = (
+            getattr(payment_method, 'name', None)
+            or getattr(payment_method, 'display_name', None)
+            or ''
+        ).strip().upper().replace('_', '-')
         account_number = (
             provider_metadata.get('pixKey')
             or provider_metadata.get('cci')
@@ -357,12 +437,48 @@ class KoyweClient:
             'accountNumber': account_number,
         }
         if provider_metadata.get('bankCode'):
-            payload['bankCode'] = provider_metadata['bankCode']
+            resolved_bank_code = self._resolve_bank_code(
+                country_code=alpha3,
+                bank_name=str(provider_metadata['bankCode']),
+            ) or str(provider_metadata['bankCode']).strip().upper()
+            payload['bankCode'] = resolved_bank_code
+        elif provider_metadata.get('bankName'):
+            resolved_bank_code = self._resolve_bank_code(
+                country_code=alpha3,
+                bank_name=str(provider_metadata['bankName']),
+            )
+            if resolved_bank_code:
+                payload['bankCode'] = resolved_bank_code
         elif getattr(bank_info, 'bank', None) and getattr(bank_info.bank, 'code', None):
-            payload['bankCode'] = bank_info.bank.code
+            resolved_bank_code = self._resolve_bank_code(
+                country_code=alpha3,
+                bank_name=str(bank_info.bank.code),
+            ) or str(bank_info.bank.code).strip().upper()
+            payload['bankCode'] = resolved_bank_code
+        elif alpha3 == 'COL' and payment_method_code in {'NEQUI', 'BANCOLOMBIA'}:
+            payload['bankCode'] = payment_method_code
+        elif alpha3 == 'MEX' and payment_method_code == 'STP':
+            payload['bankCode'] = 'STP'
+        elif alpha3 == 'PER' and payment_method_code == 'QRI-PE':
+            payload['bankCode'] = 'LIGO'
+        elif alpha3 == 'PER' and payment_method_code == 'RECAUDO-PE':
+            payload['bankCode'] = 'CREDITO'
         if getattr(bank_info, 'account_type', None):
             payload['accountType'] = _ACCOUNT_TYPE_MAP.get(bank_info.account_type, bank_info.account_type)
+        elif alpha3 == 'COL' and payment_method_code in {'NEQUI', 'BANCOLOMBIA'}:
+            # Koywe's Colombia payout schema requires accountType even for wallet-like rails.
+            # Nequi does not expose this in the user UX, so default to savings server-side.
+            payload['accountType'] = 'savings'
+        elif alpha3 == 'PER' and payment_method_code == 'QRI-PE':
+            payload['accountType'] = 'interbanking'
         return self._request('POST', '/rest/bank-accounts', email=email, json_payload=payload)
+
+    def _resolve_bank_code(self, *, country_code: str, bank_name: str) -> str | None:
+        normalized_country = (country_code or '').strip().upper()
+        normalized_name = (bank_name or '').strip().upper().replace('-', '_')
+        if not normalized_name:
+            return None
+        return _BANK_CODE_ALIASES.get(normalized_country, {}).get(normalized_name)
 
     def create_ramp_order(self, *, direction: str, amount: Decimal, fiat_symbol: str, payment_method_code: str, email: str | None, wallet_address: str | None, country_code: str, bank_info: Any = None, external_id: str | None = None, contact_profile: dict[str, Any] | None = None) -> KoyweOrderResult:
         normalized_direction = direction.upper()
@@ -384,7 +500,7 @@ class KoyweClient:
         if not quote_id:
             raise KoyweError('Koywe quote response did not include quoteId')
 
-        bank_account_id = None
+        destination_address = wallet_address if normalized_direction == 'ON_RAMP' else None
         if normalized_direction == 'OFF_RAMP':
             if not bank_info:
                 raise KoyweError('A saved payout method is required for off-ramp orders')
@@ -395,15 +511,15 @@ class KoyweClient:
                 fiat_symbol=fiat_symbol,
                 contact_profile=contact_profile,
             )
-            bank_account_id = str(bank_account.get('_id') or bank_account.get('id') or bank_account.get('bankAccountId') or '')
-            if not bank_account_id:
+            created_bank_account_id = str(bank_account.get('_id') or bank_account.get('id') or bank_account.get('bankAccountId') or '')
+            if not created_bank_account_id:
                 raise KoyweError('Koywe bank account response did not include an id')
+            destination_address = created_bank_account_id
 
         order = self.create_order(
             quote_id=quote_id,
             email=email,
-            destination_address=wallet_address if normalized_direction == 'ON_RAMP' else None,
-            bank_account_id=bank_account_id,
+            destination_address=destination_address,
             external_id=external_id,
         )
 
@@ -451,7 +567,7 @@ class KoyweClient:
         if isinstance(payload, str) and payload.startswith('http'):
             return payload
         if isinstance(payload, dict):
-            for key in (
+            action_keys = (
                 'providedAction',
                 'redirectUrl',
                 'redirect_url',
@@ -459,18 +575,17 @@ class KoyweClient:
                 'actionURL',
                 'deeplink',
                 'url',
+            )
+            for key in (
+                *action_keys,
             ):
                 value = payload.get(key)
-                if key in {'logoOut', 'logoIn', 'logo', 'image', 'icon'}:
-                    continue
                 if isinstance(value, str) and value.startswith('http'):
                     return value
-            for key, value in payload.items():
-                if key in {'logoOut', 'logoIn', 'logo', 'image', 'icon'}:
-                    continue
-                found = self._extract_action_url(value)
-                if found:
-                    return found
+                if isinstance(value, (dict, list)):
+                    found = self._extract_action_url(value)
+                    if found:
+                        return found
         elif isinstance(payload, list):
             for item in payload:
                 found = self._extract_action_url(item)
