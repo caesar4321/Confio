@@ -2,6 +2,10 @@
 Blockchain GraphQL schema - Algorand operations
 """
 import graphene
+from graphene_django import DjangoObjectType
+from graphql import GraphQLError
+from blockchain.models import PendingAutoSwap
+from users.models import Account
 from .mutations import (
     EnsureAlgorandReadyMutation,
     GenerateOptInTransactionsMutation,
@@ -52,6 +56,10 @@ class Query(graphene.ObjectType):
         phone=graphene.String(required=True),
         phone_country=graphene.String(required=False)
     )
+    pending_auto_swap = graphene.Field(
+        lambda: PendingAutoSwapType,
+        account_id=graphene.ID(required=False),
+    )
     
     def resolve_check_asset_opt_ins(self, info):
         return CheckAssetOptInsQuery()
@@ -86,6 +94,39 @@ class Query(graphene.ObjectType):
             return []
         results = get_all_pending_invites_for_phone(phone, phone_country)
         return [PendingInviteType(**r) for r in results]
+
+    def resolve_pending_auto_swap(self, info, account_id=None):
+        user = info.context.user
+        if not user or not user.is_authenticated:
+            return None
+
+        queryset = PendingAutoSwap.objects.filter(status='PENDING')
+        if account_id:
+            account = _resolve_account_for_pending_auto_swap(user=user, account_ref=account_id)
+            if not account:
+                return None
+            queryset = queryset.filter(account=account)
+        else:
+            queryset = queryset.filter(actor_user=user)
+
+        return queryset.select_related('account', 'usdc_deposit', 'conversion').order_by('-created_at').first()
+
+
+class PendingAutoSwapType(DjangoObjectType):
+    class Meta:
+        model = PendingAutoSwap
+        fields = (
+            'id',
+            'asset_type',
+            'amount_micro',
+            'amount_decimal',
+            'status',
+            'error_message',
+            'source_address',
+            'source_tx_hash',
+            'created_at',
+            'updated_at',
+        )
 
 
 class Mutation(graphene.ObjectType):
@@ -123,3 +164,53 @@ class Mutation(graphene.ObjectType):
 
 __all__ = ['Query', 'Mutation']
 
+
+def _resolve_account_for_pending_auto_swap(*, user, account_ref):
+    raw = str(account_ref or '').strip()
+    if not raw:
+        return None
+
+    if raw.isdigit():
+        account = Account.objects.filter(id=raw, deleted_at__isnull=True).first()
+        if not account:
+            return None
+        if account.account_type == 'personal':
+            return account if account.user_id == user.id else None
+        if account.account_type == 'business':
+            is_owner = Account.objects.filter(
+                user_id=user.id,
+                business_id=account.business_id,
+                account_type='business',
+                deleted_at__isnull=True,
+            ).exists()
+            return account if is_owner else None
+        return None
+
+    parts = raw.split('_')
+    if len(parts) == 2 and parts[0] == 'personal':
+        try:
+            account_index = int(parts[1])
+        except ValueError:
+            return None
+        return Account.objects.filter(
+            user_id=user.id,
+            account_type='personal',
+            account_index=account_index,
+            deleted_at__isnull=True,
+        ).first()
+
+    if len(parts) == 3 and parts[0] == 'business':
+        business_id, account_index_raw = parts[1], parts[2]
+        try:
+            account_index = int(account_index_raw)
+        except ValueError:
+            return None
+        return Account.objects.filter(
+            user_id=user.id,
+            business_id=business_id,
+            account_type='business',
+            account_index=account_index,
+            deleted_at__isnull=True,
+        ).first()
+
+    raise GraphQLError('Invalid account reference')

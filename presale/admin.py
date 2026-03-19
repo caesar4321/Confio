@@ -1109,6 +1109,8 @@ class PresalePurchaseAdmin(admin.ModelAdmin):
         'formatted_confio',
         'price_display',
         'status_colored',
+        'accepted_terms_version',
+        'accepted_terms_at',
         'txid_short',
         'created_at',
         'completed_at'
@@ -1124,6 +1126,10 @@ class PresalePurchaseAdmin(admin.ModelAdmin):
         'price_per_token',
         'transaction_hash',
         'from_address',
+        'accepted_terms_version',
+        'accepted_terms_at',
+        'accepted_terms_ip',
+        'accepted_terms_user_agent',
         'created_at',
         'completed_at'
     ]
@@ -1146,6 +1152,14 @@ class PresalePurchaseAdmin(admin.ModelAdmin):
                 'transaction_hash',
                 'from_address',
                 'notes'
+            )
+        }),
+        ('Terms Acceptance', {
+            'fields': (
+                'accepted_terms_version',
+                'accepted_terms_at',
+                'accepted_terms_ip',
+                'accepted_terms_user_agent',
             )
         }),
         ('Timestamps', {

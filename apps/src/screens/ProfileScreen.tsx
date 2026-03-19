@@ -592,10 +592,22 @@ export const ProfileScreen = () => {
               canManageBankAccounts && (
                 <TouchableOpacity
                   style={styles.cardOption}
-                  onPress={() => navigation.navigate('BankInfo')}
+                  onPress={() => navigation.navigate('RampAddress')}
+                >
+                  <Icon name="map-pin" size={18} color="#6B7280" />
+                  <Text style={styles.cardOptionText}>Dirección para recargas y retiros</Text>
+                  <Icon name="chevron-right" size={16} color="#9CA3AF" />
+                </TouchableOpacity>
+              )}
+
+            {activeAccount?.type.toLowerCase() === 'personal' &&
+              canManageBankAccounts && (
+                <TouchableOpacity
+                  style={styles.cardOption}
+                  onPress={() => navigation.navigate('PayoutMethods')}
                 >
                   <Icon name="credit-card" size={18} color="#6B7280" />
-                  <Text style={styles.cardOptionText}>Métodos de Pago</Text>
+                  <Text style={styles.cardOptionText}>Formas de cobro</Text>
                   <Icon name="chevron-right" size={16} color="#9CA3AF" />
                 </TouchableOpacity>
               )}

@@ -189,3 +189,82 @@ class IndexerAssetCursor(models.Model):
 
     def __str__(self):
         return f"asset:{self.asset_id} @ {self.last_scanned_round}"
+
+
+class PendingAutoSwap(models.Model):
+    """Actionable auto-swap work that must be completed by the client signer."""
+
+    ASSET_CHOICES = [
+        ('USDC', 'USDC'),
+        ('ALGO', 'ALGO'),
+    ]
+
+    STATUS_CHOICES = [
+        ('PENDING', 'Pending'),
+        ('SUBMITTED', 'Submitted'),
+        ('COMPLETED', 'Completed'),
+        ('FAILED', 'Failed'),
+        ('CANCELLED', 'Cancelled'),
+    ]
+
+    account = models.ForeignKey(
+        Account,
+        on_delete=models.CASCADE,
+        related_name='pending_auto_swaps',
+    )
+    actor_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='pending_auto_swaps',
+    )
+    actor_business = models.ForeignKey(
+        'users.Business',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='pending_auto_swaps',
+    )
+    actor_type = models.CharField(
+        max_length=10,
+        choices=[('user', 'Personal'), ('business', 'Business')],
+        default='user',
+    )
+    actor_address = models.CharField(max_length=100, blank=True, default='')
+    asset_type = models.CharField(max_length=10, choices=ASSET_CHOICES)
+    amount_micro = models.BigIntegerField(default=0)
+    amount_decimal = models.DecimalField(max_digits=19, decimal_places=6, default=0)
+    source_address = models.CharField(max_length=100, blank=True, default='')
+    source_tx_hash = models.CharField(max_length=100, blank=True, default='')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    error_message = models.TextField(blank=True)
+    usdc_deposit = models.OneToOneField(
+        'usdc_transactions.USDCDeposit',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='pending_auto_swap',
+    )
+    conversion = models.OneToOneField(
+        'conversion.Conversion',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='pending_auto_swap',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['account', 'status', '-created_at']),
+            models.Index(fields=['actor_user', 'status', '-created_at']),
+            models.Index(fields=['actor_business', 'status', '-created_at']),
+            models.Index(fields=['asset_type', 'status', '-created_at']),
+        ]
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.account_id}:{self.asset_type}:{self.status}:{self.amount_decimal}"

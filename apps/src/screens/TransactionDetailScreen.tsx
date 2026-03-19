@@ -67,6 +67,37 @@ const formatAmountWithSign = (amount: string | undefined): string => {
   return sign + numericPart;
 };
 
+const addPositiveSign = (value: unknown): string | undefined => {
+  if (value === undefined || value === null) return undefined;
+  const normalized = String(value).trim();
+  if (!normalized) return undefined;
+  return normalized.startsWith('+') || normalized.startsWith('-') ? normalized : `+${normalized}`;
+};
+
+const addNegativeSign = (value: unknown): string | undefined => {
+  if (value === undefined || value === null) return undefined;
+  const normalized = String(value).trim();
+  if (!normalized) return undefined;
+  if (normalized.startsWith('-')) return normalized;
+  if (normalized.startsWith('+')) return `-${normalized.slice(1)}`;
+  return `-${normalized}`;
+};
+
+const normalizeRampDirection = (value: unknown, amount?: unknown, title?: unknown): 'on_ramp' | 'off_ramp' | '' => {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'on_ramp' || normalized === 'off_ramp') return normalized;
+
+  const amountText = String(amount || '').trim();
+  if (amountText.startsWith('-')) return 'off_ramp';
+  if (amountText.startsWith('+')) return 'on_ramp';
+
+  const titleText = String(title || '').trim().toLowerCase();
+  if (titleText.includes('retiro')) return 'off_ramp';
+  if (titleText.includes('recarga')) return 'on_ramp';
+
+  return '';
+};
+
 // Helper function to format phone numbers for display
 const formatPhoneNumber = (phone: string | undefined): string => {
   if (!phone) return '';
@@ -154,6 +185,37 @@ const resolveInternalId = (tx?: any, fallback?: any): string | undefined => {
   }
 
   return firstValidNonUuid;
+};
+
+const deriveStatusFromNotificationType = (notificationType: string | undefined): string | undefined => {
+  switch ((notificationType || '').toUpperCase()) {
+    case 'RAMP_FAILED':
+      return 'failed';
+    case 'RAMP_PENDING':
+      return 'pending';
+    case 'RAMP_COMPLETED':
+      return 'completed';
+    case 'CONVERSION_FAILED':
+    case 'USDC_DEPOSIT_FAILED':
+    case 'USDC_WITHDRAWAL_FAILED':
+      return 'failed';
+    case 'CONVERSION_COMPLETED':
+    case 'USDC_DEPOSIT_COMPLETED':
+    case 'USDC_WITHDRAWAL_COMPLETED':
+      return 'completed';
+    case 'USDC_DEPOSIT_PENDING':
+      return 'pending';
+    default:
+      return undefined;
+  }
+};
+
+const normalizeStatusForDisplay = (status: string | undefined): string => {
+  const normalized = (status || '').toString().trim().toLowerCase();
+  if (!normalized) return 'pending';
+  if (normalized === 'confirmed') return 'completed';
+  if (normalized === 'submitted') return 'pending';
+  return normalized;
 };
 
 export const TransactionDetailScreen = () => {
@@ -1281,6 +1343,11 @@ export const TransactionDetailScreen = () => {
       ...transactionData,
       // Map transaction_type to type for consistency
       type: type,
+      rampDirection: transactionData.ramp_direction || transactionData.rampDirection || transactionData.direction,
+      rampFiatAmount: transactionData.ramp_fiat_amount || transactionData.rampFiatAmount,
+      rampFiatCurrency: transactionData.ramp_fiat_currency || transactionData.rampFiatCurrency,
+      walletAmount: transactionData.wallet_amount || transactionData.walletAmount,
+      walletCurrency: transactionData.wallet_currency || transactionData.walletCurrency,
       createdAt: transactionData.created_at || transactionData.createdAt || transactionData.timestamp,
       transactionType: transactionData.transaction_type || transactionData.transactionType,
       tokenType: transactionData.token_type || transactionData.tokenType || transactionData.currency,
@@ -1326,7 +1393,10 @@ export const TransactionDetailScreen = () => {
           : type === 'withdrawal'
             ? `-${transactionData.amount || '0'}`.replace('--', '-') // Ensure single negative sign
             : transactionData.amount || transactionData.from_amount || transactionData.to_amount,
-      status: transactionData.status || 'completed',
+      status:
+        transactionData.status ||
+        deriveStatusFromNotificationType(transactionData.notification_type || transactionData.notificationType) ||
+        'pending',
       // Format date if timestamp is available
       date: transactionData.timestamp ? moment.utc(transactionData.timestamp).local().format('YYYY-MM-DD') : transactionData.date,
       time: transactionData.timestamp ? moment.utc(transactionData.timestamp).local().format('HH:mm') : transactionData.time,
@@ -1354,6 +1424,35 @@ export const TransactionDetailScreen = () => {
       normalizedTransactionData.currency = 'cUSD';
     } else if (transactionData.conversion_type === 'cusd_to_usdc') {
       normalizedTransactionData.currency = 'USDC';
+    }
+
+    // For ramp detail screens, prefer direction-aware display data over provider rail labels.
+    if (type === 'ramp') {
+      const rampDirection = normalizeRampDirection(
+        normalizedTransactionData.rampDirection,
+        normalizedTransactionData.amount,
+        normalizedTransactionData.formattedTitle || normalizedTransactionData.title,
+      );
+      const rampFiatAmount = addPositiveSign(normalizedTransactionData.rampFiatAmount);
+      const walletAmount = addPositiveSign(normalizedTransactionData.walletAmount || normalizedTransactionData.amount);
+      const currentCurrency = String(normalizedTransactionData.currency || normalizedTransactionData.tokenType || '').trim().toUpperCase();
+
+      if (rampDirection === 'on_ramp') {
+        if (rampFiatAmount) {
+          normalizedTransactionData.amount = rampFiatAmount;
+        }
+        if (normalizedTransactionData.rampFiatCurrency) {
+          normalizedTransactionData.currency = normalizedTransactionData.rampFiatCurrency;
+        }
+      } else if (rampDirection === 'off_ramp') {
+        const signedWalletAmount = addNegativeSign(normalizedTransactionData.walletAmount || normalizedTransactionData.amount);
+        if (signedWalletAmount) {
+          normalizedTransactionData.amount = signedWalletAmount;
+        }
+        normalizedTransactionData.currency = 'cUSD';
+      } else if (currentCurrency === 'USDC POLYGON' || currentCurrency === 'USDC SOLANA' || currentCurrency === 'USDC-A') {
+        normalizedTransactionData.currency = 'cUSD';
+      }
     }
 
     // Fallback timestamp if missing
@@ -1691,6 +1790,8 @@ export const TransactionDetailScreen = () => {
         return <Icon name="refresh-cw" size={24} color="#3b82f6" />;
       case 'payment':
         return <Icon name="shopping-bag" size={24} color="#8b5cf6" />;
+      case 'ramp':
+        return <Icon name="repeat" size={24} color="#0ea5e9" />;
       case 'payroll':
         return <Icon name="briefcase" size={24} color="#059669" />;
       case 'deposit':
@@ -1747,6 +1848,14 @@ export const TransactionDetailScreen = () => {
         return tx.amount.startsWith('+')
           ? `Pago recibido de ${displayFromName}`
           : `Pago a ${displayToName}`;
+      case 'ramp': {
+        const rampDirection = normalizeRampDirection(
+          tx.rampDirection || tx.ramp_direction || tx.direction,
+          tx.amount,
+          tx.formattedTitle || tx.title,
+        );
+        return tx.formattedTitle || (rampDirection === 'off_ramp' ? 'Retiro' : 'Recarga');
+      }
       case 'payroll':
         return tx.amount.startsWith('+')
           ? `Nómina recibida de ${displayFromName}`
@@ -1761,12 +1870,14 @@ export const TransactionDetailScreen = () => {
   };
 
   const getStatusColor = (status: string) => {
-    switch (status?.toLowerCase()) {
+    switch (normalizeStatusForDisplay(status)) {
       case 'completed':
         return { text: '#059669', bg: '#d1fae5' };
       case 'pending':
       case 'processing':
         return { text: '#d97706', bg: '#fef3c7' };
+      case 'aml_review':
+        return { text: '#92400e', bg: '#fde68a' };
       case 'failed':
         return { text: '#dc2626', bg: '#fee2e2' };
       default:
@@ -1775,6 +1886,7 @@ export const TransactionDetailScreen = () => {
   };
 
   const statusColors = getStatusColor(currentTx.status);
+  const normalizedStatus = normalizeStatusForDisplay(currentTx.status);
 
   const headerPaddingTop = Math.max(insets.top, 12);
   const resolvedInternalId = resolveInternalId(currentTx, transactionData);
@@ -1839,8 +1951,9 @@ export const TransactionDetailScreen = () => {
               return (
                 <Text style={[
                   styles.amountText,
-                  (currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'payment' || currentTx.type === 'withdrawal' ||
-                    (currentTx.type === 'conversion' && currentTx.amount?.startsWith('-'))) && styles.negativeAmount
+                    (currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'payment' || currentTx.type === 'withdrawal' ||
+                    (currentTx.type === 'conversion' && currentTx.amount?.startsWith('-')) ||
+                    (currentTx.type === 'ramp' && normalizeRampDirection(currentTx.rampDirection || currentTx.ramp_direction || currentTx.direction, currentTx.amount, currentTx.formattedTitle || currentTx.title) === 'off_ramp')) && styles.negativeAmount
                 ]}>
                   {sign ? `${sign} ` : ''}{abs} {currentTx.currency || 'cUSD'}
                 </Text>
@@ -1862,24 +1975,27 @@ export const TransactionDetailScreen = () => {
             </Text>
 
             <View style={[styles.statusBadge, { backgroundColor: statusColors.bg }]}>
-              {(currentTx.status?.toLowerCase() === 'completed' || currentTx.status?.toLowerCase() === 'confirmed') && (
+              {normalizedStatus === 'completed' && (
                 <Icon name="check-circle" size={16} color={statusColors.text} style={styles.statusIcon} />
               )}
-              {(currentTx.status?.toLowerCase() === 'pending' || currentTx.status?.toLowerCase() === 'submitted') && (
+              {normalizedStatus === 'pending' && (
                 <Icon name="clock" size={16} color={statusColors.text} style={styles.statusIcon} />
               )}
-              {currentTx.status?.toLowerCase() === 'processing' && (
+              {normalizedStatus === 'processing' && (
                 <Icon name="loader" size={16} color={statusColors.text} style={styles.statusIcon} />
               )}
-              {currentTx.status?.toLowerCase() === 'failed' && (
+              {normalizedStatus === 'aml_review' && (
+                <Icon name="alert-triangle" size={16} color={statusColors.text} style={styles.statusIcon} />
+              )}
+              {normalizedStatus === 'failed' && (
                 <Icon name="x-circle" size={16} color={statusColors.text} style={styles.statusIcon} />
               )}
               <Text style={[styles.statusText, { color: statusColors.text }]}>
-                {currentTx.status?.toLowerCase() === 'completed' ? 'Completado' :
-                  currentTx.status?.toLowerCase() === 'confirmed' ? 'Completado' :
-                    (currentTx.status?.toLowerCase() === 'pending' || currentTx.status?.toLowerCase() === 'submitted') ? 'Pendiente' :
-                      currentTx.status?.toLowerCase() === 'processing' ? 'Procesando' :
-                        currentTx.status?.toLowerCase() === 'failed' ? 'Fallido' : 'Desconocido'}
+                {normalizedStatus === 'completed' ? 'Completado' :
+                  normalizedStatus === 'pending' ? 'Pendiente' :
+                    normalizedStatus === 'processing' ? 'Procesando' :
+                      normalizedStatus === 'aml_review' ? 'En revisión' :
+                        normalizedStatus === 'failed' ? 'Fallido' : 'Desconocido'}
               </Text>
             </View>
 

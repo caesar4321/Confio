@@ -14,21 +14,21 @@ import {
     Linking,
     Image,
     StatusBar,
-    AppState,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import FAIcon from 'react-native-vector-icons/FontAwesome';
-import * as Keychain from 'react-native-keychain';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
 import GuardarianLogo from '../assets/svg/guardarian.svg';
 import { useAuth } from '../contexts/AuthContext';
 import { useAccount } from '../contexts/AccountContext';
 import { useCountry } from '../contexts/CountryContext';
+import { useLazyQuery } from '@apollo/client';
 import { getCurrencyForCountry } from '../utils/currencyMapping';
 import { getCountryByIso } from '../utils/countries';
 import { createGuardarianTransaction, fetchGuardarianFiatCurrencies, GuardarianFiatCurrency } from '../services/guardarianService';
+import { GET_PENDING_RAMP_TRANSACTION } from '../apollo/queries';
 import { getFlagForCurrency } from '../utils/currencyFlags';
 import USDCLogo from '../assets/png/USDC.png';
 import PreFlightModal from '../components/PreFlightModal';
@@ -67,54 +67,44 @@ export const SellScreen = () => {
     const [fiatError, setFiatError] = useState<string | null>(null);
     const [showPreFlightModal, setShowPreFlightModal] = useState(false);
     const [showGuardarianReturnModal, setShowGuardarianReturnModal] = useState(false);
-    const appStateRef = React.useRef(AppState.currentState);
+    const [awaitingGuardarianReturn, setAwaitingGuardarianReturn] = useState(false);
+    const [loadPendingRampTransaction] = useLazyQuery(GET_PENDING_RAMP_TRANSACTION, {
+        fetchPolicy: 'network-only',
+    });
 
-    // AppState listener for Guardarian return detection
-    useEffect(() => {
-        // Check immediately on mount (in case we're returning from Guardarian)
-        const checkGuardarianPending = async () => {
-            console.log('SellScreen - Checking Guardarian pending on mount/foreground');
-            try {
-                const credentials = await Keychain.getGenericPassword({ service: 'com.confio.guardarian_pending' });
-                console.log('SellScreen - Keychain result:', credentials ? 'Found' : 'Not found');
-                if (credentials && credentials.password) {
-                    const timestamp = parseInt(credentials.password, 10);
-                    const now = Date.now();
-                    console.log('SellScreen - Pending timestamp:', timestamp, 'Now:', now, 'Diff:', now - timestamp);
-                    // Check if pending state is recent (< 30 minutes)
-                    if (now - timestamp < 30 * 60 * 1000) {
-                        console.log('SellScreen - Showing Guardarian return modal');
+    useFocusEffect(
+        React.useCallback(() => {
+            let active = true;
+            const checkPendingGuardarianRamp = async () => {
+                if (awaitingGuardarianReturn) {
+                    setShowGuardarianReturnModal(true);
+                    return;
+                }
+                try {
+                    const { data } = await loadPendingRampTransaction({
+                        variables: {
+                            provider: 'guardarian',
+                            direction: 'off_ramp',
+                        },
+                    });
+                    if (!active) return;
+                    const pendingRamp = data?.pendingRampTransaction;
+                    if (pendingRamp?.providerOrderId) {
                         setShowGuardarianReturnModal(true);
                     } else {
-                        // Expired, clear it
-                        console.log('SellScreen - Pending expired, clearing');
-                        await Keychain.resetGenericPassword({ service: 'com.confio.guardarian_pending' });
+                        setShowGuardarianReturnModal(false);
                     }
+                } catch (e) {
+                    console.warn('SellScreen - Pending Guardarian ramp lookup failed', e);
                 }
-            } catch (e) {
-                console.error('SellScreen - Error checking Guardarian return:', e);
-            }
-        };
+            };
 
-        // Check immediately on mount
-        checkGuardarianPending();
-
-        // Also listen for AppState changes
-        const subscription = AppState.addEventListener('change', async (nextAppState) => {
-            if (
-                appStateRef.current.match(/inactive|background/) &&
-                nextAppState === 'active'
-            ) {
-                console.log('SellScreen - App returned to foreground');
-                await checkGuardarianPending();
-            }
-            appStateRef.current = nextAppState;
-        });
-
-        return () => {
-            subscription.remove();
-        };
-    }, []);
+            checkPendingGuardarianRamp();
+            return () => {
+                active = false;
+            };
+        }, [awaitingGuardarianReturn, loadPendingRampTransaction])
+    );
 
     // Order state
     const [orderCreated, setOrderCreated] = useState(false);
@@ -202,11 +192,8 @@ export const SellScreen = () => {
                 setOrderId(tx.id);
                 setOrderCreated(true);
 
-                // Track pending state
-                const timestamp = Date.now().toString();
-                await Keychain.setGenericPassword('guardarian_sell', timestamp, { service: 'com.confio.guardarian_pending' });
-
                 if (tx.redirect_url) {
+                    setAwaitingGuardarianReturn(true);
                     await Linking.openURL(tx.redirect_url);
                 }
                 return;
@@ -214,11 +201,9 @@ export const SellScreen = () => {
                 // Case: No address returned (yet), but we have a redirect URL (common for ARS/KYC required)
                 // We don't show the "Order Created" screen because we have no address to show.
                 // We just send the user to Guardarian.
-
-                const timestamp = Date.now().toString();
-                await Keychain.setGenericPassword('guardarian_sell', timestamp, { service: 'com.confio.guardarian_pending' });
                 console.log('SellScreen - Guardarian redirect only (no address yet):', tx.redirect_url);
 
+                setAwaitingGuardarianReturn(true);
                 await Linking.openURL(tx.redirect_url);
                 return;
             } else {
@@ -324,6 +309,12 @@ export const SellScreen = () => {
                     <Icon name="arrow-left" size={24} color="#111827" />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>Retirar USDC a banco</Text>
+                <TouchableOpacity
+                    style={styles.historyButton}
+                    onPress={() => navigation.navigate('RampHistory', { initialFilter: 'off_ramp' })}
+                >
+                    <Text style={styles.historyButtonText}>Historial</Text>
+                </TouchableOpacity>
             </View>
 
             <ScrollView contentContainerStyle={styles.content}>
@@ -452,25 +443,14 @@ export const SellScreen = () => {
             {/* Guardarian Return Modal */}
             <GuardarianReturnModal
                 visible={showGuardarianReturnModal}
-                onConvert={async () => {
+                onContinueSend={async () => {
                     setShowGuardarianReturnModal(false);
-                    try {
-                        await Keychain.resetGenericPassword({ service: 'com.confio.guardarian_pending' });
-                    } catch { }
-                    navigation.navigate('USDCConversion' as any, { direction: 'cusd_to_usdc' });
-                }}
-                onRetirar={async () => {
-                    setShowGuardarianReturnModal(false);
-                    try {
-                        await Keychain.resetGenericPassword({ service: 'com.confio.guardarian_pending' });
-                    } catch { }
+                    setAwaitingGuardarianReturn(false);
                     navigation.navigate('SendWithAddress' as any, { tokenType: 'usdc' });
                 }}
                 onCancel={async () => {
                     setShowGuardarianReturnModal(false);
-                    try {
-                        await Keychain.resetGenericPassword({ service: 'com.confio.guardarian_pending' });
-                    } catch { }
+                    setAwaitingGuardarianReturn(false);
                 }}
             />
         </SafeAreaView>
@@ -500,6 +480,23 @@ const styles = StyleSheet.create({
         fontSize: 18,
         fontWeight: '700',
         color: '#111827',
+        flex: 1,
+        textAlign: 'center',
+    },
+    historyButton: {
+        minWidth: 72,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 999,
+        backgroundColor: '#FEF3C7',
+        borderWidth: 1,
+        borderColor: '#FCD34D',
+        alignItems: 'center',
+    },
+    historyButtonText: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: '#B45309',
     },
     content: {
         padding: 20,

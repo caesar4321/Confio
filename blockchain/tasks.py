@@ -548,6 +548,7 @@ def scan_inbound_deposits():
                     )
 
                     try:
+                        pending_auto_swap = human_amt >= 1
                         notif_data = {
                             'transaction_type': 'deposit',
                             'type': 'deposit',
@@ -559,6 +560,7 @@ def scan_inbound_deposits():
                             'txid': txid,
                             'round': cround,
                             'deposit_id': str(deposit.internal_id),
+                            'pending_auto_swap': pending_auto_swap,
                         }
                         if internal_id:
                             notif_data['transaction_id'] = internal_id
@@ -571,7 +573,7 @@ def scan_inbound_deposits():
                             business=account.business if account.account_type == 'business' else None,
                             notification_type=NotificationTypeChoices.USDC_DEPOSIT_COMPLETED,
                             title="Depósito USDC recibido",
-                            message=f"Recibiste {human_amt} USDC",
+                            message=f"Recibiste {human_amt} USDC. Abre la app para convertirlo a cUSD." if pending_auto_swap else f"Recibiste {human_amt} USDC",
                             data=notif_data,
                             related_object_type='SendTransaction' if internal_id else 'USDCDeposit',
                             related_object_id=internal_id or str(deposit.internal_id),
@@ -793,6 +795,7 @@ def scan_inbound_deposits():
                         memo_prefix='Depósito',
                     )
 
+                    pending_auto_swap = human_amt >= 1
                     notif_data = {
                         'token_type': 'ALGO',
                         'amount': str(human_amt),
@@ -802,6 +805,7 @@ def scan_inbound_deposits():
                         'round': cround,
                         'sender_name': resolve_sender_name(sender),
                         'transaction_type': 'received',
+                        'pending_auto_swap': pending_auto_swap,
                     }
                     if internal_id:
                         notif_data['transaction_id'] = internal_id
@@ -815,7 +819,7 @@ def scan_inbound_deposits():
                             business=account.business if account.account_type == 'business' else None,
                             notification_type=NotificationTypeChoices.SEND_FROM_EXTERNAL,
                             title='Depósito ALGO recibido',
-                            message=f"Recibiste {human_amt} ALGO",
+                            message=f"Recibiste {human_amt} ALGO. Abre la app para revisar la conversión automática." if pending_auto_swap else f"Recibiste {human_amt} ALGO",
                             data=notif_data,
                             related_object_type='SendTransaction',
                             related_object_id=internal_id,

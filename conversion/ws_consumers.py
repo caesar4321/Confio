@@ -59,7 +59,12 @@ class ConvertSessionConsumer(AsyncJsonWebsocketConsumer):
             direction = (content.get("direction") or "").strip().lower()
             amount = content.get("amount")
             try:
-                pack = await self._prepare(direction=direction, amount=str(amount))
+                pack = await self._prepare(
+                    direction=direction,
+                    amount=str(amount),
+                    ramp_provider=(content.get("ramp_provider") or "").strip().lower(),
+                    provider_order_id=(content.get("provider_order_id") or "").strip(),
+                )
                 if not pack.get("success"):
                     # Surface opt-in hint if present
                     if pack.get('requires_app_optin'):
@@ -115,7 +120,7 @@ class ConvertSessionConsumer(AsyncJsonWebsocketConsumer):
         self._idle_task = asyncio.create_task(self._idle_close())
 
     @database_sync_to_async
-    def _prepare(self, direction: str, amount: str):
+    def _prepare(self, direction: str, amount: str, ramp_provider: str = "", provider_order_id: str = ""):
         from conversion.schema import ConvertUSDCToCUSD, ConvertCUSDToUSDC
         user = self.scope.get("user")
         meta = {}
@@ -124,9 +129,21 @@ class ConvertSessionConsumer(AsyncJsonWebsocketConsumer):
         info = _DummyInfo(context=_DummyRequest(user=user, meta=meta))
 
         if direction == 'usdc_to_cusd':
-            res = ConvertUSDCToCUSD.mutate(None, info, amount=amount)
+            res = ConvertUSDCToCUSD.mutate(
+                None,
+                info,
+                amount=amount,
+                ramp_provider=ramp_provider or None,
+                provider_order_id=provider_order_id or None,
+            )
         elif direction == 'cusd_to_usdc':
-            res = ConvertCUSDToUSDC.mutate(None, info, amount=amount)
+            res = ConvertCUSDToUSDC.mutate(
+                None,
+                info,
+                amount=amount,
+                ramp_provider=ramp_provider or None,
+                provider_order_id=provider_order_id or None,
+            )
         else:
             return {"success": False, "error": "invalid_direction"}
 

@@ -18,6 +18,21 @@ class BiometricAuthService {
   private lastLockout: boolean = false;
 
   /**
+   * Use a pure passcode policy when the device has no enrolled biometrics.
+   * On iOS this makes the system show passcode entry directly instead of forcing
+   * users through multiple failed biometric attempts before the fallback appears.
+   */
+  private getAccessControlForCurrentDevice(
+    biometryType: Keychain.BIOMETRY_TYPE | null,
+  ): Keychain.ACCESS_CONTROL {
+    if (biometryType) {
+      return Keychain.ACCESS_CONTROL.BIOMETRY_CURRENT_SET_OR_DEVICE_PASSCODE;
+    }
+
+    return Keychain.ACCESS_CONTROL.DEVICE_PASSCODE;
+  }
+
+  /**
    * Invalidate the cached biometric support status to force a fresh check.
    */
   invalidateCache(): void {
@@ -87,9 +102,7 @@ class BiometricAuthService {
   private async storeBiometricSecret(): Promise<boolean> {
     try {
       const biometryType = await Keychain.getSupportedBiometryType();
-      const accessControl = biometryType
-        ? Keychain.ACCESS_CONTROL.BIOMETRY_CURRENT_SET_OR_DEVICE_PASSCODE
-        : Keychain.ACCESS_CONTROL.BIOMETRY_ANY_OR_DEVICE_PASSCODE;
+      const accessControl = this.getAccessControlForCurrentDevice(biometryType);
 
       const randomSecret = `${Date.now()}-${Math.random()}`;
       await Keychain.setGenericPassword(
@@ -190,9 +203,7 @@ class BiometricAuthService {
       console.log('[BiometricAuthService] Prompting for biometric authentication:', reason);
 
       const biometryType = await Keychain.getSupportedBiometryType();
-      const accessControl = biometryType
-        ? Keychain.ACCESS_CONTROL.BIOMETRY_CURRENT_SET_OR_DEVICE_PASSCODE
-        : Keychain.ACCESS_CONTROL.BIOMETRY_ANY_OR_DEVICE_PASSCODE;
+      const accessControl = this.getAccessControlForCurrentDevice(biometryType);
 
       const authResult = await Keychain.getGenericPassword({
         service: BIOMETRIC_SECRET_SERVICE,

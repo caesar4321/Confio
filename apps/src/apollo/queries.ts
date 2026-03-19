@@ -20,6 +20,21 @@ export const GET_ME = gql`
   }
 `;
 
+export const GET_MY_RAMP_ADDRESS = gql`
+  query GetMyRampAddress {
+    myRampAddress {
+      addressStreet
+      addressCity
+      addressState
+      addressZipCode
+      addressCountry
+      countryName
+      isComplete
+      updatedAt
+    }
+  }
+`;
+
 export const GET_PORTAL_SUPPORT_CONVERSATIONS = gql`
   query GetPortalSupportConversations($status: String) {
     portalSupportConversations(status: $status) {
@@ -425,6 +440,35 @@ export const UPDATE_USER_PROFILE = gql`
     updateUserProfile(firstName: $firstName, lastName: $lastName) {
       success
       error
+    }
+  }
+`;
+
+export const UPSERT_RAMP_USER_ADDRESS = gql`
+  mutation UpsertRampUserAddress(
+    $addressStreet: String!
+    $addressCity: String!
+    $addressState: String!
+    $addressZipCode: String!
+  ) {
+    upsertRampUserAddress(
+      addressStreet: $addressStreet
+      addressCity: $addressCity
+      addressState: $addressState
+      addressZipCode: $addressZipCode
+    ) {
+      success
+      error
+      rampAddress {
+        addressStreet
+        addressCity
+        addressState
+        addressZipCode
+        addressCountry
+        countryName
+        isComplete
+        updatedAt
+      }
     }
   }
 `;
@@ -1387,6 +1431,53 @@ export const GET_P2P_PAYMENT_METHODS = gql`
   }
 `;
 
+export const GET_RAMP_PAYMENT_METHODS = gql`
+  query GetRampPaymentMethods($countryCode: String, $direction: String) {
+    rampPaymentMethods(countryCode: $countryCode, direction: $direction) {
+      id
+      code
+      countryCode
+      displayName
+      providerType
+      description
+      icon
+      isActive
+      displayOrder
+      requiresPhone
+      requiresEmail
+      requiresAccountNumber
+      requiresIdentification
+      supportsOnRamp
+      supportsOffRamp
+      fieldSchema
+      bank {
+        id
+        name
+        shortName
+        code
+        country {
+          id
+          code
+          name
+          flagEmoji
+          requiresIdentification
+          identificationName
+          identificationFormat
+        }
+      }
+      country {
+        id
+        code
+        name
+        flagEmoji
+        requiresIdentification
+        identificationName
+        identificationFormat
+      }
+    }
+  }
+`;
+
 export const GET_RAMP_AVAILABILITY = gql`
   query GetRampAvailability($countryCode: String) {
     rampAvailability(countryCode: $countryCode) {
@@ -1487,6 +1578,21 @@ export const GET_RAMP_ORDER_STATUS = gql`
       statusDetails
       nextActionUrl
       paymentDetails
+    }
+  }
+`;
+
+export const GET_PENDING_RAMP_TRANSACTION = gql`
+  query GetPendingRampTransaction($provider: String!, $direction: String) {
+    pendingRampTransaction(provider: $provider, direction: $direction) {
+      internalId
+      provider
+      direction
+      status
+      providerOrderId
+      externalId
+      countryCode
+      createdAt
     }
   }
 `;
@@ -1953,6 +2059,16 @@ export const GET_BANKS = gql`
   }
 `;
 
+export const GET_KOYWE_BANK_INFO = gql`
+  query GetKoyweBankInfo($countryCode: String!) {
+    koyweBankInfo(countryCode: $countryCode) {
+      bankCode
+      name
+      institutionName
+    }
+  }
+`;
+
 export const GET_USER_BANK_ACCOUNTS = gql`
   query GetUserBankAccounts {
     userBankAccounts {
@@ -1976,6 +2092,43 @@ export const GET_USER_BANK_ACCOUNTS = gql`
           id
           name
           shortName
+          country {
+            id
+            code
+            name
+            flagEmoji
+            requiresIdentification
+            identificationName
+          }
+        }
+        country {
+          id
+          code
+          name
+          flagEmoji
+          requiresIdentification
+          identificationName
+        }
+      }
+      rampPaymentMethod {
+        id
+        code
+        countryCode
+        displayName
+        providerType
+        icon
+        requiresPhone
+        requiresEmail
+        requiresAccountNumber
+        requiresIdentification
+        supportsOnRamp
+        supportsOffRamp
+        fieldSchema
+        bank {
+          id
+          name
+          shortName
+          code
           country {
             id
             code
@@ -2035,6 +2188,69 @@ export const GET_BANK_INFO = gql`
   query GetBankInfo($id: ID!) {
     bankInfo(id: $id) {
       id
+      paymentMethod {
+        id
+        name
+        displayName
+        providerType
+        icon
+        requiresPhone
+        requiresEmail
+        requiresAccountNumber
+        bank {
+          id
+          name
+          shortName
+          country {
+            id
+            code
+            name
+            flagEmoji
+            requiresIdentification
+            identificationName
+            identificationFormat
+          }
+        }
+      }
+      rampPaymentMethod {
+        id
+        code
+        countryCode
+        displayName
+        providerType
+        icon
+        requiresPhone
+        requiresEmail
+        requiresAccountNumber
+        requiresIdentification
+        supportsOnRamp
+        supportsOffRamp
+        fieldSchema
+        bank {
+          id
+          name
+          shortName
+          code
+          country {
+            id
+            code
+            name
+            flagEmoji
+            requiresIdentification
+            identificationName
+            identificationFormat
+          }
+        }
+        country {
+          id
+          code
+          name
+          flagEmoji
+          requiresIdentification
+          identificationName
+          identificationFormat
+        }
+      }
       account {
         id
         accountId
@@ -2082,7 +2298,8 @@ export const GET_BANK_INFO = gql`
 // Bank Info Mutations
 export const CREATE_BANK_INFO = gql`
   mutation CreateBankInfo(
-    $paymentMethodId: ID!
+    $paymentMethodId: ID
+    $rampPaymentMethodId: ID
     $accountHolderName: String!
     $accountNumber: String
     $phoneNumber: String
@@ -2095,6 +2312,7 @@ export const CREATE_BANK_INFO = gql`
   ) {
     createBankInfo(
       paymentMethodId: $paymentMethodId
+      rampPaymentMethodId: $rampPaymentMethodId
       accountHolderName: $accountHolderName
       accountNumber: $accountNumber
       phoneNumber: $phoneNumber
@@ -2109,6 +2327,21 @@ export const CREATE_BANK_INFO = gql`
       error
       bankInfo {
         id
+        rampPaymentMethod {
+          id
+          code
+          countryCode
+          displayName
+          providerType
+          icon
+          requiresPhone
+          requiresEmail
+          requiresAccountNumber
+          requiresIdentification
+          supportsOnRamp
+          supportsOffRamp
+          fieldSchema
+        }
         accountHolderName
         accountNumber
         phoneNumber
@@ -2146,7 +2379,8 @@ export const CREATE_BANK_INFO = gql`
 export const UPDATE_BANK_INFO = gql`
   mutation UpdateBankInfo(
     $bankInfoId: ID!
-    $paymentMethodId: ID!
+    $paymentMethodId: ID
+    $rampPaymentMethodId: ID
     $accountHolderName: String!
     $accountNumber: String
     $phoneNumber: String
@@ -2160,6 +2394,7 @@ export const UPDATE_BANK_INFO = gql`
     updateBankInfo(
       bankInfoId: $bankInfoId
       paymentMethodId: $paymentMethodId
+      rampPaymentMethodId: $rampPaymentMethodId
       accountHolderName: $accountHolderName
       accountNumber: $accountNumber
       phoneNumber: $phoneNumber
@@ -2174,6 +2409,21 @@ export const UPDATE_BANK_INFO = gql`
       error
       bankInfo {
         id
+        rampPaymentMethod {
+          id
+          code
+          countryCode
+          displayName
+          providerType
+          icon
+          requiresPhone
+          requiresEmail
+          requiresAccountNumber
+          requiresIdentification
+          supportsOnRamp
+          supportsOffRamp
+          fieldSchema
+        }
         accountHolderName
         accountNumber
         phoneNumber
@@ -2307,6 +2557,8 @@ export const GET_UNIFIED_TRANSACTIONS = gql`
       
       # P2P Trade ID for navigation
       p2pTradeId
+      rampDirection
+      rampProvider
     }
   }
 `;
@@ -2626,6 +2878,10 @@ export const GET_CURRENT_ACCOUNT_TRANSACTIONS = gql`
       displayAmount
       displayCounterparty
       displayDescription
+      rampDirection
+      rampProvider
+      rampFiatAmount
+      rampFiatCurrency
       
       # Original transaction data
       senderUser {
@@ -2681,6 +2937,23 @@ export const GET_CURRENT_ACCOUNT_TRANSACTIONS = gql`
       
       # P2P Trade ID for navigation
       p2pTradeId
+    }
+  }
+`;
+
+export const GET_PENDING_AUTO_SWAP = gql`
+  query GetPendingAutoSwap($accountId: ID) {
+    pendingAutoSwap(accountId: $accountId) {
+      id
+      assetType
+      amountMicro
+      amountDecimal
+      status
+      errorMessage
+      sourceAddress
+      sourceTxHash
+      createdAt
+      updatedAt
     }
   }
 `;

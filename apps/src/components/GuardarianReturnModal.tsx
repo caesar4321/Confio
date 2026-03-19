@@ -9,12 +9,10 @@ import {
     Dimensions,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
-import FAIcon from 'react-native-vector-icons/FontAwesome';
 
 interface GuardarianReturnModalProps {
     visible: boolean;
-    onConvert: () => void;
-    onRetirar: () => void;
+    onContinueSend: () => void;
     onCancel: () => void;
 }
 
@@ -22,8 +20,7 @@ const { width } = Dimensions.get('window');
 
 const GuardarianReturnModal: React.FC<GuardarianReturnModalProps> = ({
     visible,
-    onConvert,
-    onRetirar,
+    onContinueSend,
     onCancel,
 }) => {
     return (
@@ -61,36 +58,19 @@ const GuardarianReturnModal: React.FC<GuardarianReturnModalProps> = ({
 
                     {/* Action Buttons */}
                     <View style={styles.actionsContainer}>
-                        {/* Convert Button - Primary Blue */}
                         <TouchableOpacity
                             style={styles.convertButton}
-                            onPress={onConvert}
+                            onPress={onContinueSend}
                             activeOpacity={0.85}
                         >
                             <View style={styles.buttonContent}>
-                                <Icon name="refresh-cw" size={18} color="#fff" />
+                                <Icon name="send" size={18} color="#fff" />
                                 <View style={styles.buttonTextWrap}>
-                                    <Text style={styles.convertButtonTitle}>Convertir primero</Text>
-                                    <Text style={styles.convertButtonSubtitle}>cUSD → USDC</Text>
+                                    <Text style={styles.convertButtonTitle}>Continuar a enviar USDC</Text>
+                                    <Text style={styles.convertButtonSubtitle}>La conversión se hace automáticamente</Text>
                                 </View>
                             </View>
                             <Icon name="chevron-right" size={20} color="rgba(255,255,255,0.7)" />
-                        </TouchableOpacity>
-
-                        {/* Retirar Button - Amber Secondary */}
-                        <TouchableOpacity
-                            style={styles.retirarButton}
-                            onPress={onRetirar}
-                            activeOpacity={0.85}
-                        >
-                            <View style={styles.buttonContent}>
-                                <FAIcon name="bank" size={16} color="#92400E" />
-                                <View style={styles.buttonTextWrap}>
-                                    <Text style={styles.retirarButtonTitle}>Ya tengo USDC</Text>
-                                    <Text style={styles.retirarButtonSubtitle}>Ir a enviar a Guardarian</Text>
-                                </View>
-                            </View>
-                            <Icon name="chevron-right" size={20} color="#D97706" />
                         </TouchableOpacity>
 
                         {/* Cancel Button - Tertiary */}
@@ -227,27 +207,6 @@ const styles = StyleSheet.create({
     },
     convertButtonSubtitle: {
         color: 'rgba(255, 255, 255, 0.8)',
-        fontSize: 12,
-        marginTop: 2,
-    },
-    retirarButton: {
-        backgroundColor: '#FEF3C7',
-        paddingVertical: 14,
-        paddingHorizontal: 16,
-        borderRadius: 16,
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        borderWidth: 1.5,
-        borderColor: '#FCD34D',
-    },
-    retirarButtonTitle: {
-        color: '#92400E',
-        fontSize: 16,
-        fontWeight: '600',
-    },
-    retirarButtonSubtitle: {
-        color: '#B45309',
         fontSize: 12,
         marginTop: 2,
     },

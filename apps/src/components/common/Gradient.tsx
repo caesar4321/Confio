@@ -19,7 +19,7 @@ export function Gradient({
     <View style={[styles.container, style]}>
       <Svg height="100%" width="100%" style={StyleSheet.absoluteFill}>
         <Defs>
-          <LinearGradient id="grad" x1="0" y1="0" x2="0" y2="1">
+          <LinearGradient id="grad" x1="0" y1="0" x2="1" y2="1">
             <Stop offset="0" stopColor={fromColor} stopOpacity="1" />
             <Stop offset="1" stopColor={toColor} stopOpacity="1" />
           </LinearGradient>

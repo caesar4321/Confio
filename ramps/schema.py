@@ -1,13 +1,18 @@
 import logging
 from decimal import Decimal, InvalidOperation
+from types import SimpleNamespace
 
 import graphene
+from graphene_django import DjangoObjectType
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
+from security.didit import ISO2_TO_ISO3
 from security.models import IdentityVerification
 from users.models import Account, BankInfo, Country
+from ramps.models import KoyweBankInfo, RampPaymentMethod, RampTransaction, RampUserAddress
+from ramps.koywe_sync import sync_koywe_ramp_transaction_from_order, upsert_koywe_ramp_transaction
 
 from ramps.koywe_client import KoyweClient, KoyweConfigurationError, KoyweError
 from ramps.koywe import (
@@ -22,6 +27,102 @@ from ramps.koywe import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class KoyweBankInfoType(graphene.ObjectType):
+    bank_code = graphene.String()
+    name = graphene.String()
+    institution_name = graphene.String()
+    country_code = graphene.String()
+
+    bankCode = graphene.String()
+    institutionName = graphene.String()
+    countryCode = graphene.String()
+
+    def resolve_bankCode(self, info):
+        return self.bank_code
+
+    def resolve_institutionName(self, info):
+        return self.institution_name
+
+    def resolve_countryCode(self, info):
+        return self.country_code
+
+
+class RampPaymentMethodCatalogType(DjangoObjectType):
+    field_schema = graphene.JSONString()
+
+    class Meta:
+        model = RampPaymentMethod
+        fields = (
+            'id',
+            'code',
+            'country_code',
+            'display_name',
+            'provider_type',
+            'description',
+            'icon',
+            'is_active',
+            'display_order',
+            'country',
+            'bank',
+            'requires_phone',
+            'requires_email',
+            'requires_account_number',
+            'requires_identification',
+            'supports_on_ramp',
+            'supports_off_ramp',
+            'field_schema',
+        )
+
+    countryCode = graphene.String()
+    displayName = graphene.String()
+    providerType = graphene.String()
+    isActive = graphene.Boolean()
+    displayOrder = graphene.Int()
+    requiresPhone = graphene.Boolean()
+    requiresEmail = graphene.Boolean()
+    requiresAccountNumber = graphene.Boolean()
+    requiresIdentification = graphene.Boolean()
+    supportsOnRamp = graphene.Boolean()
+    supportsOffRamp = graphene.Boolean()
+    fieldSchema = graphene.JSONString()
+
+    def resolve_countryCode(self, info):
+        return self.country_code
+
+    def resolve_displayName(self, info):
+        return self.display_name
+
+    def resolve_providerType(self, info):
+        return self.provider_type
+
+    def resolve_isActive(self, info):
+        return self.is_active
+
+    def resolve_displayOrder(self, info):
+        return self.display_order
+
+    def resolve_requiresPhone(self, info):
+        return self.requires_phone
+
+    def resolve_requiresEmail(self, info):
+        return self.requires_email
+
+    def resolve_requiresAccountNumber(self, info):
+        return self.requires_account_number
+
+    def resolve_requiresIdentification(self, info):
+        return self.requires_identification
+
+    def resolve_supportsOnRamp(self, info):
+        return self.supports_on_ramp
+
+    def resolve_supportsOffRamp(self, info):
+        return self.supports_off_ramp
+
+    def resolve_fieldSchema(self, info):
+        return self.field_schema or {}
 
 class RampPaymentMethodType(graphene.ObjectType):
     payment_method_id = graphene.ID()
@@ -334,6 +435,148 @@ class RampOrderStatusType(graphene.ObjectType):
         return self.payment_details
 
 
+class PendingRampTransactionType(graphene.ObjectType):
+    internal_id = graphene.String()
+    provider = graphene.String()
+    direction = graphene.String()
+    status = graphene.String()
+    provider_order_id = graphene.String()
+    external_id = graphene.String()
+    country_code = graphene.String()
+    created_at = graphene.DateTime()
+
+    internalId = graphene.String()
+    providerOrderId = graphene.String()
+    externalId = graphene.String()
+    countryCode = graphene.String()
+    createdAt = graphene.DateTime()
+
+    def resolve_internalId(self, info):
+        return self.internal_id
+
+    def resolve_providerOrderId(self, info):
+        return self.provider_order_id
+
+    def resolve_externalId(self, info):
+        return self.external_id
+
+    def resolve_countryCode(self, info):
+        return self.country_code
+
+    def resolve_createdAt(self, info):
+        return self.created_at
+
+
+class RampUserAddressType(graphene.ObjectType):
+    address_street = graphene.String()
+    address_city = graphene.String()
+    address_state = graphene.String()
+    address_zip_code = graphene.String()
+    address_country = graphene.String()
+    country_name = graphene.String()
+    is_complete = graphene.Boolean()
+    updated_at = graphene.DateTime()
+
+    addressStreet = graphene.String()
+    addressCity = graphene.String()
+    addressState = graphene.String()
+    addressZipCode = graphene.String()
+    addressCountry = graphene.String()
+    countryName = graphene.String()
+    isComplete = graphene.Boolean()
+    updatedAt = graphene.DateTime()
+
+    def resolve_address_country(self, info):
+        return _get_user_phone_country_alpha3(getattr(self, 'user', None))
+
+    def resolve_country_name(self, info):
+        user = getattr(self, 'user', None)
+        return getattr(user, 'phone_country_name', None) or ''
+
+    def resolve_is_complete(self, info):
+        return _is_ramp_address_complete(self)
+
+    def resolve_addressStreet(self, info):
+        return self.address_street
+
+    def resolve_addressCity(self, info):
+        return self.address_city
+
+    def resolve_addressState(self, info):
+        return self.address_state
+
+    def resolve_addressZipCode(self, info):
+        return self.address_zip_code
+
+    def resolve_addressCountry(self, info):
+        return _get_user_phone_country_alpha3(getattr(self, 'user', None))
+
+    def resolve_countryName(self, info):
+        user = getattr(self, 'user', None)
+        return getattr(user, 'phone_country_name', None) or ''
+
+    def resolve_isComplete(self, info):
+        return _is_ramp_address_complete(self)
+
+    def resolve_updatedAt(self, info):
+        return self.updated_at
+
+
+class UpsertRampUserAddress(graphene.Mutation):
+    class Arguments:
+        address_street = graphene.String(required=True)
+        address_city = graphene.String(required=True)
+        address_state = graphene.String(required=True)
+        address_zip_code = graphene.String(required=True)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    ramp_address = graphene.Field(RampUserAddressType)
+
+    rampAddress = graphene.Field(RampUserAddressType)
+
+    def resolve_rampAddress(self, info):
+        return self.ramp_address
+
+    @classmethod
+    def mutate(cls, root, info, address_street, address_city, address_state, address_zip_code):
+        user = getattr(info.context, "user", None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return cls(success=False, error='Authentication required', ramp_address=None)
+
+        if not _get_user_phone_country_alpha3(user):
+            return cls(
+                success=False,
+                error='Debes tener un país de teléfono válido para guardar tu dirección de recargas y retiros.',
+                ramp_address=None,
+            )
+
+        values = {
+            'address_street': str(address_street or '').strip(),
+            'address_city': str(address_city or '').strip(),
+            'address_state': str(address_state or '').strip(),
+            'address_zip_code': str(address_zip_code or '').strip(),
+        }
+        missing = [label for label, value in (
+            ('dirección', values['address_street']),
+            ('ciudad', values['address_city']),
+            ('provincia/estado', values['address_state']),
+            ('código postal', values['address_zip_code']),
+        ) if not value]
+        if missing:
+            return cls(
+                success=False,
+                error=f'Completa todos los campos de dirección: {", ".join(missing)}',
+                ramp_address=None,
+            )
+
+        ramp_address, _ = RampUserAddress.objects.update_or_create(
+            user=user,
+            defaults=values,
+        )
+        return cls(success=True, error=None, ramp_address=ramp_address)
+
+
 class CreateRampOrder(graphene.Mutation):
     class Arguments:
         direction = graphene.String(required=True)
@@ -393,6 +636,7 @@ class CreateRampOrder(graphene.Mutation):
                 user=user,
                 country_code=resolved_country_code,
             )
+            external_id = f'confio-ramp-{normalized_direction.lower()}-{timezone.now().strftime("%Y%m%d%H%M%S")}'
             result = client.create_ramp_order(
                 direction=normalized_direction,
                 amount=decimal_amount,
@@ -402,7 +646,7 @@ class CreateRampOrder(graphene.Mutation):
                 wallet_address=_get_koywe_destination_address(current_account=current_account),
                 country_code=resolved_country_code,
                 bank_info=bank_info,
-                external_id=f'confio-ramp-{normalized_direction.lower()}-{timezone.now().strftime("%Y%m%d%H%M%S")}',
+                external_id=external_id,
                 contact_profile=_get_koywe_contact_profile(user=user, email_override=koywe_email),
             )
         except KoyweConfigurationError as exc:
@@ -413,6 +657,30 @@ class CreateRampOrder(graphene.Mutation):
         except Exception as exc:
             logger.exception('Unexpected Koywe ramp order failure')
             return RampOrderType(success=False, error='Unexpected Koywe error while creating the order')
+
+        actor_business = current_account.business if current_account.account_type == 'business' else None
+        actor_type = 'business' if current_account.account_type == 'business' else 'user'
+        actor_display_name = current_account.display_name or user.get_full_name() or user.username or ''
+        actor_address = current_account.algorand_address or ''
+        upsert_koywe_ramp_transaction(
+            actor_user=user,
+            actor_business=actor_business,
+            actor_type=actor_type,
+            actor_display_name=actor_display_name,
+            actor_address=actor_address,
+            direction=normalized_direction,
+            country_code=resolved_country_code,
+            fiat_currency=fiat_currency or _get_country_fiat_currency(resolved_country_code),
+            payment_method_code=payment_method_code,
+            payment_method_display=result.payment_method_display,
+            order_id=result.order_id,
+            external_id=external_id,
+            amount_in=result.amount_in,
+            amount_out=result.amount_out,
+            next_action_url=result.next_action_url,
+            auth_email=koywe_email,
+            order_payload=result.raw_response,
+        )
 
         return RampOrderType(
             success=True,
@@ -499,6 +767,16 @@ class CreateMockRampOrder(graphene.Mutation):
 
 
 class Query(graphene.ObjectType):
+    koywe_bank_info = graphene.List(
+        KoyweBankInfoType,
+        country_code=graphene.String(required=True),
+    )
+    ramp_payment_methods = graphene.List(
+        RampPaymentMethodCatalogType,
+        country_code=graphene.String(),
+        direction=graphene.String(),
+        include_inactive=graphene.Boolean(),
+    )
     ramp_availability = graphene.Field(
         RampAvailabilityType,
         country_code=graphene.String(),
@@ -516,6 +794,40 @@ class Query(graphene.ObjectType):
         order_id=graphene.String(required=True),
         country_code=graphene.String(),
     )
+    pending_ramp_transaction = graphene.Field(
+        PendingRampTransactionType,
+        provider=graphene.String(required=True),
+        direction=graphene.String(),
+    )
+    my_ramp_address = graphene.Field(RampUserAddressType)
+
+    def resolve_koywe_bank_info(self, info, country_code):
+        alpha3 = country_code.upper()
+        qs = KoyweBankInfo.objects.filter(country_code=alpha3, is_active=True)
+        if not qs.exists():
+            # Trigger a sync on cache miss
+            try:
+                client = KoyweClient()
+                if client.is_configured:
+                    banks = client.get_bank_info(country_code=alpha3)
+                    for bank in banks:
+                        bank_code = bank.get('bankCode') or ''
+                        name = bank.get('name') or ''
+                        if not bank_code or not name:
+                            continue
+                        KoyweBankInfo.objects.update_or_create(
+                            bank_code=bank_code,
+                            country_code=alpha3,
+                            defaults={
+                                'name': name,
+                                'institution_name': bank.get('institutionName') or '',
+                                'is_active': True,
+                            },
+                        )
+                    qs = KoyweBankInfo.objects.filter(country_code=alpha3, is_active=True)
+            except KoyweError as exc:
+                logger.warning('Koywe bank info on-demand sync failed for %s: %s', alpha3, exc)
+        return list(qs)
 
     def resolve_ramp_availability(self, info, country_code=None):
         resolved_country_code = _resolve_ramp_country_code(info, country_code)
@@ -536,14 +848,20 @@ class Query(graphene.ObjectType):
                 exc,
             )
 
-        synced_methods = sync_country_payment_methods(resolved_country_code)
-        method_map = {method.name: method for method in synced_methods}
+        sync_country_payment_methods(resolved_country_code)
+        method_map = {
+            method.code: method
+            for method in RampPaymentMethod.objects.filter(
+                country_code=resolved_country_code.upper(),
+                is_active=True,
+            )
+        }
         country_name = _get_country_name(resolved_country_code)
 
         on_ramp_methods = []
         off_ramp_methods = []
         for method in config["methods"]:
-            payment_method = method_map.get(method["code"].lower().replace("-", "_"))
+            payment_method = method_map.get(method["code"])
             payload = _build_ramp_method_payload(
                 country_code=resolved_country_code,
                 fiat_currency=config["fiat_currency"],
@@ -572,6 +890,19 @@ class Query(graphene.ObjectType):
                 "Cotización estimada con datos de Koywe. Se enruta por Solana hasta conectar Algorand."
             ),
         )
+
+    def resolve_ramp_payment_methods(self, info, country_code=None, direction=None, include_inactive=False):
+        resolved_country_code = _resolve_ramp_country_code(info, country_code)
+        sync_country_payment_methods(resolved_country_code)
+        queryset = RampPaymentMethod.objects.filter(country_code=resolved_country_code.upper())
+        if not include_inactive:
+            queryset = queryset.filter(is_active=True)
+        normalized_direction = (direction or '').strip().upper()
+        if normalized_direction == 'ON_RAMP':
+            queryset = queryset.filter(supports_on_ramp=True)
+        elif normalized_direction == 'OFF_RAMP':
+            queryset = queryset.filter(supports_off_ramp=True)
+        return queryset.select_related('country', 'bank', 'legacy_payment_method')
 
     def resolve_ramp_quote(self, info, direction, amount, country_code=None, fiat_currency=None, payment_method_code=None):
         resolved_country_code = _resolve_ramp_country_code(info, country_code)
@@ -654,6 +985,16 @@ class Query(graphene.ObjectType):
                 order_id=order_id,
                 email=koywe_email,
             )
+            ramp_tx = RampTransaction.objects.filter(
+                provider='koywe',
+                provider_order_id=order_id,
+            ).first()
+            if ramp_tx:
+                sync_koywe_ramp_transaction_from_order(
+                    ramp_tx=ramp_tx,
+                    order_payload=result.raw_response,
+                    next_action_url=result.next_action_url,
+                )
         except KoyweConfigurationError as exc:
             return RampOrderStatusType(success=False, error=str(exc))
         except KoyweError as exc:
@@ -672,6 +1013,51 @@ class Query(graphene.ObjectType):
             next_action_url=result.next_action_url,
             payment_details=result.raw_response,
         )
+
+    def resolve_pending_ramp_transaction(self, info, provider, direction=None):
+        user = getattr(info.context, "user", None)
+        if not (user and getattr(user, "is_authenticated", False)):
+            return None
+
+        current_account = _get_ramp_account_for_user(info, user)
+        if not current_account:
+            return None
+
+        queryset = RampTransaction.objects.filter(
+            provider=(provider or "").strip().lower(),
+            status__in=["PENDING", "PROCESSING", "AML_REVIEW"],
+        )
+        if direction:
+            queryset = queryset.filter(direction=(direction or "").strip().lower())
+
+        if current_account.account_type == 'business' and current_account.business_id:
+            queryset = queryset.filter(actor_business_id=current_account.business_id)
+        else:
+            queryset = queryset.filter(actor_user=user)
+
+        if getattr(current_account, 'algorand_address', None):
+            queryset = queryset.filter(actor_address=current_account.algorand_address)
+
+        ramp_tx = queryset.order_by('-created_at').first()
+        if not ramp_tx:
+            return None
+
+        return PendingRampTransactionType(
+            internal_id=str(ramp_tx.internal_id),
+            provider=ramp_tx.provider,
+            direction=ramp_tx.direction,
+            status=ramp_tx.status,
+            provider_order_id=ramp_tx.provider_order_id,
+            external_id=ramp_tx.external_id,
+            country_code=ramp_tx.country_code,
+            created_at=ramp_tx.created_at,
+        )
+
+    def resolve_my_ramp_address(self, info):
+        user = getattr(info.context, "user", None)
+        if not (user and getattr(user, "is_authenticated", False)):
+            return None
+        return _build_effective_ramp_address_snapshot(user)
 
 
 def _resolve_ramp_country_code(info, country_code=None):
@@ -785,22 +1171,75 @@ def _get_koywe_destination_address(*, current_account) -> str | None:
 
 
 def _get_koywe_auth_email(*, user, country_code: str) -> str:
-    sandbox_emails = getattr(settings, 'KOYWE_SANDBOX_EMAILS_BY_COUNTRY', {}) or {}
-    koywe_env = str(getattr(settings, 'KOYWE_ENV', '') or '').strip().lower()
-    if koywe_env == 'sandbox':
-        sandbox_email = sandbox_emails.get((country_code or '').upper())
-        if sandbox_email:
-            return sandbox_email
-    return (getattr(user, 'email', None) or '').strip()
+    email = (getattr(user, 'email', None) or '').strip()
+    if not email:
+        raise KoyweError('Tu cuenta debe tener un email para usar recargas y retiros')
+    return email
 
 
-def _get_koywe_contact_profile(*, user, email_override: str | None = None) -> dict[str, str]:
-    verification = (
+def _get_user_phone_country_alpha3(user) -> str:
+    iso2 = str(getattr(user, 'phone_country', '') or '').strip().upper()
+    return ISO2_TO_ISO3.get(iso2, '')
+
+
+def _get_latest_personal_verification(user):
+    return (
         IdentityVerification.objects
         .filter(user=user, status='verified', risk_factors__account_type__isnull=True)
         .order_by('-verified_at', '-updated_at', '-created_at')
         .first()
     )
+
+
+def _build_effective_ramp_address_snapshot(user):
+    verification = _get_latest_personal_verification(user)
+    ramp_address = RampUserAddress.objects.filter(user=user).first()
+    address_country = _get_user_phone_country_alpha3(user) or (
+        (verification.verified_country or '').strip() if verification else ''
+    )
+    address_street = (
+        (ramp_address.address_street or '').strip()
+        if ramp_address and ramp_address.address_street
+        else (verification.verified_address or '').strip() if verification and verification.verified_address else ''
+    )
+    address_city = (
+        (ramp_address.address_city or '').strip()
+        if ramp_address and ramp_address.address_city
+        else (verification.verified_city or '').strip() if verification and verification.verified_city else ''
+    )
+    address_state = (
+        (ramp_address.address_state or '').strip()
+        if ramp_address and ramp_address.address_state
+        else (verification.verified_state or '').strip() if verification and verification.verified_state else ''
+    )
+    address_zip_code = (
+        (ramp_address.address_zip_code or '').strip()
+        if ramp_address and ramp_address.address_zip_code
+        else (verification.verified_postal_code or '').strip() if verification and verification.verified_postal_code else ''
+    )
+    return SimpleNamespace(
+        user=user,
+        address_street=address_street,
+        address_city=address_city,
+        address_state=address_state,
+        address_zip_code=address_zip_code,
+        address_country=address_country,
+        updated_at=getattr(ramp_address, 'updated_at', None) or getattr(verification, 'updated_at', None),
+    )
+
+
+def _is_ramp_address_complete(value) -> bool:
+    return bool(
+        getattr(value, 'address_street', None)
+        and getattr(value, 'address_city', None)
+        and getattr(value, 'address_state', None)
+        and getattr(value, 'address_zip_code', None)
+        and _get_user_phone_country_alpha3(getattr(value, 'user', None))
+    )
+
+
+def _get_koywe_contact_profile(*, user, email_override: str | None = None) -> dict[str, str]:
+    verification = _get_latest_personal_verification(user)
 
     first_name = (getattr(verification, 'verified_first_name', None) or getattr(user, 'first_name', None) or '').strip()
     last_name = (getattr(verification, 'verified_last_name', None) or getattr(user, 'last_name', None) or '').strip()
@@ -818,9 +1257,23 @@ def _get_koywe_contact_profile(*, user, email_override: str | None = None) -> di
     if verification:
         profile['documentNumber'] = (verification.document_number or '').strip()
         profile['documentType'] = (verification.document_type or '').strip()
+        profile['dob'] = verification.verified_date_of_birth.isoformat() if verification.verified_date_of_birth else ''
+    effective_address = _build_effective_ramp_address_snapshot(user)
+    if effective_address.address_street:
+        profile['address'] = effective_address.address_street
+        profile['addressStreet'] = effective_address.address_street
+    if effective_address.address_city:
+        profile['addressCity'] = effective_address.address_city
+    if effective_address.address_state:
+        profile['addressState'] = effective_address.address_state
+    if effective_address.address_zip_code:
+        profile['addressZipCode'] = effective_address.address_zip_code
+    if effective_address.address_country:
+        profile['addressCountry'] = effective_address.address_country
     return {key: value for key, value in profile.items() if value}
 
 
 class Mutation(graphene.ObjectType):
     create_ramp_order = CreateRampOrder.Field()
     create_mock_ramp_order = CreateMockRampOrder.Field()
+    upsert_ramp_user_address = UpsertRampUserAddress.Field()

@@ -5,6 +5,7 @@ from urllib.parse import parse_qs
 import logging
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 from channels.db import database_sync_to_async
+from users.legal.documents import TERMS
 
 
 class _DummyRequest:
@@ -53,6 +54,32 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
         for t in (getattr(self, "_keepalive_task", None), getattr(self, "_idle_task", None)):
             if t:
                 t.cancel()
+
+    def _get_client_ip(self):
+        try:
+            headers = {
+                k.decode("latin1").lower(): v.decode("latin1")
+                for k, v in (self.scope.get("headers") or [])
+            }
+            forwarded_for = headers.get("x-forwarded-for", "")
+            if forwarded_for:
+                return forwarded_for.split(",")[0].strip()
+            client = self.scope.get("client")
+            if client and client[0]:
+                return client[0]
+        except Exception:
+            pass
+        return None
+
+    def _get_user_agent(self):
+        try:
+            headers = {
+                k.decode("latin1").lower(): v.decode("latin1")
+                for k, v in (self.scope.get("headers") or [])
+            }
+            return headers.get("user-agent", "")
+        except Exception:
+            return ""
 
     async def receive_json(self, content, **kwargs):
         await self._reset_idle_timer()
@@ -113,6 +140,42 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
             except Exception as e:
                 await self.send_json({"type": "error", "message": str(e) or "optin_prepare_exception"})
             return
+        if t == "prepare_request":
+            try:
+                amount = content.get("amount")
+                platform = content.get("platform", "")
+                accepted_terms = bool(content.get("accepted_terms"))
+                try:
+                    logging.getLogger(__name__).info(
+                        f"[PRESALE][WS] prepare_request amount={amount} platform={platform} accepted_terms={accepted_terms}"
+                    )
+                except Exception:
+                    pass
+                pack = await self._prepare(
+                    amount,
+                    platform=platform,
+                    accepted_terms=accepted_terms,
+                    client_ip=self._get_client_ip(),
+                    user_agent=self._get_user_agent(),
+                )
+                if not pack.get("success"):
+                    await self.send_json({"type": "error", "message": pack.get("error", "prepare_failed")})
+                    return
+                await self.send_json({
+                    "type": "prepare_ready",
+                    "pack": {
+                        "internal_id": pack.get("purchase_id"),
+                        "purchase_id": pack.get("purchase_id"),
+                        "transactions": pack.get("transactions"),
+                        "sponsor_transactions": pack.get("sponsor_transactions"),
+                        "user_signing_indexes": pack.get("user_signing_indexes", [1]),
+                        "group_id": pack.get("group_id"),
+                        "sponsor_topup": pack.get("sponsor_topup"),
+                    },
+                })
+            except Exception as e:
+                await self.send_json({"type": "error", "message": str(e) or "prepare_exception"})
+            return
         if t == "optin_submit":
             try:
                 signed = content.get("signed_transactions")
@@ -124,37 +187,6 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
                 await self.send_json({"type": "submit_ok", "transaction_id": res.get("txid")})
             except Exception as e:
                 await self.send_json({"type": "error", "message": str(e) or "optin_submit_exception"})
-            return
-        if t == "prepare_request":
-            try:
-                amount = content.get("amount")
-                platform = content.get("platform", "")
-                try:
-                    logging.getLogger(__name__).info(f"[PRESALE][WS] prepare_request amount={amount} platform={platform}")
-                except Exception:
-                    pass
-                pack = await self._prepare(amount, platform)
-                if not pack.get("success"):
-                    # Special hint: presale app opt-in required
-                    if pack.get('error') == 'requires_presale_app_optin':
-                        await self.send_json({"type": "error", "message": "requires_presale_app_optin", "app_id": pack.get('app_id')})
-                        return
-                    await self.send_json({"type": "error", "message": pack.get("error", "prepare_failed")})
-                    return
-                await self.send_json({
-                    "type": "prepare_ready",
-                    "pack": {
-                        "internal_id": pack.get("purchase_id"),
-                        "purchase_id": pack.get("purchase_id"),  # backward compat
-                        "transactions": pack.get("transactions"),
-                        "sponsor_transactions": pack.get("sponsor_transactions"),
-                        "user_signing_indexes": pack.get("user_signing_indexes", [1]),
-                        "group_id": pack.get("group_id"),
-                        "sponsor_topup": pack.get("sponsor_topup"),
-                    },
-                })
-            except Exception as e:
-                await self.send_json({"type": "error", "message": str(e) or "prepare_exception"})
             return
         if t == "submit_request":
             try:
@@ -233,7 +265,7 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
         return account
 
     @database_sync_to_async
-    def _prepare(self, amount, platform: str = ""):
+    def _prepare(self, amount, platform: str = "", accepted_terms: bool = False, client_ip: str | None = None, user_agent: str = ""):
         from decimal import Decimal
         from django.utils import timezone
         from presale.models import PresalePhase, PresalePurchase, UserPresaleLimit, PresaleSettings
@@ -248,6 +280,9 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
         is_eligible, error_msg = check_presale_eligibility(user)
         if not is_eligible:
             return {"success": False, "error": error_msg}
+
+        if not accepted_terms:
+            return {"success": False, "error": "terms_acceptance_required"}
 
         # Validate presale is active and find phase
         settings_obj = PresaleSettings.get_settings()
@@ -328,6 +363,10 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
             price_per_token=phase.price_per_token,
             status='processing',
             from_address=account.algorand_address,
+            accepted_terms_version=TERMS['version'],
+            accepted_terms_at=timezone.now(),
+            accepted_terms_ip=client_ip,
+            accepted_terms_user_agent=(user_agent or '')[:1000],
         )
 
         # Build sponsored transaction group

@@ -32,6 +32,10 @@ class UnifiedTransactionType(DjangoObjectType):
     
     # P2P Trade ID for navigation
     p2p_trade_id = graphene.String(description="P2P Trade ID if this is an exchange transaction")
+    ramp_direction = graphene.String(description="Ramp direction (on_ramp/off_ramp)")
+    ramp_provider = graphene.String(description="Ramp provider display name")
+    ramp_fiat_amount = graphene.String(description="Ramp fiat-side amount")
+    ramp_fiat_currency = graphene.String(description="Ramp fiat-side currency")
     
     # Expose Payroll Item ID for QR code verification
     item_id = graphene.String(description="Payroll Item ID")
@@ -87,6 +91,10 @@ class UnifiedTransactionType(DjangoObjectType):
         # Conversions are always "self" transactions
         if self.transaction_type == 'conversion':
             return 'conversion'
+        if self.transaction_type == 'ramp':
+            if getattr(self, 'ramp_transaction', None):
+                return 'received' if self.ramp_transaction.direction == 'on_ramp' else 'sent'
+            return 'unknown'
 
         # Payroll: derive from user identity first (addresses may be missing)
         if self.transaction_type == 'payroll':
@@ -196,6 +204,11 @@ class UnifiedTransactionType(DjangoObjectType):
             # Handle conversions with their description
             if self.transaction_type == 'conversion':
                 return self.description or 'Conversión'
+
+            if self.transaction_type == 'ramp':
+                if getattr(self, 'ramp_transaction', None):
+                    return 'Recarga' if self.ramp_transaction.direction == 'on_ramp' else 'Retiro'
+                return self.description or 'Ramp'
             
             # Handle P2P exchanges with their description
             if self.transaction_type == 'exchange':
@@ -238,6 +251,27 @@ class UnifiedTransactionType(DjangoObjectType):
         """Return P2P Trade ID if this is an exchange transaction"""
         if self.transaction_type == 'exchange' and self.p2p_trade_id:
             return str(self.p2p_trade_id)
+        return None
+
+    def resolve_ramp_direction(self, info):
+        if self.transaction_type == 'ramp' and getattr(self, 'ramp_transaction', None):
+            return self.ramp_transaction.direction
+        return None
+
+    def resolve_ramp_provider(self, info):
+        if self.transaction_type == 'ramp' and getattr(self, 'ramp_transaction', None):
+            return self.ramp_transaction.get_provider_display()
+        return None
+
+    def resolve_ramp_fiat_amount(self, info):
+        if self.transaction_type == 'ramp' and getattr(self, 'ramp_transaction', None):
+            value = getattr(self.ramp_transaction, 'fiat_amount', None)
+            return str(value) if value is not None else None
+        return None
+
+    def resolve_ramp_fiat_currency(self, info):
+        if self.transaction_type == 'ramp' and getattr(self, 'ramp_transaction', None):
+            return self.ramp_transaction.fiat_currency or None
         return None
 
     def resolve_item_id(self, info):
@@ -308,7 +342,8 @@ class UnifiedTransactionQuery(graphene.ObjectType):
                 'p2p_trade', 
                 'payroll_item', 
                 'referral_reward_event', 
-                'presale_purchase'
+                'presale_purchase',
+                'ramp_transaction',
             ).filter(
                 Q(sender_business=account.business) | 
                 Q(counterparty_business=account.business)
@@ -325,7 +360,8 @@ class UnifiedTransactionQuery(graphene.ObjectType):
                 'p2p_trade', 
                 'payroll_item', 
                 'referral_reward_event', 
-                'presale_purchase'
+                'presale_purchase',
+                'ramp_transaction',
             ).filter(
                 Q(
                     Q(sender_user=user) & Q(sender_business__isnull=True)
@@ -344,6 +380,10 @@ class UnifiedTransactionQuery(graphene.ObjectType):
             wanted = [t.upper() for t in token_types]
             queryset = queryset.annotate(tok_upper=Upper('token_type')).filter(tok_upper__in=wanted)
         
+        queryset = queryset.exclude(
+            Q(transaction_type='conversion') & Q(conversion__ramp_transaction__isnull=False)
+        )
+
         # Order by created_at descending to show newest first
         queryset = queryset.order_by('-created_at')
         
@@ -441,7 +481,22 @@ class UnifiedTransactionQuery(graphene.ObjectType):
             from django.db.models.functions import Upper
             wanted = [t.upper() for t in token_types]
             queryset = queryset.annotate(tok_upper=Upper('token_type')).filter(tok_upper__in=wanted)
+
+        queryset = queryset.select_related(
+            'send_transaction',
+            'payment_transaction',
+            'conversion',
+            'p2p_trade',
+            'payroll_item',
+            'referral_reward_event',
+            'presale_purchase',
+            'ramp_transaction',
+        )
         
+        queryset = queryset.exclude(
+            Q(transaction_type='conversion') & Q(conversion__ramp_transaction__isnull=False)
+        )
+
         # Order by created_at descending to show newest first
         queryset = queryset.order_by('-created_at')
         
@@ -555,7 +610,22 @@ class UnifiedTransactionQuery(graphene.ObjectType):
         
         # Apply friend filter
         queryset = queryset.filter(friend_conditions)
+
+        queryset = queryset.select_related(
+            'send_transaction',
+            'payment_transaction',
+            'conversion',
+            'p2p_trade',
+            'payroll_item',
+            'referral_reward_event',
+            'presale_purchase',
+            'ramp_transaction',
+        )
         
+        queryset = queryset.exclude(
+            Q(transaction_type='conversion') & Q(conversion__ramp_transaction__isnull=False)
+        )
+
         # Order by created_at descending to show newest first
         queryset = queryset.order_by('-created_at')
         

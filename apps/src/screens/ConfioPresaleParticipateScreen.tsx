@@ -37,6 +37,7 @@ export const ConfioPresaleParticipateScreen = () => {
   const { selectedCountry } = useCountry();
 
   const [amount, setAmount] = useState('');
+  const [hasAcceptedTerms, setHasAcceptedTerms] = useState(false);
 
   // Use the app's selected country for formatting
   const countryCode = selectedCountry?.[2] || 'VE';
@@ -82,6 +83,7 @@ export const ConfioPresaleParticipateScreen = () => {
   const tokensReceived = calculateTokens(parsedAmount);
   const isValidAmount = parsedAmount >= minAmount && parsedAmount <= maxAmount;
   const exceedsBalance = !balancesLoading && parsedAmount > availableCusd;
+  const canSubmit = isValidAmount && parsedAmount > 0 && !exceedsBalance && hasAcceptedTerms && !busy;
 
   // Ensure user is opted into the presale app (explicit opt-in on enter and before swap)
   // Throws an error if the server returns an error message (e.g., backup check failure)
@@ -240,10 +242,14 @@ export const ConfioPresaleParticipateScreen = () => {
       Alert.alert('Saldo insuficiente', 'No tienes suficiente cUSD para esta compra.');
       return;
     }
+    if (!hasAcceptedTerms) {
+      Alert.alert('Confirmación requerida', 'Debes aceptar los Términos de la preventa antes de continuar.');
+      return;
+    }
 
     Alert.alert(
-      'Confirmar conversión',
-      `¿Convertir ${amount} cUSD a ${formatWithLocale(tokensReceived, { minimumFractionDigits: 2 })} $CONFIO?`,
+      'Confirmar compra',
+      `¿Comprar ${formatWithLocale(tokensReceived, { minimumFractionDigits: 2 })} $CONFIO por ${amount} cUSD?`,
       [
         {
           text: 'Cancelar',
@@ -341,7 +347,7 @@ export const ConfioPresaleParticipateScreen = () => {
             <Text style={styles.statusDescription}>
               {hasExceededGoal
                 ? `La comunidad ha superado todas las expectativas. La Fase ${presale?.phaseNumber || 1} continúa disponible por tiempo limitado.`
-                : `¡La Fase ${presale?.phaseNumber || 1} está activa! Puedes convertir cUSD a $CONFIO al precio más bajo de la historia. Oferta limitada mientras tengamos monedas disponibles.`
+                : `La Fase ${presale?.phaseNumber || 1} está activa. Puedes acceder temprano al ecosistema $CONFIO con cupos limitados mientras haya disponibilidad.`
               }
             </Text>
             <View style={styles.progressContainer}>
@@ -395,7 +401,7 @@ export const ConfioPresaleParticipateScreen = () => {
 
         {/* Swap Interface */}
         <View style={styles.swapSection}>
-          <Text style={styles.sectionTitle}>Convertir cUSD a $CONFIO</Text>
+          <Text style={styles.sectionTitle}>Comprar $CONFIO</Text>
 
           <View style={styles.swapCard}>
             <View style={styles.inputContainer}>
@@ -440,6 +446,38 @@ export const ConfioPresaleParticipateScreen = () => {
                 )}
               </View>
             )}
+
+            <View style={styles.disclosureCard}>
+              <Text style={styles.disclosureTitle}>Resumen importante</Text>
+              <Text style={styles.disclosureText}>
+                $CONFIO es un token de acceso al ecosistema. No representa participación en la empresa, dividendos ni derechos sobre ingresos o activos de Confío.
+              </Text>
+              <Text style={styles.disclosureText}>
+                Su valor y utilidad futura no están garantizados, y la compra puede implicar pérdida total.
+              </Text>
+            </View>
+
+            <TouchableOpacity
+              style={styles.checkboxRow}
+              activeOpacity={0.85}
+              onPress={() => setHasAcceptedTerms(current => !current)}
+            >
+              <Icon
+                name={hasAcceptedTerms ? 'check-square' : 'square'}
+                size={20}
+                color={hasAcceptedTerms ? colors.primary : '#9CA3AF'}
+              />
+              <Text style={styles.checkboxText}>
+                He leído y acepto los{' '}
+                <Text
+                  style={styles.checkboxLink}
+                  onPress={() => navigation.navigate('LegalDocument', { docType: 'terms' })}
+                >
+                  Términos de Servicio
+                </Text>
+                {' '}y entiendo que no hay garantía de valor ni de liquidez.
+              </Text>
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -448,15 +486,15 @@ export const ConfioPresaleParticipateScreen = () => {
           <TouchableOpacity
             style={[
               styles.swapButton,
-              (!isValidAmount || parsedAmount === 0 || exceedsBalance) && styles.swapButtonDisabled
+              !canSubmit && styles.swapButtonDisabled
             ]}
             onPress={handleSwap}
-            disabled={!isValidAmount || parsedAmount === 0 || exceedsBalance || busy}
+            disabled={!canSubmit}
           >
             {busy ? null : (
               <>
                 <Icon name="refresh-cw" size={20} color="#fff" />
-                <Text style={styles.swapButtonText}>Convertir Ahora</Text>
+                <Text style={styles.swapButtonText}>Comprar Ahora</Text>
               </>
             )}
           </TouchableOpacity>
@@ -464,16 +502,16 @@ export const ConfioPresaleParticipateScreen = () => {
           <View style={styles.lockingNotice}>
             <Icon name="lock" size={16} color="#f59e0b" />
             <Text style={styles.lockingText}>
-              <Text style={styles.lockingBold}>Importante:</Text> Las monedas $CONFIO permanecerán bloqueadas hasta que Confío alcance adopción masiva.
-              Esto protege el valor y asegura que construyamos juntos el futuro financiero de Latinoamérica.
+              <Text style={styles.lockingBold}>Importante:</Text> Las monedas $CONFIO pueden permanecer bloqueadas hasta la habilitación del reclamo o de funciones futuras definidas por Confío.
+              La disponibilidad depende del despliegue técnico y operativo del ecosistema.
             </Text>
           </View>
 
           <View style={styles.riskDisclosure}>
             <Icon name="alert-triangle" size={14} color="#ef4444" />
             <Text style={styles.riskText}>
-              <Text style={styles.riskBold}>Inversión de alto riesgo:</Text> Como cualquier negocio nuevo,
-              el éxito no está garantizado. Participa con responsabilidad.
+              <Text style={styles.riskBold}>Riesgo:</Text> El valor, utilidad y liquidez de $CONFIO no están garantizados.
+              Participa solo si entiendes estos riesgos.
             </Text>
           </View>
         </View>
@@ -486,7 +524,7 @@ export const ConfioPresaleParticipateScreen = () => {
             <View style={styles.benefitItem}>
               <Icon name="star" size={20} color={colors.secondary} />
               <Text style={styles.benefitText}>
-                <Text style={styles.benefitBold}>Precio más bajo:</Text> {presalePrice.toFixed(2)} cUSD por moneda vs precios futuros más altos
+                <Text style={styles.benefitBold}>Acceso temprano:</Text> Participas antes que el resto de la comunidad en esta fase
               </Text>
             </View>
 
@@ -828,6 +866,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.violetLight,
     borderRadius: 12,
     padding: 16,
+    marginBottom: 16,
   },
   resultRow: {
     flexDirection: 'row',
@@ -875,6 +914,42 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     color: '#fff',
+  },
+  disclosureCard: {
+    backgroundColor: '#F8FAFC',
+    borderColor: '#E2E8F0',
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+  },
+  disclosureTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.dark,
+    marginBottom: 8,
+  },
+  disclosureText: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: '#475569',
+    marginBottom: 6,
+  },
+  checkboxRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  checkboxText: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 19,
+    color: '#475569',
+  },
+  checkboxLink: {
+    color: colors.secondary,
+    fontWeight: '700',
+    textDecorationLine: 'underline',
   },
   lockingNotice: {
     flexDirection: 'row',

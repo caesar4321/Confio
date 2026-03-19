@@ -30,6 +30,18 @@ const colors = {
 };
 
 type ConfioPresaleScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
+type PresalePhaseCard = {
+  phase: string;
+  title: string;
+  price: string;
+  unit: string;
+  goal: string;
+  target: string;
+  location: string;
+  status: string;
+  description: string;
+  vision: string[];
+};
 
 export const ConfioPresaleScreen = () => {
   const navigation = useNavigation<ConfioPresaleScreenNavigationProp>();
@@ -52,7 +64,7 @@ export const ConfioPresaleScreen = () => {
   const claimable = onchainInfoData?.myPresaleOnchainInfo?.claimable || 0;
 
   // Use server data
-  const presalePhases = data?.allPresalePhases ? data.allPresalePhases.map((phase: any) => ({
+  const presalePhases: PresalePhaseCard[] = data?.allPresalePhases ? data.allPresalePhases.map((phase: any) => ({
     phase: `Fase ${phase.phaseNumber}`,
     title: phase.name,
     price: `${parseFloat(phase.pricePerToken).toFixed(2)} cUSD`,
@@ -251,7 +263,7 @@ export const ConfioPresaleScreen = () => {
             <>
               <Text style={styles.heroTitle}>Preventa Exclusiva de $CONFIO</Text>
               <Text style={styles.heroSubtitle}>
-                Sé parte del futuro financiero que estamos construyendo para nuestra gente
+                Acceso temprano al ecosistema que estamos construyendo para nuestra gente
               </Text>
               <View style={styles.comingSoonBadge}>
                 <Text style={styles.comingSoonText}>🚀 Lanzamiento Q1 2026</Text>
@@ -323,7 +335,7 @@ export const ConfioPresaleScreen = () => {
         {!isClaimsUnlocked && (
           <View style={styles.phasesSection}>
             <Text style={styles.sectionTitle}>Fases de la Preventa</Text>
-            {presalePhases.map((phase, index) => (
+            {presalePhases.map((phase: PresalePhaseCard, index: number) => (
               <View key={index} style={styles.phaseCard}>
                 <View style={styles.phaseHeader}>
                   <View style={styles.phaseInfo}>
@@ -354,7 +366,7 @@ export const ConfioPresaleScreen = () => {
                   <Text style={styles.locationText}>{phase.location}</Text>
                 </View>
                 <View style={styles.visionTags}>
-                  {phase.vision.map((item, idx) => (
+                  {phase.vision.map((item: string, idx: number) => (
                     <View key={idx} style={styles.visionTag}>
                       <Text style={styles.visionTagText}>{item}</Text>
                     </View>
@@ -369,7 +381,7 @@ export const ConfioPresaleScreen = () => {
         <View style={styles.ctaSection}>
           <Text style={styles.ctaTitle}>¿Listo para hacer historia?</Text>
           <Text style={styles.ctaSubtitle}>
-            {isClaimsUnlocked ? 'Reclama las monedas que compraste en la preventa' : 'Únete a miles de personas que ya creen en un futuro financiero mejor'}
+            {isClaimsUnlocked ? 'Reclama las monedas que compraste en la preventa' : 'Únete temprano al ecosistema $CONFIO y sigue su desarrollo desde adentro'}
           </Text>
 
           {!isClaimsUnlocked && activePresaleData?.activePresalePhase ? (

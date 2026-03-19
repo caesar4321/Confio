@@ -21,24 +21,35 @@ export const RampStepHeader = ({
   metaColor = '#6b7280',
 }: Props) => {
   return (
-    <View style={styles.header}>
-      <View style={styles.left}>
-        <View style={[styles.badge, { backgroundColor: accentBackground }]}>
-          <Text style={[styles.badgeText, { color: accentColor }]}>{number}</Text>
+    <View style={styles.wrapper}>
+      <View style={styles.header}>
+        <View style={styles.left}>
+          <View style={[styles.badge, { backgroundColor: accentBackground }]}>
+            <Text style={[styles.badgeText, { color: accentColor }]}>{number}</Text>
+          </View>
+          <Text style={[styles.title, { color: titleColor }]}>{title}</Text>
         </View>
-        <Text style={[styles.title, { color: titleColor }]}>{title}</Text>
+        {meta ? <Text style={[styles.meta, { color: metaColor }]}>{meta}</Text> : null}
       </View>
-      {meta ? <Text style={[styles.meta, { color: metaColor }]}>{meta}</Text> : null}
+      <View style={styles.divider} />
     </View>
   );
 };
 
 const styles = StyleSheet.create({
+  wrapper: {
+    marginBottom: 14,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    marginBottom: 10,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: '#e5e7eb',
+    marginBottom: 2,
   },
   left: {
     flexDirection: 'row',

@@ -3,6 +3,7 @@ from __future__ import annotations
 from decimal import Decimal, ROUND_DOWN
 
 from p2p_exchange.models import P2PPaymentMethod
+from ramps.models import RampPaymentMethod
 from users.models import Country
 
 
@@ -31,7 +32,7 @@ COUNTRY_METHODS = {
                 "display_name": "Transferencia bancaria",
                 "provider_type": "bank",
                 "icon": "repeat",
-                "description": "CBU/CVU o cuenta bancaria a nombre del usuario.",
+                "description": "Pago con transferencia desde tu banco (no aceptamos efectivo). Cuenta debe estar a tu nombre.",
                 "requires_account_number": True,
                 "requires_phone": False,
                 "requires_email": False,
@@ -43,7 +44,7 @@ COUNTRY_METHODS = {
                 "display_name": "Khipu",
                 "provider_type": "fintech",
                 "icon": "smartphone",
-                "description": "Transferencia automatizada desde banco compatible.",
+                "description": "Pago con transferencia automatizada desde tu banco. Cuenta debe estar a tu nombre.",
                 "requires_account_number": False,
                 "requires_phone": False,
                 "requires_email": True,
@@ -55,7 +56,7 @@ COUNTRY_METHODS = {
                 "display_name": "QR interoperable",
                 "provider_type": "fintech",
                 "icon": "smartphone",
-                "description": "Pago por QR interoperable en pesos argentinos.",
+                "description": "Pago con QR interoperable en ARS.",
                 "requires_account_number": False,
                 "requires_phone": False,
                 "requires_email": False,
@@ -79,7 +80,7 @@ COUNTRY_METHODS = {
                 "display_name": "QR interoperable",
                 "provider_type": "fintech",
                 "icon": "smartphone",
-                "description": "SIP / QR interoperable boliviano.",
+                "description": "Pago con QR boliviano.",
                 "requires_account_number": False,
                 "requires_phone": False,
                 "requires_email": False,
@@ -100,10 +101,10 @@ COUNTRY_METHODS = {
         "methods": [
             {
                 "code": "SULPAYMENTS",
-                "display_name": "PIX transfer",
+                "display_name": "PIX",
                 "provider_type": "fintech",
                 "icon": "smartphone",
-                "description": "Transferencia PIX desde una cuenta PIX registrada.",
+                "description": "Pagamentos PIX da sua conta PIX.",
                 "requires_account_number": True,
                 "requires_phone": False,
                 "requires_email": False,
@@ -115,7 +116,7 @@ COUNTRY_METHODS = {
                 "display_name": "PIX QR",
                 "provider_type": "fintech",
                 "icon": "smartphone",
-                "description": "Pago con QR dinamico via PIX.",
+                "description": "Pague com PIX usando QR Code dinâmico.",
                 "requires_account_number": False,
                 "requires_phone": True,
                 "requires_email": False,
@@ -139,7 +140,7 @@ COUNTRY_METHODS = {
                 "display_name": "Transferencia bancaria",
                 "provider_type": "bank",
                 "icon": "repeat",
-                "description": "Transferencia bancaria manual a nombre del usuario.",
+                "description": "Pago con transferencia manual desde tu banco (no aceptamos efectivo), obliga salir de Koywe a tu banco. Cuenta debe estar a tu nombre.",
                 "requires_account_number": True,
                 "requires_phone": False,
                 "requires_email": False,
@@ -151,7 +152,7 @@ COUNTRY_METHODS = {
                 "display_name": "Khipu",
                 "provider_type": "fintech",
                 "icon": "smartphone",
-                "description": "Transferencia automatizada desde banco chileno.",
+                "description": "Pago con transferencia automatizada desde tu banco. Cuenta debe estar a tu nombre.",
                 "requires_account_number": False,
                 "requires_phone": False,
                 "requires_email": True,
@@ -175,7 +176,7 @@ COUNTRY_METHODS = {
                 "display_name": "PSE",
                 "provider_type": "fintech",
                 "icon": "repeat",
-                "description": "Pago en línea con enlace PSE.",
+                "description": "Pago automatizado con cuenta bancaria desde cualquier banco.",
                 "requires_account_number": False,
                 "requires_phone": False,
                 "requires_email": True,
@@ -187,7 +188,7 @@ COUNTRY_METHODS = {
                 "display_name": "Nequi",
                 "provider_type": "fintech",
                 "icon": "smartphone",
-                "description": "Billetera movil Nequi.",
+                "description": "Pago usando Nequi.",
                 "requires_account_number": False,
                 "requires_phone": True,
                 "requires_email": False,
@@ -199,7 +200,19 @@ COUNTRY_METHODS = {
                 "display_name": "Bancolombia",
                 "provider_type": "bank",
                 "icon": "credit-card",
-                "description": "Cuenta Bancolombia a nombre del usuario.",
+                "description": "Pago usando Bancolombia.",
+                "requires_account_number": True,
+                "requires_phone": False,
+                "requires_email": False,
+                "supports_on_ramp": True,
+                "supports_off_ramp": True,
+            },
+            {
+                "code": "WIRECO",
+                "display_name": "Transferencia bancaria",
+                "provider_type": "bank",
+                "icon": "repeat",
+                "description": "Transferencia bancaria a cualquier banco colombiano.",
                 "requires_account_number": True,
                 "requires_phone": False,
                 "requires_email": False,
@@ -223,7 +236,7 @@ COUNTRY_METHODS = {
                 "display_name": "SPEI",
                 "provider_type": "bank",
                 "icon": "repeat",
-                "description": "Transferencia SPEI o CLABE registrada.",
+                "description": "Pago con transferencia SPEI manual desde tu banco (no aceptamos efectivo), obliga salir de Koywe a tu banco. Cuenta debe estar a tu nombre.",
                 "requires_account_number": True,
                 "requires_phone": False,
                 "requires_email": False,
@@ -235,7 +248,7 @@ COUNTRY_METHODS = {
                 "display_name": "STP",
                 "provider_type": "bank",
                 "icon": "credit-card",
-                "description": "Cuenta STP vinculada para pagos y retiros.",
+                "description": "Agrega fondos a tu cuenta STP.",
                 "requires_account_number": True,
                 "requires_phone": False,
                 "requires_email": False,
@@ -259,7 +272,7 @@ COUNTRY_METHODS = {
                 "display_name": "Transferencia bancaria",
                 "provider_type": "bank",
                 "icon": "repeat",
-                "description": "Cuenta bancaria peruana en soles.",
+                "description": "Pago con transferencia manual desde tu banco (no aceptamos efectivo), obliga salir de Koywe a tu banco. Cuenta debe estar a tu nombre.",
                 "requires_account_number": True,
                 "requires_phone": False,
                 "requires_email": False,
@@ -283,7 +296,7 @@ COUNTRY_METHODS = {
                 "display_name": "Recaudo BCP",
                 "provider_type": "bank",
                 "icon": "credit-card",
-                "description": "Cuenta BCP Peru en soles.",
+                "description": "Recaudo BCP Perú Soles.",
                 "requires_account_number": True,
                 "requires_phone": False,
                 "requires_email": False,
@@ -329,6 +342,7 @@ def sync_country_payment_methods(country_code: str) -> list[P2PPaymentMethod]:
     methods = []
 
     for index, method in enumerate(config["methods"], start=1):
+        field_schema = build_ramp_field_schema(country_code=country_code.upper(), method=method)
         defaults = {
             "display_name": method["display_name"],
             "provider_type": method["provider_type"],
@@ -346,6 +360,30 @@ def sync_country_payment_methods(country_code: str) -> list[P2PPaymentMethod]:
             country_code=country_code.upper(),
             defaults=defaults,
         )
+        RampPaymentMethod.objects.update_or_create(
+            code=method["code"],
+            country_code=country_code.upper(),
+            defaults={
+                "display_name": method["display_name"],
+                "provider_type": method["provider_type"],
+                "is_active": True,
+                "icon": method["icon"],
+                "country": country,
+                "bank": payment_method.bank,
+                "legacy_payment_method": payment_method,
+                "description": method["description"],
+                "requires_phone": method["requires_phone"],
+                "requires_email": method["requires_email"],
+                "requires_account_number": method["requires_account_number"],
+                "requires_identification": bool(
+                    payment_method.bank and payment_method.bank.country and payment_method.bank.country.requires_identification
+                ),
+                "supports_on_ramp": method["supports_on_ramp"],
+                "supports_off_ramp": method["supports_off_ramp"],
+                "display_order": index * 10,
+                "field_schema": field_schema,
+            },
+        )
         methods.append(payment_method)
 
     P2PPaymentMethod.objects.filter(
@@ -353,6 +391,12 @@ def sync_country_payment_methods(country_code: str) -> list[P2PPaymentMethod]:
         name__startswith="wire",
     ).exclude(
         name__in=[m["code"].lower().replace("-", "_") for m in config["methods"]]
+    ).update(is_active=False)
+
+    RampPaymentMethod.objects.filter(
+        country_code=country_code.upper()
+    ).exclude(
+        code__in=[m["code"] for m in config["methods"]]
     ).update(is_active=False)
 
     return methods
@@ -439,3 +483,139 @@ def quote_ramp(*, direction: str, amount: Decimal, country_code: str, fiat_curre
 def _fmt(value: Decimal) -> str:
     normalized = value.quantize(Decimal("0.01"), rounding=ROUND_DOWN)
     return format(normalized.normalize(), "f")
+
+
+def build_ramp_field_schema(*, country_code: str, method: dict) -> dict:
+    code = (method.get("code") or "").upper()
+    provider_type = method.get("provider_type") or "other"
+    is_bank = provider_type == "bank"
+
+    account_field = {
+        "label": "Número de cuenta" if is_bank else "Identificador",
+        "placeholder": "Número de cuenta bancaria" if is_bank else "Identificador de cuenta",
+        "show": bool(method.get("requires_account_number")),
+        "required": bool(method.get("requires_account_number")),
+        "keyboardType": "numeric" if is_bank else "default",
+    }
+    phone_field = {
+        "label": "Número de teléfono",
+        "placeholder": "Número de teléfono",
+        "show": bool(method.get("requires_phone")),
+        "required": bool(method.get("requires_phone")),
+        "keyboardType": "phone-pad",
+    }
+    email_field = {
+        "label": "Correo electrónico",
+        "placeholder": "Correo electrónico",
+        "show": bool(method.get("requires_email")),
+        "required": bool(method.get("requires_email")),
+        "keyboardType": "email-address",
+    }
+    schema = {
+        "accountHolderLabel": "Titular de la cuenta o billetera" if provider_type == "fintech" else "Titular de la cuenta",
+        "accountField": account_field,
+        "phoneField": phone_field,
+        "emailField": email_field,
+        "showAccountTypeField": is_bank,
+        "accountTypeRequired": is_bank,
+        "defaultProviderMetadata": {},
+        "providerFields": [],
+    }
+
+    if country_code == "BR" and code in {"SULPAYMENTS", "PIX_QR"}:
+        schema["providerFields"] = [
+            {
+                "key": "bankName",
+                "label": "Institución receptora",
+                "placeholder": "Selecciona la institución",
+                "required": True,
+                "picker": "bank",
+                "helpText": "Selecciona la institución o banco asociado a la llave PIX donde recibirás el retiro.",
+            },
+            {
+                "key": "pixKeyType",
+                "label": "Tipo de llave PIX",
+                "placeholder": "CPF, teléfono, email o aleatoria",
+                "required": False,
+                "helpText": "Si tu cuenta usa PIX, guarda el tipo de llave para completar el cobro.",
+            },
+        ]
+    elif country_code == "MX" and code == "WIREMX":
+        schema["providerFields"] = [
+            {
+                "key": "bankName",
+                "label": "Institución receptora",
+                "placeholder": "Nombre de la institución",
+                "required": False,
+                "helpText": "Guarda la institución receptora para transferencias SPEI.",
+            },
+        ]
+    elif country_code == "PE" and code in {"WIREPE", "RECAUDO-PE"}:
+        schema["providerFields"] = [
+            {
+                "key": "bankName",
+                "label": "Banco receptor",
+                "placeholder": "Selecciona el banco",
+                "required": code != "RECAUDO-PE",
+                "picker": "bank",
+            },
+            {
+                "key": "cci",
+                "label": "CCI (opcional)",
+                "placeholder": "Código de Cuenta Interbancario",
+                "required": False,
+                "keyboardType": "numeric",
+            },
+        ]
+    elif country_code == "CL" and code == "WIRECL":
+        schema["providerFields"] = [
+            {
+                "key": "bankName",
+                "label": "Banco receptor",
+                "placeholder": "Selecciona el banco",
+                "required": True,
+                "picker": "bank",
+            },
+            {
+                "key": "beneficiaryRut",
+                "label": "RUT del titular",
+                "placeholder": "Ingresa el RUT del titular",
+                "required": False,
+            },
+        ]
+    elif country_code == "CO" and code == "WIRECO":
+        schema["providerFields"] = [
+            {
+                "key": "bankName",
+                "label": "Banco receptor",
+                "placeholder": "Selecciona el banco",
+                "required": True,
+                "picker": "bank",
+            },
+        ]
+    elif country_code == "CO" and code == "NEQUI":
+        schema["defaultProviderMetadata"] = {
+            "bankCode": "co_nequi",
+        }
+    elif country_code == "CO" and code == "BANCOLOMBIA":
+        schema["defaultProviderMetadata"] = {
+            "bankCode": "co_bancolombia",
+        }
+        schema["accountField"] = {
+            **account_field,
+            "label": "Número de cuenta Bancolombia",
+            "placeholder": "Ingresa tu número de cuenta (máx. 11 dígitos)",
+            "keyboardType": "numeric",
+            "maxLength": 11,
+        }
+    elif country_code == "CO" and code == "PSE":
+        schema["accountHolderLabel"] = "Nombre completo"
+        schema["providerFields"] = [
+            {"key": "firstName", "label": "Nombre", "placeholder": "Ingresa tu nombre", "required": True},
+            {"key": "lastName", "label": "Apellido", "placeholder": "Ingresa tu apellido", "required": True},
+            {"key": "documentType", "label": "Tipo de documento", "placeholder": "CC, CE, NIT, PASSPORT...", "required": True},
+            {"key": "documentNumber", "label": "Número de documento", "placeholder": "Ingresa tu número de documento", "required": True, "keyboardType": "numeric"},
+            {"key": "bankName", "label": "Banco receptor", "placeholder": "Nombre del banco", "required": False},
+        ]
+
+    return schema

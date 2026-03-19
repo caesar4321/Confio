@@ -9,6 +9,34 @@ const NOTIFICATION_TOKEN_KEY = 'push_notification_token';
 const NOTIFICATION_PROMPT_SHOWN_KEY = 'push_notification_prompt_shown';
 const NOTIFICATION_PROMPT_TIMESTAMP_KEY = 'push_notification_prompt_timestamp';
 
+const normalizeRampNotificationPayload = (data: any, notifType?: string, id?: string) => {
+  const direction = (data?.direction || data?.ramp_direction || data?.rampDirection || '').toString().toLowerCase();
+  const fiatAmount = data?.ramp_fiat_amount ?? data?.rampFiatAmount;
+  const fiatCurrency = data?.ramp_fiat_currency ?? data?.rampFiatCurrency;
+  const walletAmount = data?.wallet_amount ?? data?.walletAmount ?? data?.amount;
+  const walletCurrency = data?.wallet_currency ?? data?.walletCurrency ?? 'cUSD';
+
+  return {
+    ...data,
+    ...(id ? { id } : {}),
+    notification_type: notifType || data?.notification_type,
+    transaction_type: 'ramp',
+    ramp_direction: direction,
+    rampDirection: direction,
+    amount: direction === 'on_ramp' ? (fiatAmount ?? data?.amount) : walletAmount,
+    currency: direction === 'on_ramp'
+      ? (fiatCurrency ?? data?.currency ?? data?.token_type ?? data?.tokenType)
+      : 'cUSD',
+    token_type: direction === 'on_ramp'
+      ? (fiatCurrency ?? data?.currency ?? data?.token_type ?? data?.tokenType)
+      : 'cUSD',
+    ramp_fiat_amount: fiatAmount,
+    ramp_fiat_currency: fiatCurrency,
+    wallet_amount: walletAmount,
+    wallet_currency: walletCurrency,
+  };
+};
+
 export class PushNotificationService {
   private static instance: PushNotificationService;
   private isInitialized = false;
@@ -213,6 +241,22 @@ export class PushNotificationService {
       
       // Parse action URL if it exists
       if (action_url) {
+        const pendingAutoSwap =
+          remoteMessage.data?.pending_auto_swap === 'true' ||
+          remoteMessage.data?.pending_auto_swap === 'True' ||
+          remoteMessage.data?.data_pending_auto_swap === 'true' ||
+          remoteMessage.data?.data_pending_auto_swap === 'True';
+
+        if (pendingAutoSwap) {
+          RootNavigation.navigationRef.navigate('Main' as never, {
+            screen: 'BottomTabs',
+            params: {
+              screen: 'Home',
+            },
+          } as never);
+          return;
+        }
+
         if (action_url.includes('p2p/trade/')) {
           const tradeId = action_url.split('p2p/trade/')[1];
           console.log('[PushNotificationService] Navigating to ActiveTrade:', tradeId);
@@ -282,6 +326,16 @@ export class PushNotificationService {
             if (!transactionData.id && transactionData.payment_transaction_id) {
               transactionData.id = transactionData.payment_transaction_id;
             }
+          } else if (
+            notification_type === 'RAMP_PENDING' ||
+            notification_type === 'RAMP_COMPLETED' ||
+            notification_type === 'RAMP_FAILED'
+          ) {
+            transactionType = 'ramp';
+            Object.assign(
+              transactionData,
+              normalizeRampNotificationPayload(transactionData, notification_type, transactionId),
+            );
           }
           
           console.log('[PushNotificationService] Navigating to TransactionDetail:', {

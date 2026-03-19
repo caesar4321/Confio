@@ -225,6 +225,25 @@ class PresalePurchase(models.Model):
         null=True,
         blank=True
     )
+    accepted_terms_version = models.CharField(
+        max_length=32,
+        blank=True,
+        help_text="Terms version accepted by the user at purchase time"
+    )
+    accepted_terms_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp when the user accepted the presale terms"
+    )
+    accepted_terms_ip = models.GenericIPAddressField(
+        null=True,
+        blank=True,
+        help_text="Client IP recorded when the user accepted the presale terms"
+    )
+    accepted_terms_user_agent = models.TextField(
+        blank=True,
+        help_text="User agent recorded when the user accepted the presale terms"
+    )
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True, blank=True)

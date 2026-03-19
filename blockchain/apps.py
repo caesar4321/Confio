@@ -7,6 +7,11 @@ class BlockchainConfig(AppConfig):
     verbose_name = 'Blockchain Integration'
     
     def ready(self):
+        try:
+            from . import signals  # noqa: F401
+        except Exception:
+            pass
+
         # Optional: warm Algod-related caches to reduce first-payment latency
         try:
             from django.conf import settings

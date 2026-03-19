@@ -46,6 +46,11 @@ class NotificationType(models.TextChoices):
     USDC_WITHDRAWAL_PENDING = 'USDC_WITHDRAWAL_PENDING', 'USDC Withdrawal Pending'
     USDC_WITHDRAWAL_COMPLETED = 'USDC_WITHDRAWAL_COMPLETED', 'USDC Withdrawal Completed'
     USDC_WITHDRAWAL_FAILED = 'USDC_WITHDRAWAL_FAILED', 'USDC Withdrawal Failed'
+
+    # Ramp aggregate notifications
+    RAMP_PENDING = 'RAMP_PENDING', 'Ramp Pending'
+    RAMP_COMPLETED = 'RAMP_COMPLETED', 'Ramp Completed'
+    RAMP_FAILED = 'RAMP_FAILED', 'Ramp Failed'
     
     # Account related
     ACCOUNT_VERIFIED = 'ACCOUNT_VERIFIED', 'Account Verified'

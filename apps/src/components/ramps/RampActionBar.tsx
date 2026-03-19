@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   ActivityIndicator,
+  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -28,6 +29,7 @@ export const RampActionBar = ({
   onSecondaryPress,
 }: Props) => {
   return (
+    <View style={styles.surface}>
     <View style={styles.wrap}>
       <TouchableOpacity
         style={[styles.primaryButton, primaryDisabled && styles.primaryButtonDisabled]}
@@ -53,50 +55,70 @@ export const RampActionBar = ({
         </TouchableOpacity>
       ) : null}
     </View>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
+  surface: {
+    marginTop: 8,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    backgroundColor: '#ffffff',
+    borderRadius: 24,
+    paddingHorizontal: 6,
+    paddingTop: 10,
+    paddingBottom: Platform.OS === 'ios' ? 6 : 10,
+    shadowColor: '#10b981',
+    shadowOpacity: 0.10,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: -4 },
+    elevation: 8,
+    borderWidth: 1,
+    borderColor: '#e8f5ee',
+  },
   wrap: {
-    marginHorizontal: 22,
+    marginHorizontal: 10,
   },
   primaryButton: {
-    marginTop: 12,
+    marginTop: 4,
     backgroundColor: '#059669',
     borderRadius: 16,
-    paddingVertical: 16,
+    paddingVertical: 17,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#059669',
-    shadowOpacity: 0.26,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 4,
+    shadowOpacity: 0.30,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 5,
   },
   primaryButtonDisabled: {
-    opacity: 0.7,
+    opacity: 0.6,
   },
   primaryButtonIcon: {
     marginRight: 8,
   },
   primaryButtonText: {
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '800',
     color: '#ffffff',
+    letterSpacing: 0.2,
   },
   ghostButton: {
-    marginTop: 12,
+    marginTop: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 14,
-    borderRadius: 16,
-    borderWidth: 1.5,
-    borderColor: '#e5e7eb',
+    paddingVertical: 13,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#d1fae5',
+    backgroundColor: '#f0fdf4',
   },
   ghostButtonText: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#1f2937',
+    color: '#047857',
   },
 });

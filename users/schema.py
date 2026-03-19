@@ -715,6 +715,7 @@ class BankInfoType(DjangoObjectType):
 	payment_details = graphene.JSONString()
 	provider_metadata = graphene.JSONString()
 	payment_method = graphene.Field('p2p_exchange.schema.P2PPaymentMethodType')
+	ramp_payment_method = graphene.Field('ramps.schema.RampPaymentMethodCatalogType')
 	
 	class Meta:
 		model = BankInfo
@@ -745,6 +746,21 @@ class BankInfoType(DjangoObjectType):
 	
 	def resolve_payment_method(self, info):
 		return self.payment_method
+
+	def resolve_ramp_payment_method(self, info):
+		if getattr(self, 'ramp_payment_method', None):
+			return self.ramp_payment_method
+		payment_method = getattr(self, 'payment_method', None)
+		if not payment_method:
+			return None
+		try:
+			from ramps.models import RampPaymentMethod
+			return RampPaymentMethod.objects.filter(
+				code=payment_method.name.upper().replace('_', '-'),
+				country_code=(payment_method.country_code or '').upper(),
+			).first()
+		except Exception:
+			return None
 
 
 # Achievement System GraphQL Types
@@ -1295,7 +1311,8 @@ class Query(EmployeeQueries, graphene.ObjectType):
 				confioPresaleLocked=f"{all_balances.get('confio_presale', {}).get('amount', 0):.2f}",
 				confioLocked=f"{confio_lock_val:.2f}",
 				pendingReferralReward=f"{pending_referral_amount:.2f}",
-				usdc=f"{all_balances['usdc']['amount']:.2f}"
+				# Preserve full asset precision so client threshold checks match on-chain minimums.
+				usdc=f"{all_balances['usdc']['amount']:.6f}"
 			)
 		except Exception:
 			# Graceful fallback to zeros to avoid client crashes
@@ -3286,7 +3303,8 @@ class RefreshToken(graphene.Mutation):
 
 class CreateBankInfo(graphene.Mutation):
     class Arguments:
-        payment_method_id = graphene.ID(required=True)
+        payment_method_id = graphene.ID()
+        ramp_payment_method_id = graphene.ID()
         account_holder_name = graphene.String(required=True)
         account_number = graphene.String()
         phone_number = graphene.String()
@@ -3302,7 +3320,7 @@ class CreateBankInfo(graphene.Mutation):
     bank_info = graphene.Field(BankInfoType)
 
     @classmethod
-    def mutate(cls, root, info, payment_method_id, account_holder_name,
+    def mutate(cls, root, info, account_holder_name, payment_method_id=None, ramp_payment_method_id=None,
                account_number=None, phone_number=None, email=None, username=None,
                account_type=None, identification_number=None, provider_metadata=None, is_default=False):
         user = getattr(info.context, 'user', None)
@@ -3334,32 +3352,59 @@ class CreateBankInfo(graphene.Mutation):
                     account_index=account_index
                 )
 
-            # Import P2PPaymentMethod
             from p2p_exchange.models import P2PPaymentMethod
-            payment_method = P2PPaymentMethod.objects.get(id=payment_method_id, is_active=True)
+            from ramps.models import RampPaymentMethod
+
+            if not payment_method_id and not ramp_payment_method_id:
+                return CreateBankInfo(success=False, error="Método de pago no encontrado")
+
+            ramp_payment_method = None
+            payment_method = None
+            if ramp_payment_method_id:
+                ramp_payment_method = RampPaymentMethod.objects.get(id=ramp_payment_method_id, is_active=True)
+                payment_method = ramp_payment_method.legacy_payment_method
+            if payment_method_id and not payment_method:
+                payment_method = P2PPaymentMethod.objects.get(id=payment_method_id, is_active=True)
+                ramp_payment_method = RampPaymentMethod.objects.filter(
+                    code=payment_method.name.upper().replace('_', '-'),
+                    country_code=(payment_method.country_code or '').upper(),
+                    is_active=True,
+                ).first()
 
             # Validate required fields based on payment method type
-            if payment_method.requires_account_number and not account_number:
+            requires_account_number = (
+                ramp_payment_method.requires_account_number if ramp_payment_method else payment_method.requires_account_number
+            )
+            requires_phone = ramp_payment_method.requires_phone if ramp_payment_method else payment_method.requires_phone
+            requires_email = ramp_payment_method.requires_email if ramp_payment_method else payment_method.requires_email
+            stored_email = email.strip() if email else None
+
+            if requires_account_number and not account_number:
                 return CreateBankInfo(success=False, error="Número de cuenta es requerido para este método de pago")
-            if payment_method.requires_phone and not phone_number:
+            if requires_phone and not phone_number:
                 return CreateBankInfo(success=False, error="Número de teléfono es requerido para este método de pago")
-            if payment_method.requires_email and not email:
+            if requires_email and not stored_email:
                 return CreateBankInfo(success=False, error="Email es requerido para este método de pago")
 
-            if payment_method.bank and payment_method.bank.country.requires_identification and not identification_number:
+            effective_bank = (ramp_payment_method.bank if ramp_payment_method else None) or (payment_method.bank if payment_method else None)
+            if effective_bank and effective_bank.country.requires_identification and not identification_number:
                 return CreateBankInfo(
                     success=False,
-                    error=f"{payment_method.bank.country.identification_name} es requerido para cuentas bancarias en {payment_method.bank.country.name}"
+                    error=f"{effective_bank.country.identification_name} es requerido para cuentas bancarias en {effective_bank.country.name}"
                 )
 
             # Check for duplicate payment method
-            duplicate_filter = {'account': account, 'payment_method': payment_method}
-            if payment_method.requires_account_number and account_number:
+            duplicate_filter = {'account': account}
+            if ramp_payment_method:
+                duplicate_filter['ramp_payment_method'] = ramp_payment_method
+            elif payment_method:
+                duplicate_filter['payment_method'] = payment_method
+            if requires_account_number and account_number:
                 duplicate_filter['account_number'] = account_number
-            elif payment_method.requires_phone and phone_number:
+            elif requires_phone and phone_number:
                 duplicate_filter['phone_number'] = phone_number
-            elif payment_method.requires_email and email:
-                duplicate_filter['email'] = email
+            elif requires_email and stored_email:
+                duplicate_filter['email'] = stored_email
             existing = BankInfo.objects.filter(**duplicate_filter).first()
             if existing:
                 return CreateBankInfo(success=False, error="Ya tienes registrado este método de pago")
@@ -3368,10 +3413,11 @@ class CreateBankInfo(graphene.Mutation):
             bank_info = BankInfo.objects.create(
                 account=account,
                 payment_method=payment_method,
+                ramp_payment_method=ramp_payment_method,
                 account_holder_name=account_holder_name.strip(),
                 account_number=account_number.strip() if account_number else None,
                 phone_number=phone_number.strip() if phone_number else None,
-                email=email.strip() if email else None,
+                email=stored_email,
                 username=username.strip() if username else None,
                 account_type=account_type,
                 identification_number=identification_number.strip() if identification_number else None,
@@ -3380,16 +3426,17 @@ class CreateBankInfo(graphene.Mutation):
             )
 
             # Legacy fields for compatibility
-            if payment_method.bank:
-                bank_info.bank = payment_method.bank
-                bank_info.country = payment_method.bank.country
+            effective_bank = effective_bank or (payment_method.bank if payment_method else None)
+            if effective_bank:
+                bank_info.bank = effective_bank
+                bank_info.country = effective_bank.country
                 bank_info.save()
 
             return CreateBankInfo(success=True, error=None, bank_info=bank_info)
 
         except Account.DoesNotExist:
             return CreateBankInfo(success=False, error="Cuenta no encontrada")
-        except P2PPaymentMethod.DoesNotExist:
+        except (P2PPaymentMethod.DoesNotExist, RampPaymentMethod.DoesNotExist):
             return CreateBankInfo(success=False, error="Método de pago no encontrado")
         except Exception as e:
             logger.error(f"Error creating bank info: {str(e)}")
@@ -3400,6 +3447,7 @@ class UpdateBankInfo(graphene.Mutation):
     class Arguments:
         bank_info_id = graphene.ID(required=True)
         payment_method_id = graphene.ID()
+        ramp_payment_method_id = graphene.ID()
         account_holder_name = graphene.String(required=True)
         account_number = graphene.String()
         phone_number = graphene.String()
@@ -3415,7 +3463,7 @@ class UpdateBankInfo(graphene.Mutation):
     bank_info = graphene.Field(BankInfoType)
 
     @classmethod
-    def mutate(cls, root, info, bank_info_id, account_holder_name, payment_method_id=None,
+    def mutate(cls, root, info, bank_info_id, account_holder_name, payment_method_id=None, ramp_payment_method_id=None,
                account_number=None, phone_number=None, email=None, username=None,
                account_type=None, identification_number=None, provider_metadata=None, is_default=False):
         user = getattr(info.context, 'user', None)
@@ -3429,13 +3477,27 @@ class UpdateBankInfo(graphene.Mutation):
                 account__user=user
             )
 
-            if payment_method_id:
+            if payment_method_id or ramp_payment_method_id:
                 from p2p_exchange.models import P2PPaymentMethod
-                payment_method = P2PPaymentMethod.objects.get(id=payment_method_id, is_active=True)
+                from ramps.models import RampPaymentMethod
+                payment_method = None
+                ramp_payment_method = None
+                if ramp_payment_method_id:
+                    ramp_payment_method = RampPaymentMethod.objects.get(id=ramp_payment_method_id, is_active=True)
+                    payment_method = ramp_payment_method.legacy_payment_method
+                if payment_method_id and not payment_method:
+                    payment_method = P2PPaymentMethod.objects.get(id=payment_method_id, is_active=True)
+                    ramp_payment_method = RampPaymentMethod.objects.filter(
+                        code=payment_method.name.upper().replace('_', '-'),
+                        country_code=(payment_method.country_code or '').upper(),
+                        is_active=True,
+                    ).first()
                 bank_info.payment_method = payment_method
-                if payment_method.bank:
-                    bank_info.bank = payment_method.bank
-                    bank_info.country = payment_method.bank.country
+                bank_info.ramp_payment_method = ramp_payment_method
+                effective_bank = (ramp_payment_method.bank if ramp_payment_method else None) or (payment_method.bank if payment_method else None)
+                if effective_bank:
+                    bank_info.bank = effective_bank
+                    bank_info.country = effective_bank.country
 
             # Check employee permissions for business accounts
             if bank_info.account.account_type == 'business':
@@ -3475,11 +3537,24 @@ class UpdateBankInfo(graphene.Mutation):
                     error=f"{validation_country.identification_name} es requerido para cuentas bancarias en {validation_country.name}"
                 )
 
+            validation_payment_method = bank_info.ramp_payment_method or bank_info.payment_method
+            requires_account_number = bool(getattr(validation_payment_method, 'requires_account_number', False))
+            requires_phone = bool(getattr(validation_payment_method, 'requires_phone', False))
+            requires_email = bool(getattr(validation_payment_method, 'requires_email', False))
+            stored_email = email.strip() if email else None
+
+            if requires_account_number and not account_number:
+                return UpdateBankInfo(success=False, error="Número de cuenta es requerido para este método de pago")
+            if requires_phone and not phone_number:
+                return UpdateBankInfo(success=False, error="Número de teléfono es requerido para este método de pago")
+            if requires_email and not stored_email:
+                return UpdateBankInfo(success=False, error="Email es requerido para este método de pago")
+
             # Update bank info
             bank_info.account_holder_name = account_holder_name.strip()
             bank_info.account_number = account_number.strip() if account_number else None
             bank_info.phone_number = phone_number.strip() if phone_number else None
-            bank_info.email = email.strip() if email else None
+            bank_info.email = stored_email
             bank_info.username = username.strip() if username else None
             bank_info.account_type = account_type
             bank_info.identification_number = identification_number.strip() if identification_number else None

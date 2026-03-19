@@ -6,6 +6,77 @@ from django.db import transaction
 from decimal import Decimal
 from .models import Conversion
 from send.validators import validate_transaction_amount
+import logging
+
+
+logger = logging.getLogger(__name__)
+
+
+def _link_ramp_context_to_conversion(*, conversion, ramp_provider=None, provider_order_id=None):
+    if not conversion or not ramp_provider or not provider_order_id:
+        return
+
+    provider = str(ramp_provider).strip().lower()
+    order_id = str(provider_order_id).strip()
+    if not provider or not order_id:
+        return
+
+    try:
+        from ramps.models import RampTransaction
+
+        ramp_tx = RampTransaction.objects.select_for_update().filter(
+            provider=provider,
+            provider_order_id=order_id,
+        ).first()
+        if not ramp_tx:
+            logger.warning(
+                "No RampTransaction found for conversion %s with provider=%s order_id=%s",
+                conversion.internal_id,
+                provider,
+                order_id,
+            )
+            return
+
+        update_fields = []
+        if ramp_tx.conversion_id != conversion.id:
+            ramp_tx.conversion = conversion
+            update_fields.append('conversion')
+
+        if conversion.actor_address and ramp_tx.actor_address != conversion.actor_address:
+            ramp_tx.actor_address = conversion.actor_address
+            update_fields.append('actor_address')
+
+        if conversion.conversion_type == 'usdc_to_cusd':
+            final_amount = conversion.to_amount
+            final_currency = 'CUSD'
+        else:
+            final_amount = conversion.to_amount
+            final_currency = 'USDC'
+
+        if ramp_tx.final_amount != final_amount:
+            ramp_tx.final_amount = final_amount
+            update_fields.append('final_amount')
+        if ramp_tx.final_currency != final_currency:
+            ramp_tx.final_currency = final_currency
+            update_fields.append('final_currency')
+
+        if update_fields:
+            update_fields.append('updated_at')
+            ramp_tx.save(update_fields=update_fields)
+            logger.info(
+                "Linked conversion %s to ramp transaction %s (%s:%s)",
+                conversion.internal_id,
+                ramp_tx.internal_id,
+                provider,
+                order_id,
+            )
+    except Exception:
+        logger.exception(
+            "Failed to link conversion %s to ramp provider=%s order_id=%s",
+            getattr(conversion, 'internal_id', None),
+            ramp_provider,
+            provider_order_id,
+        )
 
 
 class ConversionType(DjangoObjectType):
@@ -65,6 +136,8 @@ class ConvertUSDCToCUSD(graphene.Mutation):
     """Mutation to convert USDC to cUSD"""
     class Arguments:
         amount = graphene.String(required=True, description="Amount of USDC to convert")
+        ramp_provider = graphene.String(required=False, description="Ramp provider context for linked conversions")
+        provider_order_id = graphene.String(required=False, description="Provider order id for linked ramp conversions")
     
     conversion = graphene.Field(ConversionType)
     success = graphene.Boolean()
@@ -76,7 +149,7 @@ class ConvertUSDCToCUSD(graphene.Mutation):
     app_id = graphene.String(description="Application ID for opt-in")
     
     @classmethod
-    def mutate(cls, root, info, amount):
+    def mutate(cls, root, info, amount, ramp_provider=None, provider_order_id=None):
         import traceback, sys
         user = getattr(info.context, 'user', None)
         print(f"[CONVERSION] ConvertUSDCToCUSD called - amount: {amount}, user: {user}", file=sys.stderr)
@@ -185,6 +258,11 @@ class ConvertUSDCToCUSD(graphene.Mutation):
                     exchange_rate=exchange_rate,
                     fee_amount=fee_amount,
                     status='PENDING'
+                )
+                _link_ramp_context_to_conversion(
+                    conversion=conversion,
+                    ramp_provider=ramp_provider,
+                    provider_order_id=provider_order_id,
                 )
                 
                 # Build blockchain transactions
@@ -307,6 +385,8 @@ class ConvertCUSDToUSDC(graphene.Mutation):
     """Mutation to convert cUSD to USDC"""
     class Arguments:
         amount = graphene.String(required=True, description="Amount of cUSD to convert")
+        ramp_provider = graphene.String(required=False, description="Ramp provider context for linked conversions")
+        provider_order_id = graphene.String(required=False, description="Provider order id for linked ramp conversions")
     
     conversion = graphene.Field(ConversionType)
     success = graphene.Boolean()
@@ -318,7 +398,7 @@ class ConvertCUSDToUSDC(graphene.Mutation):
     app_id = graphene.String(description="Application ID for opt-in")
     
     @classmethod
-    def mutate(cls, root, info, amount):
+    def mutate(cls, root, info, amount, ramp_provider=None, provider_order_id=None):
         user = getattr(info.context, 'user', None)
         if not (user and getattr(user, 'is_authenticated', False)):
             return ConvertCUSDToUSDC(
@@ -424,6 +504,11 @@ class ConvertCUSDToUSDC(graphene.Mutation):
                     exchange_rate=exchange_rate,
                     fee_amount=fee_amount,
                     status='PENDING'
+                )
+                _link_ramp_context_to_conversion(
+                    conversion=conversion,
+                    ramp_provider=ramp_provider,
+                    provider_order_id=provider_order_id,
                 )
                 
                 # Build blockchain transactions
@@ -689,34 +774,42 @@ class ExecutePendingConversion(graphene.Mutation):
                 # Create notification for successful conversion
                 try:
                     from notifications.utils import create_transaction_notification
-                    
-                    # Determine the conversion direction for the notification
-                    if conversion.conversion_type == 'cusd_to_usdc':
-                        from_token = 'cUSD'
-                        to_token = 'USDC'
+                    try:
+                        linked_ramp = conversion.ramp_transaction
+                    except Exception:
+                        linked_ramp = None
+
+                    if linked_ramp:
+                        linked_ramp.conversion = conversion
+                        linked_ramp.save(update_fields=['conversion', 'updated_at'])
                     else:
-                        # Default to USDC -> cUSD for unknown legacy values to avoid inverted UX.
-                        from_token = 'USDC'
-                        to_token = 'cUSD'
+                        # Determine the conversion direction for the notification
+                        if conversion.conversion_type == 'cusd_to_usdc':
+                            from_token = 'cUSD'
+                            to_token = 'USDC'
+                        else:
+                            # Default to USDC -> cUSD for unknown legacy values to avoid inverted UX.
+                            from_token = 'USDC'
+                            to_token = 'cUSD'
                     
-                    create_transaction_notification(
-                        transaction_type='conversion',
-                        sender_user=conversion.actor_user,
-                        business=conversion.actor_business,
-                        amount=str(conversion.to_amount),
-                        token_type=to_token,
-                        transaction_id=str(conversion.id),
-                        transaction_model='Conversion',
-                        additional_data={
-                            'from_amount': str(conversion.from_amount),
-                            'from_token': from_token,
-                            'to_amount': str(conversion.to_amount),
-                            'to_token': to_token,
-                            'transaction_hash': result.get('transaction_id', ''),
-                            'conversion_type': conversion.conversion_type
-                        }
-                    )
-                    print(f"[CONVERSION] Notification created for conversion {conversion.id}")
+                        create_transaction_notification(
+                            transaction_type='conversion',
+                            sender_user=conversion.actor_user,
+                            business=conversion.actor_business,
+                            amount=str(conversion.to_amount),
+                            token_type=to_token,
+                            transaction_id=str(conversion.id),
+                            transaction_model='Conversion',
+                            additional_data={
+                                'from_amount': str(conversion.from_amount),
+                                'from_token': from_token,
+                                'to_amount': str(conversion.to_amount),
+                                'to_token': to_token,
+                                'transaction_hash': result.get('transaction_id', ''),
+                                'conversion_type': conversion.conversion_type
+                            }
+                        )
+                        print(f"[CONVERSION] Notification created for conversion {conversion.id}")
                 except Exception as e:
                     logger.error(f"Failed to create conversion notification: {e}")
                     import traceback

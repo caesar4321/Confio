@@ -19,6 +19,7 @@ import { USDCConversionScreen } from '../screens/USDCConversionScreen';
 import TopUpScreen from '../screens/TopUpScreen';
 import { SellScreen } from '../screens/SellScreen';
 import RampInstructionsScreen from '../screens/RampInstructionsScreen';
+import RampHistoryScreen from '../screens/RampHistoryScreen';
 
 // ... existing imports ...
 
@@ -45,7 +46,8 @@ import { ActiveTradeScreen } from '../screens/ActiveTradeScreen';
 import { TraderRatingScreen } from '../screens/TraderRatingScreen';
 import { ScanScreen } from '../screens/ScanScreen';
 import { CreateOfferScreen } from '../screens/CreateOfferScreen';
-import { BankInfoScreen } from '../screens/BankInfoScreen';
+import { PayoutMethodsScreen } from '../screens/PayoutMethodsScreen';
+import { RampAddressScreen } from '../screens/RampAddressScreen';
 import AchievementsScreen from '../screens/AchievementsScreen';
 import { ConfioTokenInfoScreen } from '../screens/ConfioTokenInfoScreen';
 import { ConfioPresaleScreen } from '../screens/ConfioPresaleScreen';
@@ -123,8 +125,15 @@ export const MainNavigator = () => {
           }}
         />
         <Stack.Screen
-          name="BankInfo"
-          component={BankInfoScreen}
+          name="PayoutMethods"
+          component={PayoutMethodsScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="RampAddress"
+          component={RampAddressScreen}
           options={{
             headerShown: false,
           }}
@@ -237,6 +246,13 @@ export const MainNavigator = () => {
         <Stack.Screen
           name="RampInstructions"
           component={RampInstructionsScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="RampHistory"
+          component={RampHistoryScreen}
           options={{
             headerShown: false,
           }}

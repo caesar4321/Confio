@@ -23,6 +23,7 @@ import { useCountry } from '../contexts/CountryContext';
 import {
   GET_ME,
   GET_RAMP_AVAILABILITY,
+  GET_MY_RAMP_ADDRESS,
   GET_MY_KYC_STATUS,
   GET_MY_PERSONAL_KYC_STATUS,
 } from '../apollo/queries';
@@ -67,15 +68,15 @@ const colors = {
   textMuted: '#6b7280',
   textLight: '#9ca3af',
   border: '#e5e7eb',
-  background: '#f0fdf4',
+  background: '#f6faf7',
   surface: '#ffffff',
-  primary: '#059669',
-  primaryDark: '#047857',
+  primary: '#34d399',
+  primaryDark: '#10b981',
   primaryLight: '#d1fae5',
   accent: '#3b82f6',
   accentLight: '#dbeafe',
-  heroFrom: '#059669',
-  heroTo: '#34d399',
+  heroFrom: '#10b981',
+  heroTo: '#6ee7b7',
 };
 
 const currencyNames: Record<string, string> = {
@@ -107,6 +108,7 @@ const TopUpScreen = () => {
   const [selectedMethodCode, setSelectedMethodCode] = useState<string | null>(null);
   const [step, setStep] = useState<'form' | 'review'>('form');
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
+  const [amountFocused, setAmountFocused] = useState(false);
 
   const countryCode = useMemo(() => {
     const selectedIso = selectedCountry?.[2];
@@ -119,6 +121,10 @@ const TopUpScreen = () => {
   const { data: meData } = useQuery(GET_ME);
   const { data: kycData } = useQuery(GET_MY_KYC_STATUS);
   const { data: personalKycData } = useQuery(GET_MY_PERSONAL_KYC_STATUS);
+  const { data: rampAddressData, loading: rampAddressLoading } = useQuery(GET_MY_RAMP_ADDRESS, {
+    fetchPolicy: 'cache-and-network',
+    skip: !isKoyweCountry,
+  });
   const { data: availabilityData, loading: availabilityLoading } = useQuery(GET_RAMP_AVAILABILITY, {
     variables: { countryCode },
     fetchPolicy: 'cache-and-network',
@@ -151,6 +157,7 @@ const TopUpScreen = () => {
     meData?.me?.verificationStatus,
     personalKycData?.myPersonalKycStatus?.status,
   ]);
+  const hasCompleteRampAddress = Boolean(rampAddressData?.myRampAddress?.isComplete);
   const selectedMethodMin = Number(selectedMethod?.onRampMinAmount || 0);
   const selectedMethodMax = Number(selectedMethod?.onRampMaxAmount || 0);
   const {
@@ -221,6 +228,21 @@ const TopUpScreen = () => {
         openVerificationPrompt();
         return;
       }
+      if (rampAddressLoading) {
+        Alert.alert('Verificando dirección', 'Espera un momento mientras validamos tu dirección para recargas y retiros.');
+        return;
+      }
+      if (!hasCompleteRampAddress) {
+        Alert.alert(
+          'Completa tu dirección',
+          'Antes de continuar, necesitamos tu dirección para habilitar las recargas y retiros bancarios.',
+          [
+            { text: 'Ahora no', style: 'cancel' },
+            { text: 'Completar', onPress: () => navigation.navigate('RampAddress') },
+          ],
+        );
+        return;
+      }
       setStep('review');
     })();
   };
@@ -235,6 +257,17 @@ const TopUpScreen = () => {
       actionLabel: 'compra',
     });
     if (!authenticated) {
+      return;
+    }
+    if (!hasCompleteRampAddress) {
+      Alert.alert(
+        'Completa tu dirección',
+        'Antes de confirmar, necesitamos tu dirección para habilitar las recargas y retiros bancarios.',
+        [
+          { text: 'Ahora no', style: 'cancel' },
+          { text: 'Completar', onPress: () => navigation.navigate('RampAddress') },
+        ],
+      );
       return;
     }
 
@@ -299,7 +332,9 @@ const TopUpScreen = () => {
           <Text style={[styles.methodDescription, selected && styles.methodDescriptionSelected]}>{method.description}</Text>
         </View>
         <View style={[styles.radioOuter, selected && styles.radioOuterSelected]}>
-          {selected && <View style={styles.radioInner} />}
+          {selected
+            ? <Icon name="check" size={13} color="#ffffff" />
+            : null}
         </View>
       </TouchableOpacity>
     );
@@ -308,7 +343,7 @@ const TopUpScreen = () => {
   return (
     <>
       <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.heroFrom} />
+      <StatusBar barStyle="light-content" backgroundColor="#10b981" />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <RampReveal delay={0}>
         <RampHero
@@ -325,12 +360,20 @@ const TopUpScreen = () => {
         <RampReveal delay={60}>
         <View style={styles.noticeCard}>
           <View style={styles.noticeIconWrap}>
-            <Icon name="globe" size={16} color={colors.accent} />
+            <Icon name="globe" size={16} color={colors.primary} />
           </View>
           <View style={styles.noticeCopy}>
             <Text style={styles.noticeTitle}>{countryFlag ? `${countryFlag} ` : ''}Según tu país</Text>
             <Text style={styles.noticeText}>Te mostramos los medios de pago disponibles para {availability?.countryName || countryCode}.</Text>
           </View>
+          <TouchableOpacity
+            style={styles.historyPill}
+            onPress={() => navigation.navigate('RampHistory', { initialFilter: 'on_ramp' })}
+            activeOpacity={0.8}
+          >
+            <Icon name="clock" size={14} color={colors.primary} />
+            <Text style={styles.historyPillText}>Ver recargas</Text>
+          </TouchableOpacity>
         </View>
         </RampReveal>
 
@@ -358,7 +401,7 @@ const TopUpScreen = () => {
               />
               <View style={styles.amountCard}>
                 <Text style={styles.inputLabel}>Monto estimado en {friendlyCurrency(fiatCurrency)}</Text>
-                <View style={styles.amountInputRow}>
+                <View style={[styles.amountInputRow, amountFocused && styles.amountInputRowFocused]}>
                   <TextInput
                     style={styles.amountInput}
                     value={amount}
@@ -366,11 +409,15 @@ const TopUpScreen = () => {
                       setAmount(value);
                       setStep('form');
                     }}
+                    onFocus={() => setAmountFocused(true)}
+                    onBlur={() => setAmountFocused(false)}
                     keyboardType="decimal-pad"
                     placeholder="0"
                     placeholderTextColor={colors.textLight}
                   />
-                  <Text style={styles.currencySuffix}>{fiatCurrency}</Text>
+                  <View style={styles.currencyBadge}>
+                    <Text style={styles.currencyBadgeText}>{fiatCurrency}</Text>
+                  </View>
                 </View>
                 <Text style={styles.helperText}>Verás cuánto recibirías y el tipo de cambio estimado antes de confirmar.</Text>
                 {selectedMethodMin > 0 || selectedMethodMax > 0 ? (
@@ -429,6 +476,10 @@ const TopUpScreen = () => {
                       <Text style={styles.quoteValue}>{formatRampMoney(quote.amountOut, 'cUSD')}</Text>
                     </View>
                     <View style={styles.quoteRow}>
+                      <Text style={styles.quoteLabel}>Tipo de cambio</Text>
+                      <Text style={styles.quoteValue}>{`${formatRampRate(quote.exchangeRate)} ${fiatCurrency}/cUSD`}</Text>
+                    </View>
+                    <View style={styles.quoteRow}>
                       <Text style={styles.quoteLabel}>{'Comisión del\nprocesador de pagos'}</Text>
                       <Text style={styles.quoteValue}>
                         {formatRampMoney(String(Number(quote.feeAmount || 0) + Number(quote.networkFeeAmount || 0)), quote.feeCurrency)}
@@ -436,9 +487,9 @@ const TopUpScreen = () => {
                     </View>
                     <View style={styles.quoteRow}>
                       <Text style={styles.quoteLabel}>Comisión de Confío</Text>
-                      <Text style={[styles.quoteValue, { color: colors.primary }]}>
-                        {formatRampMoney(0, quote.feeCurrency || fiatCurrency)}
-                      </Text>
+                      <View style={styles.gratisBadge}>
+                        <Text style={styles.gratisBadgeText}>Gratis</Text>
+                      </View>
                     </View>
                   </>
                 ) : (
@@ -454,7 +505,6 @@ const TopUpScreen = () => {
             {step === 'review' ? (
               <RampReveal delay={230}>
               <View style={styles.reviewCard}>
-                <View style={styles.reviewAccent} />
                 <Text style={styles.reviewTitle}>Revisión final</Text>
                 <View style={styles.reviewRow}>
                   <Icon name="credit-card" size={16} color={colors.textMuted} />
@@ -506,17 +556,17 @@ const styles = StyleSheet.create({
   noticeCard: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    backgroundColor: colors.accentLight,
+    backgroundColor: '#f0fdf4',
     borderRadius: 16,
     padding: 16,
     marginHorizontal: 22,
     marginBottom: 20,
     gap: 12,
     borderWidth: 1,
-    borderColor: '#bfdbfe',
-    shadowColor: '#3b82f6',
+    borderColor: '#bbf7d0',
+    shadowColor: '#059669',
     shadowOpacity: 0.08,
-    shadowRadius: 12,
+    shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
     elevation: 2,
   },
@@ -524,7 +574,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: 'rgba(59,130,246,0.12)',
+    backgroundColor: 'rgba(5,150,105,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 2,
@@ -532,10 +582,27 @@ const styles = StyleSheet.create({
   noticeCopy: {
     flex: 1,
   },
+  historyPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'center',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  historyPillText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.primary,
+  },
   noticeTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: colors.accent,
+    color: colors.primaryDark,
     marginBottom: 4,
   },
   noticeText: {
@@ -590,8 +657,12 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     paddingHorizontal: 16,
     paddingVertical: 14,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: colors.border,
+  },
+  amountInputRowFocused: {
+    borderColor: colors.primary,
+    backgroundColor: '#f0fdf4',
   },
   amountInput: {
     flex: 1,
@@ -600,11 +671,18 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     padding: 0,
   },
-  currencySuffix: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.textMuted,
+  currencyBadge: {
+    backgroundColor: colors.primaryLight,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
     marginLeft: 12,
+  },
+  currencyBadgeText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.primaryDark,
+    letterSpacing: 0.4,
   },
   helperText: {
     marginTop: 12,
@@ -632,7 +710,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderRadius: 18,
     padding: 16,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: colors.border,
     flexDirection: 'row',
     alignItems: 'center',
@@ -643,22 +721,26 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   methodCardSelected: {
-    borderColor: colors.primary,
-    backgroundColor: '#f8fffb',
-    shadowColor: colors.primary,
-    shadowOpacity: 0.1,
+    borderColor: colors.primaryDark,
+    borderWidth: 2,
+    backgroundColor: colors.primaryDark,
+    shadowColor: colors.primaryDark,
+    shadowOpacity: 0.22,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 4,
   },
   methodIconWrap: {
     width: 40,
     height: 40,
-    borderRadius: 20,
+    borderRadius: 12,
     backgroundColor: colors.primaryLight,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 14,
   },
   methodIconWrapSelected: {
-    backgroundColor: colors.primary,
+    backgroundColor: 'rgba(255,255,255,0.2)',
   },
   methodCopy: {
     flex: 1,
@@ -670,7 +752,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   methodTitleSelected: {
-    color: colors.primaryDark,
+    color: '#ffffff',
   },
   methodDescription: {
     fontSize: 13,
@@ -678,62 +760,64 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   methodDescriptionSelected: {
-    color: colors.textPrimary,
+    color: 'rgba(255,255,255,0.75)',
   },
   radioOuter: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 2,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 1.5,
     borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
     marginLeft: 12,
   },
   radioOuterSelected: {
-    borderColor: colors.primary,
+    borderColor: 'rgba(255,255,255,0.5)',
+    backgroundColor: 'rgba(255,255,255,0.18)',
   },
   radioInner: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: colors.primary,
+    backgroundColor: '#ffffff',
   },
   quoteCard: {
-    backgroundColor: colors.surface,
+    backgroundColor: '#f0fdf8',
     borderRadius: 20,
     padding: 20,
-    borderWidth: 1,
-    borderColor: '#d1fae5',
-    shadowColor: '#111827',
-    shadowOpacity: 0.06,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 2,
+    borderWidth: 1.5,
+    borderColor: '#6ee7b7',
+    shadowColor: '#059669',
+    shadowOpacity: 0.14,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 4,
   },
   quoteEyebrow: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
-    letterSpacing: 0.6,
+    letterSpacing: 1.2,
     textTransform: 'uppercase',
     color: colors.primaryDark,
-    marginBottom: 8,
+    marginBottom: 10,
   },
   quoteHeadline: {
-    fontSize: 28,
+    fontSize: 34,
     fontWeight: '800',
-    color: colors.textPrimary,
-    marginBottom: 6,
-    lineHeight: 34,
+    color: colors.primaryDark,
+    marginBottom: 4,
+    lineHeight: 40,
   },
   quoteHeadlineCompact: {
-    fontSize: 24,
-    lineHeight: 30,
+    fontSize: 28,
+    lineHeight: 34,
   },
   quoteRate: {
-    fontSize: 14,
+    fontSize: 13,
     color: colors.textMuted,
     lineHeight: 20,
+    marginBottom: 4,
   },
   quoteDivider: {
     height: 1,
@@ -759,6 +843,18 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     textAlign: 'right',
   },
+  gratisBadge: {
+    backgroundColor: colors.primaryLight,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  gratisBadgeText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: colors.primaryDark,
+    letterSpacing: 0.3,
+  },
   emptyQuote: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -778,27 +874,19 @@ const styles = StyleSheet.create({
     marginHorizontal: 22,
     borderWidth: 1,
     borderColor: '#d1fae5',
-    shadowColor: '#111827',
-    shadowOpacity: 0.08,
+    borderLeftWidth: 5,
+    borderLeftColor: colors.primary,
+    shadowColor: colors.primary,
+    shadowOpacity: 0.12,
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 8 },
-    elevation: 3,
-    overflow: 'hidden',
-  },
-  reviewAccent: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 4,
-    backgroundColor: colors.primary,
+    elevation: 4,
   },
   reviewTitle: {
     fontSize: 18,
     fontWeight: '800',
     color: colors.textPrimary,
     marginBottom: 14,
-    marginTop: 2,
   },
   reviewRow: {
     flexDirection: 'row',

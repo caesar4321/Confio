@@ -155,7 +155,7 @@ export const TradeConfirmScreen: React.FC = () => {
           { text: 'Cancelar', style: 'cancel' },
           {
             text: 'Configurar',
-            onPress: () => navigation.navigate('BankInfo'),
+            onPress: () => navigation.navigate('PayoutMethods'),
             style: 'default'
           }
         ]
@@ -373,7 +373,7 @@ export const TradeConfirmScreen: React.FC = () => {
           />
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Seleccionar método de pago</Text>
+              <Text style={styles.modalTitle}>Seleccionar forma de cobro</Text>
               <TouchableOpacity onPress={() => setShowPaymentModal(false)}>
                 <Icon name="x" size={24} color="#6B7280" />
               </TouchableOpacity>
@@ -398,7 +398,7 @@ export const TradeConfirmScreen: React.FC = () => {
                               text: 'Configurar ahora',
                               onPress: () => {
                                 setShowPaymentModal(false);
-                                navigation.navigate('BankInfo');
+                                navigation.navigate('PayoutMethods');
                               },
                               style: 'default'
                             }
@@ -429,7 +429,7 @@ export const TradeConfirmScreen: React.FC = () => {
                         )}
                       </View>
                       <Text style={[styles.paymentOptionDescription, !isConfigured && styles.paymentOptionDescriptionDisabled]}>
-                        {isConfigured ? getPaymentMethodDescription(method) : 'Toca para configurar este método de pago'}
+                        {isConfigured ? getPaymentMethodDescription(method) : 'Toca para configurar esta forma de cobro'}
                         {method.bank?.country?.name && ` • ${method.bank.country.name}`}
                       </Text>
                     </View>

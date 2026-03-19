@@ -76,7 +76,7 @@ type AccountDetailScreenRouteProp = RouteProp<MainStackParamList, 'AccountDetail
 
 interface Transaction {
   id?: string;
-  type: 'received' | 'sent' | 'exchange' | 'payment' | 'conversion' | 'reward' | 'presale' | 'payroll';
+  type: 'received' | 'sent' | 'exchange' | 'payment' | 'conversion' | 'reward' | 'presale' | 'payroll' | 'ramp';
   from?: string;
   to?: string;
   fromPhone?: string;
@@ -112,6 +112,8 @@ interface Transaction {
   payrollRunId?: string;
   runId?: string;
   transactionHash?: string;
+  rampDirection?: string;
+  rampProvider?: string;
 }
 
 // Set Spanish locale for moment
@@ -554,7 +556,7 @@ export const AccountDetailScreen = () => {
     if (sourceTransactions.length > 0) {
       sourceTransactions.forEach((tx: any) => {
         // Determine transaction type based on both transactionType and direction
-        let type: 'sent' | 'received' | 'payment' | 'conversion' | 'exchange' | 'reward' | 'presale' | 'payroll' = 'sent';
+        let type: 'sent' | 'received' | 'payment' | 'conversion' | 'exchange' | 'reward' | 'presale' | 'payroll' | 'ramp' = 'sent';
         const normalizedTxType = (tx.transactionType || '').toLowerCase();
         if (normalizedTxType === 'payment') {
           type = 'payment';
@@ -562,6 +564,8 @@ export const AccountDetailScreen = () => {
           type = 'conversion';
         } else if (normalizedTxType === 'exchange') {
           type = 'exchange';
+        } else if (normalizedTxType === 'ramp') {
+          type = 'ramp';
         } else if (normalizedTxType === 'reward') {
           type = 'reward';
         } else if (normalizedTxType === 'presale') {
@@ -747,6 +751,14 @@ export const AccountDetailScreen = () => {
             fromDisplay = tx.displayCounterparty || 'Vendedor';
             toDisplay = 'Tú (comprador)';
           }
+        } else if (type === 'ramp') {
+          if ((tx.rampDirection || '').toLowerCase() === 'off_ramp') {
+            fromDisplay = 'Tu cuenta';
+            toDisplay = tx.rampProvider || tx.counterpartyDisplayName || tx.displayCounterparty || 'Proveedor';
+          } else {
+            fromDisplay = tx.rampProvider || tx.senderDisplayName || tx.displayCounterparty || 'Proveedor';
+            toDisplay = 'Tu cuenta';
+          }
         } else if ((type === 'payment' && tx.direction === 'received') || (type === 'received')) {
           fromDisplay = tx.displayCounterparty;
           // Truncate external wallet addresses
@@ -782,6 +794,15 @@ export const AccountDetailScreen = () => {
           const sign = tx.direction === 'sent' ? '-' : '+';
           signedDisplayAmount = `${sign}${signedDisplayAmount}`;
         }
+
+        const rampDirection = (tx.rampDirection || '').toLowerCase();
+        const rampFiatAmountRaw = tx.rampFiatAmount;
+        const rampFiatAmount = rampFiatAmountRaw === undefined || rampFiatAmountRaw === null
+          ? ''
+          : String(rampFiatAmountRaw).trim();
+        const signedRampFiatAmount = rampFiatAmount
+          ? ((rampFiatAmount.startsWith('+') || rampFiatAmount.startsWith('-')) ? rampFiatAmount : `+${rampFiatAmount}`)
+          : '';
 
         // Map backend status to UI status labels
         const rawStatus = (tx.status || '').toUpperCase();
@@ -827,7 +848,11 @@ export const AccountDetailScreen = () => {
           to: toDisplay,
           fromPhone: isConversion ? undefined : (tx.direction === 'received' ? fromPhoneKey : undefined),
           toPhone: isConversion ? undefined : (tx.direction === 'sent' ? toPhoneKey : undefined),
-          amount: isConversion ? conversionAmount : signedDisplayAmount,
+          amount: isConversion
+            ? conversionAmount
+            : type === 'ramp' && rampDirection === 'on_ramp' && signedRampFiatAmount
+              ? signedRampFiatAmount
+              : signedDisplayAmount,
           // For conversions, show the currency of the amount displayed: the destination token for '+' and source for '-'
           currency: isConversion
             ? (
@@ -835,6 +860,12 @@ export const AccountDetailScreen = () => {
               conversionType === 'cusd_to_usdc' ? 'USDC' :
               undefined
             )
+            : type === 'ramp'
+              ? (
+                rampDirection === 'on_ramp'
+                  ? (tx.rampFiatCurrency || 'cUSD')
+                  : 'cUSD'
+              )
             : (() => {
               const normalizedToken = (tx.tokenType || '').toUpperCase();
               const isCusdToken = normalizedToken === 'CUSD' || normalizedToken.includes('CONFIO DOLLAR') || normalizedToken.includes('CUSD ');
@@ -888,6 +919,10 @@ export const AccountDetailScreen = () => {
           internalId: tx.internalId, // Pass internalId to detail screen
           senderBusiness: tx.senderBusiness,
           recipientBusiness: tx.counterpartyBusiness,
+          rampDirection: tx.rampDirection,
+          rampProvider: tx.rampProvider,
+          rampFiatAmount: tx.rampFiatAmount,
+          rampFiatCurrency: tx.rampFiatCurrency,
         };
 
         // Debug final transaction for external deposits
@@ -945,6 +980,10 @@ export const AccountDetailScreen = () => {
         return `Enviado a ${transaction.to}`;
       case 'exchange':
         return `Conversión ${transaction.from} → ${transaction.to}`;
+      case 'ramp':
+        return transaction.rampDirection === 'off_ramp'
+          ? `Retiro${transaction.to ? ` con ${transaction.to}` : ''}`
+          : `Recarga${transaction.from ? ` con ${transaction.from}` : ''}`;
       case 'conversion':
         // Use conversionType field first, fallback to description parsing
         if (transaction.conversionType === 'usdc_to_cusd') {
@@ -988,6 +1027,8 @@ export const AccountDetailScreen = () => {
         return <Icon name="refresh-cw" size={20} color="#3B82F6" />;
       case 'conversion':
         return <Icon name="repeat" size={20} color="#34D399" />;
+      case 'ramp':
+        return <Icon name="repeat" size={20} color="#0EA5E9" />;
       case 'payment':
         return <Icon name="shopping-bag" size={20} color="#8B5CF6" />;
       case 'reward':
@@ -1212,6 +1253,11 @@ export const AccountDetailScreen = () => {
         case 'exchange':
           baseTitle = `Conversión ${transaction.from} → ${transaction.to}`;
           break;
+        case 'ramp':
+          baseTitle = transaction.rampDirection === 'off_ramp'
+            ? `Retiro${transaction.to ? ` con ${transaction.to}` : ''}`
+            : `Recarga${transaction.from ? ` con ${transaction.from}` : ''}`;
+          break;
         case 'conversion':
           // Use short title for conversions based on conversion type
           if (transaction.conversionType === 'usdc_to_cusd') {
@@ -1299,6 +1345,8 @@ export const AccountDetailScreen = () => {
           conversionType: transaction.conversionType,
           formattedTitle: transaction.type === 'conversion' && transaction.conversionType === 'usdc_to_cusd' ? 'USDC → cUSD' :
             transaction.type === 'conversion' && transaction.conversionType === 'cusd_to_usdc' ? 'cUSD → USDC' :
+            transaction.type === 'ramp' && transaction.rampDirection === 'off_ramp' ? 'Retiro' :
+            transaction.type === 'ramp' ? 'Recarga' :
             undefined,
           isInvitedFriend: transaction.isInvitation || false, // true means friend is NOT on Confío
           invitationClaimed: transaction.invitationClaimed || false,

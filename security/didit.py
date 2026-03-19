@@ -11,7 +11,10 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
+from notifications.models import NotificationType as NotificationTypeChoices
+from notifications.utils import create_notification
 from security.models import IdentityVerification
+from users.models import Business
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -274,10 +277,10 @@ def _placeholder_defaults(*, user, session_id: str, account_type: str, business_
         'verified_last_name': user.last_name or 'Verification',
         'verified_date_of_birth': date(1900, 1, 1),
         'verified_nationality': 'UNK',
-        'verified_address': 'Pending Didit verification',
-        'verified_city': 'Unknown City',
-        'verified_state': 'Unknown State',
-        'verified_country': 'UNK',
+        'verified_address': '',
+        'verified_city': '',
+        'verified_state': '',
+        'verified_country': '',
         'document_type': 'national_id',
         'document_number': f'didit:{session_id}',
         'document_issuing_country': 'UNK',
@@ -356,9 +359,9 @@ def _extract_verification_payload(response_payload: dict[str, Any]) -> dict[str,
         'verified_nationality': _normalize_iso3(
             _first_non_empty(id_verification.get('nationality'), response_payload.get('nationality'))
         ),
-        'verified_address': address_line or _first_non_empty(response_payload.get('full_address'), 'Verified by Didit'),
-        'verified_city': _first_non_empty(parsed_address.get('city'), response_payload.get('city'), 'Unknown City'),
-        'verified_state': _first_non_empty(parsed_address.get('state'), response_payload.get('state'), 'Unknown State'),
+        'verified_address': address_line or _first_non_empty(response_payload.get('full_address')),
+        'verified_city': _first_non_empty(parsed_address.get('city'), response_payload.get('city')),
+        'verified_state': _first_non_empty(parsed_address.get('state'), response_payload.get('state')),
         'verified_country': _normalize_iso3(
             _first_non_empty(parsed_address.get('country'), response_payload.get('country'), issuing_country)
         ),
@@ -406,6 +409,51 @@ def _resolve_user_from_payload(response_payload: dict[str, Any], expected_user=N
         return None
 
 
+def _notify_verification_status_change(
+    *,
+    verification: IdentityVerification,
+    account_type: str,
+    business_id: str | None,
+    previous_status: str | None,
+    new_status: str,
+) -> None:
+    if previous_status == new_status or new_status not in {'verified', 'rejected'}:
+        return
+
+    business = None
+    if account_type == 'business' and business_id:
+        business = Business.objects.filter(id=business_id).first()
+
+    if new_status == 'verified':
+        create_notification(
+            user=verification.user,
+            business=business,
+            notification_type=NotificationTypeChoices.ACCOUNT_VERIFIED,
+            title='Cuenta verificada',
+            message='Tu verificacion de identidad fue aprobada. Ya puedes continuar en Confio.',
+            data={'verification_id': str(verification.id)},
+            related_object_type='IdentityVerification',
+            related_object_id=str(verification.id),
+            action_url='confio://verification',
+        )
+        return
+
+    create_notification(
+        user=verification.user,
+        business=business,
+        notification_type=NotificationTypeChoices.SECURITY_ALERT,
+        title='Verificacion rechazada',
+        message='Tu verificacion de identidad no pudo ser aprobada. Revisa los requisitos e intentalo de nuevo.',
+        data={
+            'verification_id': str(verification.id),
+            'reason': verification.rejected_reason or '',
+        },
+        related_object_type='IdentityVerification',
+        related_object_id=str(verification.id),
+        action_url='confio://verification',
+    )
+
+
 def sync_didit_session(*, session_id: str, expected_user=None) -> tuple[IdentityVerification, dict[str, Any]]:
     response_payload = _didit_request('GET', f'/v3/session/{session_id}/decision/')
     user = _resolve_user_from_payload(response_payload, expected_user=expected_user)
@@ -427,6 +475,7 @@ def sync_didit_session(*, session_id: str, expected_user=None) -> tuple[Identity
 
     extracted = _extract_verification_payload(response_payload)
     status = _map_didit_status(response_payload)
+    previous_status = verification.status
     risk_factors = dict(verification.risk_factors or {})
     risk_factors['provider'] = 'didit'
     risk_factors['didit'] = {
@@ -460,6 +509,13 @@ def sync_didit_session(*, session_id: str, expected_user=None) -> tuple[Identity
     if status != 'rejected':
         verification.rejected_reason = None
     verification.save()
+    _notify_verification_status_change(
+        verification=verification,
+        account_type=account_type,
+        business_id=business_id,
+        previous_status=previous_status,
+        new_status=status,
+    )
 
     return verification, response_payload
 

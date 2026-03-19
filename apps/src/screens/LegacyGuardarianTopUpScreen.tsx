@@ -358,6 +358,12 @@ const TopUpScreen = () => {
           <Icon name="arrow-left" size={22} color="#111827" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Recargar con Guardarian</Text>
+        <TouchableOpacity
+          style={styles.historyButton}
+          onPress={() => navigation.navigate('RampHistory', { initialFilter: 'on_ramp' })}
+        >
+          <Text style={styles.historyButtonText}>Historial</Text>
+        </TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -554,6 +560,23 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: '#111827',
+    flex: 1,
+    textAlign: 'center',
+  },
+  historyButton: {
+    minWidth: 72,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    alignItems: 'center',
+  },
+  historyButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#047857',
   },
   content: {
     paddingHorizontal: 20,

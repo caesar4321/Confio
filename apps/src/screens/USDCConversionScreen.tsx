@@ -79,6 +79,8 @@ export const USDCConversionScreen = () => {
   const [amount, setAmount] = useState('');
   // Use route param if provided, otherwise default to usdc_to_cusd (original behavior)
   const routeDirection = (route.params as any)?.direction;
+  const rampProvider = (route.params as any)?.rampProvider;
+  const providerOrderId = (route.params as any)?.providerOrderId;
   const initialDirection = routeDirection === 'cusd_to_usdc' ? 'cusd_to_usdc' : 'usdc_to_cusd';
   const [conversionDirection, setConversionDirection] = useState<'usdc_to_cusd' | 'cusd_to_usdc'>(initialDirection);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -295,7 +297,12 @@ export const USDCConversionScreen = () => {
 
       while (retryCount <= maxRetries) {
         try {
-          pack = await ws.prepare({ direction: conversionDirection, amount: amount });
+          pack = await ws.prepare({
+            direction: conversionDirection,
+            amount: amount,
+            rampProvider,
+            providerOrderId,
+          });
           break; // Success, exit retry loop
         } catch (e: any) {
           const errorMessage = String(e?.message);

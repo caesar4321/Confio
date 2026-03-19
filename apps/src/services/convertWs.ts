@@ -3,6 +3,8 @@
 type PrepareArgs = {
   direction: 'usdc_to_cusd' | 'cusd_to_usdc';
   amount: string | number;
+  rampProvider?: 'guardarian' | 'koywe';
+  providerOrderId?: string;
 };
 
 type PreparePack = {
@@ -115,8 +117,14 @@ export class ConvertWsSession {
         }
       }, timeoutMs);
       try {
-        console.log('[convertWs] -> prepare', args.direction, args.amount);
-        this.ws!.send(JSON.stringify({ type: 'prepare', direction: args.direction, amount: String(args.amount) }));
+        console.log('[convertWs] -> prepare', args.direction, args.amount, args.rampProvider, args.providerOrderId);
+        this.ws!.send(JSON.stringify({
+          type: 'prepare',
+          direction: args.direction,
+          amount: String(args.amount),
+          ramp_provider: args.rampProvider,
+          provider_order_id: args.providerOrderId,
+        }));
       } catch (e) {
         clearTimeout(t);
         reject(e);
@@ -154,4 +162,3 @@ export class ConvertWsSession {
     });
   }
 }
-

@@ -11,6 +11,34 @@ import notificationDedup from './notificationDeduplication';
 const FCM_TOKEN_SERVICE = 'confio_fcm_token';
 const DEVICE_ID_SERVICE = 'confio_device_id';
 
+const normalizeRampNotificationPayload = (data: any, notifType?: string, id?: string) => {
+  const direction = (data?.direction || data?.ramp_direction || data?.rampDirection || '').toString().toLowerCase();
+  const fiatAmount = data?.ramp_fiat_amount ?? data?.rampFiatAmount;
+  const fiatCurrency = data?.ramp_fiat_currency ?? data?.rampFiatCurrency;
+  const walletAmount = data?.wallet_amount ?? data?.walletAmount ?? data?.amount;
+  const walletCurrency = data?.wallet_currency ?? data?.walletCurrency ?? 'cUSD';
+
+  return {
+    ...data,
+    ...(id ? { id } : {}),
+    notification_type: notifType || data?.notification_type,
+    transaction_type: 'ramp',
+    ramp_direction: direction,
+    rampDirection: direction,
+    amount: direction === 'on_ramp' ? (fiatAmount ?? data?.amount) : walletAmount,
+    currency: direction === 'on_ramp'
+      ? (fiatCurrency ?? data?.currency ?? data?.token_type ?? data?.tokenType)
+      : 'cUSD',
+    token_type: direction === 'on_ramp'
+      ? (fiatCurrency ?? data?.currency ?? data?.token_type ?? data?.tokenType)
+      : 'cUSD',
+    ramp_fiat_amount: fiatAmount,
+    ramp_fiat_currency: fiatCurrency,
+    wallet_amount: walletAmount,
+    wallet_currency: walletCurrency,
+  };
+};
+
 // Global singleton to prevent multiple instances across reloads
 let globalMessagingInstance: MessagingService | null = null;
 
@@ -676,6 +704,16 @@ class MessagingService {
     if (notification_type) {
       transactionData.notification_type = notification_type;
     }
+    if (
+      notification_type === 'RAMP_PENDING' ||
+      notification_type === 'RAMP_COMPLETED' ||
+      notification_type === 'RAMP_FAILED'
+    ) {
+      Object.assign(
+        transactionData,
+        normalizeRampNotificationPayload(transactionData, notification_type, transactionData.internal_id || transactionData.internalId || transactionData.id),
+      );
+    }
 
     console.log('[MessagingService] Extracted transaction data:', transactionData);
     console.log('[MessagingService] Navigation params:', { action_url, notification_type, related_type, related_id });
@@ -780,6 +818,22 @@ class MessagingService {
     }
 
     if (parts.length > 0) {
+      const pendingAutoSwap =
+        transactionData?.pending_auto_swap === true ||
+        transactionData?.pending_auto_swap === 'true' ||
+        transactionData?.data_pending_auto_swap === true ||
+        transactionData?.data_pending_auto_swap === 'true';
+
+      if (pendingAutoSwap) {
+        navigationRef.current?.navigate('Main' as never, {
+          screen: 'BottomTabs',
+          params: {
+            screen: 'Home'
+          }
+        } as never);
+        return;
+      }
+
       switch (parts[0]) {
         case 'verification':
           // Navigate to Verification explanation screen
@@ -810,6 +864,9 @@ class MessagingService {
               transactionType = 'withdrawal';
             } else if (notificationType === 'CONVERSION_COMPLETED') {
               transactionType = 'conversion';
+            } else if (notificationType === 'RAMP_PENDING' || notificationType === 'RAMP_COMPLETED' || notificationType === 'RAMP_FAILED') {
+              transactionType = 'ramp';
+              Object.assign(navData, normalizeRampNotificationPayload(navData, notificationType, parts[1]));
             }
 
             console.log('[MessagingService] Navigating to TransactionDetail:', {
@@ -931,6 +988,10 @@ class MessagingService {
         }
         if (type === 'PaymentTransaction' || type === 'payment') {
           transactionType = 'payment';
+        }
+        if (notifType === 'RAMP_PENDING' || notifType === 'RAMP_COMPLETED' || notifType === 'RAMP_FAILED') {
+          transactionType = 'ramp';
+          Object.assign(navData, normalizeRampNotificationPayload(navData, notifType, id));
         }
 
         navigationRef.current?.navigate('Main' as never, {

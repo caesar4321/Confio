@@ -160,6 +160,66 @@ const parseWireMxRows = (rawAddress?: string | null): RampInstructionRow[] => {
   return rows;
 };
 
+const parseWireCoRows = (rawAddress?: string | null): RampInstructionRow[] => {
+  const lines = splitAddressLines(rawAddress);
+  const rows: RampInstructionRow[] = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+
+    if (line.includes('@') && !line.includes(' ')) {
+      rows.push({ label: 'Email', value: line });
+      continue;
+    }
+
+    // "Koywe SAS" or "Koywe Colombia" → Beneficiario
+    if (/^koywe\b/i.test(line)) {
+      rows.push({ label: 'Beneficiario', value: line });
+      continue;
+    }
+
+    // "NIT 901.620.954-1" → NIT
+    if (/^nit\b/i.test(line)) {
+      const match = line.match(/^nit\s+(.+)$/i);
+      if (match) {
+        rows.push({ label: 'NIT', value: match[1].trim() });
+        continue;
+      }
+    }
+
+    // "Cta de ahorro" or "Cta corriente" → Tipo de cuenta
+    if (/^cta\b/i.test(line)) {
+      rows.push({ label: 'Tipo de cuenta', value: line });
+      continue;
+    }
+
+    // "Banco Davivienda" → Banco
+    if (/^banco\b/i.test(line)) {
+      const match = line.match(/^banco\s+(.+)$/i);
+      if (match) {
+        rows.push({ label: 'Banco', value: match[1].trim() });
+        continue;
+      }
+    }
+
+    // Pure number → Número de cuenta
+    if (/^\d+$/.test(line)) {
+      rows.push({ label: 'Número de cuenta', value: line });
+      continue;
+    }
+
+    const match = line.match(/^([A-Za-z]+)\s+(.*)$/);
+    if (match) {
+      rows.push({ label: prettifyRowLabel(match[1]), value: match[2].trim() });
+      continue;
+    }
+
+    rows.push({ label: `Dato ${index + 1}`, value: line });
+  }
+
+  return rows;
+};
+
 const parseWireClRows = (rawAddress?: string | null): RampInstructionRow[] => {
   const lines = splitAddressLines(rawAddress);
   const rows: RampInstructionRow[] = [];
@@ -282,6 +342,8 @@ export const buildRampInstructionView = ({
               ? parseWireClRows(providedAddress)
             : normalizedCode === 'WIREMX' || normalizedCode === 'STP'
               ? parseWireMxRows(providedAddress)
+            : normalizedCode === 'WIRECO'
+              ? parseWireCoRows(providedAddress)
               : parseAddressRows(providedAddress)
           : payoutRows,
     };

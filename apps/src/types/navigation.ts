@@ -29,7 +29,8 @@ export type MainStackParamList = {
   BottomTabs: NavigatorScreenParams<BottomTabParamList>;
   LegalDocument: { docType: 'terms' | 'privacy' | 'deletion' };
   Verification: undefined;
-  BankInfo: undefined;
+  PayoutMethods: undefined;
+  RampAddress: undefined;
   ConfioAddress: undefined;
   Notification: undefined;
   HomeMessages: {
@@ -156,6 +157,9 @@ export type MainStackParamList = {
   };
   TopUp: undefined;
   Sell: undefined;
+  RampHistory: {
+    initialFilter?: 'all' | 'on_ramp' | 'off_ramp';
+  } | undefined;
   RampInstructions: {
     direction: 'ON_RAMP' | 'OFF_RAMP';
     orderId: string;
@@ -172,7 +176,11 @@ export type MainStackParamList = {
   USDCManage: undefined;
   USDCWithdraw: undefined;
   USDCHistory: undefined;
-  USDCConversion: undefined;
+  USDCConversion: {
+    direction?: 'usdc_to_cusd' | 'cusd_to_usdc';
+    rampProvider?: 'guardarian' | 'koywe';
+    providerOrderId?: string;
+  } | undefined;
   SendWithAddress: {
     tokenType: 'cusd' | 'confio' | 'usdc';
     prefilledAddress?: string;
@@ -222,7 +230,7 @@ export type MainStackParamList = {
   PayrollRunsHistory: undefined;
   PayrollRun: undefined;
   TransactionDetail: {
-    transactionType: 'received' | 'sent' | 'exchange' | 'payment' | 'deposit' | 'withdrawal' | 'conversion';
+    transactionType: 'received' | 'sent' | 'exchange' | 'payment' | 'deposit' | 'withdrawal' | 'conversion' | 'ramp';
     transactionData?: any; // You can make this more specific based on your data structure
   };
   TransactionProcessing: {

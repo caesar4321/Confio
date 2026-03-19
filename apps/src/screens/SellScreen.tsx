@@ -23,11 +23,12 @@ import { MainStackParamList } from '../types/navigation';
 import { useAccount } from '../contexts/AccountContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useCountry } from '../contexts/CountryContext';
-import { AddBankInfoModal } from '../components/AddBankInfoModal';
+import { AddPayoutMethodModal } from '../components/AddPayoutMethodModal';
 import {
   GET_ME,
   GET_MY_BALANCES,
   GET_RAMP_AVAILABILITY,
+  GET_MY_RAMP_ADDRESS,
   GET_MY_KYC_STATUS,
   GET_MY_PERSONAL_KYC_STATUS,
   GET_USER_BANK_ACCOUNTS,
@@ -42,6 +43,7 @@ import { RampHero } from '../components/ramps/RampHero';
 import { RampReveal } from '../components/ramps/RampReveal';
 import { RampStepHeader } from '../components/ramps/RampStepHeader';
 import { CREATE_RAMP_ORDER } from '../apollo/mutations';
+import { tryFundKoyweOffRampInBackground } from '../services/koyweOffRampService';
 import { SellScreen as LegacyGuardarianSellScreen } from './LegacyGuardarianSellScreen';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'Sell'>;
@@ -66,11 +68,15 @@ type RampMethod = {
   offRampMaxAmount?: string | null;
 };
 
-type SavedBankInfo = {
+type SavedPayoutMethod = {
   id: string;
   accountHolderName: string;
   summaryText: string;
   paymentMethod?: {
+    id: string;
+    displayName: string;
+  };
+  rampPaymentMethod?: {
     id: string;
     displayName: string;
   };
@@ -84,12 +90,12 @@ const colors = {
   textMuted: '#6b7280',
   textLight: '#9ca3af',
   border: '#e5e7eb',
-  background: '#f0fdf4',
+  background: '#f6faf7',
   surface: '#ffffff',
   surfaceAlt: '#f3f4f6',
-  primary: '#059669',
-  primaryDark: '#047857',
-  primaryMid: '#10b981',
+  primary: '#34d399',
+  primaryDark: '#10b981',
+  primaryMid: '#6ee7b7',
   primaryLight: '#d1fae5',
   primaryUltraLight: '#ecfdf5',
   accent: '#3b82f6',
@@ -99,8 +105,8 @@ const colors = {
   success: '#15803d',
   danger: '#b91c1c',
   dangerLight: '#fee2e2',
-  heroFrom: '#047857',
-  heroTo: '#34d399',
+  heroFrom: '#10b981',
+  heroTo: '#6ee7b7',
 };
 
 /* ─── Friendly currency names ─── */
@@ -134,6 +140,7 @@ export const SellScreen = () => {
   const [showAddMethodModal, setShowAddMethodModal] = useState(false);
   const [step, setStep] = useState<'form' | 'review'>('form');
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
+  const [amountFocused, setAmountFocused] = useState(false);
 
   const countryCode = useMemo(() => {
     const selectedIso = selectedCountry?.[2];
@@ -149,6 +156,10 @@ export const SellScreen = () => {
   });
   const { data: kycData } = useQuery(GET_MY_KYC_STATUS);
   const { data: personalKycData } = useQuery(GET_MY_PERSONAL_KYC_STATUS);
+  const { data: rampAddressData, loading: rampAddressLoading } = useQuery(GET_MY_RAMP_ADDRESS, {
+    fetchPolicy: 'cache-and-network',
+    skip: !isKoyweCountry,
+  });
   const {
     data: availabilityData,
     loading: availabilityLoading,
@@ -187,11 +198,12 @@ export const SellScreen = () => {
       .map((status: string) => status.toLowerCase());
     return candidates.includes('verified') || meData?.me?.isIdentityVerified;
   }, [kycData?.myKycStatus?.status, meData?.me?.isIdentityVerified, meData?.me?.verificationStatus, personalKycData?.myPersonalKycStatus?.status]);
+  const hasCompleteRampAddress = Boolean(rampAddressData?.myRampAddress?.isComplete);
 
-  const savedMethods: SavedBankInfo[] = useMemo(() => {
+  const savedMethods: SavedPayoutMethod[] = useMemo(() => {
     const accounts = bankAccountsData?.userBankAccounts || [];
-    return accounts.filter((account: SavedBankInfo) =>
-      methods.some((method) => method.paymentMethodId && account.paymentMethod?.id === method.paymentMethodId),
+    return accounts.filter((account: SavedPayoutMethod) =>
+      methods.some((method) => method.paymentMethodId && (account.rampPaymentMethod?.id || account.paymentMethod?.id) === method.paymentMethodId),
     );
   }, [bankAccountsData?.userBankAccounts, methods]);
 
@@ -236,7 +248,7 @@ export const SellScreen = () => {
     if (!selectedMethod?.paymentMethodId) {
       return [];
     }
-    return savedMethods.filter((account) => account.paymentMethod?.id === selectedMethod.paymentMethodId);
+    return savedMethods.filter((account) => (account.rampPaymentMethod?.id || account.paymentMethod?.id) === selectedMethod.paymentMethodId);
   }, [savedMethods, selectedMethod?.paymentMethodId]);
 
   const selectedSavedMethod = useMemo(
@@ -301,6 +313,21 @@ export const SellScreen = () => {
       promptVerification();
       return;
     }
+    if (rampAddressLoading) {
+      Alert.alert('Verificando dirección', 'Espera un momento mientras validamos tu dirección para recargas y retiros.');
+      return;
+    }
+    if (!hasCompleteRampAddress) {
+      Alert.alert(
+        'Completa tu dirección',
+        'Antes de continuar, necesitamos tu dirección para habilitar las recargas y retiros bancarios.',
+        [
+          { text: 'Ahora no', style: 'cancel' },
+          { text: 'Completar', onPress: () => navigation.navigate('RampAddress') },
+        ],
+      );
+      return;
+    }
     setStep('review');
   };
 
@@ -316,43 +343,76 @@ export const SellScreen = () => {
     if (!authenticated) {
       return;
     }
+    if (!hasCompleteRampAddress) {
+      Alert.alert(
+        'Completa tu dirección',
+        'Antes de confirmar, necesitamos tu dirección para habilitar las recargas y retiros bancarios.',
+        [
+          { text: 'Ahora no', style: 'cancel' },
+          { text: 'Completar', onPress: () => navigation.navigate('RampAddress') },
+        ],
+      );
+      return;
+    }
 
     setIsSubmittingOrder(true);
-    createRampOrder({
-      variables: {
-        direction: 'OFF_RAMP',
-        amount: String(parsedAmount),
-        countryCode: availability?.countryCode,
-        fiatCurrency,
-        paymentMethodCode: selectedMethod.code,
-        bankInfoId: selectedSavedMethod.id,
-      },
-    })
-      .then(({ data }) => {
-        const result = data?.createRampOrder;
-        if (!result?.success || !result?.orderId) {
-          Alert.alert('No se pudo crear la orden', getFriendlyRampError(result?.error));
-          return;
-        }
-        navigation.replace('RampInstructions', {
+    try {
+      const { data } = await createRampOrder({
+        variables: {
           direction: 'OFF_RAMP',
-          orderId: result.orderId,
+          amount: String(parsedAmount),
           countryCode: availability?.countryCode,
-          paymentMethodCode: selectedMethod.code,
-          paymentMethodDisplay: result.paymentMethodDisplay || selectedMethod.displayName,
-          amountOut: result.amountOut || undefined,
           fiatCurrency,
-          destinationSummary: selectedSavedMethod?.summaryText || undefined,
-          nextActionUrl: result.nextActionUrl || undefined,
-          paymentDetails: result.paymentDetails,
-        });
-      })
-      .catch((error) => {
-        Alert.alert('No se pudo crear la orden', getFriendlyRampError(error?.message));
-      })
-      .finally(() => {
-        setIsSubmittingOrder(false);
+          paymentMethodCode: selectedMethod.code,
+          bankInfoId: selectedSavedMethod.id,
+        },
       });
+
+      const result = data?.createRampOrder;
+      if (!result?.success || !result?.orderId) {
+        Alert.alert('No se pudo crear la orden', getFriendlyRampError(result?.error));
+        return;
+      }
+
+      let autoFundingWarning: string | null = null;
+      if (String(result.nextStep || '').toUpperCase() === 'WAIT_FOR_USDC_TRANSFER') {
+        const fundingResult = await tryFundKoyweOffRampInBackground({
+          amount: parsedAmount,
+          paymentDetails: result.paymentDetails,
+          providerOrderId: result.orderId,
+          activeAccount,
+        });
+
+        if (fundingResult.status === 'failed') {
+          autoFundingWarning = fundingResult.reason === 'invalid_amount'
+            ? 'No pudimos iniciar el envío automático del retiro.'
+            : `No pudimos iniciar el envío automático del retiro: ${fundingResult.reason}.`;
+        } else if (fundingResult.status === 'skipped') {
+          autoFundingWarning = 'No pudimos iniciar el envío automático porque Koywe no devolvió un destino compatible con Algorand.';
+        }
+      }
+
+      navigation.replace('RampInstructions', {
+        direction: 'OFF_RAMP',
+        orderId: result.orderId,
+        countryCode: availability?.countryCode,
+        paymentMethodCode: selectedMethod.code,
+        paymentMethodDisplay: result.paymentMethodDisplay || selectedMethod.displayName,
+        amountOut: result.amountOut || undefined,
+        fiatCurrency,
+        destinationSummary: selectedSavedMethod?.summaryText || undefined,
+        nextActionUrl: result.nextActionUrl || undefined,
+        paymentDetails: result.paymentDetails,
+      });
+
+      if (autoFundingWarning) {
+        Alert.alert('Retiro creado', autoFundingWarning);
+      }
+    } catch (error: any) {
+      Alert.alert('No se pudo crear la orden', getFriendlyRampError(error?.message));
+    } finally {
+      setIsSubmittingOrder(false);
+    }
   };
 
   if (!isKoyweCountry) {
@@ -361,7 +421,7 @@ export const SellScreen = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.heroFrom} />
+      <StatusBar barStyle="light-content" backgroundColor="#10b981" />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* ─── Hero with gradient ─── */}
         <RampReveal delay={0}>
@@ -380,7 +440,7 @@ export const SellScreen = () => {
         <RampReveal delay={60}>
         <View style={styles.bannerCard}>
           <View style={styles.bannerIconWrap}>
-            <Icon name="shield" size={16} color={colors.accent} />
+            <Icon name="shield" size={16} color={colors.primary} />
           </View>
           <View style={styles.bannerCopy}>
             <Text style={styles.bannerTitle}>{countryFlag ? `${countryFlag} ` : ''}Datos de cobro</Text>
@@ -388,6 +448,14 @@ export const SellScreen = () => {
               Puedes guardar tu cuenta o billetera para no volver a cargarla en próximos retiros.
             </Text>
           </View>
+          <TouchableOpacity
+            style={styles.historyPill}
+            onPress={() => navigation.navigate('RampHistory', { initialFilter: 'off_ramp' })}
+            activeOpacity={0.8}
+          >
+            <Icon name="clock" size={14} color={colors.primary} />
+            <Text style={styles.historyPillText}>Ver retiros</Text>
+          </TouchableOpacity>
         </View>
         </RampReveal>
 
@@ -412,7 +480,7 @@ export const SellScreen = () => {
               />
               <View style={styles.inputCard}>
                 <Text style={styles.inputLabel}>Monto a retirar en cUSD</Text>
-                <View style={styles.amountInputRow}>
+                <View style={[styles.amountInputRow, amountFocused && styles.amountInputRowFocused]}>
                   <TextInput
                     style={styles.amountInput}
                     value={amount}
@@ -420,11 +488,15 @@ export const SellScreen = () => {
                       setAmount(value);
                       setStep('form');
                     }}
+                    onFocus={() => setAmountFocused(true)}
+                    onBlur={() => setAmountFocused(false)}
                     keyboardType="decimal-pad"
                     placeholder="0"
                     placeholderTextColor={colors.textLight}
                   />
-                  <Text style={styles.currencySuffix}>cUSD</Text>
+                  <View style={styles.currencyBadge}>
+                    <Text style={styles.currencyBadgeText}>cUSD</Text>
+                  </View>
                   <TouchableOpacity
                     style={[styles.maxPill, (!effectiveSellMax || balancesLoading) && styles.maxPillDisabled]}
                     onPress={() => {
@@ -478,7 +550,9 @@ export const SellScreen = () => {
                         <Text style={[styles.methodText, selected && styles.methodTextSelected]}>{method.description}</Text>
                       </View>
                       <View style={[styles.radioOuter, selected && styles.radioOuterSelected]}>
-                        {selected && <View style={styles.radioInner} />}
+                        {selected
+                          ? <Icon name="check" size={13} color="#ffffff" />
+                          : null}
                       </View>
                     </TouchableOpacity>
                   );
@@ -501,7 +575,7 @@ export const SellScreen = () => {
                   />
                 </View>
                 <TouchableOpacity style={styles.addButton} onPress={() => setShowAddMethodModal(true)}>
-                  <Icon name="plus-circle" size={16} color={colors.accent} />
+                  <Icon name="plus-circle" size={15} color={colors.primaryDark} />
                   <Text style={styles.addButtonText}>Agregar</Text>
                 </TouchableOpacity>
               </View>
@@ -570,17 +644,21 @@ export const SellScreen = () => {
                       <Text style={styles.quoteValue}>{formatRampMoney(quote.amountOut, fiatCurrency)}</Text>
                     </View>
                     <View style={styles.quoteRow}>
+                      <Text style={styles.quoteLabel}>Tipo de cambio</Text>
+                      <Text style={styles.quoteValue}>{`${formatRampRate(quote.exchangeRate)} ${fiatCurrency}/cUSD`}</Text>
+                    </View>
+                    <View style={styles.quoteRow}>
                       <Text style={styles.quoteLabel}>{'Comisión del\nprocesador de pagos'}</Text>
                       <Text style={styles.quoteValue}>{formatRampMoney(String(Number(quote.feeAmount || 0) + Number(quote.networkFeeAmount || 0)), quote.feeCurrency)}</Text>
                     </View>
                     <View style={styles.quoteRow}>
                       <Text style={styles.quoteLabel}>Comisión de Confío</Text>
-                      <Text style={[styles.quoteValue, { color: colors.primary }]}>
-                        {formatRampMoney(0, quote.feeCurrency || fiatCurrency)}
-                      </Text>
+                      <View style={styles.gratisBadge}>
+                        <Text style={styles.gratisBadgeText}>Gratis</Text>
+                      </View>
                     </View>
                     <View style={styles.disclaimerPill}>
-                      <Icon name="info" size={12} color={colors.accent} />
+                      <Icon name="info" size={12} color={colors.primaryDark} />
                       <Text style={styles.quoteNote}>La cotización puede cambiar antes de confirmar.</Text>
                     </View>
                   </>
@@ -598,7 +676,6 @@ export const SellScreen = () => {
             {step === 'review' ? (
               <RampReveal delay={270}>
               <View style={styles.reviewCard}>
-                <View style={styles.reviewAccent} />
                 <Text style={styles.reviewTitle}>Revisión final</Text>
                 <View style={styles.reviewRow}>
                   <Icon name="credit-card" size={16} color={colors.textMuted} />
@@ -644,7 +721,7 @@ export const SellScreen = () => {
         presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'}
         onRequestClose={() => setShowAddMethodModal(false)}
       >
-        <AddBankInfoModal
+        <AddPayoutMethodModal
           isVisible={showAddMethodModal}
           onClose={() => setShowAddMethodModal(false)}
           onSuccess={() => {
@@ -653,13 +730,12 @@ export const SellScreen = () => {
             refetchAvailability({ countryCode });
           }}
           accountId={activeAccount?.id || null}
-          editingBankInfo={null}
+          editingPayoutMethod={null}
           initialCountryCode={countryCode}
           allowedCountryCodes={[countryCode]}
           allowedPaymentMethodIds={methods.map((method) => method.paymentMethodId).filter(Boolean) as string[]}
           initialPaymentMethodId={selectedMethod?.paymentMethodId || null}
           lockCountry={true}
-          mode="off_ramp"
         />
       </Modal>
     </SafeAreaView>
@@ -681,13 +757,15 @@ const styles = StyleSheet.create({
   bannerCard: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    backgroundColor: colors.accentLight,
+    backgroundColor: '#f0fdf4',
     borderRadius: 16,
     padding: 16,
     marginHorizontal: 22,
     marginBottom: 20,
     gap: 12,
-    shadowColor: '#3b82f6',
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+    shadowColor: '#059669',
     shadowOpacity: 0.08,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
@@ -697,7 +775,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: 'rgba(59,130,246,0.12)',
+    backgroundColor: 'rgba(5,150,105,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 2,
@@ -705,10 +783,27 @@ const styles = StyleSheet.create({
   bannerCopy: {
     flex: 1,
   },
+  historyPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'center',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  historyPillText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.primary,
+  },
   bannerTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: colors.accent,
+    color: colors.primaryDark,
     marginBottom: 4,
   },
   bannerText: {
@@ -820,6 +915,18 @@ const styles = StyleSheet.create({
   amountInputRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+    paddingHorizontal: 2,
+    paddingVertical: 2,
+    marginHorizontal: -2,
+  },
+  amountInputRowFocused: {
+    borderColor: colors.primary,
+    backgroundColor: '#f0fdf4',
+    borderRadius: 14,
+    paddingHorizontal: 8,
   },
   amountInput: {
     flex: 1,
@@ -828,11 +935,18 @@ const styles = StyleSheet.create({
     color: colors.dark,
     paddingVertical: 4,
   },
-  currencySuffix: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.textLight,
+  currencyBadge: {
+    backgroundColor: colors.primaryLight,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
     marginLeft: 8,
+  },
+  currencyBadgeText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.primaryDark,
+    letterSpacing: 0.4,
   },
   maxPill: {
     marginLeft: 10,
@@ -880,7 +994,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: '#eef2f7',
     shadowColor: '#111827',
     shadowOpacity: 0.05,
@@ -889,10 +1003,14 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   methodCardSelected: {
-    backgroundColor: colors.primaryUltraLight,
-    borderColor: '#a7f3d0',
-    shadowColor: colors.primary,
-    shadowOpacity: 0.12,
+    backgroundColor: colors.primaryDark,
+    borderColor: colors.primaryDark,
+    borderWidth: 2,
+    shadowColor: colors.primaryDark,
+    shadowOpacity: 0.22,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 4,
   },
   methodCopy: {
     flex: 1,
@@ -907,7 +1025,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   methodIconSelected: {
-    backgroundColor: colors.primary,
+    backgroundColor: 'rgba(255,255,255,0.2)',
   },
   methodTitle: {
     fontSize: 15,
@@ -915,7 +1033,7 @@ const styles = StyleSheet.create({
     color: colors.dark,
   },
   methodTitleSelected: {
-    color: colors.primaryDark,
+    color: '#ffffff',
   },
   methodText: {
     color: colors.textMuted,
@@ -923,27 +1041,28 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   methodTextSelected: {
-    color: colors.textMuted,
+    color: 'rgba(255,255,255,0.75)',
   },
 
   /* ── Radio button ── */
   radioOuter: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     borderWidth: 2,
     borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
   radioOuterSelected: {
-    borderColor: colors.primary,
+    borderColor: 'rgba(255,255,255,0.5)',
+    backgroundColor: 'rgba(255,255,255,0.18)',
   },
   radioInner: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: colors.primary,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#ffffff',
   },
 
   /* ── Add button ── */
@@ -951,11 +1070,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    backgroundColor: '#ecfdf5',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: '#a7f3d0',
   },
   addButtonText: {
-    color: colors.accent,
+    color: colors.primaryDark,
     fontWeight: '700',
-    fontSize: 14,
+    fontSize: 13,
   },
 
   /* ── Empty state ── */
@@ -1022,38 +1147,38 @@ const styles = StyleSheet.create({
 
   /* ── Quote card ── */
   quoteCard: {
-    backgroundColor: colors.surface,
+    backgroundColor: '#f0fdf8',
     borderRadius: 20,
     padding: 20,
     gap: 10,
-    borderWidth: 1,
-    borderColor: '#d1fae5',
-    shadowColor: '#111827',
-    shadowOpacity: 0.06,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 3,
+    borderWidth: 1.5,
+    borderColor: '#6ee7b7',
+    shadowColor: '#059669',
+    shadowOpacity: 0.14,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 4,
   },
   quoteHeadline: {
-    fontSize: 28,
+    fontSize: 34,
     fontWeight: '800',
-    color: colors.dark,
-    lineHeight: 34,
+    color: colors.primaryDark,
+    lineHeight: 40,
   },
   quoteHeadlineCompact: {
-    fontSize: 24,
-    lineHeight: 30,
+    fontSize: 28,
+    lineHeight: 34,
   },
   quoteEyebrow: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
-    letterSpacing: 0.6,
+    letterSpacing: 1.2,
     textTransform: 'uppercase',
     color: colors.primaryDark,
   },
   quoteRate: {
     color: colors.textMuted,
-    fontSize: 14,
+    fontSize: 13,
     lineHeight: 20,
   },
   quoteDivider: {
@@ -1085,18 +1210,32 @@ const styles = StyleSheet.create({
   disclaimerPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.accentLight,
+    backgroundColor: '#ecfdf5',
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 8,
     gap: 8,
     marginTop: 4,
+    borderWidth: 1,
+    borderColor: '#a7f3d0',
   },
   quoteNote: {
-    color: colors.accent,
+    color: colors.primaryDark,
     lineHeight: 18,
     fontSize: 12,
     flex: 1,
+  },
+  gratisBadge: {
+    backgroundColor: colors.primaryLight,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  gratisBadgeText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: colors.primaryDark,
+    letterSpacing: 0.3,
   },
   emptyQuote: {
     alignItems: 'center',
@@ -1111,28 +1250,20 @@ const styles = StyleSheet.create({
     padding: 20,
     marginHorizontal: 22,
     gap: 14,
-    shadowColor: '#111827',
-    shadowOpacity: 0.08,
+    borderWidth: 1,
+    borderColor: '#d1fae5',
+    borderLeftWidth: 5,
+    borderLeftColor: colors.primary,
+    shadowColor: colors.primary,
+    shadowOpacity: 0.12,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 6 },
-    elevation: 3,
-    overflow: 'hidden',
-  },
-  reviewAccent: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 4,
-    backgroundColor: colors.primary,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    elevation: 4,
   },
   reviewTitle: {
     fontSize: 18,
     fontWeight: '700',
     color: colors.dark,
-    marginTop: 4,
   },
   reviewRow: {
     flexDirection: 'row',

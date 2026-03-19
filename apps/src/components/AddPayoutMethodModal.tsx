@@ -16,14 +16,15 @@ import Icon from 'react-native-vector-icons/Feather';
 import { useQuery, useMutation, useApolloClient } from '@apollo/client';
 import {
   GET_COUNTRIES,
-  GET_BANKS,
-  GET_P2P_PAYMENT_METHODS,
+  GET_KOYWE_BANK_INFO,
+  GET_RAMP_PAYMENT_METHODS,
   GET_USER_BANK_ACCOUNTS,
   CREATE_BANK_INFO,
   UPDATE_BANK_INFO
 } from '../apollo/queries';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
+import Svg, { Defs, LinearGradient, Stop, Rect, Circle } from 'react-native-svg';
 
 // Colors matching app design
 const colors = {
@@ -53,6 +54,7 @@ const SAVABLE_PAYMENT_METHOD_CODES = new Set([
   'WIRECL',
   'NEQUI',
   'BANCOLOMBIA',
+  'WIRECO',
   'WIREMX',
   'STP',
   'WIREPE',
@@ -78,8 +80,8 @@ const PERU_BANK_CODE_ALIASES: Record<string, string> = {
   LIGO: 'LIGO',
 };
 
-const KOYWE_BANK_PICKER_ALLOWLIST: Record<string, Set<string>> = {
-  PE: new Set(['bcp', 'bbva_peru', 'scotiabank_peru', 'interbank', 'banco_nacion_peru', 'citibank_peru']),
+const COUNTRY_ALPHA2_TO_ALPHA3: Record<string, string> = {
+  AR: 'ARG', BO: 'BOL', BR: 'BRA', CL: 'CHL', CO: 'COL', MX: 'MEX', PE: 'PER',
 };
 
 interface PaymentMethodAccount {
@@ -114,7 +116,9 @@ interface PaymentMethodAccount {
         identificationFormat?: string;
       };
     };
+    country?: Country;
   };
+  rampPaymentMethod?: RampPaymentMethod | null;
   accountHolderName: string;
   accountNumber?: string;
   phoneNumber?: string;
@@ -141,6 +145,8 @@ interface FieldConfig {
   show: boolean;
   required: boolean;
   keyboardType?: 'default' | 'numeric' | 'email-address' | 'phone-pad';
+  minLength?: number;
+  maxLength?: number;
 }
 
 const normalizeProviderMetadata = (value: unknown): Record<string, string> => {
@@ -154,6 +160,41 @@ const normalizeProviderMetadata = (value: unknown): Record<string, string> => {
     }
   }
   return typeof value === 'object' ? value as Record<string, string> : {};
+};
+
+const normalizeAccountType = (value: unknown): string => {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return '';
+
+  const normalized = raw
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[-\s]+/g, '_')
+    .replace(/^cuenta_/, '')
+    .replace(/^de_/, '');
+
+  const mapping: Record<string, string> = {
+    ahorro: 'savings',
+    ahorros: 'savings',
+    savings: 'savings',
+    corriente: 'checking',
+    checking: 'checking',
+    nomina: 'payroll',
+    payroll: 'payroll',
+    interbancaria: 'interbanking',
+    interbanking: 'interbanking',
+  };
+
+  return mapping[normalized] || normalized;
+};
+
+const toPayoutAccountType = (value: unknown): string | null => {
+  const normalized = normalizeAccountType(value);
+  if (!normalized) return null;
+  if (normalized === 'savings') return 'ahorro';
+  if (normalized === 'checking') return 'corriente';
+  if (normalized === 'payroll') return 'nomina';
+  return normalized;
 };
 
 interface Country {
@@ -186,15 +227,32 @@ interface Bank {
   accountTypeChoices?: string[];
 }
 
-interface P2PPaymentMethod {
+interface RampFieldSchema {
+  accountHolderLabel?: string;
+  accountField?: FieldConfig;
+  phoneField?: FieldConfig;
+  emailField?: FieldConfig;
+  showAccountTypeField?: boolean;
+  accountTypeRequired?: boolean;
+  defaultProviderMetadata?: Record<string, string>;
+  providerFields?: ProviderFieldConfig[];
+}
+
+interface RampPaymentMethod {
   id: string;
-  name: string;
+  code?: string;
+  name?: string;
   displayName: string;
   providerType: string;
   icon: string;
   requiresPhone: boolean;
   requiresEmail: boolean;
   requiresAccountNumber: boolean;
+  requiresIdentification?: boolean;
+  supportsOnRamp?: boolean;
+  supportsOffRamp?: boolean;
+  fieldSchema?: RampFieldSchema;
+  country?: Country;
   bank?: {
     id: string;
     name: string;
@@ -212,41 +270,39 @@ interface P2PPaymentMethod {
   isActive?: boolean;
 }
 
-interface AddBankInfoModalProps {
+interface AddPayoutMethodModalProps {
   isVisible: boolean;
   onClose: () => void;
   onSuccess: () => void;
   accountId: string | null;
-  editingBankInfo: PaymentMethodAccount | null;
+  editingPayoutMethod: PaymentMethodAccount | null;
   initialCountryCode?: string | null;
   allowedCountryCodes?: string[] | null;
   allowedPaymentMethodIds?: string[] | null;
   initialPaymentMethodId?: string | null;
   lockCountry?: boolean;
   lockPaymentMethod?: boolean;
-  mode?: 'general' | 'off_ramp' | 'on_ramp';
 }
 
-export const AddBankInfoModal = ({
+export const AddPayoutMethodModal = ({
   isVisible,
   onClose,
   onSuccess,
   accountId,
-  editingBankInfo,
+  editingPayoutMethod,
   initialCountryCode = null,
   allowedCountryCodes = null,
   allowedPaymentMethodIds = null,
   initialPaymentMethodId = null,
   lockCountry = false,
   lockPaymentMethod = false,
-  mode = 'general',
-}: AddBankInfoModalProps) => {
+}: AddPayoutMethodModalProps) => {
   // Safe area insets not required; use fixed padding where needed
-  const isEditing = !!editingBankInfo;
+  const isEditing = !!editingPayoutMethod;
   const apolloClient = useApolloClient();
 
   // Form state
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<P2PPaymentMethod | null>(null);
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<RampPaymentMethod | null>(null);
   const [selectedCountry, setSelectedCountry] = useState<Country | null>(null);
   const [selectedBank, setSelectedBank] = useState<Bank | null>(null);
   const [formData, setFormData] = useState({
@@ -265,24 +321,82 @@ export const AddBankInfoModal = ({
   const [showProviderBankPicker, setShowProviderBankPicker] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const resetRailSpecificFields = (
+    currentData: {
+      accountHolderName: string;
+      accountNumber: string;
+      accountType: string;
+      identificationNumber: string;
+      phoneNumber: string;
+      email: string;
+      username: string;
+      providerMetadata: Record<string, string>;
+      isDefault: boolean;
+    },
+    overrides: Partial<{
+      accountHolderName: string;
+      accountNumber: string;
+      accountType: string;
+      identificationNumber: string;
+      phoneNumber: string;
+      email: string;
+      username: string;
+      providerMetadata: Record<string, string>;
+      isDefault: boolean;
+    }> = {},
+  ) => ({
+    accountHolderName: currentData.accountHolderName,
+    accountNumber: '',
+    accountType: '',
+    identificationNumber: '',
+    phoneNumber: '',
+    email: '',
+    username: '',
+    providerMetadata: {},
+    isDefault: currentData.isDefault,
+    ...overrides,
+  });
+
+  const parseRampFieldSchema = (paymentMethod?: RampPaymentMethod | null): RampFieldSchema | null => {
+    const raw = paymentMethod?.fieldSchema;
+    if (!raw) return null;
+    if (typeof raw === 'object') return raw as RampFieldSchema;
+    try {
+      return JSON.parse(raw as unknown as string) as RampFieldSchema;
+    } catch {
+      return null;
+    }
+  };
+
+  const getDefaultProviderMetadata = (paymentMethod?: RampPaymentMethod | null): Record<string, string> => {
+    const schema = parseRampFieldSchema(paymentMethod);
+    return schema?.defaultProviderMetadata || {};
+  };
+
   // Initialize form for editing
   useEffect(() => {
-    if (editingBankInfo) {
-      setSelectedPaymentMethod(editingBankInfo.paymentMethod);
-      if (editingBankInfo.paymentMethod.bank) {
-        setSelectedCountry(editingBankInfo.paymentMethod.bank.country);
-        setSelectedBank(editingBankInfo.paymentMethod.bank);
+    if (editingPayoutMethod) {
+      const resolvedPaymentMethod = editingPayoutMethod.rampPaymentMethod || editingPayoutMethod.paymentMethod;
+      setSelectedPaymentMethod(resolvedPaymentMethod);
+      if (resolvedPaymentMethod?.bank) {
+        setSelectedCountry(resolvedPaymentMethod.bank.country);
+        setSelectedBank(resolvedPaymentMethod.bank);
+      } else if (resolvedPaymentMethod?.country) {
+        setSelectedCountry(resolvedPaymentMethod.country);
       }
       setFormData({
-        accountHolderName: editingBankInfo.accountHolderName,
-        accountNumber: editingBankInfo.accountNumber || '',
-        accountType: editingBankInfo.accountType || '',
-        identificationNumber: editingBankInfo.identificationNumber || '',
-        phoneNumber: editingBankInfo.phoneNumber || '',
-        email: editingBankInfo.email || '',
-        username: editingBankInfo.username || '',
-        providerMetadata: normalizeProviderMetadata(editingBankInfo.providerMetadata),
-        isDefault: editingBankInfo.isDefault,
+        accountHolderName: editingPayoutMethod.accountHolderName,
+        accountNumber: editingPayoutMethod.accountNumber || '',
+        accountType: normalizeAccountType(editingPayoutMethod.accountType),
+        identificationNumber: editingPayoutMethod.identificationNumber || '',
+        phoneNumber: editingPayoutMethod.phoneNumber || '',
+        email: editingPayoutMethod.email || '',
+        username: editingPayoutMethod.username || '',
+        providerMetadata: {
+          ...getDefaultProviderMetadata(resolvedPaymentMethod),
+          ...normalizeProviderMetadata(editingPayoutMethod.providerMetadata),
+        },
+        isDefault: editingPayoutMethod.isDefault,
       });
     } else {
       // Reset form for new entry
@@ -301,7 +415,7 @@ export const AddBankInfoModal = ({
         isDefault: false,
       });
     }
-  }, [editingBankInfo, isVisible]);
+  }, [editingPayoutMethod, isVisible]);
 
   // GraphQL queries
   const {
@@ -315,26 +429,31 @@ export const AddBankInfoModal = ({
   const {
     data: paymentMethodsData,
     loading: paymentMethodsLoading
-  } = useQuery(GET_P2P_PAYMENT_METHODS, {
-    variables: { countryCode: selectedCountry?.code },
+  } = useQuery(GET_RAMP_PAYMENT_METHODS, {
+    variables: {
+      countryCode: selectedCountry?.code,
+      direction: 'OFF_RAMP',
+    },
     skip: !isVisible || !selectedCountry,
     fetchPolicy: 'cache-and-network', // Use same policy as CreateOfferScreen for consistency
     onCompleted: (data) => {
-      console.log('[AddBankInfoModal] Payment methods query completed:', {
+      console.log('[AddPayoutMethodModal] Payment methods query completed:', {
+        component: 'AddPayoutMethodModal',
         countryCode: selectedCountry?.code,
-        methodsCount: data?.p2pPaymentMethods?.length,
-        methods: data?.p2pPaymentMethods?.slice(0, 5).map((m: any) => ({
+        methodsCount: data?.rampPaymentMethods?.length,
+        methods: data?.rampPaymentMethods?.slice(0, 5).map((m: any) => ({
           id: m.id,
-          name: m.displayName,
+          name: m.code || m.displayName,
           providerType: m.providerType
         }))
       });
     }
   });
 
-  const { data: banksData } = useQuery(GET_BANKS, {
-    variables: { countryCode: selectedCountry?.code },
-    skip: !isVisible || !selectedCountry,
+  const alpha3 = COUNTRY_ALPHA2_TO_ALPHA3[(selectedCountry?.code || '').toUpperCase()];
+  const { data: koyweBankData } = useQuery(GET_KOYWE_BANK_INFO, {
+    variables: { countryCode: alpha3 },
+    skip: !isVisible || !alpha3,
     fetchPolicy: 'cache-and-network',
   });
 
@@ -365,14 +484,17 @@ export const AddBankInfoModal = ({
   });
 
   const countries: Country[] = countriesData?.countries || [];
-  const countryBanks: Bank[] = banksData?.banks || [];
-  const koyweBankOptions = useMemo(() => {
-    const allowedCodes = KOYWE_BANK_PICKER_ALLOWLIST[(selectedCountry?.code || '').toUpperCase()];
-    if (!allowedCodes) {
-      return countryBanks;
-    }
-    return countryBanks.filter((bank) => allowedCodes.has((bank.code || '').toLowerCase()));
-  }, [countryBanks, selectedCountry?.code]);
+  const koyweBankOptions: Bank[] = useMemo(() => {
+    const raw: { bankCode: string; name: string; institutionName?: string }[] =
+      koyweBankData?.koyweBankInfo || [];
+    return raw.map((b) => ({
+      id: b.bankCode,
+      code: b.bankCode,
+      name: b.name,
+      shortName: b.institutionName || undefined,
+      country: { id: '', code: selectedCountry?.code || '', name: '', flagEmoji: '' },
+    }));
+  }, [koyweBankData, selectedCountry?.code]);
   const filteredCountries = useMemo(() => {
     if (!allowedCountryCodes?.length) {
       const supported = new Set(KOYWE_SUPPORTED_COUNTRY_CODES);
@@ -382,33 +504,33 @@ export const AddBankInfoModal = ({
     return countries.filter((country) => allowed.has(country.code.toUpperCase()));
   }, [allowedCountryCodes, countries]);
 
-  const paymentMethods: P2PPaymentMethod[] = useMemo(() => {
-    const methods = (paymentMethodsData?.p2pPaymentMethods || []).filter((method: P2PPaymentMethod) => {
-      const code = (method.name || '').replace(/_/g, '-').toUpperCase();
-      if (mode === 'general' || mode === 'off_ramp') {
-        return SAVABLE_PAYMENT_METHOD_CODES.has(code);
+  const paymentMethods: RampPaymentMethod[] = useMemo(() => {
+    const methods = (paymentMethodsData?.rampPaymentMethods || []).filter((method: RampPaymentMethod) => {
+      const code = (method.code || method.name || '').replace(/_/g, '-').toUpperCase();
+      if (!method.supportsOffRamp) {
+        return false;
       }
-      return true;
+      return SAVABLE_PAYMENT_METHOD_CODES.has(code);
     });
     if (!allowedPaymentMethodIds?.length) {
       return methods;
     }
     const allowed = new Set(allowedPaymentMethodIds);
-    return methods.filter((method: P2PPaymentMethod) => allowed.has(method.id));
-  }, [allowedPaymentMethodIds, paymentMethodsData?.p2pPaymentMethods]);
+    return methods.filter((method: RampPaymentMethod) => allowed.has(method.id));
+  }, [allowedPaymentMethodIds, paymentMethodsData?.rampPaymentMethods]);
 
   useEffect(() => {
-    if (!isVisible || editingBankInfo || !initialCountryCode || !filteredCountries.length) {
+    if (!isVisible || editingPayoutMethod || !initialCountryCode || !filteredCountries.length) {
       return;
     }
     const matchingCountry = filteredCountries.find((country) => country.code === initialCountryCode);
     if (matchingCountry) {
       setSelectedCountry(matchingCountry);
     }
-  }, [filteredCountries, editingBankInfo, initialCountryCode, isVisible]);
+  }, [filteredCountries, editingPayoutMethod, initialCountryCode, isVisible]);
 
   useEffect(() => {
-    if (!isVisible || editingBankInfo || !initialPaymentMethodId || !paymentMethods.length) {
+    if (!isVisible || editingPayoutMethod || !initialPaymentMethodId || !paymentMethods.length) {
       return;
     }
     const matchingMethod = paymentMethods.find((method) => method.id === initialPaymentMethodId);
@@ -417,30 +539,29 @@ export const AddBankInfoModal = ({
       if (matchingMethod.bank) {
         setSelectedBank(matchingMethod.bank);
       }
+      setFormData(prev => ({
+        ...prev,
+        providerMetadata: {
+          ...getDefaultProviderMetadata(matchingMethod),
+          ...prev.providerMetadata,
+        },
+      }));
     }
-  }, [editingBankInfo, initialPaymentMethodId, isVisible, paymentMethods]);
-
-  // Debug logging
-  console.log('Countries loaded:', countries.length);
-  console.log('Selected country:', selectedCountry?.name, selectedCountry?.code);
-  console.log('Payment methods count:', paymentMethods.length);
-  if (selectedCountry?.code === 'CO') {
-    console.log('Colombia payment methods:', paymentMethods.map(pm => pm.displayName));
-  }
+  }, [editingPayoutMethod, initialPaymentMethodId, isVisible, paymentMethods]);
 
   const getAccountTypeOptions = () => {
     if (selectedBank && selectedBank.accountTypeChoices && selectedBank.accountTypeChoices.length > 0) {
       return selectedBank.accountTypeChoices.map(type => ({
-        value: type,
+        value: normalizeAccountType(type),
         label: getAccountTypeLabel(type)
       }));
     }
 
-    // Default options
+    // Default canonical options
     return [
-      { value: 'ahorro', label: 'Cuenta de Ahorros' },
-      { value: 'corriente', label: 'Cuenta Corriente' },
-      { value: 'nomina', label: 'Cuenta Nómina' },
+      { value: 'savings', label: 'Cuenta de Ahorros' },
+      { value: 'checking', label: 'Cuenta Corriente' },
+      { value: 'payroll', label: 'Cuenta Nómina' },
     ];
   };
 
@@ -452,13 +573,16 @@ export const AddBankInfoModal = ({
       'checking': 'Cuenta Corriente',
       'savings': 'Cuenta de Ahorros',
       'payroll': 'Cuenta Nómina',
+      'interbanking': 'Cuenta Interbancaria',
     };
-    return labels[type] || type;
+    return labels[normalizeAccountType(type)] || type;
   };
 
-  const methodCode = (selectedPaymentMethod?.name || '').replace(/_/g, '-').toUpperCase();
+  const methodCode = (selectedPaymentMethod?.code || selectedPaymentMethod?.name || '').replace(/_/g, '-').toUpperCase();
   const countryCode = selectedCountry?.code?.toUpperCase() || '';
-  const isPayoutMode = mode !== 'on_ramp';
+  const serverFieldSchema = useMemo<RampFieldSchema | null>(() => {
+    return parseRampFieldSchema(selectedPaymentMethod);
+  }, [selectedPaymentMethod?.fieldSchema]);
 
   const fieldCopy = useMemo(() => {
     const defaultAccount: FieldConfig = {
@@ -478,12 +602,21 @@ export const AddBankInfoModal = ({
     const defaultEmail: FieldConfig = {
       label: 'Email',
       placeholder: 'Dirección de correo electrónico',
-      show: Boolean(selectedPaymentMethod?.requiresEmail),
-      required: Boolean(selectedPaymentMethod?.requiresEmail),
+      show: false,
+      required: false,
       keyboardType: 'email-address' as const,
     };
 
-    if (FIRST_NAME_ONLY_METHOD_CODES.has(methodCode) && !(isPayoutMode && (methodCode === 'QRI-BO' || methodCode === 'QRI-PE'))) {
+    if (serverFieldSchema) {
+      return {
+        account: serverFieldSchema.accountField || defaultAccount,
+        phone: serverFieldSchema.phoneField || defaultPhone,
+        email: serverFieldSchema.emailField || defaultEmail,
+        holderLabel: serverFieldSchema.accountHolderLabel || (selectedPaymentMethod?.providerType === 'fintech' ? 'Titular de la cuenta o billetera' : 'Titular de la cuenta'),
+      };
+    }
+
+    if (FIRST_NAME_ONLY_METHOD_CODES.has(methodCode) && methodCode !== 'QRI-BO' && methodCode !== 'QRI-PE') {
       return {
         account: { ...defaultAccount, show: false, required: false },
         phone: { ...defaultPhone, show: false, required: false },
@@ -541,22 +674,14 @@ export const AddBankInfoModal = ({
       };
     }
     if (countryCode === 'PE' && methodCode === 'QRI-PE') {
-      if (isPayoutMode) {
-        return {
-          account: { ...defaultAccount, label: 'CCI o número interbancario', placeholder: 'Ingresa el número interbancario de 20 dígitos', show: true, required: true, keyboardType: 'numeric' as const },
-          phone: { ...defaultPhone, show: false, required: false },
-          email: { ...defaultEmail, show: false, required: false },
-          holderLabel: 'Titular de la cuenta',
-        };
-      }
       return {
-        account: { ...defaultAccount, show: false, required: false },
-        phone: { ...defaultPhone, label: 'Teléfono de la billetera', placeholder: 'Número asociado a la billetera', show: false, required: false },
+        account: { ...defaultAccount, label: 'CCI o número interbancario', placeholder: 'Ingresa el número interbancario de 20 dígitos', show: true, required: true, keyboardType: 'numeric' as const },
+        phone: { ...defaultPhone, show: false, required: false },
         email: { ...defaultEmail, show: false, required: false },
-        holderLabel: 'Nombre',
+        holderLabel: 'Titular de la cuenta',
       };
     }
-    if (countryCode === 'BO' && methodCode === 'QRI-BO' && isPayoutMode) {
+    if (countryCode === 'BO' && methodCode === 'QRI-BO') {
       return {
         account: { ...defaultAccount, show: false, required: false },
         phone: { ...defaultPhone, label: 'Teléfono de la billetera', placeholder: 'Número asociado a la billetera', show: true, required: true },
@@ -570,20 +695,34 @@ export const AddBankInfoModal = ({
       email: defaultEmail,
       holderLabel: selectedPaymentMethod?.providerType === 'fintech' ? 'Titular de la cuenta o billetera' : 'Titular de la cuenta',
     };
-  }, [countryCode, isPayoutMode, methodCode, selectedPaymentMethod?.providerType]);
+  }, [countryCode, methodCode, selectedPaymentMethod?.providerType, serverFieldSchema]);
 
-const showAccountTypeField = useMemo(() => {
-  if (!selectedPaymentMethod || selectedPaymentMethod.providerType !== 'bank') {
-    return false;
-  }
-  return true;
-}, [countryCode, methodCode, selectedPaymentMethod]);
+  const payoutEmailField = useMemo(
+    () => ({ ...fieldCopy.email, show: false, required: false }),
+    [fieldCopy.email],
+  );
 
-  const accountTypeRequired = showAccountTypeField;
+  const showAccountTypeField = useMemo(() => {
+    if (typeof serverFieldSchema?.showAccountTypeField === 'boolean') {
+      return serverFieldSchema.showAccountTypeField;
+    }
+    if (!selectedPaymentMethod || selectedPaymentMethod.providerType !== 'bank') {
+      return false;
+    }
+    return true;
+  }, [countryCode, methodCode, selectedPaymentMethod, serverFieldSchema]);
+
+  const accountTypeRequired = typeof serverFieldSchema?.accountTypeRequired === 'boolean'
+    ? serverFieldSchema.accountTypeRequired
+    : showAccountTypeField;
 
   const providerFieldConfigs = useMemo<ProviderFieldConfig[]>(() => {
     if (!selectedPaymentMethod) {
       return [];
+    }
+
+    if (serverFieldSchema?.providerFields?.length) {
+      return serverFieldSchema.providerFields;
     }
 
     if (countryCode === 'CO' && methodCode === 'PSE') {
@@ -617,23 +756,21 @@ const showAccountTypeField = useMemo(() => {
     }
 
     if (countryCode === 'BR' && (methodCode === 'SULPAYMENTS' || methodCode === 'PIX-QR')) {
-      const fields: ProviderFieldConfig[] = [];
-      if (isPayoutMode) {
-        fields.push({
+      return [
+        {
           key: 'bankName',
           label: 'Institución receptora',
           placeholder: 'Selecciona la institución',
           required: true,
           helpText: 'Selecciona la institución o banco asociado a la llave PIX donde recibirás el retiro.',
-        });
-      }
-      fields.push({
-        key: 'pixKeyType',
-        label: 'Tipo de llave PIX',
-        placeholder: 'CPF, teléfono, email o aleatoria',
-        helpText: 'Si tu cuenta usa PIX, guarda el tipo de llave para completar el cobro.',
-      });
-      return fields;
+        },
+        {
+          key: 'pixKeyType',
+          label: 'Tipo de llave PIX',
+          placeholder: 'CPF, teléfono, email o aleatoria',
+          helpText: 'Si tu cuenta usa PIX, guarda el tipo de llave para completar el cobro.',
+        },
+      ];
     }
 
     if (countryCode === 'CL' && (methodCode === 'WIRECL' || methodCode === 'KHIPU')) {
@@ -642,8 +779,8 @@ const showAccountTypeField = useMemo(() => {
           key: 'bankName',
           label: 'Banco receptor',
           placeholder: 'Selecciona el banco',
-          required: methodCode === 'WIRECL' && isPayoutMode,
-          helpText: methodCode === 'WIRECL' && isPayoutMode ? 'Selecciona el banco donde recibirás el retiro.' : undefined,
+          required: methodCode === 'WIRECL',
+          helpText: methodCode === 'WIRECL' ? 'Selecciona el banco donde recibirás el retiro.' : undefined,
         },
         {
           key: 'beneficiaryRut',
@@ -683,10 +820,6 @@ const showAccountTypeField = useMemo(() => {
       ];
     }
 
-    if (!isPayoutMode) {
-      return [];
-    }
-
     if (countryCode === 'BO' && methodCode === 'QRI-BO') {
       return [
         {
@@ -719,11 +852,11 @@ const showAccountTypeField = useMemo(() => {
     }
 
     return [];
-  }, [countryCode, isPayoutMode, methodCode, selectedPaymentMethod]);
+  }, [countryCode, methodCode, selectedPaymentMethod, serverFieldSchema]);
 
   const validateForm = () => {
     if (!selectedPaymentMethod) {
-      Alert.alert('Error', 'Por favor selecciona un método de pago', [{ text: 'OK' }]);
+      Alert.alert('Error', 'Por favor selecciona una forma de cobro', [{ text: 'OK' }]);
       return false;
     }
 
@@ -739,13 +872,20 @@ const showAccountTypeField = useMemo(() => {
       return false;
     }
 
-    if (fieldCopy.phone.required && !formData.phoneNumber.trim()) {
-      Alert.alert('Error', 'Por favor ingresa el número de teléfono', [{ text: 'OK' }]);
-      return false;
+    const accountNumberValue = String(formData.accountNumber || '').trim();
+    if (fieldCopy.account.show && accountNumberValue) {
+      if (fieldCopy.account.minLength && accountNumberValue.length < fieldCopy.account.minLength) {
+        Alert.alert('Error', `${fieldCopy.account.label} debe tener al menos ${fieldCopy.account.minLength} dígitos`, [{ text: 'OK' }]);
+        return false;
+      }
+      if (fieldCopy.account.maxLength && accountNumberValue.length > fieldCopy.account.maxLength) {
+        Alert.alert('Error', `${fieldCopy.account.label} debe tener máximo ${fieldCopy.account.maxLength} dígitos`, [{ text: 'OK' }]);
+        return false;
+      }
     }
 
-    if (fieldCopy.email.required && !formData.email.trim()) {
-      Alert.alert('Error', 'Por favor ingresa el email', [{ text: 'OK' }]);
+    if (fieldCopy.phone.required && !formData.phoneNumber.trim()) {
+      Alert.alert('Error', 'Por favor ingresa el número de teléfono', [{ text: 'OK' }]);
       return false;
     }
 
@@ -777,15 +917,7 @@ const showAccountTypeField = useMemo(() => {
     setIsSubmitting(true);
     try {
       const enrichedProviderMetadata = { ...formData.providerMetadata };
-      if (isPayoutMode && countryCode === 'CO') {
-        if (methodCode === 'NEQUI' && !enrichedProviderMetadata.bankCode) {
-          enrichedProviderMetadata.bankCode = 'NEQUI';
-        }
-        if (methodCode === 'BANCOLOMBIA' && !enrichedProviderMetadata.bankCode) {
-          enrichedProviderMetadata.bankCode = 'BANCOLOMBIA';
-        }
-      }
-      if (isPayoutMode && countryCode === 'PE') {
+      if (countryCode === 'PE') {
         const normalizedBankName = (enrichedProviderMetadata.bankName || '').trim().toUpperCase();
         if (!enrichedProviderMetadata.bankCode && normalizedBankName && PERU_BANK_CODE_ALIASES[normalizedBankName]) {
           enrichedProviderMetadata.bankCode = PERU_BANK_CODE_ALIASES[normalizedBankName];
@@ -797,11 +929,12 @@ const showAccountTypeField = useMemo(() => {
           enrichedProviderMetadata.bankCode = 'CREDITO';
         }
       }
-      if (isPayoutMode && countryCode === 'MX' && methodCode === 'STP' && !enrichedProviderMetadata.bankCode) {
+      if (countryCode === 'MX' && methodCode === 'STP' && !enrichedProviderMetadata.bankCode) {
         enrichedProviderMetadata.bankCode = 'STP';
       }
       const variables = {
-        paymentMethodId: selectedPaymentMethod!.id,
+        paymentMethodId: null,
+        rampPaymentMethodId: selectedPaymentMethod!.id,
         accountHolderName:
           methodCode === 'PSE' &&
           formData.providerMetadata.firstName?.trim() &&
@@ -810,9 +943,9 @@ const showAccountTypeField = useMemo(() => {
             : formData.accountHolderName.trim(),
         accountNumber: formData.accountNumber.trim() || null,
         phoneNumber: formData.phoneNumber.trim() || null,
-        email: formData.email.trim() || null,
+        email: null,
         username: formData.username.trim() || null,
-        accountType: showAccountTypeField ? (formData.accountType || null) : null,
+        accountType: showAccountTypeField ? toPayoutAccountType(formData.accountType) : null,
         identificationNumber: formData.identificationNumber.trim() || null,
         providerMetadata: Object.keys(enrichedProviderMetadata).length
           ? JSON.stringify(enrichedProviderMetadata)
@@ -824,7 +957,7 @@ const showAccountTypeField = useMemo(() => {
       if (isEditing) {
         result = await updateBankInfo({
           variables: {
-            bankInfoId: editingBankInfo!.id,
+            bankInfoId: editingPayoutMethod!.id,
             ...variables
           },
           refetchQueries: [
@@ -873,11 +1006,11 @@ const showAccountTypeField = useMemo(() => {
 
         Alert.alert(
           'Éxito',
-          isEditing ? 'Método de pago actualizado' : 'Método de pago agregado',
+          isEditing ? 'Forma de cobro actualizada' : 'Forma de cobro agregada',
           [{ text: 'OK', onPress: onSuccess }]
         );
       } else {
-        Alert.alert('Error', data?.error || 'Error al guardar el método de pago', [{ text: 'OK' }]);
+        Alert.alert('Error', data?.error || 'Error al guardar la forma de cobro', [{ text: 'OK' }]);
       }
     } catch (error) {
       console.error('Error submitting payment method:', error);
@@ -895,12 +1028,7 @@ const showAccountTypeField = useMemo(() => {
     // No need to filter by isActive - backend already returns only active methods
     const activePaymentMethods = paymentMethods;
 
-    console.log('[AddBankInfoModal] Payment methods to display:', {
-      total: paymentMethods.length,
-      methods: paymentMethods.slice(0, 5).map(m => m.displayName)
-    });
-
-    const renderPaymentMethodItem = ({ item: method }: { item: P2PPaymentMethod }) => (
+    const renderPaymentMethodItem = ({ item: method }: { item: RampPaymentMethod }) => (
       <TouchableOpacity
         style={styles.pickerItem}
         onPress={() => {
@@ -911,7 +1039,11 @@ const showAccountTypeField = useMemo(() => {
           } else {
             setSelectedBank(null);
           }
-          setFormData(prev => ({ ...prev, providerMetadata: {}, accountType: '' }));
+          setFormData(prev => resetRailSpecificFields(prev, {
+            accountHolderName: prev.accountHolderName,
+            isDefault: prev.isDefault,
+            providerMetadata: getDefaultProviderMetadata(method),
+          }));
           setShowPaymentMethodPicker(false);
         }}
       >
@@ -937,22 +1069,14 @@ const showAccountTypeField = useMemo(() => {
         presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'}
         onRequestClose={() => setShowPaymentMethodPicker(false)}
       >
-        <View style={styles.pickerContainer}>
+        <SafeAreaView style={styles.pickerContainer}>
           <View style={styles.pickerHeader}>
             <TouchableOpacity onPress={() => setShowPaymentMethodPicker(false)}>
               <Text style={styles.pickerCancel}>Cancelar</Text>
             </TouchableOpacity>
-            <Text style={styles.pickerTitle}>Seleccionar Método</Text>
-            <View style={{ width: 60 }} />
+            <Text style={styles.pickerTitle}>Forma de cobro</Text>
+            <View style={{ width: 70 }} />
           </View>
-
-          {activePaymentMethods.length > 10 && (
-            <View style={styles.scrollHint}>
-              <Text style={styles.scrollHintText}>
-                {activePaymentMethods.length} métodos disponibles - desliza para ver más
-              </Text>
-            </View>
-          )}
 
           <FlatList
             data={activePaymentMethods}
@@ -961,20 +1085,18 @@ const showAccountTypeField = useMemo(() => {
             style={styles.pickerList}
             contentContainerStyle={styles.pickerListContent}
             showsVerticalScrollIndicator={true}
-            // Important FlatList optimizations for large lists
             initialNumToRender={20}
             maxToRenderPerBatch={10}
             windowSize={21}
             removeClippedSubviews={true}
             updateCellsBatchingPeriod={50}
-            // Ensure all items are rendered
             getItemLayout={(data, index) => ({
-              length: 60, // Approximate height of each item
-              offset: 60 * index,
+              length: 62,
+              offset: 62 * index,
               index,
             })}
           />
-        </View>
+        </SafeAreaView>
       </Modal>
     );
   };
@@ -991,7 +1113,10 @@ const showAccountTypeField = useMemo(() => {
           setSelectedCountry(country);
           setSelectedBank(null);
           setSelectedPaymentMethod(null); // Reset payment method when country changes
-          setFormData(prev => ({ ...prev, providerMetadata: {}, accountType: '' }));
+          setFormData(prev => resetRailSpecificFields(prev, {
+            accountHolderName: prev.accountHolderName,
+            isDefault: prev.isDefault,
+          }));
           setShowCountryPicker(false);
         }}
       >
@@ -1010,13 +1135,13 @@ const showAccountTypeField = useMemo(() => {
         presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'}
         onRequestClose={() => setShowCountryPicker(false)}
       >
-        <View style={styles.pickerContainer}>
+        <SafeAreaView style={styles.pickerContainer}>
           <View style={styles.pickerHeader}>
             <TouchableOpacity onPress={() => setShowCountryPicker(false)}>
               <Text style={styles.pickerCancel}>Cancelar</Text>
             </TouchableOpacity>
-            <Text style={styles.pickerTitle}>Seleccionar País</Text>
-            <View style={{ width: 60 }} />
+            <Text style={styles.pickerTitle}>País</Text>
+            <View style={{ width: 70 }} />
           </View>
 
           <FlatList
@@ -1026,20 +1151,18 @@ const showAccountTypeField = useMemo(() => {
             style={styles.pickerList}
             contentContainerStyle={styles.pickerListContent}
             showsVerticalScrollIndicator={true}
-            // Important FlatList optimizations for large lists
             initialNumToRender={20}
             maxToRenderPerBatch={10}
             windowSize={21}
             removeClippedSubviews={true}
             updateCellsBatchingPeriod={50}
-            // Ensure all items are rendered
             getItemLayout={(data, index) => ({
-              length: 60, // Approximate height of each item
-              offset: 60 * index,
+              length: 56,
+              offset: 56 * index,
               index,
             })}
           />
-        </View>
+        </SafeAreaView>
       </Modal>
     );
   };
@@ -1085,13 +1208,13 @@ const showAccountTypeField = useMemo(() => {
         presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'}
         onRequestClose={() => setShowProviderBankPicker(false)}
       >
-        <View style={styles.pickerContainer}>
+        <SafeAreaView style={styles.pickerContainer}>
           <View style={styles.pickerHeader}>
             <TouchableOpacity onPress={() => setShowProviderBankPicker(false)}>
               <Text style={styles.pickerCancel}>Cancelar</Text>
             </TouchableOpacity>
-            <Text style={styles.pickerTitle}>Seleccionar Banco</Text>
-            <View style={{ width: 60 }} />
+            <Text style={styles.pickerTitle}>Banco receptor</Text>
+            <View style={{ width: 70 }} />
           </View>
 
           <FlatList
@@ -1107,313 +1230,345 @@ const showAccountTypeField = useMemo(() => {
             removeClippedSubviews={true}
             updateCellsBatchingPeriod={50}
             getItemLayout={(data, index) => ({
-              length: 60,
-              offset: 60 * index,
+              length: 62,
+              offset: 62 * index,
               index,
             })}
           />
-        </View>
+        </SafeAreaView>
       </Modal>
     );
   };
 
 
+  const [focusedField, setFocusedField] = useState<string | null>(null);
+
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <View style={[styles.header, { paddingTop: 8 }]}>
+      {/* Gradient header with curved bottom */}
+      <View style={styles.headerWrap}>
+        <Svg width="100%" height={70} style={StyleSheet.absoluteFill}>
+          <Defs>
+            <LinearGradient id="hdrGrad" x1="0" y1="0" x2="1" y2="1">
+              <Stop offset="0" stopColor="#34d399" stopOpacity="1" />
+              <Stop offset="1" stopColor="#6ee7b7" stopOpacity="1" />
+            </LinearGradient>
+          </Defs>
+          <Rect width="100%" height={70} fill="url(#hdrGrad)" />
+          <Circle cx="92%" cy="10" r="60" fill="rgba(255,255,255,0.07)" />
+        </Svg>
         <View style={styles.headerContent}>
           <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-            <Icon name="x" size={24} color={colors.text.primary} />
+            <Icon name="x" size={22} color="white" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>
-            {isEditing ? 'Editar método de pago' : mode === 'off_ramp' ? 'Agregar forma de cobro' : 'Agregar método de pago'}
+            {isEditing ? 'Editar forma de cobro' : 'Agregar forma de cobro'}
           </Text>
-          <TouchableOpacity
-            onPress={handleSubmit}
-            disabled={isSubmitting}
-            style={[styles.saveButton, isSubmitting && styles.saveButtonDisabled]}
-          >
-            {isSubmitting ? (
-              <ActivityIndicator size="small" color="white" />
-            ) : (
-              <Text style={styles.saveButtonText}>
-                {isEditing ? 'Guardar' : 'Crear'}
-              </Text>
-            )}
-          </TouchableOpacity>
+          {/* Save button in header still shown, but primary CTA is at bottom */}
+          <View style={{ width: 40 }} />
         </View>
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Country Selection */}
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>País *</Text>
-          <TouchableOpacity
-            style={[styles.picker, lockCountry && styles.pickerDisabled]}
-            onPress={() => !lockCountry && setShowCountryPicker(true)}
-            disabled={countriesLoading || lockCountry}
-          >
-            <View style={styles.pickerContent}>
-              {selectedCountry ? (
-                <>
-                  <Text style={styles.countryFlag}>{selectedCountry.flagEmoji}</Text>
-                  <Text style={styles.pickerText}>{selectedCountry.name}</Text>
-                </>
-              ) : (
-                <Text style={styles.pickerPlaceholder}>
-                  {countriesLoading ? 'Cargando países...' : 'Seleccionar país'}
-                </Text>
+      <ScrollView
+        style={styles.content}
+        contentContainerStyle={styles.contentContainer}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* ── Section: Destino ── */}
+        <Text style={styles.sectionHeader}>Destino</Text>
+        <View style={styles.card}>
+          {/* Country */}
+          <View style={styles.fieldInCard}>
+            <Text style={styles.label}>País {!lockCountry && '*'}</Text>
+            <TouchableOpacity
+              style={[styles.picker, lockCountry && styles.pickerDisabled]}
+              onPress={() => !lockCountry && setShowCountryPicker(true)}
+              disabled={countriesLoading || lockCountry}
+            >
+              <View style={styles.pickerContent}>
+                {selectedCountry ? (
+                  <>
+                    <Text style={styles.countryFlag}>{selectedCountry.flagEmoji}</Text>
+                    <Text style={styles.pickerText}>{selectedCountry.name}</Text>
+                  </>
+                ) : (
+                  <Text style={styles.pickerPlaceholder}>
+                    {countriesLoading ? 'Cargando países...' : 'Seleccionar país'}
+                  </Text>
+                )}
+              </View>
+              <Icon name={lockCountry ? 'lock' : 'chevron-down'} size={16} color={colors.text.light} />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.cardDivider} />
+
+          {/* Payment Method */}
+          <View style={styles.fieldInCard}>
+            <Text style={styles.label}>Forma de cobro *</Text>
+            <TouchableOpacity
+              style={[styles.picker, (!selectedCountry || lockPaymentMethod) && styles.pickerDisabled]}
+              onPress={() => selectedCountry && !lockPaymentMethod && setShowPaymentMethodPicker(true)}
+              disabled={!selectedCountry || lockPaymentMethod}
+            >
+              <View style={styles.pickerContent}>
+                {selectedPaymentMethod ? (
+                  <>
+                    <Icon name={getPaymentMethodIcon(selectedPaymentMethod.icon, selectedPaymentMethod.providerType, selectedPaymentMethod.displayName)} size={18} color={colors.primary} style={{ marginRight: 8 }} />
+                    <Text style={styles.pickerText}>{selectedPaymentMethod.displayName}</Text>
+                  </>
+                ) : (
+                  <Text style={styles.pickerPlaceholder}>
+                    {selectedCountry
+                      ? (paymentMethodsLoading ? 'Cargando métodos...' : 'Seleccionar forma de cobro')
+                      : 'Primero selecciona un país'}
+                  </Text>
+                )}
+              </View>
+              <Icon name={lockPaymentMethod ? 'lock' : 'chevron-down'} size={16} color={colors.text.light} />
+            </TouchableOpacity>
+          </View>
+
+          {/* Bank info display */}
+          {selectedPaymentMethod?.bank && (
+            <>
+              <View style={styles.cardDivider} />
+              <View style={styles.fieldInCard}>
+                <View style={styles.infoBox}>
+                  <Icon name="info" size={14} color={colors.primaryDark} />
+                  <Text style={styles.infoText}>{selectedPaymentMethod.bank.name}</Text>
+                </View>
+              </View>
+            </>
+          )}
+        </View>
+
+        {/* ── Section: Datos del titular ── */}
+        <Text style={styles.sectionHeader}>Datos del titular</Text>
+        <View style={styles.card}>
+          {/* Account Holder Name */}
+          <View style={styles.fieldInCard}>
+            <Text style={styles.label}>{fieldCopy.holderLabel} *</Text>
+            <TextInput
+              style={[styles.textInput, focusedField === 'holder' && styles.textInputFocused]}
+              value={formData.accountHolderName}
+              onChangeText={(value) => setFormData(prev => ({ ...prev, accountHolderName: value }))}
+              placeholder={fieldCopy.holderLabel}
+              placeholderTextColor={colors.text.light}
+              autoCapitalize="words"
+              onFocus={() => setFocusedField('holder')}
+              onBlur={() => setFocusedField(null)}
+            />
+          </View>
+
+          {/* Identification Number */}
+          {selectedPaymentMethod?.bank?.country?.requiresIdentification && (
+            <>
+              <View style={styles.cardDivider} />
+              <View style={styles.fieldInCard}>
+                <Text style={styles.label}>{selectedPaymentMethod.bank.country.identificationName} *</Text>
+                <TextInput
+                  style={[styles.textInput, focusedField === 'id' && styles.textInputFocused]}
+                  value={formData.identificationNumber}
+                  onChangeText={(value) => setFormData(prev => ({ ...prev, identificationNumber: value }))}
+                  placeholder={`Ingresa tu ${selectedPaymentMethod.bank.country.identificationName}`}
+                  placeholderTextColor={colors.text.light}
+                  keyboardType="numeric"
+                  onFocus={() => setFocusedField('id')}
+                  onBlur={() => setFocusedField(null)}
+                />
+                {selectedPaymentMethod.bank.country.identificationFormat && (
+                  <Text style={styles.helpText}>Formato: {selectedPaymentMethod.bank.country.identificationFormat}</Text>
+                )}
+              </View>
+            </>
+          )}
+        </View>
+
+        {/* ── Section: Datos de la cuenta ── */}
+        {(fieldCopy.account.show || fieldCopy.phone.show || payoutEmailField.show || providerFieldConfigs.length > 0) && (
+          <>
+            <Text style={styles.sectionHeader}>Datos de la cuenta</Text>
+            <View style={styles.card}>
+              {/* Account Number */}
+              {fieldCopy.account.show && (
+                <View style={styles.fieldInCard}>
+                  <Text style={styles.label}>{fieldCopy.account.label}{fieldCopy.account.required ? ' *' : ''}</Text>
+                  <TextInput
+                    style={[styles.textInput, focusedField === 'account' && styles.textInputFocused]}
+                    value={formData.accountNumber}
+                    onChangeText={(value) => setFormData(prev => ({ ...prev, accountNumber: value }))}
+                    placeholder={fieldCopy.account.placeholder}
+                    placeholderTextColor={colors.text.light}
+                    keyboardType={fieldCopy.account.keyboardType}
+                    maxLength={fieldCopy.account.maxLength}
+                    onFocus={() => setFocusedField('account')}
+                    onBlur={() => setFocusedField(null)}
+                  />
+                </View>
               )}
-            </View>
-            <Icon name={lockCountry ? 'lock' : 'chevron-down'} size={16} color={colors.text.secondary} />
-          </TouchableOpacity>
-        </View>
 
-        {/* Payment Method Selection */}
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Método de Pago *</Text>
-          <TouchableOpacity
-            style={[styles.picker, (!selectedCountry || lockPaymentMethod) && styles.pickerDisabled]}
-            onPress={() => selectedCountry && !lockPaymentMethod && setShowPaymentMethodPicker(true)}
-            disabled={!selectedCountry || lockPaymentMethod}
-          >
-            <View style={styles.pickerContent}>
-              {selectedPaymentMethod ? (
+              {/* Phone */}
+              {fieldCopy.phone.show && (
                 <>
-                  <Icon name={getPaymentMethodIcon(selectedPaymentMethod.icon, selectedPaymentMethod.providerType, selectedPaymentMethod.displayName)} size={20} color={colors.text.secondary} />
-                  <Text style={[styles.pickerText, { marginLeft: 8 }]}>{selectedPaymentMethod.displayName}</Text>
-                </>
-              ) : (
-                <Text style={styles.pickerPlaceholder}>
-                  {selectedCountry ? 'Seleccionar método de pago' : 'Primero selecciona un país'}
-                </Text>
-              )}
-            </View>
-            <Icon name={lockPaymentMethod ? 'lock' : 'chevron-down'} size={20} color={colors.text.secondary} />
-          </TouchableOpacity>
-        </View>
-
-        {/* Bank Information Display (only show for bank-based payment methods) */}
-        {selectedPaymentMethod?.bank && (
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Banco</Text>
-            <View style={styles.infoBox}>
-              <Icon name="info" size={16} color={colors.text.secondary} />
-              <Text style={styles.infoText}>{selectedPaymentMethod.bank.name}</Text>
-            </View>
-          </View>
-        )}
-
-        {/* Account Holder Name */}
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>{fieldCopy.holderLabel} *</Text>
-          <TextInput
-            style={styles.textInput}
-            value={formData.accountHolderName}
-            onChangeText={(value) => setFormData(prev => ({ ...prev, accountHolderName: value }))}
-            placeholder={fieldCopy.holderLabel}
-            autoCapitalize="words"
-          />
-        </View>
-
-        {/* Account Number (conditional) */}
-        {fieldCopy.account.show && (
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>
-              {fieldCopy.account.label}{fieldCopy.account.required ? ' *' : ''}
-            </Text>
-            <TextInput
-              style={styles.textInput}
-              value={formData.accountNumber}
-              onChangeText={(value) => setFormData(prev => ({ ...prev, accountNumber: value }))}
-              placeholder={fieldCopy.account.placeholder}
-              keyboardType={fieldCopy.account.keyboardType}
-            />
-          </View>
-        )}
-
-        {/* Phone Number (conditional) */}
-        {fieldCopy.phone.show && (
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>{fieldCopy.phone.label}{fieldCopy.phone.required ? ' *' : ''}</Text>
-            <TextInput
-              style={styles.textInput}
-              value={formData.phoneNumber}
-              onChangeText={(value) => setFormData(prev => ({ ...prev, phoneNumber: value }))}
-              placeholder={fieldCopy.phone.placeholder}
-              keyboardType={fieldCopy.phone.keyboardType}
-            />
-          </View>
-        )}
-
-        {/* Email (conditional) */}
-        {fieldCopy.email.show && (
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>{fieldCopy.email.label}{fieldCopy.email.required ? ' *' : ''}</Text>
-            <TextInput
-              style={styles.textInput}
-              value={formData.email}
-              onChangeText={(value) => setFormData(prev => ({ ...prev, email: value }))}
-              placeholder={fieldCopy.email.placeholder}
-              keyboardType={fieldCopy.email.keyboardType}
-              autoCapitalize="none"
-            />
-          </View>
-        )}
-
-        {/* Username (always optional) */}
-        {selectedPaymentMethod && selectedPaymentMethod.providerType === 'fintech' && false && (
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Usuario (Opcional)</Text>
-            <TextInput
-              style={styles.textInput}
-              value={formData.username}
-              onChangeText={(value) => setFormData(prev => ({ ...prev, username: value }))}
-              placeholder="Nombre de usuario o handle"
-              autoCapitalize="none"
-            />
-          </View>
-        )}
-
-        {/* Account Type (only for banks) */}
-        {showAccountTypeField && (
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>
-              Tipo de Cuenta{accountTypeRequired ? ' *' : ''}
-            </Text>
-            <View style={styles.radioGroup}>
-              {getAccountTypeOptions().map((option) => (
-                <TouchableOpacity
-                  key={option.value}
-                  style={styles.radioOption}
-                  onPress={() => setFormData(prev => ({ ...prev, accountType: option.value }))}
-                >
-                  <View style={[
-                    styles.radioCircle,
-                    formData.accountType === option.value && styles.radioCircleSelected
-                  ]}>
-                    {formData.accountType === option.value && (
-                      <View style={styles.radioInner} />
-                    )}
+                  {fieldCopy.account.show && <View style={styles.cardDivider} />}
+                  <View style={styles.fieldInCard}>
+                    <Text style={styles.label}>{fieldCopy.phone.label}{fieldCopy.phone.required ? ' *' : ''}</Text>
+                    <TextInput
+                      style={[styles.textInput, focusedField === 'phone' && styles.textInputFocused]}
+                      value={formData.phoneNumber}
+                      onChangeText={(value) => setFormData(prev => ({ ...prev, phoneNumber: value }))}
+                      placeholder={fieldCopy.phone.placeholder}
+                      placeholderTextColor={colors.text.light}
+                      keyboardType={fieldCopy.phone.keyboardType}
+                      onFocus={() => setFocusedField('phone')}
+                      onBlur={() => setFocusedField(null)}
+                    />
                   </View>
-                  <Text style={styles.radioLabel}>{option.label}</Text>
-                </TouchableOpacity>
+                </>
+              )}
+
+              {/* Email */}
+              {payoutEmailField.show && (
+                <>
+                  {(fieldCopy.account.show || fieldCopy.phone.show) && <View style={styles.cardDivider} />}
+                  <View style={styles.fieldInCard}>
+                    <Text style={styles.label}>{payoutEmailField.label}{payoutEmailField.required ? ' *' : ''}</Text>
+                    <TextInput
+                      style={[styles.textInput, focusedField === 'email' && styles.textInputFocused]}
+                      value={formData.email}
+                      onChangeText={(value) => setFormData(prev => ({ ...prev, email: value }))}
+                      placeholder={payoutEmailField.placeholder}
+                      placeholderTextColor={colors.text.light}
+                      keyboardType={payoutEmailField.keyboardType}
+                      autoCapitalize="none"
+                      onFocus={() => setFocusedField('email')}
+                      onBlur={() => setFocusedField(null)}
+                    />
+                  </View>
+                </>
+              )}
+
+              {/* Provider fields */}
+              {providerFieldConfigs.map((field, idx) => {
+                const hasPrev = fieldCopy.account.show || fieldCopy.phone.show || payoutEmailField.show || idx > 0;
+                if (field.key === 'bankName') {
+                  const canUseBankPicker = koyweBankOptions.length > 0;
+                  return (
+                    <React.Fragment key={field.key}>
+                      {hasPrev && <View style={styles.cardDivider} />}
+                      <View style={styles.fieldInCard}>
+                        <Text style={styles.label}>{field.label}{field.required ? ' *' : ''}</Text>
+                        {canUseBankPicker ? (
+                          <TouchableOpacity style={styles.picker} onPress={() => setShowProviderBankPicker(true)}>
+                            <View style={styles.pickerContent}>
+                              {formData.providerMetadata.bankName ? (
+                                <Text style={styles.pickerText}>{formData.providerMetadata.bankName}</Text>
+                              ) : (
+                                <Text style={styles.pickerPlaceholder}>{field.placeholder}</Text>
+                              )}
+                            </View>
+                            <Icon name="chevron-down" size={16} color={colors.text.light} />
+                          </TouchableOpacity>
+                        ) : (
+                          <TextInput
+                            style={[styles.textInput, focusedField === field.key && styles.textInputFocused]}
+                            value={formData.providerMetadata[field.key] || ''}
+                            onChangeText={(value) => setFormData(prev => ({ ...prev, providerMetadata: { ...prev.providerMetadata, [field.key]: value } }))}
+                            placeholder={field.placeholder}
+                            placeholderTextColor={colors.text.light}
+                            autoCapitalize="words"
+                            onFocus={() => setFocusedField(field.key)}
+                            onBlur={() => setFocusedField(null)}
+                          />
+                        )}
+                        {field.helpText ? <Text style={styles.helpText}>{field.helpText}</Text> : null}
+                      </View>
+                    </React.Fragment>
+                  );
+                }
+                return (
+                  <React.Fragment key={field.key}>
+                    {hasPrev && <View style={styles.cardDivider} />}
+                    <View style={styles.fieldInCard}>
+                      <Text style={styles.label}>{field.label}{field.required ? ' *' : ''}</Text>
+                      <TextInput
+                        style={[styles.textInput, focusedField === field.key && styles.textInputFocused]}
+                        value={formData.providerMetadata[field.key] || ''}
+                        onChangeText={(value) => setFormData(prev => ({ ...prev, providerMetadata: { ...prev.providerMetadata, [field.key]: value } }))}
+                        placeholder={field.placeholder}
+                        placeholderTextColor={colors.text.light}
+                        keyboardType={field.keyboardType || 'default'}
+                        autoCapitalize="none"
+                        onFocus={() => setFocusedField(field.key)}
+                        onBlur={() => setFocusedField(null)}
+                      />
+                      {field.helpText ? <Text style={styles.helpText}>{field.helpText}</Text> : null}
+                    </View>
+                  </React.Fragment>
+                );
+              })}
+            </View>
+          </>
+        )}
+
+        {/* ── Section: Tipo de cuenta ── */}
+        {showAccountTypeField && (
+          <>
+            <Text style={styles.sectionHeader}>Tipo de cuenta{accountTypeRequired ? ' *' : ''}</Text>
+            <View style={styles.card}>
+              {getAccountTypeOptions().map((option, idx) => (
+                <React.Fragment key={option.value}>
+                  {idx > 0 && <View style={styles.cardDivider} />}
+                  <TouchableOpacity
+                    style={styles.radioRow}
+                    onPress={() => setFormData(prev => ({ ...prev, accountType: option.value }))}
+                  >
+                    <View style={[styles.radioCircle, formData.accountType === option.value && styles.radioCircleSelected]}>
+                      {formData.accountType === option.value && <View style={styles.radioInner} />}
+                    </View>
+                    <Text style={styles.radioLabel}>{option.label}</Text>
+                  </TouchableOpacity>
+                </React.Fragment>
               ))}
             </View>
-          </View>
+          </>
         )}
 
-        {/* Identification Number (conditional) */}
-        {selectedPaymentMethod?.bank?.country?.requiresIdentification && (
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>
-              {selectedPaymentMethod.bank.country.identificationName} *
-            </Text>
-          <TextInput
-            style={styles.textInput}
-            value={formData.identificationNumber}
-            onChangeText={(value) => setFormData(prev => ({ ...prev, identificationNumber: value }))}
-            placeholder={`Ingresa tu ${selectedPaymentMethod.bank.country.identificationName}`}
-            keyboardType="numeric"
-          />
-            {selectedPaymentMethod.bank.country.identificationFormat && (
-              <Text style={styles.helpText}>
-                Formato: {selectedPaymentMethod.bank.country.identificationFormat}
-              </Text>
-            )}
-          </View>
-        )}
-
-        {providerFieldConfigs.map((field) => {
-          if (field.key === 'bankName') {
-            const canUseBankPicker = koyweBankOptions.length > 0;
-            return (
-              <View style={styles.inputGroup} key={field.key}>
-                <Text style={styles.label}>
-                  {field.label}{field.required ? ' *' : ''}
-                </Text>
-                {canUseBankPicker ? (
-                  <TouchableOpacity
-                    style={styles.picker}
-                    onPress={() => setShowProviderBankPicker(true)}
-                  >
-                    <View style={styles.pickerContent}>
-                      {formData.providerMetadata.bankName ? (
-                        <Text style={styles.pickerText}>{formData.providerMetadata.bankName}</Text>
-                      ) : (
-                        <Text style={styles.pickerPlaceholder}>{field.placeholder}</Text>
-                      )}
-                    </View>
-                    <Icon name="chevron-down" size={16} color={colors.text.secondary} />
-                  </TouchableOpacity>
-                ) : (
-                  <TextInput
-                    style={styles.textInput}
-                    value={formData.providerMetadata[field.key] || ''}
-                    onChangeText={(value) =>
-                      setFormData(prev => ({
-                        ...prev,
-                        providerMetadata: {
-                          ...prev.providerMetadata,
-                          [field.key]: value,
-                        },
-                      }))
-                    }
-                    placeholder={field.placeholder}
-                    autoCapitalize="words"
-                  />
-                )}
-                {field.helpText ? <Text style={styles.helpText}>{field.helpText}</Text> : null}
-              </View>
-            );
-          }
-
-          return (
-            <View style={styles.inputGroup} key={field.key}>
-              <Text style={styles.label}>
-                {field.label}{field.required ? ' *' : ''}
-              </Text>
-              <TextInput
-                style={styles.textInput}
-                value={formData.providerMetadata[field.key] || ''}
-                onChangeText={(value) =>
-                  setFormData(prev => ({
-                    ...prev,
-                    providerMetadata: {
-                      ...prev.providerMetadata,
-                      [field.key]: value,
-                    },
-                  }))
-                }
-                placeholder={field.placeholder}
-                keyboardType={field.keyboardType || 'default'}
-                autoCapitalize="none"
-              />
-              {field.helpText ? <Text style={styles.helpText}>{field.helpText}</Text> : null}
-            </View>
-          );
-        })}
-
-
-        {/* Set as Default */}
-        <View style={styles.inputGroup}>
+        {/* ── Default checkbox ── */}
+        <View style={styles.card}>
           <TouchableOpacity
             style={styles.checkboxRow}
             onPress={() => setFormData(prev => ({ ...prev, isDefault: !prev.isDefault }))}
           >
-            <View style={[
-              styles.checkbox,
-              formData.isDefault && styles.checkboxSelected
-            ]}>
-              {formData.isDefault && (
-                <Icon name="check" size={14} color="white" />
-              )}
+            <View style={[styles.checkbox, formData.isDefault && styles.checkboxSelected]}>
+              {formData.isDefault && <Icon name="check" size={13} color="white" />}
             </View>
-            <Text style={styles.checkboxLabel}>Marcar como método de pago predeterminado</Text>
+            <Text style={styles.checkboxLabel}>Marcar como forma de cobro predeterminada</Text>
           </TouchableOpacity>
         </View>
+
+        {/* Bottom spacing so sticky button doesn't overlap */}
+        <View style={{ height: 100 }} />
       </ScrollView>
+
+      {/* ── Sticky save button ── */}
+      <View style={styles.stickyFooter}>
+        <TouchableOpacity
+          onPress={handleSubmit}
+          disabled={isSubmitting}
+          style={[styles.saveButton, isSubmitting && styles.saveButtonDisabled]}
+        >
+          {isSubmitting ? (
+            <ActivityIndicator size="small" color="white" />
+          ) : (
+            <Text style={styles.saveButtonText}>
+              {isEditing ? 'Guardar cambios' : 'Agregar forma de cobro'}
+            </Text>
+          )}
+        </TouchableOpacity>
+      </View>
 
       {/* Pickers */}
       {renderPaymentMethodPicker()}
@@ -1428,69 +1583,104 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  header: {
-    backgroundColor: 'white',
-    borderBottomWidth: 1,
-    borderBottomColor: colors.neutralDark,
-    paddingBottom: 16,
-    paddingHorizontal: 16,
+
+  // ── Header ──
+  headerWrap: {
+    height: 70,
+    overflow: 'hidden',
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
   },
   headerContent: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 10,
   },
   closeButton: {
-    padding: 4,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: 'bold',
-    color: colors.text.primary,
-  },
-  saveButton: {
-    backgroundColor: colors.primary,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-    minWidth: 60,
-    alignItems: 'center',
-  },
-  saveButtonDisabled: {
-    opacity: 0.6,
-  },
-  saveButtonText: {
     color: 'white',
-    fontWeight: '600',
-    fontSize: 14,
   },
+
+  // ── Scroll content ──
   content: {
     flex: 1,
+  },
+  contentContainer: {
     paddingHorizontal: 16,
-    paddingTop: 16,
+    paddingTop: 20,
   },
-  inputGroup: {
-    marginBottom: 20,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.text.primary,
+
+  // ── Section headers ──
+  sectionHeader: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.text.light,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
     marginBottom: 8,
+    marginLeft: 4,
+  },
+
+  // ── Grouped card ──
+  card: {
+    backgroundColor: 'white',
+    borderRadius: 14,
+    marginBottom: 20,
+    overflow: 'hidden',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#064e3b',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.06,
+        shadowRadius: 6,
+      },
+      android: { elevation: 2 },
+    }),
+  },
+  fieldInCard: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  cardDivider: {
+    height: 1,
+    backgroundColor: colors.neutralDark,
+    marginHorizontal: 14,
+  },
+
+  // ── Labels & inputs ──
+  label: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.text.secondary,
+    marginBottom: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
   },
   picker: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: 'white',
-    borderRadius: 8,
+    backgroundColor: colors.background,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: colors.neutralDark,
     paddingHorizontal: 12,
-    paddingVertical: 12,
+    paddingVertical: 11,
   },
   pickerDisabled: {
-    opacity: 0.6,
+    opacity: 0.5,
   },
   pickerContent: {
     flexDirection: 'row',
@@ -1498,38 +1688,59 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   pickerText: {
-    fontSize: 16,
+    fontSize: 15,
     color: colors.text.primary,
   },
   pickerPlaceholder: {
-    fontSize: 16,
-    color: colors.text.secondary,
+    fontSize: 15,
+    color: colors.text.light,
   },
   countryFlag: {
     fontSize: 20,
     marginRight: 8,
   },
   textInput: {
-    backgroundColor: 'white',
-    borderRadius: 8,
+    backgroundColor: colors.background,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: colors.neutralDark,
     paddingHorizontal: 12,
-    paddingVertical: 12,
-    fontSize: 16,
+    paddingVertical: 11,
+    fontSize: 15,
     color: colors.text.primary,
+  },
+  textInputFocused: {
+    borderColor: colors.primary,
+    borderWidth: 1.5,
   },
   helpText: {
     fontSize: 12,
-    color: colors.text.secondary,
-    marginTop: 4,
+    color: colors.text.light,
+    marginTop: 5,
+    lineHeight: 16,
   },
-  radioGroup: {
-    gap: 12,
-  },
-  radioOption: {
+  infoBox: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: colors.primaryLight,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  infoText: {
+    fontSize: 14,
+    color: colors.primaryDark,
+    marginLeft: 8,
+    flex: 1,
+    fontWeight: '500',
+  },
+
+  // ── Radio buttons ──
+  radioRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 14,
   },
   radioCircle: {
     width: 20,
@@ -1551,17 +1762,21 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   radioLabel: {
-    fontSize: 16,
+    fontSize: 15,
     color: colors.text.primary,
   },
+
+  // ── Checkbox ──
   checkboxRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 14,
   },
   checkbox: {
-    width: 20,
-    height: 20,
-    borderRadius: 4,
+    width: 22,
+    height: 22,
+    borderRadius: 6,
     borderWidth: 2,
     borderColor: colors.text.light,
     marginRight: 12,
@@ -1573,9 +1788,47 @@ const styles = StyleSheet.create({
     borderColor: colors.primary,
   },
   checkboxLabel: {
-    fontSize: 16,
+    fontSize: 15,
     color: colors.text.primary,
+    flex: 1,
+    lineHeight: 20,
   },
+
+  // ── Sticky footer ──
+  stickyFooter: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: 'white',
+    borderTopWidth: 1,
+    borderTopColor: colors.neutralDark,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: -2 },
+        shadowOpacity: 0.06,
+        shadowRadius: 4,
+      },
+      android: { elevation: 4 },
+    }),
+  },
+  saveButton: {
+    backgroundColor: colors.primary,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 50,
+  },
+  saveButtonDisabled: {
+    opacity: 0.6,
+  },
+  saveButtonText: {
+    color: 'white',
+    fontWeight: '700',
+    fontSize: 16,
+  },
+
+  // ── Picker modals ──
   pickerContainer: {
     flex: 1,
     backgroundColor: colors.background,
@@ -1591,20 +1844,20 @@ const styles = StyleSheet.create({
     backgroundColor: 'white',
   },
   pickerTitle: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: 'bold',
     color: colors.text.primary,
   },
   pickerCancel: {
     fontSize: 16,
     color: colors.primary,
+    fontWeight: '600',
   },
   pickerList: {
     flex: 1,
-    maxHeight: '80%', // Ensure it doesn't take full screen
   },
   pickerListContent: {
-    paddingBottom: 20, // Add padding at the bottom for better scrolling
+    paddingBottom: 32,
   },
   scrollHint: {
     backgroundColor: colors.primary + '15',
@@ -1614,14 +1867,14 @@ const styles = StyleSheet.create({
   },
   scrollHintText: {
     fontSize: 13,
-    color: colors.primary,
+    color: colors.primaryDark,
     fontStyle: 'italic',
   },
   pickerItem: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 14,
     backgroundColor: 'white',
     borderBottomWidth: 1,
     borderBottomColor: colors.neutralDark,
@@ -1641,19 +1894,5 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.text.light,
     marginTop: 2,
-  },
-  infoBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.primaryLight,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 8,
-  },
-  infoText: {
-    fontSize: 14,
-    color: colors.text.primary,
-    flex: 1,
   },
 });

@@ -59,6 +59,7 @@ class AppCheckService {
         if (this.isInitialized) return;
 
         try {
+            const initStart = Date.now();
             // Use the new modular API for App Check initialization
             const rnfbProvider = appCheck().newReactNativeFirebaseAppCheckProvider();
             const configuredDebugToken =
@@ -96,6 +97,7 @@ class AppCheckService {
                 Platform.OS,
                 useDebugProvider ? '(debug token mode)' : '(production attestation mode)',
             );
+            console.log(`[PERF][AppCheck] initialize total: ${Date.now() - initStart}ms`);
         } catch (error: any) {
             console.warn('[AppCheck] Failed to initialize:', error?.message, error);
             // Don't throw - allow app to continue in monitoring mode
@@ -107,6 +109,7 @@ class AppCheckService {
      * Returns null if unavailable (which is logged but not blocked)
      */
     private async fetchToken(): Promise<string | null> {
+        const startTime = Date.now();
         try {
             if (!this.isInitialized) {
                 await this.initialize();
@@ -117,10 +120,14 @@ class AppCheckService {
                 this.lastToken = token;
                 this.lastTokenAt = Date.now();
             }
+            console.log(`[PERF][AppCheck] fetchToken total: ${Date.now() - startTime}ms`, {
+                hasToken: !!token,
+            });
             return token;
         } catch (error: any) {
             console.warn('[AppCheck] Failed to get token:', error?.message, error);
             this.lastFailureAt = Date.now();
+            console.log(`[PERF][AppCheck] fetchToken failed after: ${Date.now() - startTime}ms`);
             return null;
         }
     }
@@ -133,10 +140,17 @@ class AppCheckService {
         const now = Date.now();
 
         if (this.lastToken && now - this.lastTokenAt < AppCheckService.TOKEN_REUSE_MS) {
+            console.log(`[PERF][AppCheck] getTokenForHeader cache hit: 0ms`, {
+                tokenAgeMs: now - this.lastTokenAt,
+            });
             return this.lastToken;
         }
 
         if (this.lastFailureAt && now - this.lastFailureAt < AppCheckService.FAILURE_BACKOFF_MS) {
+            console.log(`[PERF][AppCheck] getTokenForHeader backoff hit: 0ms`, {
+                failureAgeMs: now - this.lastFailureAt,
+                hasCachedToken: !!this.lastToken,
+            });
             return this.lastToken;
         }
 

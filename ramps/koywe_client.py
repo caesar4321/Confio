@@ -1,4 +1,5 @@
 import logging
+import unicodedata
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
@@ -13,6 +14,7 @@ logger = logging.getLogger(__name__)
 _TOKEN_CURRENCIES_CACHE_KEY = 'koywe:token-currencies'
 _TOKEN_CURRENCIES_CACHE_TTL = 60 * 15
 _RAMP_LIMITS_CACHE_TTL = 60 * 10
+_ACCOUNT_PROFILE_SYNC_CACHE_TTL = 60 * 60 * 24
 
 
 class KoyweError(Exception):
@@ -58,8 +60,12 @@ _COUNTRY_ALPHA3 = {
 
 _ACCOUNT_TYPE_MAP = {
     'ahorro': 'savings',
+    'ahorros': 'savings',
+    'savings': 'savings',
     'corriente': 'checking',
+    'checking': 'checking',
     'nomina': 'checking',
+    'payroll': 'checking',
     'interbancaria': 'interbanking',
     'interbanking': 'interbanking',
 }
@@ -114,6 +120,14 @@ _BANK_CODE_ALIASES = {
         'BANCO_CONSORCIO': 'CONSORCIO',
         'ITAU_CHILE': 'ITAU',
     },
+    'COL': {
+        'NEQUI': 'co_nequi',
+        'CO_NEQUI': 'co_nequi',
+        'BANCOLOMBIA': 'co_bancolombia',
+        'CO_BANCOLOMBIA': 'co_bancolombia',
+        'DAVIPLATA': 'co_daviplata',
+        'CO_DAVIPLATA': 'co_daviplata',
+    },
     'PER': {
         'BCP': 'CREDITO',
         'BCP_PERU': 'CREDITO',
@@ -143,21 +157,72 @@ _BANK_CODE_ALIASES = {
 
 _DOCUMENT_TYPE_MAP = {
     'AR': 'DNI',
-    'BO': 'CED_CIU',
-    'BR': 'PASS',
+    'BO': 'CI',
+    'BR': 'CPF',
     'CL': 'RUT',
     'CO': 'CED_CIU',
     'MX': 'RFC',
     'PE': 'DNI',
-    'US': 'PASS',
 }
 
-_VERIFICATION_DOCUMENT_TYPE_MAP = {
-    'passport': 'PASS',
-    'drivers_license': 'PASS',
-    'foreign_id': 'CED_EXT',
-    'national_id': None,
+_COUNTRY_DOCUMENT_TYPE_MAP = {
+    'AR': {
+        'national_id': 'DNI',
+        'dni': 'DNI',
+        'cuit': 'CUIT',
+    },
+    'BO': {
+        'national_id': 'CI',
+        'ci': 'CI',
+        'nit': 'NIT',
+    },
+    'BR': {
+        'national_id': 'CPF',
+        'cpf': 'CPF',
+        'cnpj': 'CNPJ',
+    },
+    'CL': {
+        'national_id': 'RUT',
+        'rut': 'RUT',
+    },
+    'CO': {
+        'national_id': 'CED_CIU',
+        'foreign_id': 'CED_EXT',
+        'passport': 'PASS',
+        'ced_ciu': 'CED_CIU',
+        'ced_ext': 'CED_EXT',
+        'ti': 'TI',
+        'nuip': 'NUIP',
+        'te': 'TE',
+        'ppt': 'PPT',
+        'pass': 'PASS',
+        'pep': 'PEP',
+        'rc': 'RC',
+        'nit': 'NIT',
+    },
+    'MX': {
+        'national_id': 'RFC',
+        'rfc': 'RFC',
+        'curp': 'CURP',
+    },
+    'PE': {
+        'national_id': 'DNI',
+        'dni': 'DNI',
+        'ruc': 'RUC',
+        'ce': 'CE',
+    },
 }
+
+
+def _normalize_account_type(value: str | None) -> str | None:
+    raw_value = str(value or '').strip()
+    if not raw_value:
+        return None
+    normalized_key = unicodedata.normalize('NFKD', raw_value)
+    normalized_key = ''.join(ch for ch in normalized_key if not unicodedata.combining(ch))
+    normalized_key = normalized_key.lower().replace('-', '_').replace(' ', '_')
+    normalized_key = normalized_key.replace('cuenta_', '').replace('de_', '')
+    return _ACCOUNT_TYPE_MAP.get(normalized_key, raw_value)
 
 
 class KoyweClient:
@@ -403,8 +468,12 @@ class KoyweClient:
             'asset_note': RAMP_USDC_ALGORAND_NOTE,
         }
 
-    def create_order(self, *, quote_id: str, email: str | None = None, destination_address: str | None = None, external_id: str | None = None) -> dict[str, Any]:
+    def create_order(self, *, quote_id: str, email: str | None = None, destination_address: str | None = None, external_id: str | None = None, document_number: str | None = None) -> dict[str, Any]:
         payload: dict[str, Any] = {'quoteId': quote_id}
+        if email:
+            payload['email'] = email
+        if document_number:
+            payload['documentNumber'] = document_number
         if destination_address:
             payload['destinationAddress'] = destination_address
         if external_id:
@@ -416,6 +485,15 @@ class KoyweClient:
 
     def create_bank_account(self, *, bank_info: Any, email: str | None, country_code: str, fiat_symbol: str, contact_profile: dict[str, Any] | None = None) -> dict[str, Any]:
         alpha3 = _COUNTRY_ALPHA3.get((country_code or '').upper(), (country_code or '').upper())
+        normalized_contact_profile = self._normalize_contact_profile(
+            contact_profile=contact_profile,
+            country_code=country_code,
+        )
+        self.ensure_account_profile(
+            email=email,
+            country_code=country_code,
+            contact_profile=normalized_contact_profile,
+        )
         provider_metadata = getattr(bank_info, 'provider_metadata', None) or {}
         payment_method = getattr(bank_info, 'payment_method', None)
         payment_method_code = (
@@ -434,13 +512,15 @@ class KoyweClient:
         payload: dict[str, Any] = {
             'countryCode': alpha3,
             'currencySymbol': fiat_symbol,
-            'accountNumber': account_number,
         }
+        if account_number is not None:
+            payload['accountNumber'] = str(account_number)
         if provider_metadata.get('bankCode'):
+            raw_bank_code = str(provider_metadata['bankCode']).strip()
             resolved_bank_code = self._resolve_bank_code(
                 country_code=alpha3,
-                bank_name=str(provider_metadata['bankCode']),
-            ) or str(provider_metadata['bankCode']).strip().upper()
+                bank_name=raw_bank_code,
+            ) or raw_bank_code
             payload['bankCode'] = resolved_bank_code
         elif provider_metadata.get('bankName'):
             resolved_bank_code = self._resolve_bank_code(
@@ -455,17 +535,24 @@ class KoyweClient:
                 bank_name=str(bank_info.bank.code),
             ) or str(bank_info.bank.code).strip().upper()
             payload['bankCode'] = resolved_bank_code
-        elif alpha3 == 'COL' and payment_method_code in {'NEQUI', 'BANCOLOMBIA'}:
-            payload['bankCode'] = payment_method_code
+        elif alpha3 == 'COL' and payment_method_code == 'NEQUI':
+            payload['bankCode'] = 'co_nequi'
+        elif alpha3 == 'COL' and payment_method_code == 'BANCOLOMBIA':
+            payload['bankCode'] = 'co_bancolombia'
+        elif alpha3 == 'COL' and not payload.get('bankCode'):
+            raise KoyweError('"bankCode" is required for COP payouts — select a bank')
         elif alpha3 == 'MEX' and payment_method_code == 'STP':
             payload['bankCode'] = 'STP'
         elif alpha3 == 'PER' and payment_method_code == 'QRI-PE':
             payload['bankCode'] = 'LIGO'
         elif alpha3 == 'PER' and payment_method_code == 'RECAUDO-PE':
             payload['bankCode'] = 'CREDITO'
-        if getattr(bank_info, 'account_type', None):
-            payload['accountType'] = _ACCOUNT_TYPE_MAP.get(bank_info.account_type, bank_info.account_type)
-        elif alpha3 == 'COL' and payment_method_code in {'NEQUI', 'BANCOLOMBIA'}:
+        elif alpha3 == 'BOL' and payment_method_code in {'QRI-BO', 'QRI_BO'}:
+            payload['bankCode'] = 'SIP_QR'
+        normalized_account_type = _normalize_account_type(getattr(bank_info, 'account_type', None))
+        if normalized_account_type:
+            payload['accountType'] = normalized_account_type
+        elif alpha3 == 'COL' and payment_method_code in {'NEQUI', 'BANCOLOMBIA', 'WIRECO'}:
             # Koywe's Colombia payout schema requires accountType even for wallet-like rails.
             # Nequi does not expose this in the user UX, so default to savings server-side.
             payload['accountType'] = 'savings'
@@ -484,6 +571,15 @@ class KoyweClient:
         normalized_direction = direction.upper()
         if normalized_direction == 'ON_RAMP' and not wallet_address:
             raise KoyweError('The active account does not have a destination wallet address configured')
+        normalized_contact_profile = self._normalize_contact_profile(
+            contact_profile=contact_profile,
+            country_code=country_code,
+        )
+        self.ensure_account_profile(
+            email=email,
+            country_code=country_code,
+            contact_profile=normalized_contact_profile,
+        )
         payment_method_id, payment_method_display = self.resolve_payment_provider(
             fiat_symbol=fiat_symbol,
             payment_method_code=payment_method_code,
@@ -509,7 +605,7 @@ class KoyweClient:
                 email=email,
                 country_code=country_code,
                 fiat_symbol=fiat_symbol,
-                contact_profile=contact_profile,
+                contact_profile=normalized_contact_profile,
             )
             created_bank_account_id = str(bank_account.get('_id') or bank_account.get('id') or bank_account.get('bankAccountId') or '')
             if not created_bank_account_id:
@@ -521,6 +617,7 @@ class KoyweClient:
             email=email,
             destination_address=destination_address,
             external_id=external_id,
+            document_number=str(normalized_contact_profile.get('documentNumber') or '').strip() or None,
         )
 
         order_id = str(order.get('_id') or order.get('id') or order.get('orderId') or quote_id)
@@ -557,11 +654,128 @@ class KoyweClient:
             return {}
         normalized = dict(contact_profile)
         document_type = normalized.get('documentType')
-        if document_type in _VERIFICATION_DOCUMENT_TYPE_MAP:
-            normalized['documentType'] = _VERIFICATION_DOCUMENT_TYPE_MAP[document_type] or _DOCUMENT_TYPE_MAP.get(country_code.upper(), 'PASS')
-        elif not document_type and normalized.get('documentNumber'):
-            normalized['documentType'] = _DOCUMENT_TYPE_MAP.get(country_code.upper(), 'PASS')
+        document_number = normalized.get('documentNumber')
+        if document_number:
+            resolved_document_type = self._resolve_document_type(
+                country_code=country_code,
+                document_type=document_type,
+            )
+            normalized['documentType'] = resolved_document_type
         return {key: value for key, value in normalized.items() if value}
+
+    def _resolve_document_type(self, *, country_code: str, document_type: str | None) -> str:
+        normalized_country = (country_code or '').strip().upper()
+        normalized_document_type = str(document_type or '').strip().lower()
+        country_map = _COUNTRY_DOCUMENT_TYPE_MAP.get(normalized_country, {})
+        resolved = country_map.get(normalized_document_type)
+        if resolved:
+            return resolved
+
+        if normalized_document_type == 'drivers_license':
+            raise KoyweError(f'Document type "{normalized_document_type}" is not supported for Koywe delegated KYC in country {normalized_country}')
+        if normalized_document_type == 'passport':
+            raise KoyweError(f'Document type "{normalized_document_type}" is not supported for Koywe delegated KYC in country {normalized_country}')
+        if not normalized_document_type:
+            default_document_type = _DOCUMENT_TYPE_MAP.get(normalized_country)
+            if default_document_type:
+                return default_document_type
+
+        raise KoyweError(f'Document type "{document_type or "unknown"}" is not mapped for Koywe delegated KYC in country {normalized_country}')
+
+    def ensure_account_profile(self, *, email: str | None, country_code: str, contact_profile: dict[str, Any] | None = None) -> None:
+        normalized_contact = self._normalize_contact_profile(
+            contact_profile=contact_profile,
+            country_code=country_code,
+        )
+        if not normalized_contact:
+            return
+
+        normalized_email = str(email or normalized_contact.get('email') or '').strip().lower()
+        document_number = str(normalized_contact.get('documentNumber') or '').strip()
+        if not normalized_email or not document_number:
+            return
+
+        cache_key = f'koywe:account-profile:{normalized_email}:{country_code.upper()}:{document_number}'
+        if cache.get(cache_key):
+            return
+
+        payload = self._build_account_profile_payload(
+            email=normalized_email,
+            country_code=country_code,
+            contact_profile=normalized_contact,
+        )
+        if not payload:
+            return
+
+        try:
+            self._request('POST', '/rest/accounts', email=normalized_email, json_payload=payload)
+        except KoyweError as exc:
+            if self._is_existing_account_error(str(exc)):
+                cache.set(cache_key, True, timeout=_ACCOUNT_PROFILE_SYNC_CACHE_TTL)
+                return
+            raise
+
+        cache.set(cache_key, True, timeout=_ACCOUNT_PROFILE_SYNC_CACHE_TTL)
+
+    def _build_account_profile_payload(self, *, email: str, country_code: str, contact_profile: dict[str, Any]) -> dict[str, Any] | None:
+        alpha3 = _COUNTRY_ALPHA3.get((country_code or '').upper(), (country_code or '').upper())
+        first_name = str(contact_profile.get('firstName') or '').strip()
+        last_name = str(contact_profile.get('lastName') or '').strip()
+        document_number = str(contact_profile.get('documentNumber') or '').strip()
+        document_type = str(contact_profile.get('documentType') or '').strip()
+        phone = str(contact_profile.get('phone') or '').strip()
+        if not (first_name and last_name and document_number and document_type and alpha3):
+            return None
+
+        address_street = str(contact_profile.get('addressStreet') or contact_profile.get('address') or '').strip()
+        address_city = str(contact_profile.get('addressCity') or '').strip()
+        address_state = str(contact_profile.get('addressState') or '').strip()
+        address_country = str(contact_profile.get('addressCountry') or '').strip()
+        address_zip_code = str(contact_profile.get('addressZipCode') or '').strip()
+        dob = contact_profile.get('dob')
+        dob_value = str(dob).strip() if dob else '1900-01-01'
+
+        payload: dict[str, Any] = {
+            'document': {
+                'documentNumber': document_number,
+                'documentType': document_type,
+                'country': alpha3,
+                'isCompany': False,
+            },
+            'personalInfo': {
+                'names': first_name,
+                'firstLastname': last_name,
+                'activity': str(contact_profile.get('activity') or 'OTHER'),
+                'phoneNumber': phone or '0000000000',
+                'dob': dob_value,
+            },
+        }
+        address_fields = {
+            'addressStreet': address_street,
+            'addressCountry': address_country,
+            'addressZipCode': address_zip_code,
+            'addressCity': address_city,
+            'addressState': address_state,
+        }
+        missing_address_fields = [key for key, value in address_fields.items() if not value]
+        if missing_address_fields:
+            missing_display = ', '.join(missing_address_fields)
+            raise KoyweError(
+                f'Koywe delegated KYC requires address fields before syncing account profile: {missing_display}'
+            )
+        payload['address'] = address_fields
+        return payload
+
+    def _is_existing_account_error(self, message: str) -> bool:
+        normalized = str(message or '').strip().lower()
+        return any(fragment in normalized for fragment in (
+            'already exists',
+            'already registered',
+            'account already',
+            'profile already',
+            'document already exists',
+            'duplicate',
+        ))
 
     def _extract_action_url(self, payload: Any) -> str | None:
         if isinstance(payload, str) and payload.startswith('http'):
@@ -673,6 +887,26 @@ class KoyweClient:
                 low = midpoint
 
         return high.quantize(Decimal('0.01'))
+
+    def get_bank_info(self, *, country_code: str) -> list[dict[str, Any]]:
+        """
+        Fetch available banks for a country from GET /rest/bank-info/{countryCode}.
+        country_code must be ISO 3166-1 alpha-3 (e.g. 'COL', 'PER').
+        Returns list of {bankCode, name, institutionName} dicts.
+        """
+        url = f'{self.base_url}/rest/bank-info/{country_code.upper()}'
+        try:
+            resp = requests.get(url, timeout=15)
+            if resp.status_code == 400:
+                return []
+            if not resp.ok:
+                raise KoyweError(f'Koywe bank-info returned {resp.status_code} for {country_code}')
+            data = resp.json()
+            if not isinstance(data, list):
+                return []
+            return data
+        except requests.RequestException as exc:
+            raise KoyweError(f'Koywe bank-info request failed for {country_code}: {exc}') from exc
 
     def _safe_preview_quote(self, *, symbol_in: str, symbol_out: str, amount: Decimal) -> dict[str, Any] | None:
         try:

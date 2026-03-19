@@ -17,6 +17,7 @@ class UnifiedTransactionTable(models.Model):
         ('exchange', 'P2P Exchange'),
         ('reward', 'Reward'),
         ('presale', 'Presale Purchase'),
+        ('ramp', 'Ramp'),
     ]
     
     STATUS_CHOICES = [
@@ -100,6 +101,13 @@ class UnifiedTransactionTable(models.Model):
         blank=True,
         on_delete=models.CASCADE,
         related_name='unified_transaction'
+    )
+    ramp_transaction = models.OneToOneField(
+        'ramps.RampTransaction',
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name='unified_transaction',
     )
     
     # Denormalized fields for quick access/filtering
@@ -292,6 +300,8 @@ class UnifiedTransactionTable(models.Model):
             return self.referral_reward_event.internal_id
         if self.transaction_type == 'presale' and self.presale_purchase:
             return self.presale_purchase.internal_id
+        if self.transaction_type == 'ramp' and self.ramp_transaction:
+            return self.ramp_transaction.internal_id
         return None
 
     @property

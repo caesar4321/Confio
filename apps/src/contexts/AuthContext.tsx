@@ -93,6 +93,15 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   const lastBiometricSuccessRef = useRef<number>(0);
   const bootstrapAuthRanRef = useRef<boolean>(false);
 
+  const perfLog = (label: string, startTime: number, extra?: Record<string, any>) => {
+    const durationMs = Date.now() - startTime;
+    if (extra) {
+      console.log(`[PERF][AuthContext] ${label}: ${durationMs}ms`, extra);
+      return;
+    }
+    console.log(`[PERF][AuthContext] ${label}: ${durationMs}ms`);
+  };
+
   const waitForAppToBeActive = async (timeoutMs = 4000): Promise<boolean> => {
     if (AppState.currentState === 'active') {
       return true;
@@ -761,14 +770,19 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   };
 
   const checkAuthState = async () => {
+    const checkAuthStateStart = Date.now();
     try {
       console.log('Checking auth state...');
 
       // Check for JWT tokens instead of zkLogin data
       const Keychain = await import('react-native-keychain');
+      const keychainReadStart = Date.now();
       const credentials = await Keychain.getGenericPassword({
         service: 'com.confio.auth',
         username: 'auth_tokens'
+      });
+      perfLog('Keychain.getGenericPassword during checkAuthState', keychainReadStart, {
+        hasCredentials: !!credentials,
       });
 
       console.log('Auth state JWT tokens:', {
@@ -778,7 +792,9 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
 
       if (credentials && credentials !== false) {
         try {
+          const parseStart = Date.now();
           const tokens = JSON.parse(credentials.password);
+          perfLog('JSON.parse stored auth tokens', parseStart);
           const hasValidTokens = tokens.accessToken && tokens.refreshToken;
           console.log('Has valid JWT tokens:', hasValidTokens);
 
@@ -788,7 +804,11 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
             let accessToken = tokens.accessToken;
             const refreshToken = tokens.refreshToken;
             try {
+              const decodeStart = Date.now();
               const decoded: any = jwtDecode(accessToken);
+              perfLog('jwtDecode access token', decodeStart, {
+                exp: decoded?.exp,
+              });
               const nowTs = Math.floor(Date.now() / 1000);
               if (!decoded?.exp || decoded.exp <= nowTs + 30) {
                 // Refresh access token first
@@ -802,13 +822,18 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
                   }
                 `;
                 const { apolloClient } = await import('../apollo/client');
+                const refreshStart = Date.now();
                 const { data } = await apolloClient.mutate({
                   mutation: REFRESH_TOKEN,
                   variables: { refreshToken },
                   context: { skipAuth: true },
                 });
+                perfLog('Startup RefreshToken mutation', refreshStart, {
+                  hasToken: !!data?.refreshToken?.token,
+                });
                 if (data?.refreshToken?.token) {
                   accessToken = data.refreshToken.token;
+                  const keychainWriteStart = Date.now();
                   await Keychain.setGenericPassword(
                     'auth_tokens',
                     JSON.stringify({ accessToken, refreshToken }),
@@ -818,6 +843,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
                       accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED,
                     }
                   );
+                  perfLog('Persist refreshed access token to Keychain', keychainWriteStart);
                   setAccountContextTick((t) => t + 1);
                 }
               }
@@ -826,9 +852,17 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
             }
 
 
+            const biometricStateStart = Date.now();
             const bioEnabled = await biometricAuthService.isEnabled();
+            perfLog('biometricAuthService.isEnabled on startup', biometricStateStart, {
+              bioEnabled,
+            });
             if (bioEnabled) {
+              const waitActiveStart = Date.now();
               const appIsActive = await waitForAppToBeActive();
+              perfLog('waitForAppToBeActive before startup biometric prompt', waitActiveStart, {
+                appIsActive,
+              });
               if (!appIsActive) {
                 console.warn('[AuthContext] App never became active for startup biometric prompt');
                 setIsAuthenticated(false);
@@ -842,7 +876,11 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
             try {
               if (bioEnabled) {
                 console.log('[AuthContext] Biometrics enabled, enforcing check on startup...');
+                const startupBiometricStart = Date.now();
                 const bioOk = await biometricAuthService.authenticate('Desbloquea Confío');
+                perfLog('Startup biometricAuthService.authenticate', startupBiometricStart, {
+                  bioOk,
+                });
                 if (!bioOk) {
                   console.log('[AuthContext] Startup biometric authentication failed or cancelled');
                   setIsAuthenticated(false);
@@ -855,10 +893,17 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
               }
 
               const authService = AuthService.getInstance();
+              const activeContextStart = Date.now();
               const accountContext = await authService.getActiveAccountContext();
+              perfLog('AuthService.getActiveAccountContext on startup', activeContextStart, {
+                type: accountContext?.type,
+                businessId: accountContext?.businessId,
+                index: accountContext?.index,
+              });
               if (accountContext.type === 'business' && accountContext.businessId) {
                 const { SWITCH_ACCOUNT_TOKEN } = await import('../apollo/queries');
                 const { apolloClient } = await import('../apollo/client');
+                const switchTokenStart = Date.now();
                 const { data } = await apolloClient.mutate({
                   mutation: SWITCH_ACCOUNT_TOKEN,
                   variables: {
@@ -867,8 +912,12 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
                     businessId: accountContext.businessId,
                   },
                 });
+                perfLog('Startup SWITCH_ACCOUNT_TOKEN mutation', switchTokenStart, {
+                  hasToken: !!data?.switchAccountToken?.token,
+                });
                 if (data?.switchAccountToken?.token) {
                   // Store new access token with the same refresh token
+                  const businessKeychainWriteStart = Date.now();
                   await Keychain.setGenericPassword(
                     'auth_tokens',
                     JSON.stringify({ accessToken: data.switchAccountToken.token, refreshToken }),
@@ -878,6 +927,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
                       accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED,
                     }
                   );
+                  perfLog('Persist business-context access token to Keychain', businessKeychainWriteStart);
                 }
               }
             } catch (syncErr) {
@@ -885,7 +935,13 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
             }
 
             // Require biometric enrollment first, then unlock on app start when session exists
+            const enrollmentStart = Date.now();
             const enrollmentResult = await enforceBiometricEnrollment({ skipRevalidate: true });
+            perfLog('enforceBiometricEnrollment on startup', enrollmentStart, {
+              ok: enrollmentResult.ok,
+              alreadyEnabled: enrollmentResult.alreadyEnabled,
+              didAuthenticate: enrollmentResult.didAuthenticate,
+            });
             if (!enrollmentResult.ok) {
               setIsAuthenticated(false);
               navigateToScreen('Auth');
@@ -893,11 +949,17 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
               return;
             }
 
+            const unlockPromptStart = Date.now();
             const biometricOk = bioEnabled
               ? true
               : enrollmentResult.didAuthenticate
                 ? true
                 : await biometricAuthService.authenticate('Desbloquea Confío');
+            perfLog('Fallback startup biometricAuthService.authenticate', unlockPromptStart, {
+              biometricOk,
+              skippedBecauseBioEnabled: bioEnabled,
+              skippedBecauseEnrollmentAuthenticated: enrollmentResult.didAuthenticate,
+            });
             if (!biometricOk) {
               Alert.alert(
                 'Confirma con biometría',
@@ -920,8 +982,9 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
             (async () => {
               try {
                 const { GET_USER_ACCOUNTS } = await import('../apollo/queries');
+                const prefetchStart = Date.now();
                 await apolloClient.query({ query: GET_USER_ACCOUNTS, fetchPolicy: 'network-only' });
-                console.log('Prefetched userAccounts after navigating to Main');
+                perfLog('Prefetch userAccounts after navigating to Main', prefetchStart);
               } catch (prefetchErr) {
                 console.warn('Failed to prefetch userAccounts (post-nav):', prefetchErr);
               }
@@ -946,6 +1009,9 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       setIsAuthenticated(false);
       navigateToScreen('Auth');
     } finally {
+      perfLog('checkAuthState total', checkAuthStateStart, {
+        finalIsAuthenticated: isAuthenticated,
+      });
       setIsLoading(false);
     }
   };

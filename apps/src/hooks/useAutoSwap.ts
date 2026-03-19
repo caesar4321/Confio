@@ -1,8 +1,9 @@
 import { useState, useRef, useCallback } from 'react';
-import { useMutation, gql } from '@apollo/client';
+import { useMutation, gql, useQuery } from '@apollo/client';
 import { useFocusEffect } from '@react-navigation/native';
 import algorandService from '../services/algorandService';
 import { cusdAppOptInService } from '../services/cusdAppOptInService';
+import { GET_PENDING_AUTO_SWAP } from '../apollo/queries';
 
 const BUILD_AUTO_SWAP_TRANSACTIONS = gql`
   mutation BuildAutoSwapTransactions($inputAssetType: String!, $amount: String!) {
@@ -41,10 +42,24 @@ interface UseAutoSwapProps {
     activeAccount?: any;
 }
 
-const USDC_THRESHOLD = 1;  // contract minimum: do not auto-convert below 1 USDC
+const USDC_THRESHOLD_MICRO = 1_000_000;
 const ALGO_RESERVE_THRESHOLD = 3; // Keep 3 ALGO in wallet before auto-swapping excess
 const ALGO_MIN_SWAP_AMOUNT = 1; // Require at least 1 whole ALGO of excess to trigger
 const MIN_MODAL_VISIBLE_MS = 1200;
+
+const toMicroUnits = (value: string): number => {
+    const trimmed = (value || '').trim();
+    if (!trimmed) return 0;
+
+    const negative = trimmed.startsWith('-');
+    const normalized = negative ? trimmed.slice(1) : trimmed;
+    const [wholePartRaw, fractionalRaw = ''] = normalized.split('.');
+    const wholePart = wholePartRaw.replace(/\D/g, '') || '0';
+    const fractionalPart = fractionalRaw.replace(/\D/g, '').padEnd(6, '0').slice(0, 6);
+    const micros = Number(wholePart) * 1_000_000 + Number(fractionalPart);
+
+    return negative ? -micros : micros;
+};
 
 export const useAutoSwap = ({
     isAuthenticated,
@@ -56,9 +71,14 @@ export const useAutoSwap = ({
 }: UseAutoSwapProps) => {
     const [buildAutoSwapTransactions] = useMutation(BUILD_AUTO_SWAP_TRANSACTIONS);
     const [submitAutoSwapTransactions] = useMutation(SUBMIT_AUTO_SWAP_TRANSACTIONS);
+    const { data: pendingAutoSwapData } = useQuery(GET_PENDING_AUTO_SWAP, {
+        variables: { accountId: activeAccount?.id || null },
+        skip: !isAuthenticated || !activeAccount?.id,
+        fetchPolicy: 'cache-and-network',
+    });
 
-    // Auto-Swap Background Detection Trigger
-    // Triggers a silent conversion when USDC > 0 or ALGO exceeds reserve.
+    // Auto-swap silently converts USDC once it reaches the 1 USDC contract minimum
+    // or swaps ALGO only when it exceeds the configured reserve.
     const isSwappingRef = useRef(false);
     const [swapModalAsset, setSwapModalAsset] = useState<'ALGO' | 'USDC' | null>(null);
 
@@ -73,16 +93,20 @@ export const useAutoSwap = ({
                 // Concurrency guard — ref is always current, unlike state in stale closures
                 if (isSwappingRef.current) return;
 
-                const currentUsdc = Number(usdcBalanceStr) || 0;
+                const currentUsdcMicro = toMicroUnits(usdcBalanceStr);
                 const currentAlgo = parseFloat(algoBalanceStr) || 0;
 
                 // Determine input asset and amount
                 let swapAssetType = null;
                 let swapAmount = '0';
+                const pendingAutoSwap = pendingAutoSwapData?.pendingAutoSwap;
 
-                if (currentUsdc >= USDC_THRESHOLD) {
+                if (pendingAutoSwap?.assetType === 'USDC' && pendingAutoSwap?.status === 'PENDING') {
                     swapAssetType = 'USDC';
-                    swapAmount = Math.floor(currentUsdc * 1000000).toString();
+                    swapAmount = String(pendingAutoSwap.amountMicro || '0');
+                } else if (currentUsdcMicro >= USDC_THRESHOLD_MICRO) {
+                    swapAssetType = 'USDC';
+                    swapAmount = currentUsdcMicro.toString();
                 } else {
                     // Keep a hard reserve in ALGO and only swap true excess.
                     const excessAlgo = Math.max(0, currentAlgo - ALGO_RESERVE_THRESHOLD);
@@ -207,7 +231,7 @@ export const useAutoSwap = ({
             };
 
             checkAndTriggerSwap();
-        }, [usdcBalanceStr, algoBalanceStr, myBalancesLoading, isAuthenticated, buildAutoSwapTransactions, submitAutoSwapTransactions, refreshAccountBalance, activeAccount])
+        }, [usdcBalanceStr, algoBalanceStr, myBalancesLoading, isAuthenticated, buildAutoSwapTransactions, submitAutoSwapTransactions, refreshAccountBalance, activeAccount, pendingAutoSwapData])
     );
 
     return {

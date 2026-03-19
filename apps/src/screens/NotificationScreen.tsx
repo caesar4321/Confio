@@ -22,6 +22,63 @@ const REFERRAL_EVENT_TYPE_MAP: Record<string, string> = {
   REFERRAL_EVENT_P2P_TRADE: 'p2p_trade',
 };
 
+const deriveStatusFromNotificationType = (notificationType: string): string | undefined => {
+  switch ((notificationType || '').toUpperCase()) {
+    case 'RAMP_FAILED':
+      return 'failed';
+    case 'RAMP_PENDING':
+      return 'pending';
+    case 'RAMP_COMPLETED':
+      return 'completed';
+    case 'USDC_DEPOSIT_PENDING':
+      return 'pending';
+    case 'USDC_DEPOSIT_COMPLETED':
+    case 'USDC_WITHDRAWAL_COMPLETED':
+    case 'CONVERSION_COMPLETED':
+      return 'completed';
+    case 'CONVERSION_FAILED':
+    case 'USDC_DEPOSIT_FAILED':
+    case 'USDC_WITHDRAWAL_FAILED':
+      return 'failed';
+    default:
+      return undefined;
+  }
+};
+
+const normalizeRampNotificationPayload = (data: any, notifType: string, createdAt: string, id: string) => {
+  const direction = (data?.direction || data?.ramp_direction || data?.rampDirection || '').toString().toLowerCase();
+  const fiatAmount = data?.ramp_fiat_amount ?? data?.rampFiatAmount;
+  const fiatCurrency = data?.ramp_fiat_currency ?? data?.rampFiatCurrency;
+  const walletAmount = data?.wallet_amount ?? data?.walletAmount ?? data?.amount;
+  const walletCurrency = data?.wallet_currency ?? data?.walletCurrency ?? 'cUSD';
+
+  return {
+    ...data,
+    id,
+    createdAt,
+    notification_type: notifType,
+    transaction_type: 'ramp',
+    ramp_direction: direction,
+    rampDirection: direction,
+    internal_id: data?.internal_id ?? data?.internalId ?? id,
+    internalId: data?.internalId ?? data?.internal_id ?? id,
+    amount: direction === 'on_ramp'
+      ? (fiatAmount ?? data?.amount)
+      : walletAmount,
+    currency: direction === 'on_ramp'
+      ? (fiatCurrency ?? data?.currency ?? data?.token_type ?? data?.tokenType)
+      : 'cUSD',
+    token_type: direction === 'on_ramp'
+      ? (fiatCurrency ?? data?.currency ?? data?.token_type ?? data?.tokenType)
+      : 'cUSD',
+    ramp_fiat_amount: fiatAmount,
+    ramp_fiat_currency: fiatCurrency,
+    wallet_amount: walletAmount,
+    wallet_currency: walletCurrency,
+    status: data?.status || deriveStatusFromNotificationType(notifType),
+  };
+};
+
 type NotificationScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
 interface Notification {
@@ -257,6 +314,10 @@ export const NotificationScreen = () => {
       ...enrichedData,
       id,
       notification_type: notifType,
+      status:
+        enrichedData?.status ||
+        baseData?.status ||
+        deriveStatusFromNotificationType(notifType),
       ...(internalId ? { internalId, internal_id: internalId } : {}),
     };
 
@@ -293,6 +354,7 @@ export const NotificationScreen = () => {
     if (notifType === 'CONVERSION_COMPLETED') baseTxnType = 'conversion';
     if (notifType === 'USDC_DEPOSIT_COMPLETED' || notifType === 'USDC_DEPOSIT_PENDING') baseTxnType = 'deposit';
     if (notifType === 'USDC_WITHDRAWAL_COMPLETED') baseTxnType = 'withdrawal';
+    if (notifType === 'RAMP_PENDING' || notifType === 'RAMP_COMPLETED' || notifType === 'RAMP_FAILED') baseTxnType = 'ramp';
 
     // Parse data blob once
     let parsedData: any = notification.data;
@@ -456,11 +518,26 @@ export const NotificationScreen = () => {
         });
       } else if (url.includes('transaction/')) {
         const transactionId = url.split('transaction/')[1];
+        if (parsedData?.pending_auto_swap === true || parsedData?.pending_auto_swap === 'true') {
+          navigation.navigate('BottomTabs', { screen: 'Home' } as never);
+          return;
+        }
         // Prefer server fetch for full fidelity; pass minimal payload with id and type hint
         const txnType: any = baseTxnType;
 
         // Parse notification.data if it's a JSON string to avoid spreading characters
         const fullData: any = parsedData;
+
+        if (txnType === 'ramp' || notifType.startsWith('RAMP_')) {
+          navigateToTransactionDetail({
+            id: transactionId,
+            notifType,
+            txnType: 'ramp',
+            baseData: fullData,
+            enrichedData: normalizeRampNotificationPayload(fullData, notifType, notification.createdAt, transactionId),
+          });
+          return;
+        }
 
         // Handle payroll notifications - navigate to PayrollReceipt screen
         if (notifType === 'PAYROLL_RECEIVED' || notifType === 'PAYROLL_SENT') {
@@ -617,6 +694,16 @@ export const NotificationScreen = () => {
 
       // Parse data blob if available
       const fullData: any = parsedData;
+      if (txnType === 'ramp' || type === 'RampTransaction' || notifType.startsWith('RAMP_')) {
+        navigateToTransactionDetail({
+          id,
+          notifType,
+          txnType: 'ramp',
+          baseData: fullData,
+          enrichedData: normalizeRampNotificationPayload(fullData, notifType, notification.createdAt, id),
+        });
+        return;
+      }
 
       // Identity verification related notifications -> Verification screen
       if (type === 'IdentityVerification') {
@@ -778,6 +865,17 @@ export const NotificationScreen = () => {
         });
       }
     } else {
+      if (notifType.startsWith('RAMP_')) {
+        const derivedId = parsedData.transaction_id || parsedData.transactionId || parsedData.internal_id || parsedData.internalId || parsedData.id || '';
+        navigateToTransactionDetail({
+          id: derivedId,
+          notifType,
+          txnType: 'ramp',
+          baseData: parsedData,
+          enrichedData: normalizeRampNotificationPayload(parsedData, notifType, notification.createdAt, derivedId),
+        });
+        return;
+      }
       // Fallback: for transaction-like notifications without actionUrl/relatedObject, navigate using data
       if (notifType === 'PAYROLL_RECEIVED' || notifType === 'PAYROLL_SENT') {
         // Navigate to PayrollReceipt screen for payroll notifications
@@ -896,6 +994,9 @@ export const NotificationScreen = () => {
       USDC_DEPOSIT_PENDING: { icon: 'clock', color: '#F59E0B' },
       USDC_DEPOSIT_COMPLETED: { icon: 'download', color: '#06B6D4' },
       USDC_WITHDRAWAL_COMPLETED: { icon: 'upload', color: '#06B6D4' },
+      RAMP_PENDING: { icon: 'repeat', color: '#F59E0B' },
+      RAMP_COMPLETED: { icon: 'repeat', color: '#06B6D4' },
+      RAMP_FAILED: { icon: 'x-circle', color: '#EF4444' },
 
       // Account & Security
       ACCOUNT_VERIFIED: { icon: 'user-check', color: '#10B981' },

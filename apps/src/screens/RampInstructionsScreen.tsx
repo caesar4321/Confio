@@ -36,14 +36,14 @@ const colors = {
   textPrimary: '#1f2937',
   textMuted: '#6b7280',
   border: '#e5e7eb',
-  background: '#f0fdf4',
+  background: '#f6faf7',
   surface: '#ffffff',
-  primary: '#059669',
-  primaryDark: '#047857',
+  primary: '#34d399',
+  primaryDark: '#10b981',
   accent: '#3b82f6',
   accentLight: '#dbeafe',
-  heroFrom: '#059669',
-  heroTo: '#34d399',
+  heroFrom: '#10b981',
+  heroTo: '#6ee7b7',
 };
 
 const cleanDisplay = (text?: string | null): string => {
@@ -74,21 +74,24 @@ const getStatusMeta = (
         label: direction === 'ON_RAMP' ? 'Esperando tu pago' : 'Esperando confirmación',
         detailLabel: direction === 'ON_RAMP' ? 'En espera de pago' : 'Pendiente de confirmación',
         tone: 'neutral' as const,
+        icon: 'clock' as const,
       };
     case 'PENDING':
-      return { label: 'Pendiente', detailLabel: 'Pendiente', tone: 'neutral' as const };
+      return { label: 'Pendiente', detailLabel: 'Pendiente', tone: 'neutral' as const, icon: 'clock' as const };
     case 'EXECUTING':
     case 'IN_PROGRESS':
       return {
         label: direction === 'ON_RAMP' ? 'Procesando tu compra' : 'Procesando tu retiro',
         detailLabel: 'En proceso',
         tone: 'info' as const,
+        icon: 'loader' as const,
       };
     case 'DELIVERED':
       return {
         label: direction === 'ON_RAMP' ? 'Compra completada' : 'Retiro completado',
         detailLabel: 'Completado',
         tone: 'success' as const,
+        icon: 'check-circle' as const,
       };
     case 'REJECTED':
     case 'INVALID_WITHDRAWALS_DETAILS':
@@ -96,14 +99,23 @@ const getStatusMeta = (
         label: direction === 'ON_RAMP' ? 'Compra rechazada' : 'Retiro rechazado',
         detailLabel: statusCode === 'INVALID_WITHDRAWALS_DETAILS' ? 'Datos inválidos' : 'Rechazado',
         tone: 'error' as const,
+        icon: 'x-circle' as const,
       };
     default:
       return {
         label: loading ? 'Actualizando estado...' : 'Estado de la orden',
         detailLabel: loading ? 'Actualizando...' : 'Sin estado',
         tone: 'neutral' as const,
+        icon: 'activity' as const,
       };
   }
+};
+
+const statusPillIconColor: Record<string, string> = {
+  neutral: '#374151',
+  info: '#3b82f6',
+  success: '#047857',
+  error: '#b91c1c',
 };
 
 export const RampInstructionsScreen = () => {
@@ -197,7 +209,7 @@ export const RampInstructionsScreen = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.heroFrom} />
+      <StatusBar barStyle="light-content" backgroundColor="#10b981" />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <RampReveal delay={0}>
         <RampHero
@@ -215,11 +227,22 @@ export const RampInstructionsScreen = () => {
         <RampCard style={styles.card}>
           <Text style={styles.summaryEyebrow}>Seguimiento de la orden</Text>
           <View style={[styles.statusPill, styles[`statusPill_${statusMeta.tone}`]]}>
+            <Icon name={statusMeta.icon} size={13} color={statusPillIconColor[statusMeta.tone]} />
             <Text style={[styles.statusPillText, styles[`statusPillText_${statusMeta.tone}`]]}>{statusMeta.label}</Text>
           </View>
           <View style={styles.stackedRow}>
             <Text style={styles.label}>Orden</Text>
-            <Text style={styles.orderValue}>{orderId}</Text>
+            <View style={styles.orderRow}>
+              <Text style={styles.orderValue}>{orderId}</Text>
+              <TouchableOpacity
+                style={styles.copyPillInline}
+                onPress={() => copyInstructionValue('ID de orden', orderId)}
+                activeOpacity={0.7}
+              >
+                <Icon name="copy" size={11} color={colors.primaryDark} />
+                <Text style={styles.copyPillText}>Copiar</Text>
+              </TouchableOpacity>
+            </View>
           </View>
           {statusCode ? (
             <View style={styles.row}>
@@ -284,15 +307,17 @@ export const RampInstructionsScreen = () => {
                 {instructionView.rows.map((item, index) => (
                   <View key={`${item.label}-${index}`} style={styles.instructionRow}>
                     <Text style={styles.instructionLabel}>{item.label}</Text>
-                    <Text style={styles.instructionValue}>{cleanDisplay(item.value)}</Text>
-                    <TouchableOpacity
-                      style={styles.copyPillInline}
-                      onPress={() => copyInstructionValue(item.label, cleanDisplay(item.value))}
-                      activeOpacity={0.7}
-                    >
-                      <Icon name="copy" size={12} color={colors.accent} />
-                      <Text style={styles.copyPillText}>Copiar</Text>
-                    </TouchableOpacity>
+                    <View style={styles.instructionValueRow}>
+                      <Text style={styles.instructionValue}>{cleanDisplay(item.value)}</Text>
+                      <TouchableOpacity
+                        style={styles.copyPillInline}
+                        onPress={() => copyInstructionValue(item.label, cleanDisplay(item.value))}
+                        activeOpacity={0.7}
+                      >
+                        <Icon name="copy" size={11} color={colors.primaryDark} />
+                        <Text style={styles.copyPillText}>Copiar</Text>
+                      </TouchableOpacity>
+                    </View>
                   </View>
                 ))}
               </>
@@ -300,13 +325,15 @@ export const RampInstructionsScreen = () => {
 
             {instructionView.qrValue ? (
               <View style={styles.qrWrap}>
-                <QRCode value={instructionView.qrValue} size={190} />
+                <View style={styles.qrFrame}>
+                  <QRCode value={instructionView.qrValue} size={190} />
+                </View>
                 <TouchableOpacity
                   style={styles.copyPill}
                   onPress={() => copyInstructionValue('Código QR', instructionView.qrValue!)}
                   activeOpacity={0.7}
                 >
-                  <Icon name="copy" size={12} color={colors.accent} />
+                  <Icon name="copy" size={12} color={colors.primaryDark} />
                   <Text style={styles.copyPillText}>Copiar código</Text>
                 </TouchableOpacity>
               </View>
@@ -330,7 +357,7 @@ export const RampInstructionsScreen = () => {
 
         <RampReveal delay={240}>
         <TouchableOpacity style={[styles.refreshButton, isRefreshing && styles.refreshButtonDisabled]} onPress={handleRefresh} activeOpacity={0.7} disabled={isRefreshing}>
-          {isRefreshing ? <ActivityIndicator size="small" color={colors.accent} /> : <Icon name="refresh-cw" size={14} color={colors.accent} />}
+          {isRefreshing ? <ActivityIndicator size="small" color={colors.primary} /> : <Icon name="refresh-cw" size={14} color={colors.primary} />}
           <Text style={styles.refreshButtonText}>{isRefreshing ? 'Actualizando...' : 'Consultar estado'}</Text>
         </TouchableOpacity>
         </RampReveal>
@@ -352,6 +379,21 @@ export const RampInstructionsScreen = () => {
         ) : null}
 
         <RampReveal delay={300}>
+        <TouchableOpacity
+          style={styles.historyButton}
+          onPress={() =>
+            navigation.navigate('RampHistory', {
+              initialFilter: direction === 'ON_RAMP' ? 'on_ramp' : 'off_ramp',
+            })
+          }
+          activeOpacity={0.7}
+        >
+          <Icon name="clock" size={15} color={colors.primary} />
+          <Text style={styles.historyButtonText}>Ver historial</Text>
+        </TouchableOpacity>
+        </RampReveal>
+
+        <RampReveal delay={330}>
         <TouchableOpacity
           style={styles.ghostButton}
           onPress={() => navigation.navigate('BottomTabs', { screen: 'Home' })}
@@ -408,7 +450,13 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   stackedRow: {
-    gap: 8,
+    gap: 6,
+  },
+  orderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flexWrap: 'wrap',
   },
   summaryEyebrow: {
     fontSize: 12,
@@ -440,14 +488,18 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   orderValue: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
     color: colors.textPrimary,
-    flexWrap: 'wrap',
-    lineHeight: 20,
+    fontVariant: ['tabular-nums'],
+    letterSpacing: 0.3,
+    flexShrink: 1,
   },
   statusPill: {
     alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -482,20 +534,27 @@ const styles = StyleSheet.create({
     color: '#b91c1c',
   },
   instructionRow: {
-    gap: 6,
+    gap: 4,
     paddingBottom: 12,
     marginBottom: 2,
     borderBottomWidth: 1,
     borderBottomColor: '#f3f4f6',
   },
+  instructionValueRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flexWrap: 'wrap',
+  },
   sectionTitle: {
-    fontSize: 17,
+    fontSize: 18,
     fontWeight: '800',
     color: colors.textPrimary,
+    lineHeight: 24,
   },
   sectionBody: {
     fontSize: 14,
-    lineHeight: 22,
+    lineHeight: 23,
     color: colors.textMuted,
   },
   stepsWrap: {
@@ -537,6 +596,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 22,
     color: colors.textPrimary,
+    flexShrink: 1,
   },
   qrWrap: {
     alignItems: 'center',
@@ -544,35 +604,52 @@ const styles = StyleSheet.create({
     marginVertical: 10,
     paddingVertical: 10,
   },
+  qrFrame: {
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 16,
+    shadowColor: '#111827',
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
   note: {
     fontSize: 13,
     lineHeight: 19,
-    color: colors.accent,
+    color: colors.textMuted,
+    fontStyle: 'italic',
   },
   copyPill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: colors.accentLight,
+    backgroundColor: '#ecfdf5',
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: '#a7f3d0',
   },
   copyPillInline: {
     alignSelf: 'flex-start',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: colors.accentLight,
+    backgroundColor: '#ecfdf5',
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 6,
     marginTop: 6,
+    borderWidth: 1,
+    borderColor: '#a7f3d0',
   },
   copyPillText: {
     fontSize: 12,
     fontWeight: '700',
-    color: colors.accent,
+    color: colors.primaryDark,
   },
   refreshButton: {
     marginTop: 10,
@@ -582,18 +659,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
     borderRadius: 16,
-    paddingVertical: 14,
-    backgroundColor: colors.accentLight,
-    borderWidth: 1,
-    borderColor: '#bfdbfe',
+    paddingVertical: 13,
+    backgroundColor: 'transparent',
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    borderStyle: 'dashed',
   },
   refreshButtonDisabled: {
-    opacity: 0.7,
+    opacity: 0.6,
   },
   refreshButtonText: {
     fontSize: 14,
     fontWeight: '700',
-    color: colors.accent,
+    color: colors.primary,
   },
   refreshMessage: {
     marginTop: 10,
@@ -603,20 +681,38 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     textAlign: 'center',
   },
+  historyButton: {
+    marginTop: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    marginHorizontal: 22,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    backgroundColor: '#f0fdf4',
+  },
+  historyButtonText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.primary,
+  },
   ghostButton: {
-    marginTop: 12,
+    marginTop: 10,
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 14,
     marginHorizontal: 22,
     borderRadius: 16,
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: colors.border,
   },
   ghostButtonText: {
     fontSize: 15,
-    fontWeight: '700',
-    color: colors.textPrimary,
+    fontWeight: '600',
+    color: colors.textMuted,
   },
 });
 

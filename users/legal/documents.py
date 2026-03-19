@@ -5,8 +5,8 @@ Each document is a dictionary with sections, where each section has a title and 
 
 TERMS = {
     'title': 'Términos de Servicio',
-    'version': '1.1.0',
-    'last_updated': '2025-12-11',
+    'version': '1.2.0',
+    'last_updated': '2026-03-19',
     'is_legally_binding': True,
     'sections': [
         {
@@ -39,7 +39,17 @@ TERMS = {
             ]
         },
         {
-            'title': '5. Limitaciones de Responsabilidad',
+            'title': '5. Preventa y Token $CONFIO',
+            'content': [
+                'La preventa de $CONFIO da acceso a un token del ecosistema Confío y no representa acciones, participación societaria, dividendos ni derecho a utilidades, ingresos o activos de Confío.',
+                'La compra de $CONFIO no constituye una cuenta de ahorro, depósito bancario, contrato de inversión, asesoría financiera ni oferta pública de valores.',
+                'El valor, liquidez, disponibilidad y utilidad futura de $CONFIO pueden cambiar o no materializarse. No garantizamos apreciación, mercado secundario, listados ni recompra.',
+                'Cualquier funcionalidad, beneficio o acceso futuro asociado a $CONFIO depende del desarrollo del producto, requisitos técnicos, cumplimiento normativo y decisiones operativas de Confío.',
+                'Al participar en la preventa, usted declara que compra por su propio criterio y que entiende que puede perder la totalidad del valor entregado.'
+            ]
+        },
+        {
+            'title': '6. Limitaciones de Responsabilidad',
             'content': [
                 'Pérdidas debido a errores del usuario',
                 'Problemas de conectividad',
@@ -48,7 +58,7 @@ TERMS = {
             ]
         },
         {
-            'title': '6. Restricciones Geográficas',
+            'title': '7. Restricciones Geográficas',
             'content': [
                 'La participación en la preventa de monedas y ciertos servicios financieros de Confío está estrictamente prohibida para:',
                 'Residentes o ciudadanos de los Estados Unidos de América (US)',
@@ -56,11 +66,19 @@ TERMS = {
             ]
         },
         {
-            'title': '7. Modificaciones',
+            'title': '8. Cumplimiento del Usuario',
+            'content': [
+                'Usted es responsable de verificar que el uso de Confío y la compra de $CONFIO estén permitidos en su jurisdicción.',
+                'Podemos rechazar, limitar o cancelar acceso a servicios o a la preventa si detectamos restricciones regulatorias, sanciones, fraude, suplantación o incumplimiento de estos términos.',
+                'Podemos solicitar verificaciones adicionales de identidad, origen de fondos o residencia antes o después de permitir el uso de ciertas funciones.'
+            ]
+        },
+        {
+            'title': '9. Modificaciones',
             'content': 'Nos reservamos el derecho de modificar estos términos en cualquier momento. Los cambios entrarán en vigor al publicarlos en nuestro sitio web.'
         },
         {
-            'title': '8. Contacto',
+            'title': '10. Contacto',
             'content': {
                 'email': 'legal@confio.lat',
                 'telegram': 'https://t.me/confio4world'
@@ -71,8 +89,8 @@ TERMS = {
 
 PRIVACY = {
     'title': 'Política de Privacidad',
-    'version': '1.2.0',
-    'last_updated': '2025-12-14',
+    'version': '1.3.0',
+    'last_updated': '2026-03-19',
     'is_legally_binding': True,
     'sections': [
         {
@@ -83,16 +101,18 @@ PRIVACY = {
                     'Dirección de correo electrónico',
                     'Número de teléfono',
                     'Direcciones de billetera',
-                    'Información de transacciones'
+                    'Información de transacciones',
+                    'Información de cuenta y perfil, incluyendo identificadores internos, país de teléfono y nombre de usuario'
                 ],
                 'kyc_info': [
                     'Fecha de nacimiento',
-                    'Número de identificación (cédula, DNI, pasaporte)',
+                    'Número y tipo de identificación (por ejemplo cédula, DNI, pasaporte u otros documentos soportados)',
                     'Fotografía de documento de identidad',
                     'Documento de identidad escaneado o fotografiado',
                     'Selfie con documento de identidad',
                     'Información de dirección residencial',
-                    'Información de fuente de fondos'
+                    'Datos del documento, como país emisor y fecha de expiración',
+                    'Resultados de verificación, rechazos, motivos de revisión y señales de riesgo o AML'
                 ],
                 'device_info': [
                     'Sistema operativo',
@@ -100,9 +120,24 @@ PRIVACY = {
                     'Dirección IP',
                     'Ubicación',
                     'ID del dispositivo',
-                    'ID de Publicidad (Advertising ID)',
-                    'Configuración de notificaciones',
-                    'Última hora activa y registros de actividad'
+                    'Huella del dispositivo, user agent, sesiones, última actividad y registros de seguridad',
+                    'Configuración de notificaciones y tokens de notificaciones push',
+                    'Señales de integridad de la app o del dispositivo para prevención de fraude'
+                ],
+                'payments_and_ramps': [
+                    'Métodos de cobro o retiro guardados, como cuentas bancarias, identificadores, números de teléfono o alias según el método',
+                    'Metadatos requeridos por proveedores de ramp on/off, incluyendo datos específicos del rail o proveedor',
+                    'Dirección declarada por el usuario para recargas y retiros cuando sea necesaria para procesos regulatorios o de proveedor',
+                    'Órdenes de recarga y retiro, estados, identificadores externos, montos, monedas y eventos de webhook relacionados'
+                ],
+                'support_and_content': [
+                    'Conversaciones y mensajes de soporte',
+                    'Preferencias y estados de lectura de notificaciones o contenido dentro de la app',
+                    'Reacciones, suscripciones a canales y otra interacción con contenido publicado en la plataforma'
+                ],
+                'business_and_payroll': [
+                    'Datos de negocios, roles de empleados, permisos, notas internas y configuraciones operativas',
+                    'Destinatarios de nómina, corridas de nómina, montos, comisiones, estado de pagos y metadatos asociados'
                 ]
             }
         },
@@ -111,12 +146,15 @@ PRIVACY = {
             'content': [
                 'Proporcionar y mantener nuestros servicios',
                 'Procesar transacciones',
+                'Procesar recargas, retiros y otras integraciones con proveedores de pago o rampas',
                 'Enviar actualizaciones importantes',
                 'Mejorar nuestros servicios',
-                'Análisis estadístico para mejorar la experiencia del usuario',
+                'Personalizar y operar funciones de soporte, notificaciones y contenido dentro de la app',
+                'Análisis operativo y estadístico para mejorar la experiencia del usuario',
                 'Cumplir con obligaciones legales y regulatorias',
                 'Verificar su identidad y prevenir fraudes',
-                'Cumplir con requisitos de KYC/AML'
+                'Cumplir con requisitos de KYC/AML',
+                'Detectar abuso, proteger cuentas, evaluar integridad del dispositivo y monitorear riesgos de seguridad'
             ]
         },
         {
@@ -125,9 +163,10 @@ PRIVACY = {
                 'Cuando es requerido por ley',
                 'Para proteger nuestros derechos',
                 'Con su consentimiento explícito',
-                'Con proveedores de servicios de verificación KYC',
-                'Con proveedores de servicios de análisis (como Firebase Analytics de Google) para entender el uso de la aplicación y mejorar nuestros servicios',
-                'Con autoridades regulatorias cuando sea necesario'
+                'Con proveedores de servicios de verificación KYC y cumplimiento regulatorio',
+                'Con proveedores de recargas, retiros, pagos, transferencias y conversión de activos cuando sea necesario para ejecutar una operación solicitada por usted',
+                'Con proveedores de infraestructura, almacenamiento, autenticación, notificaciones push y seguridad que actúan como encargados del tratamiento',
+                'Con autoridades regulatorias, judiciales o administrativas cuando sea necesario'
             ]
         },
         {
@@ -138,7 +177,8 @@ PRIVACY = {
                 'Monitoreo regular de seguridad',
                 'Actualizaciones de seguridad',
                 'Almacenamiento seguro de documentos KYC',
-                'Verificación de identidad mediante proveedores certificados'
+                'Verificación de identidad mediante proveedores certificados',
+                'Controles antifraude, registros de sesión, monitoreo de dispositivos y verificaciones de integridad'
             ]
         },
         {
@@ -149,15 +189,15 @@ PRIVACY = {
                 'Solicitar la eliminación de datos',
                 'Oponerse al procesamiento',
                 'Exportar sus datos',
-                'Solicitar información sobre el uso de sus datos KYC'
+                'Solicitar información sobre el uso de sus datos KYC y de seguridad'
             ]
         },
         {
-            'title': '6. Retención de Datos KYC',
+            'title': '6. Retención de Datos',
             'content': [
-                'El tiempo requerido por las regulaciones aplicables',
-                'Un mínimo de 5 años después de la última transacción',
-                'El tiempo necesario para cumplir con obligaciones legales'
+                'Conservamos datos personales, transaccionales, de seguridad y de soporte durante el tiempo necesario para prestar el servicio, proteger la plataforma y cumplir con obligaciones legales o regulatorias',
+                'Los datos KYC/AML y los registros vinculados a transacciones pueden conservarse por el tiempo requerido por la regulación aplicable, incluyendo al menos 5 años después de la última transacción cuando corresponda',
+                'Podemos conservar registros antifraude, seguridad, auditoría y cumplimiento por el tiempo necesario para investigar incidentes, prevenir abuso y atender requerimientos legales'
             ]
         },
         {
@@ -172,8 +212,8 @@ PRIVACY = {
 
 DELETION = {
     'title': 'Eliminación de Datos',
-    'version': '1.0.0',
-    'last_updated': '2025-05-02',
+    'version': '1.1.0',
+    'last_updated': '2026-03-19',
     'is_legally_binding': True,
     'sections': [
         {
@@ -182,31 +222,33 @@ DELETION = {
                 'Enviar un email a privacy@confio.lat',
                 'Incluir "Solicitud de Eliminación de Datos" en el asunto',
                 'Proporcionar su dirección de correo electrónico registrada',
-                'Confirmar su identidad'
+                'Confirmar su identidad',
+                'Podemos solicitar información adicional para validar la titularidad de la cuenta y prevenir eliminaciones fraudulentas'
             ]
         },
         {
             'title': '2. Datos que se Eliminarán',
             'content': [
-                'Información de la cuenta',
-                'Historial de transacciones',
-                'Preferencias de usuario',
-                'Datos de contacto'
+                'Cuando la ley y nuestras obligaciones regulatorias lo permitan, eliminaremos o anonimizaremos datos de perfil, preferencias, información de contacto y otros datos no esenciales para cumplimiento',
+                'También podremos desactivar su acceso, cerrar la cuenta y eliminar o desvincular configuraciones operativas asociadas a la cuenta',
+                'Cuando técnicamente o legalmente no sea posible una eliminación inmediata, restringiremos el uso de los datos y los conservaremos solo para fines permitidos'
             ]
         },
         {
             'title': '3. Datos que no se Eliminarán',
             'content': [
                 'Registros de transacciones en la blockchain',
-                'Información requerida por ley',
-                'Datos necesarios para prevenir fraudes'
+                'Información que debamos conservar por ley, regulación, requerimientos fiscales, contables, KYC, AML, auditoría o prevención de fraude',
+                'Registros de seguridad, sesiones, eventos de integridad, señales antifraude y evidencia necesaria para investigar abuso o incidentes',
+                'Registros operativos o contractuales necesarios para resolver disputas, cumplir obligaciones pendientes o defender derechos legales'
             ]
         },
         {
             'title': '4. Tiempo de Procesamiento',
             'content': [
-                'Procesaremos su solicitud dentro de los 30 días hábiles',
-                'Recibirá una confirmación por email cuando se complete'
+                'Procesaremos su solicitud dentro de un plazo razonable y conforme a la ley aplicable',
+                'En casos complejos o cuando existan obligaciones regulatorias, verificaciones adicionales o sistemas de terceros involucrados, el proceso puede tardar más',
+                'Recibirá una confirmación por email cuando la solicitud haya sido atendida o cuando podamos informarle qué datos deben conservarse'
             ]
         },
         {
@@ -214,7 +256,8 @@ DELETION = {
             'content': [
                 'No podrá acceder a sus datos eliminados',
                 'Deberá crear una nueva cuenta para usar nuestros servicios',
-                'Las transacciones en la blockchain son permanentes'
+                'Las transacciones en la blockchain son permanentes',
+                'La eliminación de la cuenta no implica la eliminación automática de todos los registros regulatorios, antifraude o de seguridad que debamos conservar'
             ]
         },
         {

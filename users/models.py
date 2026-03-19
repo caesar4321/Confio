@@ -620,6 +620,14 @@ class BankInfo(SoftDeleteModel):
         blank=True,
         help_text="Type of payment method (bank, fintech, etc.)"
     )
+    ramp_payment_method = models.ForeignKey(
+        'ramps.RampPaymentMethod',
+        on_delete=models.SET_NULL,
+        related_name='user_bank_infos',
+        null=True,
+        blank=True,
+        help_text="Ramp payment method owned by the ramps domain"
+    )
     
     # DEPRECATED: Legacy bank-specific fields (kept for backward compatibility)
     country = models.ForeignKey(

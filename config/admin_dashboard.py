@@ -1031,6 +1031,15 @@ from exchange_rates.admin import ExchangeRateAdmin, RateFetchLogAdmin
 confio_admin_site.register(ExchangeRate, ExchangeRateAdmin)
 confio_admin_site.register(RateFetchLog, RateFetchLogAdmin)
 
+# Ramp models
+from ramps.models import KoyweBankInfo, RampPaymentMethod, RampTransaction, RampUserAddress, RampWebhookEvent
+from ramps.admin import KoyweBankInfoAdmin, RampPaymentMethodAdmin, RampTransactionAdmin, RampUserAddressAdmin, RampWebhookEventAdmin
+confio_admin_site.register(KoyweBankInfo, KoyweBankInfoAdmin)
+confio_admin_site.register(RampPaymentMethod, RampPaymentMethodAdmin)
+confio_admin_site.register(RampTransaction, RampTransactionAdmin)
+confio_admin_site.register(RampUserAddress, RampUserAddressAdmin)
+confio_admin_site.register(RampWebhookEvent, RampWebhookEventAdmin)
+
 # USDC Transaction models
 from usdc_transactions.models import USDCDeposit, USDCWithdrawal, GuardarianTransaction
 from usdc_transactions.admin import USDCDepositAdmin, USDCWithdrawalAdmin, GuardarianTransactionAdmin

@@ -28,6 +28,137 @@ from .constants import (
 logger = logging.getLogger(__name__)
 
 
+def _link_autoswap_conversion_to_recent_guardarian_ramp(*, user, account, conversion):
+    if not user or not account or not conversion:
+        return
+
+    try:
+        from ramps.models import RampTransaction
+
+        candidates = RampTransaction.objects.select_for_update().filter(
+            provider='guardarian',
+            direction='on_ramp',
+            actor_user=user,
+            conversion__isnull=True,
+            usdc_deposit__isnull=False,
+            created_at__gte=timezone.now() - timedelta(hours=48),
+        ).order_by('-created_at')
+
+        matched = candidates.filter(
+            actor_address=account.algorand_address or '',
+            usdc_deposit__amount=conversion.from_amount,
+        ).first()
+
+        if not matched:
+            matched = candidates.filter(
+                actor_address=account.algorand_address or '',
+            ).first() or candidates.first()
+
+        if not matched:
+            logger.info(
+                "[AutoSwap USDC] No recent Guardarian ramp candidate for conversion %s",
+                conversion.internal_id,
+            )
+            return
+
+        update_fields = []
+        if matched.conversion_id != conversion.id:
+            matched.conversion = conversion
+            update_fields.append('conversion')
+        if conversion.actor_address and matched.actor_address != conversion.actor_address:
+            matched.actor_address = conversion.actor_address
+            update_fields.append('actor_address')
+        if matched.final_amount != conversion.to_amount:
+            matched.final_amount = conversion.to_amount
+            update_fields.append('final_amount')
+        if matched.final_currency != 'CUSD':
+            matched.final_currency = 'CUSD'
+            update_fields.append('final_currency')
+
+        if update_fields:
+            update_fields.append('updated_at')
+            matched.save(update_fields=update_fields)
+            logger.info(
+                "[AutoSwap USDC] Linked conversion %s to ramp %s (Guardarian %s)",
+                conversion.internal_id,
+                matched.internal_id,
+                matched.provider_order_id,
+            )
+    except Exception:
+        logger.exception(
+            "[AutoSwap USDC] Failed to link conversion %s to Guardarian ramp",
+            getattr(conversion, 'internal_id', None),
+        )
+
+
+def _link_external_withdrawal_to_ramp(
+    *,
+    ramp_provider: str | None,
+    provider_order_id: str | None,
+    conversion=None,
+    withdrawal=None,
+    actor_address: str | None = None,
+):
+    if not ramp_provider or not provider_order_id:
+        return
+
+    provider = str(ramp_provider).strip().lower()
+    order_id = str(provider_order_id).strip()
+    if not provider or not order_id:
+        return
+
+    try:
+        from ramps.models import RampTransaction
+
+        ramp_tx = RampTransaction.objects.select_for_update().filter(
+            provider=provider,
+            provider_order_id=order_id,
+        ).first()
+        if not ramp_tx:
+            logger.warning(
+                "[Ramp Funding] No ramp transaction found for provider=%s order_id=%s",
+                provider,
+                order_id,
+            )
+            return
+
+        update_fields = []
+        if conversion and ramp_tx.conversion_id != conversion.id:
+            ramp_tx.conversion = conversion
+            update_fields.append('conversion')
+        if withdrawal and ramp_tx.usdc_withdrawal_id != withdrawal.id:
+            ramp_tx.usdc_withdrawal = withdrawal
+            update_fields.append('usdc_withdrawal')
+        if actor_address and ramp_tx.actor_address != actor_address:
+            ramp_tx.actor_address = actor_address
+            update_fields.append('actor_address')
+        if ramp_tx.status != 'PROCESSING':
+            ramp_tx.status = 'PROCESSING'
+            update_fields.append('status')
+        if ramp_tx.status_detail != 'withdrawal_submitted_provider_pending':
+            ramp_tx.status_detail = 'withdrawal_submitted_provider_pending'
+            update_fields.append('status_detail')
+
+        if update_fields:
+            update_fields.append('updated_at')
+            ramp_tx.save(update_fields=update_fields)
+            logger.info(
+                "[Ramp Funding] Linked conversion=%s withdrawal=%s to ramp %s:%s",
+                getattr(conversion, 'internal_id', None),
+                getattr(withdrawal, 'internal_id', None),
+                provider,
+                order_id,
+            )
+    except Exception:
+        logger.exception(
+            "[Ramp Funding] Failed to link conversion=%s withdrawal=%s to ramp %s:%s",
+            getattr(conversion, 'internal_id', None),
+            getattr(withdrawal, 'internal_id', None),
+            ramp_provider,
+            provider_order_id,
+        )
+
+
 def _get_referral_reward_summary(user) -> dict:
     """Aggregate referral-earned CONFIO balances for a user."""
     from achievements.models import UserAchievement, ConfioRewardTransaction, ReferralWithdrawalLog
@@ -2536,9 +2667,19 @@ class BuildAutoSwapTransactionsMutation(graphene.Mutation):
                 from decimal import Decimal
                 from blockchain.cusd_transaction_builder import CUSDTransactionBuilder
                 from conversion.models import Conversion
+                from blockchain.auto_swap_state import attach_conversion_to_pending_auto_swap
+                from blockchain.models import PendingAutoSwap
                 
                 amount_decimal = Decimal(amount) / Decimal('1000000')
                 tx_builder = CUSDTransactionBuilder()
+                pending_auto_swap = PendingAutoSwap.objects.filter(
+                    account=account,
+                    asset_type='USDC',
+                    status='PENDING',
+                ).select_related('conversion').order_by('-created_at').first()
+
+                if pending_auto_swap and pending_auto_swap.amount_micro > 0:
+                    amount_decimal = Decimal(str(pending_auto_swap.amount_micro)) / Decimal('1000000')
                 
                 # Use actual on-chain USDC balance to avoid underflow from stale cache.
                 # The client amount is a hint; the real balance may differ slightly
@@ -2565,6 +2706,10 @@ class BuildAutoSwapTransactionsMutation(graphene.Mutation):
                 if actual_usdc is not None and actual_usdc < amount_decimal:
                     logger.info(f"[AutoSwap USDC] Client sent {amount_decimal}, actual on-chain is {actual_usdc}. Using actual.")
                     amount_decimal = actual_usdc
+                    if pending_auto_swap:
+                        pending_auto_swap.amount_decimal = actual_usdc
+                        pending_auto_swap.amount_micro = int((actual_usdc * Decimal('1000000')).quantize(Decimal('1')))
+                        pending_auto_swap.save(update_fields=['amount_decimal', 'amount_micro', 'updated_at'])
                 
                 # Contract minimum is 1 USDC for mint_with_collateral.
                 if amount_decimal < Decimal('1.0'):
@@ -2590,17 +2735,46 @@ class BuildAutoSwapTransactionsMutation(graphene.Mutation):
 
                 # We need to make sure the user has a transaction hash reference eventually
                 # We'll create a PENDING conversion
-                conversion = Conversion.objects.create(
-                    actor_type='user',
-                    actor_user=user,
-                    actor_display_name=user.username,
-                    actor_address=account.algorand_address,
-                    conversion_type='usdc_to_cusd',
-                    from_amount=amount_decimal,
-                    to_amount=amount_decimal,
-                    exchange_rate=Decimal('1.0'),
-                    fee_amount=Decimal('0.0'),
-                    status='PENDING_SIG'
+                conversion = None
+                if (
+                    pending_auto_swap
+                    and pending_auto_swap.conversion
+                    and pending_auto_swap.conversion.status in ['PENDING', 'PENDING_SIG', 'SUBMITTED', 'PROCESSING']
+                ):
+                    conversion = pending_auto_swap.conversion
+                    conversion.from_amount = amount_decimal
+                    conversion.to_amount = amount_decimal
+                    conversion.exchange_rate = Decimal('1.0')
+                    conversion.fee_amount = Decimal('0.0')
+                    conversion.status = 'PENDING_SIG'
+                    conversion.error_message = None
+                    conversion.save(update_fields=[
+                        'from_amount',
+                        'to_amount',
+                        'exchange_rate',
+                        'fee_amount',
+                        'status',
+                        'error_message',
+                        'updated_at',
+                    ])
+                else:
+                    conversion = Conversion.objects.create(
+                        actor_type='user',
+                        actor_user=user,
+                        actor_display_name=user.username,
+                        actor_address=account.algorand_address,
+                        conversion_type='usdc_to_cusd',
+                        from_amount=amount_decimal,
+                        to_amount=amount_decimal,
+                        exchange_rate=Decimal('1.0'),
+                        fee_amount=Decimal('0.0'),
+                        status='PENDING_SIG'
+                    )
+                    attach_conversion_to_pending_auto_swap(pending_auto_swap, conversion)
+                _link_autoswap_conversion_to_recent_guardarian_ramp(
+                    user=user,
+                    account=account,
+                    conversion=conversion,
                 )
 
                 # Normalize sponsor transactions array of JSON strings and user transactions
@@ -2935,6 +3109,7 @@ class SubmitAutoSwapTransactionsMutation(graphene.Mutation):
         try:
             from conversion.models import Conversion
             from blockchain.algorand_client import get_algod_client
+            from blockchain.auto_swap_state import mark_pending_auto_swap_submitted
             import base64
             import json as _json
 
@@ -2991,6 +3166,7 @@ class SubmitAutoSwapTransactionsMutation(graphene.Mutation):
             conv.status = 'SUBMITTED'
             conv.to_transaction_hash = txid
             conv.save(update_fields=['status', 'to_transaction_hash', 'updated_at'])
+            mark_pending_auto_swap_submitted(conv)
 
             # If this is a burn+send, also finalize the withdrawal record
             # and create a proper SendTransaction (post_save signal in users/signals.py
@@ -2999,6 +3175,7 @@ class SubmitAutoSwapTransactionsMutation(graphene.Mutation):
             if withdrawal_id:
                 try:
                     from usdc_transactions.models import USDCWithdrawal
+                    from usdc_transactions.models_unified import UnifiedUSDCTransactionTable
                     from send.models import SendTransaction
                     from users.models import Account
                     from django.utils import timezone as dj_tz
@@ -3040,6 +3217,34 @@ class SubmitAutoSwapTransactionsMutation(graphene.Mutation):
                         status='SUBMITTED',
                         transaction_hash=txid,
                     )
+
+                    # Keep the USDC withdrawal unified row in sync with the
+                    # submitted on-chain tx so scan_outbound_confirmations can
+                    # pick it up and finalize the withdrawal.
+                    UnifiedUSDCTransactionTable.objects.update_or_create(
+                        usdc_withdrawal=w,
+                        defaults={
+                            'transaction_id': str(w.internal_id),
+                            'transaction_type': 'withdrawal',
+                            'actor_user': w.actor_user,
+                            'actor_business': w.actor_business,
+                            'actor_type': w.actor_type,
+                            'actor_display_name': w.actor_display_name,
+                            'actor_address': w.actor_address,
+                            'amount': w.amount,
+                            'currency': 'USDC',
+                            'source_address': w.actor_address,
+                            'destination_address': w.destination_address,
+                            'transaction_hash': txid,
+                            'network': w.network,
+                            'status': 'SUBMITTED',
+                            'error_message': w.error_message,
+                            'created_at': w.created_at,
+                            'transaction_date': w.created_at,
+                            'completed_at': w.completed_at,
+                            'updated_at': dj_tz.now(),
+                        }
+                    )
                 except Exception as wdl_err:
                     logger.warning(f"Failed to finalize withdrawal {withdrawal_id}: {wdl_err}")
 
@@ -3079,13 +3284,15 @@ class BuildBurnAndSendMutation(graphene.Mutation):
         amount = graphene.String(required=True)  # cUSD amount in base units (micro)
         recipient_address = graphene.String(required=True)
         note = graphene.String(required=False)
+        ramp_provider = graphene.String(required=False)
+        provider_order_id = graphene.String(required=False)
 
     success = graphene.Boolean()
     error = graphene.String()
     transactions = graphene.JSONString()
 
     @classmethod
-    def mutate(cls, root, info, amount, recipient_address, note=None):
+    def mutate(cls, root, info, amount, recipient_address, note=None, ramp_provider=None, provider_order_id=None):
         try:
             user = info.context.user
             if not user.is_authenticated:
@@ -3176,6 +3383,14 @@ class BuildBurnAndSendMutation(graphene.Mutation):
                 'sponsor_transactions': sponsors_norm,
                 'group_id': tx_result.get('group_id')
             }
+
+            _link_external_withdrawal_to_ramp(
+                ramp_provider=ramp_provider,
+                provider_order_id=provider_order_id,
+                conversion=conversion,
+                withdrawal=withdrawal,
+                actor_address=account.algorand_address,
+            )
 
             return cls(
                 success=True,

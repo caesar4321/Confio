@@ -74,7 +74,7 @@ export class PresaleWsSession {
     return new Promise((resolve, reject) => {
       this.resolvers['prepare'] = resolve as any; this.rejectors['prepare'] = reject as any;
       const t = setTimeout(() => { if (this.rejectors['prepare']) { this.rejectors['prepare'](new Error('prepare_timeout')); delete this.rejectors['prepare']; delete this.resolvers['prepare']; } }, timeout);
-      try { this.ws!.send(JSON.stringify({ type: 'prepare_request', amount: String(amount), platform: Platform.OS })); } catch (e) { clearTimeout(t); reject(e); }
+      try { this.ws!.send(JSON.stringify({ type: 'prepare_request', amount: String(amount), platform: Platform.OS, accepted_terms: true })); } catch (e) { clearTimeout(t); reject(e); }
     });
   }
 
