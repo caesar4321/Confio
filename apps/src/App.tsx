@@ -2,10 +2,9 @@ import React, { useRef, useEffect } from 'react';
 import { ApolloProvider } from '@apollo/client';
 import { NavigationContainer, NavigationContainerRef } from '@react-navigation/native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import { StatusBar } from 'react-native';
+import { StatusBar, StyleSheet, View, ActivityIndicator, Text } from 'react-native';
 import { colors } from './config/theme';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { View, ActivityIndicator, Text } from 'react-native';
 import apolloClient from './apollo/client';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { HeaderProvider } from './contexts/HeaderContext';
@@ -67,30 +66,30 @@ const Navigation: React.FC = () => {
     }
   }, [isAuthenticated]);
 
-  if (isLoading) {
-    console.log('Showing loading indicator');
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" />
-      </View>
-    );
-  }
-
-  console.log('Rendering navigation stack, isAuthenticated:', isAuthenticated);
+  console.log('Rendering navigation stack, isAuthenticated:', isAuthenticated, 'isLoading:', isLoading);
 
   return (
-    <Stack.Navigator
-      screenOptions={{
-        headerShown: false,
-        animation: 'none'
-      }}
-    >
-      {!isAuthenticated ? (
-        <Stack.Screen name="Auth" component={AuthNavigator} />
-      ) : (
-        <Stack.Screen name="Main" component={MainNavigator} />
+    <View style={{ flex: 1 }}>
+      {/* Always mount the navigator to avoid tree swap on Android */}
+      <Stack.Navigator
+        screenOptions={{
+          headerShown: false,
+          animation: 'none'
+        }}
+      >
+        {!isAuthenticated ? (
+          <Stack.Screen name="Auth" component={AuthNavigator} />
+        ) : (
+          <Stack.Screen name="Main" component={MainNavigator} />
+        )}
+      </Stack.Navigator>
+      {/* Loading overlay — covers navigator while auth resolves, then disappears */}
+      {isLoading && (
+        <View style={[StyleSheet.absoluteFillObject, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff', zIndex: 10 }]}>
+          <ActivityIndicator size="large" />
+        </View>
       )}
-    </Stack.Navigator>
+    </View>
   );
 };
 
