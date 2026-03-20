@@ -15,15 +15,45 @@ import { deepLinkHandler } from '../utils/deepLinkHandler';
 // Simple auth readiness gate to coordinate token-dependent queries
 let __authReady = false;
 const __authReadyResolvers: Array<() => void> = [];
+// React state listeners for isAuthReady
+let __authReadySetters: Array<(v: boolean) => void> = [];
 export function signalAuthReady() {
   __authReady = true;
   while (__authReadyResolvers.length) {
     try { __authReadyResolvers.pop()?.(); } catch { }
   }
+  // Notify React state listeners
+  for (const setter of __authReadySetters) {
+    try { setter(true); } catch { }
+  }
+}
+export function resetAuthReady() {
+  __authReady = false;
+  // Notify React state listeners
+  for (const setter of __authReadySetters) {
+    try { setter(false); } catch { }
+  }
 }
 export async function waitForAuthReady() {
   if (__authReady) return;
   await new Promise<void>(res => __authReadyResolvers.push(res));
+}
+/**
+ * React hook that returns true once signalAuthReady() has been called.
+ * Useful for skipping GraphQL queries until the JWT token is fully ready
+ * (refreshed + synced to the correct account context).
+ */
+export function useAuthReady(): boolean {
+  const [ready, setReady] = React.useState(__authReady);
+  React.useEffect(() => {
+    // In case signalAuthReady() was called between render and effect
+    if (__authReady) setReady(true);
+    __authReadySetters.push(setReady);
+    return () => {
+      __authReadySetters = __authReadySetters.filter(s => s !== setReady);
+    };
+  }, []);
+  return ready;
 }
 
 interface UserProfile {
@@ -799,59 +829,11 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           console.log('Has valid JWT tokens:', hasValidTokens);
 
           if (hasValidTokens) {
-            // Ensure access token is valid (refresh if needed) BEFORE navigating
-            const { jwtDecode } = await import('jwt-decode');
             let accessToken = tokens.accessToken;
             const refreshToken = tokens.refreshToken;
-            try {
-              const decodeStart = Date.now();
-              const decoded: any = jwtDecode(accessToken);
-              perfLog('jwtDecode access token', decodeStart, {
-                exp: decoded?.exp,
-              });
-              const nowTs = Math.floor(Date.now() / 1000);
-              if (!decoded?.exp || decoded.exp <= nowTs + 30) {
-                // Refresh access token first
-                const { gql } = await import('@apollo/client');
-                const REFRESH_TOKEN = gql`
-                  mutation RefreshToken($refreshToken: String!) {
-                    refreshToken(refreshToken: $refreshToken) {
-                      token
-                      refreshExpiresIn
-                    }
-                  }
-                `;
-                const { apolloClient } = await import('../apollo/client');
-                const refreshStart = Date.now();
-                const { data } = await apolloClient.mutate({
-                  mutation: REFRESH_TOKEN,
-                  variables: { refreshToken },
-                  context: { skipAuth: true },
-                });
-                perfLog('Startup RefreshToken mutation', refreshStart, {
-                  hasToken: !!data?.refreshToken?.token,
-                });
-                if (data?.refreshToken?.token) {
-                  accessToken = data.refreshToken.token;
-                  const keychainWriteStart = Date.now();
-                  await Keychain.setGenericPassword(
-                    'auth_tokens',
-                    JSON.stringify({ accessToken, refreshToken }),
-                    {
-                      service: 'com.confio.auth',
-                      username: 'auth_tokens',
-                      accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED,
-                    }
-                  );
-                  perfLog('Persist refreshed access token to Keychain', keychainWriteStart);
-                  setAccountContextTick((t) => t + 1);
-                }
-              }
-            } catch (e) {
-              console.error('Pre-navigation refresh failed:', e);
-            }
 
-
+            // Show biometric prompt FIRST — it's local and doesn't need a valid token.
+            // Token refresh happens in parallel so it's ready by the time biometric completes.
             const biometricStateStart = Date.now();
             const bioEnabled = await biometricAuthService.isEnabled();
             perfLog('biometricAuthService.isEnabled on startup', biometricStateStart, {
@@ -872,7 +854,58 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
               }
             }
 
-            // Align access token context with active account before navigating
+            // Start token refresh in the background while biometric prompt is shown
+            const tokenRefreshPromise = (async () => {
+              try {
+                const { jwtDecode } = await import('jwt-decode');
+                const decodeStart = Date.now();
+                const decoded: any = jwtDecode(accessToken);
+                perfLog('jwtDecode access token', decodeStart, {
+                  exp: decoded?.exp,
+                });
+                const nowTs = Math.floor(Date.now() / 1000);
+                if (!decoded?.exp || decoded.exp <= nowTs + 30) {
+                  const { gql } = await import('@apollo/client');
+                  const REFRESH_TOKEN = gql`
+                    mutation RefreshToken($refreshToken: String!) {
+                      refreshToken(refreshToken: $refreshToken) {
+                        token
+                        refreshExpiresIn
+                      }
+                    }
+                  `;
+                  const { apolloClient } = await import('../apollo/client');
+                  const refreshStart = Date.now();
+                  const { data } = await apolloClient.mutate({
+                    mutation: REFRESH_TOKEN,
+                    variables: { refreshToken },
+                    context: { skipAuth: true },
+                  });
+                  perfLog('Startup RefreshToken mutation', refreshStart, {
+                    hasToken: !!data?.refreshToken?.token,
+                  });
+                  if (data?.refreshToken?.token) {
+                    accessToken = data.refreshToken.token;
+                    const keychainWriteStart = Date.now();
+                    await Keychain.setGenericPassword(
+                      'auth_tokens',
+                      JSON.stringify({ accessToken, refreshToken }),
+                      {
+                        service: 'com.confio.auth',
+                        username: 'auth_tokens',
+                        accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED,
+                      }
+                    );
+                    perfLog('Persist refreshed access token to Keychain', keychainWriteStart);
+                    setAccountContextTick((t) => t + 1);
+                  }
+                }
+              } catch (e) {
+                console.error('Pre-navigation refresh failed:', e);
+              }
+            })();
+
+            // Run biometric auth and token refresh in parallel
             try {
               if (bioEnabled) {
                 console.log('[AuthContext] Biometrics enabled, enforcing check on startup...');
@@ -891,6 +924,9 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
                 console.log('[AuthContext] Startup biometric authentication successful');
                 lastBiometricSuccessRef.current = Date.now();
               }
+
+              // Wait for token refresh to complete before proceeding with account context
+              await tokenRefreshPromise;
 
               const authService = AuthService.getInstance();
               const activeContextStart = Date.now();
@@ -916,7 +952,6 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
                   hasToken: !!data?.switchAccountToken?.token,
                 });
                 if (data?.switchAccountToken?.token) {
-                  // Store new access token with the same refresh token
                   const businessKeychainWriteStart = Date.now();
                   await Keychain.setGenericPassword(
                     'auth_tokens',
@@ -1044,6 +1079,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   const signOut = async () => {
     try {
       console.log('Starting sign out process...');
+      resetAuthReady();
       const authService = AuthService.getInstance();
       await authService.signOut();
       setIsAuthenticated(false);
@@ -1051,6 +1087,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       navigateToScreen('Auth');
     } catch (error) {
       console.error('Error signing out:', error);
+      resetAuthReady();
       setIsAuthenticated(false);
       setProfileData(null);
     }

@@ -35,16 +35,26 @@ _KOYWE_PROCESSING_STATUSES = {
 _KOYWE_PENDING_STATUSES = {'WAITING'}
 
 
-def verify_koywe_webhook_signature(raw_body: bytes, signature_header: str | None) -> bool:
+def verify_koywe_webhook_signature(payload: dict[str, Any]) -> bool:
     secret = (getattr(settings, 'KOYWE_WEBHOOK_SECRET', '') or '').strip()
     if not secret:
         return True
-    provided = (signature_header or '').strip()
+    provided = str(payload.get('signature') or '').strip()
     if not provided:
         return False
+    unsigned_payload = {
+        key: value
+        for key, value in payload.items()
+        if key != 'signature'
+    }
+    message = json.dumps(
+        unsigned_payload,
+        ensure_ascii=False,
+        separators=(',', ':'),
+    ).encode('utf-8')
     expected = hmac.new(
         secret.encode('utf-8'),
-        raw_body,
+        message,
         hashlib.sha256,
     ).hexdigest()
     return hmac.compare_digest(expected, provided)

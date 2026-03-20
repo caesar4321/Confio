@@ -1314,8 +1314,27 @@ class Query(EmployeeQueries, graphene.ObjectType):
 				# Preserve full asset precision so client threshold checks match on-chain minimums.
 				usdc=f"{all_balances['usdc']['amount']:.6f}"
 			)
-		except Exception:
-			# Graceful fallback to zeros to avoid client crashes
+		except Exception as exc:
+			logger.error("resolve_my_balances failed: %s", exc, exc_info=True)
+			# Fall back to DB-cached balances instead of zeros
+			try:
+				from blockchain.balance_service import BalanceService
+				# Re-locate account for cache lookup (may have been set above)
+				fallback_account = locals().get('account')
+				if fallback_account:
+					cached = BalanceService.get_all_balances(fallback_account, force_refresh=False)
+					return BalancesType(
+						algo=f"{cached['algo']['amount']:.6f}",
+						cusd=f"{cached['cusd']['amount']:.2f}",
+						confio=f"{cached['confio']['amount']:.2f}",
+						confioPresaleLocked=f"{cached.get('confio_presale', {}).get('amount', 0):.2f}",
+						confioLocked=f"{cached.get('confio_presale', {}).get('amount', 0):.2f}",
+						pendingReferralReward="0.00",
+						usdc=f"{cached['usdc']['amount']:.6f}"
+					)
+			except Exception:
+				pass
+			# Last resort: zeros
 			return BalancesType(algo="0.000000", cusd="0.00", confio="0.00", confioPresaleLocked="0.00", confioLocked="0.00", pendingReferralReward="0.00", usdc="0.00")
 
 	def resolve_stats_summary(self, info):

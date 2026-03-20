@@ -21,23 +21,21 @@ logger = logging.getLogger(__name__)
 @csrf_exempt
 @require_POST
 def koywe_webhook(request):
-    signature = request.headers.get('Koywe-Signature') or request.headers.get('KOYWE-SIGNATURE')
-
-    logger.info(
-        'Koywe webhook received: signature_present=%s content_length=%s',
-        bool(signature),
-        request.META.get('CONTENT_LENGTH'),
-    )
-
-    if not verify_koywe_webhook_signature(request.body, signature):
-        logger.warning('Koywe webhook rejected due to invalid signature')
-        return JsonResponse({'ok': False, 'error': 'Invalid signature'}, status=403)
-
     try:
         payload = json.loads(request.body.decode('utf-8'))
     except json.JSONDecodeError:
         logger.warning('Koywe webhook rejected due to invalid JSON')
         return JsonResponse({'ok': False, 'error': 'Invalid JSON'}, status=400)
+
+    logger.info(
+        'Koywe webhook received: payload_signature_present=%s content_length=%s',
+        bool(payload.get('signature')),
+        request.META.get('CONTENT_LENGTH'),
+    )
+
+    if not verify_koywe_webhook_signature(payload):
+        logger.warning('Koywe webhook rejected due to invalid payload signature')
+        return JsonResponse({'ok': False, 'error': 'Invalid signature'}, status=403)
 
     event_type = extract_koywe_event_type(payload)
     event_id = extract_koywe_event_id(payload)

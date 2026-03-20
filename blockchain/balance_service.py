@@ -2,6 +2,7 @@
 Hybrid balance caching service - Fast reads with blockchain truth
 """
 import asyncio
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Dict, Optional
@@ -30,6 +31,7 @@ class BalanceService:
     CACHE_TTL = 300  # 5 minutes
     STALE_THRESHOLD = timedelta(minutes=5)
     RECONCILIATION_THRESHOLD = timedelta(hours=1)
+    BLOCKCHAIN_TIMEOUT = 10  # seconds – max wait for Algorand node RPC
     
     @classmethod
     def get_balance(
@@ -53,25 +55,34 @@ class BalanceService:
         """
         # Critical operations or force refresh always hit blockchain
         if verify_critical or force_refresh:
-            blockchain_data = cls._fetch_from_blockchain(account, token)
-            
-            # Clear all caches when force refreshing
-            if force_refresh:
-                cache_key = f"balance:{account.id}:{token}"
-                cache.delete(cache_key)
-                logger.info(f"Force refresh: cleared balance cache for {account.id}:{token}")
-            
-            # Update database with fresh data
-            # Always refresh the cache after a force refresh so subsequent calls get the new value
-            balance = cls._update_balance_cache(account, token, blockchain_data['amount'], skip_cache=False)
-            
-            return {
-                'amount': balance.amount,
-                'available': balance.available_amount,
-                'pending': balance.pending_amount,
-                'last_synced': balance.last_synced,
-                'is_stale': False
-            }
+            try:
+                blockchain_data = cls._fetch_from_blockchain(account, token)
+
+                # Clear all caches when force refreshing
+                if force_refresh:
+                    cache_key = f"balance:{account.id}:{token}"
+                    cache.delete(cache_key)
+                    logger.info(f"Force refresh: cleared balance cache for {account.id}:{token}")
+
+                # Update database with fresh data
+                balance = cls._update_balance_cache(account, token, blockchain_data['amount'], skip_cache=False)
+
+                return {
+                    'amount': balance.amount,
+                    'available': balance.available_amount,
+                    'pending': balance.pending_amount,
+                    'last_synced': balance.last_synced,
+                    'is_stale': False
+                }
+            except (FuturesTimeoutError, Exception) as e:
+                logger.warning(
+                    "Blockchain fetch failed for %s:%s (critical=%s), falling back to cache: %s",
+                    account.algorand_address, token, verify_critical, e,
+                )
+                # For truly critical operations, re-raise so caller knows it's not verified
+                if verify_critical:
+                    raise
+                # For force_refresh, fall through to cached data below
         
         # Try to get from cache first (normal flow)
         balance = cls._get_cached_balance(account, token)
@@ -132,19 +143,34 @@ class BalanceService:
                     'confio_presale': cls._format_return(cached['CONFIO_PRESALE']),
                 }
         # Fetch fresh snapshot and update caches for all tokens
-        data = cls._fetch_all_from_blockchain(account)
-        # Update DB caches
-        for t in tokens:
-            cls._update_balance_cache(account, t, data.get(t, Decimal('0')))
-        now = timezone.now()
-        # Return formatted dict
-        return {
-            'algo': {'amount': data.get('ALGO', Decimal('0')), 'available': data.get('ALGO', Decimal('0')), 'pending': Decimal('0'), 'last_synced': now, 'is_stale': False},
-            'cusd': {'amount': data.get('CUSD', Decimal('0')), 'available': data.get('CUSD', Decimal('0')), 'pending': Decimal('0'), 'last_synced': now, 'is_stale': False},
-            'confio': {'amount': data.get('CONFIO', Decimal('0')), 'available': data.get('CONFIO', Decimal('0')), 'pending': Decimal('0'), 'last_synced': now, 'is_stale': False},
-            'usdc': {'amount': data.get('USDC', Decimal('0')), 'available': data.get('USDC', Decimal('0')), 'pending': Decimal('0'), 'last_synced': now, 'is_stale': False},
-            'confio_presale': {'amount': data.get('CONFIO_PRESALE', Decimal('0')), 'available': data.get('CONFIO_PRESALE', Decimal('0')), 'pending': Decimal('0'), 'last_synced': now, 'is_stale': False},
-        }
+        try:
+            data = cls._fetch_all_from_blockchain(account)
+            # Update DB caches
+            for t in tokens:
+                cls._update_balance_cache(account, t, data.get(t, Decimal('0')))
+            now = timezone.now()
+            # Return formatted dict
+            return {
+                'algo': {'amount': data.get('ALGO', Decimal('0')), 'available': data.get('ALGO', Decimal('0')), 'pending': Decimal('0'), 'last_synced': now, 'is_stale': False},
+                'cusd': {'amount': data.get('CUSD', Decimal('0')), 'available': data.get('CUSD', Decimal('0')), 'pending': Decimal('0'), 'last_synced': now, 'is_stale': False},
+                'confio': {'amount': data.get('CONFIO', Decimal('0')), 'available': data.get('CONFIO', Decimal('0')), 'pending': Decimal('0'), 'last_synced': now, 'is_stale': False},
+                'usdc': {'amount': data.get('USDC', Decimal('0')), 'available': data.get('USDC', Decimal('0')), 'pending': Decimal('0'), 'last_synced': now, 'is_stale': False},
+                'confio_presale': {'amount': data.get('CONFIO_PRESALE', Decimal('0')), 'available': data.get('CONFIO_PRESALE', Decimal('0')), 'pending': Decimal('0'), 'last_synced': now, 'is_stale': False},
+            }
+        except (FuturesTimeoutError, Exception) as e:
+            logger.warning(
+                "[get_all_balances] blockchain fetch failed for %s, falling back to DB cache: %s",
+                account.algorand_address, e,
+            )
+            # Fall back to DB-cached balances instead of returning zeros
+            cached = {t: cls._get_cached_balance(account, t) for t in tokens}
+            return {
+                'algo': cls._format_return(cached['ALGO']),
+                'cusd': cls._format_return(cached['CUSD']),
+                'confio': cls._format_return(cached['CONFIO']),
+                'usdc': cls._format_return(cached['USDC']),
+                'confio_presale': cls._format_return(cached['CONFIO_PRESALE']),
+            }
 
     @classmethod
     def _format_return(cls, balance: Optional[Balance]) -> Dict[str, Decimal]:
@@ -160,17 +186,40 @@ class BalanceService:
 
     @classmethod
     def _fetch_all_from_blockchain(cls, account: Account) -> Dict[str, Decimal]:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            async def fetch():
-                async with await get_algorand_client() as client:
-                    return await client.get_balances_snapshot(account.algorand_address, skip_cache=True)
-            snapshot = loop.run_until_complete(fetch())
-            logger.info("[balance_fetch_batch] addr=%s data=%s", account.algorand_address, snapshot)
-            return snapshot or {}
-        finally:
-            loop.close()
+        """Fetch all balances from blockchain with a hard timeout.
+
+        The underlying algod SDK call is synchronous/blocking, so asyncio
+        timeouts cannot cancel it.  We run it in a thread pool and enforce a
+        wall-clock timeout via ``concurrent.futures``.
+        """
+        def _do_fetch() -> Dict[str, Decimal]:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                async def fetch():
+                    async with await get_algorand_client() as client:
+                        return await client.get_balances_snapshot(
+                            account.algorand_address, skip_cache=True
+                        )
+                return loop.run_until_complete(fetch()) or {}
+            finally:
+                loop.close()
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(_do_fetch)
+            try:
+                snapshot = future.result(timeout=cls.BLOCKCHAIN_TIMEOUT)
+                logger.info(
+                    "[balance_fetch_batch] addr=%s data=%s",
+                    account.algorand_address, snapshot,
+                )
+                return snapshot
+            except FuturesTimeoutError:
+                logger.error(
+                    "[balance_fetch_batch] TIMEOUT after %ds for addr=%s",
+                    cls.BLOCKCHAIN_TIMEOUT, account.algorand_address,
+                )
+                raise
     
     @classmethod
     def mark_stale(cls, account: Account, token: Optional[str] = None):
@@ -269,36 +318,42 @@ class BalanceService:
     
     @classmethod
     def _fetch_from_blockchain(cls, account: Account, token: str, skip_cache: bool = True) -> Dict[str, Decimal]:
-        """Fetch balance directly from blockchain"""
-        # Run async code in sync context
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        async def get_balance():
-            async with await get_algorand_client() as client:
-                if token == 'CUSD':
-                    # Get actual cUSD balance from the cUSD asset
-                    return await client.get_cusd_balance(account.algorand_address, skip_cache=skip_cache)
-                elif token == 'CONFIO':
-                    return await client.get_confio_balance(account.algorand_address, skip_cache=skip_cache)
-                elif token == 'CONFIO_PRESALE':
-                    return await client.get_presale_locked_confio(account.algorand_address, skip_cache=skip_cache)
-                elif token == 'USDC':
-                    return await client.get_usdc_balance(account.algorand_address, skip_cache=skip_cache)
-                else:
-                    return Decimal('0')
-        
-        try:
-            amount = loop.run_until_complete(get_balance())
-            logger.info("[balance_fetch] addr=%s token=%s amount=%s", account.algorand_address, token, amount)
-            
-            return {
-                'amount': amount,
-                'timestamp': timezone.now()
-            }
-            
-        finally:
-            loop.close()
+        """Fetch balance directly from blockchain with timeout."""
+        def _do_fetch():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                async def get_balance():
+                    async with await get_algorand_client() as client:
+                        if token == 'CUSD':
+                            return await client.get_cusd_balance(account.algorand_address, skip_cache=skip_cache)
+                        elif token == 'CONFIO':
+                            return await client.get_confio_balance(account.algorand_address, skip_cache=skip_cache)
+                        elif token == 'CONFIO_PRESALE':
+                            return await client.get_presale_locked_confio(account.algorand_address, skip_cache=skip_cache)
+                        elif token == 'USDC':
+                            return await client.get_usdc_balance(account.algorand_address, skip_cache=skip_cache)
+                        else:
+                            return Decimal('0')
+                return loop.run_until_complete(get_balance())
+            finally:
+                loop.close()
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(_do_fetch)
+            try:
+                amount = future.result(timeout=cls.BLOCKCHAIN_TIMEOUT)
+                logger.info("[balance_fetch] addr=%s token=%s amount=%s", account.algorand_address, token, amount)
+                return {
+                    'amount': amount,
+                    'timestamp': timezone.now()
+                }
+            except FuturesTimeoutError:
+                logger.error(
+                    "[balance_fetch] TIMEOUT after %ds for addr=%s token=%s",
+                    cls.BLOCKCHAIN_TIMEOUT, account.algorand_address, token,
+                )
+                raise
     
     @classmethod
     def _update_balance_cache(

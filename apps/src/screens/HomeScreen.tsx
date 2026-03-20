@@ -18,7 +18,7 @@ import { Gradient } from '../components/common/Gradient';
 import { AuthService } from '../services/authService';
 import { useNavigation, useFocusEffect, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth, useAuthReady } from '../contexts/AuthContext';
 import { useHeader } from '../contexts/HeaderContext';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
@@ -104,6 +104,7 @@ export const HomeScreen = () => {
   const route = useRoute<any>();
   const { setCurrentAccountAvatar, profileMenu } = useHeader();
   const { signOut, userProfile, isAuthenticated, profileData } = useAuth() as any;
+  const isAuthReady = useAuthReady();
   const { userCountry, selectedCountry } = useCountry();
   const { currency, formatAmount, exchangeRate } = useCurrency();
   const { rate: marketRate, loading: rateLoading } = useSelectedCountryRate();
@@ -143,11 +144,14 @@ export const HomeScreen = () => {
     isAccountSwitchInProgress
   } = useAtomicAccountSwitch();
 
-  // Fetch all balances in a single call to avoid flicker
+  // Fetch all balances in a single call to avoid flicker.
+  // Skip until auth is fully ready (JWT refreshed + synced to correct account context)
+  // to prevent fetching with a stale/wrong-context token.
   const { data: myBalancesData, loading: myBalancesLoading, error: myBalancesError, refetch: refetchMyBalances } = useQuery(GET_MY_BALANCES, {
     fetchPolicy: 'network-only',
     nextFetchPolicy: 'network-only',
     notifyOnNetworkStatusChange: true,
+    skip: !isAuthReady,
   });
   const [refreshAccountBalance] = useMutation(REFRESH_ACCOUNT_BALANCE);
   const [checkReferralStatus, { data: referralStatusData }] = useMutation(CHECK_REFERRAL_STATUS);
