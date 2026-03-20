@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 
 export const useProfileMenu = () => {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
@@ -13,9 +13,9 @@ export const useProfileMenu = () => {
     setShowProfileMenu(false);
   }, []);
 
-  return {
+  return useMemo(() => ({
     showProfileMenu,
     openProfileMenu,
     closeProfileMenu,
-  };
+  }), [showProfileMenu, openProfileMenu, closeProfileMenu]);
 }; 

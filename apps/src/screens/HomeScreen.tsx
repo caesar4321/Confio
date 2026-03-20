@@ -11,10 +11,7 @@ import {
   Image,
   RefreshControl,
   Animated,
-  Dimensions,
   Vibration,
-  AppState,
-  AppStateStatus
 } from 'react-native';
 import ConvertModal from '../components/ConvertModal';
 import { Gradient } from '../components/common/Gradient';
@@ -22,7 +19,6 @@ import { AuthService } from '../services/authService';
 import { useNavigation, useFocusEffect, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuth } from '../contexts/AuthContext';
-import { waitForAuthReady } from '../contexts/AuthContext';
 import { useHeader } from '../contexts/HeaderContext';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
@@ -30,8 +26,6 @@ import Icon from 'react-native-vector-icons/Feather';
 import FAIcon from 'react-native-vector-icons/FontAwesome';
 import InviteClaimBanner from '../components/InviteClaimBanner';
 import * as Keychain from 'react-native-keychain';
-import { getApiUrl } from '../config/env';
-import { jwtDecode } from 'jwt-decode';
 import { RootStackParamList, MainStackParamList } from '../types/navigation';
 import { ProfileMenu } from '../components/ProfileMenu';
 import { useAccount } from '../contexts/AccountContext';
@@ -40,11 +34,10 @@ import { PushNotificationService } from '../services/pushNotificationService';
 import { AccountSwitchOverlay } from '../components/AccountSwitchOverlay';
 import { getCountryByIso } from '../utils/countries';
 import { WalletCardSkeleton } from '../components/SkeletonLoader';
-import { gql, useQuery, useMutation, useApolloClient } from '@apollo/client';
-import { GET_PRESALE_STATUS, GET_MY_BALANCES, GET_USER_ACCOUNTS, GET_ACTIVE_PRESALE, GET_ALL_PRESALE_PHASES, CHECK_REFERRAL_STATUS } from '../apollo/queries';
+import { useQuery, useMutation } from '@apollo/client';
+import { GET_PRESALE_STATUS, GET_MY_BALANCES, GET_ACTIVE_PRESALE, GET_ALL_PRESALE_PHASES, CHECK_REFERRAL_STATUS } from '../apollo/queries';
 import { REFRESH_ACCOUNT_BALANCE, SET_REFERRER } from '../apollo/mutations';
 import { useCountry } from '../contexts/CountryContext';
-import algorandService from '../services/algorandService';
 import { useCurrency } from '../hooks/useCurrency';
 import { useSelectedCountryRate } from '../hooks/useExchangeRate';
 import { inviteSendService } from '../services/inviteSendService';
@@ -55,10 +48,6 @@ import { ReferralSuccessModal } from '../components/ReferralSuccessModal';
 import AutoSwapModal from '../components/AutoSwapModal';
 import { useAutoSwap } from '../hooks/useAutoSwap';
 import { deepLinkHandler } from '../utils/deepLinkHandler';
-import { TextInput } from 'react-native';
-
-const AUTH_KEYCHAIN_SERVICE = 'com.confio.auth';
-const AUTH_KEYCHAIN_USERNAME = 'auth_tokens';
 const PREFERENCES_KEYCHAIN_SERVICE = 'com.confio.preferences';
 const BALANCE_VISIBILITY_KEY = 'balance_visibility';
 const INVITE_TS_SERVICE = 'com.confio.preferences.invite';
@@ -78,15 +67,6 @@ const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string 
 
   return phoneNumber;
 };
-
-interface CustomJwtPayload {
-  user_id: number;
-  username: string;
-  exp: number;
-  origIat: number;
-  auth_token_version: number;
-  type: 'access' | 'refresh';
-}
 
 interface Account {
   id: string;
@@ -127,7 +107,6 @@ export const HomeScreen = () => {
   const { userCountry, selectedCountry } = useCountry();
   const { currency, formatAmount, exchangeRate } = useCurrency();
   const { rate: marketRate, loading: rateLoading } = useSelectedCountryRate();
-  const apollo = useApolloClient();
   const [algorandAddress, setAlgorandAddress] = React.useState<string>('');
   // Show local currency by default if not in US and rate is available
   const [showLocalCurrency, setShowLocalCurrency] = useState(false);
@@ -147,18 +126,14 @@ export const HomeScreen = () => {
   // const [showConvertModal, setShowConvertModal] = useState(false); // Removed for auto-swap
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const scaleAnim = useRef(new Animated.Value(0.95)).current;
+  const scaleAnim = useRef(new Animated.Value(1)).current; // Start at 1 to avoid scale-induced layout shift
   const balanceAnim = useRef(new Animated.Value(0)).current;
 
   // Use account context
   const {
     activeAccount,
     accounts,
-    isLoading: accountsLoading,
-    createAccount,
     refreshAccounts,
-    getActiveAccountContext,
-    syncWithServer,
   } = useAccount();
 
   // Use atomic account switching
@@ -213,47 +188,30 @@ export const HomeScreen = () => {
   const [presaleDismissed, setPresaleDismissed] = useState(false);
   const showPayrollCard = (isBusinessAccount || isEmployeeDelegate || isPersonalAccount) && pendingPayrollCount > 0;
 
-  // Refetch balances when active account changes
+  // Refetch balances when active account changes (skip initial mount — useQuery already fetches)
+  const prevAccountIdRef = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (activeAccount) {
+    const currentId = activeAccount?.id;
+    if (currentId && prevAccountIdRef.current !== undefined && prevAccountIdRef.current !== currentId) {
       refetchMyBalances();
     }
-  }, [activeAccount?.id, activeAccount?.type, activeAccount?.index, refetchMyBalances]);
+    prevAccountIdRef.current = currentId;
+  }, [activeAccount?.id, refetchMyBalances]);
 
-  // Force refresh balances when navigating to this screen
+  // Force refresh balances when navigating BACK to this screen (not on initial mount)
+  const isMountedRef = useRef(false);
   useFocusEffect(
     useCallback(() => {
+      if (!isMountedRef.current) {
+        // Skip the very first focus — useQuery's network-only already fires on mount
+        isMountedRef.current = true;
+        return;
+      }
       console.log('HomeScreen focused - refreshing balances and payroll');
       refetchMyBalances();
       refetchPendingPayroll();
-      // Also nudge account refresh on focus in case auth just resumed
-      try { refreshAccounts(); } catch { }
     }, [refetchMyBalances, refetchPendingPayroll])
   );
-
-  // Extra guard: subscribe to navigation focus event to refetch
-  useEffect(() => {
-    const unsubscribe = navigation.addListener('focus', () => {
-      console.log('HomeScreen navigation focus - refetching balances and payroll');
-      refetchMyBalances();
-      refetchPendingPayroll();
-    });
-    return unsubscribe;
-  }, [navigation, refetchMyBalances, refetchPendingPayroll]);
-
-  // On initial mount after auth, pull accounts once to avoid blank ProfileMenu
-  useEffect(() => {
-    if (isAuthenticated) {
-      console.log('HomeScreen - Authenticated on mount, refreshing accounts');
-      refreshAccounts();
-      // Retry once shortly after in case token just switched contexts
-      const t = setTimeout(() => {
-        console.log('HomeScreen - Retrying accounts refresh');
-        refreshAccounts();
-      }, 600);
-      return () => clearTimeout(t);
-    }
-  }, [isAuthenticated, refreshAccounts]);
 
   // State for deferred referral success modal
   const [showDeferredReferralSuccess, setShowDeferredReferralSuccess] = useState(false);
@@ -499,44 +457,26 @@ export const HomeScreen = () => {
   // Don't show local currency option if exchange rate is not available
   const canShowLocalCurrency = marketRate !== null && marketRate !== 1 && currency.code !== 'USD';
 
-  // Debug exchange rate
-  console.log('HomeScreen - Exchange rate:', {
-    marketRate,
-    rateLoading,
-    localExchangeRate,
-    totalUSDValue,
-    totalLocalValue,
-    currency: currency.code,
-    currencySymbol: currency.symbol,
-    userCountry,
-    userCountryISO: userCountry?.[2],
-    selectedCountry,
-    selectedCountryISO: selectedCountry?.[2],
-    showLocalCurrency,
-    formattedLocal: formatAmount.plain(totalLocalValue),
-    formattedUSD: totalUSDValue.toLocaleString('en-US', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    })
-  });
-
-  // Track initialization state (one-time) to avoid flicker
+  // Track initialization state — wait for essential data before showing content
   const [isInitialized, setIsInitialized] = useState(false);
   // Only show loading during the initial pass; do not toggle back after first render
   const isLoading = !isInitialized;
 
-  // Log any errors and data for debugging
+  // Gate initialization on activeAccount + first balance data to prevent layout shake
+  const initializedRef = useRef(false);
   useEffect(() => {
-    console.log('Balance query status:', {
-      isInitialized,
-      loading: myBalancesLoading,
-      data: myBalancesData,
-      error: myBalancesError?.message,
-    });
+    if (initializedRef.current) return;
+    if (activeAccount && !myBalancesLoading && myBalancesData) {
+      initializedRef.current = true;
+      setIsInitialized(true);
+    }
+  }, [activeAccount, myBalancesLoading, myBalancesData]);
+
+  useEffect(() => {
     if (myBalancesError) {
       console.error('Error fetching balances:', myBalancesError);
     }
-  }, [isInitialized, myBalancesLoading, myBalancesData, myBalancesError]);
+  }, [myBalancesError]);
 
 
   // Auto-Swap logic has been refactored into the useAutoSwap hook
@@ -545,219 +485,53 @@ export const HomeScreen = () => {
 
   // Convert stored accounts to the format expected by ProfileMenu
   // For personal accounts, format phone number with country code
-  const accountMenuItems = accounts.map(acc => {
-    if (acc.type === 'personal' && userProfile) {
-      return {
-        ...acc,
-        phone: formatPhoneNumber(userProfile.phoneNumber, userProfile.phoneCountry), // Format phone number with country code
-      };
+  const accountMenuItems = React.useMemo(() => (
+    accounts.map(acc => {
+      if (acc.type === 'personal' && userProfile) {
+        return {
+          ...acc,
+          phone: formatPhoneNumber(userProfile.phoneNumber, userProfile.phoneCountry),
+        };
+      }
+      return acc;
+    })
+  ), [accounts, userProfile]);
+
+  // Display accounts — useAccountManager already handles placeholders, no need
+  // for a separate bootstrap effect that causes extra re-renders.
+  const displayAccounts = React.useMemo(() => {
+    if (accountMenuItems.length > 0) {
+      return accountMenuItems;
     }
-    return acc;
-  });
 
-  // Bootstrap placeholder accounts if server/state not ready yet
-  const [bootstrapAccounts, setBootstrapAccounts] = useState<Account[]>([]);
+    // Fallback: derive from profile data (rare, only if useAccountManager is still loading)
+    const bp = profileData?.businessProfile;
+    if (bp && bp.id && bp.name) {
+      return [{
+        id: `business_${bp.id}_0`,
+        name: bp.name,
+        type: 'business' as const,
+        phone: undefined,
+        category: bp.category,
+        avatar: (bp.name || 'N').charAt(0).toUpperCase(),
+        isEmployee: false,
+      }];
+    }
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        if (!isAuthenticated) {
-          if (!cancelled) setBootstrapAccounts([]);
-          return;
-        }
-        // Only attempt bootstrap when nothing to show
-        if (accountMenuItems.length > 0) {
-          if (!cancelled) setBootstrapAccounts([]);
-          return;
-        }
-        const ctx = await getActiveAccountContext();
-        if (cancelled) return;
-        if (ctx.type === 'business' && ctx.businessId) {
-          const bp = profileData?.businessProfile;
-          const name = bp?.name || 'Negocio';
-          const avatar = (name || 'N').charAt(0).toUpperCase();
-          setBootstrapAccounts([
-            {
-              id: `business_${ctx.businessId}_${ctx.index}`,
-              name,
-              type: 'business',
-              avatar,
-              category: bp?.category,
-            } as Account,
-          ]);
-        } else {
-          const name = userProfile?.firstName || userProfile?.username || 'Personal';
-          const avatar = (name || 'P').charAt(0).toUpperCase();
-          setBootstrapAccounts([
-            {
-              id: `personal_${ctx.index}`,
-              name,
-              type: 'personal',
-              avatar,
-              phone: userProfile ? formatPhoneNumber(userProfile.phoneNumber, userProfile.phoneCountry) : undefined,
-            } as Account,
-          ]);
-        }
-      } catch (e) {
-        // As a last resort, show a generic personal placeholder
-        setBootstrapAccounts([
-          { id: 'personal_0', name: 'Personal', type: 'personal', avatar: 'P' } as Account,
-        ]);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [isAuthenticated, accountMenuItems.length, getActiveAccountContext, userProfile?.firstName, userProfile?.username, userProfile?.phoneNumber, userProfile?.phoneCountry, profileData?.businessProfile?.id, profileData?.businessProfile?.name, profileData?.businessProfile?.category]);
-
-  // Only use stored accounts normally; provide safe placeholder on startup/race
-  const displayAccounts = accountMenuItems.length > 0
-    ? accountMenuItems
-    : (bootstrapAccounts.length > 0
-      ? bootstrapAccounts
-      : (() => {
-        const bp = profileData?.businessProfile;
-        if (bp && bp.id && bp.name) {
-          return [{
-            id: `business_${bp.id}_0`,
-            name: bp.name,
-            type: 'business' as const,
-            phone: undefined,
-            category: bp.category,
-            avatar: (bp.name || 'N').charAt(0).toUpperCase(),
-            isEmployee: false,
-          }];
-        }
-        if (userProfile) {
-          return [{
-            id: 'personal_0',
-            name: userProfile.firstName || userProfile.username || 'Personal',
-            type: 'personal' as const,
-            phone: formatPhoneNumber(userProfile.phoneNumber, userProfile.phoneCountry),
-            category: undefined,
-            avatar: (userProfile.firstName || userProfile.username || 'P').charAt(0).toUpperCase(),
-            isEmployee: false,
-          }];
-        }
-        return [];
-      })()
-    );
-
-  // Debug display accounts
-  console.log('HomeScreen - Display accounts:', {
-    accountsLength: accounts.length,
-    accountMenuItemsLength: accountMenuItems.length,
-    bootstrapAccountsLength: bootstrapAccounts.length,
-    displayAccountsLength: displayAccounts.length,
-    displayAccounts: displayAccounts.map(acc => ({ id: acc.id, name: acc.name, avatar: acc.avatar, type: acc.type })),
-    activeAccountId: activeAccount?.id,
-    activeAccountType: activeAccount?.type,
-  });
-
-  // One-time hard hydrate of accounts from server right after mount/auth
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        if (!isAuthenticated) return;
-        // Only if we still have just a placeholder or nothing
-        if (accounts.length > 1) return;
-        // Ensure we only hydrate after a fresh/finalized token is in place
-        try { await waitForAuthReady(); } catch { }
-        console.log('HomeScreen - Hydrating accounts via GET_USER_ACCOUNTS');
-        const result = await apollo.query({
-          query: GET_USER_ACCOUNTS,
-          fetchPolicy: 'no-cache',
-          context: { skipProactiveRefresh: true },
-        });
-        const list = result?.data?.userAccounts || [];
-        console.log('HomeScreen - GET_USER_ACCOUNTS result count:', list.length);
-        if (!cancelled && list.length >= 1) {
-          try { await syncWithServer(list as any[]); } catch (e) { console.log('HomeScreen - syncWithServer failed', e); }
-        } else if (!cancelled && list.length === 0) {
-          // Fallback: derive accounts from profileData to populate menu promptly
-          const derived: any[] = [];
-          if (profileData?.userProfile) {
-            derived.push({
-              id: 'personal_0',
-              accountType: 'personal',
-              accountIndex: 0,
-              displayName: profileData.userProfile.firstName || profileData.userProfile.username || 'Personal',
-              avatarLetter: (profileData.userProfile.firstName || profileData.userProfile.username || 'P').charAt(0).toUpperCase(),
-              isEmployee: false,
-              employeeRole: null,
-              employeePermissions: null,
-              business: null,
-            });
-          }
-          if (profileData?.businessProfile?.id && profileData.businessProfile.name) {
-            derived.push({
-              id: `business_${profileData.businessProfile.id}_0`,
-              accountType: 'business',
-              accountIndex: 0,
-              displayName: profileData.businessProfile.name,
-              avatarLetter: (profileData.businessProfile.name || 'N').charAt(0).toUpperCase(),
-              isEmployee: false,
-              employeeRole: null,
-              employeePermissions: null,
-              business: {
-                id: profileData.businessProfile.id,
-                name: profileData.businessProfile.name,
-                category: profileData.businessProfile.category,
-              }
-            });
-          }
-          if (derived.length > 0) {
-            console.log('HomeScreen - Using derived accounts from profileData:', derived.length);
-            try { await syncWithServer(derived); } catch (e) { console.log('HomeScreen - derived syncWithServer failed', e); }
-          }
-        }
-      } catch (e) {
-        console.warn('HomeScreen - GET_USER_ACCOUNTS hydrate failed:', (e as any)?.message || e);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [isAuthenticated, accounts.length, apollo, syncWithServer, profileData?.userProfile?.firstName, profileData?.userProfile?.username, profileData?.businessProfile?.id, profileData?.businessProfile?.name, profileData?.businessProfile?.category]);
-
-  // Fallback: if accounts are still empty shortly after auth/profile are ready, derive from profileData immediately
-  useEffect(() => {
-    if (!isAuthenticated) return;
-    if (accounts.length > 0) return;
-    // Try to populate from profileData without waiting on network
-    const derived: any[] = [];
-    if (profileData?.userProfile) {
-      derived.push({
+    if (userProfile) {
+      return [{
         id: 'personal_0',
-        accountType: 'personal',
-        accountIndex: 0,
-        displayName: profileData.userProfile.firstName || profileData.userProfile.username || 'Personal',
-        avatarLetter: (profileData.userProfile.firstName || profileData.userProfile.username || 'P').charAt(0).toUpperCase(),
+        name: userProfile.firstName || userProfile.username || 'Personal',
+        type: 'personal' as const,
+        phone: formatPhoneNumber(userProfile.phoneNumber, userProfile.phoneCountry),
+        category: undefined,
+        avatar: (userProfile.firstName || userProfile.username || 'P').charAt(0).toUpperCase(),
         isEmployee: false,
-        employeeRole: null,
-        employeePermissions: null,
-        business: null,
-      });
+      }];
     }
-    if (profileData?.businessProfile?.id && profileData.businessProfile.name) {
-      derived.push({
-        id: `business_${profileData.businessProfile.id}_0`,
-        accountType: 'business',
-        accountIndex: 0,
-        displayName: profileData.businessProfile.name,
-        avatarLetter: (profileData.businessProfile.name || 'N').charAt(0).toUpperCase(),
-        isEmployee: false,
-        employeeRole: null,
-        employeePermissions: null,
-        business: {
-          id: profileData.businessProfile.id,
-          name: profileData.businessProfile.name,
-          category: profileData.businessProfile.category,
-        }
-      });
-    }
-    if (derived.length > 0) {
-      (async () => { try { await syncWithServer(derived); } catch { } })();
-    }
-  }, [isAuthenticated, accounts.length, profileData?.userProfile?.firstName, profileData?.userProfile?.username, profileData?.businessProfile?.id, profileData?.businessProfile?.name, profileData?.businessProfile?.category, syncWithServer]);
+
+    return [];
+  }, [accountMenuItems, profileData?.businessProfile, userProfile]);
 
   // Save balance visibility preference to Keychain
   const saveBalanceVisibility = async (isVisible: boolean) => {
@@ -817,33 +591,27 @@ export const HomeScreen = () => {
     saveBalanceVisibility(newVisibility);
   };
 
-  const currentAccount = activeAccount ? {
-    ...activeAccount,
-    phone: activeAccount.type === 'personal' && userProfile
-      ? formatPhoneNumber(userProfile.phoneNumber, userProfile.phoneCountry)
-      : activeAccount.phone,
-  } : (displayAccounts.length > 0 ? displayAccounts[0] : null); // Only use first account if accounts exist
+  const currentAccount = React.useMemo(() => {
+    if (activeAccount) {
+      return {
+        ...activeAccount,
+        phone: activeAccount.type === 'personal' && userProfile
+          ? formatPhoneNumber(userProfile.phoneNumber, userProfile.phoneCountry)
+          : activeAccount.phone,
+      };
+    }
 
-  // Debug display accounts
-  console.log('HomeScreen - Display accounts:', {
-    accountsLength: accounts.length,
-    accountMenuItemsLength: accountMenuItems.length,
-    displayAccountsLength: displayAccounts.length,
-    displayAccounts: displayAccounts.map(acc => ({ id: acc.id, name: acc.name, avatar: acc.avatar, type: acc.type })),
-    currentAccountType: currentAccount?.type,
-    currentAccountName: currentAccount?.name,
-    currentAccountAvatar: currentAccount?.avatar,
-    currentAccountIndex: currentAccount?.id && currentAccount.id.startsWith('business_')
-      ? currentAccount.id.split('_')[2]
-      : currentAccount?.id?.split('_')[1],
-    activeAccountId: activeAccount?.id,
-    activeAccountType: activeAccount?.type,
-    activeAccountName: activeAccount?.name,
-    activeAccountAvatar: activeAccount?.avatar,
-    activeAccountIndex: activeAccount?.index,
-    userProfileLoaded: !!userProfile,
-    userProfileName: userProfile?.firstName || userProfile?.username
-  });
+    return displayAccounts.length > 0 ? displayAccounts[0] : null;
+  }, [activeAccount, displayAccounts, userProfile]);
+
+  const canViewBalance = !activeAccount?.isEmployee || !!activeAccount?.employeePermissions?.viewBalance;
+  const displayedPortfolioBalance = canViewBalance
+    ? showBalance
+      ? (showLocalCurrency
+        ? formatAmount.plain(floorToDecimals(totalLocalValue, 2))
+        : formatFixedFloor(totalUSDValue, 2))
+      : '••••••'
+    : '••••••';
 
 
   // Pull to refresh handler
@@ -1052,25 +820,15 @@ export const HomeScreen = () => {
 
   // Entrance animation - only run after initialization
   React.useEffect(() => {
-    if (isInitialized && !isLoading) {
-      // Small delay to ensure smooth transition
-      setTimeout(() => {
-        Animated.parallel([
-          Animated.timing(fadeAnim, {
-            toValue: 1,
-            duration: 600,
-            useNativeDriver: true,
-          }),
-          Animated.spring(scaleAnim, {
-            toValue: 1,
-            friction: 8,
-            tension: 40,
-            useNativeDriver: true,
-          }),
-        ]).start();
-      }, 50);
+    if (isInitialized) {
+      // No delay needed — skeleton overlay handles the transition
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 250,
+        useNativeDriver: true,
+      }).start();
     }
-  }, [fadeAnim, scaleAnim, isInitialized, isLoading]);
+  }, [fadeAnim, isInitialized]);
 
   // Balance animation when value changes
   React.useEffect(() => {
@@ -1139,8 +897,7 @@ export const HomeScreen = () => {
 
     const initializeHomeScreen = async () => {
       if (!mounted) return;
-      // Mark initialized immediately to avoid long blocking loading screens
-      setIsInitialized(true);
+      // Initialization is now gated by activeAccount + balances arriving (above)
 
       try {
         // Load balance visibility preference first
@@ -1157,8 +914,6 @@ export const HomeScreen = () => {
 
       } catch (error) {
         console.error('HomeScreen - Error during initialization:', error);
-      } finally {
-        // No-op: already marked initialized at start
       }
     };
 
@@ -1173,18 +928,10 @@ export const HomeScreen = () => {
 
   // Update header when account changes or user profile updates
   useEffect(() => {
-    console.log('HomeScreen - Avatar update effect:', {
-      currentAccountAvatar: currentAccount?.avatar,
-      currentAccountName: currentAccount?.name,
-      currentAccountType: currentAccount?.type,
-      userProfileLoaded: !!userProfile,
-      userProfileName: userProfile?.firstName || userProfile?.username
-    });
-
     if (currentAccount) {
       setCurrentAccountAvatar(currentAccount.avatar);
     }
-  }, [currentAccount, setCurrentAccountAvatar, userProfile]);
+  }, [currentAccount, setCurrentAccountAvatar]);
 
   // FIX: Refresh Algorand address when active account changes (critical for post-migration update)
   useEffect(() => {
@@ -1225,14 +972,6 @@ export const HomeScreen = () => {
     };
   }, [activeAccount?.id, activeAccount?.type, activeAccount?.index]);
 
-  // Debug log when showProfileMenu changes
-  useEffect(() => {
-    console.log('showProfileMenu changed to:', profileMenu.showProfileMenu);
-  }, [profileMenu.showProfileMenu]);
-
-  // Only refresh accounts when coming from specific screens
-  const [hasInitialLoad, setHasInitialLoad] = useState(false);
-
   // Memoized navigation handlers for better performance
   const navigateToCUSDAccount = useCallback(() => {
     navigation.navigate('AccountDetail', {
@@ -1256,23 +995,13 @@ export const HomeScreen = () => {
     });
   }, [navigation, confioTotal, activeAccount?.algorandAddress, algorandAddress]);
 
-  useFocusEffect(
-    React.useCallback(() => {
-      // Only refresh if we've done the initial load and are coming back
-      if (hasInitialLoad) {
-        console.log('HomeScreen - Screen refocused, checking if refresh needed');
-        // Only refresh if we're coming from screens that might have changed data
-        const currentRoute = navigation.getState()?.routes?.slice(-2, -1)?.[0]?.name;
-        if (currentRoute === 'CreateBusiness' || currentRoute === 'EditBusiness' || currentRoute === 'EditProfile') {
-          refreshAccounts();
-        }
-      } else {
-        setHasInitialLoad(true);
-      }
-    }, [hasInitialLoad, refreshAccounts, navigation])
-  );
+  // Use refs for unstable dependencies so handleAccountSwitch identity is stable
+  const atomicSwitchAccountRef = useRef(atomicSwitchAccount);
+  atomicSwitchAccountRef.current = atomicSwitchAccount;
+  const refetchMyBalancesRef = useRef(refetchMyBalances);
+  refetchMyBalancesRef.current = refetchMyBalances;
 
-  const handleAccountSwitch = async (accountId: string): Promise<boolean> => {
+  const handleAccountSwitch = useCallback(async (accountId: string): Promise<boolean> => {
     try {
       console.log('HomeScreen - handleAccountSwitch called with:', accountId);
 
@@ -1282,15 +1011,13 @@ export const HomeScreen = () => {
       // All accounts are now real accounts from the server
       console.log('HomeScreen - Switching to account:', accountId);
 
-      // Use atomic account switching
-      const success = await atomicSwitchAccount(accountId);
+      // Use atomic account switching (via ref to avoid dep instability)
+      const success = await atomicSwitchAccountRef.current(accountId);
 
       if (success) {
         console.log('HomeScreen - Account switch successful');
         // Refresh balances after successful switch
-        await Promise.all([
-          refetchMyBalances(),
-        ]);
+        await refetchMyBalancesRef.current();
         return true;
       } else {
         console.log('HomeScreen - Account switch failed');
@@ -1305,7 +1032,7 @@ export const HomeScreen = () => {
       );
       return false;
     }
-  };
+  }, [profileMenu.closeProfileMenu]);
 
   const handleCreateBusinessAccount = () => {
     profileMenu.closeProfileMenu();
@@ -1360,22 +1087,30 @@ export const HomeScreen = () => {
     }, [handleAccountSwitch])
   );
 
-  if (isLoading) {
-    return (
-      <Gradient
-        fromColor="#5AC8A8"
-        toColor="#72D9BC"
-        style={styles.container}
-      >
-        <View style={styles.content}>
-          <Text style={styles.loadingText}>Cargando...</Text>
-        </View>
-      </Gradient>
-    );
-  }
-
   return (
     <View style={styles.container}>
+      {/* Skeleton overlay — rendered on top while loading, then removed */}
+      {isLoading && (
+        <View style={[StyleSheet.absoluteFillObject, { zIndex: 1, backgroundColor: '#f9fafb' }]} pointerEvents="none">
+          <View style={styles.balanceCard}>
+            <View style={styles.portfolioHeader}>
+              <View style={styles.portfolioTitleContainer}>
+                <Text style={styles.portfolioLabel}>Mi Saldo Total</Text>
+                <Text style={styles.portfolioSubLabel}>En Dólares</Text>
+              </View>
+            </View>
+            <View style={styles.balanceContainer}>
+              <Text style={styles.currencySymbol}>$</Text>
+              <Text style={styles.balanceAmount}>••••••</Text>
+            </View>
+          </View>
+          <View style={styles.walletsSection}>
+            <Text style={styles.walletsTitle}>Mis Billeteras</Text>
+            <WalletCardSkeleton />
+            <WalletCardSkeleton />
+          </View>
+        </View>
+      )}
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
@@ -1446,23 +1181,8 @@ export const HomeScreen = () => {
             <Text style={styles.currencySymbol}>
               {showLocalCurrency ? currency.symbol : '$'}
             </Text>
-            <Text style={styles.balanceAmount}>
-              {/* Hide balance for employees without viewBalance permission */}
-              {(() => {
-                console.log('HomeScreen Balance Check:', {
-                  isEmployee: activeAccount?.isEmployee,
-                  permissions: activeAccount?.employeePermissions,
-                  viewBalance: activeAccount?.employeePermissions?.viewBalance
-                });
-                return (activeAccount?.isEmployee && !activeAccount?.employeePermissions?.viewBalance)
-                  ? '••••••'
-                  : showBalance
-                    ? (showLocalCurrency
-                      ? formatAmount.plain(floorToDecimals(totalLocalValue, 2))
-                      : formatFixedFloor(totalUSDValue, 2)
-                    )
-                    : '••••••';
-              })()}
+                    <Text style={styles.balanceAmount}>
+              {displayedPortfolioBalance}
             </Text>
           </Animated.View>
         </Animated.View>
@@ -1664,20 +1384,10 @@ export const HomeScreen = () => {
                 onPress={action.route}
                 activeOpacity={0.7}
               >
-                <Animated.View
+                <View
                   style={[
                     styles.actionIcon,
                     { backgroundColor: action.color },
-                    {
-                      transform: [
-                        {
-                          scale: scaleAnim.interpolate({
-                            inputRange: [0.95, 1],
-                            outputRange: [0.8, 1],
-                          })
-                        }
-                      ]
-                    }
                   ]}
                 >
                   {/* @ts-ignore */}
@@ -1686,7 +1396,7 @@ export const HomeScreen = () => {
                   ) : (
                     <Icon name={action.icon} size={22} color="#fff" />
                   )}
-                </Animated.View>
+                </View>
                 <Text style={styles.actionLabel}>{action.label}</Text>
               </TouchableOpacity>
             ))

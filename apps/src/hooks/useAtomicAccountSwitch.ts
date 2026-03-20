@@ -39,6 +39,14 @@ export const useAtomicAccountSwitch = (): UseAtomicAccountSwitchReturn => {
   const authService = AuthService.getInstance();
   const accountManager = AccountManager.getInstance();
 
+  // Use refs for frequently-changing deps to keep switchAccount identity stable
+  const accountsRef = useRef(accounts);
+  accountsRef.current = accounts;
+  const refreshProfileRef = useRef(refreshProfile);
+  refreshProfileRef.current = refreshProfile;
+  const refreshAccountsRef = useRef(refreshAccounts);
+  refreshAccountsRef.current = refreshAccounts;
+
   const switchAccount = useCallback(async (accountId: string): Promise<boolean> => {
     // Prevent concurrent account switches
     if (switchInProgressRef.current) {
@@ -59,7 +67,7 @@ export const useAtomicAccountSwitch = (): UseAtomicAccountSwitchReturn => {
 
       // Step 1: Validate the target account exists
       setState(prev => ({ ...prev, progress: 'Validando cuenta...' }));
-      const targetAccount = accounts.find(acc => acc.id === accountId);
+      const targetAccount = accountsRef.current.find(acc => acc.id === accountId);
       if (!targetAccount) {
         throw new Error('Cuenta no encontrada');
       }
@@ -109,10 +117,10 @@ export const useAtomicAccountSwitch = (): UseAtomicAccountSwitchReturn => {
       setState(prev => ({ ...prev, progress: 'Actualizando perfil...' }));
       try {
         if (targetAccount.type === 'business' && targetAccount.business?.id) {
-          await refreshProfile('business', targetAccount.business.id);
+          await refreshProfileRef.current('business', targetAccount.business.id);
           console.log('👤 [AtomicAccountSwitch] Business profile refreshed');
         } else {
-          await refreshProfile('personal');
+          await refreshProfileRef.current('personal');
           console.log('👤 [AtomicAccountSwitch] Personal profile refreshed');
         }
       } catch (profileError) {
@@ -122,7 +130,7 @@ export const useAtomicAccountSwitch = (): UseAtomicAccountSwitchReturn => {
 
       // Step 8: Refresh accounts to update UI
       setState(prev => ({ ...prev, progress: 'Actualizando lista de cuentas...' }));
-      await refreshAccounts();
+      await refreshAccountsRef.current();
       console.log('📋 [AtomicAccountSwitch] Accounts list refreshed');
 
       // Step 9: Resume Apollo queries
@@ -174,7 +182,7 @@ export const useAtomicAccountSwitch = (): UseAtomicAccountSwitchReturn => {
       switchInProgressRef.current = false;
       return false;
     }
-  }, [accounts, apolloClient, authService, accountManager, refreshProfile, refreshAccounts]);
+  }, [apolloClient, authService, accountManager]);
 
   return {
     switchAccount,

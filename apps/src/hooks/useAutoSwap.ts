@@ -1,9 +1,8 @@
 import { useState, useRef, useCallback } from 'react';
-import { useMutation, gql, useQuery } from '@apollo/client';
+import { useMutation, gql } from '@apollo/client';
 import { useFocusEffect } from '@react-navigation/native';
 import algorandService from '../services/algorandService';
 import { cusdAppOptInService } from '../services/cusdAppOptInService';
-import { GET_PENDING_AUTO_SWAP } from '../apollo/queries';
 
 const BUILD_AUTO_SWAP_TRANSACTIONS = gql`
   mutation BuildAutoSwapTransactions($inputAssetType: String!, $amount: String!) {
@@ -71,11 +70,6 @@ export const useAutoSwap = ({
 }: UseAutoSwapProps) => {
     const [buildAutoSwapTransactions] = useMutation(BUILD_AUTO_SWAP_TRANSACTIONS);
     const [submitAutoSwapTransactions] = useMutation(SUBMIT_AUTO_SWAP_TRANSACTIONS);
-    const { data: pendingAutoSwapData } = useQuery(GET_PENDING_AUTO_SWAP, {
-        variables: { accountId: activeAccount?.id || null },
-        skip: !isAuthenticated || !activeAccount?.id,
-        fetchPolicy: 'cache-and-network',
-    });
 
     // Auto-swap silently converts USDC once it reaches the 1 USDC contract minimum
     // or swaps ALGO only when it exceeds the configured reserve.
@@ -99,12 +93,7 @@ export const useAutoSwap = ({
                 // Determine input asset and amount
                 let swapAssetType = null;
                 let swapAmount = '0';
-                const pendingAutoSwap = pendingAutoSwapData?.pendingAutoSwap;
-
-                if (pendingAutoSwap?.assetType === 'USDC' && pendingAutoSwap?.status === 'PENDING') {
-                    swapAssetType = 'USDC';
-                    swapAmount = String(pendingAutoSwap.amountMicro || '0');
-                } else if (currentUsdcMicro >= USDC_THRESHOLD_MICRO) {
+                if (currentUsdcMicro >= USDC_THRESHOLD_MICRO) {
                     swapAssetType = 'USDC';
                     swapAmount = currentUsdcMicro.toString();
                 } else {
@@ -231,7 +220,7 @@ export const useAutoSwap = ({
             };
 
             checkAndTriggerSwap();
-        }, [usdcBalanceStr, algoBalanceStr, myBalancesLoading, isAuthenticated, buildAutoSwapTransactions, submitAutoSwapTransactions, refreshAccountBalance, activeAccount, pendingAutoSwapData])
+        }, [usdcBalanceStr, algoBalanceStr, myBalancesLoading, isAuthenticated, buildAutoSwapTransactions, submitAutoSwapTransactions, refreshAccountBalance, activeAccount])
     );
 
     return {

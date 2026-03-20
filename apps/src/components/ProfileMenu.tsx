@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Modal } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useAuth } from '../contexts/AuthContext';
@@ -41,7 +41,7 @@ interface ProfileMenuProps {
   onCreateBusinessAccount: () => void;
 }
 
-export const ProfileMenu: React.FC<ProfileMenuProps> = ({
+export const ProfileMenu: React.FC<ProfileMenuProps> = React.memo(({
   visible,
   onClose,
   accounts,
@@ -52,8 +52,12 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({
   const { userProfile, isUserProfileLoading } = useAuth();
   const { isLoading: accountsLoading } = useAccount();
 
+  if (!visible) {
+    return null;
+  }
+
   // For personal accounts, only format phone number with country code
-  const displayAccounts = accounts.map(acc => {
+  const displayAccounts = useMemo(() => accounts.map(acc => {
     if (acc.type === 'personal' && userProfile) {
       return {
         ...acc,
@@ -61,21 +65,13 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({
       };
     }
     return acc;
-  });
-  const currentAccount = displayAccounts.find(acc => acc.id === selectedAccount) || displayAccounts[0];
+  }), [accounts, userProfile]);
 
-  // Debug logging
-  console.log('ProfileMenu render:', { 
-    visible, 
-    selectedAccount, 
-    currentAccount: !!currentAccount,
-    currentAccountName: currentAccount?.name,
-    currentAccountAvatar: currentAccount?.avatar,
-    accountsCount: accounts.length,
-    accounts: displayAccounts.map(acc => ({ id: acc.id, name: acc.name, avatar: acc.avatar, type: acc.type }))
-  });
+  const currentAccount = useMemo(
+    () => displayAccounts.find(acc => acc.id === selectedAccount) || displayAccounts[0],
+    [displayAccounts, selectedAccount]
+  );
 
-  // Do not return null — render with a safe placeholder so the menu never disappears mid-hydration
   const headerAccount = currentAccount || ({ id: 'personal_0', name: 'Personal', type: 'personal', avatar: 'P' } as Account);
 
   return (
@@ -165,7 +161,7 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({
       </TouchableOpacity>
     </Modal>
   );
-};
+});
 
 const styles = StyleSheet.create({
   overlay: {

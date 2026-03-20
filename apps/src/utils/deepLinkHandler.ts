@@ -17,14 +17,23 @@ export interface DeepLinkData {
 
 export class DeepLinkHandler {
   private navigation: NavigationContainerRef<any> | null = null;
+  private initialized = false;
+  private linkListenerSetup = false;
 
-  constructor() {
-    this.handleInitialLink();
-    this.setupLinkListener();
-  }
+  constructor() {}
 
   setNavigation(navigation: NavigationContainerRef<any>) {
     this.navigation = navigation;
+  }
+
+  async init() {
+    if (this.initialized) {
+      return;
+    }
+
+    this.initialized = true;
+    this.setupLinkListener();
+    await this.handleInitialLink();
   }
 
   private async handleInitialLink() {
@@ -188,6 +197,11 @@ export class DeepLinkHandler {
   }
 
   private setupLinkListener() {
+    if (this.linkListenerSetup) {
+      return;
+    }
+
+    this.linkListenerSetup = true;
     // Listen for links when app is running
     Linking.addEventListener('url', (event) => {
       if (event.url) {

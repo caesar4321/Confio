@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useRef } from 'react';
 import { useQuery } from '@apollo/client';
 import { GET_ME } from '../apollo/queries';
 import { Country, countries, getCountryByIso } from '../utils/countries';
@@ -20,28 +20,37 @@ export const CountryProvider: React.FC<CountryProviderProps> = ({ children }) =>
   const { data: userData, loading } = useQuery(GET_ME);
   const [userCountry, setUserCountry] = useState<Country | null>(null);
   const [selectedCountry, setSelectedCountry] = useState<Country | null>(null);
+  const previousUserCountryIsoRef = useRef<string | null>(null);
 
   // Determine user's country from their phone country (ISO code)
   useEffect(() => {
-    if (userData?.me?.phoneCountry) {
-      const country = getCountryByIso(userData.me.phoneCountry);
-
-      if (country) {
-        setUserCountry(country);
-        setSelectedCountry(country);
-      } else {
-        // Fallback to Argentina if phone country not found
-        const argentinaCountry = countries.find(c => c[0] === 'Argentina') || null;
-        setUserCountry(argentinaCountry);
-        setSelectedCountry(argentinaCountry);
-      }
-    } else {
-      // Fallback to Argentina if no phone country
-      const argentinaCountry = countries.find(c => c[0] === 'Argentina') || null;
-      setUserCountry(argentinaCountry);
-      setSelectedCountry(argentinaCountry);
+    if (loading) {
+      return;
     }
-  }, [userData?.me?.phoneCountry]);
+
+    const resolvedCountry = userData?.me?.phoneCountry
+      ? getCountryByIso(userData.me.phoneCountry)
+      : null;
+    const fallbackCountry = countries.find(c => c[0] === 'Argentina') || null;
+    const nextUserCountry = resolvedCountry || fallbackCountry;
+    const nextUserCountryIso = nextUserCountry?.[2] || null;
+    const previousUserCountryIso = previousUserCountryIsoRef.current;
+
+    setUserCountry(prev => (prev?.[2] === nextUserCountryIso ? prev : nextUserCountry));
+    setSelectedCountry(prev => {
+      if (!prev) {
+        return nextUserCountry;
+      }
+
+      if (prev?.[2] === previousUserCountryIso) {
+        return nextUserCountry;
+      }
+
+      return prev;
+    });
+
+    previousUserCountryIsoRef.current = nextUserCountryIso;
+  }, [loading, userData?.me?.phoneCountry]);
 
   const value: CountryContextType = {
     userCountry,
