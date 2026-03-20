@@ -482,7 +482,6 @@ export const HomeScreen = () => {
     }
   }, [myBalancesError]);
 
-
   // Auto-Swap logic has been refactored into the useAutoSwap hook
 
   // No more mock accounts - we fetch from server

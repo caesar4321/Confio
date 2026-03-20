@@ -63,10 +63,10 @@ class AlgorandClient:
                     address,
                 )
             self._using_fallback_algod = False
-            return algod.AlgodClient('', address, headers=headers)
+            return algod.AlgodClient('', address, headers=headers, timeout=8)
 
         self._using_fallback_algod = False
-        return algod.AlgodClient(token, address, headers=ua)
+        return algod.AlgodClient(token, address, headers=ua, timeout=8)
 
     def _build_indexer_client(self):
         """Instantiate an indexer client with optional API key support."""
@@ -211,11 +211,9 @@ class AlgorandClient:
         Returns a dict with Decimal values in human units (6 decimals for all).
         Keys: 'ALGO', 'CUSD', 'CONFIO', 'USDC', 'CONFIO_PRESALE'
         """
-        try:
-            info = self.algod.account_info(address)
-        except Exception as e:
-            logger.error("[snapshot] failed to fetch account_info for %s: %s", address, e)
-            return {k: Decimal('0') for k in ['ALGO', 'CUSD', 'CONFIO', 'USDC', 'CONFIO_PRESALE']}
+        # Let exceptions propagate — callers (balance_service) catch them and
+        # fall back to DB-cached values. Swallowing here returns silent zeros.
+        info = self.algod.account_info(address)
 
         def asset_amount(asset_id: Optional[int]) -> Decimal:
             if not asset_id:
