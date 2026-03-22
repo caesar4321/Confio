@@ -1,9 +1,17 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { gql, useMutation, useQuery } from '@apollo/client';
+import {
+  requestNotificationPermission,
+  getFCMToken,
+  onForegroundMessage,
+  isFirebaseConfigured,
+} from '../../firebase';
 
 import './PortalConsole.css';
 
 const SUPPORT_POLL_INTERVAL_MS = 5000;
+
+/* ─── GraphQL ─── */
 
 const GET_PORTAL_ME = gql`
   query GetPortalMe {
@@ -143,6 +151,16 @@ const REQUEST_PUBLICATION_IMAGE_UPLOAD = gql`
   }
 `;
 
+const REGISTER_FCM_TOKEN = gql`
+  mutation RegisterFCMToken($token: String!, $deviceType: String!, $deviceId: String!, $deviceName: String) {
+    registerFcmToken(token: $token, deviceType: $deviceType, deviceId: $deviceId, deviceName: $deviceName) {
+      success
+    }
+  }
+`;
+
+/* ─── Helpers ─── */
+
 function createEmptyDraft() {
   return {
     id: null,
@@ -175,6 +193,13 @@ const TAG_COLOR_OPTIONS = [
   { value: '#FF4444', label: 'Rojo Video' },
   { value: '#2563EB', label: 'Azul' },
 ];
+
+const STATUS_COLORS = {
+  DRAFT: { bg: '#f2f4f7', color: '#475467' },
+  SCHEDULED: { bg: '#eff8ff', color: '#175cd3' },
+  PUBLISHED: { bg: '#ecfdf3', color: '#067647' },
+  ARCHIVED: { bg: '#fef3f2', color: '#b42318' },
+};
 
 const PUBLICATION_IMAGE_MAX_LANDSCAPE = 1440;
 const PUBLICATION_IMAGE_MAX_PORTRAIT = 1280;
@@ -390,6 +415,105 @@ async function uploadPublicationImage(upload, blob, filename, contentType) {
   return { contentType };
 }
 
+function getWebDeviceId() {
+  let deviceId = localStorage.getItem('confio_portal_device_id');
+  if (!deviceId) {
+    deviceId = `web-portal-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    localStorage.setItem('confio_portal_device_id', deviceId);
+  }
+  return deviceId;
+}
+
+function isDraftDirty(draft) {
+  const empty = createEmptyDraft();
+  return (
+    draft.title !== empty.title ||
+    draft.tag !== empty.tag ||
+    draft.id !== null ||
+    draft.blocks.some((block) =>
+      block.type === 'paragraph' ? block.text.trim() !== '' : block.type === 'image'
+    )
+  );
+}
+
+/* ─── Toast Component ─── */
+
+function ToastContainer({ toasts, onDismiss }) {
+  return (
+    <div className="portal-toast-container">
+      {toasts.map((toast) => (
+        <div
+          key={toast.id}
+          className={`portal-toast portal-toast-${toast.type}`}
+          onClick={() => onDismiss(toast.id)}
+          role="alert"
+        >
+          <span className="portal-toast-icon">
+            {toast.type === 'success' ? '\u2713' : toast.type === 'error' ? '\u2717' : '\u26A0'}
+          </span>
+          <span>{toast.message}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function useToasts() {
+  const [toasts, setToasts] = useState([]);
+  const nextId = useRef(0);
+
+  const addToast = useCallback((message, type = 'success', duration = 4000) => {
+    const id = nextId.current++;
+    setToasts((prev) => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, duration);
+  }, []);
+
+  const dismissToast = useCallback((id) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  return { toasts, addToast, dismissToast };
+}
+
+/* ─── Spinner Component ─── */
+
+function Spinner({ size = 18 }) {
+  return (
+    <svg className="portal-spinner" width={size} height={size} viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="3" strokeDasharray="31.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/* ─── Status Pill ─── */
+
+function StatusPill({ status }) {
+  const style = STATUS_COLORS[status] || STATUS_COLORS.DRAFT;
+  return (
+    <span className="portal-status-pill" style={{ background: style.bg, color: style.color }}>
+      {status}
+    </span>
+  );
+}
+
+/* ─── Unread Badge ─── */
+
+function UnreadBadge({ count }) {
+  if (!count || count <= 0) return null;
+  return <span className="portal-unread-badge">{count > 99 ? '99+' : count}</span>;
+}
+
+/* ─── Tab Badge ─── */
+
+function TabBadge({ count }) {
+  if (!count || count <= 0) return null;
+  return <span className="portal-tab-badge">{count > 99 ? '99+' : count}</span>;
+}
+
+/* ─── Main Component ─── */
+
 export default function PortalConsole() {
   const [activeTab, setActiveTab] = useState('support');
   const [supportStatus, setSupportStatus] = useState('OPEN');
@@ -399,7 +523,14 @@ export default function PortalConsole() {
   const [draft, setDraft] = useState(createEmptyDraft);
   const [imageUploadError, setImageUploadError] = useState('');
   const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [supportSearch, setSupportSearch] = useState('');
+  const [contentSearch, setContentSearch] = useState('');
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const supportThreadRef = useRef(null);
+  const replyTextareaRef = useRef(null);
+  const { toasts, addToast, dismissToast } = useToasts();
+
+  /* ─── Queries ─── */
 
   const meQuery = useQuery(GET_PORTAL_ME, {
     fetchPolicy: 'network-only',
@@ -418,6 +549,8 @@ export default function PortalConsole() {
     fetchPolicy: 'network-only',
   });
 
+  /* ─── Mutations ─── */
+
   const [sendReply, sendReplyState] = useMutation(PORTAL_SEND_SUPPORT_REPLY, {
     refetchQueries: [{ query: GET_PORTAL_SUPPORT_CONVERSATIONS, variables: { status: supportStatus } }],
   });
@@ -428,23 +561,57 @@ export default function PortalConsole() {
     refetchQueries: [{ query: GET_PORTAL_CONTENT_ITEMS, variables: { channelSlug: contentChannelFilter || null, status: null } }],
   });
   const [requestPublicationImageUpload] = useMutation(REQUEST_PUBLICATION_IMAGE_UPLOAD);
+  const [registerFCMTokenMutation] = useMutation(REGISTER_FCM_TOKEN);
+
+  /* ─── Derived state ─── */
 
   const conversations = supportQuery.data?.portalSupportConversations || [];
-  const activeConversation = useMemo(
-    () => conversations.find((conversation) => conversation.id === activeConversationId) || conversations[0] || null,
-    [conversations, activeConversationId]
+  const filteredConversations = useMemo(() => {
+    if (!supportSearch.trim()) return conversations;
+    const q = supportSearch.toLowerCase();
+    return conversations.filter(
+      (c) =>
+        c.customerName?.toLowerCase().includes(q) ||
+        c.customerEmail?.toLowerCase().includes(q) ||
+        c.contextLabel?.toLowerCase().includes(q) ||
+        c.lastPreview?.toLowerCase().includes(q)
+    );
+  }, [conversations, supportSearch]);
+
+  const totalUnread = useMemo(
+    () => conversations.reduce((sum, c) => sum + (c.unreadCount || 0), 0),
+    [conversations]
   );
+
+  const activeConversation = useMemo(
+    () => filteredConversations.find((c) => c.id === activeConversationId) || filteredConversations[0] || null,
+    [filteredConversations, activeConversationId]
+  );
+
   const contentItems = contentQuery.data?.portalContentItems || [];
+  const filteredContentItems = useMemo(() => {
+    if (!contentSearch.trim()) return contentItems;
+    const q = contentSearch.toLowerCase();
+    return contentItems.filter(
+      (item) =>
+        item.title?.toLowerCase().includes(q) ||
+        item.body?.toLowerCase().includes(q) ||
+        item.tag?.toLowerCase().includes(q)
+    );
+  }, [contentItems, contentSearch]);
+
   const backendOrigin = getBackendOrigin();
   const loginUrl = buildPortalAuthUrl(backendOrigin, '/portal/login/');
   const logoutUrl = buildPortalAuthUrl(backendOrigin, '/portal/logout/');
   const setup2faUrl = buildPortalAuthUrl(backendOrigin, '/portal/setup-2fa/');
 
+  /* ─── Effects ─── */
+
   useEffect(() => {
-    if (!activeConversationId && conversations[0]?.id) {
-      setActiveConversationId(conversations[0].id);
+    if (!activeConversationId && filteredConversations[0]?.id) {
+      setActiveConversationId(filteredConversations[0].id);
     }
-  }, [activeConversationId, conversations]);
+  }, [activeConversationId, filteredConversations]);
 
   useEffect(() => {
     if (activeTab !== 'support' || !activeConversation) {
@@ -458,9 +625,93 @@ export default function PortalConsole() {
     });
   }, [activeTab, activeConversation?.id, activeConversation?.messages?.length]);
 
-  const startNewDraft = () => setDraft(createEmptyDraft());
+  // Unsaved changes warning
+  useEffect(() => {
+    const handler = (event) => {
+      if (isDraftDirty(draft)) {
+        event.preventDefault();
+        event.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [draft]);
+
+  // Auto-register FCM token if browser permission already granted
+  useEffect(() => {
+    if (!isFirebaseConfigured()) return;
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (Notification.permission !== 'granted') return;
+
+    (async () => {
+      const token = await getFCMToken();
+      if (!token) return;
+      try {
+        await registerFCMTokenMutation({
+          variables: {
+            token,
+            deviceType: 'web',
+            deviceId: getWebDeviceId(),
+            deviceName: `Portal Web - ${navigator.userAgent.split(' ').slice(-1)[0] || 'Browser'}`,
+          },
+        });
+        setNotificationsEnabled(true);
+      } catch (e) {
+        // silent — user can retry via button
+      }
+    })();
+  }, [registerFCMTokenMutation]);
+
+  // Firebase foreground notifications
+  useEffect(() => {
+    if (!isFirebaseConfigured()) return;
+    const unsubscribe = onForegroundMessage((payload) => {
+      const title = payload.notification?.title || 'Nueva notificación';
+      const body = payload.notification?.body || '';
+      addToast(`${title}: ${body}`, 'success', 6000);
+
+      // Also show browser notification if tab is not focused
+      if (document.hidden && Notification.permission === 'granted') {
+        new Notification(title, {
+          body,
+          icon: '/images/$CONFIO.png',
+          tag: payload.data?.tag || 'portal',
+        });
+      }
+    });
+    return unsubscribe;
+  }, [addToast]);
+
+  // Global keyboard shortcuts
+  useEffect(() => {
+    const handler = (event) => {
+      // Cmd/Ctrl + K to focus search
+      if ((event.metaKey || event.ctrlKey) && event.key === 'k') {
+        event.preventDefault();
+        const searchInput = document.querySelector('.portal-search-input');
+        if (searchInput) {
+          searchInput.focus();
+        }
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  /* ─── Handlers ─── */
+
+  const startNewDraft = () => {
+    if (isDraftDirty(draft) && !window.confirm('Tienes cambios sin guardar. ¿Descartar?')) {
+      return;
+    }
+    setDraft(createEmptyDraft());
+    setImageUploadError('');
+  };
 
   const editContentItem = (item) => {
+    if (isDraftDirty(draft) && !window.confirm('Tienes cambios sin guardar. ¿Descartar?')) {
+      return;
+    }
     const metadata = parsePortalMetadata(item.metadata);
     const platformLinks = metadata.platform_links || {};
     setDraft({
@@ -535,8 +786,10 @@ export default function PortalConsole() {
           }),
         ],
       }));
+      addToast('Imagen subida correctamente', 'success');
     } catch (error) {
       setImageUploadError(error.message || 'No se pudo subir la imagen.');
+      addToast(error.message || 'Error subiendo imagen', 'error');
     } finally {
       event.target.value = '';
       setIsUploadingImage(false);
@@ -590,25 +843,43 @@ export default function PortalConsole() {
     if (!activeConversation || !replyDraft.trim()) {
       return;
     }
-    await sendReply({
-      variables: {
-        conversationId: activeConversation.id,
-        body: replyDraft.trim(),
-      },
-    });
-    setReplyDraft('');
+    try {
+      await sendReply({
+        variables: {
+          conversationId: activeConversation.id,
+          body: replyDraft.trim(),
+        },
+      });
+      setReplyDraft('');
+      addToast('Respuesta enviada', 'success');
+    } catch (error) {
+      addToast('Error enviando respuesta', 'error');
+    }
+  };
+
+  const handleReplyKeyDown = (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+      event.preventDefault();
+      submitReply();
+    }
   };
 
   const toggleConversationStatus = async () => {
     if (!activeConversation) {
       return;
     }
-    await setSupportStatusMutation({
-      variables: {
-        conversationId: activeConversation.id,
-        status: activeConversation.status === 'OPEN' ? 'CLOSED' : 'OPEN',
-      },
-    });
+    const nextStatus = activeConversation.status === 'OPEN' ? 'CLOSED' : 'OPEN';
+    try {
+      await setSupportStatusMutation({
+        variables: {
+          conversationId: activeConversation.id,
+          status: nextStatus,
+        },
+      });
+      addToast(`Conversación ${nextStatus === 'CLOSED' ? 'cerrada' : 'reabierta'}`, 'success');
+    } catch (error) {
+      addToast('Error cambiando estado', 'error');
+    }
   };
 
   const submitContent = async (event) => {
@@ -617,7 +888,7 @@ export default function PortalConsole() {
     try {
       metadata = draft.metadataText.trim() ? JSON.parse(draft.metadataText) : {};
     } catch (error) {
-      window.alert('Metadata debe ser JSON válido.');
+      addToast('Metadata debe ser JSON válido', 'error');
       return;
     }
 
@@ -680,33 +951,98 @@ export default function PortalConsole() {
       .filter(Boolean)
       .join('\n\n');
 
-    await saveContentItem({
-      variables: {
-        contentItemId: draft.id,
-        channelSlug: draft.channelSlug,
-        itemType: draft.itemType,
-        title: draft.title || null,
-        body: bodyPreview || null,
-        tag: draft.tag || null,
-        status: draft.status,
-        publishedAt: fromDateTimeLocalValue(draft.publishedAt),
-        visibilityPolicy: draft.visibilityPolicy,
-        sendPush: draft.sendPush,
-        sendInApp: draft.sendInApp,
-        metadata: JSON.stringify(metadata),
-        surfaces: draft.surfaces,
-      },
-    });
-    startNewDraft();
-    setImageUploadError('');
+    try {
+      await saveContentItem({
+        variables: {
+          contentItemId: draft.id,
+          channelSlug: draft.channelSlug,
+          itemType: draft.itemType,
+          title: draft.title || null,
+          body: bodyPreview || null,
+          tag: draft.tag || null,
+          status: draft.status,
+          publishedAt: fromDateTimeLocalValue(draft.publishedAt),
+          visibilityPolicy: draft.visibilityPolicy,
+          sendPush: draft.sendPush,
+          sendInApp: draft.sendInApp,
+          metadata: JSON.stringify(metadata),
+          surfaces: draft.surfaces,
+        },
+      });
+      addToast(draft.id ? 'Publicación actualizada' : 'Publicación creada', 'success');
+      setDraft(createEmptyDraft());
+      setImageUploadError('');
+    } catch (error) {
+      addToast('Error guardando publicación', 'error');
+    }
   };
+
+  const handleContentKeyDown = (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key === 's') {
+      event.preventDefault();
+      submitContent(event);
+    }
+  };
+
+  const enableNotifications = async () => {
+    const permission = await requestNotificationPermission();
+    if (permission !== 'granted') {
+      addToast('Notificaciones bloqueadas por el navegador', 'error');
+      return;
+    }
+
+    const token = await getFCMToken();
+    if (!token) {
+      addToast('No se pudo obtener token de notificaciones. Verifica la configuración de Firebase.', 'error');
+      return;
+    }
+
+    try {
+      await registerFCMTokenMutation({
+        variables: {
+          token,
+          deviceType: 'web',
+          deviceId: getWebDeviceId(),
+          deviceName: `Portal Web - ${navigator.userAgent.split(' ').slice(-1)[0] || 'Browser'}`,
+        },
+      });
+      setNotificationsEnabled(true);
+      addToast('Notificaciones activadas', 'success');
+    } catch (error) {
+      addToast('Error registrando notificaciones', 'error');
+    }
+  };
+
+  /* ─── Render ─── */
 
   const me = meQuery.data?.me;
   const isAuthenticated = Boolean(me?.id);
   const isStaff = Boolean(me?.isStaff);
 
   if (meQuery.loading) {
-    return <div className="portal-shell"><div className="portal-card">Cargando portal...</div></div>;
+    return (
+      <div className="portal-shell">
+        <div className="portal-loading-screen">
+          <Spinner size={32} />
+          <span>Cargando portal...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (meQuery.error) {
+    return (
+      <div className="portal-shell">
+        <div className="portal-gate">
+          <div className="portal-eyebrow">Portal interno</div>
+          <h1>Error de conexión</h1>
+          <p>No se pudo conectar con el servidor. Intenta recargar la página.</p>
+          <button className="portal-primary-button" onClick={() => window.location.reload()}>
+            Recargar
+          </button>
+        </div>
+      </div>
+    );
   }
 
   if (!isAuthenticated) {
@@ -776,20 +1112,46 @@ export default function PortalConsole() {
   const handleLogout = () => window.location.assign(logoutUrl);
 
   return (
-    <div className="portal-shell">
+    <div className="portal-shell" onKeyDown={handleContentKeyDown}>
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+
       <div className="portal-header">
         <div>
           <div className="portal-eyebrow">confio.lat/portal</div>
           <h1>Portal editorial y soporte</h1>
         </div>
-        <div className="portal-user-chip">
-          {me.firstName || me.username}
+        <div className="portal-header-actions">
+          {isFirebaseConfigured() && !notificationsEnabled && (
+            <button className="portal-notification-button" onClick={enableNotifications} title="Activar notificaciones push">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+              </svg>
+              Notificaciones
+            </button>
+          )}
+          {notificationsEnabled && (
+            <span className="portal-notification-active" title="Notificaciones activas">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+              </svg>
+            </span>
+          )}
+          <div className="portal-user-chip">
+            {me.firstName || me.username}
+          </div>
         </div>
       </div>
 
       <div className="portal-tabs">
-        <button className={activeTab === 'support' ? 'active' : ''} onClick={() => setActiveTab('support')}>Soporte</button>
-        <button className={activeTab === 'content' ? 'active' : ''} onClick={() => setActiveTab('content')}>Publicaciones</button>
+        <button className={activeTab === 'support' ? 'active' : ''} onClick={() => setActiveTab('support')}>
+          Soporte
+          <TabBadge count={totalUnread} />
+        </button>
+        <button className={activeTab === 'content' ? 'active' : ''} onClick={() => setActiveTab('content')}>
+          Publicaciones
+        </button>
         <button className="portal-ghost-tab" onClick={handleLogout}>Cerrar sesión</button>
       </div>
 
@@ -803,22 +1165,47 @@ export default function PortalConsole() {
                 <option value="CLOSED">Cerradas</option>
               </select>
             </div>
-            <div className="portal-list">
-              {conversations.map((conversation) => (
-                <button
-                  key={conversation.id}
-                  className={`portal-list-row ${activeConversation?.id === conversation.id ? 'selected' : ''}`}
-                  onClick={() => setActiveConversationId(conversation.id)}
-                >
-                  <div className="portal-list-title-row">
-                    <strong>{conversation.customerName}</strong>
-                    <span>{conversation.unreadCount}</span>
+            <input
+              className="portal-search-input"
+              type="text"
+              placeholder="Buscar conversaciones... (Cmd+K)"
+              value={supportSearch}
+              onChange={(event) => setSupportSearch(event.target.value)}
+            />
+            {supportQuery.loading && conversations.length === 0 ? (
+              <div className="portal-empty"><Spinner /> Cargando...</div>
+            ) : (
+              <div className="portal-list">
+                {filteredConversations.length === 0 ? (
+                  <div className="portal-empty-state">
+                    <div className="portal-empty-icon">
+                      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#d0d5dd" strokeWidth="1.5">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                      </svg>
+                    </div>
+                    <p>{supportSearch ? 'Sin resultados para esta búsqueda' : 'No hay conversaciones en esta vista'}</p>
                   </div>
-                  <div className="portal-list-meta">{conversation.contextLabel}</div>
-                  <div className="portal-list-preview">{conversation.lastPreview}</div>
-                </button>
-              ))}
-            </div>
+                ) : (
+                  filteredConversations.map((conversation) => (
+                    <button
+                      key={conversation.id}
+                      className={`portal-list-row ${activeConversation?.id === conversation.id ? 'selected' : ''}`}
+                      onClick={() => setActiveConversationId(conversation.id)}
+                    >
+                      <div className="portal-list-title-row">
+                        <strong>{conversation.customerName}</strong>
+                        <UnreadBadge count={conversation.unreadCount} />
+                      </div>
+                      <div className="portal-list-meta">{conversation.contextLabel}</div>
+                      <div className="portal-list-preview">{conversation.lastPreview}</div>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+            {supportQuery.error && (
+              <div className="portal-error-banner">Error cargando conversaciones. Reintentando...</div>
+            )}
           </section>
 
           <section className="portal-panel">
@@ -850,21 +1237,34 @@ export default function PortalConsole() {
                 </div>
                 <div className="portal-reply-box">
                   <textarea
+                    ref={replyTextareaRef}
                     value={replyDraft}
                     onChange={(event) => setReplyDraft(event.target.value)}
-                    placeholder="Responder al usuario..."
+                    onKeyDown={handleReplyKeyDown}
+                    placeholder="Responder al usuario... (Cmd+Enter para enviar)"
                   />
-                  <button
-                    className="portal-primary-button"
-                    onClick={submitReply}
-                    disabled={!replyDraft.trim() || sendReplyState.loading}
-                  >
-                    Enviar
-                  </button>
+                  <div className="portal-reply-actions">
+                    <span className="portal-shortcut-hint">Cmd+Enter</span>
+                    <button
+                      className="portal-primary-button"
+                      onClick={submitReply}
+                      disabled={!replyDraft.trim() || sendReplyState.loading}
+                    >
+                      {sendReplyState.loading ? <><Spinner size={14} /> Enviando...</> : 'Enviar'}
+                    </button>
+                  </div>
                 </div>
               </>
             ) : (
-              <div className="portal-empty">No hay conversaciones en esta vista.</div>
+              <div className="portal-empty-state portal-empty-state-large">
+                <div className="portal-empty-icon">
+                  <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#d0d5dd" strokeWidth="1.5">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                  </svg>
+                </div>
+                <h3>Sin conversaciones</h3>
+                <p>No hay conversaciones {supportStatus === 'OPEN' ? 'abiertas' : 'cerradas'} en este momento.</p>
+              </div>
             )}
           </section>
         </div>
@@ -882,23 +1282,52 @@ export default function PortalConsole() {
                 <button className="portal-secondary-button" onClick={startNewDraft}>Nueva</button>
               </div>
             </div>
-            <div className="portal-list">
-              {contentItems.map((item) => (
-                <button key={item.id} className="portal-list-row" onClick={() => editContentItem(item)}>
-                  <div className="portal-list-title-row">
-                    <strong>{item.title || 'Sin título'}</strong>
-                    <span>{item.status}</span>
+            <input
+              className="portal-search-input"
+              type="text"
+              placeholder="Buscar publicaciones..."
+              value={contentSearch}
+              onChange={(event) => setContentSearch(event.target.value)}
+            />
+            {contentQuery.loading && contentItems.length === 0 ? (
+              <div className="portal-empty"><Spinner /> Cargando...</div>
+            ) : (
+              <div className="portal-list">
+                {filteredContentItems.length === 0 ? (
+                  <div className="portal-empty-state">
+                    <div className="portal-empty-icon">
+                      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#d0d5dd" strokeWidth="1.5">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                        <polyline points="14 2 14 8 20 8" />
+                        <line x1="16" y1="13" x2="8" y2="13" />
+                        <line x1="16" y1="17" x2="8" y2="17" />
+                      </svg>
+                    </div>
+                    <p>{contentSearch ? 'Sin resultados para esta búsqueda' : 'No hay publicaciones'}</p>
                   </div>
-                  <div className="portal-list-meta">{item.channelTitle} · {item.itemType}</div>
-                  <div className="portal-list-preview">{item.body}</div>
-                </button>
-              ))}
-            </div>
+                ) : (
+                  filteredContentItems.map((item) => (
+                    <button key={item.id} className="portal-list-row" onClick={() => editContentItem(item)}>
+                      <div className="portal-list-title-row">
+                        <strong>{item.title || 'Sin título'}</strong>
+                        <StatusPill status={item.status} />
+                      </div>
+                      <div className="portal-list-meta">{item.channelTitle} · {item.itemType}</div>
+                      <div className="portal-list-preview">{item.body}</div>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+            {contentQuery.error && (
+              <div className="portal-error-banner">Error cargando publicaciones</div>
+            )}
           </section>
 
           <section className="portal-panel">
             <div className="portal-panel-header">
               <h2>{draft.id ? 'Editar publicación' : 'Nueva publicación'}</h2>
+              {isDraftDirty(draft) && <span className="portal-dirty-indicator">Sin guardar</span>}
             </div>
             <form className="portal-form" onSubmit={submitContent}>
               <label>
@@ -963,7 +1392,7 @@ export default function PortalConsole() {
                       Agregar texto
                     </button>
                     <label className="portal-upload-button">
-                      {isUploadingImage ? 'Subiendo...' : 'Agregar imagen'}
+                      {isUploadingImage ? <><Spinner size={14} /> Subiendo...</> : 'Agregar imagen'}
                       <input
                         type="file"
                         accept="image/png,image/jpeg,image/webp"
@@ -1042,8 +1471,30 @@ export default function PortalConsole() {
                 <label>
                   Mostrar en
                   <div className="portal-surface-badges">
-                    <span className={`portal-surface-badge ${draft.surfaces.includes('CHANNEL') ? 'active' : ''}`}>Canal</span>
-                    <span className={`portal-surface-badge ${draft.surfaces.includes('DISCOVER') ? 'active' : ''}`}>Descubrir</span>
+                    <button
+                      type="button"
+                      className={`portal-surface-badge ${draft.surfaces.includes('CHANNEL') ? 'active' : ''}`}
+                      onClick={() => setDraft((current) => ({
+                        ...current,
+                        surfaces: current.surfaces.includes('CHANNEL')
+                          ? current.surfaces.filter((s) => s !== 'CHANNEL')
+                          : [...current.surfaces, 'CHANNEL'],
+                      }))}
+                    >
+                      Canal
+                    </button>
+                    <button
+                      type="button"
+                      className={`portal-surface-badge ${draft.surfaces.includes('DISCOVER') ? 'active' : ''}`}
+                      onClick={() => setDraft((current) => ({
+                        ...current,
+                        surfaces: current.surfaces.includes('DISCOVER')
+                          ? current.surfaces.filter((s) => s !== 'DISCOVER')
+                          : [...current.surfaces, 'DISCOVER'],
+                      }))}
+                    >
+                      Descubrir
+                    </button>
                   </div>
                 </label>
               </div>
@@ -1076,9 +1527,12 @@ export default function PortalConsole() {
                   <textarea value={draft.metadataText} onChange={(event) => setDraft((current) => ({ ...current, metadataText: event.target.value }))} />
                 </label>
               </details>
-              <button className="portal-primary-button" type="submit" disabled={saveContentState.loading}>
-                Guardar publicación
-              </button>
+              <div className="portal-form-submit-row">
+                <span className="portal-shortcut-hint">Cmd+S para guardar</span>
+                <button className="portal-primary-button" type="submit" disabled={saveContentState.loading}>
+                  {saveContentState.loading ? <><Spinner size={14} /> Guardando...</> : 'Guardar publicación'}
+                </button>
+              </div>
             </form>
           </section>
         </div>

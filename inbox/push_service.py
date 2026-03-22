@@ -451,6 +451,86 @@ def send_content_item_push(content_item_id: int) -> Dict[str, int]:
     return result
 
 
+def send_support_staff_push(support_message_id: int) -> Dict[str, int]:
+    """Send push notification to all staff users when a user sends a support message."""
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+
+    message = (
+        SupportMessage.objects.select_related(
+            'conversation__user',
+            'conversation__account',
+            'conversation__business',
+            'sender_user',
+        )
+        .filter(id=support_message_id, sender_type='USER')
+        .first()
+    )
+    if message is None:
+        raise ValueError('Support user message not found')
+
+    conversation = message.conversation
+    customer_name = ''
+    if message.sender_user:
+        customer_name = (
+            f'{message.sender_user.first_name or ""} {message.sender_user.last_name or ""}'.strip()
+            or message.sender_user.username
+            or message.sender_user.email
+            or ''
+        )
+
+    staff_user_ids = list(
+        User.objects.filter(is_staff=True, is_active=True)
+        .exclude(id=message.sender_user_id)
+        .values_list('id', flat=True)
+    )
+    if not staff_user_ids:
+        return {'sent': 0, 'failed': 0}
+
+    tokens = list(
+        FCMDeviceToken.objects.filter(
+            user_id__in=staff_user_ids,
+            is_active=True,
+        ).values_list('token', 'id')
+    )
+    if not tokens:
+        return {'sent': 0, 'failed': 0}
+
+    title = f'Nuevo mensaje de soporte'
+    body_text = f'{customer_name}: {(message.body or "")[:140]}'
+
+    result = send_batch_notifications(
+        tokens=tokens,
+        title=title,
+        body=body_text,
+        data={
+            'action_url': 'confio://portal/support',
+            'conversation_id': str(conversation.id),
+            'data_channel_id': 'soporte',
+            'data_conversation_id': str(conversation.id),
+            'data_message_id': str(message.id),
+            'data_sender_type': 'user',
+            'data_sender_name': customer_name,
+            'data_body': message.body or '',
+            'tag': f'support-staff-{conversation.id}',
+        },
+        badge_count=None,
+        notification=None,
+        channel_id=CHANNEL_ID_MESSAGES,
+    )
+    logger.info(
+        'Support staff push sent',
+        extra={
+            'support_message_id': message.id,
+            'conversation_id': conversation.id,
+            'staff_count': len(staff_user_ids),
+            'sent': result.get('sent', 0),
+            'failed': result.get('failed', 0),
+        },
+    )
+    return result
+
+
 def send_support_reply_push(support_message_id: int) -> Dict[str, int]:
     message = (
         SupportMessage.objects.select_related(

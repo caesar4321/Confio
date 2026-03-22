@@ -27,7 +27,7 @@ from .models import (
     SupportMessage,
     VisibilityPolicy,
 )
-from .push_service import send_support_reply_push
+from .push_service import send_support_reply_push, send_support_staff_push
 from .tasks import send_content_item_push_task
 
 logger = logging.getLogger(__name__)
@@ -290,6 +290,9 @@ def build_portal_support_conversation_payload(conversation: SupportConversation)
             or conversation.assigned_to.username
         )
 
+    # Unread if the last message is from the user (awaiting staff reply)
+    unread_count = 1 if latest_message and latest_message.sender_type == 'USER' else 0
+
     return PortalSupportConversationType(
         id=str(conversation.id),
         customer_name=customer_name,
@@ -299,7 +302,7 @@ def build_portal_support_conversation_payload(conversation: SupportConversation)
         assigned_to_name=assigned_to_name,
         last_message_at=conversation.last_message_at,
         last_preview=latest_message.body if latest_message else '',
-        unread_count=conversation.messages.filter(sender_type='USER').count(),
+        unread_count=unread_count,
         messages=[
             PortalSupportMessageType(
                 id=str(message.id),
@@ -657,7 +660,10 @@ class Query(graphene.ObjectType):
         ).prefetch_related('messages__sender_user').order_by('-last_message_at', '-updated_at')
         if status:
             queryset = queryset.filter(status=status)
-        return [build_portal_support_conversation_payload(conversation) for conversation in queryset[:100]]
+        payloads = [build_portal_support_conversation_payload(conversation) for conversation in queryset[:100]]
+        # Awaiting staff reply (unread) first, then by most recent
+        payloads.sort(key=lambda c: (-c.unread_count, c.last_message_at is None, -(c.last_message_at.timestamp() if c.last_message_at else 0)))
+        return payloads
 
     @login_required
     def resolve_portal_support_conversation(self, info, conversation_id):
@@ -833,6 +839,11 @@ class SendSupportMessage(graphene.Mutation):
         )
         conversation.last_message_at = message.created_at
         conversation.save(update_fields=['last_message_at', 'updated_at'])
+
+        try:
+            send_support_staff_push(message.id)
+        except Exception:
+            logger.exception('Failed to send support staff push', extra={'conversation_id': conversation.id, 'message_id': message.id})
 
         return SendSupportMessage(
             success=True,

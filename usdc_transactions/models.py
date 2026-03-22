@@ -264,6 +264,7 @@ class GuardarianTransaction(models.Model):
     
     STATUS_CHOICES = [
         ('waiting', 'Waiting'),       # Initial state
+        ('waiting_for_deposit', 'Waiting for Deposit'),  # User must complete fiat deposit
         ('waiting_for_customer', 'Waiting for Customer'), # Action required
         ('pending', 'Pending'),       # Payment started
         ('confirmed', 'Confirmed'),   # Payment confirmed

@@ -17,7 +17,7 @@ def poll_guardarian_transactions():
     """
     # Active states customization
     # 1. Draft/Waiting: User hasn't paid yet or just started. Abandon after 24 hours.
-    waiting_states = ['new', 'waiting', 'waiting_for_customer']
+    waiting_states = ['new', 'waiting', 'waiting_for_deposit', 'waiting_for_customer']
     waiting_threshold = timezone.now() - timedelta(hours=24)
     
     # 2. Processing: User paid, money moving. Keep polling for 7 days to ensure completion.
@@ -87,8 +87,11 @@ def poll_guardarian_transactions():
                 updated_count += 1
                 
                 # Link deposit if finished
-                if new_status == 'finished' and not tx.onchain_deposit:
-                    tx.attempt_match_deposit()
+                if new_status == 'finished':
+                    if tx.transaction_type == 'buy' and not tx.onchain_deposit:
+                        tx.attempt_match_deposit()
+                    elif tx.transaction_type == 'sell' and not tx.onchain_withdrawal:
+                        tx.attempt_match_withdrawal()
 
             # Sleep to respect rate limits (basic throttle)
             time.sleep(1.0)
@@ -127,8 +130,22 @@ def check_single_guardarian_transaction(guardarian_id):
                 tx.status = new_status
                 if data.get('to_amount'):
                     tx.to_amount_actual = Decimal(str(data.get('to_amount')))
+                if data.get('status_details'):
+                    tx.status_details = data.get('status_details')
                 tx.save()
+                if new_status == 'finished':
+                    if tx.transaction_type == 'buy' and not tx.onchain_deposit:
+                        tx.attempt_match_deposit()
+                    elif tx.transaction_type == 'sell' and not tx.onchain_withdrawal:
+                        tx.attempt_match_withdrawal()
                 return f"Updated to {new_status}"
+            if new_status == 'finished':
+                if tx.transaction_type == 'buy' and not tx.onchain_deposit:
+                    tx.attempt_match_deposit()
+                    return "Finished and attempted deposit match"
+                if tx.transaction_type == 'sell' and not tx.onchain_withdrawal:
+                    tx.attempt_match_withdrawal()
+                    return "Finished and attempted withdrawal match"
             return "No change"
         else:
             return f"API Error {resp.status_code}"
