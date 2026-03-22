@@ -270,6 +270,20 @@ function formatDateTime(value) {
   }).format(new Date(value));
 }
 
+function formatRelativeTime(value) {
+  if (!value) return '';
+  const now = Date.now();
+  const diff = now - new Date(value).getTime();
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return 'ahora';
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d`;
+  return formatDateTime(value);
+}
+
 function toDateTimeLocalValue(value) {
   if (!value) {
     return '';
@@ -519,6 +533,7 @@ export default function PortalConsole() {
   const [supportStatus, setSupportStatus] = useState('OPEN');
   const [contentChannelFilter, setContentChannelFilter] = useState('');
   const [activeConversationId, setActiveConversationId] = useState(null);
+  const [mobileShowThread, setMobileShowThread] = useState(false);
   const [replyDraft, setReplyDraft] = useState('');
   const [draft, setDraft] = useState(createEmptyDraft);
   const [imageUploadError, setImageUploadError] = useState('');
@@ -1157,7 +1172,7 @@ export default function PortalConsole() {
 
       {activeTab === 'support' ? (
         <div className="portal-grid portal-grid-support">
-          <section className="portal-panel">
+          <section className={`portal-panel ${mobileShowThread ? 'portal-mobile-hidden' : ''}`}>
             <div className="portal-panel-header">
               <h2>Conversaciones</h2>
               <select value={supportStatus} onChange={(event) => setSupportStatus(event.target.value)}>
@@ -1189,15 +1204,21 @@ export default function PortalConsole() {
                   filteredConversations.map((conversation) => (
                     <button
                       key={conversation.id}
-                      className={`portal-list-row ${activeConversation?.id === conversation.id ? 'selected' : ''}`}
-                      onClick={() => setActiveConversationId(conversation.id)}
+                      className={`portal-list-row ${activeConversation?.id === conversation.id ? 'selected' : ''} ${conversation.unreadCount > 0 ? 'unread' : ''}`}
+                      onClick={() => { setActiveConversationId(conversation.id); setMobileShowThread(true); }}
                     >
                       <div className="portal-list-title-row">
                         <strong>{conversation.customerName}</strong>
+                        <span className="portal-list-time">{formatRelativeTime(conversation.lastMessageAt)}</span>
+                      </div>
+                      <div className="portal-list-meta">
+                        {conversation.contextLabel}
+                        {conversation.assignedToName ? ` · ${conversation.assignedToName}` : ''}
+                      </div>
+                      <div className="portal-list-preview-row">
+                        <span className="portal-list-preview">{conversation.lastPreview}</span>
                         <UnreadBadge count={conversation.unreadCount} />
                       </div>
-                      <div className="portal-list-meta">{conversation.contextLabel}</div>
-                      <div className="portal-list-preview">{conversation.lastPreview}</div>
                     </button>
                   ))
                 )}
@@ -1208,20 +1229,30 @@ export default function PortalConsole() {
             )}
           </section>
 
-          <section className="portal-panel">
+          <section className={`portal-panel ${mobileShowThread ? '' : 'portal-mobile-hidden-thread'}`}>
             {activeConversation ? (
               <>
                 <div className="portal-panel-header portal-thread-header">
-                  <div>
-                    <h2>{activeConversation.customerName}</h2>
-                    <div className="portal-list-meta">
-                      {activeConversation.contextLabel}
-                      {activeConversation.customerEmail ? ` · ${activeConversation.customerEmail}` : ''}
+                  <div className="portal-thread-header-left">
+                    <button className="portal-back-button" onClick={() => setMobileShowThread(false)}>
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="15 18 9 12 15 6" />
+                      </svg>
+                    </button>
+                    <div>
+                      <h2>{activeConversation.customerName}</h2>
+                      <div className="portal-list-meta">
+                        {activeConversation.contextLabel}
+                        {activeConversation.customerEmail ? ` · ${activeConversation.customerEmail}` : ''}
+                      </div>
                     </div>
                   </div>
-                  <button className="portal-secondary-button" onClick={toggleConversationStatus}>
-                    {activeConversation.status === 'OPEN' ? 'Cerrar' : 'Reabrir'}
-                  </button>
+                  <div className="portal-inline-actions">
+                    <span className={`portal-status-dot ${activeConversation.status === 'OPEN' ? 'open' : 'closed'}`} />
+                    <button className="portal-secondary-button" onClick={toggleConversationStatus}>
+                      {activeConversation.status === 'OPEN' ? 'Cerrar' : 'Reabrir'}
+                    </button>
+                  </div>
                 </div>
                 <div className="portal-thread" ref={supportThreadRef}>
                   {activeConversation.messages.map((message) => (
@@ -1517,8 +1548,6 @@ export default function PortalConsole() {
               <div className="portal-checks">
                 <label><input type="checkbox" checked={draft.sendPush} onChange={(event) => setDraft((current) => ({ ...current, sendPush: event.target.checked }))} /> Push</label>
                 <label><input type="checkbox" checked={draft.sendInApp} onChange={(event) => setDraft((current) => ({ ...current, sendInApp: event.target.checked }))} /> In-app</label>
-                <label><input type="checkbox" checked={draft.surfaces.includes('CHANNEL')} onChange={(event) => setDraft((current) => ({ ...current, surfaces: event.target.checked ? Array.from(new Set([...current.surfaces, 'CHANNEL'])) : current.surfaces.filter((surface) => surface !== 'CHANNEL') }))} /> Canal</label>
-                <label><input type="checkbox" checked={draft.surfaces.includes('DISCOVER')} onChange={(event) => setDraft((current) => ({ ...current, surfaces: event.target.checked ? Array.from(new Set([...current.surfaces, 'DISCOVER'])) : current.surfaces.filter((surface) => surface !== 'DISCOVER') }))} /> Descubrir</label>
               </div>
               <details className="portal-advanced">
                 <summary>Metadata avanzada (JSON)</summary>

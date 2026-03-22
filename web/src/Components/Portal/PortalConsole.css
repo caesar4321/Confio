@@ -265,12 +265,29 @@
   box-shadow: 0 8px 22px rgba(15, 159, 116, 0.12);
 }
 
+.portal-list-row.unread {
+  border-left: 3px solid #0f9f74;
+  background: #f8fdfb;
+}
+
 .portal-list-title-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 12px;
   margin-bottom: 4px;
+}
+
+.portal-list-time {
+  font-size: 11px;
+  font-weight: 600;
+  color: #98a2b3;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.portal-list-row.unread .portal-list-time {
+  color: #0f9f74;
 }
 
 .portal-list-title-row span,
@@ -285,13 +302,22 @@
   margin-bottom: 6px;
 }
 
+.portal-list-preview-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
 .portal-list-preview {
   font-size: 13px;
   line-height: 1.45;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  flex: 1;
+  min-width: 0;
 }
 
 /* ─── Thread ─── */
@@ -337,6 +363,52 @@
 .portal-message.from-agent .portal-message-time,
 .portal-message.from-agent .portal-message-sender {
   color: rgba(255, 255, 255, 0.8);
+}
+
+/* ─── Thread Header ─── */
+
+.portal-thread-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.portal-back-button {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid #e4e7ec;
+  border-radius: 12px;
+  background: #ffffff;
+  cursor: pointer;
+  color: #475467;
+  flex-shrink: 0;
+  transition: 120ms ease;
+}
+
+.portal-back-button:hover {
+  border-color: #0f9f74;
+  color: #0f9f74;
+}
+
+.portal-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.portal-status-dot.open {
+  background: #12b76a;
+  box-shadow: 0 0 0 3px rgba(18, 183, 106, 0.2);
+}
+
+.portal-status-dot.closed {
+  background: #98a2b3;
+  box-shadow: 0 0 0 3px rgba(152, 162, 179, 0.2);
 }
 
 /* ─── Reply Box ─── */
@@ -552,9 +624,13 @@
 }
 
 .portal-form textarea,
-.portal-reply-box textarea,
 .portal-token-input {
   min-height: 120px;
+  resize: vertical;
+}
+
+.portal-reply-box textarea {
+  min-height: 72px;
   resize: vertical;
 }
 
@@ -805,7 +881,11 @@
 
 @media (max-width: 980px) {
   .portal-shell {
-    padding: 18px;
+    padding: 14px;
+  }
+
+  .portal-header h1 {
+    font-size: 24px;
   }
 
   .portal-grid-support,
@@ -816,6 +896,8 @@
 
   .portal-panel {
     min-height: auto;
+    border-radius: 20px;
+    padding: 16px;
   }
 
   .portal-list,
@@ -827,23 +909,115 @@
   .portal-header {
     flex-direction: column;
     align-items: flex-start;
-    gap: 12px;
+    gap: 10px;
   }
 
   .portal-header-actions {
     flex-wrap: wrap;
   }
 
-  .portal-notification-button span {
+  .portal-tabs {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    gap: 8px;
+  }
+
+  .portal-tabs::-webkit-scrollbar {
     display: none;
+  }
+
+  .portal-tabs button {
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .portal-back-button {
+    display: flex;
+  }
+
+  .portal-mobile-hidden {
+    display: none;
+  }
+
+  .portal-mobile-hidden-thread {
+    display: none;
+  }
+
+  .portal-message {
+    max-width: 90%;
+  }
+
+  .portal-reply-box textarea {
+    min-height: 60px;
+  }
+
+  .portal-block-toolbar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .portal-form-image-header {
+    flex-direction: column;
+    gap: 10px;
   }
 
   .portal-toast-container {
     right: 12px;
     left: 12px;
+    top: 12px;
   }
 
   .portal-toast {
     max-width: none;
+  }
+
+  .portal-gate {
+    margin: 24px auto;
+    padding: 20px;
+  }
+
+  .portal-gate h1 {
+    font-size: 24px;
+  }
+}
+
+@media (max-width: 480px) {
+  .portal-shell {
+    padding: 10px;
+  }
+
+  .portal-header h1 {
+    font-size: 20px;
+  }
+
+  .portal-panel {
+    border-radius: 16px;
+    padding: 12px;
+  }
+
+  .portal-card,
+  .portal-gate {
+    border-radius: 16px;
+  }
+
+  .portal-list-row {
+    border-radius: 14px;
+    padding: 12px;
+  }
+
+  .portal-message {
+    border-radius: 14px;
+    padding: 10px;
+    max-width: 92%;
+  }
+
+  .portal-panel-header h2 {
+    font-size: 17px;
+  }
+
+  .portal-form-row {
+    grid-template-columns: 1fr;
   }
 }
