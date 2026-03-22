@@ -63,10 +63,10 @@ class AlgorandClient:
                     address,
                 )
             self._using_fallback_algod = False
-            return algod.AlgodClient('', address, headers=headers, timeout=8)
+            return algod.AlgodClient('', address, headers=headers)
 
         self._using_fallback_algod = False
-        return algod.AlgodClient(token, address, headers=ua, timeout=8)
+        return algod.AlgodClient(token, address, headers=ua)
 
     def _build_indexer_client(self):
         """Instantiate an indexer client with optional API key support."""
