@@ -747,6 +747,14 @@ export const REACT_TO_MESSAGE_CONTENT = gql`
   }
 `;
 
+export const TRACK_CONTENT_PLATFORM_CLICK = gql`
+  mutation TrackContentPlatformClick($contentItemId: ID!, $platform: String!, $surface: String!) {
+    trackContentPlatformClick(contentItemId: $contentItemId, platform: $platform, surface: $surface) {
+      success
+    }
+  }
+`;
+
 export const UPDATE_MESSAGE_CHANNEL_MUTE = gql`
   mutation UpdateMessageChannelMute($channelId: String!, $isMuted: Boolean!) {
     updateMessageChannelMute(channelId: $channelId, isMuted: $isMuted) {

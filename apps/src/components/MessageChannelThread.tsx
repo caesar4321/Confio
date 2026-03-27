@@ -22,6 +22,7 @@ import founderImage from '../assets/png/JulianMoon_Founder.jpeg';
 import { Channel, ChannelMessage, ChannelAvatar, channelMeta, messageReactionOptions, tealLight, tealGreen } from './MessageInboxShared';
 import { MainStackParamList } from '../types/navigation';
 import { ResponsiveImage } from './ResponsiveImage';
+import { trackContentPlatformClick } from '../services/contentClickTrackingService';
 
 const platformButtonStyles: Record<'TikTok' | 'Instagram' | 'YouTube', { bg: string; fg: string }> = {
   TikTok: { bg: '#111111', fg: '#FFFFFF' },
@@ -64,7 +65,7 @@ function getDateGroupLabel(time: string) {
 function renderMessageContent(
   channel: Channel,
   message: ChannelMessage,
-  openLink: (link: string) => Promise<void>,
+  openLink: (messageId: number, platform: 'TikTok' | 'Instagram' | 'YouTube', link: string) => Promise<void>,
   onReact: (messageId: number, emoji: string) => Promise<void>,
   onOpenDetail: (messageId: number) => void,
   showEmojiPicker: number | null,
@@ -103,7 +104,7 @@ function renderMessageContent(
             <Pressable
               key={platform}
               onPress={() => {
-                void openLink(url);
+                void openLink(message.id, platform, url);
               }}
               style={[
                 styles.videoPlatformButton,
@@ -406,12 +407,19 @@ export function MessageChannelThread({
     previousMessageCountRef.current = messageCount;
   }, [channel.id, channel.messages.length]);
 
-  const openLink = async (link: string) => {
+  const openLink = async (messageId: number, platform: 'TikTok' | 'Instagram' | 'YouTube', link: string) => {
     if (!link || link === '#') {
       return;
     }
 
     try {
+      await trackContentPlatformClick({
+        contentItemId: messageId,
+        surface: 'CHANNEL',
+        platform: platform.toUpperCase() as 'TIKTOK' | 'INSTAGRAM' | 'YOUTUBE',
+        channelId: channel.id,
+        url: link,
+      });
       await Linking.openURL(link);
     } catch (error) {
       console.warn('Failed to open link', error);

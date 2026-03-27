@@ -233,6 +233,9 @@ class KoyweClient:
         self.crypto_symbol = getattr(settings, 'KOYWE_CRYPTO_SYMBOL', 'USDC Solana')
         self.timeout = getattr(settings, 'KOYWE_TIMEOUT_SECONDS', 20)
         self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (compatible; ConfioApp/1.0)',
+        })
 
     @property
     def is_configured(self) -> bool:
@@ -888,6 +891,12 @@ class KoyweClient:
 
         return high.quantize(Decimal('0.01'))
 
+    def register_webhook(self, *, url: str, secret: str | None = None) -> dict[str, Any]:
+        payload: dict[str, Any] = {'url': url}
+        if secret:
+            payload['secret'] = secret
+        return self._request('POST', '/rest/clients/updateWebhook', json_payload=payload)
+
     def get_bank_info(self, *, country_code: str) -> list[dict[str, Any]]:
         """
         Fetch available banks for a country from GET /rest/bank-info/{countryCode}.
@@ -896,7 +905,7 @@ class KoyweClient:
         """
         url = f'{self.base_url}/rest/bank-info/{country_code.upper()}'
         try:
-            resp = requests.get(url, timeout=15)
+            resp = self.session.get(url, timeout=15)
             if resp.status_code == 400:
                 return []
             if not resp.ok:

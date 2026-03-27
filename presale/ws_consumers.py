@@ -144,10 +144,11 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
             try:
                 amount = content.get("amount")
                 platform = content.get("platform", "")
-                accepted_terms = bool(content.get("accepted_terms"))
+                has_accepted_terms_field = "accepted_terms" in content
+                accepted_terms = bool(content.get("accepted_terms")) if has_accepted_terms_field else True
                 try:
                     logging.getLogger(__name__).info(
-                        f"[PRESALE][WS] prepare_request amount={amount} platform={platform} accepted_terms={accepted_terms}"
+                        f"[PRESALE][WS] prepare_request amount={amount} platform={platform} accepted_terms={accepted_terms} legacy_client={not has_accepted_terms_field}"
                     )
                 except Exception:
                     pass
@@ -155,6 +156,7 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
                     amount,
                     platform=platform,
                     accepted_terms=accepted_terms,
+                    require_terms=has_accepted_terms_field,
                     client_ip=self._get_client_ip(),
                     user_agent=self._get_user_agent(),
                 )
@@ -265,7 +267,7 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
         return account
 
     @database_sync_to_async
-    def _prepare(self, amount, platform: str = "", accepted_terms: bool = False, client_ip: str | None = None, user_agent: str = ""):
+    def _prepare(self, amount, platform: str = "", accepted_terms: bool = False, require_terms: bool = True, client_ip: str | None = None, user_agent: str = ""):
         from decimal import Decimal
         from django.utils import timezone
         from presale.models import PresalePhase, PresalePurchase, UserPresaleLimit, PresaleSettings
@@ -281,7 +283,7 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
         if not is_eligible:
             return {"success": False, "error": error_msg}
 
-        if not accepted_terms:
+        if require_terms and not accepted_terms:
             return {"success": False, "error": "terms_acceptance_required"}
 
         # Validate presale is active and find phase
@@ -363,10 +365,10 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
             price_per_token=phase.price_per_token,
             status='processing',
             from_address=account.algorand_address,
-            accepted_terms_version=TERMS['version'],
-            accepted_terms_at=timezone.now(),
-            accepted_terms_ip=client_ip,
-            accepted_terms_user_agent=(user_agent or '')[:1000],
+            accepted_terms_version=TERMS['version'] if require_terms and accepted_terms else '',
+            accepted_terms_at=timezone.now() if require_terms and accepted_terms else None,
+            accepted_terms_ip=client_ip if require_terms and accepted_terms else None,
+            accepted_terms_user_agent=(user_agent or '')[:1000] if require_terms and accepted_terms else '',
         )
 
         # Build sponsored transaction group

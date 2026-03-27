@@ -68,6 +68,12 @@ class ContentSurfaceType(models.TextChoices):
     HOME_HIGHLIGHT = 'HOME_HIGHLIGHT', 'Home Highlight'
 
 
+class ContentPlatformType(models.TextChoices):
+    TIKTOK = 'TIKTOK', 'TikTok'
+    INSTAGRAM = 'INSTAGRAM', 'Instagram'
+    YOUTUBE = 'YOUTUBE', 'YouTube'
+
+
 class ContentNotificationPriority(models.TextChoices):
     SILENT = 'SILENT', 'Silent'
     NORMAL = 'NORMAL', 'Normal'
@@ -363,6 +369,55 @@ class ContentReaction(models.Model):
                 fields=['content_item', 'user', 'business'],
                 condition=Q(account__isnull=True, business__isnull=False),
                 name='inbox_reaction_item_user_business_uniq',
+            ),
+        ]
+
+
+class ContentPlatformClick(models.Model):
+    content_item = models.ForeignKey(ContentItem, on_delete=models.CASCADE, related_name='platform_clicks')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='content_platform_clicks')
+    account = models.ForeignKey(Account, on_delete=models.CASCADE, null=True, blank=True, related_name='content_platform_clicks')
+    business = models.ForeignKey(Business, on_delete=models.CASCADE, null=True, blank=True, related_name='content_platform_clicks')
+    surface = models.CharField(max_length=24, choices=ContentSurfaceType.choices)
+    platform = models.CharField(max_length=16, choices=ContentPlatformType.choices)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['content_item', 'platform', '-created_at'], name='inbox_click_item_platform_idx'),
+            models.Index(fields=['user', '-created_at'], name='inbox_click_user_idx'),
+            models.Index(fields=['surface', 'platform', '-created_at'], name='inbox_click_surface_idx'),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    Q(account__isnull=False, business__isnull=True)
+                    | Q(account__isnull=True, business__isnull=False)
+                ),
+                name='inbox_platform_click_context_valid',
+            ),
+        ]
+
+
+class ContentPlatformClickDailyStat(models.Model):
+    date = models.DateField()
+    content_item = models.ForeignKey(ContentItem, on_delete=models.CASCADE, related_name='platform_click_daily_stats')
+    surface = models.CharField(max_length=24, choices=ContentSurfaceType.choices)
+    platform = models.CharField(max_length=16, choices=ContentPlatformType.choices)
+    click_count = models.PositiveIntegerField(default=0)
+    unique_user_count = models.PositiveIntegerField(default=0)
+    aggregated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['content_item', 'platform', '-date'], name='ibox_clk_day_item_idx'),
+            models.Index(fields=['surface', 'platform', '-date'], name='ibox_clk_day_surf_idx'),
+            models.Index(fields=['-date', '-click_count'], name='ibox_clk_day_date_idx'),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['date', 'content_item', 'surface', 'platform'],
+                name='ibox_clk_day_unique',
             ),
         ]
 

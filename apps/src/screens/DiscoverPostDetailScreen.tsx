@@ -18,6 +18,7 @@ import { REACT_TO_MESSAGE_CONTENT } from '../apollo/mutations';
 import { GET_DISCOVER_POST } from '../apollo/queries';
 import { MainStackParamList } from '../types/navigation';
 import { ResponsiveImage } from '../components/ResponsiveImage';
+import { trackContentPlatformClick } from '../services/contentClickTrackingService';
 
 type Navigation = NativeStackNavigationProp<MainStackParamList>;
 type RouteProps = NativeStackScreenProps<MainStackParamList, 'DiscoverPostDetail'>['route'];
@@ -150,11 +151,22 @@ export const DiscoverPostDetailScreen = () => {
 
   const post = data?.discoverPost as DiscoverPostDto | undefined;
 
-  const handleOpenLink = async (url: string) => {
+  const handleOpenLink = async (
+    url: string,
+    platform?: 'TikTok' | 'Instagram' | 'YouTube'
+  ) => {
     if (!url) {
       return;
     }
     try {
+      if (platform) {
+        await trackContentPlatformClick({
+          contentItemId,
+          surface: 'DISCOVER',
+          platform: platform.toUpperCase() as 'TIKTOK' | 'INSTAGRAM' | 'YOUTUBE',
+          url,
+        });
+      }
       await Linking.openURL(url);
     } catch (error) {
       console.warn('Failed to open discover platform link', error);
@@ -280,7 +292,7 @@ export const DiscoverPostDetailScreen = () => {
                 <Pressable
                   key={platform}
                   onPress={() => {
-                    void handleOpenLink(url);
+                    void handleOpenLink(url, platform);
                   }}
                   style={[
                     styles.videoPlatformButton,

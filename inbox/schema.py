@@ -17,7 +17,9 @@ from .models import (
     ChannelScope,
     ChannelMembership,
     ContentReaction,
+    ContentPlatformClick,
     ContentItem,
+    ContentPlatformType,
     ContentSurfaceType,
     OwnerType,
     ContentStatus,
@@ -813,6 +815,56 @@ class ReactToMessageContent(graphene.Mutation):
         )
 
 
+class TrackContentPlatformClick(graphene.Mutation):
+    class Arguments:
+        content_item_id = graphene.ID(required=True)
+        platform = graphene.String(required=True)
+        surface = graphene.String(required=True)
+
+    success = graphene.Boolean(required=True)
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, content_item_id, platform, surface):
+        user, account, business, _ = get_context_models(info)
+
+        normalized_platform = (platform or '').upper()
+        normalized_surface = (surface or '').upper()
+
+        if normalized_platform not in ContentPlatformType.values:
+            raise GraphQLError('Unsupported platform')
+        if normalized_surface not in ContentSurfaceType.values:
+            raise GraphQLError('Unsupported surface')
+
+        item = ContentItem.objects.filter(id=content_item_id, status=ContentStatus.PUBLISHED).first()
+        if item is None:
+            raise GraphQLError('Content item not found')
+
+        membership_filter = {'channel': item.channel, 'user': user, 'is_subscribed': True}
+        if business is not None:
+            membership_filter.update({'business': business, 'account__isnull': True})
+        else:
+            membership_filter.update({'account': account, 'business__isnull': True})
+
+        membership = ChannelMembership.objects.filter(**membership_filter).first()
+        if membership is None or not get_visible_content_queryset(membership).filter(id=item.id).exists():
+            raise GraphQLError('Content item not available in this context')
+
+        create_kwargs = {
+            'content_item': item,
+            'user': user,
+            'platform': normalized_platform,
+            'surface': normalized_surface,
+        }
+        if business is not None:
+            create_kwargs['business'] = business
+        else:
+            create_kwargs['account'] = account
+
+        ContentPlatformClick.objects.create(**create_kwargs)
+        return TrackContentPlatformClick(success=True)
+
+
 class SendSupportMessage(graphene.Mutation):
     class Arguments:
         body = graphene.String(required=True)
@@ -1155,6 +1207,7 @@ class RequestPublicationImageUpload(graphene.Mutation):
 class Mutation(graphene.ObjectType):
     mark_message_channel_seen = MarkMessageChannelSeen.Field()
     react_to_message_content = ReactToMessageContent.Field()
+    track_content_platform_click = TrackContentPlatformClick.Field()
     send_support_message = SendSupportMessage.Field()
     update_message_channel_mute = UpdateMessageChannelMute.Field()
     portal_send_support_reply = PortalSendSupportReply.Field()

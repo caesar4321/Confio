@@ -2,11 +2,16 @@ from django.contrib import admin
 from django.contrib import messages
 from django import forms
 from django.utils import timezone
+from django.db.models import Count, IntegerField, OuterRef, Q, Subquery, Sum, Value
+from django.db.models.functions import Coalesce
+from datetime import datetime, timedelta
 
 from .models import (
     Channel,
     ChannelMembership,
     ContentItem,
+    ContentPlatformClick,
+    ContentPlatformClickDailyStat,
     ContentReadState,
     ContentReaction,
     ContentSurface,
@@ -205,6 +210,10 @@ class ContentItemAdmin(admin.ModelAdmin):
         'item_type',
         'status',
         'discover_status',
+        'platform_clicks_total',
+        'platform_clicks_last_7_days',
+        'platform_clicks_tiktok',
+        'platform_clicks_youtube',
         'published_at',
         'push_sent_at',
         'send_in_app',
@@ -294,6 +303,88 @@ class ContentItemAdmin(admin.ModelAdmin):
         ),
     )
 
+    def get_queryset(self, request):
+        queryset = super().get_queryset(request)
+        today = timezone.localdate()
+        seven_days_ago = today - timedelta(days=6)
+        start_of_today = timezone.make_aware(datetime.combine(today, datetime.min.time()))
+
+        aggregate_total_subquery = (
+            ContentPlatformClickDailyStat.objects.filter(content_item=OuterRef('pk'))
+            .values('content_item')
+            .annotate(total=Sum('click_count'))
+            .values('total')[:1]
+        )
+        aggregate_last_7_days_subquery = (
+            ContentPlatformClickDailyStat.objects.filter(
+                content_item=OuterRef('pk'),
+                date__gte=seven_days_ago,
+            )
+            .values('content_item')
+            .annotate(total=Sum('click_count'))
+            .values('total')[:1]
+        )
+        aggregate_tiktok_subquery = (
+            ContentPlatformClickDailyStat.objects.filter(
+                content_item=OuterRef('pk'),
+                platform='TIKTOK',
+            )
+            .values('content_item')
+            .annotate(total=Sum('click_count'))
+            .values('total')[:1]
+        )
+        aggregate_youtube_subquery = (
+            ContentPlatformClickDailyStat.objects.filter(
+                content_item=OuterRef('pk'),
+                platform='YOUTUBE',
+            )
+            .values('content_item')
+            .annotate(total=Sum('click_count'))
+            .values('total')[:1]
+        )
+
+        return queryset.annotate(
+            platform_clicks_total_count=(
+                Coalesce(Subquery(aggregate_total_subquery, output_field=IntegerField()), Value(0))
+                + Count('platform_clicks', filter=Q(platform_clicks__created_at__gte=start_of_today), distinct=True)
+            ),
+            platform_clicks_last_7_days_count=(
+                Coalesce(Subquery(aggregate_last_7_days_subquery, output_field=IntegerField()), Value(0))
+                + Count(
+                    'platform_clicks',
+                    filter=Q(platform_clicks__created_at__gte=start_of_today),
+                    distinct=True,
+                )
+            ),
+            platform_clicks_tiktok_count=(
+                Coalesce(Subquery(aggregate_tiktok_subquery, output_field=IntegerField()), Value(0))
+                + Count(
+                    'platform_clicks',
+                    filter=Q(
+                        platform_clicks__created_at__gte=start_of_today,
+                        platform_clicks__platform='TIKTOK',
+                    ),
+                    distinct=True,
+                )
+            ),
+            platform_clicks_youtube_count=(
+                Coalesce(Subquery(aggregate_youtube_subquery, output_field=IntegerField()), Value(0))
+                + Count(
+                    'platform_clicks',
+                    filter=Q(
+                        platform_clicks__created_at__gte=start_of_today,
+                        platform_clicks__platform='YOUTUBE',
+                    ),
+                    distinct=True,
+                )
+            ),
+            platform_clicks_raw_today_count=Count(
+                'platform_clicks',
+                filter=Q(platform_clicks__created_at__gte=start_of_today),
+                distinct=True,
+            ),
+        )
+
     def title_or_body(self, obj):
         return obj.title or (obj.body[:80] if obj.body else '')
 
@@ -308,6 +399,26 @@ class ContentItemAdmin(admin.ModelAdmin):
         return 'Live'
 
     discover_status.short_description = 'Discover'
+
+    def platform_clicks_total(self, obj):
+        return getattr(obj, 'platform_clicks_total_count', 0)
+
+    platform_clicks_total.short_description = 'Clicks'
+
+    def platform_clicks_last_7_days(self, obj):
+        return getattr(obj, 'platform_clicks_last_7_days_count', 0)
+
+    platform_clicks_last_7_days.short_description = 'Clicks 7d'
+
+    def platform_clicks_tiktok(self, obj):
+        return getattr(obj, 'platform_clicks_tiktok_count', 0)
+
+    platform_clicks_tiktok.short_description = 'TikTok'
+
+    def platform_clicks_youtube(self, obj):
+        return getattr(obj, 'platform_clicks_youtube_count', 0)
+
+    platform_clicks_youtube.short_description = 'YouTube'
 
     @admin.action(description='Publicar seleccionado ahora')
     def publish_selected_now(self, request, queryset):
@@ -421,6 +532,33 @@ class ContentReactionAdmin(admin.ModelAdmin):
     )
     autocomplete_fields = ('content_item', 'reaction_type', 'user', 'account', 'business')
     list_select_related = ('content_item', 'reaction_type', 'user', 'account', 'business')
+
+
+@admin.register(ContentPlatformClick)
+class ContentPlatformClickAdmin(admin.ModelAdmin):
+    list_display = ('content_item', 'platform', 'surface', 'user', 'account', 'business', 'created_at')
+    list_filter = ('platform', 'surface', 'content_item__channel')
+    search_fields = (
+        'content_item__title',
+        'content_item__channel__title',
+        'user__username',
+        'user__email',
+    )
+    autocomplete_fields = ('content_item', 'user', 'account', 'business')
+    list_select_related = ('content_item', 'user', 'account', 'business')
+
+
+@admin.register(ContentPlatformClickDailyStat)
+class ContentPlatformClickDailyStatAdmin(admin.ModelAdmin):
+    list_display = ('date', 'content_item', 'platform', 'surface', 'click_count', 'unique_user_count', 'aggregated_at')
+    list_filter = ('date', 'platform', 'surface', 'content_item__channel')
+    search_fields = (
+        'content_item__title',
+        'content_item__channel__title',
+    )
+    autocomplete_fields = ('content_item',)
+    list_select_related = ('content_item',)
+    date_hierarchy = 'date'
 
 
 class SupportMessageInline(admin.TabularInline):

@@ -30,6 +30,7 @@ from p2p_exchange.models import P2POffer, P2PTrade, P2PUserStats, P2PDispute
 from send.models import SendTransaction
 from payments.models import PaymentTransaction
 from blockchain.constants import REFERRAL_ACHIEVEMENT_SLUGS
+from inbox.models import ContentPlatformClick
 
 
 class ConfioAdminSite(AdminSiteOTPRequired):
@@ -294,6 +295,42 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         context['last_broadcast'] = Notification.objects.filter(
             is_broadcast=True
         ).order_by('-created_at').first()
+
+        # Content engagement metrics
+        content_clicks_last_24h = ContentPlatformClick.objects.filter(created_at__gte=last_24h)
+        content_clicks_last_7d = ContentPlatformClick.objects.filter(created_at__gte=last_7_start)
+        content_clicks_last_30d = ContentPlatformClick.objects.filter(created_at__gte=now - timedelta(days=30))
+
+        context['content_click_stats'] = {
+            'total': ContentPlatformClick.objects.count(),
+            'last_24h': content_clicks_last_24h.count(),
+            'last_7d': content_clicks_last_7d.count(),
+            'unique_users_7d': content_clicks_last_7d.values('user_id').distinct().count(),
+            'tiktok_7d': content_clicks_last_7d.filter(platform='TIKTOK').count(),
+            'instagram_7d': content_clicks_last_7d.filter(platform='INSTAGRAM').count(),
+            'youtube_7d': content_clicks_last_7d.filter(platform='YOUTUBE').count(),
+            'channel_7d': content_clicks_last_7d.filter(surface='CHANNEL').count(),
+            'discover_7d': content_clicks_last_7d.filter(surface='DISCOVER').count(),
+        }
+
+        context['platform_breakdown_7d'] = list(
+            content_clicks_last_7d.values('platform').annotate(
+                click_count=Count('id'),
+                unique_users=Count('user_id', distinct=True),
+            ).order_by('-click_count')
+        )
+
+        context['top_clicked_content'] = list(
+            content_clicks_last_30d.values(
+                'content_item_id',
+                'content_item__title',
+                'content_item__channel__title',
+                'surface',
+            ).annotate(
+                click_count=Count('id'),
+                unique_users=Count('user_id', distinct=True),
+            ).order_by('-click_count', '-unique_users')[:8]
+        )
         
         # Monthly volumes
         conversions_volume = Conversion.objects.filter(
@@ -883,6 +920,8 @@ from inbox.models import (
     Channel,
     ChannelMembership,
     ContentItem,
+    ContentPlatformClick,
+    ContentPlatformClickDailyStat,
     ContentReadState,
     ContentReaction,
     ContentSurface,
@@ -895,6 +934,8 @@ from inbox.admin import (
     ChannelAdmin,
     ChannelMembershipAdmin,
     ContentItemAdmin,
+    ContentPlatformClickAdmin,
+    ContentPlatformClickDailyStatAdmin,
     ContentReadStateAdmin,
     ContentReactionAdmin,
     ContentSurfaceAdmin,
@@ -1072,6 +1113,8 @@ confio_admin_site.register(ChannelMembership, ChannelMembershipAdmin)
 confio_admin_site.register(ContentReadState, ContentReadStateAdmin)
 confio_admin_site.register(ReactionType, ReactionTypeAdmin)
 confio_admin_site.register(ContentReaction, ContentReactionAdmin)
+confio_admin_site.register(ContentPlatformClick, ContentPlatformClickAdmin)
+confio_admin_site.register(ContentPlatformClickDailyStat, ContentPlatformClickDailyStatAdmin)
 confio_admin_site.register(SupportConversation, SupportConversationAdmin)
 confio_admin_site.register(SupportMessage, SupportMessageAdmin)
 confio_admin_site.register(SupportConversationState, SupportConversationStateAdmin)
