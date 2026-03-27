@@ -6,16 +6,25 @@ import { oauthStorage } from '../services/oauthStorageService';
 import { GOOGLE_CLIENT_IDS } from '../config/env';
 import { AccountManager } from '../utils/accountManager';
 import { apolloClient } from '../apollo/client';
+import { useAuth } from '../contexts/AuthContext';
 
 
 export const MigrationModal = () => {
     const [visible, setVisible] = useState(false);
     const [loading, setLoading] = useState(false);
     const [status, setStatus] = useState('Verificando estado de la billetera...');
+    const { isAuthenticated, accountContextTick } = useAuth();
 
     useEffect(() => {
+        if (!isAuthenticated) {
+            setVisible(false);
+            setLoading(false);
+            setStatus('Verificando estado de la billetera...');
+            return;
+        }
+
         checkMigration();
-    }, []);
+    }, [isAuthenticated, accountContextTick]);
 
     const checkMigration = async () => {
         try {
