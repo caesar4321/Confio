@@ -73,24 +73,24 @@ def _resolve_main_assets():
     """Resolve main.js and main.css URLs robustly.
 
     Strategy:
-    1) Try manifests in likely locations: static/, staticfiles/, web/build/.
+    1) Try manifests in likely locations, preferring the active web build first.
        Validate that referenced files exist on disk under one of the known
        static roots that Nginx/Django can serve.
-    2) Fallback: scan for latest main.* in staticfiles/ first (preferred for prod),
-       then web/build/static/, then static/.
+    2) Fallback: scan for latest main.* in web/build/static/ first to match
+       the nginx /static/js and /static/css aliases, then staticfiles/, then static/.
     Returns (js_url, css_url) as URL paths beginning with /static/.
     """
     base = settings.BASE_DIR
     candidates_manifests = [
-        os.path.join(base, 'static', 'asset-manifest.json'),
-        os.path.join(base, 'staticfiles', 'asset-manifest.json'),
         os.path.join(base, 'web', 'build', 'asset-manifest.json'),
+        os.path.join(base, 'staticfiles', 'asset-manifest.json'),
+        os.path.join(base, 'static', 'asset-manifest.json'),
     ]
 
     # Map URL /static/... to possible on-disk roots
     static_roots = [
-        os.path.join(base, 'staticfiles'),
         os.path.join(base, 'web', 'build', 'static'),
+        os.path.join(base, 'staticfiles'),
         os.path.join(base, 'static'),
     ]
 
@@ -140,7 +140,7 @@ def _resolve_main_assets():
         except Exception:
             return None
 
-    # Fallback scanning preference: staticfiles -> web/build/static -> static
+    # Fallback scanning preference: web/build/static -> staticfiles -> static
     if not js_url:
         for root in static_roots:
             js_url = pick_latest_from_dir(root, 'js', 'main.', '.js')
