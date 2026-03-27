@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, ActivityIndicator, StyleSheet, Modal, Alert } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { View, Text, ActivityIndicator, StyleSheet, Modal, Alert, AppState } from 'react-native';
 import { migrationService } from '../services/migrationService';
 import authService from '../services/authService';
 import { oauthStorage } from '../services/oauthStorageService';
@@ -14,6 +14,8 @@ export const MigrationModal = () => {
     const [loading, setLoading] = useState(false);
     const [status, setStatus] = useState('Verificando estado de la billetera...');
     const { isAuthenticated, accountContextTick } = useAuth();
+    const isCheckingRef = useRef(false);
+    const isMigratingRef = useRef(false);
 
     useEffect(() => {
         if (!isAuthenticated) {
@@ -23,10 +25,25 @@ export const MigrationModal = () => {
             return;
         }
 
-        checkMigration();
+        void checkMigration();
+    }, [isAuthenticated, accountContextTick]);
+
+    useEffect(() => {
+        const subscription = AppState.addEventListener('change', (nextState) => {
+            if (nextState === 'active' && isAuthenticated) {
+                void checkMigration();
+            }
+        });
+
+        return () => subscription.remove();
     }, [isAuthenticated, accountContextTick]);
 
     const checkMigration = async () => {
+        if (isCheckingRef.current || isMigratingRef.current) {
+            return;
+        }
+
+        isCheckingRef.current = true;
         try {
             // 1. (Removed) Preliminary Backend Status Check
             // We removed the UI-level backend check because it was preventing the "Zombie Type 2" fix.
@@ -80,14 +97,23 @@ export const MigrationModal = () => {
 
             if (migrationState.needsMigration) {
                 setVisible(true);
-                performMigration(iss, sub, aud, provider);
+                void performMigration(iss, sub, aud, provider);
+            } else {
+                setVisible(false);
             }
         } catch (error) {
             console.error('Migration check failed:', error);
+        } finally {
+            isCheckingRef.current = false;
         }
     };
 
     const performMigration = async (iss: string, sub: string, aud: string, provider: 'google' | 'apple') => {
+        if (isMigratingRef.current) {
+            return;
+        }
+
+        isMigratingRef.current = true;
         setLoading(true);
         setStatus('Actualizando la seguridad de tu billetera...\nPor favor no cierres la aplicación.');
 
@@ -121,6 +147,9 @@ export const MigrationModal = () => {
                 'No pudimos actualizar tu billetera. Por favor verifica tu conexión a internet e inténtalo de nuevo.',
                 [{ text: 'Reintentar', onPress: () => performMigration(iss, sub, aud, provider) }]
             );
+        } finally {
+            isMigratingRef.current = false;
+            setLoading(false);
         }
     };
 
