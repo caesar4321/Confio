@@ -39,7 +39,7 @@ export const BackupCompletionScreen = () => {
     await handleSuccessfulLogin(phoneVerified, false);
   }, [apolloClient, handleSuccessfulLogin, refreshProfile]);
 
-  const handleRetryBackup = useCallback(async (forceBackup: boolean = false) => {
+  const handleRetryBackup = useCallback(async (forceBackup: boolean = true) => {
     setIsRetrying(true);
     setError(null);
 
@@ -170,7 +170,7 @@ export const BackupCompletionScreen = () => {
 
         <TouchableOpacity
           style={[styles.primaryButton, isRetrying && styles.buttonDisabled]}
-          onPress={() => handleRetryBackup(false)}
+          onPress={() => handleRetryBackup(true)}
           disabled={isRetrying}
           activeOpacity={0.8}
         >
