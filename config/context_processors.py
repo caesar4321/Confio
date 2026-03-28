@@ -10,6 +10,7 @@ from achievements.models import (
     ReferralWithdrawalLog,
     ConfioRewardTransaction,
 )
+from achievements.referral_security import get_referral_reward_summary
 from p2p_exchange.models import P2PTrade
 from presale.models import PresalePurchase, PresalePhase
 from security.models import DeviceFingerprint
@@ -44,20 +45,7 @@ def admin_dashboard_stats(request):
         high_value = referral_logs.filter(amount__gte=Decimal('500')).count()
         unique_referral_users = referral_logs.values('user').distinct().count()
 
-        referral_achievement_ids = list(
-            UserAchievement.objects.filter(
-                achievement_type__slug__in=REFERRAL_ACHIEVEMENT_SLUGS
-            ).values_list('id', flat=True)
-        )
-        referral_earned_total = ConfioRewardTransaction.objects.filter(
-            transaction_type='earned',
-            reference_type='achievement',
-            reference_id__in=[str(pk) for pk in referral_achievement_ids],
-        ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
-
-        referral_available = referral_earned_total - total_withdrawn
-        if referral_available < Decimal('0'):
-            referral_available = Decimal('0')
+        referral_reward_summary = get_referral_reward_summary()
 
         # Multi-user device detection (legacy achievements still informative for abuse)
         multi_user_devices = DeviceFingerprint.objects.annotate(
@@ -69,9 +57,9 @@ def admin_dashboard_stats(request):
         ).filter(user_count__gt=1).count()
 
         fraud_stats = {
-            'earned_total': referral_earned_total,
+            'earned_total': referral_reward_summary['earned'],
             'total_withdrawn': total_withdrawn,
-            'available_total': referral_available,
+            'available_total': referral_reward_summary['available'],
             'daily_withdrawn': daily_withdrawn,
             'weekly_withdrawn': weekly_withdrawn,
             'pending_review': pending_review,

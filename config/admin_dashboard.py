@@ -26,6 +26,7 @@ from achievements.models import (
     UserReferral,
     ReferralRewardEvent,
 )
+from achievements.referral_security import get_referral_reward_summary
 from p2p_exchange.models import P2POffer, P2PTrade, P2PUserStats, P2PDispute
 from send.models import SendTransaction
 from payments.models import PaymentTransaction
@@ -208,19 +209,7 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         high_value = referral_logs.filter(amount__gte=Decimal('500')).count()
         unique_referral_users = referral_logs.values('user').distinct().count()
 
-        referral_achievement_ids = list(
-            UserAchievement.objects.filter(
-                achievement_type__slug__in=REFERRAL_ACHIEVEMENT_SLUGS
-            ).values_list('id', flat=True)
-        )
-        referral_earned_total = ConfioRewardTransaction.objects.filter(
-            transaction_type='earned',
-            reference_type='achievement',
-            reference_id__in=[str(pk) for pk in referral_achievement_ids],
-        ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
-        referral_available = referral_earned_total - total_withdrawn
-        if referral_available < Decimal('0'):
-            referral_available = Decimal('0')
+        referral_reward_summary = get_referral_reward_summary()
 
         multi_user_devices = DeviceFingerprint.objects.annotate(
             user_count=Count(
@@ -231,8 +220,8 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         ).filter(user_count__gt=1).count()
 
         context['fraud_stats'] = {
-            'earned_total': referral_earned_total,
-            'available_total': referral_available,
+            'earned_total': referral_reward_summary['earned'],
+            'available_total': referral_reward_summary['available'],
             'total_withdrawn': total_withdrawn,
             'daily_withdrawn': daily_withdrawn,
             'weekly_withdrawn': weekly_withdrawn,

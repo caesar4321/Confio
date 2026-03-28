@@ -13,6 +13,7 @@ from django.db.models import Sum
 from django.db.models.functions import Coalesce, Greatest
 from django.utils import timezone
 
+from achievements.referral_security import get_referral_reward_summary
 from users.models import Account
 from .algorand_account_manager import AlgorandAccountManager
 from .algorand_sponsor_service import algorand_sponsor_service
@@ -193,35 +194,7 @@ def _link_external_withdrawal_to_ramp(
 
 def _get_referral_reward_summary(user) -> dict:
     """Aggregate referral-earned CONFIO balances for a user."""
-    from achievements.models import UserAchievement, ConfioRewardTransaction, ReferralWithdrawalLog
-
-    referral_ids = list(
-        UserAchievement.objects.filter(
-            user=user,
-            achievement_type__slug__in=REFERRAL_ACHIEVEMENT_SLUGS
-        ).values_list('id', flat=True)
-    )
-    if not referral_ids:
-        zero = Decimal('0')
-        return {'earned': zero, 'spent': zero, 'available': zero}
-
-    str_ids = [str(pk) for pk in referral_ids]
-    earned = (
-        ConfioRewardTransaction.objects.filter(
-            user=user,
-            transaction_type='earned',
-            reference_type='achievement',
-            reference_id__in=str_ids
-        ).aggregate(total=Coalesce(Sum('amount'), Decimal('0')))['total'] or Decimal('0')
-    )
-    spent = (
-        ReferralWithdrawalLog.objects.filter(user=user)
-        .aggregate(total=Coalesce(Sum('amount'), Decimal('0')))['total'] or Decimal('0')
-    )
-    available = earned - spent
-    if available < Decimal('0'):
-        available = Decimal('0')
-    return {'earned': earned, 'spent': spent, 'available': available}
+    return get_referral_reward_summary(user=user)
 
 
 def _calculate_referral_portion(user, amount: Decimal) -> Decimal:

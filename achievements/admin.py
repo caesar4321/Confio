@@ -12,6 +12,7 @@ from datetime import timedelta
 
 from blockchain.constants import REFERRAL_ACHIEVEMENT_SLUGS
 
+from .referral_security import get_referral_reward_summary
 from .models import (
     AchievementType,
     UserAchievement,
@@ -354,18 +355,7 @@ class UserRewardAdmin(admin.ModelAdmin):
         referral_pending_review = referral_withdrawals.filter(requires_review=True).count()
         referral_unique_users = referral_withdrawals.values('user').distinct().count()
 
-        referral_achievement_ids = list(UserAchievement.objects.filter(
-            achievement_type__slug__in=REFERRAL_ACHIEVEMENT_SLUGS
-        ).values_list('id', flat=True))
-        referral_achievement_ids_str = [str(pk) for pk in referral_achievement_ids]
-        referral_earned_total = ConfioRewardTransaction.objects.filter(
-            transaction_type='earned',
-            reference_type='achievement',
-            reference_id__in=referral_achievement_ids_str
-        ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
-        referral_available_total = referral_earned_total - referral_total_amount
-        if referral_available_total < Decimal('0'):
-            referral_available_total = Decimal('0')
+        referral_reward_summary = get_referral_reward_summary()
         
         context = {
             **self.admin_site.each_context(request),
@@ -392,8 +382,8 @@ class UserRewardAdmin(admin.ModelAdmin):
                 'high_value_count': referral_high_value,
                 'pending_review': referral_pending_review,
                 'unique_users': referral_unique_users,
-                'earned_total': referral_earned_total,
-                'available_total': referral_available_total,
+                'earned_total': referral_reward_summary['earned'],
+                'available_total': referral_reward_summary['available'],
             },
             'opts': self.model._meta,
             'has_filters': False,
