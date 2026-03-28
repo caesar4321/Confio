@@ -122,6 +122,38 @@ def _link_external_withdrawal_to_ramp(
             )
             return
 
+        if provider == 'koywe' and ramp_tx.direction != 'off_ramp':
+            logger.warning(
+                "[Ramp Funding] Refusing to link withdrawal to non-off-ramp Koywe order_id=%s",
+                order_id,
+            )
+            return
+
+        if ramp_tx.status in {'COMPLETED', 'FAILED'}:
+            logger.warning(
+                "[Ramp Funding] Refusing to mutate terminal ramp %s:%s status=%s",
+                provider,
+                order_id,
+                ramp_tx.status,
+            )
+            return
+
+        if conversion and ramp_tx.conversion_id and ramp_tx.conversion_id != conversion.id:
+            logger.warning(
+                "[Ramp Funding] Refusing to overwrite existing conversion on ramp %s:%s",
+                provider,
+                order_id,
+            )
+            return
+
+        if withdrawal and ramp_tx.usdc_withdrawal_id and ramp_tx.usdc_withdrawal_id != withdrawal.id:
+            logger.warning(
+                "[Ramp Funding] Refusing to overwrite existing withdrawal on ramp %s:%s",
+                provider,
+                order_id,
+            )
+            return
+
         update_fields = []
         if conversion and ramp_tx.conversion_id != conversion.id:
             ramp_tx.conversion = conversion
