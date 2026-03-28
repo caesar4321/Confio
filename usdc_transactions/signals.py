@@ -325,9 +325,8 @@ def handle_usdc_withdrawal_save(sender, instance, created, **kwargs):
             candidates = GuardarianTransaction.objects.filter(
                 user=instance.actor_user,
                 created_at__gte=recent_time,
-                onchain_withdrawal__isnull=True
-            ).exclude(
-                status__in=['failed', 'refunded', 'expired']
+                onchain_withdrawal__isnull=True,
+                status__in=['pending', 'confirmed', 'exchanging', 'sending', 'finished'],
             )
             
             matched_tx = None

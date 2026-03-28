@@ -84,7 +84,7 @@ class GuardarianTransactionAdmin(admin.ModelAdmin):
     list_display = ['guardarian_id', 'transaction_direction', 'user', 'amount_display', 'status_display', 'onchain_status', 'created_at']
     list_filter = [TransactionTypeFilter, 'status', 'from_currency', 'created_at']
     search_fields = ['guardarian_id', 'external_id', 'user__email', 'user__name']
-    readonly_fields = ['guardarian_id', 'external_id', 'created_at', 'updated_at']
+    readonly_fields = ['guardarian_id', 'external_id', 'transaction_direction', 'created_at', 'updated_at']
     ordering = ['-created_at']
     
     fieldsets = (
@@ -115,11 +115,11 @@ class GuardarianTransactionAdmin(admin.ModelAdmin):
     def onchain_status(self, obj):
         if obj.transaction_type == 'buy':
             if obj.onchain_deposit:
-                return format_html('<span style="color: green;">✔ Linked Deposit</span>')
+                return format_html('<span style="color: green;">✔ Matched Deposit</span>')
             return format_html('<span style="color: red;">Not Linked</span>')
         else:
             if obj.onchain_withdrawal:
-                 return format_html('<span style="color: green;">✔ Linked Withdrawal</span>')
+                 return format_html('<span style="color: green;">✔ Matched Withdrawal</span>')
             return format_html('<span style="color: red;">Not Linked</span>')
     onchain_status.short_description = "On-Chain Link"
 
@@ -129,7 +129,9 @@ class GuardarianTransactionAdmin(admin.ModelAdmin):
 
     def status_display(self, obj):
         colors = {
+            'new': 'gray',
             'waiting': 'gray',
+            'waiting_for_deposit': 'orange',
             'pending': 'orange',
             'confirmed': 'blue',
             'exchanging': 'purple',

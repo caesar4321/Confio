@@ -263,6 +263,7 @@ class GuardarianTransaction(models.Model):
     """Model to track Guardarian Top-Up attempts and outcomes"""
     
     STATUS_CHOICES = [
+        ('new', 'New'),               # Created on Guardarian, user has not progressed yet
         ('waiting', 'Waiting'),       # Initial state
         ('waiting_for_deposit', 'Waiting for Deposit'),  # User must complete fiat deposit
         ('waiting_for_customer', 'Waiting for Customer'), # Action required
@@ -406,6 +407,12 @@ class GuardarianTransaction(models.Model):
         Amount check: 'from_amount' is what user sent (e.g. 20 USDC).
         """
         if self.transaction_type != 'sell':
+            return None
+
+        # A withdrawal should not be auto-linked to a Guardarian sell that has not
+        # progressed beyond the pre-funding states. Those rows are too weak to
+        # distinguish from an unrelated standalone withdrawal by the user.
+        if self.status in ['new', 'waiting', 'waiting_for_deposit', 'waiting_for_customer']:
             return None
             
         if self.onchain_withdrawal:
