@@ -356,6 +356,7 @@ class UserType(DjangoObjectType):
 	verification_status = graphene.String()
 	accounts = graphene.List(lambda: AccountType)
 	is_staff = graphene.Boolean()
+	requires_backup_completion = graphene.Boolean()
 	
 	# Explicitly define sensitive fields to enforce security
 	phone_number = graphene.String()
@@ -379,6 +380,14 @@ class UserType(DjangoObjectType):
 			return self.phone_number
 		# Otherwise hide it
 		return None
+
+	def resolve_requires_backup_completion(self, info):
+		user = info.context.user
+		if not user.is_authenticated:
+			return False
+		if str(user.id) != str(self.id):
+			return False
+		return bool(getattr(self, 'requires_backup_completion', False))
 
 	def resolve_email(self, info):
 		"""

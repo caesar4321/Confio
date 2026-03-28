@@ -2019,7 +2019,7 @@ export const secureDeterministicWallet = SecureDeterministicWalletService.getIns
 /**
  * Reports backup status to the server.
  */
-export const reportBackupStatus = async (provider: 'google_drive' | 'icloud') => {
+export const reportBackupStatus = async (provider: 'google_drive' | 'icloud'): Promise<boolean> => {
   try {
     const deviceName = await DeviceInfo.getDeviceName();
     await apolloClient.mutate({
@@ -2033,7 +2033,9 @@ export const reportBackupStatus = async (provider: 'google_drive' | 'icloud') =>
     });
     console.log(`[BackupHealth] Reported safe via ${provider}`);
     AnalyticsService.logBackupSuccess(provider, deviceName);
+    return true;
   } catch (e) {
     console.warn('[BackupHealth] Failed to report status:', e);
+    return false;
   }
 };

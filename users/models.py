@@ -176,6 +176,14 @@ class User(AbstractUser, SoftDeleteModel):
         self.auth_token_version += 1
         self.save(update_fields=['auth_token_version'])
 
+    @property
+    def requires_backup_completion(self):
+        """
+        Android users are only considered safe once a successful backup verification
+        has been reported back to the server.
+        """
+        return self.platform_os == 'android' and self.backup_verified_at is None
+
 
 
     @property

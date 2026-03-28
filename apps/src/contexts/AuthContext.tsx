@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, RefObject, useRe
 import { Alert, AppState, Platform } from 'react-native';
 import { AuthService } from '../services/authService';
 import { NavigationContainerRef } from '@react-navigation/native';
-import { RootStackParamList } from '../types/navigation';
+import { AuthStackParamList, RootStackParamList } from '../types/navigation';
 import { useApolloClient, gql } from '@apollo/client';
 import * as Keychain from 'react-native-keychain';
 import { jwtDecode } from 'jwt-decode';
@@ -68,6 +68,7 @@ interface UserProfile {
   lastVerifiedDate?: string;
   verificationStatus?: string;
   backupProvider?: string; // 'google_drive' | 'icloud' | null
+  requiresBackupCompletion?: boolean;
 }
 
 interface BusinessProfile {
@@ -92,7 +93,7 @@ interface AuthContextType {
   isLoading: boolean;
   signOut: () => Promise<void>;
   checkLocalAuthState: () => Promise<boolean>;
-  handleSuccessfulLogin: (isPhoneVerified: boolean) => Promise<void>;
+  handleSuccessfulLogin: (isPhoneVerified: boolean, requiresBackupCompletion?: boolean) => Promise<void>;
   completePhoneVerification: () => Promise<void>;
   completeBiometricAndEnter: () => Promise<boolean>;
   profileData: ProfileData | null;
@@ -130,6 +131,22 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       return;
     }
     console.log(`[PERF][AuthContext] ${label}: ${durationMs}ms`);
+  };
+
+  const resetAuthStack = (screen: keyof AuthStackParamList, params?: AuthStackParamList[keyof AuthStackParamList]) => {
+    if (!isNavigationReady || !navigationRef.current) return;
+    navigationRef.current.reset({
+      index: 0,
+      routes: [
+        {
+          name: 'Auth',
+          params: {
+            screen,
+            params,
+          },
+        },
+      ],
+    });
   };
 
   const waitForAppToBeActive = async (timeoutMs = 4000): Promise<boolean> => {
@@ -754,42 +771,23 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     return true;
   };
 
-  const handleSuccessfulLogin = async (isPhoneVerified: boolean) => {
+  const handleSuccessfulLogin = async (isPhoneVerified: boolean, requiresBackupCompletion: boolean = false) => {
     try {
       console.log('Handling successful login...');
+      if (requiresBackupCompletion) {
+        console.log('User must complete secure backup before entering the app');
+        resetAuthStack('BackupCompletion');
+        return;
+      }
+
       if (isPhoneVerified) {
         console.log('User has verified phone number');
         // Route to biometric setup screen; completion will trigger the remaining flow
-        if (isNavigationReady && navigationRef.current) {
-          navigationRef.current.reset({
-            index: 0,
-            routes: [
-              {
-                name: 'Auth',
-                params: {
-                  screen: 'BiometricSetup',
-                  params: { origin: 'login' as const },
-                },
-              },
-            ],
-          });
-        }
+        resetAuthStack('BiometricSetup', { origin: 'login' as const });
       } else {
         console.log('User needs phone verification');
         // Don't set isAuthenticated to true yet - keep user in Auth flow
-        if (isNavigationReady && navigationRef.current) {
-          navigationRef.current.reset({
-            index: 0,
-            routes: [
-              {
-                name: 'Auth',
-                params: {
-                  screen: 'PhoneVerification',
-                },
-              },
-            ],
-          });
-        }
+        resetAuthStack('PhoneVerification');
       }
     } catch (error) {
       console.error('Error handling successful login:', error);
@@ -820,7 +818,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
         credentialType: typeof credentials
       });
 
-      if (credentials && credentials !== false) {
+      if (credentials) {
         try {
           const parseStart = Date.now();
           const tokens = JSON.parse(credentials.password);
@@ -1008,6 +1006,35 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
             }
             lastBiometricSuccessRef.current = Date.now();
 
+            let requiresBackupCompletion = false;
+            try {
+              const meStart = Date.now();
+              const { data } = await apolloClient.query({
+                query: GET_ME,
+                fetchPolicy: 'network-only',
+              });
+              perfLog('GET_ME during startup auth checkpoint', meStart, {
+                requiresBackupCompletion: !!data?.me?.requiresBackupCompletion,
+              });
+              const me = data?.me || null;
+              setProfileData(me ? {
+                userProfile: me,
+                businessProfile: undefined,
+                currentAccountType: 'personal'
+              } : null);
+              requiresBackupCompletion = !!me?.requiresBackupCompletion;
+            } catch (profileErr) {
+              console.warn('[AuthContext] Failed to fetch profile during startup auth checkpoint:', profileErr);
+            }
+
+            if (requiresBackupCompletion) {
+              console.log('[AuthContext] Backup completion required before entering main app');
+              setIsAuthenticated(false);
+              resetAuthStack('BackupCompletion');
+              setIsLoading(false);
+              return;
+            }
+
             // Mark authenticated and go to Main immediately to avoid splash hanging
             setIsAuthenticated(true);
             // Do NOT signal authReady here on cold resume; signal after token is aligned to stored context
@@ -1060,7 +1087,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
         username: 'auth_tokens'
       });
 
-      if (credentials && credentials !== false) {
+      if (credentials) {
         const tokens = JSON.parse(credentials.password);
         const hasValidTokens = tokens.accessToken && tokens.refreshToken;
         setIsAuthenticated(hasValidTokens);

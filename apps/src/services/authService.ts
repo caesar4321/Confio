@@ -427,7 +427,22 @@ export class AuthService {
     }
   }
 
-  async signInWithGoogle(onProgress?: (message: string) => void, enableDrive: boolean = true) {
+  async signInWithGoogle(
+    onProgress?: (message: string) => void,
+    enableDrive: boolean = true
+  ): Promise<{
+    userInfo: {
+      email: string | null;
+      firstName: string;
+      lastName: string;
+      photoURL: string | null;
+    };
+    walletData: {
+      algorandAddress: string | null;
+      isPhoneVerified: boolean;
+    };
+    requiresBackupCompletion: boolean;
+  }> {
     const startTime = Date.now();
     const perfLog = (step: string) => {
       console.log(`[PERF] ${step}: ${Date.now() - startTime}ms`);
@@ -781,6 +796,35 @@ export class AuthService {
       console.log('Phone verification status from backend:', isPhoneVerified);
 
       // 10) Return user info with Algorand address
+      let requiresBackupCompletion = false;
+
+      // Report backup status only if Drive was enabled AND sync actually succeeded
+      if (enableDrive && driveSyncSucceeded) {
+        try {
+          const { reportBackupStatus } = await import('./secureDeterministicWallet');
+          const reportSucceeded = await reportBackupStatus('google_drive');
+          console.log('[AuthService] Backup status reported for Google sign-in:', reportSucceeded);
+        } catch (e) {
+          console.warn('[AuthService] Failed to report backup status:', e);
+        }
+      }
+
+      try {
+        const { GET_ME } = await import('../apollo/queries');
+        const { data } = await apolloClient.query({
+          query: GET_ME,
+          fetchPolicy: 'network-only',
+        });
+        requiresBackupCompletion = !!data?.me?.requiresBackupCompletion;
+        console.log('[AuthService] Post-login backup checkpoint:', {
+          requiresBackupCompletion,
+          backupProvider: data?.me?.backupProvider,
+        });
+      } catch (checkpointErr) {
+        console.warn('[AuthService] Failed to fetch backup checkpoint after Google sign-in:', checkpointErr);
+        requiresBackupCompletion = Platform.OS === 'android';
+      }
+
       const result = {
         userInfo: {
           email: user.email,
@@ -791,21 +835,11 @@ export class AuthService {
         walletData: {
           algorandAddress: null,
           isPhoneVerified
-        }
+        },
+        requiresBackupCompletion,
       };
       perfLog('Total sign-in time');
       console.log('Sign-in process completed successfully:', result);
-
-      // Report backup status only if Drive was enabled AND sync actually succeeded
-      if (enableDrive && driveSyncSucceeded) {
-        try {
-          const { reportBackupStatus } = await import('./secureDeterministicWallet');
-          await reportBackupStatus('google_drive');
-          console.log('[AuthService] Backup status reported for Google sign-in');
-        } catch (e) {
-          console.warn('[AuthService] Failed to report backup status:', e);
-        }
-      }
 
       return result;
     } catch (error) {

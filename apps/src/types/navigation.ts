@@ -3,6 +3,7 @@ import { NavigatorScreenParams } from '@react-navigation/native';
 // Auth Stack - Handles authentication flow
 export type AuthStackParamList = {
   Login: undefined;
+  BackupCompletion: undefined;
   PhoneVerification: undefined;
   Registration: undefined;
   LegalDocument: { docType: 'terms' | 'privacy' | 'deletion' };

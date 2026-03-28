@@ -95,7 +95,10 @@ export const AuthScreen = () => {
       console.log('Google Sign-In result:', result);
       console.log('Phone verification status:', result.walletData?.isPhoneVerified);
 
-      await handleSuccessfulLogin(result.walletData?.isPhoneVerified || false);
+      await handleSuccessfulLogin(
+        result.walletData?.isPhoneVerified || false,
+        result.requiresBackupCompletion || false
+      );
     } catch (error) {
       console.error('Google Sign-In failed:', error);
       if (error instanceof AccountDeactivatedError) {
