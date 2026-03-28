@@ -6,10 +6,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { useAccount } from '../contexts/AccountContext';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { RootStackParamList, MainStackParamList } from '../types/navigation';
+import { MainStackParamList } from '../types/navigation';
 import { getCountryByIso } from '../utils/countries';
-import { usePushNotificationPrompt } from '../hooks/usePushNotificationPrompt';
-import { PushNotificationModal } from '../components/PushNotificationModal';
 import { ReferralInputModal } from '../components/ReferralInputModal';
 import { BackupConsentModal } from '../components/BackupConsentModal';
 import { ExistingBackupModal } from '../components/ExistingBackupModal';
@@ -56,8 +54,6 @@ export const ProfileScreen = () => {
   const { signOut, userProfile, isUserProfileLoading } = useAuth();
   const { activeAccount, accounts, isLoading: accountsLoading, refreshAccounts } = useAccount();
   const navigation = useNavigation<ProfileScreenNavigationProp>();
-  const { showModal, handleAllow, handleDeny, checkAndShowPrompt, needsSettings } = usePushNotificationPrompt();
-  const [hasCheckedThisFocus, setHasCheckedThisFocus] = React.useState(false);
   const rawUsername = userProfile?.username || '';
   const username = rawUsername ? `@${rawUsername}` : '';
   const normalizedCountryIso = React.useMemo(() => {
@@ -286,21 +282,9 @@ export const ProfileScreen = () => {
       //   });
       // }
 
-      // Reset the check flag when screen loses focus
-      return () => {
-        setHasCheckedThisFocus(false);
-      };
+      return undefined;
     }, [refreshAccounts, checkBiometricSupport])
   );
-
-  // Separate effect for push notification check to avoid infinite loop
-  React.useEffect(() => {
-    if (!hasCheckedThisFocus && !showModal) {
-      console.log('[ProfileScreen] Checking push notification permission...');
-      setHasCheckedThisFocus(true);
-      checkAndShowPrompt();
-    }
-  }, [hasCheckedThisFocus, showModal, checkAndShowPrompt]);
 
   const handleLegalDocumentPress = (docType: 'terms' | 'privacy' | 'deletion') => {
     navigation.navigate('LegalDocument', { docType });
@@ -787,15 +771,6 @@ export const ProfileScreen = () => {
         onClose={() => setShowReferralModal(false)}
         onSuccess={() => setShowReferralModal(false)}
       />
-
-      {/* Push Notification Permission Modal */}
-      <PushNotificationModal
-        visible={showModal}
-        onAllow={handleAllow}
-        onDeny={handleDeny}
-        needsSettings={needsSettings}
-      />
-
       {/* Google Drive Backup Modal */}
       <BackupConsentModal
         visible={showBackupModal}

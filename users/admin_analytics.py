@@ -16,6 +16,7 @@ from decimal import Decimal
 
 from .models_analytics import DailyMetrics, CountryMetrics
 from .models import User
+from .analytics import count_all_signups_for_date
 
 
 @admin.register(DailyMetrics)
@@ -24,11 +25,13 @@ class DailyMetricsAdmin(admin.ModelAdmin):
     
     list_display = (
         'date',
+        'raw_signups_display',
+        'phone_signups_display',
+        'phone_completion_rate_display',
         'dau_display',
         'wau_display',
         'mau_display',
         'total_users_display',
-        'new_users_display',
         'engagement_ratio',
         'growth_indicator',
         'created_at',
@@ -76,6 +79,41 @@ class DailyMetricsAdmin(admin.ModelAdmin):
         )
     dau_display.short_description = 'DAU'
     dau_display.admin_order_field = 'dau'
+
+    def raw_signups_display(self, obj):
+        """Display all raw signups, including incomplete onboarding."""
+        if not hasattr(obj, '_raw_signups'):
+            obj._raw_signups = count_all_signups_for_date(obj.date)
+        return f"{obj._raw_signups:,}"
+    raw_signups_display.short_description = 'All Signups'
+
+    def phone_signups_display(self, obj):
+        """Display signups that completed phone capture."""
+        return format_html(
+            '<strong style="color: #10B981;">{}</strong>',
+            f"{obj.new_users_today:,}"
+        )
+    phone_signups_display.short_description = 'Phone Signups'
+    phone_signups_display.admin_order_field = 'new_users_today'
+
+    def phone_completion_rate_display(self, obj):
+        """Display the share of raw signups that completed phone capture."""
+        raw_signups = getattr(obj, '_raw_signups', None)
+        if raw_signups is None:
+            raw_signups = count_all_signups_for_date(obj.date)
+            obj._raw_signups = raw_signups
+
+        if raw_signups == 0:
+            return format_html('<span style="color: gray;">N/A</span>')
+
+        ratio = obj.new_users_today / raw_signups
+        color = '#10B981' if ratio >= 0.80 else '#F59E0B' if ratio >= 0.60 else '#EF4444'
+        return format_html(
+            '<span style="color: {}; font-weight: bold;">{}</span>',
+            color,
+            f"{ratio:.1%}"
+        )
+    phone_completion_rate_display.short_description = 'Signup → Phone'
     
     def wau_display(self, obj):
         """Display WAU with formatting"""
@@ -96,21 +134,10 @@ class DailyMetricsAdmin(admin.ModelAdmin):
     mau_display.admin_order_field = 'mau'
     
     def total_users_display(self, obj):
-        """Display total users"""
+        """Display the phone-complete user base."""
         return f"{obj.total_users:,}"
-    total_users_display.short_description = 'Total Users'
+    total_users_display.short_description = 'Phone Users'
     total_users_display.admin_order_field = 'total_users'
-    
-    def new_users_display(self, obj):
-        """Display new users with badge"""
-        if obj.new_users_today > 0:
-            return format_html(
-                '<span style="background-color: #10B981; color: white; padding: 2px 6px; border-radius: 4px;">+{}</span>',
-                f"{obj.new_users_today:,}"
-            )
-        return '0'
-    new_users_display.short_description = 'New Users'
-    new_users_display.admin_order_field = 'new_users_today'
     
     def engagement_ratio(self, obj):
         """Display DAU/MAU ratio as engagement indicator"""
@@ -180,6 +207,11 @@ class DailyMetricsAdmin(admin.ModelAdmin):
     growth_details.short_description = 'Growth Analysis'
     
     actions = ['capture_snapshot_now']
+
+    def changelist_view(self, request, extra_context=None):
+        extra_context = extra_context or {}
+        extra_context['title'] = 'Daily Metrics (Phone-Complete User Base)'
+        return super().changelist_view(request, extra_context=extra_context)
     
     def capture_snapshot_now(self, request, queryset):
         """Manual action to capture a snapshot for today"""
@@ -212,13 +244,14 @@ class CountryMetricsAdmin(admin.ModelAdmin):
     list_display = (
         'country_display',
         'date',
-        'dau_display',
-        'wau_display',
         'mau_display',
+        'wau_display',
+        'dau_display',
         'active_fcm_users_display',
         'total_users_display',
         'new_users_display',
-        'engagement_ratio',
+        'mau_penetration_display',
+        'active_fcm_penetration_display',
     )
     list_filter = ('country_code', 'date', 'created_at')
     search_fields = ('country_code', 'date')
@@ -313,36 +346,49 @@ class CountryMetricsAdmin(admin.ModelAdmin):
     active_fcm_users_display.admin_order_field = 'active_fcm_users'
     
     def total_users_display(self, obj):
-        """Display total users"""
+        """Display phone-complete users in this country."""
         return f"{obj.total_users:,}"
-    total_users_display.short_description = 'Total Users'
+    total_users_display.short_description = 'Phone Users'
     total_users_display.admin_order_field = 'total_users'
     
     def new_users_display(self, obj):
-        """Display new users"""
+        """Display phone-complete signups captured on this date."""
         if obj.new_users_today > 0:
             return format_html(
                 '<span style="color: #10B981;">+{}</span>',
                 f"{obj.new_users_today:,}"
             )
         return '0'
-    new_users_display.short_description = 'New'
+    new_users_display.short_description = 'Phone Signups'
     new_users_display.admin_order_field = 'new_users_today'
-    
-    def engagement_ratio(self, obj):
-        """Display DAU/MAU ratio"""
-        ratio = obj.dau_mau_ratio
-        
-        if ratio >= Decimal('0.20'):
+
+    def mau_penetration_display(self, obj):
+        """Display MAU as a share of the country user base."""
+        ratio = Decimal(obj.mau) / Decimal(obj.total_users) if obj.total_users else Decimal('0')
+        if ratio >= Decimal('0.30'):
             color = '#10B981'
-        elif ratio >= Decimal('0.10'):
+        elif ratio >= Decimal('0.15'):
             color = '#F59E0B'
         else:
             color = '#EF4444'
-        
         return format_html(
-            '<span style="color: {};">{}</span>',
+            '<span style="color: {}; font-weight: bold;">{}</span>',
             color,
             f"{ratio:.1%}"
         )
-    engagement_ratio.short_description = 'DAU/MAU'
+    mau_penetration_display.short_description = 'MAU / Users'
+
+    def active_fcm_penetration_display(self, obj):
+        """Display current active FCM users as a share of the country user base."""
+        active_fcm = getattr(obj, 'active_fcm_users', 0)
+        ratio = Decimal(active_fcm) / Decimal(obj.total_users) if obj.total_users else Decimal('0')
+        return format_html(
+            '<span style="color: #8B5CF6;">{}</span>',
+            f"{ratio:.1%}"
+        )
+    active_fcm_penetration_display.short_description = 'FCM / Users'
+
+    def changelist_view(self, request, extra_context=None):
+        extra_context = extra_context or {}
+        extra_context['title'] = 'Country Metrics (Phone-Complete User Base)'
+        return super().changelist_view(request, extra_context=extra_context)

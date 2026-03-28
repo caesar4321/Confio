@@ -41,6 +41,54 @@ def _localize_arg(naive_dt: datetime) -> datetime:
     return naive_dt.replace(tzinfo=ARG_TZ)
 
 
+def get_real_users_queryset():
+    """
+    Return the canonical "real users" queryset.
+
+    Real users are users who completed phone capture, which is currently the
+    closest proxy to "reached the product" in Confio.
+    """
+    from users.models import User
+
+    return User.objects.exclude(phone_number__isnull=True).exclude(phone_number='')
+
+
+def get_argentina_day_bounds(target_date):
+    """
+    Return UTC datetime bounds for a calendar day in Argentina time.
+    """
+    naive_start = datetime.combine(target_date, datetime.min.time())
+    start_arg = _localize_arg(naive_start)
+    start_time = start_arg.astimezone(UTC_TZ)
+
+    naive_end = datetime.combine(target_date, datetime.max.time())
+    end_arg = _localize_arg(naive_end)
+    end_time = end_arg.astimezone(UTC_TZ)
+
+    return start_time, end_time
+
+
+def count_all_signups_for_date(target_date):
+    """
+    Count all account creations for the given Argentina calendar date.
+    """
+    from users.models import User
+
+    start_time, end_time = get_argentina_day_bounds(target_date)
+    return User.objects.filter(created_at__gte=start_time, created_at__lte=end_time).count()
+
+
+def count_real_signups_for_date(target_date, country_code=None):
+    """
+    Count phone-complete signups for the given Argentina calendar date.
+    """
+    start_time, end_time = get_argentina_day_bounds(target_date)
+    queryset = get_real_users_queryset().filter(created_at__gte=start_time, created_at__lte=end_time)
+    if country_code:
+        queryset = queryset.filter(phone_country=country_code)
+    return queryset.count()
+
+
 def calculate_dau(target_date=None):
     """
     Calculate Daily Active Users for a specific date

@@ -262,7 +262,7 @@
         <a href="{% url 'confio_admin:p2p_analytics' %}" class="action-button">P2P Analytics</a>
         <a href="{% url 'confio_admin:user_analytics' %}" class="action-button secondary">User Analytics</a>
         <a href="{% url 'confio_admin:users_dailymetrics_changelist' %}" class="action-button secondary">📈
-            DAU/WAU/MAU</a>
+            Daily Funnel</a>
         <a href="{% url 'confio_admin:users_countrymetrics_changelist' %}" class="action-button secondary">🌍 Country
             Metrics</a>
         <a href="{% url 'confio_admin:transaction_analytics' %}" class="action-button secondary">Transaction
@@ -297,21 +297,27 @@
     <!-- Key Metrics -->
     <div class="metrics-grid">
         <div class="metric-card">
-            <div class="metric-label">Total Users</div>
+            <div class="metric-label">Phone-Complete Users</div>
             <div class="metric-value">{{ total_users|intcomma }}</div>
-            <div class="metric-change">+{{ new_users_last_7_days }} last 7 days</div>
+            <div class="metric-change">+{{ new_users_last_7_days }} phone signups in last 7 days</div>
         </div>
 
         <div class="metric-card">
             <div class="metric-label">Active (24h)</div>
             <div class="metric-value">{{ active_users_today|intcomma }}</div>
-            <div class="metric-change">Last 24 hours</div>
+            <div class="metric-change">{{ active_users_month|intcomma }} MAU</div>
         </div>
 
         <div class="metric-card">
-            <div class="metric-label">Verified Users</div>
-            <div class="metric-value">{{ verified_users|intcomma }}</div>
-            <div class="metric-change">Verified accounts</div>
+            <div class="metric-label">Signup → Phone (7d)</div>
+            <div class="metric-value">{{ phone_completion_last_7_days|floatformat:1 }}%</div>
+            <div class="metric-change">{{ new_users_last_7_days }} / {{ all_signups_last_7_days }} completed phone</div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">FCM Reachable Now</div>
+            <div class="metric-value">{{ fcm_active_users|intcomma }}</div>
+            <div class="metric-change">{{ fcm_recent_users|intcomma }} used in last 30d</div>
         </div>
 
     </div>

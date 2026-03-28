@@ -31,8 +31,6 @@ from send.models import SendTransaction
 from payments.models import PaymentTransaction
 from blockchain.constants import REFERRAL_ACHIEVEMENT_SLUGS
 from inbox.models import ContentPlatformClick
-
-
 class ConfioAdminSite(AdminSiteOTPRequired):
     """Custom admin site with enhanced dashboard"""
     site_header = 'Confío Admin Panel'
@@ -71,20 +69,32 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         # User metrics
         # DAU/MAU now uses centralized last_activity_at field (single source of truth)
         # See users/activity_tracking.py for activity tracking implementation
-        context['total_users'] = User.objects.filter(phone_number__isnull=False).count()
-        context['active_users_today'] = User.objects.filter(phone_number__isnull=False, last_activity_at__gte=last_24h).count()
-        context['new_users_last_7_days'] = User.objects.filter(phone_number__isnull=False, created_at__gte=last_7_start).count()
+        real_users = User.objects.exclude(phone_number__isnull=True).exclude(phone_number='')
+        context['total_users'] = real_users.count()
+        context['active_users_today'] = real_users.filter(last_activity_at__gte=last_24h).count()
+        context['active_users_week'] = real_users.filter(last_activity_at__gte=last_7_start).count()
+        context['active_users_month'] = real_users.filter(last_activity_at__gte=now - timedelta(days=30)).count()
+        context['new_users_last_7_days'] = real_users.filter(created_at__gte=last_7_start).count()
+        context['all_signups_last_7_days'] = User.objects.filter(created_at__gte=last_7_start).count()
+        context['phone_completion_last_7_days'] = (
+            context['new_users_last_7_days'] / context['all_signups_last_7_days'] * 100
+            if context['all_signups_last_7_days'] else 0
+        )
+        context['fcm_active_users'] = real_users.filter(fcm_tokens__is_active=True).distinct().count()
+        context['fcm_recent_users'] = real_users.filter(
+            fcm_tokens__is_active=True,
+            fcm_tokens__last_used__gte=now - timedelta(days=30)
+        ).distinct().count()
         context['verified_users'] = IdentityVerification.objects.filter(status='verified').count()
         
         # V2 Migration & Backup Security Metrics
         # Uses Account model for migration status (per-account tracking)
         from users.models import Account
         total_active_for_stats = context['active_users_today'] if context['active_users_today'] > 0 else 1
-        drive_users = User.objects.filter(phone_number__isnull=False, backup_provider='google_drive').count()
+        drive_users = real_users.filter(backup_provider='google_drive').count()
         migrated_accounts = Account.objects.filter(is_keyless_migrated=True).count()
         # For safe V2 users, count users with both backup verified AND at least one migrated account
-        safe_v2_users = User.objects.filter(
-            phone_number__isnull=False, 
+        safe_v2_users = real_users.filter(
             backup_verified_at__isnull=False,
             accounts__is_keyless_migrated=True
         ).distinct().count()

@@ -21,6 +21,7 @@ import { navigationRef } from './navigation/RootNavigation';
 import { initializeNotifee } from './services/notifeeConfig';
 import linking from './navigation/linking'; // Import linking config
 import { deepLinkHandler } from './utils/deepLinkHandler';
+import { PushNotificationProvider } from './hooks/usePushNotificationContext';
 // Dev: attach derivation verifier helper
 if (__DEV__) {
   import('./dev/derivationVerifier').catch(() => { });
@@ -125,11 +126,13 @@ const AppContent: React.FC = () => {
               <CountryProvider>
                 <HeaderProvider>
                   <ScanProvider>
-                    <View style={{ flex: 1 }}>
+                    <PushNotificationProvider>
                       <View style={{ flex: 1 }}>
-                        <Navigation />
+                        <View style={{ flex: 1 }}>
+                          <Navigation />
+                        </View>
                       </View>
-                    </View>
+                    </PushNotificationProvider>
                   </ScanProvider>
                 </HeaderProvider>
               </CountryProvider>

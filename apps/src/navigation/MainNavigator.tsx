@@ -77,6 +77,7 @@ import { MigrationModal } from '../components/MigrationModal';
 import messagingService from '../services/messagingService';
 import { pushNotificationService } from '../services/pushNotificationService';
 import { deepLinkHandler } from '../utils/deepLinkHandler';
+import { usePushNotificationContext } from '../hooks/usePushNotificationContext';
 
 console.log('MainNavigator: TransactionProcessingScreen imported:', !!TransactionProcessingScreen);
 console.log('MainNavigator: TransactionSuccessScreen imported:', !!TransactionSuccessScreen);
@@ -85,6 +86,7 @@ const Stack = createNativeStackNavigator<MainStackParamList>();
 
 export const MainNavigator = () => {
   console.log('MainNavigator: Component rendering at:', new Date().toISOString());
+  const { checkAndShowPrompt } = usePushNotificationContext();
 
   useEffect(() => {
     console.log('[MainNavigator] Mounted, processing pending notification/deep-link work');
@@ -98,6 +100,16 @@ export const MainNavigator = () => {
 
     return () => clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      checkAndShowPrompt().catch(error => {
+        console.error('[MainNavigator] Failed to check push notification prompt:', error);
+      });
+    }, 1200);
+
+    return () => clearTimeout(timer);
+  }, [checkAndShowPrompt]);
 
   return (
     <>
