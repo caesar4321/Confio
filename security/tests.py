@@ -228,6 +228,8 @@ class DiditIntegrationTests(TestCase):
         self.assertEqual(verification.status, 'pending')
         self.assertEqual(verification.document_number_normalized, 'P123456')
         self.assertIn('duplicate_identity', verification.risk_factors)
+        self.assertTrue(verification.requires_manual_review)
+        self.assertIn('revisión manual', verification.status_detail)
         self.assertTrue(
             SuspiciousActivity.objects.filter(
                 user=self.user,

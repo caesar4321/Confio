@@ -208,6 +208,31 @@ class IdentityVerification(SoftDeleteModel):
         if self.document_issuing_country:
             self.document_issuing_country = str(self.document_issuing_country).strip().upper()[:3]
         super().save(*args, **kwargs)
+
+    @property
+    def requires_manual_review(self) -> bool:
+        risk_factors = self.risk_factors or {}
+        return bool(risk_factors.get('requires_review') or risk_factors.get('duplicate_identity'))
+
+    @property
+    def status_detail(self) -> str:
+        risk_factors = self.risk_factors or {}
+        duplicate_identity = risk_factors.get('duplicate_identity') or {}
+
+        if duplicate_identity:
+            return (
+                'Tu verificación requiere revisión manual porque detectamos otra cuenta '
+                'con el mismo documento. Te avisaremos cuando termine la revisión.'
+            )
+        if self.status == 'verified':
+            return 'Tu identidad quedó verificada correctamente.'
+        if self.status == 'rejected':
+            return self.rejected_reason or 'La verificación fue rechazada. Puedes intentar nuevamente.'
+        if self.status == 'pending':
+            return 'Didit recibió tu sesión. Te avisaremos cuando termine la revisión.'
+        if self.status == 'expired':
+            return 'La verificación expiró. Inicia una nueva sesión para continuar.'
+        return 'Todavía no iniciaste una verificación de identidad.'
     
     def approve_verification(self, approved_by):
         """Approve the verification and sync verified name with user profile"""

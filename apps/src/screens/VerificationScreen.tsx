@@ -135,6 +135,14 @@ function statusMeta(status: NormalizedStatus) {
   }
 }
 
+function getStatusDetail(status: NormalizedStatus, detail?: string | null): string {
+  const trimmed = (detail || '').trim();
+  if (trimmed) {
+    return trimmed;
+  }
+  return statusMeta(status).description;
+}
+
 const VerificationScreen = () => {
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const { activeAccount } = useAccount();
@@ -167,7 +175,13 @@ const VerificationScreen = () => {
     ? (businessStatus !== 'unverified' ? businessStatus : anyStatus)
     : (personalStatus !== 'unverified' ? personalStatus : anyStatus);
   const currentLevel = effectiveStatus === 'verified' ? 1 : 0;
-  const meta = statusMeta(effectiveStatus);
+  const activeStatusNode = isBusinessAccount
+    ? (bizKycData?.businessKycStatus || anyKycData?.myKycStatus)
+    : (personalKycData?.myPersonalKycStatus || anyKycData?.myKycStatus);
+  const meta = {
+    ...statusMeta(effectiveStatus),
+    description: getStatusDetail(effectiveStatus, activeStatusNode?.statusDetail),
+  };
   const isBusy = isLaunchingDidit || isRefreshing;
   const isInitialLoading = meLoading || personalLoading || anyLoading || businessLoading;
 
@@ -202,14 +216,15 @@ const VerificationScreen = () => {
 
     await refreshStatuses();
     const normalized = normalizeStatus(result.verificationStatus);
+    const detail = result.statusDetail || result.verification?.statusDetail;
     if (normalized === 'verified') {
-      Alert.alert('Verificación completa', 'Tu identidad quedó verificada correctamente.');
+      Alert.alert('Verificación completa', detail || 'Tu identidad quedó verificada correctamente.');
     } else if (normalized === 'pending') {
-      Alert.alert('Verificación enviada', 'Didit recibió tu sesión. Te avisaremos cuando termine la revisión.');
+      Alert.alert('Verificación enviada', detail || 'Didit recibió tu sesión. Te avisaremos cuando termine la revisión.');
     } else if (normalized === 'rejected') {
-      Alert.alert('Verificación rechazada', 'La sesión fue rechazada. Puedes intentar nuevamente.');
+      Alert.alert('Verificación rechazada', detail || 'La sesión fue rechazada. Puedes intentar nuevamente.');
     } else {
-      Alert.alert('Sesión iniciada', 'La sesión se creó, pero Didit todavía no devolvió un resultado final.');
+      Alert.alert('Sesión iniciada', detail || 'La sesión se creó, pero Didit todavía no devolvió un resultado final.');
     }
   }, [refreshStatuses, syncDiditSession]);
 

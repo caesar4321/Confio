@@ -374,10 +374,14 @@ export const SYNC_DIDIT_VERIFICATION_SESSION = gql`
       success
       error
       verificationStatus
+      statusDetail
+      requiresManualReview
       verification {
         id
         status
         verifiedAt
+        statusDetail
+        requiresManualReview
       }
     }
   }

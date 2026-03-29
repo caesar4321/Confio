@@ -86,6 +86,8 @@ export const GET_MY_KYC_STATUS = gql`
     myKycStatus {
       id
       status
+      statusDetail
+      requiresManualReview
     }
   }
 `;
@@ -97,6 +99,8 @@ export const GET_MY_PERSONAL_KYC_STATUS = gql`
       id
       status
       verifiedAt
+      statusDetail
+      requiresManualReview
     }
   }
 `;
@@ -107,6 +111,8 @@ export const GET_MY_PERSONAL_VERIFIED_KYC = gql`
       id
       status
       verifiedAt
+      statusDetail
+      requiresManualReview
     }
   }
 `;
@@ -116,6 +122,8 @@ export const GET_BUSINESS_KYC_STATUS = gql`
     businessKycStatus(businessId: $businessId) {
       id
       status
+      statusDetail
+      requiresManualReview
     }
   }
 `;

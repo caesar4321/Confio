@@ -20,6 +20,9 @@ logger = logging.getLogger(__name__)
 
 
 class IdentityVerificationType(DjangoObjectType):
+    status_detail = graphene.String()
+    requires_manual_review = graphene.Boolean()
+
     class Meta:
         model = IdentityVerification
         fields = ('id', 'status', 'verified_at', 'verified_first_name', 
@@ -30,6 +33,12 @@ class IdentityVerificationType(DjangoObjectType):
             return self.verified_at or getattr(self, 'updated_at', None) or getattr(self, 'created_at', None)
         except Exception:
             return None
+
+    def resolve_status_detail(self, info):
+        return getattr(self, 'status_detail', '')
+
+    def resolve_requires_manual_review(self, info):
+        return bool(getattr(self, 'requires_manual_review', False))
 
 
 class UserDeviceType(DjangoObjectType):
@@ -216,6 +225,7 @@ class CheckKYCStatus(graphene.Mutation):
     kyc_required = graphene.Boolean()
     reason = graphene.String()
     verification_status = graphene.String()
+    status_detail = graphene.String()
     
     @classmethod
     def mutate(cls, root, info, operation_type, amount=None):
@@ -224,7 +234,8 @@ class CheckKYCStatus(graphene.Mutation):
             return CheckKYCStatus(
                 kyc_required=True,
                 reason="Authentication required",
-                verification_status="none"
+                verification_status="none",
+                status_detail="Authentication required",
             )
         
         # Check KYC requirement
@@ -237,13 +248,16 @@ class CheckKYCStatus(graphene.Mutation):
             ).order_by('-created_at').first()
             
             verification_status = verification.status if verification else "none"
-        except:
+            status_detail = verification.status_detail if verification else "Todavía no iniciaste una verificación de identidad."
+        except Exception:
             verification_status = "none"
+            status_detail = "Todavía no iniciaste una verificación de identidad."
         
         return CheckKYCStatus(
             kyc_required=required,
-            reason=reason,
-            verification_status=verification_status
+            reason=reason or status_detail,
+            verification_status=verification_status,
+            status_detail=status_detail,
         )
 
 
@@ -387,4 +401,3 @@ class SecurityMutation(graphene.ObjectType):
 # Export for main schema
 Query = SecurityQuery
 Mutation = SecurityMutation
-

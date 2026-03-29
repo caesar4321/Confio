@@ -447,6 +447,9 @@ class UserType(DjangoObjectType):
 		return Account.objects.filter(user=self).select_related('business')
 
 class IdentityVerificationType(DjangoObjectType):
+    status_detail = graphene.String()
+    requires_manual_review = graphene.Boolean()
+
     class Meta:
         model = IdentityVerification
         fields = ('id', 'user', 'verified_first_name', 'verified_last_name', 'verified_date_of_birth', 'verified_nationality', 'verified_address', 'verified_city', 'verified_state', 'verified_country', 'verified_postal_code', 'document_type', 'document_number', 'document_issuing_country', 'document_expiry_date', 'status', 'verified_by', 'verified_at', 'rejected_reason', 'created_at', 'updated_at')
@@ -457,6 +460,12 @@ class IdentityVerificationType(DjangoObjectType):
             return self.verified_at or self.updated_at or self.created_at
         except Exception:
             return None
+
+    def resolve_status_detail(self, info):
+        return getattr(self, 'status_detail', '')
+
+    def resolve_requires_manual_review(self, info):
+        return bool(getattr(self, 'requires_manual_review', False))
 
 class BusinessType(DjangoObjectType):
     is_verified = graphene.Boolean()
@@ -2444,6 +2453,8 @@ class SyncDiditVerificationSession(graphene.Mutation):
     error = graphene.String()
     verification = graphene.Field(IdentityVerificationType)
     verification_status = graphene.String()
+    status_detail = graphene.String()
+    requires_manual_review = graphene.Boolean()
 
     @classmethod
     def mutate(cls, root, info, session_id):
@@ -2458,12 +2469,14 @@ class SyncDiditVerificationSession(graphene.Mutation):
                 error=None,
                 verification=verification,
                 verification_status=verification.status,
+                status_detail=verification.status_detail,
+                requires_manual_review=verification.requires_manual_review,
             )
         except (DiditConfigurationError, DiditAPIError) as e:
-            return SyncDiditVerificationSession(success=False, error=str(e), verification=None, verification_status=None)
+            return SyncDiditVerificationSession(success=False, error=str(e), verification=None, verification_status=None, status_detail=None, requires_manual_review=False)
         except Exception as e:
             logger.exception("SyncDiditVerificationSession failed")
-            return SyncDiditVerificationSession(success=False, error=str(e), verification=None, verification_status=None)
+            return SyncDiditVerificationSession(success=False, error=str(e), verification=None, verification_status=None, status_detail=None, requires_manual_review=False)
 
 
 class PresignedUploadInfo(graphene.ObjectType):
