@@ -55,8 +55,8 @@ async def fake_create_sponsored_transfer(*args, **kwargs):
     ALGORAND_ALGOD_ADDRESS='http://fake-node',
     ALGORAND_ALGOD_TOKEN='fake-token',
 )
-class ReferralWithdrawalLimitTest(TestCase):
-    """Tests around referral withdrawal restrictions for sponsored sends."""
+class ReferralWithdrawalPolicyTest(TestCase):
+    """Tests around referral reward withdrawal policy for sponsored sends."""
 
     def setUp(self):
         # Ensure AlgorandAccountManager picks up the overridden settings.
@@ -70,8 +70,7 @@ class ReferralWithdrawalLimitTest(TestCase):
             password='password123',
             firebase_uid='uid-referrer',
         )
-        # Provide minimal phone context (kept blank so phone verification check only
-        # triggers once earned >= 100).
+        # Keep the user unverified unless a test changes that explicitly.
         self.user.phone_number = ''
         self.user.save()
 
@@ -187,8 +186,8 @@ class ReferralWithdrawalLimitTest(TestCase):
             ),
         )
 
-    def test_high_value_requires_identity_verification(self):
-        """High-value referral withdrawals still require KYC when identity is not verified."""
+    def test_high_value_referral_withdrawal_requires_identity_verification(self):
+        """High-value referral withdrawals are blocked while identity remains unverified."""
 
         self.user.phone_number = '1234567890'
         self.user.save(update_fields=['phone_number'])
@@ -197,11 +196,7 @@ class ReferralWithdrawalLimitTest(TestCase):
         self._grant_referral_earnings(Decimal('780'))
 
         ctx_patch, algod_patch, sponsor_patch = self._patch_context()
-        with ctx_patch, algod_patch, sponsor_patch, patch(
-            'blockchain.mutations.REFERRAL_DAILY_LIMIT', Decimal('1000')
-        ), patch(
-            'blockchain.mutations.REFERRAL_WEEKLY_LIMIT', Decimal('5000')
-        ):
+        with ctx_patch, algod_patch, sponsor_patch:
             result = AlgorandSponsoredSendMutation.mutate(
                 root=None,
                 info=self.info,
@@ -213,13 +208,13 @@ class ReferralWithdrawalLimitTest(TestCase):
         self.assertFalse(result.success)
         self.assertIn('verificación de identidad', result.error)
 
-    def test_earned_threshold_requires_identity(self):
+    def test_any_referral_funded_withdrawal_requires_identity(self):
         """Referral-funded withdrawals require identity verification once rewards exist."""
 
         self.user.phone_number = '987654321'
         self.user.save(update_fields=['phone_number'])
 
-        # Add 130 CONFIO to push lifetime earnings over 100 threshold.
+        # Add more referral rewards; any referral-funded portion should still require KYC.
         self._grant_referral_earnings(Decimal('130'))
 
         ctx_patch, algod_patch, sponsor_patch = self._patch_context()
