@@ -26,7 +26,7 @@ from achievements.models import (
     UserReferral,
     ReferralRewardEvent,
 )
-from achievements.referral_security import get_referral_reward_summary
+from achievements.referral_security import get_referral_reward_summary, get_referral_reward_policy_stats
 from p2p_exchange.models import P2POffer, P2PTrade, P2PUserStats, P2PDispute
 from send.models import SendTransaction
 from payments.models import PaymentTransaction
@@ -210,6 +210,7 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         unique_referral_users = referral_logs.values('user').distinct().count()
 
         referral_reward_summary = get_referral_reward_summary()
+        referral_policy_stats = get_referral_reward_policy_stats()
 
         multi_user_devices = DeviceFingerprint.objects.annotate(
             user_count=Count(
@@ -229,6 +230,12 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             'high_value': high_value,
             'unique_users': unique_referral_users,
             'multi_user_devices': multi_user_devices,
+            'rewarded_users': referral_policy_stats['rewarded_users'],
+            'verified_reward_users': referral_policy_stats['verified_reward_users'],
+            'unverified_reward_users': referral_policy_stats['unverified_reward_users'],
+            'verified_available_total': referral_policy_stats['verified_available_total'],
+            'kyc_hold_total': referral_policy_stats['kyc_hold_total'],
+            'duplicate_identity_review_users': referral_policy_stats['duplicate_identity_review_users'],
         }
 
         referral_records = UserReferral.objects.filter(deleted_at__isnull=True)

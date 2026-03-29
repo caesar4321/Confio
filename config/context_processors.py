@@ -10,7 +10,7 @@ from achievements.models import (
     ReferralWithdrawalLog,
     ConfioRewardTransaction,
 )
-from achievements.referral_security import get_referral_reward_summary
+from achievements.referral_security import get_referral_reward_summary, get_referral_reward_policy_stats
 from p2p_exchange.models import P2PTrade
 from presale.models import PresalePurchase, PresalePhase
 from security.models import DeviceFingerprint
@@ -46,6 +46,7 @@ def admin_dashboard_stats(request):
         unique_referral_users = referral_logs.values('user').distinct().count()
 
         referral_reward_summary = get_referral_reward_summary()
+        referral_policy_stats = get_referral_reward_policy_stats()
 
         # Multi-user device detection (legacy achievements still informative for abuse)
         multi_user_devices = DeviceFingerprint.objects.annotate(
@@ -66,6 +67,12 @@ def admin_dashboard_stats(request):
             'high_value': high_value,
             'unique_users': unique_referral_users,
             'multi_user_devices': multi_user_devices,
+            'rewarded_users': referral_policy_stats['rewarded_users'],
+            'verified_reward_users': referral_policy_stats['verified_reward_users'],
+            'unverified_reward_users': referral_policy_stats['unverified_reward_users'],
+            'verified_available_total': referral_policy_stats['verified_available_total'],
+            'kyc_hold_total': referral_policy_stats['kyc_hold_total'],
+            'duplicate_identity_review_users': referral_policy_stats['duplicate_identity_review_users'],
         }
         
         # User Statistics

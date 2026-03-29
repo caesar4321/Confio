@@ -12,7 +12,7 @@ from datetime import timedelta
 
 from blockchain.constants import REFERRAL_ACHIEVEMENT_SLUGS
 
-from .referral_security import get_referral_reward_summary
+from .referral_security import get_referral_reward_summary, get_referral_reward_policy_stats
 from .models import (
     AchievementType,
     UserAchievement,
@@ -356,6 +356,7 @@ class UserRewardAdmin(admin.ModelAdmin):
         referral_unique_users = referral_withdrawals.values('user').distinct().count()
 
         referral_reward_summary = get_referral_reward_summary()
+        referral_policy_stats = get_referral_reward_policy_stats()
         
         context = {
             **self.admin_site.each_context(request),
@@ -384,6 +385,12 @@ class UserRewardAdmin(admin.ModelAdmin):
                 'unique_users': referral_unique_users,
                 'earned_total': referral_reward_summary['earned'],
                 'available_total': referral_reward_summary['available'],
+                'rewarded_users': referral_policy_stats['rewarded_users'],
+                'verified_reward_users': referral_policy_stats['verified_reward_users'],
+                'unverified_reward_users': referral_policy_stats['unverified_reward_users'],
+                'verified_available_total': referral_policy_stats['verified_available_total'],
+                'kyc_hold_total': referral_policy_stats['kyc_hold_total'],
+                'duplicate_identity_review_users': referral_policy_stats['duplicate_identity_review_users'],
             },
             'opts': self.model._meta,
             'has_filters': False,

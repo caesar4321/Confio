@@ -31,12 +31,13 @@ class IdentityVerificationAdmin(admin.ModelAdmin):
     search_fields = (
         'user__username', 'user__email',
         'verified_first_name', 'verified_last_name',
-        'document_number'
+        'document_number', 'document_number_normalized'
     )
     readonly_fields = (
         'created_at', 'updated_at', 'verified_at',
         'risk_assessment_display', 'document_preview',
-        'external_document_links', 'context_badge'
+        'external_document_links', 'context_badge',
+        'document_number_normalized'
     )
     
     fieldsets = (
@@ -57,7 +58,7 @@ class IdentityVerificationAdmin(admin.ModelAdmin):
         }),
         ('Document Information', {
             'fields': (
-                'document_type', 'document_number',
+                'document_type', 'document_number', 'document_number_normalized',
                 'document_issuing_country', 'document_expiry_date',
                 'document_preview'
             )

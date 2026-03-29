@@ -138,7 +138,7 @@
             <div class="stat-card">
                 <div class="stat-value success">{{ referral_stats.earned_total|floatformat:2 }}</div>
                 <div class="stat-label">CONFIO Earned via Referrals</div>
-                <div class="stat-sublabel">{{ referral_stats.unique_users|floatformat:0 }} users rewarded</div>
+                <div class="stat-sublabel">{{ referral_stats.rewarded_users|floatformat:0 }} users rewarded</div>
             </div>
             <div class="stat-card">
                 <div class="stat-value">{{ referral_stats.total_amount|floatformat:2 }}</div>
@@ -146,14 +146,14 @@
                 <div class="stat-sublabel">{{ referral_stats.total_withdrawals|floatformat:0 }} total requests</div>
             </div>
             <div class="stat-card">
-                <div class="stat-value">{{ referral_stats.available_total|floatformat:2 }}</div>
-                <div class="stat-label">CONFIO Still Available</div>
-                <div class="stat-sublabel">Recompensas de referidos sin retirar</div>
+                <div class="stat-value">{{ referral_stats.verified_available_total|floatformat:2 }}</div>
+                <div class="stat-label">CONFIO Available to Verified Users</div>
+                <div class="stat-sublabel">KYC hold: {{ referral_stats.kyc_hold_total|floatformat:2 }} CONFIO</div>
             </div>
             <div class="stat-card">
-                <div class="stat-value warning">{{ referral_stats.pending_review|floatformat:0 }}</div>
-                <div class="stat-label">Withdrawals Pending Review</div>
-                <div class="stat-sublabel">{{ referral_stats.high_value_count|floatformat:0 }} high-value (≥500 CONFIO)</div>
+                <div class="stat-value warning">{{ referral_stats.duplicate_identity_review_users|floatformat:0 }}</div>
+                <div class="stat-label">Duplicate Identity Reviews</div>
+                <div class="stat-sublabel">{{ referral_stats.pending_review|floatformat:0 }} withdrawal reviews · {{ referral_stats.high_value_count|floatformat:0 }} high-value</div>
             </div>
             <div class="stat-card">
                 <div class="stat-value">{{ referral_stats.daily_amount|floatformat:2 }}</div>
@@ -163,13 +163,13 @@
                 </div>
             </div>
             <div class="stat-card">
-                <div class="stat-value info">{{ stats.multi_user_devices_count|floatformat:0 }}</div>
-                <div class="stat-label">Multi-Account Devices</div>
-                <div class="stat-sublabel">Devices sharing referral rewards</div>
+                <div class="stat-value info">{{ referral_stats.unverified_reward_users|floatformat:0 }}</div>
+                <div class="stat-label">Unverified Reward Holders</div>
+                <div class="stat-sublabel">{{ referral_stats.verified_reward_users|floatformat:0 }} verified users can withdraw</div>
             </div>
         </div>
         <p class="stat-note">
-            Las métricas usan solo recompensas por referidos. Depósitos, compras de presale u otros orígenes de CONFIO no están sujetos a estos límites.
+            Las métricas usan solo recompensas por referidos. Recompensas y referidos ahora requieren verificación personal antes del reclamo o retiro. Depósitos y presale no están sujetos a este control.
         </p>
     </div>
 

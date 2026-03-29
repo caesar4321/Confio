@@ -191,8 +191,8 @@
 <div class="fraud-stats-section">
     <h2>🔍 $CONFIO Reward Security</h2>
     <p>
-        Live visibility into referral-sourced $CONFIO rewards. These limits only apply to balances earned
-        via referrals—presale or external deposits remain unrestricted.
+        Live visibility into referral-sourced $CONFIO rewards. Rewarded $CONFIO now requires verified personal
+        identity before claim or withdrawal. Presale or external deposits remain unrestricted.
     </p>
     
     <div class="stats-grid">
@@ -203,17 +203,17 @@
         
         <div class="stat-card">
             <div class="stat-label">Available for Withdrawal</div>
-            <div class="stat-value success">{{ fraud_stats.available_total|default:"0"|floatformat:2 }} CONFIO</div>
+            <div class="stat-value success">{{ fraud_stats.verified_available_total|default:"0"|floatformat:2 }} CONFIO</div>
             <div class="stat-sublabel">
-                Total withdrawn: {{ fraud_stats.total_withdrawn|default:"0"|floatformat:2 }} CONFIO
+                KYC hold: {{ fraud_stats.kyc_hold_total|default:"0"|floatformat:2 }} CONFIO
             </div>
         </div>
         
         <div class="stat-card">
-            <div class="stat-label">Reviews & High-Value Checks</div>
-            <div class="stat-value danger">{{ fraud_stats.pending_review|default:"0" }}</div>
+            <div class="stat-label">Review Queue</div>
+            <div class="stat-value danger">{{ fraud_stats.duplicate_identity_review_users|default:"0" }}</div>
             <div class="stat-sublabel">
-                High-value withdrawals (&gt;500 CONFIO): {{ fraud_stats.high_value|default:"0" }}
+                Duplicate identity reviews pending
             </div>
         </div>
         
@@ -226,9 +226,11 @@
         </div>
         
         <div class="stat-card">
-            <div class="stat-label">Audience Overview</div>
-            <div class="stat-value">{{ fraud_stats.unique_users|default:"0" }}</div>
-            <div class="stat-sublabel">Unique referrers with withdrawals</div>
+            <div class="stat-label">Reward Holders</div>
+            <div class="stat-value">{{ fraud_stats.rewarded_users|default:"0" }}</div>
+            <div class="stat-sublabel">
+                Verified: {{ fraud_stats.verified_reward_users|default:"0" }} · Unverified: {{ fraud_stats.unverified_reward_users|default:"0" }}
+            </div>
         </div>
 
         <div class="stat-card">
@@ -238,10 +240,12 @@
         </div>
     </div>
     
-    {% if fraud_stats.pending_review > 0 %}
+    {% if fraud_stats.duplicate_identity_review_users > 0 or fraud_stats.unverified_reward_users > 0 %}
     <div class="alert-warning">
-        <strong>⚠️ Review queue:</strong>
-        {{ fraud_stats.pending_review }} withdrawal{{ fraud_stats.pending_review|pluralize }} awaiting manual verification.
+        <strong>⚠️ Reward controls active:</strong>
+        {{ fraud_stats.unverified_reward_users|default:"0" }} reward holder{{ fraud_stats.unverified_reward_users|pluralize }}
+        still need personal KYC, and {{ fraud_stats.duplicate_identity_review_users|default:"0" }} duplicate identity review{{ fraud_stats.duplicate_identity_review_users|pluralize }}
+        {{ fraud_stats.duplicate_identity_review_users|pluralize:"is,are" }} pending.
     </div>
     {% endif %}
     

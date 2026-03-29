@@ -819,9 +819,8 @@
     {% if fraud_stats %}
     <h2 class="section-title">🔍 $CONFIO Reward Security</h2>
     <p style="margin-bottom: 18px; color: #1f2937;">
-        Monitoring referral-earned $CONFIO balances and withdrawal limits. Presale and externally deposited
-        tokens stay
-        unrestricted.
+        Monitoring referral-earned $CONFIO balances, KYC holds, and duplicate-identity review queues.
+        Presale and externally deposited tokens stay unrestricted.
     </p>
     <div class="metrics-grid">
         <div class="metric-card">
@@ -832,9 +831,8 @@
 
         <div class="metric-card">
             <div class="metric-label">Available for Withdrawal</div>
-            <div class="metric-value" style="color: #16a34a;">{{ fraud_stats.available_total|default:"0"|floatformat:2 }} CONFIO</div>
-            <div class="metric-change">Withdrawn to date: {{ fraud_stats.total_withdrawn|default:"0"|floatformat:2 }}
-                CONFIO</div>
+            <div class="metric-value" style="color: #16a34a;">{{ fraud_stats.verified_available_total|default:"0"|floatformat:2 }} CONFIO</div>
+            <div class="metric-change">KYC hold: {{ fraud_stats.kyc_hold_total|default:"0"|floatformat:2 }} CONFIO</div>
         </div>
 
         <div class="metric-card">
@@ -845,15 +843,15 @@
         </div>
 
         <div class="metric-card">
-            <div class="metric-label">Reviews & High Value</div>
-            <div class="metric-value" style="color: #dc2626;">{{ fraud_stats.pending_review|default:"0" }}</div>
-            <div class="metric-change">High-value (&gt;500 CONFIO): {{ fraud_stats.high_value|default:"0" }}</div>
+            <div class="metric-label">Duplicate Identity Reviews</div>
+            <div class="metric-value" style="color: #dc2626;">{{ fraud_stats.duplicate_identity_review_users|default:"0" }}</div>
+            <div class="metric-change">Pending manual review in personal KYC</div>
         </div>
 
         <div class="metric-card">
-            <div class="metric-label">Unique Referrers</div>
-            <div class="metric-value">{{ fraud_stats.unique_users|default:"0"|intcomma }}</div>
-            <div class="metric-change">With referral withdrawals</div>
+            <div class="metric-label">Reward Holders</div>
+            <div class="metric-value">{{ fraud_stats.rewarded_users|default:"0"|intcomma }}</div>
+            <div class="metric-change">Verified: {{ fraud_stats.verified_reward_users|default:"0"|intcomma }} · Unverified: {{ fraud_stats.unverified_reward_users|default:"0"|intcomma }}</div>
         </div>
 
         <div class="metric-card">
@@ -864,14 +862,13 @@
         </div>
     </div>
 
-    {% if fraud_stats.pending_review > 0 %}
+    {% if fraud_stats.duplicate_identity_review_users > 0 or fraud_stats.unverified_reward_users > 0 %}
     <div class="alert-box" style="margin-bottom: 20px;">
         <span class="alert-icon">⚠️</span>
         <div>
-            <strong>Review queue:</strong>
-            {{ fraud_stats.pending_review }} withdrawal{{ fraud_stats.pending_review|pluralize }} awaiting
-            manual
-            verification.
+            <strong>Reward controls active:</strong>
+            {{ fraud_stats.unverified_reward_users|default:"0" }} reward holder{{ fraud_stats.unverified_reward_users|pluralize }} still need personal KYC and
+            {{ fraud_stats.duplicate_identity_review_users|default:"0" }} duplicate identity review{{ fraud_stats.duplicate_identity_review_users|pluralize }} {{ fraud_stats.duplicate_identity_review_users|pluralize:"is,are" }} pending.
         </div>
     </div>
     {% endif %}
