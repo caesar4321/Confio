@@ -149,8 +149,8 @@ class ReferralWithdrawalLimitTest(TestCase):
             description='Referral reward (test grant)',
         )
 
-    def test_daily_limit_blocks_unverified_identity(self):
-        """Unverified users exceeding the daily referral withdrawal limit should be blocked."""
+    def test_unverified_users_cannot_withdraw_referral_rewards(self):
+        """Unverified users should be blocked from withdrawing referral-funded CONFIO."""
 
         ctx_patch, algod_patch, sponsor_patch = self._patch_context()
         with ctx_patch, algod_patch, sponsor_patch:
@@ -163,7 +163,7 @@ class ReferralWithdrawalLimitTest(TestCase):
             )
 
         self.assertFalse(result.success)
-        self.assertIn('solo pueden retirar 10 CONFIO', result.error)
+        self.assertIn('verificación de identidad', result.error)
 
     def _patch_context(self):
         """Helper to patch JWT context, Algod client, and sponsor service."""
@@ -188,7 +188,7 @@ class ReferralWithdrawalLimitTest(TestCase):
         )
 
     def test_high_value_requires_identity_verification(self):
-        """High-value referral withdrawals require KYC when identity is not verified."""
+        """High-value referral withdrawals still require KYC when identity is not verified."""
 
         self.user.phone_number = '1234567890'
         self.user.save(update_fields=['phone_number'])
@@ -214,7 +214,7 @@ class ReferralWithdrawalLimitTest(TestCase):
         self.assertIn('verificación de identidad', result.error)
 
     def test_earned_threshold_requires_identity(self):
-        """Lifetime referral earnings over threshold require identity verification."""
+        """Referral-funded withdrawals require identity verification once rewards exist."""
 
         self.user.phone_number = '987654321'
         self.user.save(update_fields=['phone_number'])
@@ -235,8 +235,8 @@ class ReferralWithdrawalLimitTest(TestCase):
         self.assertFalse(result.success)
         self.assertIn('verificación de identidad', result.error)
 
-    def test_limits_apply_to_referral_claim_rewards_without_legacy_achievements(self):
-        """Current referral claims should still count toward withdrawal limits."""
+    def test_referral_claim_rewards_without_legacy_achievements_still_require_verification(self):
+        """Current referral claims should still require identity verification."""
 
         UserAchievement.objects.all().delete()
         ConfioRewardTransaction.objects.all().delete()
@@ -268,7 +268,7 @@ class ReferralWithdrawalLimitTest(TestCase):
             )
 
         self.assertFalse(result.success)
-        self.assertIn('solo pueden retirar 10 CONFIO', result.error)
+        self.assertIn('verificación de identidad', result.error)
 
     def test_non_referral_confio_send_is_not_blocked_by_referral_kyc_gate(self):
         """External CONFIO sends should not trigger referral-only KYC copy."""

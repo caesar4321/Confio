@@ -4,8 +4,17 @@ from django.utils import timezone
 from django.contrib.postgres.fields import ArrayField
 from users.models import SoftDeleteModel
 from django.db.models import Q
+from django.db import transaction
 from django.db.models.signals import post_save
 from django.dispatch import receiver
+import re
+
+
+def normalize_document_number(value: str | None) -> str:
+    """Normalize identity document numbers for duplicate-person detection."""
+    if not value:
+        return ''
+    return re.sub(r'[^A-Z0-9]', '', str(value).upper())
 
 
 class IdentityVerification(SoftDeleteModel):
@@ -81,6 +90,13 @@ class IdentityVerification(SoftDeleteModel):
     document_number = models.CharField(
         max_length=50,
         help_text="Document number/ID"
+    )
+    document_number_normalized = models.CharField(
+        max_length=64,
+        blank=True,
+        default='',
+        db_index=True,
+        help_text="Normalized document number used for duplicate identity detection"
     )
     document_issuing_country = models.CharField(
         max_length=3,
@@ -186,6 +202,12 @@ class IdentityVerification(SoftDeleteModel):
     
     def __str__(self):
         return f"Verification for {self.user.username} - {self.get_status_display()}"
+
+    def save(self, *args, **kwargs):
+        self.document_number_normalized = normalize_document_number(self.document_number)
+        if self.document_issuing_country:
+            self.document_issuing_country = str(self.document_issuing_country).strip().upper()[:3]
+        super().save(*args, **kwargs)
     
     def approve_verification(self, approved_by):
         """Approve the verification and sync verified name with user profile"""
@@ -205,6 +227,125 @@ class IdentityVerification(SoftDeleteModel):
         self.verified_by = rejected_by
         self.rejected_reason = reason
         self.save()
+
+
+def _is_personal_context(verification: IdentityVerification) -> bool:
+    return (verification.risk_factors or {}).get('account_type') != 'business'
+
+
+def _collect_duplicate_identity_context(user_ids):
+    related_ips = set()
+    related_devices = set()
+
+    try:
+        from achievements.models import UserAchievement
+
+        related_ips.update(
+            ip for ip in UserAchievement.objects.filter(
+                user_id__in=user_ids,
+                deleted_at__isnull=True,
+            ).exclude(claim_ip_address__isnull=True).values_list('claim_ip_address', flat=True)
+            if ip
+        )
+        related_devices.update(
+            fp for fp in UserAchievement.objects.filter(
+                user_id__in=user_ids,
+                deleted_at__isnull=True,
+            ).exclude(device_fingerprint_hash__isnull=True).values_list('device_fingerprint_hash', flat=True)
+            if fp
+        )
+    except Exception:
+        pass
+
+    try:
+        related_ips.update(
+            ip for ip in IPDeviceUser.objects.filter(user_id__in=user_ids)
+            .exclude(ip_address__ip_address__isnull=True)
+            .values_list('ip_address__ip_address', flat=True)
+            if ip
+        )
+        related_devices.update(
+            fp for fp in IPDeviceUser.objects.filter(user_id__in=user_ids)
+            .exclude(device_fingerprint__fingerprint__isnull=True)
+            .values_list('device_fingerprint__fingerprint', flat=True)
+            if fp
+        )
+    except Exception:
+        pass
+
+    return {
+        'related_ips': sorted(related_ips),
+        'related_devices': sorted(related_devices),
+    }
+
+
+@receiver(post_save, sender=IdentityVerification)
+def defer_duplicate_personal_identity_verifications(sender, instance: 'IdentityVerification', created, **kwargs):
+    """Prevent automatic verification when the same personal identity appears on another user."""
+    try:
+        if instance.status != 'verified' or not _is_personal_context(instance):
+            return
+        if not instance.document_number_normalized or not instance.document_issuing_country or instance.document_issuing_country == 'UNK':
+            return
+
+        duplicate_qs = IdentityVerification.objects.filter(
+            status='verified',
+            document_number_normalized=instance.document_number_normalized,
+            document_issuing_country=instance.document_issuing_country,
+        ).filter(
+            Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business')
+        ).exclude(user=instance.user)
+
+        if not duplicate_qs.exists():
+            return
+
+        related_user_ids = list(duplicate_qs.values_list('user_id', flat=True).distinct())
+        context = _collect_duplicate_identity_context([instance.user_id, *related_user_ids])
+        risk_factors = dict(instance.risk_factors or {})
+        risk_factors['requires_review'] = True
+        risk_factors['duplicate_identity'] = {
+            'document_issuing_country': instance.document_issuing_country,
+            'document_number_normalized': instance.document_number_normalized,
+            'related_user_ids': related_user_ids,
+            'related_verification_ids': list(duplicate_qs.values_list('id', flat=True)),
+            'related_ips': context['related_ips'],
+            'related_devices': context['related_devices'],
+        }
+
+        IdentityVerification.objects.filter(pk=instance.pk).update(
+            status='pending',
+            verified_at=None,
+            rejected_reason='La verificación requiere revisión manual por identidad duplicada.',
+            risk_factors=risk_factors,
+            updated_at=timezone.now(),
+        )
+
+        def create_review_flag():
+            activity = SuspiciousActivity.objects.create(
+                user=instance.user,
+                activity_type='multiple_accounts',
+                status='pending',
+                detection_data={
+                    'trigger': 'duplicate_personal_identity',
+                    'document_issuing_country': instance.document_issuing_country,
+                    'document_number_normalized': instance.document_number_normalized,
+                    'related_user_ids': related_user_ids,
+                    'related_ips': context['related_ips'],
+                    'related_devices': context['related_devices'],
+                },
+                severity_score=9,
+                action_taken='Deferred automatic verification pending manual review.',
+            )
+            if related_user_ids:
+                activity.related_users.add(*related_user_ids)
+            if context['related_ips']:
+                activity.related_ips = context['related_ips']
+                activity.save(update_fields=['related_ips'])
+
+        transaction.on_commit(create_review_flag)
+    except Exception:
+        # Never break verification persistence due to duplicate review helpers.
+        pass
 
 
 @receiver(post_save, sender=IdentityVerification)
@@ -1097,4 +1238,3 @@ class IntegrityVerdict(models.Model):
             user=user,
             is_emulator=True
         ).exists()
-

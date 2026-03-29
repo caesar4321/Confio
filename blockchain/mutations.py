@@ -19,10 +19,7 @@ from .algorand_account_manager import AlgorandAccountManager
 from .algorand_sponsor_service import algorand_sponsor_service
 from .constants import (
     REFERRAL_ACHIEVEMENT_SLUGS,
-    REFERRAL_DAILY_LIMIT,
-    REFERRAL_WEEKLY_LIMIT,
     REFERRAL_SINGLE_REVIEW_THRESHOLD,
-    REFERRAL_VERIFICATION_TRIGGER,
     REFERRAL_MAX_USERS_PER_IP,
 )
 
@@ -990,25 +987,13 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
                 
                 # Apply referral restrictions for CONFIO withdrawals
                 if asset_type_upper == 'CONFIO':
-                    referral_summary = _get_referral_reward_summary(user)
                     referral_portion = _calculate_referral_portion(user, amount_decimal)
                     if referral_portion > Decimal('0'):
-                        if referral_summary['earned'] >= REFERRAL_VERIFICATION_TRIGGER and not user.is_identity_verified:
+                        if not user.is_identity_verified:
                             return cls(
                                 success=False,
-                                error='Necesitas completar la verificación de identidad para seguir retirando recompensas de referidos.'
+                                error='Necesitas completar tu verificación de identidad para retirar $CONFIO ganado por recompensas o referidos.'
                             )
-                        now = timezone.now()
-                        if not user.is_identity_verified:
-                            daily_total = _sum_referral_withdrawals(user, now - timedelta(days=1))
-                            if daily_total + referral_portion > REFERRAL_DAILY_LIMIT:
-                                return cls(success=False, error='Las cuentas básicas solo pueden retirar 10 CONFIO de referidos por día. Completa tu verificación para ampliar el límite.')
-                            weekly_total = _sum_referral_withdrawals(user, now - timedelta(days=7))
-                            if weekly_total + referral_portion > REFERRAL_WEEKLY_LIMIT:
-                                return cls(success=False, error='Las cuentas básicas solo pueden retirar 50 CONFIO de referidos por semana. Completa tu verificación para ampliar el límite.')
-
-                        if referral_portion > REFERRAL_SINGLE_REVIEW_THRESHOLD and not user.is_identity_verified:
-                            return cls(success=False, error='Necesitas completar la verificación de identidad para retiros mayores a 500 CONFIO provenientes de referidos.')
             # Native ALGO transfers do not use ASA scaling
 
             # Create sponsored transaction using async function

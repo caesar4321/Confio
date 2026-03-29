@@ -3967,6 +3967,11 @@ class PrepareReferralRewardClaim(graphene.Mutation):
 		user_address = get_primary_algorand_address(user)
 		if not user_address:
 			return PrepareReferralRewardClaim(success=False, error="Necesitas asociar tu billetera Algorand para desbloquear $CONFIO.")
+		if not user.is_identity_verified:
+			return PrepareReferralRewardClaim(
+				success=False,
+				error="Necesitas completar tu verificación de identidad para reclamar $CONFIO ganado por recompensas o referidos.",
+			)
 
 		service = ConfioRewardsService()
 		claim_kind = 'referee'
@@ -4216,6 +4221,11 @@ class SubmitReferralRewardClaim(graphene.Mutation):
 		user = getattr(info.context, 'user', None)
 		if not (user and getattr(user, 'is_authenticated', False)):
 			return SubmitReferralRewardClaim(success=False, error="Necesitas iniciar sesión para desbloquear.")
+		if not user.is_identity_verified:
+			return SubmitReferralRewardClaim(
+				success=False,
+				error="Necesitas completar tu verificación de identidad para reclamar $CONFIO ganado por recompensas o referidos.",
+			)
 
 		# Firebase App Check Enforcement (Blocking Mode)
 		from security.integrity_service import app_check_service

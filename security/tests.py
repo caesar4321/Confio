@@ -6,7 +6,7 @@ from django.test import TestCase, override_settings
 
 from security.didit import create_didit_session, sync_didit_session, verify_didit_webhook_signature
 from security.didit import DiditConfigurationError
-from security.models import IdentityVerification
+from security.models import IdentityVerification, SuspiciousActivity
 
 User = get_user_model()
 
@@ -145,6 +145,95 @@ class DiditIntegrationTests(TestCase):
         self.assertEqual(verification.document_type, 'passport')
         self.assertEqual(verification.document_number, 'P123456')
         self.assertEqual(verification.document_issuing_country, 'VEN')
+
+    @patch('security.didit.requests.request')
+    def test_sync_session_defers_duplicate_personal_identity(self, mock_request):
+        other_user = User.objects.create_user(
+            username='didit-user-2',
+            password='secret123',
+            firebase_uid='firebase-didit-user-2',
+            first_name='Ana',
+            last_name='Perez',
+            phone_country='AR',
+        )
+        IdentityVerification.objects.create(
+            user=other_user,
+            verified_first_name='Ana',
+            verified_last_name='Perez',
+            verified_date_of_birth=date(1994, 7, 21),
+            verified_nationality='VEN',
+            verified_address='Main street',
+            verified_city='Bogota',
+            verified_state='Cundinamarca',
+            verified_country='COL',
+            document_type='passport',
+            document_number='P-123 456',
+            document_issuing_country='VEN',
+            status='verified',
+            risk_factors={},
+        )
+
+        verification = IdentityVerification.objects.create(
+            user=self.user,
+            verified_first_name='Pending',
+            verified_last_name='Verification',
+            verified_date_of_birth=date(1900, 1, 1),
+            verified_nationality='UNK',
+            verified_address='Pending Didit verification',
+            verified_city='Unknown City',
+            verified_state='Unknown State',
+            verified_country='UNK',
+            document_type='national_id',
+            document_number='didit:sess_dup',
+            document_issuing_country='UNK',
+            status='pending',
+            risk_factors={
+                'provider': 'didit',
+                'didit': {
+                    'session_id': 'sess_dup',
+                    'status': 'pending',
+                },
+            },
+        )
+
+        mock_request.return_value = self._mock_response({
+            'session_id': 'sess_dup',
+            'status': 'Approved',
+            'vendor_data': '{"user_id":1,"account_type":"personal"}',
+            'first_name': 'Ana',
+            'last_name': 'Perez',
+            'date_of_birth': '1994-07-21',
+            'id_verifications': [{
+                'nationality': 'VEN',
+                'document_type': 'passport',
+                'document_number': 'P123456',
+                'issuing_state': 'VEN',
+                'expiration_date': '2030-12-31',
+                'parsed_address': {
+                    'street': 'Calle 123',
+                    'street_number': '45',
+                    'city': 'Bogota',
+                    'state': 'Cundinamarca',
+                    'postal_code': '110111',
+                    'country': 'CO',
+                },
+            }],
+        })
+
+        synced, _ = sync_didit_session(session_id='sess_dup', expected_user=self.user)
+
+        verification.refresh_from_db()
+        synced.refresh_from_db()
+        self.assertEqual(verification.id, synced.id)
+        self.assertEqual(verification.status, 'pending')
+        self.assertEqual(verification.document_number_normalized, 'P123456')
+        self.assertIn('duplicate_identity', verification.risk_factors)
+        self.assertTrue(
+            SuspiciousActivity.objects.filter(
+                user=self.user,
+                activity_type='multiple_accounts',
+            ).exists()
+        )
 
 
 @override_settings(DIDIT_WEBHOOK_SECRET='super-secret')
