@@ -269,3 +269,38 @@ class ReferralWithdrawalLimitTest(TestCase):
 
         self.assertFalse(result.success)
         self.assertIn('solo pueden retirar 10 CONFIO', result.error)
+
+    def test_non_referral_confio_send_is_not_blocked_by_referral_kyc_gate(self):
+        """External CONFIO sends should not trigger referral-only KYC copy."""
+
+        UserAchievement.objects.all().delete()
+        ConfioRewardTransaction.objects.all().delete()
+        self.balance.total_earned = Decimal('130')
+        self.balance.total_locked = Decimal('0')
+        self.balance.total_unlocked = Decimal('130')
+        self.balance.total_spent = Decimal('130')
+        self.balance.save(
+            update_fields=['total_earned', 'total_locked', 'total_unlocked', 'total_spent']
+        )
+        ConfioRewardTransaction.objects.create(
+            user=self.user,
+            transaction_type='unlocked',
+            amount=Decimal('130'),
+            balance_after=self.balance.total_unlocked,
+            reference_type='referral_claim',
+            reference_id='referral_claim:test-exhausted',
+            description='Referral claim reward',
+        )
+
+        ctx_patch, algod_patch, sponsor_patch = self._patch_context()
+        with ctx_patch, algod_patch, sponsor_patch:
+            result = AlgorandSponsoredSendMutation.mutate(
+                root=None,
+                info=self.info,
+                recipient_address='B' * 58,
+                amount=5,
+                asset_type='CONFIO',
+            )
+
+        self.assertTrue(result.success)
+        self.assertIsNone(result.error)

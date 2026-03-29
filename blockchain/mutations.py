@@ -834,13 +834,6 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
                 abuse_error = _check_referral_device_ip_limits(user)
                 if abuse_error:
                     return cls(success=False, error=abuse_error)
-                
-                referral_summary = _get_referral_reward_summary(user)
-                if referral_summary['earned'] >= REFERRAL_VERIFICATION_TRIGGER and not user.is_identity_verified:
-                    return cls(
-                        success=False,
-                        error='Necesitas completar la verificación de identidad para seguir retirando recompensas de referidos.'
-                    )
 
             # Get JWT context for account determination
             from users.jwt_context import get_jwt_business_context_with_validation
@@ -1000,6 +993,11 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
                     referral_summary = _get_referral_reward_summary(user)
                     referral_portion = _calculate_referral_portion(user, amount_decimal)
                     if referral_portion > Decimal('0'):
+                        if referral_summary['earned'] >= REFERRAL_VERIFICATION_TRIGGER and not user.is_identity_verified:
+                            return cls(
+                                success=False,
+                                error='Necesitas completar la verificación de identidad para seguir retirando recompensas de referidos.'
+                            )
                         now = timezone.now()
                         if not user.is_identity_verified:
                             daily_total = _sum_referral_withdrawals(user, now - timedelta(days=1))
