@@ -153,12 +153,38 @@ const PhoneVerificationScreen = () => {
           setCurrentScreen('code');
           return true;
         } else {
-          Alert.alert('Error', data.initiateTelegramVerification.error || 'Failed to send code');
+          Alert.alert(
+            'No pudimos enviar el código por Telegram',
+            data.initiateTelegramVerification.error || 'Intenta nuevamente o recibe tu código por SMS.',
+            [
+              { text: 'Cancelar', style: 'cancel' },
+              {
+                text: 'Intentar con SMS',
+                onPress: async () => {
+                  setVerificationMethod('sms');
+                  await handleSendSmsCode();
+                },
+              },
+            ]
+          );
           return false;
         }
       } catch (e) {
         console.error('Error sending verification:', e);
-        Alert.alert('Error', 'Network error');
+        Alert.alert(
+          'No pudimos enviar el código por Telegram',
+          'Intenta nuevamente o recibe tu código por SMS.',
+          [
+            { text: 'Cancelar', style: 'cancel' },
+            {
+              text: 'Intentar con SMS',
+              onPress: async () => {
+                setVerificationMethod('sms');
+                await handleSendSmsCode();
+              },
+            },
+          ]
+        );
         return false;
       }
     });
@@ -228,7 +254,26 @@ const PhoneVerificationScreen = () => {
             }
           }
         } else {
-          Alert.alert('Error', data.verifyTelegramCode.error || 'Verification failed');
+          const errorMessage = data.verifyTelegramCode.error || 'Verification failed';
+          if (errorMessage.includes('Mensaje no entregado')) {
+            Alert.alert(
+              'Telegram no disponible',
+              `${errorMessage}\n\nTambién puedes recibir el código por SMS.`,
+              [
+                { text: 'Cancelar', style: 'cancel' },
+                {
+                  text: 'Intentar con SMS',
+                  onPress: async () => {
+                    setVerificationMethod('sms');
+                    setVerificationCode(['', '', '', '', '', '']);
+                    await handleSendSmsCode();
+                  },
+                },
+              ]
+            );
+          } else {
+            Alert.alert('Error', errorMessage);
+          }
         }
       } else if (verificationMethod === 'sms') {
         const cleanPhoneNumber = phoneNumber.replace(/[\s-]/g, '');
@@ -431,7 +476,7 @@ const PhoneVerificationScreen = () => {
 
         <View style={styles.methodContainer}>
           <TouchableOpacity
-            style={[styles.methodCard, codeRequestBlocked && styles.methodCardDisabled]}
+            style={[styles.methodCard, styles.primaryMethodCard, codeRequestBlocked && styles.methodCardDisabled]}
             activeOpacity={0.85}
             disabled={codeRequestBlocked}
             onPress={() => {
@@ -443,29 +488,46 @@ const PhoneVerificationScreen = () => {
               <TelegramLogo width="100%" height="100%" />
             </View>
             <View style={styles.methodContent}>
-              <Text style={styles.methodTitle}>Verificación vía Telegram</Text>
-              <Text style={styles.methodDescription}>Enviaremos un código a tu cuenta de Telegram</Text>
+              <Text style={styles.methodTitle}>Recibir código por Telegram</Text>
+              <Text style={styles.methodBadge}>Recomendado y más rápido</Text>
+              <Text style={styles.methodDescription}>Te enviaremos el código por Telegram.{'\n'}Usa SMS si este número no es tu Telegram.</Text>
               <View style={styles.methodButtonRow}>
                 <Text style={[styles.methodButtonText, codeRequestBlocked && styles.methodButtonTextDisabled]}>
-                  {methodCtaText}
+                  {codeRequestBlocked ? methodCtaText : 'Enviar código'}
                 </Text>
                 <Feather name="arrow-right" size={16} color={colors.confioGreen} />
               </View>
             </View>
           </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.methodCard, styles.secondaryMethodCard, codeRequestBlocked && styles.methodCardDisabled]}
+            activeOpacity={0.85}
+            disabled={codeRequestBlocked}
+            onPress={async () => {
+              setVerificationMethod('sms');
+              await handleSendSmsCode();
+            }}
+          >
+            <View style={[styles.methodIconContainer, styles.smsMethodIconContainer]}>
+              <Feather name="message-square" size={20} color="#4B5563" />
+            </View>
+            <View style={styles.methodContent}>
+              <Text style={styles.methodTitle}>Recibir código por SMS</Text>
+              <Text style={styles.methodDescription}>No necesitas Telegram instalado.</Text>
+              <View style={styles.secondaryMethodButtonRow}>
+                <Text style={[styles.smsMethodButtonText, codeRequestBlocked && styles.methodButtonTextDisabled]}>
+                  {codeRequestBlocked ? methodCtaText : 'Enviar SMS'}
+                </Text>
+                <Feather name="arrow-right" size={16} color="#4B5563" />
+              </View>
+            </View>
+          </TouchableOpacity>
         </View>
 
-        <TouchableOpacity
-          style={[styles.smsButton, codeRequestBlocked && styles.disabledLink]}
-          disabled={codeRequestBlocked}
-          onPress={async () => {
-            setVerificationMethod('sms');
-            await handleSendSmsCode();
-          }}
-        >
-          <Text style={styles.smsButtonText}>Recibir a través de SMS</Text>
-          <Feather name="arrow-right" size={16} color="#6B7280" />
-        </TouchableOpacity>
+        <Text style={styles.methodHelperText}>
+          Elige la opción que prefieras. Ambas son seguras.
+        </Text>
         {codeRequestCooldown > 0 && (
           <Text style={styles.cooldownHelper}>Puedes volver a solicitar el código en {codeRequestCooldown}s</Text>
         )}
@@ -714,11 +776,20 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   methodCard: {
-    backgroundColor: '#F3F4F6',
-    borderRadius: 12,
+    borderRadius: 16,
     padding: 16,
     flexDirection: 'row',
     alignItems: 'flex-start',
+    borderWidth: 1,
+  },
+  primaryMethodCard: {
+    backgroundColor: '#F3F4F6',
+    borderColor: '#D1FAE5',
+    marginBottom: 12,
+  },
+  secondaryMethodCard: {
+    backgroundColor: '#F9FAFB',
+    borderColor: '#D1D5DB',
   },
   methodCardDisabled: {
     opacity: 0.6,
@@ -732,6 +803,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  smsMethodIconContainer: {
+    backgroundColor: '#E5E7EB',
+  },
   methodContent: {
     flex: 1,
   },
@@ -741,12 +815,33 @@ const styles = StyleSheet.create({
     color: '#1F2937',
     marginBottom: 4,
   },
+  methodBadge: {
+    alignSelf: 'flex-start',
+    color: '#047857',
+    backgroundColor: '#D1FAE5',
+    fontSize: 12,
+    fontWeight: '600',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    marginBottom: 8,
+  },
   methodDescription: {
     fontSize: 14,
     color: '#1F2937',
     marginBottom: 8,
   },
+  smsMethodButtonText: {
+    color: '#4B5563',
+    fontSize: 14,
+    fontWeight: '600',
+    marginRight: 4,
+  },
   methodButtonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  secondaryMethodButtonRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
@@ -759,15 +854,11 @@ const styles = StyleSheet.create({
   methodButtonTextDisabled: {
     color: '#9CA3AF',
   },
-  smsButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 'auto',
-  },
-  smsButtonText: {
+  methodHelperText: {
     color: '#6B7280',
     fontSize: 14,
+    textAlign: 'center',
+    marginTop: 8,
   },
   codeContainer: {
     flexDirection: 'row',
