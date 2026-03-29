@@ -74,6 +74,25 @@ const colors = {
   warning: '#F59E0B', // amber-500
 };
 
+function isTechnicalSendFlowError(message?: string | null): boolean {
+  const normalized = (message || '').trim().toLowerCase();
+  if (!normalized) {
+    return true;
+  }
+
+  return [
+    'open_timeout',
+    'prepare_timeout',
+    'submit_timeout',
+    'ws_closed',
+    'prepare_exception',
+    'submit_exception',
+    'submit_failed',
+    'not_open',
+    'network request failed',
+  ].includes(normalized);
+}
+
 type TransactionType = 'sent' | 'payment';
 
 interface TransactionData {
@@ -453,6 +472,8 @@ export const TransactionProcessingScreen = () => {
           } else if (errMsg.includes('Insufficient') && errMsg.includes('balance')) {
             const assetName = transactionData.tokenType || transactionData.currency || 'fondos';
             setTransactionError(`Saldo insuficiente. No tienes suficientes ${assetName} para realizar este envío.`);
+          } else if (!isTechnicalSendFlowError(errMsg)) {
+            setTransactionError(errMsg);
           } else {
             setTransactionError('No se pudo preparar la transacción. Revisa tu conexión e inténtalo de nuevo.');
           }
@@ -521,6 +542,8 @@ export const TransactionProcessingScreen = () => {
           } else if (errMsg.includes('Insufficient') && errMsg.includes('balance')) {
             const assetName = transactionData.tokenType || transactionData.currency || 'fondos';
             setTransactionError(`Saldo insuficiente. No tienes suficientes ${assetName} para realizar este envío.`);
+          } else if (!isTechnicalSendFlowError(errMsg)) {
+            setTransactionError(errMsg);
           } else {
             setTransactionError('No se pudo enviar la transacción. Revisa tu conexión e inténtalo de nuevo.');
           }
