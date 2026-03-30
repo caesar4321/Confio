@@ -50,9 +50,11 @@ export class SendWsSession {
   private pendingResolvers: { [k: string]: (v: any) => void } = {};
   private pendingRejectors: { [k: string]: (e: any) => void } = {};
   private closeRequested = false;
+  private isOpenResolved = false;
 
   async open(): Promise<void> {
     if (this.openPromise) return this.openPromise;
+    this.isOpenResolved = false;
     this.openPromise = new Promise(async (resolve, reject) => {
       try {
         const token = await getJwtToken();
@@ -69,10 +71,27 @@ export class SendWsSession {
         console.log('[sendWs] Opening', wsUrl.replace(token, '***').replace(appCheckToken, '***'));
         const ws = new WebSocket(wsUrl);
         this.ws = ws;
-        const timeout = setTimeout(() => { console.log('[sendWs] open timeout'); reject(new Error('open_timeout')); }, 15000);
-        ws.onopen = () => { clearTimeout(timeout); console.log('[sendWs] open'); resolve(); };
-        ws.onerror = (e) => { clearTimeout(timeout); console.log('[sendWs] error', e); if (!this.closeRequested) reject(e); };
+        const timeout = setTimeout(() => {
+          console.log('[sendWs] open timeout');
+          reject(new Error('open_timeout'));
+        }, 15000);
+        const resolveOpen = () => {
+          if (this.isOpenResolved) return;
+          this.isOpenResolved = true;
+          clearTimeout(timeout);
+          resolve();
+        };
+        ws.onopen = () => {
+          console.log('[sendWs] open');
+          resolveOpen();
+        };
+        ws.onerror = (e) => {
+          clearTimeout(timeout);
+          console.log('[sendWs] error', e);
+          if (!this.closeRequested) reject(e);
+        };
         ws.onclose = (e) => {
+          clearTimeout(timeout);
           console.log('[sendWs] close', e.code, e.reason);
           if (!this.closeRequested) {
             Object.keys(this.pendingRejectors).forEach((k) => this.pendingRejectors[k](new Error('ws_closed')));
@@ -81,6 +100,7 @@ export class SendWsSession {
         };
         ws.onmessage = (ev) => {
           try {
+            resolveOpen();
             const msg = JSON.parse(ev.data);
             console.log('[sendWs] message', msg?.type);
             if (msg.type === 'prepare_ready') {
@@ -103,7 +123,11 @@ export class SendWsSession {
 
   private resolve(key: string, value: any) {
     const r = this.pendingResolvers[key];
-    if (r) { r(value); delete this.pendingResolvers[key]; delete this.pendingRejectors[key]; }
+    if (r) {
+      r(value);
+      delete this.pendingResolvers[key];
+      delete this.pendingRejectors[key];
+    }
   }
   private rejectAll(err: any) {
     Object.keys(this.pendingRejectors).forEach((k) => this.pendingRejectors[k](err));
@@ -114,11 +138,7 @@ export class SendWsSession {
     await this.open();
     if (!this.ws) throw new Error('not_open');
 
-
-
     return new Promise<SendPreparePack>((resolve, reject) => {
-      this.pendingResolvers['prepare'] = resolve as any;
-      this.pendingRejectors['prepare'] = reject as any;
       const t = setTimeout(() => {
         if (this.pendingRejectors['prepare']) {
           console.log('[sendWs] prepare timeout');
@@ -126,6 +146,14 @@ export class SendWsSession {
           delete this.pendingRejectors['prepare']; delete this.pendingResolvers['prepare'];
         }
       }, timeoutMs);
+      this.pendingResolvers['prepare'] = ((value: SendPreparePack) => {
+        clearTimeout(t);
+        resolve(value);
+      }) as any;
+      this.pendingRejectors['prepare'] = ((err: any) => {
+        clearTimeout(t);
+        reject(err);
+      }) as any;
       try {
         console.log('[sendWs] -> prepare_request');
         this.ws!.send(JSON.stringify({ type: 'prepare_request', amount: args.amount, asset_type: args.assetType, note: args.note, recipient_address: args.recipientAddress, recipient_user_id: args.recipientUserId, recipient_phone: args.recipientPhone }));
@@ -140,8 +168,6 @@ export class SendWsSession {
     await this.open();
     if (!this.ws) throw new Error('not_open');
     return new Promise<SubmitResult>((resolve, reject) => {
-      this.pendingResolvers['submit'] = resolve as any;
-      this.pendingRejectors['submit'] = reject as any;
       const t = setTimeout(() => {
         if (this.pendingRejectors['submit']) {
           console.log('[sendWs] submit timeout');
@@ -149,6 +175,14 @@ export class SendWsSession {
           delete this.pendingRejectors['submit']; delete this.pendingResolvers['submit'];
         }
       }, timeoutMs);
+      this.pendingResolvers['submit'] = ((value: SubmitResult) => {
+        clearTimeout(t);
+        resolve(value);
+      }) as any;
+      this.pendingRejectors['submit'] = ((err: any) => {
+        clearTimeout(t);
+        reject(err);
+      }) as any;
       try {
         console.log('[sendWs] -> submit_request');
         this.ws!.send(JSON.stringify({ type: 'submit_request', signed_transactions: [{ index: 1, transaction: signedUserTxn }], signed_sponsor_txn: sponsorTxn }));
@@ -163,6 +197,8 @@ export class SendWsSession {
     this.closeRequested = true;
     try { console.log('[sendWs] closing'); this.ws?.close(1000, 'flow_end'); } catch { }
     this.ws = null;
+    this.openPromise = null;
+    this.isOpenResolved = false;
   }
 }
 

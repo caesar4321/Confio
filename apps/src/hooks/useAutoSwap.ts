@@ -45,6 +45,7 @@ const USDC_THRESHOLD_MICRO = 1_000_000;
 const ALGO_RESERVE_THRESHOLD = 3; // Keep 3 ALGO in wallet before auto-swapping excess
 const ALGO_MIN_SWAP_AMOUNT = 1; // Require at least 1 whole ALGO of excess to trigger
 const MIN_MODAL_VISIBLE_MS = 1200;
+const AUTO_SWAP_REQUEST_TIMEOUT_MS = 20000;
 
 const toMicroUnits = (value: string): number => {
     const trimmed = (value || '').trim();
@@ -58,6 +59,31 @@ const toMicroUnits = (value: string): number => {
     const micros = Number(wholePart) * 1_000_000 + Number(fractionalPart);
 
     return negative ? -micros : micros;
+};
+
+const withTimeout = async <T,>(promise: Promise<T>, ms: number, label: string): Promise<T> =>
+    Promise.race([
+        promise,
+        new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error(`timeout:${label}`)), ms)
+        )
+    ]);
+
+const parseAutoSwapPayload = (raw: any) => {
+    if (!raw) {
+        throw new Error('missing_auto_swap_payload');
+    }
+
+    let payload = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (typeof payload === 'string') {
+        payload = JSON.parse(payload);
+    }
+
+    if (!payload || typeof payload !== 'object') {
+        throw new Error('invalid_auto_swap_payload');
+    }
+
+    return payload;
 };
 
 export const useAutoSwap = ({
@@ -78,7 +104,7 @@ export const useAutoSwap = ({
 
     // Track per-swapKey last attempt time to avoid re-triggering same swap on every render.
     const lastAttemptTimestamps = useRef<Record<string, number>>({});
-    const SWAP_COOLDOWN_MS = 60_000; // 60-second cooldown after failure
+    const SWAP_COOLDOWN_MS = 60_000; // 60-second cooldown after an attempt
 
     useFocusEffect(
         useCallback(() => {
@@ -130,12 +156,12 @@ export const useAutoSwap = ({
                     // 1) Build swap txns, with one retry after cUSD app opt-in when required.
                     let data: any = null;
                     for (let attempt = 0; attempt < 2; attempt++) {
-                        const res = await buildAutoSwapTransactions({
+                        const res = await withTimeout(buildAutoSwapTransactions({
                             variables: {
                                 inputAssetType: swapAssetType,
                                 amount: swapAmount
                             }
-                        });
+                        }), AUTO_SWAP_REQUEST_TIMEOUT_MS, 'build_auto_swap');
                         data = res.data?.buildAutoSwapTransactions;
                         if (data?.success) break;
 
@@ -162,9 +188,7 @@ export const useAutoSwap = ({
                     }
 
                     // graphene.JSONString can arrive as a dict (already parsed by Apollo) or as a string
-                    let payload = typeof data.transactions === 'string' ? JSON.parse(data.transactions) : data.transactions;
-                    // Guard against double-encoded JSON
-                    if (typeof payload === 'string') payload = JSON.parse(payload);
+                    const payload = parseAutoSwapPayload(data.transactions);
 
                     const unsignedBase64Txns: string[] = payload.transactions || [];
                     const sponsorTxns: string[] = payload.sponsor_transactions || [];
@@ -190,21 +214,21 @@ export const useAutoSwap = ({
                         typeof s === 'string' ? s : JSON.stringify(s)
                     );
 
-                    const submitRes = await submitAutoSwapTransactions({
+                    const submitRes = await withTimeout(submitAutoSwapTransactions({
                         variables: {
                             internalId,
                             signedTransactions: signedUserTxns,
                             sponsorTransactions: sponsorTxnStrings
                         }
-                    });
+                    }), AUTO_SWAP_REQUEST_TIMEOUT_MS, 'submit_auto_swap');
 
                     const submitData = submitRes.data?.submitAutoSwapTransactions;
                     if (!submitData?.success) {
                         console.warn('[AutoSwap Hook] Failed to submit auto swap:', submitData?.error);
                     } else {
                         console.log(`[AutoSwap Hook] Swap successful! TXID: ${submitData.txid}`);
-                        // Clear the cooldown so future different-amount attempts are fresh
-                        delete lastAttemptTimestamps.current[swapKey];
+                        // Keep a post-success cooldown so stale balances do not immediately retrigger the same swap.
+                        lastAttemptTimestamps.current[swapKey] = Date.now();
                         refreshAccountBalance();
                     }
                 } catch (e) {

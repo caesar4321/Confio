@@ -24,6 +24,19 @@ const REFERRAL_EVENT_TYPE_MAP: Record<string, string> = {
 
 const deriveStatusFromNotificationType = (notificationType: string): string | undefined => {
   switch ((notificationType || '').toUpperCase()) {
+    case 'SEND_RECEIVED':
+    case 'SEND_SENT':
+    case 'SEND_FROM_EXTERNAL':
+    case 'INVITE_RECEIVED':
+    case 'SEND_INVITATION_SENT':
+    case 'SEND_INVITATION_CLAIMED':
+    case 'SEND_INVITATION_EXPIRED':
+    case 'PAYMENT_RECEIVED':
+    case 'PAYMENT_SENT':
+    case 'INVOICE_PAID':
+    case 'PAYROLL_RECEIVED':
+    case 'PAYROLL_SENT':
+      return 'completed';
     case 'RAMP_FAILED':
       return 'failed';
     case 'RAMP_PENDING':

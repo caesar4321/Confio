@@ -51,9 +51,11 @@ export class ConvertWsSession {
   private pendingResolvers: { [k: string]: (v: any) => void } = {};
   private pendingRejectors: { [k: string]: (e: any) => void } = {};
   private closeRequested = false;
+  private isOpenResolved = false;
 
   async open(): Promise<void> {
     if (this.openPromise) return this.openPromise;
+    this.isOpenResolved = false;
     this.openPromise = new Promise(async (resolve, reject) => {
       try {
         const token = await getJwtToken();
@@ -62,10 +64,17 @@ export class ConvertWsSession {
         console.log('[convertWs] Opening', wsUrl.replace(token, '***'));
         const ws = new WebSocket(wsUrl);
         this.ws = ws;
-        const timeout = setTimeout(() => { console.log('[convertWs] open timeout'); reject(new Error('open_timeout')); }, 3000);
-        ws.onopen = () => { clearTimeout(timeout); console.log('[convertWs] open'); resolve(); };
+        const timeout = setTimeout(() => { console.log('[convertWs] open timeout'); reject(new Error('open_timeout')); }, 15000);
+        const resolveOpen = () => {
+          if (this.isOpenResolved) return;
+          this.isOpenResolved = true;
+          clearTimeout(timeout);
+          resolve();
+        };
+        ws.onopen = () => { console.log('[convertWs] open'); resolveOpen(); };
         ws.onerror = (e) => { clearTimeout(timeout); console.log('[convertWs] error', e); if (!this.closeRequested) reject(e); };
         ws.onclose = (e) => {
+          clearTimeout(timeout);
           console.log('[convertWs] close', e.code, e.reason);
           if (!this.closeRequested) {
             Object.keys(this.pendingRejectors).forEach((k) => this.pendingRejectors[k](new Error('ws_closed')));
@@ -74,6 +83,7 @@ export class ConvertWsSession {
         };
         ws.onmessage = (ev) => {
           try {
+            resolveOpen();
             const msg = JSON.parse(ev.data);
             console.log('[convertWs] message', msg?.type);
             if (msg.type === 'prepare_ready') {
@@ -107,8 +117,6 @@ export class ConvertWsSession {
     await this.open();
     if (!this.ws) throw new Error('not_open');
     return new Promise<PreparePack>((resolve, reject) => {
-      this.pendingResolvers['prepare'] = resolve as any;
-      this.pendingRejectors['prepare'] = reject as any;
       const t = setTimeout(() => {
         if (this.pendingRejectors['prepare']) {
           console.log('[convertWs] prepare timeout');
@@ -116,6 +124,14 @@ export class ConvertWsSession {
           delete this.pendingRejectors['prepare']; delete this.pendingResolvers['prepare'];
         }
       }, timeoutMs);
+      this.pendingResolvers['prepare'] = ((value: PreparePack) => {
+        clearTimeout(t);
+        resolve(value);
+      }) as any;
+      this.pendingRejectors['prepare'] = ((err: any) => {
+        clearTimeout(t);
+        reject(err);
+      }) as any;
       try {
         console.log('[convertWs] -> prepare', args.direction, args.amount, args.rampProvider, args.providerOrderId);
         this.ws!.send(JSON.stringify({
@@ -136,8 +152,6 @@ export class ConvertWsSession {
     await this.open();
     if (!this.ws) throw new Error('not_open');
     return new Promise<SubmitResult>((resolve, reject) => {
-      this.pendingResolvers['submit'] = resolve as any;
-      this.pendingRejectors['submit'] = reject as any;
       const t = setTimeout(() => {
         if (this.pendingRejectors['submit']) {
           console.log('[convertWs] submit timeout');
@@ -145,6 +159,14 @@ export class ConvertWsSession {
           delete this.pendingRejectors['submit']; delete this.pendingResolvers['submit'];
         }
       }, timeoutMs);
+      this.pendingResolvers['submit'] = ((value: SubmitResult) => {
+        clearTimeout(t);
+        resolve(value);
+      }) as any;
+      this.pendingRejectors['submit'] = ((err: any) => {
+        clearTimeout(t);
+        reject(err);
+      }) as any;
       try {
         console.log('[convertWs] -> submit', args.internalId);
         // Normalize sponsorTransactions to strings
@@ -160,5 +182,13 @@ export class ConvertWsSession {
         reject(e);
       }
     });
+  }
+
+  close() {
+    this.closeRequested = true;
+    try { console.log('[convertWs] closing'); this.ws?.close(1000, 'flow_end'); } catch { }
+    this.ws = null;
+    this.openPromise = null;
+    this.isOpenResolved = false;
   }
 }

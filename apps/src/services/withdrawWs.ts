@@ -48,9 +48,11 @@ export class WithdrawWsSession {
   private pendingResolvers: { [k: string]: (v: any) => void } = {};
   private pendingRejectors: { [k: string]: (e: any) => void } = {};
   private closeRequested = false;
+  private isOpenResolved = false;
 
   async open(): Promise<void> {
     if (this.openPromise) return this.openPromise;
+    this.isOpenResolved = false;
     this.openPromise = new Promise(async (resolve, reject) => {
       try {
         const token = await getJwtToken();
@@ -68,9 +70,16 @@ export class WithdrawWsSession {
         const ws = new WebSocket(wsUrl);
         this.ws = ws;
         const timeout = setTimeout(() => { console.log('[withdrawWs] open timeout'); reject(new Error('open_timeout')); }, 15000);
-        ws.onopen = () => { clearTimeout(timeout); console.log('[withdrawWs] open'); resolve(); };
+        const resolveOpen = () => {
+          if (this.isOpenResolved) return;
+          this.isOpenResolved = true;
+          clearTimeout(timeout);
+          resolve();
+        };
+        ws.onopen = () => { console.log('[withdrawWs] open'); resolveOpen(); };
         ws.onerror = (e) => { clearTimeout(timeout); console.log('[withdrawWs] error', e); if (!this.closeRequested) reject(e); };
         ws.onclose = (e) => {
+          clearTimeout(timeout);
           console.log('[withdrawWs] close', e.code, e.reason);
           if (!this.closeRequested) {
             Object.keys(this.pendingRejectors).forEach((k) => this.pendingRejectors[k](new Error('ws_closed')));
@@ -79,6 +88,7 @@ export class WithdrawWsSession {
         };
         ws.onmessage = (ev) => {
           try {
+            resolveOpen();
             const msg = JSON.parse(ev.data);
             console.log('[withdrawWs] message', msg?.type);
             if (msg.type === 'prepare_ready') {
@@ -112,11 +122,7 @@ export class WithdrawWsSession {
     await this.open();
     if (!this.ws) throw new Error('not_open');
 
-
-
     return new Promise<PreparePack>((resolve, reject) => {
-      this.pendingResolvers['prepare'] = resolve as any;
-      this.pendingRejectors['prepare'] = reject as any;
       const t = setTimeout(() => {
         if (this.pendingRejectors['prepare']) {
           console.log('[withdrawWs] prepare timeout');
@@ -124,6 +130,14 @@ export class WithdrawWsSession {
           delete this.pendingRejectors['prepare']; delete this.pendingResolvers['prepare'];
         }
       }, timeoutMs);
+      this.pendingResolvers['prepare'] = ((value: PreparePack) => {
+        clearTimeout(t);
+        resolve(value);
+      }) as any;
+      this.pendingRejectors['prepare'] = ((err: any) => {
+        clearTimeout(t);
+        reject(err);
+      }) as any;
       try {
         console.log('[withdrawWs] -> prepare', args.amount, args.destinationAddress);
         this.ws!.send(JSON.stringify({ type: 'prepare', amount: String(args.amount), destination_address: args.destinationAddress }));
@@ -138,8 +152,6 @@ export class WithdrawWsSession {
     await this.open();
     if (!this.ws) throw new Error('not_open');
     return new Promise<SubmitResult>((resolve, reject) => {
-      this.pendingResolvers['submit'] = resolve as any;
-      this.pendingRejectors['submit'] = reject as any;
       const t = setTimeout(() => {
         if (this.pendingRejectors['submit']) {
           console.log('[withdrawWs] submit timeout');
@@ -147,6 +159,14 @@ export class WithdrawWsSession {
           delete this.pendingRejectors['submit']; delete this.pendingResolvers['submit'];
         }
       }, timeoutMs);
+      this.pendingResolvers['submit'] = ((value: SubmitResult) => {
+        clearTimeout(t);
+        resolve(value);
+      }) as any;
+      this.pendingRejectors['submit'] = ((err: any) => {
+        clearTimeout(t);
+        reject(err);
+      }) as any;
       try {
         console.log('[withdrawWs] -> submit', args.internalId);
         const sponsors = (args.sponsorTransactions || []).map((e: any) => (typeof e === 'string' ? e : JSON.stringify(e)));
@@ -162,5 +182,12 @@ export class WithdrawWsSession {
       }
     });
   }
-}
 
+  close() {
+    this.closeRequested = true;
+    try { console.log('[withdrawWs] closing'); this.ws?.close(1000, 'flow_end'); } catch { }
+    this.ws = null;
+    this.openPromise = null;
+    this.isOpenResolved = false;
+  }
+}

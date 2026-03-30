@@ -59,9 +59,11 @@ export class PayWsSession {
   private pendingResolvers: { [k: string]: (v: any) => void } = {};
   private pendingRejectors: { [k: string]: (e: any) => void } = {};
   private closeRequested = false;
+  private isOpenResolved = false;
 
   async open(): Promise<void> {
     if (this.openPromise) return this.openPromise;
+    this.isOpenResolved = false;
     this.openPromise = new Promise(async (resolve, reject) => {
       try {
         const token = await getJwtToken();
@@ -82,9 +84,16 @@ export class PayWsSession {
           console.log('[payWs] open timeout');
           reject(new Error('open_timeout'));
         }, 15000);
-        ws.onopen = () => { clearTimeout(timeout); console.log('[payWs] open'); resolve(); };
+        const resolveOpen = () => {
+          if (this.isOpenResolved) return;
+          this.isOpenResolved = true;
+          clearTimeout(timeout);
+          resolve();
+        };
+        ws.onopen = () => { console.log('[payWs] open'); resolveOpen(); };
         ws.onerror = (e) => { clearTimeout(timeout); console.log('[payWs] error', e); if (!this.closeRequested) reject(e); };
         ws.onclose = (e) => {
+          clearTimeout(timeout);
           console.log('[payWs] close', e.code, e.reason);
           if (!this.closeRequested) {
             // reject all pending
@@ -94,6 +103,7 @@ export class PayWsSession {
         };
         ws.onmessage = (ev) => {
           try {
+            resolveOpen();
             const msg = JSON.parse(ev.data);
             console.log('[payWs] message', msg?.type);
             if (msg.type === 'prepare_ready') {
@@ -127,8 +137,6 @@ export class PayWsSession {
     await this.open();
     if (!this.ws) throw new Error('not_open');
     return new Promise<PreparePack>((resolve, reject) => {
-      this.pendingResolvers['prepare'] = resolve as any;
-      this.pendingRejectors['prepare'] = reject as any;
       const t = setTimeout(() => {
         if (this.pendingRejectors['prepare']) {
           console.log('[payWs] prepare timeout');
@@ -136,6 +144,14 @@ export class PayWsSession {
           delete this.pendingRejectors['prepare']; delete this.pendingResolvers['prepare'];
         }
       }, timeoutMs);
+      this.pendingResolvers['prepare'] = ((value: PreparePack) => {
+        clearTimeout(t);
+        resolve(value);
+      }) as any;
+      this.pendingRejectors['prepare'] = ((err: any) => {
+        clearTimeout(t);
+        reject(err);
+      }) as any;
       try {
         console.log('[payWs] -> prepare_request');
         this.ws!.send(JSON.stringify({ type: 'prepare_request', amount: req.amount, asset_type: req.assetType, internal_id: req.internalId, note: req.note, recipient_business_id: req.recipientBusinessId }));
@@ -150,8 +166,6 @@ export class PayWsSession {
     await this.open();
     if (!this.ws) throw new Error('not_open');
     return new Promise<SubmitResult>((resolve, reject) => {
-      this.pendingResolvers['submit'] = resolve as any;
-      this.pendingRejectors['submit'] = reject as any;
       const t = setTimeout(() => {
         if (this.pendingRejectors['submit']) {
           console.log('[payWs] submit timeout');
@@ -159,6 +173,14 @@ export class PayWsSession {
           delete this.pendingRejectors['submit']; delete this.pendingResolvers['submit'];
         }
       }, timeoutMs);
+      this.pendingResolvers['submit'] = ((value: SubmitResult) => {
+        clearTimeout(t);
+        resolve(value);
+      }) as any;
+      this.pendingRejectors['submit'] = ((err: any) => {
+        clearTimeout(t);
+        reject(err);
+      }) as any;
       try {
         console.log('[payWs] -> submit_request');
         this.ws!.send(JSON.stringify({ type: 'submit_request', signed_transactions: signedTransactions, internal_id: internalId }));
@@ -173,6 +195,8 @@ export class PayWsSession {
     this.closeRequested = true;
     try { console.log('[payWs] closing'); this.ws?.close(1000, 'flow_end'); } catch { }
     this.ws = null;
+    this.openPromise = null;
+    this.isOpenResolved = false;
   }
 }
 

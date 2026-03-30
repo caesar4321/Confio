@@ -93,6 +93,25 @@ function isTechnicalSendFlowError(message?: string | null): boolean {
   ].includes(normalized);
 }
 
+const AUTO_SWAP_REQUEST_TIMEOUT_MS = 20000;
+
+function parseAutoSwapPayload(raw: any) {
+  if (!raw) {
+    throw new Error('missing_auto_swap_payload');
+  }
+
+  let payload = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  if (typeof payload === 'string') {
+    payload = JSON.parse(payload);
+  }
+
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('invalid_auto_swap_payload');
+  }
+
+  return payload;
+}
+
 type TransactionType = 'sent' | 'payment';
 
 interface TransactionData {
@@ -443,11 +462,8 @@ export const TransactionProcessingScreen = () => {
         } catch { }
         try {
           if (!(userTransaction && sponsorTransaction)) {
-            const { SendWsSession } = await import('../services/sendWs');
-            const session = new SendWsSession();
-            try {
-              await withTimeout(session.open(), 8000, 'ws_open');
-              const pack = await withTimeout(session.prepare({
+            const { prepareSendViaWs } = await import('../services/sendWs');
+            const pack = await withTimeout(prepareSendViaWs({
                 amount: variables.amount,
                 assetType: variables.assetType,
                 note: variables.note,
@@ -455,13 +471,10 @@ export const TransactionProcessingScreen = () => {
                 recipientUserId: variables.recipientUserId,
                 recipientPhone: variables.recipientPhone,
               }), 10000, 'ws_prepare');
-              const txs = pack?.transactions || [];
-              sponsorTransaction = txs.find((t: any) => t.index === 0)?.transaction || null;
-              userTransaction = txs.find((t: any) => t.index === 1)?.transaction || null;
-              console.log('TransactionProcessingScreen: WS prepare OK');
-            } finally {
-              try { session.close(); } catch { }
-            }
+            const txs = pack?.transactions || [];
+            sponsorTransaction = txs.find((t: any) => t.index === 0)?.transaction || null;
+            userTransaction = txs.find((t: any) => t.index === 1)?.transaction || null;
+            console.log('TransactionProcessingScreen: WS prepare OK');
           }
         } catch (wsErr: any) {
           console.error('TransactionProcessingScreen: WS prepare failed:', wsErr);
@@ -617,19 +630,19 @@ export const TransactionProcessingScreen = () => {
         console.log('TransactionProcessingScreen: Starting cUSD to USDC swap step');
         let amountBaseUnits = Math.floor(parseFloat(transactionData.amount) * 1_000_000).toString();
 
-        const res = await buildAutoSwapTransactions({
+        const res = await withTimeout(buildAutoSwapTransactions({
           variables: {
             inputAssetType: 'CUSD',
             amount: amountBaseUnits
           }
-        });
+        }), AUTO_SWAP_REQUEST_TIMEOUT_MS, 'build_auto_swap');
 
         const data = res.data?.buildAutoSwapTransactions;
         if (!data?.success) {
           throw new Error(data?.error || 'Failed to build intermediate swap');
         }
 
-        const parsedData = JSON.parse(data.transactions);
+        const parsedData = parseAutoSwapPayload(data.transactions);
         const { internal_id, transactions, sponsor_transactions } = parsedData;
 
         // Sign user transactions
@@ -643,13 +656,13 @@ export const TransactionProcessingScreen = () => {
         }
 
         // Submit the swap group
-        const submitRes = await submitAutoSwapTransactions({
+        const submitRes = await withTimeout(submitAutoSwapTransactions({
           variables: {
             internalId: internal_id,
             signedTransactions: signedUserTxns,
             sponsorTransactions: (sponsor_transactions || []).map((s: any) => typeof s === 'string' ? s : JSON.stringify(s))
           }
-        });
+        }), AUTO_SWAP_REQUEST_TIMEOUT_MS, 'submit_auto_swap');
 
         if (!submitRes.data?.submitAutoSwapTransactions?.success) {
           throw new Error(submitRes.data?.submitAutoSwapTransactions?.error || 'Failed to submit intermediate swap');
@@ -676,13 +689,13 @@ export const TransactionProcessingScreen = () => {
         // Step 1: Build atomic group, retry once after cUSD app opt-in if required.
         let data: any = null;
         for (let attempt = 0; attempt < 2; attempt++) {
-          const res = await buildBurnAndSend({
+          const res = await withTimeout(buildBurnAndSend({
             variables: {
               amount: amountBaseUnits,
               recipientAddress: recipientAddr,
               note: transactionData.memo || undefined
             }
-          });
+          }), AUTO_SWAP_REQUEST_TIMEOUT_MS, 'build_burn_and_send');
 
           data = res.data?.buildBurnAndSend;
           if (data?.success) break;
@@ -709,7 +722,7 @@ export const TransactionProcessingScreen = () => {
           throw new Error(data?.error || 'Failed to build burn+send');
         }
 
-        const parsedData = JSON.parse(data.transactions);
+        const parsedData = parseAutoSwapPayload(data.transactions);
         const { internal_id, withdrawal_id, transactions, sponsor_transactions } = parsedData;
 
         // Step 2: Sign the user transactions (indices 1 and 4)
@@ -732,14 +745,14 @@ export const TransactionProcessingScreen = () => {
         }
 
         // Step 3: Submit the complete atomic group
-        const submitRes = await submitAutoSwapTransactions({
+        const submitRes = await withTimeout(submitAutoSwapTransactions({
           variables: {
             internalId: internal_id,
             signedTransactions: signedUserTxns,
             sponsorTransactions: (sponsor_transactions || []).map((s: any) => typeof s === 'string' ? s : JSON.stringify(s)),
             withdrawalId: withdrawal_id || undefined
           }
-        });
+        }), AUTO_SWAP_REQUEST_TIMEOUT_MS, 'submit_auto_swap');
 
         if (!submitRes.data?.submitAutoSwapTransactions?.success) {
           throw new Error(submitRes.data?.submitAutoSwapTransactions?.error || 'Failed to submit atomic burn+send');

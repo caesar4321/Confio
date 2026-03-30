@@ -289,8 +289,8 @@ export const USDCConversionScreen = () => {
     setLoadingMessage('Preparando conversión...');
     console.log('[USDCConversionScreen] Starting conversion (WS):', { amount, conversionDirection, sourceCurrency, targetCurrency });
 
+    const ws = new ConvertWsSession();
     try {
-      const ws = new ConvertWsSession();
       let pack: any;
       let retryCount = 0;
       const maxRetries = 2; // Allow for both cUSD app opt-in and USDC asset opt-in
@@ -405,6 +405,7 @@ export const USDCConversionScreen = () => {
         Alert.alert('Error', 'No se pudo completar la conversión. Por favor intenta de nuevo.', [{ text: 'OK' }]);
       }
     } finally {
+      try { ws.close(); } catch { }
       setIsProcessing(false);
       setLoadingMessage('');
     }
