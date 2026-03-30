@@ -284,27 +284,30 @@ export class PushNotificationService {
               } as never);
             }, 1000);
           }
-        } else if (action_url.includes('transaction/')) {
-          const transactionId = action_url.split('transaction/')[1];
-          
+        } else if (action_url.includes('transaction/') || action_url.includes('send/')) {
+          // Handle both confio://transaction/{id} (payments) and confio://send/{id} (sends)
+          const transactionId = action_url.includes('transaction/')
+            ? action_url.split('transaction/')[1]
+            : action_url.split('send/')[1];
+
           // Reconstruct transaction data from notification data fields
           const transactionData: any = {};
-          
+
           // Copy all data_ prefixed fields to transaction data
           Object.keys(remoteMessage.data).forEach(key => {
             if (key.startsWith('data_')) {
               const fieldName = key.substring(5); // Remove 'data_' prefix
               let value = remoteMessage.data[key];
-              
+
               // Parse boolean strings
               if (value === 'true' || value === 'True') {
                 value = true;
               } else if (value === 'false' || value === 'False') {
                 value = false;
               }
-              
+
               transactionData[fieldName] = value;
-              
+
               // Log boolean fields for debugging
               if (fieldName === 'is_external_address' || fieldName === 'is_invited_friend') {
                 console.log(`[PushNotificationService] Boolean field ${fieldName}:`, {
@@ -315,10 +318,10 @@ export class PushNotificationService {
               }
             }
           });
-          
+
           // Determine transaction type
           let transactionType = extra_transactionType || extra_type || 'send';
-          
+
           // Map notification types to transaction types if needed
           if (notification_type === 'PAYMENT_SENT' || notification_type === 'PAYMENT_RECEIVED') {
             transactionType = 'payment';
@@ -337,40 +340,115 @@ export class PushNotificationService {
               normalizeRampNotificationPayload(transactionData, notification_type, transactionId),
             );
           }
-          
-          console.log('[PushNotificationService] Navigating to TransactionDetail:', {
-            transactionType,
-            transactionData,
-            transactionId,
-            notification_type
-          });
-          
-          // Navigate to Main stack first, then to TransactionDetail
-          // This ensures we're in the correct navigator
-          if (RootNavigation.navigationRef.isReady()) {
-            RootNavigation.navigationRef.navigate('Main' as never, {
-              screen: 'TransactionDetail',
-              params: {
-                transactionType,
-                transactionData: { 
-                  ...transactionData,
-                  id: transactionId,
-                  transaction_type: transactionType
-                }
+
+          // For confirmed transaction notifications (sends & payments), navigate directly
+          // to the official receipt. These notifications only fire after Celery confirms
+          // the transaction on-chain, so the receipt will show "Confirmado".
+          const isConfirmedTxNotification =
+            notification_type === 'SEND_SENT' ||
+            notification_type === 'SEND_RECEIVED' ||
+            notification_type === 'PAYMENT_SENT' ||
+            notification_type === 'PAYMENT_RECEIVED';
+
+          if (isConfirmedTxNotification) {
+            // Format token type for display (CUSD → cUSD)
+            const rawToken = transactionData.token_type || '';
+            const currency = rawToken.toUpperCase() === 'CUSD' ? 'cUSD'
+              : rawToken.toUpperCase() === 'CONFIO' ? 'CONFIO'
+              : rawToken.toUpperCase() === 'USDC' ? 'USDC'
+              : rawToken || 'cUSD';
+
+            const isPayment = transactionType === 'payment';
+            const receiptType = isPayment ? 'payment' : 'transfer';
+
+            const receiptTransaction = {
+              id: transactionData.internal_id || transactionId,
+              internalId: transactionData.internal_id || transactionId,
+              verificationId: transactionData.internal_id || transactionId,
+              transactionHash: transactionData.transaction_hash || '',
+              amount: transactionData.amount || '0',
+              currency,
+              status: 'confirmed',
+              date: remoteMessage.data?.created_at || new Date().toISOString(),
+              memo: transactionData.memo || '',
+              // Sender/recipient names from notification payload
+              senderName: transactionData.sender_name || '',
+              sender_name: transactionData.sender_name || '',
+              recipientName: transactionData.recipient_name || '',
+              recipient_name: transactionData.recipient_name || '',
+              senderPhone: transactionData.sender_phone || '',
+              recipientPhone: transactionData.recipient_phone || '',
+              // Payment-specific fields
+              ...(isPayment && {
+                merchantName: transactionData.recipient_name || '',
+                payerName: transactionData.sender_name || '',
+              }),
+            };
+
+            console.log('[PushNotificationService] Navigating to TransactionReceipt:', {
+              receiptType,
+              receiptTransaction,
+              notification_type,
+            });
+
+            const navigateToReceipt = () => {
+              const target = RootNavigation.navigationRef.isReady()
+                ? RootNavigation.navigationRef
+                : null;
+
+              if (target) {
+                target.navigate('Main' as never, {
+                  screen: 'TransactionReceipt',
+                  params: {
+                    transaction: receiptTransaction,
+                    type: receiptType,
+                  },
+                } as never);
+              } else {
+                setTimeout(() => {
+                  RootNavigation.navigate('TransactionReceipt' as never, {
+                    transaction: receiptTransaction,
+                    type: receiptType,
+                  } as never);
+                }, 1000);
               }
-            } as never);
+            };
+
+            navigateToReceipt();
           } else {
-            console.log('[PushNotificationService] Navigation not ready for transaction, will retry...');
-            setTimeout(() => {
-              RootNavigation.navigate('TransactionDetail' as never, {
-                transactionType,
-                transactionData: { 
-                  ...transactionData,
-                  id: transactionId,
-                  transaction_type: transactionType
+            // For ramp and other non-confirmed notifications, keep existing TransactionDetail behavior
+            console.log('[PushNotificationService] Navigating to TransactionDetail:', {
+              transactionType,
+              transactionData,
+              transactionId,
+              notification_type
+            });
+
+            if (RootNavigation.navigationRef.isReady()) {
+              RootNavigation.navigationRef.navigate('Main' as never, {
+                screen: 'TransactionDetail',
+                params: {
+                  transactionType,
+                  transactionData: {
+                    ...transactionData,
+                    id: transactionId,
+                    transaction_type: transactionType
+                  }
                 }
               } as never);
-            }, 1000);
+            } else {
+              console.log('[PushNotificationService] Navigation not ready for transaction, will retry...');
+              setTimeout(() => {
+                RootNavigation.navigate('TransactionDetail' as never, {
+                  transactionType,
+                  transactionData: {
+                    ...transactionData,
+                    id: transactionId,
+                    transaction_type: transactionType
+                  }
+                } as never);
+              }, 1000);
+            }
           }
         } else {
           console.log('[PushNotificationService] Unknown action URL format:', action_url);

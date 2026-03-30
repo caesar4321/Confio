@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import {
   Clipboard,
   Modal,
   Linking,
+  Vibration,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
@@ -115,6 +116,11 @@ export const BusinessPaymentSuccessScreen = () => {
     paymentData.payerUser?.firstName ||
     paymentData.payerUser?.lastName ||
     paymentData.payerUser?.username || 'Cliente';
+
+  // Haptic feedback on successful payment
+  useEffect(() => {
+    Vibration.vibrate(Platform.OS === 'ios' ? 50 : [0, 50, 30, 50]);
+  }, []);
 
   // Prefer the name in params; if it's a placeholder, try fetching from invoice to enrich
   React.useEffect(() => {

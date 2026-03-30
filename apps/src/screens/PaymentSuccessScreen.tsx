@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import {
   Modal,
   Linking,
   Share,
+  Vibration,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
@@ -53,6 +54,11 @@ export const PaymentSuccessScreen = () => {
   const [showTechnical, setShowTechnical] = useState(false);
   const { userProfile, profileData } = useAuth();
   const supportCopy = getSupportCopy(userProfile?.phoneCountry);
+
+  // Haptic feedback on successful payment
+  useEffect(() => {
+    Vibration.vibrate(Platform.OS === 'ios' ? 50 : [0, 50, 30, 50]);
+  }, []);
 
   // Helper function to format currency for display
   const formatCurrency = (currency: string): string => {
@@ -147,7 +153,7 @@ export const PaymentSuccessScreen = () => {
             <Text style={styles.headerTitle}>¡Pago realizado!</Text>
 
             <Text style={styles.headerAmount}>
-              -${transactionData.amount} {formatCurrency(transactionData.currency)}
+              ${transactionData.amount} {formatCurrency(transactionData.currency)}
             </Text>
 
             <Text style={styles.headerSubtitle}>
@@ -181,8 +187,8 @@ export const PaymentSuccessScreen = () => {
                     }
                   </Text>
                 </View>
-                <View style={styles.participantIcon}>
-                  <Icon name="arrow-up" size={16} color="#EF4444" />
+                <View style={[styles.participantIcon, { backgroundColor: '#DBEAFE' }]}>
+                  <Icon name="send" size={14} color="#3B82F6" />
                 </View>
               </View>
 
@@ -543,7 +549,6 @@ const styles = StyleSheet.create({
   participantIcon: {
     width: 32,
     height: 32,
-    backgroundColor: '#FEE2E2',
     borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',

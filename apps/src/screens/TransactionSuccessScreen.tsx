@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, Platform, ScrollView, TouchableOpacity, Alert, Clipboard, Linking, Share, Modal } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, Platform, ScrollView, TouchableOpacity, Alert, Clipboard, Linking, Share, Modal, Vibration } from 'react-native';
 import WhatsAppLogo from '../assets/svg/WhatsApp.svg';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
@@ -7,6 +7,8 @@ import { useFocusEffect } from '@react-navigation/native';
 import { SHARE_LINKS } from '../config/shareLinks';
 import { useAuth } from '../contexts/AuthContext';
 import { getSupportCopy } from '../utils/supportMessaging';
+import ViewShot from 'react-native-view-shot';
+import RNShare from 'react-native-share';
 
 const colors = {
   primary: '#34D399', // emerald-400
@@ -68,6 +70,7 @@ export const TransactionSuccessScreen = () => {
 
   const [copied, setCopied] = useState(false);
   const [showTechnical, setShowTechnical] = useState(false);
+  const viewShotRef = useRef<ViewShot>(null);
 
   // Helper function to format currency for display
   const formatCurrency = (currency: string): string => {
@@ -88,6 +91,11 @@ export const TransactionSuccessScreen = () => {
       return () => { };
     }, [])
   );
+
+  // Haptic feedback on successful transaction
+  useEffect(() => {
+    Vibration.vibrate(Platform.OS === 'ios' ? 50 : [0, 50, 30, 50]);
+  }, []);
 
   const handleCopy = () => {
     Clipboard.setString(transactionId);
@@ -261,6 +269,27 @@ export const TransactionSuccessScreen = () => {
     setShowTechnical(true);
   };
 
+  const handleShareScreenshot = async () => {
+    try {
+      if (!viewShotRef.current) return;
+      const uri = await viewShotRef.current.capture();
+      if (!uri) return;
+      const typeLabel = transactionData.type === 'payment' ? 'Pago' : 'Transferencia';
+      await RNShare.open({
+        title: `Comprobante de ${typeLabel}`,
+        message: `${typeLabel} de $${transactionData.amount} ${formatCurrency(transactionData.currency)} por Confío`,
+        url: uri,
+        type: 'image/jpeg',
+        filename: `Confio_${typeLabel}_${displayId.slice(0, 8)}`,
+      });
+    } catch (error: any) {
+      // User cancelled share — not an error
+      if (error?.message !== 'User did not share') {
+        console.error('Share screenshot error:', error);
+      }
+    }
+  };
+
   const handleGoHome = () => {
     (navigation as any).navigate('BottomTabs', { screen: 'Home' });
   };
@@ -278,8 +307,9 @@ export const TransactionSuccessScreen = () => {
   return (
     <>
       <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-        {/* Success Header */}
-        <View style={[styles.header, { backgroundColor: colors.primary, paddingTop: 8 }]}>
+        <ViewShot ref={viewShotRef} options={{ format: 'jpg', quality: 0.9 }}>
+          {/* Success Header */}
+          <View style={[styles.header, { backgroundColor: colors.primary, paddingTop: 8 }]}>
           <View style={styles.headerContent}>
             {/* Success Animation */}
             <View style={styles.successCircle}>
@@ -292,7 +322,7 @@ export const TransactionSuccessScreen = () => {
             </Text>
 
             <Text style={styles.headerAmount}>
-              {transactionData.type === 'sent' ? '-' : '+'}${transactionData.amount} {formatCurrency(transactionData.currency)}
+              ${transactionData.amount} {formatCurrency(transactionData.currency)}
             </Text>
 
             <Text style={styles.headerSubtitle}>
@@ -351,11 +381,13 @@ export const TransactionSuccessScreen = () => {
                     </Text>
                   ) : null}
                 </View>
-                <View style={styles.participantIcon}>
+                <View style={[styles.participantIcon, {
+                  backgroundColor: transactionData.type === 'received' ? '#D1FAE5' : '#DBEAFE',
+                }]}>
                   <Icon
-                    name={transactionData.type === 'sent' || transactionData.type === 'payment' ? 'arrow-up' : 'arrow-down'}
-                    size={16}
-                    color={transactionData.type === 'sent' || transactionData.type === 'payment' ? '#EF4444' : '#10B981'}
+                    name={transactionData.type === 'sent' || transactionData.type === 'payment' ? 'send' : 'arrow-down'}
+                    size={14}
+                    color={transactionData.type === 'received' ? '#059669' : '#3B82F6'}
                   />
                 </View>
               </View>
@@ -448,7 +480,10 @@ export const TransactionSuccessScreen = () => {
               </View>
             </View>
           </View>
+        </View>
+        </ViewShot>
 
+        <View style={styles.content}>
           {/* Remittance Invitation Section - Only for non-Confío friends with phone numbers */}
           {(() => {
             const isOnConfio = Boolean(transactionData.isOnConfio);
@@ -543,6 +578,16 @@ export const TransactionSuccessScreen = () => {
               )}
 
 
+
+              <TouchableOpacity
+                style={[styles.actionButton, { backgroundColor: '#059669' }]}
+                onPress={handleShareScreenshot}
+              >
+                <Icon name="share-2" size={16} color="#ffffff" />
+                <Text style={styles.actionButtonText}>
+                  Compartir comprobante
+                </Text>
+              </TouchableOpacity>
 
               <TouchableOpacity
                 style={[styles.actionButton, { backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0' }]}
@@ -765,7 +810,6 @@ const styles = StyleSheet.create({
   participantIcon: {
     width: 32,
     height: 32,
-    backgroundColor: '#FEE2E2',
     borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
