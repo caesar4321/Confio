@@ -82,7 +82,6 @@ cd apps && CONFIO_ENV=testnet yarn ios
 Confío is more than a wallet — it's a mission to bring financial confidence to Latin America.
 
 *   🌐 **Website**: [confio.lat](https://confio.lat)
-*   🔗 **Telegram**: [t.me/confio4world](https://t.me/confio4world)
 *   📱 **TikTok**: [@julianmoonluna](https://tiktok.com/@julianmoonluna)
 
 ---

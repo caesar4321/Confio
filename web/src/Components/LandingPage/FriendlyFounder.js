@@ -8,7 +8,6 @@ import tiktokIcon from '../../images/TikTok.png';
 // Load icons from public folder to avoid importing outside CRA src
 const instagramIcon = process.env.PUBLIC_URL + '/images/Instagram.png';
 const youtubeIcon = process.env.PUBLIC_URL + '/images/YouTube.png';
-const telegramIcon = process.env.PUBLIC_URL + '/images/TelegramLogo.svg';
 import { useLanguage } from '../../contexts/LanguageContext';
 
 const FriendlyFounder = () => {
@@ -74,18 +73,6 @@ const FriendlyFounder = () => {
               <a href="https://youtube.com/@julianmoonluna" target="_blank" rel="noopener noreferrer" className={styles.socialIconLink} title="YouTube">
                 <img src={youtubeIcon} alt="YouTube" className={styles.socialIcon} />
               </a>
-              <a href="https://t.me/confio4world" target="_blank" rel="noopener noreferrer" className={styles.socialIconLink} title="Telegram">
-                <img src={telegramIcon} alt="Telegram" className={styles.socialIcon} />
-              </a>
-            </div>
-
-            <div className={styles.cta}>
-              <p className={styles.ctaText}>
-                {t('Únete a nuestra comunidad y sé parte del cambio', 'Join our community and be part of the change', '우리 커뮤니티에 참여하고 변화의 일부가 되세요')}
-              </p>
-              <button className={styles.ctaButton} onClick={() => window.open('https://t.me/confio4world', '_blank')}>
-                {t('Unirse al Grupo de Telegram', 'Join Telegram Group', '텔레그램 그룹 참여')}
-              </button>
             </div>
           </div>
         </motion.div>

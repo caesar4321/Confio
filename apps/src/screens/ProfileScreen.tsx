@@ -290,24 +290,6 @@ export const ProfileScreen = () => {
     navigation.navigate('LegalDocument', { docType });
   };
 
-  const handleTelegramPress = async () => {
-    const telegramUrl = 'tg://resolve?domain=confio4world';
-    const webUrl = 'https://t.me/confio4world';
-    try {
-      const canOpen = await Linking.canOpenURL(telegramUrl);
-      if (canOpen) {
-        await Linking.openURL(telegramUrl);
-      } else {
-        // Fallback to t.me URL
-        await Linking.openURL(webUrl);
-      }
-    } catch (error) {
-      console.error('Error opening Telegram link:', error);
-      // Fallback to t.me URL
-      await Linking.openURL(webUrl);
-    }
-  };
-
   const handleSocialMediaPress = async (platform: 'tiktok' | 'instagram' | 'youtube') => {
     let url = '';
     switch (platform) {
@@ -663,27 +645,6 @@ export const ProfileScreen = () => {
           </View>
         </View>
 
-        {/* Community Card */}
-        <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <View style={styles.cardTitleRow}>
-              <Icon name="users" size={20} color="#6B7280" />
-              <Text style={styles.cardTitle}>Comunidad & Soporte</Text>
-            </View>
-          </View>
-          <View style={styles.cardOptions}>
-            <TouchableOpacity
-              style={styles.cardOption}
-              onPress={handleTelegramPress}
-            >
-              <Icon name="message-circle" size={18} color="#6B7280" />
-              <Text style={styles.cardOptionText}>Grupo Telegram</Text>
-              <Text style={styles.cardOptionSubtext}>@confio4world</Text>
-              <Icon name="chevron-right" size={16} color="#9CA3AF" />
-            </TouchableOpacity>
-          </View>
-        </View>
-
         {/* Follow the Founder Section */}
         <View style={styles.founderSection}>
           <View style={styles.founderHeader}>
@@ -969,11 +930,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#374151',
     marginLeft: 12,
-  },
-  cardOptionSubtext: {
-    fontSize: 13,
-    color: '#9CA3AF',
-    marginRight: 8,
   },
   cardOptionDisabled: {
     opacity: 0.5,
