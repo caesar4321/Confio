@@ -150,7 +150,7 @@ const FriendlyAssets = () => {
             <span className={styles.documentIcon}>📗</span>
             <span>{t('Tokenomics 2025 (EN)', 'Tokenomics 2025 (EN)', '토크노믹스 2025 (EN)')}</span>
           </a>
-          <a href={t('https://docs.google.com/presentation/d/1qL-_xQGm5Wbnjfp367lPZuadCwMkLsgfReDwjp_ja7A/edit?usp=sharing', 'https://docs.google.com/presentation/d/1sGTJWHKmgme415_eQ_rOe2BzQNxmTWPwkZl3vb-Bdog/edit?usp=sharing', 'https://docs.google.com/presentation/d/1sGTJWHKmgme415_eQ_rOe2BzQNxmTWPwkZl3vb-Bdog/edit?usp=sharing')} target="_blank" rel="noopener noreferrer" className={styles.documentLink}>
+          <a href={t('https://docs.google.com/presentation/d/157hcgmSUkaDmBzyvo_LJZKTU0s9D7SjW/edit?usp=sharing&ouid=118055710232569593824&rtpof=true&sd=true', 'https://docs.google.com/presentation/d/1HCW8mBXMpYhT2m48xg9141nkaqLmGARo/edit?usp=sharing&ouid=104671499626663887236&rtpof=true&sd=true', 'https://docs.google.com/presentation/d/1HCW8mBXMpYhT2m48xg9141nkaqLmGARo/edit?usp=sharing&ouid=104671499626663887236&rtpof=true&sd=true')} target="_blank" rel="noopener noreferrer" className={styles.documentLink}>
             <span className={styles.documentIcon}>📊</span>
             <span>{t('Presentación de Confío', 'Pitch Deck', '피치덱')}</span>
           </a>

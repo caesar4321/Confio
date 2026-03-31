@@ -99,6 +99,7 @@
 
 .socialLinks {
   display: flex;
+  flex-wrap: wrap;
   gap: 16px;
   margin-bottom: 40px;
 }

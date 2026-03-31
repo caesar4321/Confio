@@ -22,20 +22,13 @@ const FriendlyHowItWorks = () => {
     },
     {
       number: '2',
-      title: t('Encuentra un vendedor P2P', 'Find a P2P seller', 'P2P 판매자 찾기'),
-      description: t('Elige entre cientos de vendedores verificados en tu país.', 'Choose from hundreds of verified sellers in your country.', '귀하의 국가에서 수백 명의 검증된 판매자 중 선택.'),
-      icon: '🤝',
-      color: '#8b5cf6'
-    },
-    {
-      number: '3',
       title: t('Compra tus dólares', 'Buy your dollars', '달러 구매'),
       description: t('Paga con tu método preferido y recibe dólares digitales al instante.', 'Pay with your preferred method and receive digital dollars instantly.', '선호하는 방법으로 결제하고 즉시 디지털 달러 받기.'),
       icon: '💵',
       color: '#f59e0b'
     },
     {
-      number: '4',
+      number: '3',
       title: t('¡Usa tus dólares!', 'Use your dollars!', '달러 사용하기!'),
       description: t('Envía a familia y amigos solo con números de teléfono, paga en tiendas locales, todo gratis.', 'Send to family and friends with just phone numbers, pay at local stores, all for free.', '전화번호만으로 가족과 친구에게 보내고, 현지 상점에서 결제, 모두 무료.'),
       icon: '🎉',

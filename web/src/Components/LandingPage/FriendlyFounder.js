@@ -4,9 +4,11 @@ import { useInView } from 'react-intersection-observer';
 import styles from '../../styles/FriendlyFounder.module.css';
 import julianImage from '../../images/JulianMoon_Founder.jpeg';
 import tiktokIcon from '../../images/TikTok.png';
-// Use existing assets as placeholders to avoid missing file errors
-// Load icons from public folder to avoid importing outside CRA src
 const instagramIcon = process.env.PUBLIC_URL + '/images/Instagram.png';
+const xIcon = process.env.PUBLIC_URL + '/images/X.png';
+const facebookIcon = process.env.PUBLIC_URL + '/images/Facebook.png';
+const telegramIcon = process.env.PUBLIC_URL + '/images/Telegram.png';
+const linkedInIcon = process.env.PUBLIC_URL + '/images/LinkedIn.png';
 const youtubeIcon = process.env.PUBLIC_URL + '/images/YouTube.png';
 import { useLanguage } from '../../contexts/LanguageContext';
 
@@ -67,8 +69,20 @@ const FriendlyFounder = () => {
               <a href="https://tiktok.com/@julianmoonluna" target="_blank" rel="noopener noreferrer" className={styles.socialIconLink} title="TikTok">
                 <img src={tiktokIcon} alt="TikTok" className={styles.socialIcon} />
               </a>
-              <a href="https://instagram.com/julianmoonluna" target="_blank" rel="noopener noreferrer" className={styles.socialIconLink} title="Instagram">
+              <a href="https://instagram.com/julianmoonluna_" target="_blank" rel="noopener noreferrer" className={styles.socialIconLink} title="Instagram">
                 <img src={instagramIcon} alt="Instagram" className={styles.socialIcon} />
+              </a>
+              <a href="https://x.com/julianmoonluna_" target="_blank" rel="noopener noreferrer" className={styles.socialIconLink} title="X">
+                <img src={xIcon} alt="X" className={styles.socialIcon} />
+              </a>
+              <a href="https://facebook.com/julianmoonluna" target="_blank" rel="noopener noreferrer" className={styles.socialIconLink} title="Facebook">
+                <img src={facebookIcon} alt="Facebook" className={styles.socialIcon} />
+              </a>
+              <a href="https://t.me/julianmoonluna" target="_blank" rel="noopener noreferrer" className={styles.socialIconLink} title="Telegram">
+                <img src={telegramIcon} alt="Telegram" className={styles.socialIcon} />
+              </a>
+              <a href="https://linkedin.com/in/julianmoonluna" target="_blank" rel="noopener noreferrer" className={styles.socialIconLink} title="LinkedIn">
+                <img src={linkedInIcon} alt="LinkedIn" className={styles.socialIcon} />
               </a>
               <a href="https://youtube.com/@julianmoonluna" target="_blank" rel="noopener noreferrer" className={styles.socialIconLink} title="YouTube">
                 <img src={youtubeIcon} alt="YouTube" className={styles.socialIcon} />
