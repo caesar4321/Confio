@@ -39,6 +39,7 @@ import { RampStepHeader } from '../components/ramps/RampStepHeader';
 import { CREATE_RAMP_ORDER } from '../apollo/mutations';
 import LegacyGuardarianTopUpScreen from './LegacyGuardarianTopUpScreen';
 import { useBackupEnforcement } from '../hooks/useBackupEnforcement';
+import { colors } from '../config/theme';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'TopUp'>;
 
@@ -60,23 +61,6 @@ type RampMethod = {
   onRampMaxAmount?: string | null;
   offRampMinAmount?: string | null;
   offRampMaxAmount?: string | null;
-};
-
-const colors = {
-  dark: '#111827',
-  textPrimary: '#1f2937',
-  textMuted: '#6b7280',
-  textLight: '#9ca3af',
-  border: '#e5e7eb',
-  background: '#f6faf7',
-  surface: '#ffffff',
-  primary: '#34d399',
-  primaryDark: '#10b981',
-  primaryLight: '#d1fae5',
-  accent: '#3b82f6',
-  accentLight: '#dbeafe',
-  heroFrom: '#10b981',
-  heroTo: '#6ee7b7',
 };
 
 const currencyNames: Record<string, string> = {
@@ -352,8 +336,8 @@ const TopUpScreen = () => {
           subtitle="Elige tu medio de pago, revisa la cotización y confirma cuando estés listo."
           onBack={() => navigation.goBack()}
           compact={isCompact}
-          fromColor={colors.heroFrom}
-          toColor={colors.heroTo}
+          fromColor={colors.primaryLight}
+          toColor={colors.primary}
         />
         </RampReveal>
 
@@ -396,8 +380,8 @@ const TopUpScreen = () => {
                 meta={`${countryFlag ? `${countryFlag} ` : ''}${availability.countryName} · ${fiatCurrency}`}
                 accentColor={colors.primaryDark}
                 accentBackground={colors.primaryLight}
-                titleColor={colors.textPrimary}
-                metaColor={colors.textMuted}
+                titleColor={colors.textFlat}
+                metaColor={colors.textSecondary}
               />
               <View style={styles.amountCard}>
                 <Text style={styles.inputLabel}>Monto estimado en {friendlyCurrency(fiatCurrency)}</Text>
@@ -413,7 +397,7 @@ const TopUpScreen = () => {
                     onBlur={() => setAmountFocused(false)}
                     keyboardType="decimal-pad"
                     placeholder="0"
-                    placeholderTextColor={colors.textLight}
+                    placeholderTextColor={colors.textSecondary}
                   />
                   <View style={styles.currencyBadge}>
                     <Text style={styles.currencyBadgeText}>{fiatCurrency}</Text>
@@ -437,7 +421,7 @@ const TopUpScreen = () => {
                 title="Medio de pago"
                 accentColor={colors.primaryDark}
                 accentBackground={colors.primaryLight}
-                titleColor={colors.textPrimary}
+                titleColor={colors.textFlat}
               />
               <Text style={styles.sectionHint}>Selecciona cómo quieres pagar.</Text>
               <View style={styles.methodsGrid}>{methods.map(renderMethodCard)}</View>
@@ -451,14 +435,14 @@ const TopUpScreen = () => {
                 title="Resumen"
                 accentColor={colors.primaryDark}
                 accentBackground={colors.primaryLight}
-                titleColor={colors.textPrimary}
+                titleColor={colors.textFlat}
               />
               <View style={styles.quoteCard}>
                 {quoteLoading ? (
                   <ActivityIndicator color={colors.primary} />
                 ) : quoteError ? (
                   <View style={styles.emptyQuote}>
-                    <Icon name="alert-circle" size={20} color={colors.textLight} />
+                    <Icon name="alert-circle" size={20} color={colors.textSecondary} />
                     <Text style={styles.emptyText}>{quoteError.message || 'No pudimos obtener la cotización de Koywe.'}</Text>
                   </View>
                 ) : quote ? (
@@ -494,7 +478,7 @@ const TopUpScreen = () => {
                   </>
                 ) : (
                   <View style={styles.emptyQuote}>
-                    <Icon name="bar-chart-2" size={20} color={colors.textLight} />
+                    <Icon name="bar-chart-2" size={20} color={colors.textSecondary} />
                     <Text style={styles.emptyText}>Ingresa un monto para ver el resumen estimado.</Text>
                   </View>
                 )}
@@ -507,12 +491,12 @@ const TopUpScreen = () => {
               <View style={styles.reviewCard}>
                 <Text style={styles.reviewTitle}>Revisión final</Text>
                 <View style={styles.reviewRow}>
-                  <Icon name="credit-card" size={16} color={colors.textMuted} />
+                  <Icon name="credit-card" size={16} color={colors.textSecondary} />
                   <Text style={styles.reviewLabel}>Medio de pago</Text>
                   <Text style={styles.reviewValue}>{selectedMethod?.displayName}</Text>
                 </View>
                 <View style={styles.reviewRow}>
-                  <Icon name="dollar-sign" size={16} color={colors.textMuted} />
+                  <Icon name="dollar-sign" size={16} color={colors.textSecondary} />
                   <Text style={styles.reviewLabel}>Recibirías</Text>
                   <Text style={styles.reviewValueHighlight}>{quoteHeadline}</Text>
                 </View>
@@ -564,7 +548,7 @@ const styles = StyleSheet.create({
     gap: 12,
     borderWidth: 1,
     borderColor: '#bbf7d0',
-    shadowColor: '#059669',
+    shadowColor: '#10B981',
     shadowOpacity: 0.08,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
@@ -608,7 +592,7 @@ const styles = StyleSheet.create({
   noticeText: {
     fontSize: 13,
     lineHeight: 19,
-    color: colors.textPrimary,
+    color: colors.textFlat,
   },
   loadingCard: {
     backgroundColor: colors.surface,
@@ -619,7 +603,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   loadingText: {
-    color: colors.textMuted,
+    color: colors.textSecondary,
     fontSize: 14,
     textAlign: 'center',
   },
@@ -629,7 +613,7 @@ const styles = StyleSheet.create({
   },
   sectionHint: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: colors.textSecondary,
     marginBottom: 12,
   },
   amountCard: {
@@ -647,7 +631,7 @@ const styles = StyleSheet.create({
   inputLabel: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.textPrimary,
+    color: colors.textFlat,
     marginBottom: 14,
   },
   amountInputRow: {
@@ -668,7 +652,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 28,
     fontWeight: '700',
-    color: colors.textPrimary,
+    color: colors.textFlat,
     padding: 0,
   },
   currencyBadge: {
@@ -688,13 +672,13 @@ const styles = StyleSheet.create({
     marginTop: 12,
     fontSize: 13,
     lineHeight: 18,
-    color: colors.textMuted,
+    color: colors.textSecondary,
   },
   limitText: {
     marginTop: 10,
     fontSize: 12,
     lineHeight: 18,
-    color: colors.textMuted,
+    color: colors.textSecondary,
   },
   errorText: {
     marginTop: 8,
@@ -748,7 +732,7 @@ const styles = StyleSheet.create({
   methodTitle: {
     fontSize: 15,
     fontWeight: '700',
-    color: colors.textPrimary,
+    color: colors.textFlat,
     marginBottom: 4,
   },
   methodTitleSelected: {
@@ -756,7 +740,7 @@ const styles = StyleSheet.create({
   },
   methodDescription: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: colors.textSecondary,
     lineHeight: 18,
   },
   methodDescriptionSelected: {
@@ -788,7 +772,7 @@ const styles = StyleSheet.create({
     padding: 20,
     borderWidth: 1.5,
     borderColor: '#6ee7b7',
-    shadowColor: '#059669',
+    shadowColor: '#10B981',
     shadowOpacity: 0.14,
     shadowRadius: 20,
     shadowOffset: { width: 0, height: 8 },
@@ -815,7 +799,7 @@ const styles = StyleSheet.create({
   },
   quoteRate: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: colors.textSecondary,
     lineHeight: 20,
     marginBottom: 4,
   },
@@ -834,13 +818,13 @@ const styles = StyleSheet.create({
   quoteLabel: {
     flex: 1,
     fontSize: 13,
-    color: colors.textMuted,
+    color: colors.textSecondary,
     lineHeight: 18,
   },
   quoteValue: {
     fontSize: 14,
     fontWeight: '700',
-    color: colors.textPrimary,
+    color: colors.textFlat,
     textAlign: 'right',
   },
   gratisBadge: {
@@ -864,7 +848,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
     fontSize: 13,
     lineHeight: 18,
-    color: colors.textMuted,
+    color: colors.textSecondary,
     textAlign: 'center',
   },
   reviewCard: {
@@ -885,7 +869,7 @@ const styles = StyleSheet.create({
   reviewTitle: {
     fontSize: 18,
     fontWeight: '800',
-    color: colors.textPrimary,
+    color: colors.textFlat,
     marginBottom: 14,
   },
   reviewRow: {
@@ -898,14 +882,14 @@ const styles = StyleSheet.create({
   reviewLabel: {
     flex: 0.95,
     fontSize: 14,
-    color: colors.textMuted,
+    color: colors.textSecondary,
     lineHeight: 20,
   },
   reviewValue: {
     flex: 1.15,
     fontSize: 14,
     fontWeight: '700',
-    color: colors.textPrimary,
+    color: colors.textFlat,
     lineHeight: 20,
     textAlign: 'right',
   },

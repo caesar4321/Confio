@@ -81,7 +81,6 @@ export const TradeConfirmScreen: React.FC = () => {
   useFocusEffect(
     React.useCallback(() => {
       if (refetchBankAccounts && activeAccount?.id) {
-        console.log('[TradeConfirmScreen] Screen focused, refetching bank accounts');
         refetchBankAccounts();
       }
     }, [refetchBankAccounts, activeAccount?.id])
@@ -142,7 +141,7 @@ export const TradeConfirmScreen: React.FC = () => {
       'Autoriza esta operación de intercambio'
     );
     if (!bioOk) {
-      Alert.alert('Se requiere biometría', Platform.OS === 'ios' ? 'Confirma con Face ID o Touch ID para continuar.' : 'Confirma con tu huella digital para continuar.', [{ text: 'OK' }]);
+      Alert.alert('Se requiere biometría', Platform.OS === 'ios' ? 'Confirma con Face ID o Touch ID para continuar.' : 'Confirma con tu huella digital para continuar.', [{ text: 'Entendido' }]);
       return;
     }
 

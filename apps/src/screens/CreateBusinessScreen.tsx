@@ -108,7 +108,6 @@ export const CreateBusinessScreen = () => {
   const handleCreateBusiness = async () => {
     // Prevent double-clicks
     if (isCreating) {
-      console.log('Business creation already in progress, ignoring click');
       return;
     }
 
@@ -116,11 +115,10 @@ export const CreateBusinessScreen = () => {
     const now = Date.now();
     const timeSinceLastAttempt = now - lastCreateAttempt.current;
     if (timeSinceLastAttempt < 2000) { // 2 seconds minimum between attempts
-      console.log('Rate limiting: Too soon since last attempt, ignoring click');
       Alert.alert(
         'Muy rápido',
         'Por favor, espera unos segundos antes de intentar de nuevo.',
-        [{ text: 'OK' }]
+        [{ text: 'Entendido' }]
       );
       return;
     }
@@ -128,7 +126,6 @@ export const CreateBusinessScreen = () => {
 
     try {
       setIsCreating(true);
-      console.log('Starting business creation process...');
       
       // Get the business type name for the category
       const businessType = businessTypes.find(type => type.id === formData.businessType);
@@ -149,14 +146,6 @@ export const CreateBusinessScreen = () => {
         const createdAccount = result.data.createBusiness.account;
         const createdBusiness = result.data.createBusiness.business;
         
-        console.log('Business created successfully:', {
-          businessId: createdBusiness?.id,
-          accountId: createdAccount?.accountId,
-          accountType: createdAccount?.accountType,
-          accountIndex: createdAccount?.accountIndex,
-          businessName: createdBusiness?.name,
-          category: createdBusiness?.category
-        });
         
         // No need to generate address here - it will be generated automatically
         // when the user switches to or initializes this business account
@@ -174,7 +163,7 @@ export const CreateBusinessScreen = () => {
           'Cuenta de negocio creada exitosamente!',
           [
             {
-              text: 'OK',
+              text: 'Entendido',
               onPress: () => navigation.goBack()
             }
           ]
@@ -188,7 +177,7 @@ export const CreateBusinessScreen = () => {
       Alert.alert(
         'Error',
         'No se pudo crear la cuenta de negocio. Por favor, inténtalo de nuevo.',
-        [{ text: 'OK' }]
+        [{ text: 'Entendido' }]
       );
     } finally {
       setIsCreating(false);

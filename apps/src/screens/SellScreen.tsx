@@ -45,6 +45,7 @@ import { RampStepHeader } from '../components/ramps/RampStepHeader';
 import { CREATE_RAMP_ORDER } from '../apollo/mutations';
 import { tryFundKoyweOffRampInBackground } from '../services/koyweOffRampService';
 import { SellScreen as LegacyGuardarianSellScreen } from './LegacyGuardarianSellScreen';
+import { colors } from '../config/theme';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'Sell'>;
 
@@ -84,31 +85,6 @@ type SavedPayoutMethod = {
 };
 
 /* ─── Polished fintech palette (sell variant) ─── */
-const colors = {
-  dark: '#111827',
-  textPrimary: '#1f2937',
-  textMuted: '#6b7280',
-  textLight: '#9ca3af',
-  border: '#e5e7eb',
-  background: '#f6faf7',
-  surface: '#ffffff',
-  surfaceAlt: '#f3f4f6',
-  primary: '#34d399',
-  primaryDark: '#10b981',
-  primaryMid: '#6ee7b7',
-  primaryLight: '#d1fae5',
-  primaryUltraLight: '#ecfdf5',
-  accent: '#3b82f6',
-  accentLight: '#dbeafe',
-  warning: '#f59e0b',
-  warningLight: '#fef3c7',
-  success: '#15803d',
-  danger: '#b91c1c',
-  dangerLight: '#fee2e2',
-  heroFrom: '#10b981',
-  heroTo: '#6ee7b7',
-};
-
 /* ─── Friendly currency names ─── */
 const currencyNames: Record<string, string> = {
   COP: 'pesos colombianos',
@@ -431,8 +407,8 @@ export const SellScreen = () => {
           subtitle="Elige cómo quieres recibir tu dinero, revisa el estimado y confirma al final."
           onBack={() => navigation.goBack()}
           compact={isCompact}
-          fromColor={colors.heroFrom}
-          toColor={colors.heroTo}
+          fromColor={colors.primaryLight}
+          toColor={colors.primary}
         />
         </RampReveal>
 
@@ -476,7 +452,7 @@ export const SellScreen = () => {
                 accentColor={colors.primaryDark}
                 accentBackground={colors.primaryLight}
                 titleColor={colors.dark}
-                metaColor={colors.textMuted}
+                metaColor={colors.textSecondary}
               />
               <View style={styles.inputCard}>
                 <Text style={styles.inputLabel}>Monto a retirar en cUSD</Text>
@@ -492,7 +468,7 @@ export const SellScreen = () => {
                     onBlur={() => setAmountFocused(false)}
                     keyboardType="decimal-pad"
                     placeholder="0"
-                    placeholderTextColor={colors.textLight}
+                    placeholderTextColor={colors.textSecondary}
                   />
                   <View style={styles.currencyBadge}>
                     <Text style={styles.currencyBadgeText}>cUSD</Text>
@@ -583,7 +559,7 @@ export const SellScreen = () => {
                 <ActivityIndicator color={colors.primary} />
               ) : compatibleSavedMethods.length === 0 ? (
                 <View style={styles.emptyCard}>
-                  <Icon name="inbox" size={22} color={colors.textLight} />
+                  <Icon name="inbox" size={22} color={colors.textSecondary} />
                   <Text style={styles.emptyTitle}>Todavía no guardaste datos para {selectedMethod?.displayName}</Text>
                   <Text style={styles.emptyText}>Agrega tu cuenta o billetera antes de confirmar el retiro.</Text>
                 </View>
@@ -626,7 +602,7 @@ export const SellScreen = () => {
                   <ActivityIndicator color={colors.primary} />
                 ) : quoteError ? (
                   <View style={styles.emptyQuote}>
-                    <Icon name="alert-circle" size={20} color={colors.textLight} />
+                    <Icon name="alert-circle" size={20} color={colors.textSecondary} />
                     <Text style={styles.emptyText}>{quoteError.message || 'No pudimos obtener la cotización de Koywe.'}</Text>
                   </View>
                 ) : quote ? (
@@ -664,7 +640,7 @@ export const SellScreen = () => {
                   </>
                 ) : (
                   <View style={styles.emptyQuote}>
-                    <Icon name="bar-chart-2" size={20} color={colors.textLight} />
+                    <Icon name="bar-chart-2" size={20} color={colors.textSecondary} />
                     <Text style={styles.emptyText}>Ingresa el monto para ver el retiro estimado.</Text>
                   </View>
                 )}
@@ -678,17 +654,17 @@ export const SellScreen = () => {
               <View style={styles.reviewCard}>
                 <Text style={styles.reviewTitle}>Revisión final</Text>
                 <View style={styles.reviewRow}>
-                  <Icon name="credit-card" size={16} color={colors.textMuted} />
+                  <Icon name="credit-card" size={16} color={colors.textSecondary} />
                   <Text style={styles.reviewLabel}>Forma de cobro</Text>
                   <Text style={styles.reviewValue}>{selectedMethod?.displayName}</Text>
                 </View>
                 <View style={styles.reviewRow}>
-                  <Icon name="briefcase" size={16} color={colors.textMuted} />
+                  <Icon name="briefcase" size={16} color={colors.textSecondary} />
                   <Text style={styles.reviewLabel}>Destino</Text>
                   <Text style={styles.reviewValue}>{selectedSavedMethod?.summaryText}</Text>
                 </View>
                 <View style={styles.reviewRow}>
-                  <Icon name="dollar-sign" size={16} color={colors.textMuted} />
+                  <Icon name="dollar-sign" size={16} color={colors.textSecondary} />
                   <Text style={styles.reviewLabel}>Recibirías</Text>
                   <Text style={styles.reviewValueHighlight}>{quoteHeadline}</Text>
                 </View>
@@ -765,7 +741,7 @@ const styles = StyleSheet.create({
     gap: 12,
     borderWidth: 1,
     borderColor: '#bbf7d0',
-    shadowColor: '#059669',
+    shadowColor: '#10B981',
     shadowOpacity: 0.08,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
@@ -809,7 +785,7 @@ const styles = StyleSheet.create({
   bannerText: {
     fontSize: 13,
     lineHeight: 19,
-    color: colors.textPrimary,
+    color: colors.textFlat,
   },
 
   /* ── Loading ── */
@@ -827,7 +803,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   loadingText: {
-    color: colors.textMuted,
+    color: colors.textSecondary,
     fontSize: 14,
   },
 
@@ -863,7 +839,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   providerHint: {
-    color: colors.textMuted,
+    color: colors.textSecondary,
     fontWeight: '600',
     fontSize: 13,
   },
@@ -873,7 +849,7 @@ const styles = StyleSheet.create({
     color: colors.dark,
   },
   fallbackText: {
-    color: colors.textMuted,
+    color: colors.textSecondary,
     lineHeight: 20,
     fontSize: 14,
   },
@@ -909,7 +885,7 @@ const styles = StyleSheet.create({
   inputLabel: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.textMuted,
+    color: colors.textSecondary,
     marginBottom: 8,
   },
   amountInputRow: {
@@ -964,13 +940,13 @@ const styles = StyleSheet.create({
     color: colors.primaryDark,
   },
   helperText: {
-    color: colors.textMuted,
+    color: colors.textSecondary,
     lineHeight: 18,
     marginTop: 10,
     fontSize: 13,
   },
   limitText: {
-    color: colors.textMuted,
+    color: colors.textSecondary,
     lineHeight: 18,
     marginTop: 8,
     fontSize: 12,
@@ -1036,7 +1012,7 @@ const styles = StyleSheet.create({
     color: '#ffffff',
   },
   methodText: {
-    color: colors.textMuted,
+    color: colors.textSecondary,
     lineHeight: 18,
     fontSize: 13,
   },
@@ -1102,7 +1078,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   emptyText: {
-    color: colors.textMuted,
+    color: colors.textSecondary,
     lineHeight: 18,
     textAlign: 'center',
     fontSize: 13,
@@ -1141,7 +1117,7 @@ const styles = StyleSheet.create({
     color: colors.dark,
   },
   savedText: {
-    color: colors.textMuted,
+    color: colors.textSecondary,
     fontSize: 13,
   },
 
@@ -1153,7 +1129,7 @@ const styles = StyleSheet.create({
     gap: 10,
     borderWidth: 1.5,
     borderColor: '#6ee7b7',
-    shadowColor: '#059669',
+    shadowColor: '#10B981',
     shadowOpacity: 0.14,
     shadowRadius: 20,
     shadowOffset: { width: 0, height: 8 },
@@ -1177,7 +1153,7 @@ const styles = StyleSheet.create({
     color: colors.primaryDark,
   },
   quoteRate: {
-    color: colors.textMuted,
+    color: colors.textSecondary,
     fontSize: 13,
     lineHeight: 20,
   },
@@ -1194,7 +1170,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   quoteLabel: {
-    color: colors.textMuted,
+    color: colors.textSecondary,
     fontSize: 14,
     lineHeight: 20,
     flex: 1,
@@ -1273,7 +1249,7 @@ const styles = StyleSheet.create({
   },
   reviewLabel: {
     flex: 0.95,
-    color: colors.textMuted,
+    color: colors.textSecondary,
     fontSize: 14,
     lineHeight: 20,
   },

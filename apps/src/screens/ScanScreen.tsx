@@ -34,15 +34,6 @@ export const ScanScreen = () => {
   const [getInvoice] = useMutation(GET_INVOICE);
 
   // Debug logging
-  console.log('ScanScreen - Account info:', {
-    accountId: activeAccount?.id,
-    accountType: activeAccount?.type,
-    accountName: activeAccount?.name,
-    isBusinessAccount,
-    scanMode,
-    isFocused,
-    isAppActive
-  });
 
   // Monitor AppState to disable camera when app is in background
   useEffect(() => {
@@ -56,13 +47,6 @@ export const ScanScreen = () => {
     };
   }, []);
 
-  console.log('ScanScreen - Debug info:', {
-    hasPermission,
-    device: device ? 'found' : 'not found',
-    scanFrameSize,
-    isFlashOn,
-    cameraActive: isFocused && isAppActive && !isProcessing
-  });
 
   useEffect(() => {
     checkPermission();
@@ -77,7 +61,7 @@ export const ScanScreen = () => {
         'Camera Permission Required',
         'Please enable camera access in your device settings to use the QR code scanner.',
         [
-          { text: 'Cancel', style: 'cancel' },
+          { text: 'Cancelar', style: 'cancel' },
           { text: 'Open Settings', onPress: openSettings }
         ]
       );
@@ -99,7 +83,6 @@ export const ScanScreen = () => {
   const handleQRCodeScanned = async (scannedData: string) => {
     if (isProcessing) return; // Prevent multiple processing
 
-    console.log('QR Code scanned:', scannedData);
 
     // Show success indicator
     setScannedSuccessfully(true);
@@ -110,7 +93,6 @@ export const ScanScreen = () => {
     const verifyMatch = scannedData.match(/verify\/([a-zA-Z0-9]+)/);
     if (verifyMatch && verifyMatch[1]) {
       const hash = verifyMatch[1];
-      console.log('Verification hash extracted:', hash);
       setIsProcessing(true);
       setScannedSuccessfully(true);
 
@@ -132,14 +114,13 @@ export const ScanScreen = () => {
       Alert.alert(
         'Invalid QR Code',
         'This QR code is not a valid Confío payment code.',
-        [{ text: 'OK', style: 'default' }]
+        [{ text: 'Entendido', style: 'default' }]
       );
       setScannedSuccessfully(false);
       return;
     }
 
     const invoiceId = validMatch[1];
-    console.log('Invoice ID extracted:', invoiceId);
 
     setIsProcessing(true);
 
@@ -152,26 +133,25 @@ export const ScanScreen = () => {
 
       if (!invoiceData?.getInvoice?.success) {
         const errors = invoiceData?.getInvoice?.errors || ['Invoice not found'];
-        Alert.alert('Error', errors.join(', '), [{ text: 'OK' }]);
+        Alert.alert('Error', errors.join(', '), [{ text: 'Entendido' }]);
         return;
       }
 
       const invoice = invoiceData.getInvoice.invoice;
-      console.log('Invoice details:', invoice);
 
       // Server-side validations:
       // 1. Invoice exists and is valid
       // 2. Invoice hasn't expired (server checks isExpired)
       // 3. Invoice is still in PENDING status
       if (invoice.isExpired) {
-        Alert.alert('Invoice Expired', 'This payment request has expired.', [{ text: 'OK' }]);
+        Alert.alert('Invoice Expired', 'This payment request has expired.', [{ text: 'Entendido' }]);
         return;
       }
 
       // Client-side validations:
       // 1. User isn't paying their own invoice
       if (invoice.createdByUser?.id === activeAccount?.id) {
-        Alert.alert('Cannot Pay Own Invoice', 'You cannot pay your own invoice.', [{ text: 'OK' }]);
+        Alert.alert('Cannot Pay Own Invoice', 'You cannot pay your own invoice.', [{ text: 'Entendido' }]);
         setScannedSuccessfully(false);
         return;
       }
@@ -183,7 +163,7 @@ export const ScanScreen = () => {
 
     } catch (error) {
       console.error('Error processing QR code:', error);
-      Alert.alert('Error', 'Failed to process the QR code. Please try again.', [{ text: 'OK' }]);
+      Alert.alert('Error', 'Failed to process the QR code. Please try again.', [{ text: 'Entendido' }]);
     } finally {
       setIsProcessing(false);
       setScannedSuccessfully(false);

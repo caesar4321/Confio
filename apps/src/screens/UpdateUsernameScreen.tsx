@@ -16,16 +16,7 @@ import { useMutation } from '@apollo/client';
 import { UPDATE_USERNAME } from '../apollo/queries';
 import { MainStackParamList } from '../types/navigation';
 import { useAuth } from '../contexts/AuthContext';
-
-const colors = {
-  background: '#F3F4F6',
-  surface: '#FFFFFF',
-  primary: '#10B981',
-  primaryDark: '#047857',
-  text: '#111827',
-  textMuted: '#6B7280',
-  error: '#DC2626',
-};
+import { colors } from '../config/theme';
 
 const normalizeChunk = (value: string) => {
   if (!value) return 'confio';
@@ -127,7 +118,7 @@ export const UpdateUsernameScreen: React.FC = () => {
       if (data?.updateUsername?.success) {
         await refreshProfile('personal');
         Alert.alert('Listo', 'Tu usuario se actualizó correctamente.', [
-          { text: 'OK', onPress: () => navigation.goBack() },
+          { text: 'Entendido', onPress: () => navigation.goBack() },
         ]);
       } else {
         const message = data?.updateUsername?.error || 'No se pudo actualizar el usuario. Intenta con otro nombre.';
@@ -251,7 +242,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   saveButton: {
-    backgroundColor: '#059669',
+    backgroundColor: '#10B981',
   },
   saveButtonDisabled: {
     opacity: 0.5,
@@ -282,11 +273,11 @@ const styles = StyleSheet.create({
   infoTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: colors.text,
+    color: colors.textFlat,
   },
   infoDescription: {
     fontSize: 14,
-    color: colors.textMuted,
+    color: colors.textSecondary,
     lineHeight: 20,
   },
   currentUsernameBox: {
@@ -297,13 +288,13 @@ const styles = StyleSheet.create({
   currentLabel: {
     fontSize: 12,
     fontWeight: '600',
-    color: colors.textMuted,
+    color: colors.textSecondary,
     marginBottom: 4,
   },
   currentValue: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.text,
+    color: colors.textFlat,
   },
   helperText: {
     fontSize: 13,
@@ -324,7 +315,7 @@ const styles = StyleSheet.create({
   inputLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.text,
+    color: colors.textFlat,
   },
   input: {
     borderWidth: 1,
@@ -333,7 +324,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     fontSize: 16,
-    color: colors.text,
+    color: colors.textFlat,
     backgroundColor: '#FFFFFF',
   },
   inputError: {
@@ -341,7 +332,7 @@ const styles = StyleSheet.create({
   },
   inputHint: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: colors.textSecondary,
   },
   errorText: {
     fontSize: 13,
@@ -361,7 +352,7 @@ const styles = StyleSheet.create({
   suggestionsTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.text,
+    color: colors.textFlat,
   },
   suggestionsRow: {
     flexDirection: 'row',
@@ -392,11 +383,11 @@ const styles = StyleSheet.create({
   tipsTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.text,
+    color: colors.textFlat,
   },
   tipItem: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: colors.textSecondary,
     lineHeight: 19,
   },
 });

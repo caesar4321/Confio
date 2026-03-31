@@ -23,7 +23,7 @@ import { useHeader } from '../contexts/HeaderContext';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import Icon from 'react-native-vector-icons/Feather';
-import FAIcon from 'react-native-vector-icons/FontAwesome';
+import MCIcon from 'react-native-vector-icons/MaterialCommunityIcons';
 import InviteClaimBanner from '../components/InviteClaimBanner';
 import * as Keychain from 'react-native-keychain';
 import { RootStackParamList, MainStackParamList } from '../types/navigation';
@@ -211,7 +211,6 @@ export const HomeScreen = () => {
         isMountedRef.current = true;
         return;
       }
-      console.log('HomeScreen focused - refreshing balances and payroll');
       refetchMyBalances();
       refetchPendingPayroll();
     }, [refetchMyBalances, refetchPendingPayroll])
@@ -250,32 +249,28 @@ export const HomeScreen = () => {
       try {
         const link = await deepLinkHandler.getDeferredLink();
         if (link && link.type === 'referral') {
-          console.log('[HomeScreen] Found deferred referral:', link.payload);
 
           // Submit to backend
           const { data, errors } = await setReferrerMutation({
             variables: { referrerIdentifier: link.payload }
           });
 
-          console.log('[HomeScreen] Referral submission result:', data);
 
           // Handle GraphQL errors
           if (errors && errors.length > 0) {
             const errorMessage = errors[0].message;
             const friendly = formatReferralErrorMessage(errorMessage);
-            console.log('[HomeScreen] Referral GraphQL error:', friendly);
 
             // 1. Rate Limits: KEEP link, SHOW alert
             const isRateLimit = /rate limit/i.test(errorMessage) || /demasiadas veces/i.test(friendly);
             if (isRateLimit) {
-              Alert.alert('Aviso', friendly, [{ text: 'OK' }]);
+              Alert.alert('Aviso', friendly, [{ text: 'Entendido' }]);
               return;
             }
 
             // 2. Suspicious/Abuse: CLEAR link, SILENCE alert (to avoid loop)
             const isSuspicious = /suspicious/i.test(errorMessage) || /unusual/i.test(friendly) || /inusual/i.test(friendly);
             if (isSuspicious) {
-              console.log('[HomeScreen] Suspicious activity detected, silently clearing deferred link');
               await deepLinkHandler.clearDeferredLink();
               return;
             }
@@ -289,14 +284,13 @@ export const HomeScreen = () => {
               /already/i.test(errorMessage) || /ya tienes/i.test(friendly) || /registrado/i.test(friendly);
 
             if (isLogicError) {
-              console.log('[HomeScreen] Permanent logic error, clearing deferred link:', friendly);
               await deepLinkHandler.clearDeferredLink();
-              Alert.alert('Aviso', friendly, [{ text: 'OK' }]);
+              Alert.alert('Aviso', friendly, [{ text: 'Entendido' }]);
               return;
             }
 
             // 4. Unknown/Network Errors: KEEP link, SHOW alert (user might retry)
-            Alert.alert('Aviso', friendly, [{ text: 'OK' }]);
+            Alert.alert('Aviso', friendly, [{ text: 'Entendido' }]);
             return;
           }
 
@@ -311,7 +305,6 @@ export const HomeScreen = () => {
           } else {
             // Ensure friendly message is a string
             const friendly = String(formatReferralErrorMessage(data?.setReferrer?.error) || 'Error desconocido');
-            console.log('[HomeScreen] Referral submission failed:', friendly);
 
             // Check if already registered/claimed or suspicious - clear silently without showing alert
             const shouldSuppressError =
@@ -322,22 +315,16 @@ export const HomeScreen = () => {
               /suspicious/i.test(data?.setReferrer?.error || '') ||
               /suspicious/i.test(data?.setReferrer?.message || '');
 
-            console.log('[HomeScreen] Should suppress error?', shouldSuppressError);
 
             if (shouldSuppressError) {
-              console.log('[HomeScreen] Suppressing error, attempting to clear link...');
               // Clear the deferred link silently - user already has a referrer or flagged as suspicious
               try {
                 await deepLinkHandler.clearDeferredLink();
-                console.log('[HomeScreen] Cleared deferred link successfully');
               } catch (clearErr) {
                 console.error('[HomeScreen] Failed to clear deferred link:', clearErr);
               }
             } else {
-              console.log('[HomeScreen] Not suppressing error, showing alert...');
               // Show alert for other errors with explicit button object
-              Alert.alert('Aviso', friendly, [{ text: 'OK', onPress: () => console.log('OK Pressed') }]);
-              console.log('[HomeScreen] Alert shown');
             }
           }
         }
@@ -348,9 +335,9 @@ export const HomeScreen = () => {
         const errorMessage = err?.graphQLErrors?.[0]?.message || err?.message;
         if (errorMessage) {
           const friendly = String(formatReferralErrorMessage(errorMessage) || 'Error desconocido');
-          Alert.alert('Error', friendly, [{ text: 'OK', onPress: () => { } }]);
+          Alert.alert('Error', friendly, [{ text: 'Entendido', onPress: () => { } }]);
         } else {
-          Alert.alert('Error', 'Error de conexión. Intenta de nuevo.', [{ text: 'OK', onPress: () => { } }]);
+          Alert.alert('Error', 'Error de conexión. Intenta de nuevo.', [{ text: 'Entendido', onPress: () => { } }]);
         }
       }
     };
@@ -558,7 +545,6 @@ export const HomeScreen = () => {
       }
     } catch (error) {
       // No saved preference, default to showing balance
-      console.log('No saved balance visibility preference, using default');
     }
   };
 
@@ -583,7 +569,6 @@ export const HomeScreen = () => {
         ts.toString()
       );
     } catch (e) {
-      console.log('Failed to persist invite banner timestamp');
     }
   };
 
@@ -759,7 +744,6 @@ export const HomeScreen = () => {
           id: 'withdraw',
           label: 'Retirar',
           icon: 'bank',
-          isFA: true,
           color: '#F59E0B',
           route: () => navigation.navigate('Sell'),
         },
@@ -814,7 +798,6 @@ export const HomeScreen = () => {
         id: 'withdraw',
         label: 'Retirar',
         icon: 'bank',
-        isFA: true,
         color: '#F59E0B',
         route: () => navigation.navigate('Sell'),
       }
@@ -866,7 +849,6 @@ export const HomeScreen = () => {
           setShowInviteClaimCard(hasPendingInvites);
           // Store the first invitation ID for backwards compatibility (if needed elsewhere)
           setInviteReceiptId(hasPendingInvites ? pendingInvites[0].invitationId : undefined);
-          console.log(`[HomeScreen] Pending invites check: ${pendingInvites.length} found`);
         }
       } catch (e) {
         if (!cancelled) {
@@ -946,7 +928,6 @@ export const HomeScreen = () => {
       try {
         const address = await authService.getAlgorandAddress();
         if (mounted) {
-          console.log('HomeScreen - Refreshed Algorand address:', address);
           setAlgorandAddress(address);
         }
       } catch (e) {
@@ -958,7 +939,6 @@ export const HomeScreen = () => {
 
     // Listen for direct address updates (e.g. from migration)
     const subscription = DeviceEventEmitter.addListener('ALGORAND_ADDRESS_UPDATED', (newAddress: string) => {
-      console.log('HomeScreen - Received ALGORAND_ADDRESS_UPDATED event:', newAddress);
       if (mounted) {
         setAlgorandAddress(newAddress);
         // FORCE REFETCH OF BALANCES
@@ -1006,24 +986,20 @@ export const HomeScreen = () => {
 
   const handleAccountSwitch = useCallback(async (accountId: string): Promise<boolean> => {
     try {
-      console.log('HomeScreen - handleAccountSwitch called with:', accountId);
 
       // Close the profile menu immediately to provide feedback
       profileMenu.closeProfileMenu();
 
       // All accounts are now real accounts from the server
-      console.log('HomeScreen - Switching to account:', accountId);
 
       // Use atomic account switching (via ref to avoid dep instability)
       const success = await atomicSwitchAccountRef.current(accountId);
 
       if (success) {
-        console.log('HomeScreen - Account switch successful');
         // Refresh balances after successful switch
         await refetchMyBalancesRef.current();
         return true;
       } else {
-        console.log('HomeScreen - Account switch failed');
         return false;
       }
     } catch (error) {
@@ -1031,7 +1007,7 @@ export const HomeScreen = () => {
       Alert.alert(
         'Error',
         'No se pudo cambiar la cuenta. Por favor intenta nuevamente.',
-        [{ text: 'OK', onPress: () => { } }]
+        [{ text: 'Entendido', onPress: () => { } }]
       );
       return false;
     }
@@ -1051,15 +1027,9 @@ export const HomeScreen = () => {
         const pendingSwitch = PushNotificationService.getPendingAccountSwitch();
         const pendingNavigation = PushNotificationService.getPendingNavigation();
 
-        console.log('HomeScreen - Checking for pending account switch:', {
-          pendingSwitch,
-          hasPendingNavigation: !!pendingNavigation,
-          hasHandleAccountSwitch: !!handleAccountSwitch
-        });
 
         // Only process if we have BOTH a pending switch AND navigation
         if (pendingSwitch && pendingNavigation && handleAccountSwitch) {
-          console.log('HomeScreen - Processing pending account switch');
 
           // Clear the pending switch to prevent duplicate processing
           PushNotificationService.clearPendingAccountSwitch();
@@ -1071,10 +1041,8 @@ export const HomeScreen = () => {
           // Execute the account switch
           handleAccountSwitch(pendingSwitch).then(success => {
             if (success) {
-              console.log('HomeScreen - Account switched successfully');
               // Execute navigation after a short delay
               setTimeout(() => {
-                console.log('HomeScreen - Executing deferred navigation');
                 navigationToExecute();
               }, 500);
             } else {
@@ -1394,8 +1362,8 @@ export const HomeScreen = () => {
                   ]}
                 >
                   {/* @ts-ignore */}
-                  {(action as any).isFA ? (
-                    <FAIcon name={action.icon} size={20} color="#fff" />
+                  {action.icon === 'bank' ? (
+                    <MCIcon name="bank" size={20} color="#fff" />
                   ) : (
                     <Icon name={action.icon} size={22} color="#fff" />
                   )}
@@ -1813,7 +1781,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   inviteClaimSuccess: {
-    color: '#059669',
+    color: '#10B981',
     marginTop: 8,
     fontSize: 13,
     textAlign: 'center',

@@ -169,7 +169,7 @@ export const PayeeDetailScreen = () => {
         mode === 'immediate'
           ? 'Se creó un pago inmediato en la nómina.'
           : `Pago programado a partir de ${startDate}.`,
-        [{ text: 'OK', onPress: () => navigation.goBack() }],
+        [{ text: 'Entendido', onPress: () => navigation.goBack() }],
       );
     } catch (e: any) {
       Alert.alert('Error', e?.message || 'No se pudo crear la nómina.');
@@ -326,7 +326,7 @@ export const PayeeDetailScreen = () => {
                   <View style={styles.historyRow}>
                     <View>
                       <Text style={styles.historyAmount}>cUSD {h.netAmount}</Text>
-                      <Text style={styles.historyDate}>{new Date(h.when).toLocaleDateString()}</Text>
+                      <Text style={styles.historyDate}>{new Date(h.when).toLocaleDateString('es-ES')}</Text>
                     </View>
                     <View style={styles.historyBadges}>
                       <View style={[styles.badge, styles.badgeSecondary]}>

@@ -15,20 +15,7 @@ import { PresaleWsSession } from '../services/presaleWs';
 import { LoadingOverlay } from '../components/LoadingOverlay';
 import algorandService from '../services/algorandService';
 import { biometricAuthService } from '../services/biometricAuthService';
-
-const colors = {
-  primary: '#34d399',
-  primaryLight: '#d1fae5',
-  primaryDark: '#10b981',
-  secondary: '#8b5cf6',
-  secondaryLight: '#e9d5ff',
-  accent: '#3b82f6',
-  neutral: '#f9fafb',
-  neutralDark: '#f3f4f6',
-  dark: '#111827',
-  violet: '#8b5cf6',
-  violetLight: '#ddd6fe',
-};
+import { colors } from '../config/theme';
 
 type ConfioPresaleParticipateScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
@@ -118,13 +105,12 @@ export const ConfioPresaleParticipateScreen = () => {
         await s.open();
         await ensureOptedIn(s);
       } catch (e: any) {
-        console.log('[Presale] initial opt-in error', e);
         // Show the error message from server (e.g., backup check failure)
         const errorMessage = e?.message || 'Error al preparar la preventa';
         Alert.alert(
           'No disponible',
           errorMessage,
-          [{ text: 'OK', onPress: () => navigation.goBack() }]
+          [{ text: 'Entendido', onPress: () => navigation.goBack() }]
         );
         return; // Don't complete initialization
       } finally {
@@ -142,7 +128,7 @@ export const ConfioPresaleParticipateScreen = () => {
         false
       );
       if (!bioOk) {
-        Alert.alert('Se requiere biometría', Platform.OS === 'ios' ? 'Confirma con Face ID o Touch ID para continuar.' : 'Confirma con tu huella digital para continuar.', [{ text: 'OK' }]);
+        Alert.alert('Se requiere biometría', Platform.OS === 'ios' ? 'Confirma con Face ID o Touch ID para continuar.' : 'Confirma con tu huella digital para continuar.', [{ text: 'Entendido' }]);
         return;
       }
 
@@ -214,7 +200,6 @@ export const ConfioPresaleParticipateScreen = () => {
       setAmount('');
       refetch();
     } catch (e: any) {
-      console.log('[Presale] swap error', e);
       setBusy(false);
       // For opt-in race, we handled silently above. Only show other errors.
       if (!String(e?.message || '').includes('requires_presale_app_optin')) {

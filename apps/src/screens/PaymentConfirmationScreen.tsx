@@ -24,6 +24,7 @@ import { useMutation } from '@apollo/client';
 import { GET_INVOICE } from '../apollo/queries';
 import { useAuth } from '../contexts/AuthContext';
 import { getSupportCopy } from '../utils/supportMessaging';
+import { APP_LAYOUT } from '../config/layout';
 
 type PaymentConfirmationRouteProp = RouteProp<{
   PaymentConfirmation: {
@@ -119,7 +120,6 @@ export const PaymentConfirmationScreen = () => {
 
     // If passed via deep link and we don't have data yet
     if (invoiceId && !fetchedInvoiceData && !isFetchingInvoice) {
-      console.log('PaymentConfirmation: Deep link detected, fetching invoice', invoiceId);
       fetchInvoice(invoiceId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -238,18 +238,15 @@ export const PaymentConfirmationScreen = () => {
             paymentId: (wsPack as any).internalId || (wsPack as any).internal_id || (wsPack as any).paymentId || (wsPack as any).payment_id || invoiceData.internalId,
             groupId: (wsPack as any).groupId || (wsPack as any).group_id
           });
-          console.log('PaymentConfirmationScreen: Preflight prepared via WS');
           return;
         }
 
         // WS-only mode: if WS pack missing/invalid, record error
         if (alive) {
           setPrepareError('Failed to prepare payment via WebSocket');
-          console.log('PaymentConfirmationScreen: Preflight failed via WS');
         }
       } catch (e: any) {
         if (alive) setPrepareError(e?.message || 'Failed to prepare payment');
-        console.log('PaymentConfirmationScreen: Preflight exception', e?.message || e);
       }
     };
 
@@ -327,17 +324,6 @@ export const PaymentConfirmationScreen = () => {
   };
 
   // Debug logging
-  console.log('PaymentConfirmationScreen - Balance Debug:', {
-    hasSnapshot: balanceSnapshot != null,
-    balanceError,
-    realBalance,
-    fallbackBalance,
-    currentPaymentAmount: currentPayment.amount,
-    currentPaymentCurrency: currentPayment.currency,
-    hasEnoughBalance,
-    balanceLoading,
-    tokenType: invoiceData.tokenType,
-  });
 
   // Wallet data for display
   const walletData = {
@@ -355,11 +341,9 @@ export const PaymentConfirmationScreen = () => {
   };
 
   const handleConfirmPayment = async () => {
-    console.log('PaymentConfirmationScreen: handleConfirmPayment called for', { invoiceId: invoiceData.internalId });
 
     // Prevent double-clicks/rapid button presses
     if (isProcessing || navLock.current) {
-      console.log('PaymentConfirmationScreen: Already processing, ignoring duplicate click');
       return;
     }
 
@@ -383,7 +367,6 @@ export const PaymentConfirmationScreen = () => {
         const amt = parseFloat(String(invoiceData.amount || '0'));
         const assetType = (String(invoiceData.tokenType || 'cUSD')).toUpperCase();
         const note = `Invoice ${invoiceData.internalId}`;
-        console.log('PaymentConfirmationScreen: prepareViaWs on confirm', { invoiceId: invoiceData.internalId, amt, assetType });
         const pack = await prepareViaWs({
           amount: amt,
           assetType,
@@ -398,25 +381,12 @@ export const PaymentConfirmationScreen = () => {
             groupId: (pack as any).groupId || (pack as any).group_id
           } as any;
           setPrepared(preparedForNav);
-          console.log('PaymentConfirmationScreen: prepareViaWs on confirm OK');
         } else {
-          console.log('PaymentConfirmationScreen: prepareViaWs on confirm failed');
         }
       } catch (e) {
-        console.log('PaymentConfirmationScreen: prepareViaWs on confirm exception', e);
       }
     }
 
-    console.log('PaymentConfirmationScreen: Navigating to PaymentProcessing with data:', {
-      type: 'payment',
-      amount: currentPayment.amount,
-      currency: currentPayment.currency,
-      merchant: currentPayment.recipient,
-      action: 'Procesando pago',
-      idempotencyKey,
-      prepared: preparedForNav ? { paymentId: preparedForNav.paymentId, txCount: preparedForNav.transactions.length } : null,
-      prepareError
-    });
 
     // Navigate to payment processing screen (prefer navigate for simplicity while debugging logs)
     (navigation as any).navigate('PaymentProcessing', {
@@ -435,7 +405,6 @@ export const PaymentConfirmationScreen = () => {
         prepared: preparedForNav
       }
     });
-    console.log('PaymentConfirmationScreen: Triggered navigation to PaymentProcessing');
 
     // Safety reset in case navigation is blocked by an unseen error
     setTimeout(() => {
@@ -689,7 +658,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
-    paddingTop: Platform.OS === 'ios' ? 48 : (StatusBar.currentHeight || 32),
+    paddingTop: Platform.OS === 'ios' ? APP_LAYOUT.topSafeArea : APP_LAYOUT.topSafeArea + 8,
     paddingBottom: 32,
     paddingHorizontal: 16,
   },

@@ -109,7 +109,7 @@ export const ReferralEventDetailScreen: React.FC = () => {
             </View>
           </View>
           <View style={styles.actions}>
-            <TouchableOpacity style={styles.primaryButton} onPress={() => navigation.navigate('MiProgresoViral')}>
+            <TouchableOpacity style={styles.primaryButton} onPress={() => navigation.navigate('Achievements')}>
               <Icon name="share-2" size={18} color="#fff" />
               <Text style={styles.primaryButtonText}>Compartir mi invitación</Text>
             </TouchableOpacity>

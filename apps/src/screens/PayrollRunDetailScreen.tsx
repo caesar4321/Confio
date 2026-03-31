@@ -52,7 +52,7 @@ const statusLabel = (status: string) => {
   switch (key) {
     case 'completed':
     case 'confirmed':
-      return { label: 'Completada', color: '#059669', bg: '#D1FAE5', icon: 'check-circle' };
+      return { label: 'Completada', color: '#10B981', bg: '#D1FAE5', icon: 'check-circle' };
     case 'prepared':
     case 'ready':
       return { label: 'Lista', color: '#4F46E5', bg: '#E0E7FF', icon: 'clock' };
@@ -107,7 +107,7 @@ export const PayrollRunDetailScreen = () => {
       await new Promise(resolve => setTimeout(resolve, 100));
 
       if (!fullRunRef.current) {
-        Alert.alert('Error', 'El comprobante no está listo para exportar.', [{ text: 'OK' }]);
+        Alert.alert('Error', 'El comprobante no está listo para exportar.', [{ text: 'Entendido' }]);
         setCapturingFullRun(false);
         return;
       }
@@ -125,7 +125,7 @@ export const PayrollRunDetailScreen = () => {
         'Comprobante guardado',
         'El comprobante se guardó en tu galería de fotos.',
         [
-          { text: 'OK', onPress: () => setCapturingFullRun(false) },
+          { text: 'Entendido', onPress: () => setCapturingFullRun(false) },
           {
             text: 'Compartir',
             onPress: async () => {
@@ -149,7 +149,7 @@ export const PayrollRunDetailScreen = () => {
       );
     } catch (e: any) {
       console.error('PDF share error', e);
-      Alert.alert('Error', 'No se pudo guardar el comprobante. Verifica los permisos de galería.', [{ text: 'OK' }]);
+      Alert.alert('Error', 'No se pudo guardar el comprobante. Verifica los permisos de galería.', [{ text: 'Entendido' }]);
       setCapturingFullRun(false);
     }
   };
@@ -168,7 +168,7 @@ export const PayrollRunDetailScreen = () => {
 
       const ref = receiptRefs.current[idx];
       if (!ref) {
-        Alert.alert('Error', 'El comprobante no está listo para exportar.', [{ text: 'OK' }]);
+        Alert.alert('Error', 'El comprobante no está listo para exportar.', [{ text: 'Entendido' }]);
         setCapturingIndex(null);
         return;
       }
@@ -186,7 +186,7 @@ export const PayrollRunDetailScreen = () => {
         'Comprobante guardado',
         'El comprobante se guardó en tu galería de fotos.',
         [
-          { text: 'OK', onPress: () => setCapturingIndex(null) },
+          { text: 'Entendido', onPress: () => setCapturingIndex(null) },
           {
             text: 'Compartir',
             onPress: async () => {
@@ -236,7 +236,7 @@ export const PayrollRunDetailScreen = () => {
         {/* Summary Card */}
         <View style={styles.summaryCard}>
           <View style={styles.summaryHeader}>
-            <Icon name="info" size={20} color="#059669" />
+            <Icon name="info" size={20} color="#10B981" />
             <Text style={styles.summaryTitle}>Resumen de la corrida</Text>
           </View>
 
@@ -278,13 +278,6 @@ export const PayrollRunDetailScreen = () => {
 
         {items.map((it: any, idx: number) => {
           const acctUser = it.recipientAccount?.user;
-          console.log(`[PayrollRunDetail] Item ${idx}:`, {
-            recipientUser: it.recipientUser,
-            recipientAccountUser: acctUser,
-            firstName: it.recipientUser?.firstName,
-            lastName: it.recipientUser?.lastName,
-            username: it.recipientUser?.username
-          });
           const name = `${it.recipientUser?.firstName || acctUser?.firstName || ''} ${it.recipientUser?.lastName || acctUser?.lastName || ''}`.trim()
             || it.recipientUser?.username || acctUser?.username || 'Empleado';
           const itemStatus = statusLabel(it.status);
@@ -333,7 +326,7 @@ export const PayrollRunDetailScreen = () => {
                 onPress={() => handleShareItemPdf(it, idx)}
                 activeOpacity={0.7}
               >
-                <Icon name="download" size={16} color="#059669" />
+                <Icon name="download" size={16} color="#10B981" />
                 <Text style={styles.receiptButtonText}>Descargar recibo individual</Text>
               </TouchableOpacity>
             </View>
@@ -492,8 +485,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   totalAmountLabel: { fontSize: 13, color: '#065F46', marginBottom: 4 },
-  totalAmountValue: { fontSize: 32, fontWeight: '700', color: '#059669' },
-  totalAmountSubtext: { fontSize: 12, color: '#059669', marginTop: 4 },
+  totalAmountValue: { fontSize: 32, fontWeight: '700', color: '#10B981' },
+  totalAmountSubtext: { fontSize: 12, color: '#10B981', marginTop: 4 },
 
   sectionHeader: {
     marginTop: 8,
@@ -566,21 +559,21 @@ const styles = StyleSheet.create({
     borderColor: '#A7F3D0',
     backgroundColor: '#ECFDF5',
   },
-  receiptButtonText: { fontSize: 13, fontWeight: '600', color: '#059669' },
+  receiptButtonText: { fontSize: 13, fontWeight: '600', color: '#10B981' },
 
   actionsContainer: {
     marginTop: 8,
     gap: 12,
   },
   primaryButton: {
-    backgroundColor: '#059669',
+    backgroundColor: '#10B981',
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
     gap: 8,
-    shadowColor: '#059669',
+    shadowColor: '#10B981',
     shadowOpacity: 0.3,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 4 },

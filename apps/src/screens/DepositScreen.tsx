@@ -41,23 +41,6 @@ const CHECK_ASSET_OPT_INS = gql`
   }
 `;
 
-const colors = {
-  primary: '#34D399', // emerald-400
-  secondary: '#8B5CF6', // violet-500
-  accent: '#3B82F6', // blue-500
-  background: '#F9FAFB', // gray-50
-  text: {
-    primary: '#1F2937', // gray-800
-    secondary: '#6B7280', // gray-500
-  },
-  warning: {
-    background: '#FEF3C7', // yellow-50
-    border: '#FDE68A', // yellow-200
-    text: '#92400E', // yellow-800
-    icon: '#D97706', // yellow-600
-  },
-};
-
 // Unified deposit configuration — same address for all tokens
 const depositConfig = {
   description: 'Recibe cUSD, USDC o CONFIO en la red de Algorand',
@@ -89,6 +72,7 @@ const depositConfig = {
 };
 
 import { AuthService } from '../services/authService';
+import { colors } from '../config/theme';
 
 // ... (imports)
 
@@ -117,7 +101,6 @@ const DepositScreen = () => {
         const authService = AuthService.getInstance();
         const address = await authService.getAlgorandAddress();
         if (address) {
-          console.log('[DepositScreen] Use fresh address from Keychain:', address);
           setLocalAddress(address);
         }
       } catch (e) {
@@ -152,13 +135,10 @@ const DepositScreen = () => {
 
   // Check if user is opted in to USDC and whether additional setup is needed
   useEffect(() => {
-    console.log('[DepositScreen] Checking opt-in status, optInData:', optInData);
 
     if (optInData?.checkAssetOptIns) {
       const { assetDetails, optedInAssets } = optInData.checkAssetOptIns;
 
-      console.log('[DepositScreen] Opted in assets:', optedInAssets);
-      console.log('[DepositScreen] Asset details:', assetDetails);
 
       // Parse assetDetails if it's a string
       let parsedAssetDetails = assetDetails;
@@ -177,7 +157,6 @@ const DepositScreen = () => {
       const hasCUSD = values.some((asset: any) => asset.symbol === 'cUSD');
       const hasCONFIO = values.some((asset: any) => asset.symbol === 'CONFIO');
 
-      console.log('[DepositScreen] Has USDC:', hasUSDC, 'Has cUSD:', hasCUSD, 'Has CONFIO:', hasCONFIO);
       setIsOptedIn(hasUSDC);
       setNeedsWalletSetup(Boolean(hasUSDC && (!hasCUSD || !hasCONFIO)));
 
@@ -227,30 +206,23 @@ const DepositScreen = () => {
   const handleOptIn = async () => {
     try {
       setOptingIn(true);
-      console.log('[DepositScreen] Activating USDC address');
 
       // Step A: Ensure cUSD application opt-in (sponsored) for business accounts
       try {
-        console.log('[DepositScreen] Ensuring cUSD app opt-in (sponsored)');
         const appOptIn = await cusdAppOptInService.handleAppOptIn(activeAccount);
-        console.log('[DepositScreen] cUSD app opt-in result:', appOptIn);
       } catch (e) {
         console.warn('[DepositScreen] cUSD app opt-in step failed or not required:', e);
       }
 
       // Step B: Ensure asset opt-ins for cUSD and CONFIO on business accounts
       try {
-        console.log('[DepositScreen] Ensuring business asset opt-ins (cUSD, CONFIO)');
         const ok = await businessOptInService.checkAndHandleOptIns((msg) => {
-          console.log('[DepositScreen] Business opt-in progress:', msg);
         });
-        console.log('[DepositScreen] Business asset opt-ins ready:', ok);
       } catch (e) {
         console.warn('[DepositScreen] Business asset opt-in step failed or not needed:', e);
       }
 
       // Request USDC opt-in from backend
-      console.log('[DepositScreen] Calling optInToAsset mutation for USDC...');
       const { data, errors } = await optInToAsset({
         variables: { assetType: 'USDC' }
       });
@@ -260,11 +232,9 @@ const DepositScreen = () => {
         return;
       }
 
-      console.log('[DepositScreen] USDC opt-in mutation response:', data);
 
       if (data?.optInToAssetByType?.alreadyOptedIn) {
         // Already opted in
-        console.log('[DepositScreen] User already opted in to USDC');
         setIsOptedIn(true);
         setNeedsWalletSetup(false);
         await refetchOptIns();
@@ -273,28 +243,22 @@ const DepositScreen = () => {
 
       if (data?.optInToAssetByType?.success && data.optInToAssetByType.requiresUserSignature) {
         // Need to sign the transaction
-        console.log('[DepositScreen] Got transactions to sign');
         const userTxn = data.optInToAssetByType.userTransaction;
         const sponsorTxn = data.optInToAssetByType.sponsorTransaction;
 
-        console.log('[DepositScreen] User transaction:', userTxn ? 'present' : 'missing');
-        console.log('[DepositScreen] Sponsor transaction:', sponsorTxn ? 'present' : 'missing');
 
         // Ensure wallet is initialized before signing (Critical for cold starts)
 
 
         // Sign and submit the transaction
-        console.log('[DepositScreen] Signing and submitting transaction...');
         const txId = await algorandService.signAndSubmitSponsoredTransaction(
           userTxn,
           sponsorTxn
         );
 
-        console.log('[DepositScreen] Transaction result:', txId);
 
         if (txId) {
           // Successfully opted in
-          console.log('[DepositScreen] Successfully opted in to USDC:', txId);
           await refetchOptIns();
           // Refresh accounts to ensure address is loaded
           await refreshAccounts();

@@ -4,20 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { useQuery, gql } from '@apollo/client';
 import { useNavigation } from '@react-navigation/native';
-
-const colors = {
-  primary: '#34d399',
-  primaryLight: '#d1fae5',
-  primaryDark: '#10b981',
-  secondary: '#8b5cf6',
-  secondaryLight: '#e9d5ff',
-  accent: '#3b82f6',
-  neutral: '#f9fafb',
-  neutralDark: '#f3f4f6',
-  dark: '#111827',
-  violet: '#8b5cf6',
-  violetLight: '#ddd6fe',
-};
+import { colors } from '../config/theme';
 
 const GET_STATS_SUMMARY = gql`
   query GetStatsSummary {

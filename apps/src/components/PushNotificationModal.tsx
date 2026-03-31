@@ -12,18 +12,9 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import Svg, { LinearGradient, Defs, Stop, Rect } from 'react-native-svg';
+import { colors } from '../config/theme';
 
 const { width, height } = Dimensions.get('window');
-
-const colors = {
-  primary: '#34D399',
-  primaryDark: '#059669',
-  primaryLight: '#D1FAE5',
-  secondary: '#8B5CF6',
-  dark: '#111827',
-  gray: '#6B7280',
-  lightGray: '#F3F4F6',
-};
 
 interface PushNotificationModalProps {
   visible: boolean;
@@ -38,7 +29,6 @@ export const PushNotificationModal: React.FC<PushNotificationModalProps> = ({
   onDeny,
   needsSettings = false,
 }) => {
-  console.log('[PushNotificationModal] Component rendered with visible:', visible);
   const slideAnim = useRef(new Animated.Value(height)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
@@ -300,7 +290,7 @@ const styles = StyleSheet.create({
   privacyContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.lightGray,
+    backgroundColor: colors.neutralDark,
     padding: 16,
     borderRadius: 12,
     marginBottom: 24,

@@ -347,7 +347,7 @@ export const ActiveTradeScreen: React.FC = () => {
           'Tu disputa ha sido registrada. Un administrador revisará el caso pronto.',
           [
             {
-              text: 'OK',
+              text: 'Entendido',
               onPress: () => navigation.goBack(),
             },
           ],
@@ -1110,19 +1110,6 @@ export const ActiveTradeScreen: React.FC = () => {
             // Get the correct counterparty stats
             const counterpartyStats = iAmBuyer ? fullTradeData?.sellerStats : fullTradeData?.buyerStats;
 
-            console.log('[ActiveTradeScreen] Rating navigation:', {
-              iAmBuyer,
-              tradeType: trade.tradeType,
-              buyerUser: fullTradeData?.buyerUser,
-              buyerBusiness: fullTradeData?.buyerBusiness,
-              sellerUser: fullTradeData?.sellerUser,
-              sellerBusiness: fullTradeData?.sellerBusiness,
-              buyerDisplayName: fullTradeData?.buyerDisplayName,
-              sellerDisplayName: fullTradeData?.sellerDisplayName,
-              counterpartyName,
-              counterpartyStats,
-              hasRating: trade.hasRating,
-            });
 
             navigation.navigate('TraderRating', {
               tradeId: trade.id,
@@ -1819,7 +1806,7 @@ const styles = StyleSheet.create({
   },
   paymentMethodSubtitle: {
     fontSize: 14,
-    color: '#059669',
+    color: '#10B981',
   },
   cashInstructionsCard: {
     backgroundColor: '#FEF3C7',

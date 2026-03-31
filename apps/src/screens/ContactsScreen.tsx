@@ -16,6 +16,7 @@ import { useApolloClient, useMutation, gql, useQuery } from '@apollo/client';
 import { useAccount } from '../contexts/AccountContext';
 import { INVITE_EMPLOYEE, GET_CURRENT_BUSINESS_EMPLOYEES, GET_CURRENT_BUSINESS_INVITATIONS, CANCEL_INVITATION, GET_PENDING_PAYROLL_ITEMS } from '../apollo/queries';
 import { getCountryByIso } from '../utils/countries';
+import { colors } from '../config/theme';
 
 // Utility function to format phone number with country code
 const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string => {
@@ -35,23 +36,6 @@ const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string 
 
 type ContactsScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
-
-const colors = {
-  primary: '#34d399', // emerald-400
-  primaryText: '#34d399',
-  primaryLight: '#d1fae5',
-  primaryDark: '#059669',
-  secondary: '#8b5cf6',
-  secondaryText: '#8b5cf6',
-  accent: '#3b82f6',
-  accentText: '#3b82f6',
-  violet: '#8b5cf6',
-  violetText: '#8b5cf6',
-  violetLight: '#f5f3ff',
-  neutral: '#f9fafb',
-  neutralDark: '#f3f4f6',
-  dark: '#111827',
-};
 
 // Memoized ContactCard component moved outside to prevent recreation
 interface ContactCardProps {
@@ -243,26 +227,8 @@ export const ContactsScreen = () => {
   // Debug logging for business account
   React.useEffect(() => {
     if (isBusinessAccount) {
-      console.log('ContactsScreen - Business account debug:', {
-        isBusinessAccount,
-        activeAccountId: activeAccount?.id,
-        activeAccountType: activeAccount?.type,
-        businessName: activeAccount?.business?.name,
-        businessId: activeAccount?.business?.id,
-        isEmployee: activeAccount?.isEmployee,
-        employeeRole: activeAccount?.employeeRole
-      });
 
       // Log query status
-      console.log('ContactsScreen - Query status:', {
-        employeesLoading,
-        employeesError: employeesError?.message,
-        employeesData: employeesData?.currentBusinessEmployees?.length || 0,
-        invitationsLoading,
-        invitationsError: invitationsError?.message,
-        invitationsData: invitationsData?.currentBusinessInvitations?.length || 0,
-        skip: !isBusinessAccount,
-      });
     }
   }, [isBusinessAccount, activeAccount, employeesLoading, employeesError, employeesData, invitationsLoading, invitationsError, invitationsData]);
 
@@ -350,13 +316,10 @@ export const ContactsScreen = () => {
   // Check contact permission on mount - only for confirmed personal accounts
   useEffect(() => {
     if (!isPersonalAccount) {
-      console.log('[PERF] Not personal account - skipping contact permission check');
       return;
     }
-    console.log('[PERF] ContactsScreen mounted');
     const startTime = Date.now();
     checkContactPermission().then(() => {
-      console.log(`[PERF] checkContactPermission completed in ${Date.now() - startTime}ms`);
     });
   }, [isPersonalAccount]);
 
@@ -366,7 +329,6 @@ export const ContactsScreen = () => {
       return;
     }
 
-    console.log('[PERF] Starting contact loading monitor');
     let checkCount = 0;
 
     // Check for contacts every 100ms until loaded
@@ -374,12 +336,10 @@ export const ContactsScreen = () => {
       checkCount++;
       const checkStart = Date.now();
       const contacts = await contactService.getAllContacts();
-      console.log(`[PERF] Check #${checkCount}: getAllContacts took ${Date.now() - checkStart}ms, got ${contacts.length} contacts`);
 
       if (contacts.length > 0) {
         const displayStart = Date.now();
         await displayContacts(contacts);
-        console.log(`[PERF] displayContacts took ${Date.now() - displayStart}ms`);
         setIsInitialLoad(false);
         clearInterval(checkInterval);
       }
@@ -401,18 +361,15 @@ export const ContactsScreen = () => {
       setHasContactPermission(hasPermission);
 
       if (hasPermission) {
-        console.log('[PERF] Has permission, getting initial contacts');
         const getContactsStart = Date.now();
 
         // Get initial contacts (may be empty if still loading)
         const contacts = await contactService.getAllContacts();
-        console.log(`[PERF] Initial getAllContacts took ${Date.now() - getContactsStart}ms, got ${contacts.length} contacts`);
 
         if (contacts.length > 0) {
           // Display immediately if available
           const displayStart = Date.now();
           await displayContacts(contacts);
-          console.log(`[PERF] Initial displayContacts took ${Date.now() - displayStart}ms`);
           setIsInitialLoad(false);
         }
 
@@ -446,12 +403,10 @@ export const ContactsScreen = () => {
     const startTime = Date.now();
 
     if (allContacts.length === 0) {
-      console.log('No contacts to display');
       setContactsData({ friends: [], nonConfioFriends: [], allContacts: [], isLoaded: true });
       return;
     }
 
-    console.log(`[PERF] Starting to format ${allContacts.length} contacts`);
     const formatStart = Date.now();
 
     // Format contacts using the cached Confío status
@@ -465,15 +420,12 @@ export const ContactsScreen = () => {
       algorandAddress: contact.confioAlgorandAddress || null
     }));
 
-    console.log(`[PERF] Formatting took ${Date.now() - formatStart}ms`);
 
     // Split into Confío users and non-Confío users
     const splitStart = Date.now();
     const confioUsers = formattedContacts.filter(contact => contact.isOnConfio);
     const nonConfioUsers = formattedContacts.filter(contact => !contact.isOnConfio);
 
-    console.log(`[PERF] Found ${confioUsers.length} Confío users and ${nonConfioUsers.length} non-Confío users`);
-    console.log(`[PERF] Splitting contacts took ${Date.now() - splitStart}ms`);
 
     // SINGLE STATE UPDATE - This is the key optimization!
     const setStateStart = Date.now();
@@ -483,9 +435,7 @@ export const ContactsScreen = () => {
       allContacts: allContacts,
       isLoaded: true
     });
-    console.log(`[PERF] setState call took ${Date.now() - setStateStart}ms`);
 
-    console.log(`[PERF] Total displayContacts time: ${Date.now() - startTime}ms`);
   };
 
   // Sync contacts with device
@@ -498,12 +448,10 @@ export const ContactsScreen = () => {
     setIsLoadingContacts(true);
     try {
       const success = await contactService.syncContacts(apolloClient);
-      console.log('Sync success:', success);
 
       if (success) {
         // Get all contacts from device
         const allContacts = await contactService.getAllContacts();
-        console.log('Retrieved contacts:', allContacts.length);
 
         await displayContacts(allContacts);
       }
@@ -585,7 +533,6 @@ export const ContactsScreen = () => {
         }
       }
       // Manual refresh - always sync
-      console.log('[SYNC] Manual refresh - syncing contacts');
       const success = await contactService.syncContacts(apolloClient);
       if (success) {
         const allContacts = await contactService.getAllContacts();
@@ -631,7 +578,6 @@ export const ContactsScreen = () => {
   };
 
   const handleSendToFriend = (friend: any) => {
-    console.log('ContactsScreen: handleSendToFriend called with friend:', friend.name);
     // Include Algorand address if available
     const friendWithAddress = {
       ...friend,
@@ -642,14 +588,11 @@ export const ContactsScreen = () => {
   };
 
   const handleFriendTokenSelection = (tokenType: 'cusd' | 'confio') => {
-    console.log('ContactsScreen: handleFriendTokenSelection called with tokenType:', tokenType);
-    console.log('ContactsScreen: selectedFriend:', selectedFriend);
     setShowFriendTokenSelection(false);
     navigation.navigate('SendToFriend', { friend: selectedFriend, tokenType });
   };
 
   const handleInviteFriend = (friend: any) => {
-    console.log('ContactsScreen: handleInviteFriend called with friend:', friend.name);
     // For non-Confío friends, we can still send them money with an invitation
     setSelectedFriend(friend);
     setShowFriendTokenSelection(true);
@@ -740,7 +683,6 @@ export const ContactsScreen = () => {
 
   const handleToggleEmployee = useCallback(async (contact: any) => {
     // TODO: Implement employee activation/deactivation
-    console.log('Toggle employee:', contact);
     Alert.alert('Funcionalidad Pendiente', 'La activación/desactivación de empleados estará disponible pronto.');
   }, []);
 
@@ -755,7 +697,6 @@ export const ContactsScreen = () => {
           style: 'destructive',
           onPress: async () => {
             // TODO: Implement employee removal
-            console.log('Remove employee:', contact);
             Alert.alert('Funcionalidad Pendiente', 'La eliminación de empleados estará disponible pronto.');
           }
         }
@@ -1603,7 +1544,6 @@ export const ContactsScreen = () => {
             // Refresh both employees and invitations data
             refetchEmployees();
             refetchInvitations();
-            console.log('Employee invitation successful, data refreshed');
           }}
         />
       )}
@@ -1866,7 +1806,7 @@ const styles = StyleSheet.create({
   },
   employeeRole: {
     fontSize: 12,
-    color: '#059669',
+    color: '#10B981',
     marginTop: 2,
   },
   employeeActionContainer: {

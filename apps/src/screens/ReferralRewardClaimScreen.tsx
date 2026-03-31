@@ -24,16 +24,7 @@ import {
 import algorandService from '../services/algorandService';
 import { useAuth } from '../contexts/AuthContext';
 import LoadingOverlay from '../components/LoadingOverlay';
-
-const colors = {
-  background: '#FFFFFF',
-  surface: '#FFFFFF',
-  accent: '#047857',
-  accentSoft: '#ECFDF5',
-  textPrimary: '#0F172A',
-  textMuted: '#6B7280',
-  border: 'rgba(15,23,42,0.08)',
-};
+import { colors } from '../config/theme';
 
 type UserInfo = {
   id: string;
@@ -230,7 +221,7 @@ export const ReferralRewardClaimScreen: React.FC = () => {
       if (item.type === 'empty') {
         return (
           <View style={styles.emptyState}>
-            <Icon name="gift" size={32} color={colors.textMuted} />
+            <Icon name="gift" size={32} color={colors.textSecondary} />
             <Text style={styles.emptyTitle}>Sin recompensas pendientes</Text>
             <Text style={styles.emptySubtitle}>
               Si completaste una misión, asegúrate de iniciar sesión con la
@@ -427,7 +418,7 @@ export const ReferralRewardClaimScreen: React.FC = () => {
       <LoadingOverlay visible={!!loadingMessage} message={loadingMessage} />
       <View style={[styles.header, { paddingTop: headerPaddingTop }]}>
         <TouchableOpacity onPress={handleBack} style={styles.backButton}>
-          <Icon name="arrow-left" size={22} color={colors.textPrimary} />
+          <Icon name="arrow-left" size={22} color={colors.textFlat} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Desbloquear $CONFIO</Text>
         <View style={styles.headerSpacer} />
@@ -487,7 +478,7 @@ const styles = StyleSheet.create({
     padding: 6,
   },
   headerTitle: {
-    color: colors.textPrimary,
+    color: colors.textFlat,
     fontSize: 18,
     fontWeight: '600',
   },
@@ -500,7 +491,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   loadingText: {
-    color: colors.textMuted,
+    color: colors.textSecondary,
     marginTop: 12,
   },
   scroll: {
@@ -520,17 +511,17 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   summaryLabel: {
-    color: colors.textMuted,
+    color: colors.textSecondary,
     fontSize: 14,
   },
   summaryValue: {
-    color: colors.textPrimary,
+    color: colors.textFlat,
     fontSize: 30,
     fontWeight: '700',
     marginVertical: 6,
   },
   summarySubtext: {
-    color: colors.textMuted,
+    color: colors.textSecondary,
     fontSize: 14,
     lineHeight: 20,
   },
@@ -540,13 +531,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   emptyTitle: {
-    color: colors.textPrimary,
+    color: colors.textFlat,
     fontSize: 18,
     fontWeight: '600',
     marginTop: 12,
   },
   emptySubtitle: {
-    color: colors.textMuted,
+    color: colors.textSecondary,
     textAlign: 'center',
     marginTop: 8,
     lineHeight: 20,
@@ -597,11 +588,11 @@ const styles = StyleSheet.create({
   pendingTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: colors.textPrimary,
+    color: colors.textFlat,
   },
   pendingSubtitle: {
     fontSize: 14,
-    color: colors.textMuted,
+    color: colors.textSecondary,
     marginTop: 4,
   },
   pendingBadge: {
@@ -631,18 +622,18 @@ const styles = StyleSheet.create({
     color: colors.accent,
   },
   rewardTitle: {
-    color: colors.textPrimary,
+    color: colors.textFlat,
     fontSize: 20,
     fontWeight: '600',
   },
   rewardSubtitle: {
-    color: colors.textMuted,
+    color: colors.textSecondary,
     fontSize: 13,
     marginTop: 2,
     textTransform: 'capitalize',
   },
   rewardMeta: {
-    color: colors.textMuted,
+    color: colors.textSecondary,
     fontSize: 12,
     marginTop: 4,
   },
@@ -669,13 +660,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
   },
   errorTitle: {
-    color: colors.textPrimary,
+    color: colors.textFlat,
     fontSize: 18,
     fontWeight: '600',
     marginTop: 12,
   },
   errorSubtitle: {
-    color: colors.textMuted,
+    color: colors.textSecondary,
     textAlign: 'center',
     marginTop: 6,
     marginBottom: 16,

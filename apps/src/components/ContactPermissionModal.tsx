@@ -286,7 +286,7 @@ const styles = StyleSheet.create({
   privacyText: {
     flex: 1,
     fontSize: 14,
-    color: '#059669',
+    color: '#10B981',
     lineHeight: 20,
   },
   howItWorksContainer: {

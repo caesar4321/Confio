@@ -6,6 +6,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQuery } from '@apollo/client';
 import { GET_PAYROLL_RUNS } from '../apollo/queries';
 import { MainStackParamList } from '../types/navigation';
+import { APP_LAYOUT } from '../config/layout';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'PayrollRunsHistory'>;
 
@@ -24,7 +25,7 @@ const statusStyles = (status: string) => {
   switch (key) {
     case 'completed':
     case 'confirmed':
-      return { bg: '#D1FAE5', fg: '#059669', label: 'Completada', icon: 'check-circle' };
+      return { bg: '#D1FAE5', fg: '#10B981', label: 'Completada', icon: 'check-circle' };
     case 'prepared':
     case 'ready':
       return { bg: '#E0E7FF', fg: '#4F46E5', label: 'Lista', icon: 'clock' };
@@ -189,7 +190,7 @@ const PayrollRunsHistoryScreen = () => {
         </View>
 
         <View style={styles.cardFooter}>
-          <Icon name="file-text" size={14} color="#059669" />
+          <Icon name="file-text" size={14} color="#10B981" />
           <Text style={styles.footerText}>Toca para ver detalle y descargar PDF</Text>
           <Icon name="chevron-right" size={16} color="#9CA3AF" />
         </View>
@@ -240,7 +241,7 @@ const PayrollRunsHistoryScreen = () => {
         <View style={styles.statsContainer}>
           <View style={styles.statsRow}>
             <View style={[styles.statCard, { flex: 1 }]}>
-              <Icon name="briefcase" size={20} color="#059669" />
+              <Icon name="briefcase" size={20} color="#10B981" />
               <Text style={styles.statCardValue}>{statistics.totalRuns}</Text>
               <Text style={styles.statCardLabel}>Corridas</Text>
               {statistics.completedRuns < statistics.totalRuns && (
@@ -260,7 +261,7 @@ const PayrollRunsHistoryScreen = () => {
 
           <View style={styles.totalPaidCard}>
             <View style={styles.totalPaidHeader}>
-              <Icon name="trending-up" size={20} color="#059669" />
+              <Icon name="trending-up" size={20} color="#10B981" />
               <Text style={styles.totalPaidLabel}>Total pagado</Text>
             </View>
             <Text style={styles.totalPaidValue}>{formatCurrency(statistics.totalPaid)} cUSD</Text>
@@ -284,8 +285,8 @@ const PayrollRunsHistoryScreen = () => {
             <RefreshControl
               refreshing={loading}
               onRefresh={() => refetch()}
-              tintColor="#059669"
-              colors={['#059669']}
+              tintColor="#10B981"
+              colors={['#10B981']}
             />
           }
           ListEmptyComponent={
@@ -318,7 +319,7 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 16,
     paddingHorizontal: 16,
-    marginTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 10 : 0,
+    marginTop: Platform.OS === 'android' ? APP_LAYOUT.topSafeArea + 10 : 0,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#fff',
@@ -358,7 +359,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
   filterChipSelected: {
-    borderColor: '#059669',
+    borderColor: '#10B981',
     backgroundColor: '#D1FAE5'
   },
   filterText: {
@@ -367,7 +368,7 @@ const styles = StyleSheet.create({
     color: '#6B7280'
   },
   filterTextSelected: {
-    color: '#059669'
+    color: '#10B981'
   },
   statsContainer: {
     padding: 16,
@@ -427,12 +428,12 @@ const styles = StyleSheet.create({
   totalPaidValue: {
     fontSize: 32,
     fontWeight: '700',
-    color: '#059669',
+    color: '#10B981',
     marginBottom: 4,
   },
   totalPaidSubtext: {
     fontSize: 12,
-    color: '#059669',
+    color: '#10B981',
   },
   listContent: {
     padding: 16,
@@ -526,7 +527,7 @@ const styles = StyleSheet.create({
   footerText: {
     flex: 1,
     fontSize: 12,
-    color: '#059669',
+    color: '#10B981',
     fontWeight: '500',
   },
   empty: {

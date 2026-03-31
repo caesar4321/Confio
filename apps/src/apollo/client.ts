@@ -83,7 +83,7 @@ async function performRefreshWithFetch(rt: string): Promise<string> {
     {
       service: AUTH_KEYCHAIN_SERVICE,
       username: AUTH_KEYCHAIN_USERNAME,
-      accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
+      accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK
     }
   );
   console.log(`[PERF][Apollo] performRefreshWithFetch Keychain write: ${Date.now() - keychainWriteStart}ms`);
@@ -375,7 +375,7 @@ const authLink = setContext(async (operation, previousContext) => {
                     {
                       service: AUTH_KEYCHAIN_SERVICE,
                       username: AUTH_KEYCHAIN_USERNAME,
-                      accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
+                      accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK
                     }
                   );
                   // Replace local token/decoded with refreshed values

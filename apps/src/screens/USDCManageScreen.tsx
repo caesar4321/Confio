@@ -5,32 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import USDCLogo from '../assets/png/USDC.png';
 import cUSDLogo from '../assets/png/cUSD.png';
-
-const colors = {
-  primary: '#34D399', // emerald-400
-  primaryText: '#34D399',
-  primaryLight: '#D1FAE5', // emerald-100
-  primaryDark: '#10B981', // emerald-500
-  secondary: '#8B5CF6', // violet-500
-  secondaryText: '#8B5CF6',
-  accent: '#3B82F6', // blue-500
-  accentText: '#3B82F6',
-  neutral: '#F9FAFB', // gray-50
-  neutralDark: '#F3F4F6', // gray-100
-  dark: '#111827', // gray-900
-  warning: {
-    background: '#FEF2F2', // red-50
-    border: '#FEE2E2', // red-200
-    text: '#991B1B', // red-800
-    icon: '#DC2626', // red-600
-  },
-  success: {
-    background: '#ECFDF5', // green-50
-    border: '#D1FAE5', // green-200
-    text: '#065F46', // green-800
-    icon: '#059669', // green-600
-  },
-};
+import { colors } from '../config/theme';
 
 const USDCManageScreen = () => {
   const navigation = useNavigation();
@@ -572,7 +547,7 @@ const styles = StyleSheet.create({
   infoTitle: {
     fontWeight: 'bold',
       fontSize: 16,
-      color: '#059669',
+      color: '#10B981',
       marginBottom: 6,
   },
   benefitsList: {

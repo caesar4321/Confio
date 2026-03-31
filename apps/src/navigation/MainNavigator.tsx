@@ -54,8 +54,6 @@ import { ConfioPresaleScreen } from '../screens/ConfioPresaleScreen';
 import { ConfioPresaleParticipateScreen } from '../screens/ConfioPresaleParticipateScreen';
 import { LoadingOverlay } from '../components/LoadingOverlay';
 import { ConfioTokenomicsScreen } from '../screens/ConfioTokenomicsScreen';
-import { MiProgresoViralScreen } from '../screens/MiProgresoViralScreen';
-import { ViralTemplatesScreen } from '../screens/ViralTemplatesScreen';
 import { ReferralFriendJoinedScreen } from '../screens/ReferralFriendJoinedScreen';
 import { ReferralActionPromptScreen } from '../screens/ReferralActionPromptScreen';
 import { ReferralEventDetailScreen } from '../screens/ReferralEventDetailScreen';
@@ -448,16 +446,7 @@ export const MainNavigator = () => {
           component={ConfioTokenomicsScreen}
           options={{ headerShown: false }}
         />
-        <Stack.Screen
-          name="MiProgresoViral"
-          component={MiProgresoViralScreen}
-          options={{ headerShown: false }}
-        />
-        <Stack.Screen
-          name="ViralTemplates"
-          component={ViralTemplatesScreen}
-          options={{ headerShown: false }}
-        />
+
         <Stack.Screen
           name="ReferralFriendJoined"
           component={ReferralFriendJoinedScreen}

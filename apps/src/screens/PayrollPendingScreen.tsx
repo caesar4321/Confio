@@ -12,16 +12,10 @@ import { Buffer } from 'buffer';
 import { useAccount } from '../contexts/AccountContext';
 import { biometricAuthService } from '../services/biometricAuthService';
 import LoadingOverlay from '../components/LoadingOverlay';
+import { colors } from '../config/theme';
+import { APP_LAYOUT } from '../config/layout';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'PayrollPending'>;
-
-const colors = {
-  primary: '#34d399',
-  text: '#111827',
-  muted: '#6b7280',
-  border: '#e5e7eb',
-  bg: '#f9fafb',
-};
 
 const statusStyles = (status: string) => {
   const key = (status || '').toLowerCase();
@@ -94,7 +88,7 @@ export const PayrollPendingScreen = () => {
         Alert.alert(
           'Biometría bloqueada',
           'Desbloquea tu dispositivo con passcode y vuelve a intentar.',
-          [{ text: 'OK', style: 'default' }],
+          [{ text: 'Entendido', style: 'default' }],
         );
         return;
       }
@@ -145,11 +139,8 @@ export const PayrollPendingScreen = () => {
       setProcessingMessage('Firmando transacción…');
 
       const unsignedBytes = Uint8Array.from(Buffer.from(prep.unsignedTransactionB64, 'base64'));
-      console.log('Payroll pay: unsigned len', unsignedBytes.length, 'first bytes', Array.from(unsignedBytes.slice(0, 8)));
       const signedBytes = await algorandService.signTransactionBytes(unsignedBytes);
-      console.log('Payroll pay: signed len', signedBytes.length, 'first bytes', Array.from(signedBytes.slice(0, 8)));
       let signedB64 = Buffer.from(signedBytes).toString('base64');
-      console.log('Payroll pay: signed b64 len', signedB64.length, 'preview', signedB64.slice(0, 12));
       if (signedB64.length % 4 !== 0) {
         signedB64 = signedB64 + '='.repeat((4 - (signedB64.length % 4)) % 4);
       }
@@ -186,7 +177,7 @@ export const PayrollPendingScreen = () => {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Icon name="chevron-left" size={24} color={colors.text} />
+          <Icon name="chevron-left" size={24} color={colors.textFlat} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Nómina pendiente</Text>
         <TouchableOpacity
@@ -285,7 +276,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    marginTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 10 : 0,
+    marginTop: Platform.OS === 'android' ? APP_LAYOUT.topSafeArea + 10 : 0,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
@@ -305,7 +296,7 @@ const styles = StyleSheet.create({
   historyText: {
     fontSize: 12,
     fontWeight: '700',
-    color: colors.text,
+    color: colors.textFlat,
   },
   balanceCard: {
     marginHorizontal: 16,
@@ -321,7 +312,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   balanceLabel: { fontSize: 12, color: colors.muted, marginBottom: 4 },
-  balanceValue: { fontSize: 18, fontWeight: '700', color: colors.text },
+  balanceValue: { fontSize: 18, fontWeight: '700', color: colors.textFlat },
   balanceHint: { fontSize: 12, color: colors.muted, marginTop: 2 },
   balanceError: { fontSize: 12, color: '#b91c1c', marginTop: 2 },
   topUpButton: {
@@ -339,13 +330,13 @@ const styles = StyleSheet.create({
   topUpText: {
     fontSize: 12,
     fontWeight: '700',
-    color: colors.text,
+    color: colors.textFlat,
   },
   headerTitle: {
     flex: 1,
     textAlign: 'center',
     fontSize: 18,
-    color: colors.text,
+    color: colors.textFlat,
     fontWeight: '600',
   },
   listContent: {
@@ -374,7 +365,7 @@ const styles = StyleSheet.create({
   },
   business: {
     fontSize: 14,
-    color: colors.text,
+    color: colors.textFlat,
     fontWeight: '600',
   },
   status: {
@@ -385,7 +376,7 @@ const styles = StyleSheet.create({
   amount: {
     fontSize: 18,
     fontWeight: '700',
-    color: colors.text,
+    color: colors.textFlat,
     marginBottom: 4,
   },
   subtext: {
@@ -435,7 +426,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontSize: 16,
     fontWeight: '600',
-    color: colors.text,
+    color: colors.textFlat,
   },
   emptySubtitle: {
     marginTop: 4,

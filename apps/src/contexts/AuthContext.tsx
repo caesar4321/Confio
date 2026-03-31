@@ -409,7 +409,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
                     {
                       service: AUTH_KEYCHAIN_SERVICE,
                       username: AUTH_KEYCHAIN_USERNAME,
-                      accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
+                      accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK
                     }
                   );
                   console.log('AuthContext - Stored updated JWT token with business context');
@@ -559,7 +559,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
                 {
                   service: AUTH_KEYCHAIN_SERVICE,
                   username: AUTH_KEYCHAIN_USERNAME,
-                  accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED,
+                  accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK,
                 }
               );
             }
@@ -891,7 +891,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
                       {
                         service: 'com.confio.auth',
                         username: 'auth_tokens',
-                        accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED,
+                        accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK,
                       }
                     );
                     perfLog('Persist refreshed access token to Keychain', keychainWriteStart);
@@ -957,7 +957,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
                     {
                       service: 'com.confio.auth',
                       username: 'auth_tokens',
-                      accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED,
+                      accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK,
                     }
                   );
                   perfLog('Persist business-context access token to Keychain', businessKeychainWriteStart);

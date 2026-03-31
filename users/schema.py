@@ -1904,23 +1904,67 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			return []
 		
 		results = []
-		
-		# Clean and normalize phone numbers
+		if not phone_numbers:
+			return results
+			
+		phone_to_key = {}
+		phone_to_cleaned = {}
+		keys_set = set()
+		cleaned_set = set()
+
+		# Collect unique formatted inputs
 		for phone in phone_numbers:
 			# Prefer canonical phone key matching across ISO variants
 			key = normalize_any_phone(phone)
-			found_user = None
 			if key:
-				found_user = User.objects.filter(phone_key=key).first()
+				phone_to_key[phone] = key
+				keys_set.add(key)
 			else:
 				# Fallback: digits-only direct match
 				cleaned_phone = ''.join(filter(str.isdigit, phone))
 				if cleaned_phone:
-					found_user = User.objects.filter(phone_number=cleaned_phone).first()
+					phone_to_cleaned[phone] = cleaned_phone
+					cleaned_set.add(cleaned_phone)
+			
+		from django.db.models import Q, Prefetch
+		from users.models import Account
+		
+		query = Q()
+		if keys_set:
+			query |= Q(phone_key__in=keys_set)
+		if cleaned_set:
+			query |= Q(phone_number__in=cleaned_set)
+
+		matched_users_by_key = {}
+		matched_users_by_cleaned = {}
+
+		if query:
+			accounts_prefetch = Prefetch(
+				'accounts',
+				queryset=Account.objects.filter(account_type='personal', account_index=0),
+				to_attr='prefetched_active_accounts'
+			)
+			users = User.objects.filter(query).prefetch_related(accounts_prefetch)
+			
+			for u in users:
+				if u.phone_key:
+					matched_users_by_key[u.phone_key] = u
+				if u.phone_number:
+					matched_users_by_cleaned[u.phone_number] = u
+
+		for phone in phone_numbers:
+			found_user = None
+			key = phone_to_key.get(phone)
+			if key and key in matched_users_by_key:
+				found_user = matched_users_by_key[key]
+			else:
+				cleaned_phone = phone_to_cleaned.get(phone)
+				if cleaned_phone and cleaned_phone in matched_users_by_cleaned:
+					found_user = matched_users_by_cleaned[cleaned_phone]
 			
 			if found_user:
 				# Get the user's active account
-				active_account = found_user.accounts.filter(account_type='personal', account_index=0).first()
+				active_account = found_user.prefetched_active_accounts[0] if getattr(found_user, 'prefetched_active_accounts', []) else None
 				
 				results.append(UserByPhoneType(
 					phone_number=phone,  # Return original phone number for matching
@@ -1954,13 +1998,57 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			return []
 
 		results = []
+		if not usernames:
+			return results
+
+		cleaned_to_raw = {}
+		for raw in usernames:
+			username = (raw or '').lstrip('@')
+			if username:
+				cleaned_to_raw[username.lower()] = raw
+
+		if not cleaned_to_raw:
+			for raw in usernames:
+				results.append(UserByPhoneType(
+					phone_number=None,
+					user_id=None,
+					username=(raw or '').lstrip('@'),
+					first_name=None,
+					last_name=None,
+					is_on_confio=False,
+					active_account_id=None,
+					active_account_algorand_address=None
+				))
+			return results
+
+		from django.db.models import Prefetch
+		from django.db.models.functions import Lower
+		from users.models import Account
+
+		accounts_prefetch = Prefetch(
+			'accounts',
+			queryset=Account.objects.filter(account_type='personal', account_index=0),
+			to_attr='prefetched_active_accounts'
+		)
+		
+		users = User.objects.annotate(
+			lower_username=Lower('username')
+		).filter(
+			lower_username__in=list(cleaned_to_raw.keys())
+		).prefetch_related(accounts_prefetch)
+
+		matched_users = {u.lower_username: u for u in users}
+
 		for raw in usernames:
 			username = (raw or '').lstrip('@')
 			if not username:
 				continue
-			found_user = User.objects.filter(username__iexact=username).first()
+				
+			lower_user = username.lower()
+			found_user = matched_users.get(lower_user)
+			
 			if found_user:
-				active_account = found_user.accounts.filter(account_type='personal', account_index=0).first()
+				active_account = found_user.prefetched_active_accounts[0] if getattr(found_user, 'prefetched_active_accounts', []) else None
 				results.append(UserByPhoneType(
 					phone_number=found_user.phone_number,
 					user_id=found_user.id,

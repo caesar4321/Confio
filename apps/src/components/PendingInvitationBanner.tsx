@@ -39,7 +39,7 @@ export const PendingInvitationBanner = () => {
           `Ahora eres empleado de ${invitation.business.name}`,
           [
             {
-              text: 'OK',
+              text: 'Entendido',
               onPress: async () => {
                 await refreshAccounts();
                 await refetch();
@@ -51,11 +51,11 @@ export const PendingInvitationBanner = () => {
         Alert.alert(
           'Error',
           data?.acceptInvitation?.errors?.[0] || 'No se pudo aceptar la invitación',
-          [{ text: 'OK' }]
+          [{ text: 'Entendido' }]
         );
       }
     } catch (error) {
-      Alert.alert('Error', 'Ocurrió un error al aceptar la invitación', [{ text: 'OK' }]);
+      Alert.alert('Error', 'Ocurrió un error al aceptar la invitación', [{ text: 'Entendido' }]);
     }
   };
 

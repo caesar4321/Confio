@@ -61,7 +61,7 @@ class BusinessOptInService {
         {
           service: this.KEYCHAIN_SERVICE,
           username: this.KEYCHAIN_USERNAME,
-          accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
+          accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK
         }
       );
       console.log('Saved opt-in statuses to Keychain');

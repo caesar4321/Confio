@@ -26,26 +26,9 @@ import { useAccount } from '../contexts/AccountContext';
 import { TransactionFilterModal, TransactionFilters } from '../components/TransactionFilterModal';
 import moment from 'moment';
 import 'moment/locale/es';
+import { colors } from '../config/theme';
 
 // Color palette
-const colors = {
-  primary: '#34D399', // emerald-400
-  primaryText: '#34d399',
-  primaryLight: '#d1fae5', // emerald-100
-  primaryDark: '#10b981', // emerald-500
-  secondary: '#8b5cf6', // violet-500
-  secondaryText: '#8b5cf6',
-  accent: '#3b82f6', // blue-500
-  accentText: '#3b82f6',
-  neutral: '#f9fafb', // gray-50
-  neutralDark: '#f3f4f6', // gray-100
-  dark: '#111827', // gray-900
-  text: {
-    primary: '#1F2937', // gray-800
-    secondary: '#6B7280', // gray-500
-  },
-};
-
 type FriendDetailScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 type FriendDetailScreenRouteProp = RouteProp<MainStackParamList, 'FriendDetail'>;
 
@@ -189,10 +172,6 @@ export function FriendDetailScreen() {
     notifyOnNetworkStatusChange: true,
     skip: false,
     onCompleted: (data) => {
-      console.log('FriendDetailScreen - Friend transactions query completed:', {
-        hasData: !!data,
-        transactionCount: data?.unifiedTransactionsWithFriend?.length || 0
-      });
     },
     onError: (error) => {
       console.error('Unified transactions query error:', error);
@@ -387,12 +366,6 @@ export function FriendDetailScreen() {
     
     // Debug logging
     if (transaction.type === 'sent') {
-      console.log('[FriendDetail] Transaction:', {
-        to: transaction.to,
-        isInvitation: transaction.isInvitation,
-        isInvitationTransaction,
-        friendIsOnConfio: friend.isOnConfio
-      });
     }
     
     return (

@@ -31,16 +31,9 @@ import { Buffer } from 'buffer';
 import { useAccount } from '../contexts/AccountContext';
 import { biometricAuthService } from '../services/biometricAuthService';
 import LoadingOverlay from '../components/LoadingOverlay';
+import { colors } from '../config/theme';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'PayrollTopUp'>;
-
-const colors = {
-  primary: '#34d399',
-  text: '#111827',
-  muted: '#6b7280',
-  border: '#e5e7eb',
-  bg: '#f9fafb',
-};
 
 const PayrollTopUpScreen = () => {
   const navigation = useNavigation<NavigationProp>();
@@ -108,7 +101,7 @@ const PayrollTopUpScreen = () => {
         Alert.alert(
           'Biometría bloqueada',
           'Desbloquea tu dispositivo con passcode y vuelve a intentar.',
-          [{ text: 'OK', style: 'default' }],
+          [{ text: 'Entendido', style: 'default' }],
         );
         return;
       }
@@ -208,7 +201,7 @@ const PayrollTopUpScreen = () => {
       setProcessing(false);
 
       Alert.alert('Fondos enviados', 'Agregamos los fondos a la bóveda de nómina.', [
-        { text: 'OK', onPress: () => navigation.goBack() },
+        { text: 'Entendido', onPress: () => navigation.goBack() },
       ]);
     } catch (e: any) {
       console.error('Payroll top-up error', e);
@@ -245,7 +238,7 @@ const PayrollTopUpScreen = () => {
         Alert.alert(
           'Biometría bloqueada',
           'Desbloquea tu dispositivo con passcode y vuelve a intentar.',
-          [{ text: 'OK', style: 'default' }],
+          [{ text: 'Entendido', style: 'default' }],
         );
         return;
       }
@@ -303,7 +296,7 @@ const PayrollTopUpScreen = () => {
       setProcessing(false);
       setWithdrawAmount('');
       Alert.alert('Retiro enviado', 'Retiramos fondos de la bóveda de nómina.', [
-        { text: 'OK', onPress: () => navigation.goBack() },
+        { text: 'Entendido', onPress: () => navigation.goBack() },
       ]);
     } catch (e: any) {
       console.error('Payroll withdraw error', e);
@@ -335,7 +328,7 @@ const PayrollTopUpScreen = () => {
         >
           <View style={styles.header}>
             <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-              <Icon name="chevron-left" size={24} color={colors.text} />
+              <Icon name="chevron-left" size={24} color={colors.textFlat} />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Fondear nómina</Text>
             <View style={{ width: 32 }} />
@@ -441,7 +434,7 @@ const styles = StyleSheet.create({
     flex: 1,
     textAlign: 'center',
     fontSize: 18,
-    color: colors.text,
+    color: colors.textFlat,
     fontWeight: '600',
   },
   card: {
@@ -464,7 +457,7 @@ const styles = StyleSheet.create({
   balanceValue: {
     fontSize: 20,
     fontWeight: '700',
-    color: colors.text,
+    color: colors.textFlat,
   },
   cardHint: {
     marginTop: 6,
@@ -491,13 +484,13 @@ const styles = StyleSheet.create({
   tokenIcon: { width: 22, height: 22, resizeMode: 'contain', marginRight: 8 },
   currency: {
     fontWeight: '700',
-    color: colors.text,
+    color: colors.textFlat,
     marginRight: 10,
   },
   input: {
     flex: 1,
     fontSize: 18,
-    color: colors.text,
+    color: colors.textFlat,
   },
   primaryButton: {
     marginHorizontal: 16,

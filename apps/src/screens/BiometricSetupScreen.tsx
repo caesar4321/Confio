@@ -23,10 +23,8 @@ export const BiometricSetupScreen = () => {
   // Helper function to check biometric support
   const checkBiometricSupport = useCallback(async () => {
     try {
-      console.log('[BiometricSetup] Checking biometric support...');
       biometricAuthService.invalidateCache();
       const supported = await biometricAuthService.isSupported();
-      console.log('[BiometricSetup] Biometric supported:', supported);
       setSupportedHint(supported ? null : 'Tu dispositivo no tiene biometría; continuaremos automáticamente.');
       if (supported) {
         setError(null);
@@ -53,11 +51,9 @@ export const BiometricSetupScreen = () => {
   // Listen for app state changes (e.g., returning from Settings)
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
-      console.log('[BiometricSetup] AppState changed:', appState.current, '->', nextAppState);
 
       // App has come to the foreground
       if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
-        console.log('[BiometricSetup] App returned to foreground, re-checking biometrics');
         checkBiometricSupport();
       }
 
@@ -72,7 +68,6 @@ export const BiometricSetupScreen = () => {
   // Re-check support when screen regains navigation focus
   useFocusEffect(
     useCallback(() => {
-      console.log('[BiometricSetup] Screen focused, re-checking biometrics');
       let alive = true;
       (async () => {
         if (alive) {
@@ -193,40 +188,33 @@ export const BiometricSetupScreen = () => {
                               try {
                                 // Try biometric enrollment first (Android 10+)
                                 await Linking.sendIntent('android.settings.BIOMETRIC_ENROLL');
-                                console.log('[BiometricSetup] Opened biometric enrollment settings');
                                 return;
                               } catch (e) {
-                                console.log('[BiometricSetup] BIOMETRIC_ENROLL not available, trying security settings');
 
                                 try {
                                   // Fallback to security settings
                                   await Linking.sendIntent('android.settings.SECURITY_SETTINGS');
-                                  console.log('[BiometricSetup] Opened security settings');
                                   return;
                                 } catch (e2) {
-                                  console.log('[BiometricSetup] SECURITY_SETTINGS not available, trying general settings');
 
                                   try {
                                     // Fallback to general settings
                                     await Linking.sendIntent('android.settings.SETTINGS');
-                                    console.log('[BiometricSetup] Opened general settings');
                                     return;
                                   } catch (e3) {
-                                    console.log('[BiometricSetup] All sendIntent attempts failed');
                                   }
                                 }
                               }
                             }
 
                             // Final fallback: open app settings
-                            console.log('[BiometricSetup] Using Linking.openSettings fallback');
                             await Linking.openSettings();
                           } catch (e) {
                             console.error('[BiometricSetup] Failed to open any settings:', e);
                             Alert.alert(
                               'No se pudo abrir ajustes',
                               'Por favor abre manualmente los Ajustes del dispositivo > Seguridad > Biometría',
-                              [{ text: 'OK' }]
+                              [{ text: 'Entendido' }]
                             );
                           }
                         }

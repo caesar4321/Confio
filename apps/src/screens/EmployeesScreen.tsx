@@ -9,13 +9,9 @@ import { useApolloClient, useMutation, useQuery, gql } from '@apollo/client';
 import { INVITE_EMPLOYEE, GET_CURRENT_BUSINESS_EMPLOYEES, GET_CURRENT_BUSINESS_INVITATIONS, CANCEL_INVITATION } from '../apollo/queries';
 import { InviteEmployeeModal } from '../components/InviteEmployeeModal';
 import { getCountryByIso } from '../utils/countries';
+import { colors } from '../config/theme';
 
 type EmployeesScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
-
-const colors = {
-  primary: '#34d399',
-  violet: '#8b5cf6',
-};
 
 const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string => {
   if (!phoneNumber) return '';
@@ -147,14 +143,14 @@ export const EmployeesScreen = () => {
       const success = result.data?.cancelInvitation?.success;
       const errorMsg = result.data?.cancelInvitation?.errors?.[0];
       if (!success) {
-        Alert.alert('Error', errorMsg || 'No se pudo cancelar la invitación', [{ text: 'OK' }]);
+        Alert.alert('Error', errorMsg || 'No se pudo cancelar la invitación', [{ text: 'Entendido' }]);
         return;
       }
-      Alert.alert('Éxito', 'Invitación cancelada correctamente.', [{ text: 'OK' }]);
+      Alert.alert('Éxito', 'Invitación cancelada correctamente.', [{ text: 'Entendido' }]);
       refetchInvitations();
     } catch (e) {
       console.error('Error canceling invitation:', e);
-      Alert.alert('Error', 'No se pudo cancelar la invitación', [{ text: 'OK' }]);
+      Alert.alert('Error', 'No se pudo cancelar la invitación', [{ text: 'Entendido' }]);
     }
   };
 

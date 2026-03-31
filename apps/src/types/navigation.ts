@@ -407,8 +407,6 @@ export type MainStackParamList = {
   ConfioPresale: undefined;
   ConfioPresaleParticipate: undefined;
   ConfioTokenomics: undefined;
-  MiProgresoViral: undefined;
-  ViralTemplates: undefined;
   ReferralFriendJoined: { friendName?: string };
   ReferralActionPrompt: { event?: string };
   ReferralEventDetail: { event?: string; referralId?: string | number; role?: 'referee' | 'referrer'; friendName?: string };

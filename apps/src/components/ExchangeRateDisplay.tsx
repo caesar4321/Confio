@@ -42,7 +42,7 @@ export const ExchangeRateDisplay: React.FC<ExchangeRateDisplayProps> = ({
     return (
       <View style={[styles.container, compact && styles.compactContainer, style]}>
         <View style={styles.errorContainer}>
-          <Icon name="alert-circle" size={12} color={colors.error} />
+          <Icon name="alert-circle" size={12} color={colors.error.icon} />
           <Text style={[styles.errorText, compact && styles.compactText]}>
             Error al cargar tasa
           </Text>
@@ -147,7 +147,7 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontSize: 10,
-    color: '#059669',
+    color: '#10B981',
     marginTop: 4,
     fontStyle: 'italic',
   },
@@ -169,7 +169,7 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontSize: 12,
-    color: colors.error,
+    color: colors.error.text,
     marginLeft: 6,
     flex: 1,
   },

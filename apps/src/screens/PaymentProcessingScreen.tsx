@@ -78,13 +78,6 @@ export const PaymentProcessingScreen = () => {
   }, [transactionData]);
 
   // Debug logging to track when this screen is accessed (avoid heavy dumps)
-  console.log('PaymentProcessingScreen: Screen mounted', {
-    amount: transactionData?.amount,
-    currency: transactionData?.currency,
-    merchant: transactionData?.merchant,
-    hasInvoiceId: !!transactionData?.internalId,
-    hasIdemKey: !!transactionData?.idempotencyKey,
-  });
 
   // Safety check - if no transaction data, go back
   useEffect(() => {
@@ -134,7 +127,7 @@ export const PaymentProcessingScreen = () => {
         Alert.alert(
           'Se requiere biometría',
           Platform.OS === 'ios' ? 'Confirma con Face ID o Touch ID para continuar.' : 'Confirma con tu huella digital para continuar.',
-          [{ text: 'OK', onPress: () => navigation.goBack() }]
+          [{ text: 'Entendido', onPress: () => navigation.goBack() }]
         );
       }
     })();
@@ -194,23 +187,8 @@ export const PaymentProcessingScreen = () => {
 
   // Process payment when screen loads
   useEffect(() => {
-    console.log('PaymentProcessingScreen: useEffect triggered', {
-      isValid,
-      hasInvoiceId: !!transactionData.internalId,
-      invoiceId: transactionData.internalId,
-      isProcessing,
-      hasProcessedRef: hasProcessedRef.current,
-      transactionData
-    });
 
     if (!isValid || !transactionData.internalId || isProcessing || hasProcessedRef.current || !bioChecked) {
-      console.log('PaymentProcessingScreen: Returning early from useEffect', {
-        reason: !isValid ? 'not valid' :
-          !transactionData.internalId ? 'no invoiceId' :
-            isProcessing ? 'already processing' :
-              !bioChecked ? 'biometric not confirmed' :
-                'already processed'
-      });
       return;
     }
 
@@ -220,7 +198,6 @@ export const PaymentProcessingScreen = () => {
 
     const processPaymentWsOnly = async () => {
       if (isProcessing || hasProcessedRef.current) {
-        console.log('PaymentProcessingScreen: Payment already in progress, skipping duplicate request');
         return;
       }
 
@@ -230,7 +207,6 @@ export const PaymentProcessingScreen = () => {
       try {
         const now = () => (typeof performance !== 'undefined' && (performance as any).now ? (performance as any).now() : Date.now());
         const t0 = now();
-        console.log('PaymentProcessingScreen[WS]: Start', { invoiceId: transactionData.internalId, preparedCount: prepared?.transactions?.length || 0 });
 
         // update UI steps
         setCurrentStep(0); // verifying
@@ -247,7 +223,6 @@ export const PaymentProcessingScreen = () => {
           const amt = parseFloat(String(transactionData.amount || '0'));
           const assetType = String(transactionData.currency || 'cUSD').toUpperCase();
           const note = `Invoice ${transactionData.internalId}`;
-          console.log('PaymentProcessingScreen[WS]: Calling prepareViaWs', { amt, assetType, note, recipientBusinessId: (transactionData as any).merchantBusinessId });
           const pack = await prepareViaWs({
             amount: amt,
             assetType,
@@ -263,7 +238,6 @@ export const PaymentProcessingScreen = () => {
             paymentId: (pack as any).internalId || (pack as any).internal_id || (pack as any).paymentId || (pack as any).payment_id || transactionData.internalId,
             groupId: (pack as any).groupId || (pack as any).group_id
           } as any;
-          console.log('PaymentProcessingScreen[WS]: Prepared pack received');
         }
 
         // Sign required transactions
@@ -272,7 +246,6 @@ export const PaymentProcessingScreen = () => {
         const { submitViaWs } = await import('../services/payWs');
 
         const transactions = (wsPack as any).transactions;
-        console.log('PaymentProcessingScreen[WS]: Signing transactions', { count: transactions.length });
 
         // Ensure wallet is initialized before signing (Critical for cold starts)
         try {
@@ -308,7 +281,6 @@ export const PaymentProcessingScreen = () => {
               accountContext.index,
               accountContext.businessId
             );
-            console.log('[PaymentProcessingScreen] Wallet restored successfully before signing');
           }
         } catch (err) {
           console.error('[PaymentProcessingScreen] Error restoring wallet:', err);
@@ -334,14 +306,12 @@ export const PaymentProcessingScreen = () => {
         const tSignEnd = now();
 
         const paymentIdForSubmit = ((wsPack as any)?.paymentId as string) || (transactionData.internalId as string);
-        console.log('PaymentProcessingScreen[WS]: Submitting via WS', { indexes: signedTransactions.map(t => t.index), paymentIdForSubmit });
         const wsRes = await submitViaWs(signedTransactions, paymentIdForSubmit);
         if (!wsRes || (!wsRes.transactionId && !(wsRes as any).transaction_id)) {
           throw new Error('WS submit failed');
         }
         const txid = (wsRes as any).transactionId || (wsRes as any).transaction_id;
         const round = (wsRes as any).confirmedRound || (wsRes as any).confirmed_round;
-        console.log('PaymentProcessingScreen[WS]: Confirmed', { txid, round, sign_ms: Math.round(tSignEnd - tSignStart), total_ms: Math.round(now() - t0) });
         setIsComplete(true);
         // Include paymentTransaction.internalId for QR verification on success screen
         setPaymentResponse({
@@ -355,13 +325,7 @@ export const PaymentProcessingScreen = () => {
         try {
           const accountManager = AccountManager.getInstance();
           const activeContext = await accountManager.getActiveAccountContext();
-          console.log('PaymentProcessingScreen - Active account context:', {
-            type: activeContext.type,
-            index: activeContext.index,
-            accountId: `${activeContext.type}_${activeContext.index}`
-          });
         } catch (error) {
-          console.log('PaymentProcessingScreen - Could not get account context:', error);
         }
         
         // Step 1: Verifying transaction (no artificial delay)
@@ -407,7 +371,6 @@ export const PaymentProcessingScreen = () => {
             } catch { return false; }
           });
           if (candidate) {
-            console.log('PaymentProcessingScreen: Found existing group; proceeding directly to signing');
             // Mimic the structure as if PayInvoice returned
             data = {
               payInvoice: {
@@ -424,20 +387,14 @@ export const PaymentProcessingScreen = () => {
           // ignore and fallback to PayInvoice
         }
         if (!usedExisting) {
-          console.log('PaymentProcessingScreen: Calling payInvoice mutation with idempotency key:', idempotencyKey);
           const resp = await payInvoice({ variables: { invoiceId: transactionData.invoiceId, idempotencyKey } });
           data = resp.data;
         }
         const tCreateEnd = now();
 
-        console.log('PaymentProcessingScreen: Mutation response received', {
-          hasBlockchainData: !!data?.payInvoice?.paymentTransaction?.blockchainData,
-          status: data?.payInvoice?.paymentTransaction?.status,
-        });
 
         // Check if we have blockchain transactions to sign
         if (data?.payInvoice?.paymentTransaction?.blockchainData) {
-          console.log('PaymentProcessingScreen: Blockchain transactions detected, proceeding with signing');
           
           try {
             // Import AlgorandService using default import pattern that works
@@ -450,20 +407,17 @@ export const PaymentProcessingScreen = () => {
               const { oauthStorage } = await import('../services/oauthStorageService');
               await oauthStorage.getOAuthSubject();
             } catch (oauthCheckErr) {
-              console.log('PaymentProcessingScreen: OAuth pre-check failed (non-fatal):', oauthCheckErr);
             }
             
             // Parse blockchainData if it's a string (GraphQL returns it as JSON string)
             let blockchainData = data.payInvoice.paymentTransaction.blockchainData;
             if (typeof blockchainData === 'string') {
-              console.log('PaymentProcessingScreen: Parsing blockchainData JSON string');
               blockchainData = JSON.parse(blockchainData);
             }
             
             // Handle Solution 1: Server provides ALL 4 transactions
             const transactions = blockchainData.transactions || [];
             
-            console.log('PaymentProcessingScreen: Received transactions from server:', transactions.length);
             
             // Sign the transactions that require user signature
             const tSignStart = now();
@@ -471,7 +425,6 @@ export const PaymentProcessingScreen = () => {
             
             // Solution 1: Process all 4 transactions from server
             if (transactions.length === 4) {
-              console.log('PaymentProcessingScreen: Using Solution 1 - all 4 transactions from server');
               
               for (let i = 0; i < transactions.length; i++) {
                 const txn = transactions[i];
@@ -479,22 +432,18 @@ export const PaymentProcessingScreen = () => {
                 const isSigned = txn.signed || false;
                 const txnIndex = txn.index !== undefined ? txn.index : i;
                 
-                console.log(`PaymentProcessingScreen: Tx ${txnIndex} - type: ${txn.type}, needsSignature: ${needsSignature}, signed: ${isSigned}`);
                 
                 if (needsSignature && !isSigned) {
                   // User needs to sign this transaction (indexes 1 and 2)
-                  console.log(`PaymentProcessingScreen: Signing transaction at index ${txnIndex} (type: ${txn.type})`);
                   
                   try {
                     // Get the actual transaction data
                     const txnData = txn.transaction;
                     
                     // Debug the transaction before signing
-                    console.log(`PaymentProcessingScreen: Tx ${txnIndex} base64 preview: ${String(txnData).substring(0, 20)}...`);
                     
                     // Decode transaction (base64 -> bytes)
                     const txnBytes = Uint8Array.from(Buffer.from(txnData, 'base64'));
-                    console.log(`PaymentProcessingScreen: Tx ${txnIndex} decoded to ${txnBytes.length} bytes`);
                     
                     // Sign the transaction locally using deterministic wallet
                     const signedTxnBytes = await algorandService.signTransactionBytes(txnBytes);
@@ -510,7 +459,6 @@ export const PaymentProcessingScreen = () => {
                   }
                 } else {
                   // Already signed by sponsor (indexes 0 and 3) or doesn't need signature
-                  console.log(`PaymentProcessingScreen: Tx ${txnIndex} already signed or doesn't need signature (type: ${txn.type}, signed: ${isSigned})`);
                   
                   // The transaction data might already be the signed transaction bytes
                   // Check if it's already base64 or if it's raw bytes that need encoding
@@ -518,7 +466,6 @@ export const PaymentProcessingScreen = () => {
                   
                   // If the transaction is already base64, use it as-is
                   // Otherwise it should be encoded properly by the server
-                  console.log(`PaymentProcessingScreen: Using pre-signed transaction data for index ${txnIndex}`);
                   
                   signedTransactions.push({
                     index: txnIndex,
@@ -533,20 +480,14 @@ export const PaymentProcessingScreen = () => {
             }
             
             const tSignEnd = now();
-            console.log('PaymentProcessingScreen: Submitting signed transactions to blockchain');
             const tSubmitStart = now();
             try {
-              console.log('PaymentProcessingScreen: Signed transactions prepared', {
-                count: signedTransactions.length,
-                indexes: signedTransactions.map((t: any) => t.index)
-              });
             } catch {}
             
             // Verify all transactions have valid base64
             for (const txn of signedTransactions) {
               try {
                 const decoded = Buffer.from(txn.transaction, 'base64');
-                console.log(`PaymentProcessingScreen: Tx ${txn.index} base64 valid (${decoded.length} bytes)`);
               } catch (e) {
                 console.error(`PaymentProcessingScreen: Tx ${txn.index} has invalid base64`);
               }
@@ -558,14 +499,7 @@ export const PaymentProcessingScreen = () => {
             let submitResult: any = null;
             let tSubmitEnd = now();
             if (wsRes && (wsRes.transactionId || wsRes.transaction_id)) {
-              console.log('PaymentProcessingScreen: Blockchain payment confirmed via WS:', wsRes);
               try {
-                console.log('[Payment][Perf]', {
-                  create_ms: Math.round(tCreateEnd - tCreateStart),
-                  sign_ms: Math.round(tSignEnd - tSignStart),
-                  submit_ms: Math.round(tSubmitEnd - tSubmitStart),
-                  total_ms: Math.round(tSubmitEnd - t0)
-                });
               } catch {}
               setIsComplete(true);
               setPaymentResponse({
@@ -587,14 +521,7 @@ export const PaymentProcessingScreen = () => {
             tSubmitEnd = now();
             
             if (submitResult.data?.submitSponsoredPayment?.success) {
-              console.log('PaymentProcessingScreen: Blockchain payment confirmed (HTTP fallback):', submitResult.data.submitSponsoredPayment);
               try {
-                console.log('[Payment][Perf]', {
-                  create_ms: Math.round(tCreateEnd - tCreateStart),
-                  sign_ms: Math.round(tSignEnd - tSignStart),
-                  submit_ms: Math.round(tSubmitEnd - tSubmitStart),
-                  total_ms: Math.round(tSubmitEnd - t0)
-                });
               } catch {}
               setIsComplete(true);
               setPaymentResponse({
@@ -614,7 +541,6 @@ export const PaymentProcessingScreen = () => {
           }
         } else if (data?.payInvoice?.success) {
           // No blockchain data - database-only payment
-          console.log('PaymentProcessingScreen: Database payment successful (no blockchain):', data.payInvoice);
           setIsComplete(true);
           setPaymentResponse(data.payInvoice);
         } else if (data?.payInvoice) {
@@ -632,7 +558,6 @@ export const PaymentProcessingScreen = () => {
                 const inv = (res.data?.invoices || []).find((it: any) => it.invoiceId === transactionData.invoiceId);
                 const pt = inv?.paymentTransactions?.find((p: any) => p && p.blockchainData && (p.blockchainData.transactions || p.blockchainData.transactions?.length));
                 if (pt && pt.blockchainData && pt.blockchainData.transactions && pt.blockchainData.transactions.length === 4) {
-                  console.log('PaymentProcessingScreen: Recovered existing payment after race; proceeding to sign');
                   // Reuse the signing+submit path with recovered data
                   let blockchainData = pt.blockchainData;
                   if (typeof blockchainData === 'string') {
@@ -668,14 +593,7 @@ export const PaymentProcessingScreen = () => {
                   const wsRes = await submitViaWs(signedTransactions, internalId);
                   let tSubmitEnd = now();
                   if (wsRes && (wsRes.transactionId || wsRes.transaction_id)) {
-                    console.log('PaymentProcessingScreen: Blockchain payment confirmed (recovered path, WS):', wsRes);
                     try {
-                      console.log('[Payment][Perf]', {
-                        create_ms: Math.round(tCreateEnd - tCreateStart),
-                        sign_ms: Math.round(tSignEnd - tSignStart),
-                        submit_ms: Math.round(tSubmitEnd - tSubmitStart),
-                        total_ms: Math.round(tSubmitEnd - t0)
-                      });
                     } catch {}
                     setIsComplete(true);
                     setPaymentResponse({ paymentTransaction: { internalId: internalId } });
@@ -690,14 +608,7 @@ export const PaymentProcessingScreen = () => {
                   });
                   tSubmitEnd = now();
                   if (submitResult.data?.submitSponsoredPayment?.success) {
-                    console.log('PaymentProcessingScreen: Blockchain payment confirmed (recovered path, HTTP):', submitResult.data.submitSponsoredPayment);
                     try {
-                      console.log('[Payment][Perf]', {
-                        create_ms: Math.round(tCreateEnd - tCreateStart),
-                        sign_ms: Math.round(tSignEnd - tSignStart),
-                        submit_ms: Math.round(tSubmitEnd - tSubmitStart),
-                        total_ms: Math.round(tSubmitEnd - t0)
-                      });
                     } catch {}
                     setIsComplete(true);
                     setPaymentResponse({ paymentTransaction: { internalId: internalId } });
@@ -712,7 +623,6 @@ export const PaymentProcessingScreen = () => {
             }
           }
           // Fallback: show error
-          console.log('PaymentProcessingScreen: Payment response received:', data.payInvoice);
           setIsComplete(true);
           setPaymentResponse(data.payInvoice);
         } else {
@@ -784,7 +694,6 @@ export const PaymentProcessingScreen = () => {
             status,
           };
 
-          console.log('PaymentProcessingScreen: Navigating to PaymentSuccess with data:', successData);
 
           (navigation as any).navigate('PaymentSuccess', {
             transactionData: successData
@@ -800,7 +709,6 @@ export const PaymentProcessingScreen = () => {
   useEffect(() => {
     const onBackPress = () => {
       // Block back navigation during processing to prevent double payments
-      console.log('PaymentProcessingScreen: Back button blocked during processing');
       return true; // Return true to prevent default back behavior
     };
 
@@ -816,7 +724,6 @@ export const PaymentProcessingScreen = () => {
   // Cleanup effect to reset state when screen unmounts
   useEffect(() => {
     return () => {
-      console.log('PaymentProcessingScreen: Screen unmounting, cleaning up state');
       setCurrentStep(0);
       setIsComplete(false);
       setIsProcessing(false);
@@ -960,7 +867,7 @@ export const PaymentProcessingScreen = () => {
           {/* Processing Info */}
           <View style={styles.infoCard}>
             <View style={styles.infoContent}>
-              <Icon name="clock" size={16} color="#059669" />
+              <Icon name="clock" size={16} color="#10B981" />
               <View style={styles.infoTextContainer}>
                 <Text style={styles.infoTitle}>¿Sabías que...?</Text>
                 <Text style={styles.infoText}>
@@ -1145,7 +1052,7 @@ const styles = StyleSheet.create({
   },
   securityBold: {
     fontWeight: '600',
-    color: '#059669',
+    color: '#10B981',
   },
   infoCard: {
     backgroundColor: '#ECFDF5',

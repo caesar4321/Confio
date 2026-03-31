@@ -29,6 +29,7 @@ import { secureDeterministicWallet } from '../services/secureDeterministicWallet
 import { oauthStorage } from '../services/oauthStorageService';
 import { cusdAppOptInService } from '../services/cusdAppOptInService';
 import { biometricAuthService } from '../services/biometricAuthService';
+import { colors } from '../config/theme';
 
 // GraphQL mutation for USDC opt-in (reused from DepositScreen)
 const OPT_IN_TO_USDC = gql`
@@ -56,18 +57,6 @@ const CHECK_ASSET_OPT_INS = gql`
     }
   }
 `;
-
-const colors = {
-  primary: '#34D399',
-  secondary: '#8B5CF6',
-  accent: '#3B82F6',
-  background: '#F9FAFB',
-  mint: '#10b981', // mint color for free fees
-  text: {
-    primary: '#1F2937',
-    secondary: '#6B7280',
-  },
-};
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList>;
 type ConversionRouteProp = RouteProp<MainStackParamList, 'USDCConversion'>;
@@ -169,11 +158,11 @@ export const USDCConversionScreen = () => {
   const validateAmount = () => {
     const numAmount = parseFloat(amount);
     if (isNaN(numAmount) || numAmount <= 0) {
-      Alert.alert('Monto inválido', 'Por favor ingresa un monto válido', [{ text: 'OK' }]);
+      Alert.alert('Monto inválido', 'Por favor ingresa un monto válido', [{ text: 'Entendido' }]);
       return false;
     }
     if (numAmount > sourceBalance) {
-      Alert.alert('Saldo insuficiente', `No tienes suficiente ${sourceCurrency} para esta conversión`, [{ text: 'OK' }]);
+      Alert.alert('Saldo insuficiente', `No tienes suficiente ${sourceCurrency} para esta conversión`, [{ text: 'Entendido' }]);
       return false;
     }
     return true;
@@ -185,7 +174,6 @@ export const USDCConversionScreen = () => {
   const handleUSDCOptIn = async (): Promise<boolean> => {
     try {
       setLoadingMessage('Configurando acceso a USDC...');
-      console.log('[USDCConversionScreen] Calling optInToAsset mutation for USDC...');
 
       const { data, errors } = await optInToUsdc({
         variables: { assetType: 'USDC' }
@@ -196,10 +184,8 @@ export const USDCConversionScreen = () => {
         return false;
       }
 
-      console.log('[USDCConversionScreen] USDC opt-in mutation response:', data);
 
       if (data?.optInToAssetByType?.alreadyOptedIn) {
-        console.log('[USDCConversionScreen] User already opted in to USDC');
         await refetchOptIns();
         return true;
       }
@@ -208,14 +194,12 @@ export const USDCConversionScreen = () => {
         const userTxn = data.optInToAssetByType.userTransaction;
         const sponsorTxn = data.optInToAssetByType.sponsorTransaction;
 
-        console.log('[USDCConversionScreen] Signing and submitting USDC opt-in...');
         const txId = await algorandService.signAndSubmitSponsoredTransaction(
           userTxn,
           sponsorTxn
         );
 
         if (txId) {
-          console.log('[USDCConversionScreen] Successfully opted in to USDC:', txId);
           await refetchOptIns();
           return true;
         } else {
@@ -245,7 +229,7 @@ export const USDCConversionScreen = () => {
           },
         },
         {
-          text: 'OK',
+          text: 'Entendido',
           onPress: () => {
             // Clear amount and navigate back
             setAmount('');
@@ -273,7 +257,7 @@ export const USDCConversionScreen = () => {
     if (!validateAmount()) return;
 
     if (!activeAccount?.algorandAddress) {
-      Alert.alert('Cuenta no configurada', 'Tu cuenta necesita estar configurada con Algorand para realizar conversiones. Por favor, contacta soporte.', [{ text: 'OK' }]);
+      Alert.alert('Cuenta no configurada', 'Tu cuenta necesita estar configurada con Algorand para realizar conversiones. Por favor, contacta soporte.', [{ text: 'Entendido' }]);
       return;
     }
 
@@ -281,13 +265,12 @@ export const USDCConversionScreen = () => {
       'Autoriza esta conversión (operación crítica)'
     );
     if (!bioOk) {
-      Alert.alert('Se requiere biometría', Platform.OS === 'ios' ? 'Confirma con Face ID o Touch ID para convertir.' : 'Confirma con tu huella digital para convertir.', [{ text: 'OK' }]);
+      Alert.alert('Se requiere biometría', Platform.OS === 'ios' ? 'Confirma con Face ID o Touch ID para convertir.' : 'Confirma con tu huella digital para convertir.', [{ text: 'Entendido' }]);
       return;
     }
 
     setIsProcessing(true);
     setLoadingMessage('Preparando conversión...');
-    console.log('[USDCConversionScreen] Starting conversion (WS):', { amount, conversionDirection, sourceCurrency, targetCurrency });
 
     const ws = new ConvertWsSession();
     try {
@@ -306,7 +289,6 @@ export const USDCConversionScreen = () => {
           break; // Success, exit retry loop
         } catch (e: any) {
           const errorMessage = String(e?.message);
-          console.log('[USDCConversionScreen] Conversion prepare error:', errorMessage);
 
           if (errorMessage === 'requires_app_optin') {
             // Handle cUSD app opt-in
@@ -323,7 +305,7 @@ export const USDCConversionScreen = () => {
               const optInResult = await cusdAppOptInService.handleAppOptIn(activeAccount);
               if (!optInResult.success) {
                 setLoadingMessage('');
-                Alert.alert('Error', optInResult.error || 'No se pudo completar la configuración inicial', [{ text: 'OK' }]);
+                Alert.alert('Error', optInResult.error || 'No se pudo completar la configuración inicial', [{ text: 'Entendido' }]);
                 return;
               }
               retryCount++;
@@ -332,13 +314,12 @@ export const USDCConversionScreen = () => {
             } catch (err) {
               setLoadingMessage('');
               console.error('[USDCConversionScreen] App opt-in error', err);
-              Alert.alert('Error', 'No se pudo completar la configuración inicial', [{ text: 'OK' }]);
+              Alert.alert('Error', 'No se pudo completar la configuración inicial', [{ text: 'Entendido' }]);
               return;
             }
           } else if (errorMessage.includes('not opted') || errorMessage.includes('USDC') || errorMessage.includes('asset') || errorMessage.includes('Please opt-in to USDC and cUSD assets first')) {
             // Handle USDC asset opt-in - try to auto opt-in gracefully
             try {
-              console.log('[USDCConversionScreen] Attempting auto USDC opt-in...');
               const usdcOptInSuccess = await handleUSDCOptIn();
               if (usdcOptInSuccess) {
                 retryCount++;
@@ -346,7 +327,6 @@ export const USDCConversionScreen = () => {
                 continue; // Retry the prepare call
               } else {
                 // USDC opt-in failed, but don't show error - just break out
-                console.log('[USDCConversionScreen] USDC opt-in failed, stopping conversion gracefully');
                 setLoadingMessage('');
                 return;
               }
@@ -358,7 +338,7 @@ export const USDCConversionScreen = () => {
           } else {
             // Other errors - show the original error
             setLoadingMessage('');
-            Alert.alert('Error', String(e?.message || 'No se pudo preparar la conversión'), [{ text: 'OK' }]);
+            Alert.alert('Error', String(e?.message || 'No se pudo preparar la conversión'), [{ text: 'Entendido' }]);
             return;
           }
         }
@@ -366,7 +346,7 @@ export const USDCConversionScreen = () => {
 
       if (!pack) {
         setLoadingMessage('');
-        Alert.alert('Error', 'No se pudo preparar la conversión después de varios intentos', [{ text: 'OK' }]);
+        Alert.alert('Error', 'No se pudo preparar la conversión después de varios intentos', [{ text: 'Entendido' }]);
         return;
       }
 
@@ -398,11 +378,10 @@ export const USDCConversionScreen = () => {
         errorMessage.includes('opt-in') ||
         errorMessage.includes('Please opt-in to USDC and cUSD assets first') ||
         errorMessage.includes('requires_app_optin')) {
-        console.log('[USDCConversionScreen] Conversion failed due to opt-in issue - handled gracefully');
         // Don't show error alert for opt-in issues - they should be handled automatically
       } else {
         // Show error only for non-opt-in related issues
-        Alert.alert('Error', 'No se pudo completar la conversión. Por favor intenta de nuevo.', [{ text: 'OK' }]);
+        Alert.alert('Error', 'No se pudo completar la conversión. Por favor intenta de nuevo.', [{ text: 'Entendido' }]);
       }
     } finally {
       try { ws.close(); } catch { }
@@ -801,7 +780,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     fontSize: 16,
-    color: colors.text,
+    color: colors.textFlat,
     marginBottom: 20,
     textAlign: 'center',
     fontWeight: '500',

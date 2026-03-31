@@ -71,7 +71,7 @@ class OAuthStorageService {
         OAUTH_SUBJECT_KEY,
         encryptedData,
         {
-          accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+          accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
           // Note: authenticatePrompt would require biometric every time
           // which might be too frequent for address generation
         }

@@ -59,7 +59,6 @@ export const MigrationModal = () => {
             // we are in a broken state (App Update from V1 -> V2).
             // We MUST force re-login to get the 'sub' claim for V1 derivation.
             if (!oauthData || !oauthData.subject) {
-                console.log('[MigrationModal] ⚠️ Critical: Authenticated but missing OAuth Subject. Forcing re-login.');
 
                 Alert.alert(
                     'Actualización de Seguridad',

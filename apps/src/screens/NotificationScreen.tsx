@@ -13,6 +13,7 @@ import moment from 'moment';
 import 'moment/locale/es';
 import { contactService } from '../services/contactService';
 import { useAuth } from '../contexts/AuthContext';
+import { APP_LAYOUT } from '../config/layout';
 
 const REFERRAL_EVENT_TYPE_MAP: Record<string, string> = {
   REFERRAL_EVENT_TOP_UP: 'top_up',
@@ -150,11 +151,8 @@ export const NotificationScreen = () => {
 
   const notifications = data?.notifications?.edges?.map((edge: any) => edge.node) || [];
 
-  console.log('[NotificationScreen] Fetched notifications:', notifications.length);
   if (notifications.length > 0) {
-    console.log('[NotificationScreen] First notification type:', notifications[0].notificationType);
     const payrollNotifs = notifications.filter((n: any) => n.notificationType === 'PAYROLL_RECEIVED');
-    console.log('[NotificationScreen] Payroll notifications count:', payrollNotifs.length);
   }
 
   const currentUserName = profileData?.currentAccountType === 'business'
@@ -244,14 +242,6 @@ export const NotificationScreen = () => {
       employeePhoneResolved = dialCode ? `${dialCode} ${userProfile.phoneNumber}` : userProfile.phoneNumber;
     }
 
-    console.log('[NotificationScreen] navigateToPayrollReceipt:', {
-      isReceived,
-      employeeNameResolved,
-      employeeUsernameResolved,
-      employeePhoneResolved,
-      dataKeys: Object.keys(data),
-      fullData: JSON.stringify(data),
-    });
 
     navigation.navigate('TransactionReceipt', {
       transaction: {
@@ -288,11 +278,6 @@ export const NotificationScreen = () => {
   }) => {
     const { id, notifType, txnType, baseData, enrichedData = {} } = params;
 
-    console.log('[NotificationScreen] navigateToTransactionDetail:', {
-      id,
-      notifType,
-      txnType,
-    });
 
     // Prefer internalId/internal_id, but also accept transaction_id variants since some notifications omit the explicit field
     const pickInternalId = (candidate: any): string | undefined => {
@@ -668,11 +653,6 @@ export const NotificationScreen = () => {
           createdAt,
         };
 
-        console.log('[NotificationScreen] Navigating to transaction via fetch:', {
-          transactionId,
-          notifType,
-          txnType
-        });
 
         navigateToTransactionDetail({
           id: transactionId,
@@ -689,7 +669,6 @@ export const NotificationScreen = () => {
         navigation.navigate('Achievements');
       } else {
         // Unknown actionUrl: fall back to notifications list (no-op navigation)
-        console.log('[NotificationScreen] Unhandled actionUrl, staying on Notifications:', url);
       }
     } else if (REFERRAL_EVENT_TYPE_MAP[notifType]) {
       navigation.navigate('ReferralEventDetail', {
@@ -986,7 +965,7 @@ export const NotificationScreen = () => {
       PAYMENT_RECEIVED: { icon: 'credit-card', color: '#10B981' },
       PAYMENT_SENT: { icon: 'credit-card', color: '#3B82F6' },
       INVOICE_PAID: { icon: 'file-text', color: '#10B981' },
-      PAYROLL_RECEIVED: { icon: 'briefcase', color: '#059669' },
+      PAYROLL_RECEIVED: { icon: 'briefcase', color: '#10B981' },
       PAYROLL_SENT: { icon: 'briefcase', color: '#3B82F6' },
 
       // P2P Trade
@@ -1121,7 +1100,6 @@ export const NotificationScreen = () => {
   const renderNotification = ({ item }: { item: Notification }) => {
     try {
       if (item.notificationType === 'PAYROLL_RECEIVED') {
-        console.log('[NotificationScreen] Rendering payroll item:', item.id, item.title);
       }
 
       const { icon, color } = getNotificationIcon(item.notificationType);
@@ -1344,7 +1322,7 @@ const styles = StyleSheet.create({
   },
   header: {
     backgroundColor: '#34d399',
-    paddingTop: Platform.OS === 'ios' ? 48 : (StatusBar.currentHeight || 32),
+    paddingTop: Platform.OS === 'ios' ? APP_LAYOUT.topSafeArea : APP_LAYOUT.topSafeArea + 8,
     paddingBottom: 16,
     paddingHorizontal: 20,
     flexDirection: 'row',

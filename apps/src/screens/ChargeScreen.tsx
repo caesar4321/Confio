@@ -30,6 +30,7 @@ import Share from 'react-native-share';
 import ViewShot from 'react-native-view-shot';
 import { CameraRoll } from '@react-native-camera-roll/camera-roll';
 import { useRef } from 'react';
+import { colors } from '../config/theme';
 
 // Import currency icons
 const cUSDIcon = require('../assets/png/cUSD.png');
@@ -40,20 +41,6 @@ type ChargeScreenNavigationProp = BottomTabNavigationProp<BottomTabParamList, 'C
 const { width } = Dimensions.get('window');
 
 // Color palette from the original design
-const colors = {
-  primary: '#34d399', // emerald-400
-  primaryText: '#34d399',
-  primaryLight: '#d1fae5', // emerald-100
-  primaryDark: '#10b981', // emerald-500
-  secondary: '#8b5cf6', // violet-500
-  secondaryText: '#8b5cf6',
-  accent: '#3b82f6', // blue-500
-  accentText: '#3b82f6',
-  neutral: '#f9fafb', // gray-50
-  neutralDark: '#f3f4f6', // gray-100
-  dark: '#111827', // gray-900
-};
-
 const ChargeScreen = () => {
   const navigation = useNavigation<ChargeScreenNavigationProp>();
   const { activeAccount } = useAccount();
@@ -85,18 +72,9 @@ const ChargeScreen = () => {
   // Check for payment status updates
   useEffect(() => {
     if (showQRCode && invoice && invoiceData?.invoices) {
-      console.log('ChargeScreen: Checking for payment status updates...');
-      console.log('ChargeScreen: Current invoice ID:', invoice.internalId);
-      console.log('ChargeScreen: Available invoices:', invoiceData.invoices.map((inv: any) => ({ id: inv.internalId, status: inv.status })));
 
       const currentInvoice = invoiceData.invoices.find((inv: any) => inv.internalId === invoice.internalId);
       if (currentInvoice) {
-        console.log('ChargeScreen: Found current invoice:', {
-          id: currentInvoice.internalId,
-          status: currentInvoice.status,
-          paidByUser: currentInvoice.paidByUser,
-          transaction: currentInvoice.transaction
-        });
 
         // Optimistic: show submitted as soon as the invoice has a SUBMITTED/PENDING_BLOCKCHAIN payment txn
         const hasSubmittedTxn = Array.isArray(currentInvoice.paymentTransactions) && currentInvoice.paymentTransactions.some(
@@ -107,13 +85,11 @@ const ChargeScreen = () => {
             if (prev === 'submitted' || prev === 'paid') {
               return prev;
             }
-            console.log('ChargeScreen: Payment submitted — waiting for confirmation (stay on Charge screen)');
             return 'submitted';
           });
         }
 
         if (currentInvoice.status === 'PAID' && !hasNavigatedToSuccess) {
-          console.log('ChargeScreen: Payment confirmed! Navigating to BusinessPaymentSuccess...');
           setPaymentStatus('paid');
           setHasNavigatedToSuccess(true);
 
@@ -150,13 +126,10 @@ const ChargeScreen = () => {
             }
           });
         } else if (currentInvoice.isExpired) {
-          console.log('ChargeScreen: Invoice expired');
           setPaymentStatus('expired');
         } else {
-          console.log('ChargeScreen: Invoice still pending, status:', currentInvoice.status);
         }
       } else {
-        console.log('ChargeScreen: Current invoice not found in polled data');
       }
     }
   }, [invoiceData, showQRCode, invoice, navigation, activeAccount]);
@@ -189,34 +162,26 @@ const ChargeScreen = () => {
   };
 
   const handleGenerateQR = async () => {
-    console.log('ChargeScreen: handleGenerateQR called');
 
     if (!amount || parseFloat(amount) <= 0) {
-      Alert.alert('Error', 'Por favor ingresa un monto válido', [{ text: 'OK' }]);
+      Alert.alert('Error', 'Por favor ingresa un monto válido', [{ text: 'Entendido' }]);
       return;
     }
 
     if (!activeAccount) {
-      Alert.alert('Error', 'No se encontró la cuenta activa', [{ text: 'OK' }]);
+      Alert.alert('Error', 'No se encontró la cuenta activa', [{ text: 'Entendido' }]);
       return;
     }
 
-    console.log('ChargeScreen: Active account:', {
-      id: activeAccount.id,
-      type: activeAccount.type,
-      name: activeAccount.name
-    });
 
     setIsLoading(true);
 
     try {
       // For business accounts, ensure opt-ins are complete before generating invoice (blocking)
       if (activeAccount.type === 'business') {
-        console.log('ChargeScreen: Business account detected, checking opt-ins...');
 
         try {
           const businessOptInService = await import('../services/businessOptInService').then(m => m.default);
-          console.log('ChargeScreen: BusinessOptInService imported successfully');
 
           // Show opt-in modal
           setIsOptingIn(true);
@@ -229,7 +194,6 @@ const ChargeScreen = () => {
             }
           );
 
-          console.log('ChargeScreen: Opt-in check result:', optInSuccess);
 
           // Hide opt-in modal
           setIsOptingIn(false);
@@ -258,23 +222,20 @@ const ChargeScreen = () => {
             setIsLoading(false);
             return;
           }
-          console.log('ChargeScreen: Business opt-ins verified, proceeding with invoice generation');
         } catch (optInError) {
           console.error('ChargeScreen: Error during opt-in check:', optInError);
           setIsOptingIn(false);
           Alert.alert(
             'Error',
             'Error al verificar la cuenta. Por favor intenta de nuevo.',
-            [{ text: 'OK' }]
+            [{ text: 'Entendido' }]
           );
           setIsLoading(false);
           return;
         }
       } else {
-        console.log('ChargeScreen: Personal account, skipping opt-in check');
       }
 
-      console.log('ChargeScreen: Creating invoice...');
       const { data } = await createInvoice({
         variables: {
           input: {
@@ -298,11 +259,11 @@ const ChargeScreen = () => {
         } catch (_) { }
       } else {
         const errors = data?.createInvoice?.errors || ['Error desconocido'];
-        Alert.alert('Error', errors.join(', '), [{ text: 'OK' }]);
+        Alert.alert('Error', errors.join(', '), [{ text: 'Entendido' }]);
       }
     } catch (error) {
       console.error('Error creating invoice:', error);
-      Alert.alert('Error', 'No se pudo crear la factura. Inténtalo de nuevo.', [{ text: 'OK' }]);
+      Alert.alert('Error', 'No se pudo crear la factura. Inténtalo de nuevo.', [{ text: 'Entendido' }]);
     } finally {
       setIsLoading(false);
     }
@@ -310,7 +271,7 @@ const ChargeScreen = () => {
 
   const handleCopy = (text: string) => {
     Clipboard.setString(text);
-    Alert.alert('Copiado', 'Enlace copiado al portapapeles', [{ text: 'OK' }]);
+    Alert.alert('Copiado', 'Enlace copiado al portapapeles', [{ text: 'Entendido' }]);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -351,7 +312,7 @@ const ChargeScreen = () => {
       if (!uri) return;
 
       await CameraRoll.save(uri, { type: 'photo' });
-      Alert.alert('Guardado', 'Código QR guardado en la galería', [{ text: 'OK' }]);
+      Alert.alert('Guardado', 'Código QR guardado en la galería', [{ text: 'Entendido' }]);
     } catch (error) {
       console.error('Download error:', error);
       Alert.alert('Error', 'No se pudo guardar la imagen');
@@ -394,7 +355,7 @@ const ChargeScreen = () => {
       case 'paid':
         return {
           text: '¡Pago Confirmado!',
-          color: '#059669',
+          color: '#10B981',
           bgColor: '#d1fae5',
           icon: 'check-circle'
         };

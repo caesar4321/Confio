@@ -62,7 +62,7 @@ export const EmployeeEditScreen = () => {
       });
       if (data?.updateBusinessEmployee?.success) {
         Alert.alert('Éxito', 'Empleado actualizado correctamente.', [
-          { text: 'OK', onPress: () => navigation.goBack() },
+          { text: 'Entendido', onPress: () => navigation.goBack() },
         ]);
       } else {
         Alert.alert('Error', data?.updateBusinessEmployee?.errors?.[0] || 'No se pudo actualizar al empleado');

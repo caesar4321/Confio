@@ -674,7 +674,7 @@ const styles = StyleSheet.create({
   },
   freeFeeText: {
     fontSize: 14,
-    color: '#059669',
+    color: '#10B981',
     fontWeight: '500',
   },
   freeFeeSubtext: {

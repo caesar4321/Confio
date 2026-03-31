@@ -224,7 +224,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     paddingBottom: 4,
     borderBottomWidth: 1,
-    borderBottomColor: '#72D9BC',
+    borderBottomColor: '#34D399',
   },
   paragraph: {
     fontSize: 16,
@@ -242,7 +242,7 @@ const styles = StyleSheet.create({
   bulletPoint: {
     fontSize: 16,
     marginRight: 8,
-    color: '#72D9BC',
+    color: '#34D399',
   },
   listItemText: {
     flex: 1,

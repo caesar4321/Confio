@@ -1623,7 +1623,7 @@ export class SecureDeterministicWalletService {
               cacheKey.username,
               newEncryptedBlob,
               {
-                accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY
+                accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY
               }
             );
             console.log('Seed re-wrapped successfully');
@@ -1697,7 +1697,7 @@ export class SecureDeterministicWalletService {
           cacheKey.username,
           encryptedBlob,
           {
-            accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY
+            accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY
           }
         );
 

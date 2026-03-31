@@ -19,21 +19,7 @@ import { GET_MY_RAMP_ADDRESS, UPSERT_RAMP_USER_ADDRESS } from '../apollo/queries
 import { MainStackParamList } from '../types/navigation';
 import { useAuth } from '../contexts/AuthContext';
 import { getCountryByIso } from '../utils/countries';
-
-const colors = {
-  background: '#F3F4F6',
-  surface: '#FFFFFF',
-  primary: '#10B981',
-  primaryDark: '#047857',
-  primaryLight: '#D1FAE5',
-  text: '#111827',
-  textMuted: '#6B7280',
-  border: '#D1D5DB',
-  error: '#DC2626',
-  errorLight: '#FEE2E2',
-  successLight: '#D1FAE5',
-  successText: '#065F46',
-};
+import { colors } from '../config/theme';
 
 type Navigation = NavigationProp<MainStackParamList>;
 
@@ -192,52 +178,52 @@ export const RampAddressScreen: React.FC = () => {
 
           <Text style={styles.label}>Dirección</Text>
           <View style={styles.inputWrapper}>
-            <Icon name="home" size={15} color={colors.textMuted} style={styles.inputIcon} />
+            <Icon name="home" size={15} color={colors.textSecondary} style={styles.inputIcon} />
             <TextInput
               style={styles.inputWithIcon}
               value={addressStreet}
               onChangeText={t => { setAddressStreet(t); setError(null); }}
               placeholder="Calle y número"
-              placeholderTextColor={colors.textMuted}
+              placeholderTextColor={colors.textSecondary}
               autoCapitalize="words"
             />
           </View>
 
           <Text style={styles.label}>Ciudad</Text>
           <View style={styles.inputWrapper}>
-            <Icon name="map" size={15} color={colors.textMuted} style={styles.inputIcon} />
+            <Icon name="map" size={15} color={colors.textSecondary} style={styles.inputIcon} />
             <TextInput
               style={styles.inputWithIcon}
               value={addressCity}
               onChangeText={t => { setAddressCity(t); setError(null); }}
               placeholder="Ciudad"
-              placeholderTextColor={colors.textMuted}
+              placeholderTextColor={colors.textSecondary}
               autoCapitalize="words"
             />
           </View>
 
           <Text style={styles.label}>Provincia o estado</Text>
           <View style={styles.inputWrapper}>
-            <Icon name="flag" size={15} color={colors.textMuted} style={styles.inputIcon} />
+            <Icon name="flag" size={15} color={colors.textSecondary} style={styles.inputIcon} />
             <TextInput
               style={styles.inputWithIcon}
               value={addressState}
               onChangeText={t => { setAddressState(t); setError(null); }}
               placeholder="Provincia o estado"
-              placeholderTextColor={colors.textMuted}
+              placeholderTextColor={colors.textSecondary}
               autoCapitalize="words"
             />
           </View>
 
           <Text style={styles.label}>Código postal</Text>
           <View style={styles.inputWrapper}>
-            <Icon name="hash" size={15} color={colors.textMuted} style={styles.inputIcon} />
+            <Icon name="hash" size={15} color={colors.textSecondary} style={styles.inputIcon} />
             <TextInput
               style={styles.inputWithIcon}
               value={addressZipCode}
               onChangeText={t => { setAddressZipCode(t); setError(null); }}
               placeholder="Código postal"
-              placeholderTextColor={colors.textMuted}
+              placeholderTextColor={colors.textSecondary}
               autoCapitalize="characters"
             />
           </View>
@@ -336,13 +322,13 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     lineHeight: 20,
-    color: colors.text,
+    color: colors.textFlat,
   },
   infoHint: {
     marginTop: 10,
     fontSize: 13,
     lineHeight: 18,
-    color: colors.textMuted,
+    color: colors.textSecondary,
   },
   formCard: {
     backgroundColor: colors.surface,
@@ -355,7 +341,7 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.textMuted,
+    color: colors.textSecondary,
     marginBottom: 6,
     marginTop: 14,
   },
@@ -378,7 +364,7 @@ const styles = StyleSheet.create({
   },
   readOnlyValue: {
     fontSize: 15,
-    color: colors.text,
+    color: colors.textFlat,
   },
   inputWrapper: {
     flexDirection: 'row',
@@ -397,7 +383,7 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 48,
     fontSize: 15,
-    color: colors.text,
+    color: colors.textFlat,
   },
   errorBanner: {
     flexDirection: 'row',

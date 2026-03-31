@@ -9,20 +9,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { getSupportCopy } from '../utils/supportMessaging';
 import ViewShot from 'react-native-view-shot';
 import RNShare from 'react-native-share';
-
-const colors = {
-  primary: '#34D399', // emerald-400
-  secondary: '#8B5CF6', // violet-500
-  accent: '#3B82F6', // blue-500
-  background: '#F9FAFB', // gray-50
-  neutralDark: '#F3F4F6', // gray-100
-  text: {
-    primary: '#1F2937', // gray-800
-    secondary: '#6B7280', // gray-500
-  },
-  success: '#10B981', // emerald-500
-  warning: '#F59E0B', // amber-500
-};
+import { colors } from '../config/theme';
 
 type TransactionType = 'sent' | 'received' | 'payment';
 
@@ -50,7 +37,6 @@ interface TransactionData {
 }
 
 export const TransactionSuccessScreen = () => {
-  console.log('TransactionSuccessScreen: Component mounted');
   const navigation = useNavigation();
   const route = useRoute();
 
@@ -65,8 +51,6 @@ export const TransactionSuccessScreen = () => {
   };
 
   // Debug logging
-  console.log('TransactionSuccessScreen: Received transaction data:', transactionData);
-  console.log('TransactionSuccessScreen: isOnConfio value:', transactionData.isOnConfio);
 
   const [copied, setCopied] = useState(false);
   const [showTechnical, setShowTechnical] = useState(false);
@@ -108,7 +92,6 @@ export const TransactionSuccessScreen = () => {
     if (transactionData.type === 'sent') {
       // Check if it's an external wallet send (has address but no phone)
       if (transactionData.recipientAddress && !transactionData.recipientPhone) {
-        console.log('TransactionSuccessScreen: handleSendAgain - navigating to SendWithAddress');
         (navigation as any).navigate('SendWithAddress', {
           tokenType: transactionData.currency.toLowerCase() === 'cusd' ? 'cusd' : 'confio',
           prefilledAddress: transactionData.recipientAddress
@@ -124,9 +107,6 @@ export const TransactionSuccessScreen = () => {
           // aptosAddress removed - server will determine this
         };
 
-        console.log('TransactionSuccessScreen: handleSendAgain - friend data:', friendData);
-        console.log('TransactionSuccessScreen: transactionData.isOnConfio:', transactionData.isOnConfio);
-        console.log('TransactionSuccessScreen: transactionData.recipientAddress:', transactionData.recipientAddress);
 
         (navigation as any).navigate('SendToFriend', {
           friend: friendData,
@@ -387,7 +367,7 @@ export const TransactionSuccessScreen = () => {
                   <Icon
                     name={transactionData.type === 'sent' || transactionData.type === 'payment' ? 'send' : 'arrow-down'}
                     size={14}
-                    color={transactionData.type === 'received' ? '#059669' : '#3B82F6'}
+                    color={transactionData.type === 'received' ? '#10B981' : '#3B82F6'}
                   />
                 </View>
               </View>
@@ -488,13 +468,6 @@ export const TransactionSuccessScreen = () => {
           {(() => {
             const isOnConfio = Boolean(transactionData.isOnConfio);
             const hasPhone = Boolean(transactionData.recipientPhone);
-            console.log('TransactionSuccessScreen: Checking invitation box condition:', {
-              type: transactionData.type,
-              isOnConfio: transactionData.isOnConfio,
-              isOnConfioBoolean: isOnConfio,
-              hasPhone: hasPhone,
-              shouldShow: transactionData.type === 'sent' && !isOnConfio && hasPhone
-            });
             return transactionData.type === 'sent' && !isOnConfio && hasPhone;
           })() && (
               <View style={[styles.remittanceContainer, styles.invitationCard]}>
@@ -580,7 +553,7 @@ export const TransactionSuccessScreen = () => {
 
 
               <TouchableOpacity
-                style={[styles.actionButton, { backgroundColor: '#059669' }]}
+                style={[styles.actionButton, { backgroundColor: '#10B981' }]}
                 onPress={handleShareScreenshot}
               >
                 <Icon name="share-2" size={16} color="#ffffff" />
@@ -593,8 +566,8 @@ export const TransactionSuccessScreen = () => {
                 style={[styles.actionButton, { backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0' }]}
                 onPress={handleShareReceipt}
               >
-                <Icon name="file-text" size={16} color="#059669" />
-                <Text style={[styles.actionButtonText, { color: '#059669' }]}>
+                <Icon name="file-text" size={16} color="#10B981" />
+                <Text style={[styles.actionButtonText, { color: '#10B981' }]}>
                   Ver comprobante oficial
                 </Text>
               </TouchableOpacity>

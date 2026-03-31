@@ -52,7 +52,7 @@ const NotificationSettingsScreen: React.FC = () => {
           'Permission Denied',
           'Please enable notifications in your device settings to receive push notifications.',
           [
-            { text: 'Cancel', style: 'cancel' },
+            { text: 'Cancelar', style: 'cancel' },
             { text: 'Open Settings', onPress: () => {
               // Open system settings
               // Linking.openSettings();
@@ -65,7 +65,7 @@ const NotificationSettingsScreen: React.FC = () => {
         'Disable Notifications',
         'To disable notifications, please go to your device settings.',
         [
-          { text: 'OK' },
+          { text: 'Entendido' },
           { text: 'Open Settings', onPress: () => {
             // Open system settings
             // Linking.openSettings();

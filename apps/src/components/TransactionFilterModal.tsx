@@ -257,12 +257,12 @@ export const TransactionFilterModal = ({
                 <TouchableOpacity
                   style={[
                     styles.filterChip,
-                    filters.types.payroll && { backgroundColor: '#059669' + '20', borderColor: '#059669' }
+                    filters.types.payroll && { backgroundColor: '#10B981' + '20', borderColor: '#10B981' }
                   ]}
                   onPress={() => toggleType('payroll')}
                 >
-                  <Icon name="briefcase" size={16} color={filters.types.payroll ? '#059669' : '#6B7280'} />
-                  <Text style={[styles.filterChipText, filters.types.payroll && { color: '#059669' }]}>
+                  <Icon name="briefcase" size={16} color={filters.types.payroll ? '#10B981' : '#6B7280'} />
+                  <Text style={[styles.filterChipText, filters.types.payroll && { color: '#10B981' }]}>
                     Nómina
                   </Text>
                 </TouchableOpacity>

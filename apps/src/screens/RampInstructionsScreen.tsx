@@ -27,24 +27,10 @@ import { RampHero } from '../components/ramps/RampHero';
 import { RampReveal } from '../components/ramps/RampReveal';
 import { formatRampMoney } from '../hooks/useRampQuoteFlow';
 import { buildRampInstructionView } from '../utils/rampInstructions';
+import { colors } from '../config/theme';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'RampInstructions'>;
 type RouteProps = RouteProp<MainStackParamList, 'RampInstructions'>;
-
-const colors = {
-  dark: '#111827',
-  textPrimary: '#1f2937',
-  textMuted: '#6b7280',
-  border: '#e5e7eb',
-  background: '#f6faf7',
-  surface: '#ffffff',
-  primary: '#34d399',
-  primaryDark: '#10b981',
-  accent: '#3b82f6',
-  accentLight: '#dbeafe',
-  heroFrom: '#10b981',
-  heroTo: '#6ee7b7',
-};
 
 const cleanDisplay = (text?: string | null): string => {
   if (!text) return '';
@@ -218,8 +204,8 @@ export const RampInstructionsScreen = () => {
           subtitle={instructionView.subtitle}
           onBack={() => navigation.goBack()}
           compact={isCompact}
-          fromColor={colors.heroFrom}
-          toColor={colors.heroTo}
+          fromColor={colors.primaryLight}
+          toColor={colors.primary}
         />
         </RampReveal>
 
@@ -468,14 +454,14 @@ const styles = StyleSheet.create({
   label: {
     flex: 0.92,
     fontSize: 14,
-    color: colors.textMuted,
+    color: colors.textSecondary,
     lineHeight: 20,
   },
   value: {
     flex: 1.08,
     fontSize: 14,
     fontWeight: '700',
-    color: colors.textPrimary,
+    color: colors.textFlat,
     textAlign: 'right',
     lineHeight: 20,
   },
@@ -490,7 +476,7 @@ const styles = StyleSheet.create({
   orderValue: {
     fontSize: 13,
     fontWeight: '700',
-    color: colors.textPrimary,
+    color: colors.textFlat,
     fontVariant: ['tabular-nums'],
     letterSpacing: 0.3,
     flexShrink: 1,
@@ -522,7 +508,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   statusPillText_neutral: {
-    color: colors.textPrimary,
+    color: colors.textFlat,
   },
   statusPillText_info: {
     color: colors.accent,
@@ -549,13 +535,13 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 18,
     fontWeight: '800',
-    color: colors.textPrimary,
+    color: colors.textFlat,
     lineHeight: 24,
   },
   sectionBody: {
     fontSize: 14,
     lineHeight: 23,
-    color: colors.textMuted,
+    color: colors.textSecondary,
   },
   stepsWrap: {
     gap: 12,
@@ -584,18 +570,18 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     lineHeight: 20,
-    color: colors.textPrimary,
+    color: colors.textFlat,
   },
   instructionLabel: {
     fontSize: 12,
     fontWeight: '700',
-    color: colors.textMuted,
+    color: colors.textSecondary,
     letterSpacing: 0.2,
   },
   instructionValue: {
     fontSize: 15,
     lineHeight: 22,
-    color: colors.textPrimary,
+    color: colors.textFlat,
     flexShrink: 1,
   },
   qrWrap: {
@@ -619,7 +605,7 @@ const styles = StyleSheet.create({
   note: {
     fontSize: 13,
     lineHeight: 19,
-    color: colors.textMuted,
+    color: colors.textSecondary,
     fontStyle: 'italic',
   },
   copyPill: {
@@ -678,7 +664,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 22,
     fontSize: 13,
     lineHeight: 18,
-    color: colors.textMuted,
+    color: colors.textSecondary,
     textAlign: 'center',
   },
   historyButton: {
@@ -712,7 +698,7 @@ const styles = StyleSheet.create({
   ghostButtonText: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.textMuted,
+    color: colors.textSecondary,
   },
 });
 

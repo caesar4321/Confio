@@ -1,6 +1,6 @@
 import React from 'react';
 import { Image, StyleSheet, View } from 'react-native';
-import Icon from 'react-native-vector-icons/FontAwesome';
+import Icon from 'react-native-vector-icons/Feather';
 
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import founderImage from '../assets/png/JulianMoon_Founder.jpeg';

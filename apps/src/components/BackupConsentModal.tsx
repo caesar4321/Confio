@@ -58,16 +58,16 @@ export const BackupConsentModal: React.FC<BackupConsentModalProps> = ({ visible,
                                 Verás una solicitud de permiso para acceder a "configuración de la aplicación". Es 100% privado.
                             </Text>
                         </View>
-                    </ScrollView>
 
-                    <View style={styles.footer}>
-                        <TouchableOpacity
-                            style={[styles.button, styles.buttonContinue]}
-                            onPress={onContinue}
-                        >
-                            <Text style={styles.textStyle}>Continuar y Proteger</Text>
-                        </TouchableOpacity>
-                    </View>
+                        <View style={styles.footerInside}>
+                            <TouchableOpacity
+                                style={[styles.button, styles.buttonContinue]}
+                                onPress={onContinue}
+                            >
+                                <Text style={styles.textStyle}>Continuar y Proteger</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </ScrollView>
                 </View>
             </View>
         </Modal>
@@ -173,7 +173,9 @@ const styles = StyleSheet.create({
     },
     button: {
         borderRadius: 16,
-        height: 56, // Fixed height for buttons
+        minHeight: 56, // Changed from fixed height
+        paddingVertical: 12,
+        paddingHorizontal: 16,
         justifyContent: 'center',
         width: '100%',
         alignItems: 'center',
@@ -182,9 +184,10 @@ const styles = StyleSheet.create({
         backgroundColor: '#4F46E5', // Indigo-600
         elevation: 2,
     },
-    footer: {
-        paddingHorizontal: 24,
-        paddingBottom: 24,
+    footerInside: {
+        width: '100%',
+        marginTop: 8,
+        paddingBottom: 12,
     },
     textStyle: {
         color: 'white',

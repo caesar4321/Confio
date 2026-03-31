@@ -10,24 +10,7 @@ import CONFIOLogo from '../assets/png/CONFIO.png';
 import USDCLogo from '../assets/png/USDC.png';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNumberFormat } from '../utils/numberFormatting';
-
-const colors = {
-  primary: '#34D399', // emerald-400
-  secondary: '#8B5CF6', // violet-500
-  accent: '#3B82F6', // blue-500
-  background: '#F9FAFB', // gray-50
-  neutralDark: '#F3F4F6', // gray-100
-  text: {
-    primary: '#1F2937', // gray-800
-    secondary: '#6B7280', // gray-500
-  },
-  warning: {
-    background: '#FEF3C7', // yellow-50
-    border: '#FDE68A', // yellow-200
-    text: '#92400E', // yellow-800
-    icon: '#D97706', // yellow-600
-  },
-};
+import { colors } from '../config/theme';
 
 type TokenType = 'cusd' | 'confio' | 'usdc';
 
@@ -167,7 +150,6 @@ export const SendWithAddressScreen = () => {
         if (!alive) return;
         if (pack && Array.isArray((pack as any).transactions) && (pack as any).transactions.length >= 2) {
           setPrepared({ transactions: (pack as any).transactions });
-          console.log('SendWithAddressScreen: Preflight prepared via WS');
         }
       } catch (e) {
         // ignore preflight errors; processing screen will fallback
@@ -177,11 +159,9 @@ export const SendWithAddressScreen = () => {
   }, [amount, destination, tokenType]);
 
   const handleSend = async () => {
-    console.log('SendWithAddressScreen: handleSend called');
 
     // Prevent double-clicks/rapid button presses
     if (isProcessing || navLock.current) {
-      console.log('SendWithAddressScreen: Already processing, ignoring duplicate click');
       return;
     }
 
@@ -242,7 +222,6 @@ export const SendWithAddressScreen = () => {
     navLock.current = true;
 
     try {
-      console.log('SendWithAddressScreen: Navigating to TransactionProcessing');
 
       // Generate idempotency key to prevent double-spending
       const minuteTimestamp = Math.floor(Date.now() / 60000);

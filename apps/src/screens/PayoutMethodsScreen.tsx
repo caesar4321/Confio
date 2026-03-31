@@ -25,32 +25,7 @@ import { useAccount } from '../contexts/AccountContext';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AddPayoutMethodModal } from '../components/AddPayoutMethodModal';
 import Svg, { Defs, LinearGradient, Stop, Rect, Circle } from 'react-native-svg';
-
-const colors = {
-  primary: '#34d399',
-  primaryLight: '#d1fae5',
-  primaryDark: '#10b981',
-  primaryDeep: '#047857',
-  secondary: '#8b5cf6',
-  accent: '#3b82f6',
-  background: '#f9fafb',
-  neutralDark: '#f3f4f6',
-  white: '#ffffff',
-  text: {
-    primary: '#1f2937',
-    secondary: '#6b7280',
-    light: '#9ca3af',
-  },
-  success: '#10b981',
-  error: '#ef4444',
-  warning: '#f59e0b',
-  providerColors: {
-    BANK: '#3b82f6',
-    DIGITAL_WALLET: '#8b5cf6',
-    MOBILE_PAYMENT: '#f59e0b',
-    DEFAULT: '#34d399',
-  },
-};
+import { colors } from '../config/theme';
 
 type PayoutMethodsNavigationProp = NativeStackNavigationProp<any>;
 
@@ -333,10 +308,10 @@ export const PayoutMethodsScreen = () => {
         Alert.alert('Éxito', 'Cuenta bancaria marcada como predeterminada');
         refetchBankAccounts();
       } else {
-        Alert.alert('Error', data?.setDefaultBankInfo?.error || 'Error al marcar como predeterminada', [{ text: 'OK' }]);
+        Alert.alert('Error', data?.setDefaultBankInfo?.error || 'Error al marcar como predeterminada', [{ text: 'Entendido' }]);
       }
     } catch {
-      Alert.alert('Error', 'Error de conexión', [{ text: 'OK' }]);
+      Alert.alert('Error', 'Error de conexión', [{ text: 'Entendido' }]);
     }
   };
 
@@ -353,13 +328,13 @@ export const PayoutMethodsScreen = () => {
             try {
               const { data } = await deleteBankInfo({ variables: { bankInfoId } });
               if (data?.deleteBankInfo?.success) {
-                Alert.alert('Éxito', 'Cuenta bancaria eliminada', [{ text: 'OK' }]);
+                Alert.alert('Éxito', 'Cuenta bancaria eliminada', [{ text: 'Entendido' }]);
                 refetchBankAccounts();
               } else {
-                Alert.alert('Error', data?.deleteBankInfo?.error || 'Error al eliminar', [{ text: 'OK' }]);
+                Alert.alert('Error', data?.deleteBankInfo?.error || 'Error al eliminar', [{ text: 'Entendido' }]);
               }
             } catch {
-              Alert.alert('Error', 'Error de conexión', [{ text: 'OK' }]);
+              Alert.alert('Error', 'Error de conexión', [{ text: 'Entendido' }]);
             }
           },
         },
@@ -627,7 +602,7 @@ const styles = StyleSheet.create({
   // ── Payment method card ──
   card: {
     flexDirection: 'row',
-    backgroundColor: colors.white,
+    backgroundColor: colors.background,
     borderRadius: 14,
     marginBottom: 10,
     overflow: 'hidden',
@@ -735,7 +710,7 @@ const styles = StyleSheet.create({
   },
   skeletonCard: {
     flexDirection: 'row',
-    backgroundColor: colors.white,
+    backgroundColor: colors.background,
     borderRadius: 16,
     marginBottom: 12,
     overflow: 'hidden',
@@ -821,7 +796,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.white,
+    backgroundColor: colors.background,
     paddingVertical: 16,
     borderRadius: 14,
     borderWidth: 2,

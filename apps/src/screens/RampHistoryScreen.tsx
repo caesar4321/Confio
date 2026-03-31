@@ -21,6 +21,7 @@ import { GET_CURRENT_ACCOUNT_TRANSACTIONS } from '../apollo/queries';
 import { useAccount } from '../contexts/AccountContext';
 import { MainStackParamList } from '../types/navigation';
 import { RampHero } from '../components/ramps/RampHero';
+import { colors } from '../config/theme';
 
 moment.locale('es');
 
@@ -31,25 +32,6 @@ type RampFilter = 'all' | 'on_ramp' | 'off_ramp';
 type ListRow =
   | { kind: 'section'; label: string; key: string }
   | { kind: 'item'; data: any; key: string };
-
-const colors = {
-  background: '#f6faf7',
-  surface: '#ffffff',
-  border: '#e5e7eb',
-  textPrimary: '#1f2937',
-  textMuted: '#6b7280',
-  primary: '#34d399',
-  primaryDark: '#10b981',
-  primaryLight: '#d1fae5',
-  danger: '#b91c1c',
-  dangerLight: '#fee2e2',
-  warning: '#b45309',
-  warningLight: '#fef3c7',
-  heroFrom: '#10b981',
-  heroTo: '#6ee7b7',
-  offRampLight: '#f1f5f9',
-  offRampIcon: '#64748b',
-};
 
 /* ─── helpers ─── */
 
@@ -278,7 +260,7 @@ export const RampHistoryScreen = () => {
       success: { bg: colors.primaryLight, text: colors.primaryDark },
       warning: { bg: colors.warningLight, text: colors.warning },
       error: { bg: colors.dangerLight, text: colors.danger },
-      neutral: { bg: '#f3f4f6', text: colors.textMuted },
+      neutral: { bg: '#f3f4f6', text: colors.textSecondary },
     }[statusTone];
 
     return (
@@ -337,7 +319,7 @@ export const RampHistoryScreen = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.heroFrom} />
+      <StatusBar barStyle="light-content" backgroundColor={colors.primaryLight} />
       <FlatList
         data={listRows}
         keyExtractor={(row) => row.key}
@@ -361,8 +343,8 @@ export const RampHistoryScreen = () => {
               title={title}
               subtitle={subtitle}
               onBack={() => navigation.goBack()}
-              fromColor={colors.heroFrom}
-              toColor={colors.heroTo}
+              fromColor={colors.primaryLight}
+              toColor={colors.primary}
             />
             <View style={styles.filtersRow}>
               {renderFilterChip('all', 'Todo')}
@@ -430,7 +412,7 @@ const styles = StyleSheet.create({
   filterChipText: {
     fontSize: 13,
     fontWeight: '700',
-    color: colors.textMuted,
+    color: colors.textSecondary,
   },
   filterChipTextSelected: {
     color: colors.primaryDark,
@@ -450,7 +432,7 @@ const styles = StyleSheet.create({
   filterBadgeText: {
     fontSize: 10,
     fontWeight: '800',
-    color: colors.textMuted,
+    color: colors.textSecondary,
   },
   filterBadgeTextSelected: {
     color: colors.primaryDark,
@@ -470,7 +452,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.5,
     textTransform: 'uppercase',
-    color: colors.textMuted,
+    color: colors.textSecondary,
   },
   sectionLine: {
     flex: 1,
@@ -517,16 +499,16 @@ const styles = StyleSheet.create({
   itemTitle: {
     fontSize: 15,
     fontWeight: '800',
-    color: colors.textPrimary,
+    color: colors.textFlat,
   },
   itemSubtitle: {
     fontSize: 12,
-    color: colors.textMuted,
+    color: colors.textSecondary,
     fontWeight: '500',
   },
   itemDate: {
     fontSize: 11,
-    color: colors.textMuted,
+    color: colors.textSecondary,
     marginTop: 2,
   },
   itemRight: {
@@ -541,14 +523,14 @@ const styles = StyleSheet.create({
   itemCurrency: {
     fontSize: 11,
     fontWeight: '600',
-    color: colors.textMuted,
+    color: colors.textSecondary,
     marginTop: -2,
   },
   itemAmountPositive: {
     color: colors.primaryDark,
   },
   itemAmountNegative: {
-    color: colors.textPrimary,
+    color: colors.textFlat,
   },
 
   /* ── Status pill ── */
@@ -587,13 +569,13 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 17,
     fontWeight: '800',
-    color: colors.textPrimary,
+    color: colors.textFlat,
     textAlign: 'center',
   },
   emptyText: {
     fontSize: 14,
     lineHeight: 21,
-    color: colors.textMuted,
+    color: colors.textSecondary,
     textAlign: 'center',
     maxWidth: '85%',
   },

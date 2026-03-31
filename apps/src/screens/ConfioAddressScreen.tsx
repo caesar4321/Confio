@@ -16,16 +16,7 @@ import { RootStackParamList } from '../types/navigation';
 import { useAuth } from '../contexts/AuthContext';
 import { Header } from '../navigation/Header';
 import { ReferralInputModal } from '../components/ReferralInputModal';
-
-const colors = {
-  background: '#F3F4F6',
-  surface: '#FFFFFF',
-  primary: '#10B981',
-  primaryDark: '#047857',
-  primaryLight: '#ECFDF5',
-  text: '#111827',
-  textMuted: '#6B7280',
-};
+import { colors } from '../config/theme';
 
 export const ConfioAddressScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
@@ -229,12 +220,12 @@ const styles = StyleSheet.create({
   heroTitle: {
     fontSize: 22,
     fontWeight: '700',
-    color: colors.text,
+    color: colors.textFlat,
     marginBottom: 12,
   },
   heroSubtitle: {
     fontSize: 14,
-    color: colors.textMuted,
+    color: colors.textSecondary,
     lineHeight: 20,
   },
   usernameCard: {
@@ -258,7 +249,7 @@ const styles = StyleSheet.create({
   usernameValue: {
     fontSize: 20,
     fontWeight: '700',
-    color: colors.text,
+    color: colors.textFlat,
   },
   usernameActions: {
     flexDirection: 'row',
@@ -324,7 +315,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.text,
+    color: colors.textFlat,
   },
   stepRow: {
     flexDirection: 'row',
@@ -347,7 +338,7 @@ const styles = StyleSheet.create({
   stepText: {
     flex: 1,
     fontSize: 13,
-    color: colors.textMuted,
+    color: colors.textSecondary,
     lineHeight: 19,
   },
   tipRow: {
@@ -358,12 +349,12 @@ const styles = StyleSheet.create({
   tipText: {
     flex: 1,
     fontSize: 13,
-    color: colors.textMuted,
+    color: colors.textSecondary,
     lineHeight: 19,
   },
   reasonText: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: colors.textSecondary,
     lineHeight: 20,
   },
   criteriaList: {
@@ -371,7 +362,7 @@ const styles = StyleSheet.create({
   },
   criteriaItem: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: colors.textSecondary,
     lineHeight: 18,
   },
   criteriaNote: {

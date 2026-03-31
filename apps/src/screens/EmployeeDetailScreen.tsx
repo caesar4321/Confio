@@ -16,22 +16,9 @@ import { Header } from '../navigation/Header';
 import { getCountryByIso } from '../utils/countries';
 import { useMutation } from '@apollo/client';
 import { REMOVE_BUSINESS_EMPLOYEE, GET_CURRENT_BUSINESS_EMPLOYEES } from '../apollo/queries';
+import { colors } from '../config/theme';
 
 // Color palette
-const colors = {
-  primary: '#34D399', // emerald-400
-  primaryLight: '#d1fae5', // emerald-100
-  primaryDark: '#10b981', // emerald-500
-  secondary: '#8b5cf6', // violet-500
-  neutral: '#f9fafb', // gray-50
-  neutralDark: '#f3f4f6', // gray-100
-  text: {
-    primary: '#1F2937', // gray-800
-    secondary: '#6B7280', // gray-500
-    light: '#9CA3AF', // gray-400
-  },
-};
-
 type EmployeeDetailScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 type EmployeeDetailScreenRouteProp = RouteProp<MainStackParamList, 'EmployeeDetail'>;
 
@@ -178,7 +165,7 @@ export const EmployeeDetailScreen = () => {
                 return;
               }
               Alert.alert('Empleado removido', `${employeeName} ha sido removido.`, [
-                { text: 'OK', onPress: () => navigation.goBack() },
+                { text: 'Entendido', onPress: () => navigation.goBack() },
               ]);
             } catch (e) {
               Alert.alert('Error', 'Ocurrió un error al remover al empleado');

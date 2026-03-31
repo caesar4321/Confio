@@ -25,22 +25,9 @@ import { useCurrency } from '../hooks/useCurrency';
 import { useAccount } from '../contexts/AccountContext';
 import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
 import { useNumberFormat } from '../utils/numberFormatting';
+import { colors } from '../config/theme';
 
 // Colors from the design
-const colors = {
-  primary: '#34d399', // emerald-400
-  primaryText: '#34d399',
-  primaryLight: '#d1fae5', // emerald-100
-  primaryDark: '#10b981', // emerald-500
-  secondary: '#8b5cf6', // violet-500
-  secondaryText: '#8b5cf6',
-  accent: '#3b82f6', // blue-500
-  accentText: '#3b82f6',
-  neutral: '#f9fafb', // gray-50
-  neutralDark: '#f3f4f6', // gray-100
-  dark: '#111827', // gray-900
-};
-
 type PaymentMethod = {
   id: string;
   name: string;
@@ -133,14 +120,6 @@ export const CreateOfferScreen = () => {
   React.useEffect(() => {
     const pmList = paymentMethodsData?.p2pPaymentMethods;
     if (pmList) {
-      console.log('[CreateOfferScreen] Available payment methods for', selectedCountry?.[0], ':', 
-        pmList.map((m: any) => ({
-          id: m.id,
-          name: m.displayName,
-          isActive: m.isActive,
-          bank: m.bank?.name
-        }))
-      );
     }
   }, [paymentMethodsData, selectedCountry]);
   
@@ -315,7 +294,7 @@ export const CreateOfferScreen = () => {
                   'Tu oferta ha sido eliminada exitosamente',
                   [
                     {
-                      text: 'OK',
+                      text: 'Entendido',
                       onPress: () => {
                         navigation.navigate('BottomTabs', { screen: 'Discover' });
                       },

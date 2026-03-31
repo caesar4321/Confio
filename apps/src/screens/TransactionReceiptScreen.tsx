@@ -19,6 +19,7 @@ import { CameraRoll } from '@react-native-camera-roll/camera-roll';
 import { MainStackParamList } from '../types/navigation';
 import { useAuth } from '../contexts/AuthContext';
 import { TransactionReceiptView } from '../components/TransactionReceiptView';
+import { APP_LAYOUT } from '../config/layout';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'TransactionReceipt'>;
 type RouteProps = RouteProp<MainStackParamList, 'TransactionReceipt'>;
@@ -194,7 +195,7 @@ export const TransactionReceiptScreen = () => {
         'Comprobante guardado',
         'El comprobante se guardó en tu galería.',
         [
-          { text: 'OK' },
+          { text: 'Entendido' },
           {
             text: 'Compartir',
             onPress: async () => {
@@ -242,7 +243,7 @@ export const TransactionReceiptScreen = () => {
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{getHeaderTitle()}</Text>
         <TouchableOpacity style={styles.downloadButton} onPress={handleExportPDF}>
-          <Icon name="download" size={20} color="#059669" />
+          <Icon name="download" size={20} color="#10B981" />
         </TouchableOpacity>
       </View>
 
@@ -289,7 +290,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    marginTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 10 : 0,
+    marginTop: Platform.OS === 'android' ? APP_LAYOUT.topSafeArea + 10 : 0,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#f3f4f6',
@@ -311,7 +312,7 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   exportButton: {
-    backgroundColor: '#059669',
+    backgroundColor: '#10B981',
     borderRadius: 12,
     paddingVertical: 16,
     paddingHorizontal: 24,
@@ -321,7 +322,7 @@ const styles = StyleSheet.create({
     gap: 8,
     margin: 20,
     marginTop: 24,
-    shadowColor: '#059669',
+    shadowColor: '#10B981',
     shadowOpacity: 0.3,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 4 },

@@ -207,7 +207,7 @@ export class AccountManager {
         accountId,
         {
           service: `${ACCOUNT_KEYCHAIN_SERVICE}_active`,
-          accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
+          accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK
         }
       );
 
@@ -458,7 +458,7 @@ export class AccountManager {
         accountJson,
         {
           service: `${ACCOUNT_KEYCHAIN_SERVICE}_${account.id}`,
-          accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
+          accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK
         }
       );
 

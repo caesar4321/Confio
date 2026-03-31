@@ -10,16 +10,10 @@ import { CREATE_PAYROLL_RECIPIENT, SET_BUSINESS_DELEGATES_BY_EMPLOYEE } from '..
 import { useAccount } from '../contexts/AccountContext';
 import { useAlgorand } from '../hooks/useAlgorand';
 import { biometricAuthService } from '../services/biometricAuthService';
+import { colors } from '../config/theme';
+import { APP_LAYOUT } from '../config/layout';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList>;
-
-const colors = {
-  primary: '#34d399',
-  text: '#111827',
-  muted: '#6b7280',
-  border: '#e5e7eb',
-  bg: '#f9fafb',
-};
 
 const getRoleLabel = (role: string) => {
   switch ((role || '').toLowerCase()) {
@@ -365,7 +359,7 @@ export const PayrollSetupWizard = () => {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={handleBack} style={styles.backButton}>
-          <Icon name={step === 1 ? 'x' : 'chevron-left'} size={24} color={colors.text} />
+          <Icon name={step === 1 ? 'x' : 'chevron-left'} size={24} color={colors.textFlat} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Configurar nómina</Text>
         <View style={{ width: 32 }} />
@@ -413,7 +407,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    marginTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 10 : 0,
+    marginTop: Platform.OS === 'android' ? APP_LAYOUT.topSafeArea + 10 : 0,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
@@ -427,7 +421,7 @@ const styles = StyleSheet.create({
     flex: 1,
     textAlign: 'center',
     fontSize: 18,
-    color: colors.text,
+    color: colors.textFlat,
     fontWeight: '600',
   },
   progressBar: {
@@ -462,7 +456,7 @@ const styles = StyleSheet.create({
   stepTitle: {
     fontSize: 20,
     fontWeight: '700',
-    color: colors.text,
+    color: colors.textFlat,
     marginBottom: 8,
   },
   stepSubtitle: {
@@ -499,7 +493,7 @@ const styles = StyleSheet.create({
   listItemName: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.text,
+    color: colors.textFlat,
   },
   listItemSubtext: {
     fontSize: 13,
@@ -532,7 +526,7 @@ const styles = StyleSheet.create({
   selectionCountText: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.text,
+    color: colors.textFlat,
   },
   warningCard: {
     flexDirection: 'row',
@@ -568,7 +562,7 @@ const styles = StyleSheet.create({
   summaryLabel: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.text,
+    color: colors.textFlat,
     marginBottom: 2,
   },
   summaryValue: {

@@ -5,7 +5,9 @@ import Icon from 'react-native-vector-icons/Feather';
 import { NavigationProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types/navigation';
 
-export const HEADER_HEIGHT = Platform.OS === 'ios' ? 88 : 64;
+import { APP_LAYOUT } from '../config/layout';
+
+export const HEADER_HEIGHT = APP_LAYOUT.headerHeight;
 
 interface HeaderProps {
   title: string;

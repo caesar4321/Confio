@@ -38,22 +38,9 @@ import { getCurrencySymbol, getCurrencyForCountry } from '../utils/currencyMappi
 import { useNumberFormat } from '../utils/numberFormatting';
 import { EmptyState } from '../components/EmptyState';
 import { OfferCardSkeleton, TradeCardSkeleton } from '../components/SkeletonLoader';
+import { colors } from '../config/theme';
 
 // Colors from the design
-const colors = {
-  primary: '#34d399', // emerald-400
-  primaryText: '#34d399',
-  primaryLight: '#d1fae5', // emerald-100
-  primaryDark: '#10b981', // emerald-500
-  secondary: '#8b5cf6', // violet-500
-  secondaryText: '#8b5cf6',
-  accent: '#3b82f6', // blue-500
-  accentText: '#3b82f6',
-  neutral: '#f9fafb', // gray-50
-  neutralDark: '#f3f4f6', // gray-100
-  dark: '#111827', // gray-900
-};
-
 const { width } = Dimensions.get('window');
 
 // Enhanced mock data for offers
@@ -365,13 +352,6 @@ export const ExchangeScreen = () => {
   const { profileData } = useAuth();
 
   // Debug active account
-  console.log('[ExchangeScreen] Active account:', {
-    activeAccountId: activeAccount?.id,
-    activeAccountType: activeAccount?.type,
-    activeAccountName: activeAccount?.name,
-    isActiveAccountNull: activeAccount === null,
-    isActiveAccountUndefined: activeAccount === undefined
-  });
 
   // Get currency information for selected country (from context, same as exchange rate hook)
   const { selectedCountry: contextSelectedCountry, userCountry } = useCountry();
@@ -427,13 +407,6 @@ export const ExchangeScreen = () => {
     limit: TRADES_LIMIT
   };
 
-  console.log('[ExchangeScreen] Trades query variables:', {
-    activeAccountType: activeAccount?.type,
-    activeAccountIndex: activeAccount?.index,
-    offset: tradesQueryVariables.offset,
-    limit: tradesQueryVariables.limit,
-    willSkipQuery: !activeAccount || !activeAccount.id
-  });
 
   const { data: myTradesData, loading: tradesLoading, error: tradesError, refetch: refetchTrades, fetchMore } = useQuery(GET_MY_P2P_TRADES, {
     variables: tradesQueryVariables,
@@ -446,21 +419,9 @@ export const ExchangeScreen = () => {
 
   // Debug trades query
   useEffect(() => {
-    console.log('[ExchangeScreen] Trades query debug:', {
-      loading: tradesLoading,
-      error: tradesError,
-      hasData: !!myTradesData,
-      tradesCount: myTradesData?.myP2pTrades?.trades?.length || 0,
-      totalCount: myTradesData?.myP2pTrades?.totalCount || 0,
-      activeCount: myTradesData?.myP2pTrades?.activeCount || 0,
-      variables: tradesQueryVariables,
-      skip: !activeAccount || !activeAccount.id,
-      activeAccount: activeAccount ? { id: activeAccount.id, type: activeAccount.type } : null
-    });
     if (tradesError) {
       // Check if this is a store reset error (happens during account switching)
       if (tradesError.message?.includes('Store reset while query was in flight')) {
-        console.log('[ExchangeScreen] Store reset error detected - this is expected during account switching');
         // The query will automatically retry after the store reset
       } else {
         console.error('[ExchangeScreen] Trades query error:', tradesError);
@@ -485,11 +446,6 @@ export const ExchangeScreen = () => {
   // Force refetch trades when active account changes
   React.useEffect(() => {
     if (activeAccount?.id && refetchTrades) {
-      console.log('[ExchangeScreen] Active account changed, refetching trades for account:', {
-        accountId: activeAccount.id,
-        accountType: activeAccount.type,
-        accountName: activeAccount.name
-      });
       refetchTrades({
         accountId: activeAccount.id
       });
@@ -499,11 +455,6 @@ export const ExchangeScreen = () => {
   // Force refetch offers when active account changes
   React.useEffect(() => {
     if (activeAccount?.id && refetchMyOffers) {
-      console.log('[ExchangeScreen] Active account changed, refetching offers for account:', {
-        accountId: activeAccount.id,
-        accountType: activeAccount.type,
-        accountName: activeAccount.name
-      });
       refetchMyOffers({
         accountId: activeAccount.id
       });
@@ -517,39 +468,10 @@ export const ExchangeScreen = () => {
   const activeTrades: ActiveTrade[] = React.useMemo(() => {
     if (!myTradesData?.myP2pTrades?.trades) return [];
 
-    console.log('[ExchangeScreen] Raw trades data:', {
-      tradesCount: myTradesData.myP2pTrades.trades.length,
-      totalCount: myTradesData.myP2pTrades.totalCount,
-      hasMore: myTradesData.myP2pTrades.hasMore,
-      activeCount: myTradesData.myP2pTrades.activeCount,
-      accountFilterUsed: tradesQueryVariables.accountId,
-      currentAccount: {
-        id: activeAccount?.id,
-        type: activeAccount?.type,
-        name: activeAccount?.name
-      },
-      trades: myTradesData.myP2pTrades.trades.map((trade: any) => ({
-        id: trade.id,
-        buyerUser: trade.buyerUser?.id,
-        sellerUser: trade.sellerUser?.id,
-        buyerBusiness: trade.buyerBusiness?.id,
-        sellerBusiness: trade.sellerBusiness?.id,
-        status: trade.status,
-        hasRating: trade.hasRating,
-        createdAt: trade.createdAt
-      }))
-    });
 
     // Special debug for trade 14
     const trade14 = myTradesData.myP2pTrades.trades.find((t: any) => t.id === '14');
     if (trade14) {
-      console.log('[ExchangeScreen] Trade 14 raw GraphQL data:', {
-        id: trade14.id,
-        status: trade14.status,
-        hasRating: trade14.hasRating,
-        buyerUser: trade14.buyerUser?.id,
-        sellerBusiness: trade14.sellerBusiness?.id
-      });
     }
 
     // Trades are already filtered and sorted on the server
@@ -564,23 +486,6 @@ export const ExchangeScreen = () => {
       // Since we're filtering by account context, we know this trade involves the current account
       let tradeType, otherPartyName;
 
-      console.log('[ExchangeScreen] Analyzing trade:', {
-        tradeId: trade.id,
-        buyerUser: trade.buyerUser?.id,
-        sellerUser: trade.sellerUser?.id,
-        buyerBusiness: trade.buyerBusiness?.id,
-        sellerBusiness: trade.sellerBusiness?.id,
-        buyerDisplayName,
-        sellerDisplayName,
-        currentAccountType: activeAccount?.type,
-        currentUserId: profileData?.userProfile?.id,
-        currentBusinessId: activeAccount?.business?.id,
-        paymentMethod: {
-          name: trade.paymentMethod?.name,
-          displayName: trade.paymentMethod?.displayName,
-          isActive: trade.paymentMethod?.isActive
-        }
-      });
 
       if (activeAccount?.type === 'business') {
         // Current account is business
@@ -703,7 +608,6 @@ export const ExchangeScreen = () => {
       }
 
       // Debug the actual status
-      console.log(`[Trade ${trade.id}] Status: ${trade.status}, hasRating: ${trade.hasRating}`);
 
       const mappedTrade = {
         id: trade.id,
@@ -747,17 +651,6 @@ export const ExchangeScreen = () => {
 
       // Debug logging for completed trades
       if (trade.status === 'COMPLETED') {
-        console.log(`[ExchangeScreen] Completed trade ${trade.id}:`, {
-          cryptoAmount: trade.cryptoAmount,
-          fiatAmount: trade.fiatAmount,
-          status: trade.status,
-          hasRating: trade.hasRating,
-          step: mappedTrade.step,
-          totalSteps: mappedTrade.totalSteps,
-          shouldShowRatingUI: !trade.hasRating,
-          sellerBusiness: trade.sellerBusiness?.name,
-          buyerUser: trade.buyerUser?.username
-        });
       }
 
       return mappedTrade;
@@ -849,25 +742,6 @@ export const ExchangeScreen = () => {
     const offers = offersData?.p2pOffers || [];
 
     // Debug logging
-    console.log('[ExchangeScreen] Filtering offers:', {
-      totalOffers: offers.length,
-      activeTab,
-      selectedCrypto,
-      selectedCountry: selectedCountry?.[2],
-      amount,
-      minRate,
-      maxRate,
-      filterVerified,
-      filterOnline,
-      filterHighVolume,
-      offers: offers.map(o => ({
-        id: o.id,
-        type: o.exchangeType,
-        token: o.tokenType,
-        rate: o.rate,
-        country: o.countryCode
-      }))
-    });
 
     // Apply client-side filtering
 
@@ -966,7 +840,6 @@ export const ExchangeScreen = () => {
     const hasMinRate = minRate && minRate.trim() !== '';
     const hasMaxRate = maxRate && maxRate.trim() !== '';
     if (hasMinRate || hasMaxRate) {
-      console.log(`📊 Final results: ${filteredOffers.length} offers out of ${offersData?.p2pOffers?.length || 0} total`);
     }
   }, [filteredOffers.length, minRate, maxRate, offersData?.p2pOffers?.length]);
 
@@ -1032,7 +905,6 @@ export const ExchangeScreen = () => {
   // Handle route params for refreshing data
   useEffect(() => {
     if (route.params?.refreshData) {
-      console.log('[ExchangeScreen] Refreshing data due to route params');
 
       // Refetch offers data
       if (refetch) {
@@ -1079,7 +951,6 @@ export const ExchangeScreen = () => {
   useFocusEffect(
     React.useCallback(() => {
       if (activeAccount?.id) {
-        console.log('[ExchangeScreen] Screen focused, refetching data');
         if (refetchTrades) {
           refetchTrades();
         }
@@ -1203,10 +1074,6 @@ export const ExchangeScreen = () => {
         }
       });
 
-      console.log('[ExchangeScreen] Loaded more trades:', {
-        newCount: result.data.myP2pTrades.trades.length,
-        hasMore: result.data.myP2pTrades.hasMore
-      });
     } catch (error) {
       console.error('Error loading more trades:', error);
     } finally {
@@ -1279,26 +1146,6 @@ export const ExchangeScreen = () => {
     const hasOldUserField = !!offer.user;
     const oldUserMatch = hasOldUserField && offer.user?.id === currentUserId;
 
-    console.log('[DEBUG] checkIfOwnOffer:', {
-      // Current account info
-      activeAccountType: activeAccount.type,
-      currentUserId,
-      currentBusinessId,
-      // Offer info
-      offerId: offer.id,
-      offerHasUser: !!offer.offerUser,
-      offerHasBusiness: !!offer.offerBusiness,
-      offerUserId: offer.offerUser?.id,
-      offerBusinessId: offer.offerBusiness?.id,
-      // Old field check
-      hasOldUserField,
-      oldUserId: offer.user?.id,
-      oldUserMatch,
-      // Comparison results
-      isCheckingBusiness: isBusinessAccount,
-      businessMatch: isBusinessAccount && offer.offerBusiness?.id === currentBusinessId,
-      userMatch: !isBusinessAccount && offer.offerUser?.id === currentUserId,
-    });
 
     if (isBusinessAccount) {
       // Business account viewing - only own if offer is from same business
@@ -1352,27 +1199,12 @@ export const ExchangeScreen = () => {
   };
 
   const handleSelectOffer = (offer: any, action: 'profile' | 'trade') => {
-    console.log('[DEBUG] handleSelectOffer START:', {
-      action,
-      offerId: offer.id,
-      offerData: offer
-    });
 
     // Check if user is trying to trade with themselves
     const isOwnOffer = checkIfOwnOffer(offer);
 
-    console.log('[DEBUG] handleSelectOffer AFTER CHECK:', {
-      action,
-      offerId: offer.id,
-      isOwnOffer,
-      offerHasUser: !!offer.offerUser,
-      offerHasBusiness: !!offer.offerBusiness,
-      willBlockTrade: action === 'trade' && isOwnOffer,
-      aboutToShowAlert: action === 'trade' && isOwnOffer
-    });
 
     if (action === 'trade' && isOwnOffer) {
-      console.log('[DEBUG] SHOWING SELF-TRADE ALERT for offer:', offer.id);
       Alert.alert(
         'No puedes comerciar con tu propia oferta',
         'Esta oferta fue creada por tu cuenta. No puedes crear un intercambio con tus propias ofertas.',
@@ -1462,18 +1294,6 @@ export const ExchangeScreen = () => {
 
     if (action === 'profile') {
       // Navigate to TraderProfile screen with trader data
-      console.log('[OfferCard] Navigating to TraderProfile:', {
-        offerUser: offer.offerUser?.firstName + ' ' + offer.offerUser?.lastName,
-        offerBusiness: offer.offerBusiness?.name,
-        userStats: {
-          completedTrades: userStats.completedTrades,
-          successRate: userStats.successRate,
-          avgRating: userStats.avgRating,
-          hasAvgRating: userStats.avgRating !== undefined,
-          avgRatingType: typeof userStats.avgRating,
-          rawUserStats: JSON.stringify(userStats)
-        }
-      });
 
       const traderData = {
         id: offer.offerUser?.id || offer.offerBusiness?.id || offer.user?.id || offer.id,
@@ -1538,14 +1358,6 @@ export const ExchangeScreen = () => {
     const [toggleFavorite] = useMutation(TOGGLE_FAVORITE_MUTATION);
 
     // Debug logging for badge rendering
-    console.log('[DEBUG] OfferCard render:', {
-      offerId: offer.id,
-      isOwnOffer,
-      shouldShowBadge: isOwnOffer === true,
-      shouldShowFavorite: !isOwnOffer && !!user,
-      hasUser: !!user,
-      isFavorite: offer.isFavorite
-    });
 
     // Extract user info from the real offer structure
     // Determine the creator name based on offer type
@@ -1592,12 +1404,6 @@ export const ExchangeScreen = () => {
 
     // Handle toggle favorite
     const handleToggleFavorite = async () => {
-      console.log('[handleToggleFavorite] Called with conditions:', {
-        isOwnOffer,
-        hasUser: !!user,
-        isFavoriting,
-        willReturn: isOwnOffer || !user || isFavoriting
-      });
 
       if (isOwnOffer || !user || isFavoriting) return;
 
@@ -1625,25 +1431,18 @@ export const ExchangeScreen = () => {
           return;
         }
 
-        console.log('[handleToggleFavorite] Sending mutation with:', {
-          ...mutationVariables,
-          offerId: offer.id
-        });
 
         const { data } = await toggleFavorite({
           variables: mutationVariables
         });
 
-        console.log('[handleToggleFavorite] Mutation response:', data);
 
         if (data?.toggleFavoriteTrader?.success) {
-          console.log('[handleToggleFavorite] Success! New isFavorite status:', data.toggleFavoriteTrader.isFavorite);
           // Update with server response
           setLocalIsFavorite(data.toggleFavoriteTrader.isFavorite);
           // Refetch offers to update isFavorite status across all instances
           refetch();
         } else {
-          console.log('[handleToggleFavorite] Failed! Response:', data);
           // Revert on failure
           setLocalIsFavorite(!newFavoriteStatus);
           const message = data?.toggleFavoriteTrader?.message || 'No se pudo actualizar el favorito';
@@ -1689,7 +1488,6 @@ export const ExchangeScreen = () => {
                   <TouchableOpacity
                     style={styles.favoriteButton}
                     onPress={() => {
-                      console.log('[Star Button] Pressed. Current isFavorite:', offer.isFavorite);
                       handleToggleFavorite();
                     }}
                     disabled={isFavoriting || isOwnOffer}
@@ -1906,7 +1704,7 @@ export const ExchangeScreen = () => {
           Alert.alert(
             'Éxito',
             `Oferta ${newStatus === 'ACTIVE' ? 'activada' : 'pausada'} correctamente`,
-            [{ text: 'OK', onPress: onRefresh }]
+            [{ text: 'Entendido', onPress: onRefresh }]
           );
         } else {
           Alert.alert('Error', data?.updateP2pOffer?.errors?.[0] || 'No se pudo actualizar la oferta');
@@ -2149,12 +1947,6 @@ export const ExchangeScreen = () => {
           <TouchableOpacity
             style={[styles.tradeUser, { flex: 1 }]}
             onPress={() => {
-              console.log('[ActiveTradeCard] Navigating to TraderProfile with:', {
-                name: trade.trader.name,
-                successRate: trade.trader.successRate,
-                avgRating: trade.trader.avgRating,
-                completedTrades: trade.trader.completedTrades
-              });
               navigation.navigate('TraderProfile', {
                 trader: {
                   id: trade.trader.id,
@@ -2250,12 +2042,6 @@ export const ExchangeScreen = () => {
           (() => {
             const isCompletedWithRating = (trade.status === 'COMPLETED' || trade.status === 'CRYPTO_RELEASED' || trade.status === 'PAYMENT_CONFIRMED') && trade.hasRating;
             if (trade.status === 'COMPLETED' || trade.status === 'CRYPTO_RELEASED' || trade.status === 'PAYMENT_CONFIRMED') {
-              console.log(`[ExchangeScreen] Trade ${trade.id} completion check:`, {
-                status: trade.status,
-                hasRating: trade.hasRating,
-                isCompletedWithRating,
-                willShowCompletedUI: isCompletedWithRating
-              });
             }
             return isCompletedWithRating;
           })() ? (
@@ -2730,7 +2516,7 @@ export const ExchangeScreen = () => {
               showAdvancedFilters && styles.rateFilterContainerExtended
             ]}>
               <View style={styles.marketRateContainer}>
-                <Icon name="trending-up" size={12} color="#059669" style={styles.marketRateIcon} />
+                <Icon name="trending-up" size={12} color="#10B981" style={styles.marketRateIcon} />
                 <Text style={styles.marketRateText}>
                   {marketRateLoading ? 'Cargando...' :
                     marketRate ? `${formatNumber(marketRate)} ${currencyCode}/USD mercado` : 'Sin datos de mercado'}
@@ -3684,7 +3470,7 @@ const styles = StyleSheet.create({
   },
   marketRateText: {
     fontSize: 12,
-    color: '#059669',
+    color: '#10B981',
     fontWeight: '600',
   },
   filterControls: {
@@ -3974,7 +3760,7 @@ const styles = StyleSheet.create({
   },
   traderStatus: {
     fontSize: 11,
-    color: '#059669',
+    color: '#10B981',
     fontWeight: '500',
     marginTop: 2,
   },
@@ -4099,13 +3885,13 @@ const styles = StyleSheet.create({
   },
   availableLabel: {
     fontSize: 11,
-    color: '#059669',
+    color: '#10B981',
     marginBottom: 4,
   },
   availableValue: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#059669',
+    color: '#10B981',
   },
   paymentMethodsContainer: {
     flex: 1,
@@ -4499,7 +4285,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
   },
   completedText: {
-    color: '#059669',
+    color: '#10B981',
     fontWeight: '600',
     fontSize: 14,
   },

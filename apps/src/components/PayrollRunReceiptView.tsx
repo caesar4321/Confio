@@ -50,7 +50,7 @@ const employeeStatusLabel = (status: string) => {
   switch (status.toLowerCase()) {
     case 'completed':
     case 'confirmed':
-      return { label: 'Pagado', color: '#059669', bg: '#D1FAE5', icon: 'check-circle' };
+      return { label: 'Pagado', color: '#10B981', bg: '#D1FAE5', icon: 'check-circle' };
     case 'pending':
       return { label: 'Pendiente', color: '#d97706', bg: '#FEF3C7', icon: 'clock' };
     case 'failed':
@@ -80,7 +80,7 @@ export const PayrollRunReceiptView: React.FC<PayrollRunReceiptViewProps> = ({
       {/* Header - Confío Branding */}
       <View style={styles.brandContainer}>
         <View style={styles.brandBadge}>
-          <Icon name="shield" size={32} color="#059669" />
+          <Icon name="shield" size={32} color="#10B981" />
         </View>
         <Text style={styles.brandTitle}>Confío</Text>
         <Text style={styles.brandSubtitle}>Comprobante de Corrida de Nómina</Text>
@@ -91,7 +91,7 @@ export const PayrollRunReceiptView: React.FC<PayrollRunReceiptViewProps> = ({
         <Icon
           name={isCompleted ? 'check-circle' : 'clock'}
           size={16}
-          color={isCompleted ? '#059669' : '#d97706'}
+          color={isCompleted ? '#10B981' : '#d97706'}
         />
         <Text style={[styles.statusText, isCompleted ? styles.statusCompletedText : styles.statusPendingText]}>
           {statusInfo}
@@ -132,12 +132,12 @@ export const PayrollRunReceiptView: React.FC<PayrollRunReceiptViewProps> = ({
         <Text style={styles.summaryValue}>{totalAmount} {currency}</Text>
         <View style={styles.summaryStats}>
           <View style={styles.statItem}>
-            <Icon name="users" size={16} color="#059669" />
+            <Icon name="users" size={16} color="#10B981" />
             <Text style={styles.statText}>{employeeCount} empleados</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
-            <Icon name="check-circle" size={16} color="#059669" />
+            <Icon name="check-circle" size={16} color="#10B981" />
             <Text style={styles.statText}>{completedCount} completados</Text>
           </View>
         </View>
@@ -172,7 +172,7 @@ export const PayrollRunReceiptView: React.FC<PayrollRunReceiptViewProps> = ({
 
       {/* Certification */}
       <View style={styles.certificationCard}>
-        <Icon name="award" size={24} color="#059669" />
+        <Icon name="award" size={24} color="#10B981" />
         <Text style={styles.certificationTitle}>Certificado por Confío</Text>
         <Text style={styles.certificationText}>
           Este comprobante ha sido generado automáticamente por Confío y certifica que la corrida de nómina fue autorizada y procesada en la blockchain de Algorand.
@@ -212,7 +212,7 @@ const styles = StyleSheet.create({
   brandTitle: {
     fontSize: 24,
     fontWeight: '700',
-    color: '#059669',
+    color: '#10B981',
     marginBottom: 4,
   },
   brandSubtitle: {
@@ -241,7 +241,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   statusCompletedText: {
-    color: '#059669',
+    color: '#10B981',
   },
   statusPendingText: {
     color: '#d97706',
@@ -299,7 +299,7 @@ const styles = StyleSheet.create({
   summaryValue: {
     fontSize: 36,
     fontWeight: '700',
-    color: '#059669',
+    color: '#10B981',
     marginBottom: 16,
   },
   summaryStats: {
@@ -362,7 +362,7 @@ const styles = StyleSheet.create({
   employeeAmountValue: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#059669',
+    color: '#10B981',
   },
   employeeAmountCurrency: {
     fontSize: 12,
@@ -381,7 +381,7 @@ const styles = StyleSheet.create({
   certificationTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#059669',
+    color: '#10B981',
     marginTop: 12,
     marginBottom: 8,
   },

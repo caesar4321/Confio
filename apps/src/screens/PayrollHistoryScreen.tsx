@@ -58,7 +58,7 @@ const PayrollHistoryScreen = () => {
       <View style={styles.row}>
         <View style={{ flex: 1 }}>
           <Text style={styles.amount}>{item.token || 'cUSD'} {item.amount}</Text>
-          <Text style={styles.date}>{new Date(item.when).toLocaleDateString()}</Text>
+          <Text style={styles.date}>{new Date(item.when).toLocaleDateString('es-ES')}</Text>
         </View>
         <View style={styles.badges}>
           <View style={[styles.badge, styles.badgeSecondary]}>

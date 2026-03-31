@@ -91,7 +91,7 @@ class BiometricAuthService {
       'enabled',
       {
         service: BIOMETRIC_PREFS_SERVICE,
-        accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED,
+        accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK,
       }
     );
   }
@@ -110,7 +110,7 @@ class BiometricAuthService {
         randomSecret,
         {
           service: BIOMETRIC_SECRET_SERVICE,
-          accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED,
+          accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK,
           accessControl,
           authenticationType: Keychain.AUTHENTICATION_TYPE.DEVICE_PASSCODE_OR_BIOMETRICS,
           securityLevel: Keychain.SECURITY_LEVEL.SECURE_SOFTWARE,

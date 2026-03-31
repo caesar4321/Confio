@@ -16,6 +16,7 @@ import { GET_MY_REFERRALS } from '../apollo/queries';
 import { biometricAuthService } from '../services/biometricAuthService';
 import authService from '../services/authService';
 import { AnalyticsService } from '../services/analyticsService';
+import { colors } from '../config/theme';
 
 // Utility function to format phone number with country code
 const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string => {
@@ -34,20 +35,6 @@ const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string 
 };
 
 // Colors from the design
-const colors = {
-  primary: '#34d399', // emerald-400
-  primaryText: '#34d399',
-  primaryLight: '#d1fae5', // emerald-100
-  primaryDark: '#10b981', // emerald-500
-  secondary: '#8b5cf6', // violet-500
-  secondaryText: '#8b5cf6',
-  accent: '#3b82f6', // blue-500
-  accentText: '#3b82f6',
-  neutral: '#f9fafb', // gray-50
-  neutralDark: '#f3f4f6', // gray-100
-  dark: '#111827', // gray-900
-};
-
 type ProfileScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
 export const ProfileScreen = () => {
@@ -142,12 +129,6 @@ export const ProfileScreen = () => {
   }, [username]);
   // Debug active account changes to ensure real-time updates
   React.useEffect(() => {
-    console.log('ProfileScreen - activeAccount changed:', {
-      activeAccountId: activeAccount?.id,
-      activeAccountName: activeAccount?.name,
-      activeAccountType: activeAccount?.type,
-      isLoading: accountsLoading
-    });
   }, [activeAccount, accountsLoading]);
 
   // Track if user has manually enabled backup during this session
@@ -157,7 +138,6 @@ export const ProfileScreen = () => {
   // Only set to true on initial load, don't reset after user manually enables
   React.useEffect(() => {
     const backupProvider = (userProfile as any)?.backupProvider?.toLowerCase();
-    console.log('[ProfileScreen] backupProvider from profile:', backupProvider, 'manuallyEnabled:', driveBackupManuallyEnabled.current);
 
     // Show as active if ANY backup is enabled (iCloud OR Google Drive)
     if (backupProvider === 'google_drive' || backupProvider === 'icloud') {
@@ -172,10 +152,8 @@ export const ProfileScreen = () => {
   // Helper function to check biometric support
   const checkBiometricSupport = React.useCallback(async () => {
     try {
-      console.log('[ProfileScreen] Checking biometric support...');
       biometricAuthService.invalidateCache();
       const supported = await biometricAuthService.isSupported();
-      console.log('[ProfileScreen] Biometric supported:', supported);
       setBiometricAvailable(supported);
       if (supported) {
         const enabled = await biometricAuthService.isEnabled();
@@ -206,11 +184,9 @@ export const ProfileScreen = () => {
   // Listen for app state changes (e.g., returning from Settings)
   React.useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
-      console.log('[ProfileScreen] AppState changed:', appState.current, '->', nextAppState);
 
       // App has come to the foreground
       if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
-        console.log('[ProfileScreen] App returned to foreground, re-checking biometrics');
         setBiometricLoading(true);
         checkBiometricSupport();
       }
@@ -264,7 +240,6 @@ export const ProfileScreen = () => {
   // Force refresh when screen comes into focus to ensure latest state
   useFocusEffect(
     React.useCallback(() => {
-      console.log('ProfileScreen - Screen focused, refreshing accounts and biometric status');
       refreshAccounts();
 
       // Re-check biometric availability when screen comes into focus
@@ -770,7 +745,6 @@ export const ProfileScreen = () => {
           // User chose to restore from a specific backup
           setShowExistingBackupModal(false);
           try {
-            console.log('[ProfileScreen] Restoring from backup entry:', entry);
 
             const walletId = entry?.id || existingBackupEntries[0]?.id;
             const lastBackupAt = entry?.lastBackupAt || existingBackupEntries[0]?.lastBackupAt;
@@ -789,7 +763,7 @@ export const ProfileScreen = () => {
               Alert.alert(
                 'Billetera Restaurada',
                 'Tu billetera ha sido restaurada correctamente.',
-                [{ text: 'OK', onPress: () => { } }]
+                [{ text: 'Entendido', onPress: () => { } }]
               );
             } else if (result.error) {
               Alert.alert('Error', result.error);

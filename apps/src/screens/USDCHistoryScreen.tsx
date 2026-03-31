@@ -18,20 +18,9 @@ import { Header } from '../navigation/Header';
 import moment from 'moment';
 import 'moment/locale/es';
 import { useContactNameSync } from '../hooks/useContactName';
+import { colors } from '../config/theme';
 
 moment.locale('es');
-
-const colors = {
-  primary: '#34D399',
-  secondary: '#8B5CF6',
-  accent: '#3B82F6',
-  background: '#F9FAFB',
-  mint: '#10b981', // mint color for free fees
-  text: {
-    primary: '#1F2937',
-    secondary: '#6B7280',
-  },
-};
 
 interface USDCTransactionRecord {
   transactionId: string;
@@ -88,13 +77,6 @@ export const USDCHistoryScreen = () => {
     notifyOnNetworkStatusChange: true,
     onCompleted: (data) => {
       const newTransactions = data?.unifiedUsdcTransactions || [];
-      console.log('USDC History loaded:', newTransactions.length, 'transactions');
-      console.log('First 5:', newTransactions.slice(0, 5).map(t => ({
-        type: t.transactionType,
-        title: t.formattedTitle,
-        amount: t.amount,
-        currency: t.currency
-      })));
       setTransactions(newTransactions);
       setHasMore(newTransactions.length === ITEMS_PER_PAGE);
     },

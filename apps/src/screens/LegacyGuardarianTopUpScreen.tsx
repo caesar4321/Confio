@@ -37,6 +37,7 @@ import { oauthStorage } from '../services/oauthStorageService';
 import { apolloClient } from '../apollo/client';
 import PreFlightModal from '../components/PreFlightModal';
 import { useBackupEnforcement } from '../hooks/useBackupEnforcement';
+import { APP_LAYOUT } from '../config/layout';
 
 
 // GraphQL mutation for USDC opt-in
@@ -230,7 +231,6 @@ const TopUpScreen = () => {
   const handleUSDCOptIn = async (): Promise<boolean> => {
     try {
       setLoadingMessage('Configurando acceso a USDC...');
-      console.log('[TopUpScreen] Calling optInToAsset mutation for USDC...');
 
       const { data, errors } = await optInToUsdc({
         variables: { assetType: 'USDC' }
@@ -242,10 +242,8 @@ const TopUpScreen = () => {
         return false;
       }
 
-      console.log('[TopUpScreen] USDC opt-in mutation response:', data);
 
       if (data?.optInToAssetByType?.alreadyOptedIn) {
-        console.log('[TopUpScreen] User already opted in to USDC');
         setLoadingMessage('');
         return true;
       }
@@ -254,14 +252,12 @@ const TopUpScreen = () => {
         const userTxn = data.optInToAssetByType.userTransaction;
         const sponsorTxn = data.optInToAssetByType.sponsorTransaction;
 
-        console.log('[TopUpScreen] Signing and submitting USDC opt-in...');
         const txId = await algorandService.signAndSubmitSponsoredTransaction(
           userTxn,
           sponsorTxn
         );
 
         if (txId) {
-          console.log('[TopUpScreen] Successfully opted in to USDC:', txId);
           setLoadingMessage('');
           return true;
         } else {
@@ -304,7 +300,6 @@ const TopUpScreen = () => {
     // Check and opt-in to USDC before proceeding
     const usdcOptInSuccess = await handleUSDCOptIn();
     if (!usdcOptInSuccess) {
-      console.log('[TopUpScreen] USDC opt-in failed, stopping top-up flow');
       return;
     }
 
@@ -335,9 +330,6 @@ const TopUpScreen = () => {
       }
 
       // DEBUG: Log the redirect URL to understand its structure
-      console.log('=== GUARDARIAN REDIRECT URL ===');
-      console.log(checkoutUrl);
-      console.log('==============================');
 
       // Open directly in external browser
       await Linking.openURL(checkoutUrl);
@@ -370,7 +362,7 @@ const TopUpScreen = () => {
         {/* Hero Section */}
         <View style={styles.heroSection}>
           <View style={styles.heroIconContainer}>
-            <Icon name="credit-card" size={32} color="#72D9BC" />
+            <Icon name="credit-card" size={32} color="#34D399" />
           </View>
           <Text style={styles.heroTitle}>Recarga tu cuenta</Text>
           <Text style={styles.heroSubtitle}>
@@ -431,7 +423,7 @@ const TopUpScreen = () => {
           </View>
 
           <View style={styles.conversionHint}>
-            <Icon name="arrow-down" size={14} color="#72D9BC" />
+            <Icon name="arrow-down" size={14} color="#34D399" />
             <Text style={styles.conversionText}>Recibirás USDC en tu cuenta</Text>
           </View>
         </View>
@@ -440,19 +432,19 @@ const TopUpScreen = () => {
         <View style={styles.featuresContainer}>
           <View style={styles.featureItem}>
             <View style={styles.featureIconCircle}>
-              <Icon name="zap" size={16} color="#72D9BC" />
+              <Icon name="zap" size={16} color="#34D399" />
             </View>
             <Text style={styles.featureText}>Instantáneo</Text>
           </View>
           <View style={styles.featureItem}>
             <View style={styles.featureIconCircle}>
-              <Icon name="shield" size={16} color="#72D9BC" />
+              <Icon name="shield" size={16} color="#34D399" />
             </View>
             <Text style={styles.featureText}>Seguro</Text>
           </View>
           <View style={styles.featureItem}>
             <View style={styles.featureIconCircle}>
-              <Icon name="credit-card" size={16} color="#72D9BC" />
+              <Icon name="credit-card" size={16} color="#34D399" />
             </View>
             <Text style={styles.featureText}>Tarjeta o banco</Text>
           </View>
@@ -518,9 +510,9 @@ const TopUpScreen = () => {
 
             {/* Progress Dots Animation */}
             <View style={styles.dotsContainer}>
-              <View style={[styles.dot, { backgroundColor: '#72D9BC' }]} />
-              <View style={[styles.dot, { backgroundColor: '#72D9BC', opacity: 0.6 }]} />
-              <View style={[styles.dot, { backgroundColor: '#72D9BC', opacity: 0.3 }]} />
+              <View style={[styles.dot, { backgroundColor: '#34D399' }]} />
+              <View style={[styles.dot, { backgroundColor: '#34D399', opacity: 0.6 }]} />
+              <View style={[styles.dot, { backgroundColor: '#34D399', opacity: 0.3 }]} />
             </View>
           </View>
         </View>
@@ -546,7 +538,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) + 12 : 12,
+    paddingTop: APP_LAYOUT.topSafeArea + 12,
     paddingBottom: 12,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
@@ -749,7 +741,7 @@ const styles = StyleSheet.create({
   },
   conversionText: {
     fontSize: 13,
-    color: '#72D9BC',
+    color: '#34D399',
     fontWeight: '600',
   },
 
@@ -779,7 +771,7 @@ const styles = StyleSheet.create({
 
   // CTA Button
   ctaButton: {
-    backgroundColor: '#72D9BC',
+    backgroundColor: '#34D399',
     borderRadius: 16,
     paddingVertical: 18,
     paddingHorizontal: 24,
@@ -787,7 +779,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    shadowColor: '#72D9BC',
+    shadowColor: '#34D399',
     shadowOpacity: 0.3,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 4 },

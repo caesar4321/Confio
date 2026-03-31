@@ -22,7 +22,7 @@ import {
   Clipboard,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
-import FAIcon from 'react-native-vector-icons/FontAwesome';
+import MCIcon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
@@ -47,26 +47,9 @@ import { useAuth } from '../contexts/AuthContext';
 import { deepLinkHandler } from '../utils/deepLinkHandler';
 import { useAutoSwap } from '../hooks/useAutoSwap';
 import AutoSwapModal from '../components/AutoSwapModal';
+import { colors } from '../config/theme';
 
 // Color palette
-const colors = {
-  primary: '#34D399', // emerald-400
-  primaryText: '#34d399',
-  primaryLight: '#d1fae5', // emerald-100
-  primaryDark: '#10b981', // emerald-500
-  secondary: '#8b5cf6', // violet-500
-  secondaryText: '#8b5cf6',
-  accent: '#3b82f6', // blue-500
-  accentText: '#3b82f6',
-  neutral: '#f9fafb', // gray-50
-  neutralDark: '#f3f4f6', // gray-100
-  dark: '#111827', // gray-900
-  text: {
-    primary: '#1F2937', // gray-800
-    secondary: '#6B7280', // gray-500
-  },
-};
-
 // Keychain constants for storing balance visibility
 const PREFERENCES_KEYCHAIN_SERVICE = 'com.confio.preferences';
 const ACCOUNT_BALANCE_VISIBILITY_PREFIX = 'account_balance_visibility_';
@@ -241,7 +224,6 @@ export const AccountDetailScreen = () => {
       }
     } catch (error) {
       // No saved preference, default to showing balance
-      console.log('No saved balance visibility preference for account:', route.params.accountType);
     }
   };
 
@@ -297,17 +279,6 @@ export const AccountDetailScreen = () => {
   };
 
   // Debug logging
-  console.log('AccountDetailScreen - Account info:', {
-    activeAccountType: activeAccount?.type,
-    activeAccountIndex: activeAccount?.index,
-    activeAccountAddress: activeAccount?.algorandAddress,
-    paramAddress: accountAddress,
-    accountName: account.name,
-    routeParams: {
-      accountType: route.params.accountType,
-      accountName: route.params.accountName
-    }
-  });
 
   // Fetch USDC balance for cUSD accounts (not for employees)
   const shouldFetchUSDC = route.params.accountType === 'cusd' && !activeAccount?.isEmployee;
@@ -387,7 +358,6 @@ export const AccountDetailScreen = () => {
       : ['CONFIO']
   };
 
-  console.log('AccountDetailScreen - JWT GraphQL query variables:', queryVariables);
 
   const { data: unifiedTransactionsData, loading: unifiedLoading, error: unifiedError, refetch: refetchUnified, fetchMore } = useQuery(GET_CURRENT_ACCOUNT_TRANSACTIONS, {
     variables: queryVariables,
@@ -396,10 +366,6 @@ export const AccountDetailScreen = () => {
     nextFetchPolicy: 'cache-first',
     notifyOnNetworkStatusChange: true,
     onCompleted: (data) => {
-      console.log('AccountDetailScreen - JWT context query completed:', {
-        hasData: !!data,
-        transactionCount: data?.currentAccountTransactions?.length || 0
-      });
     },
     onError: (error) => {
       console.error('AccountDetailScreen - Unified query error:', error);
@@ -465,7 +431,6 @@ export const AccountDetailScreen = () => {
   // Refetch transactions when active account changes
   useEffect(() => {
     if (activeAccount && canQueryTransactions) {
-      console.log('AccountDetailScreen - Active account changed, refetching transactions');
       refetchUnified({
         limit: transactionLimit,
         offset: 0,
@@ -503,7 +468,6 @@ export const AccountDetailScreen = () => {
       const { data: refreshData } = await refreshBalanceMutation();
 
       if (refreshData?.refreshAccountBalance?.success) {
-        console.log('AccountDetailScreen - Balances refreshed from blockchain:', refreshData.refreshAccountBalance.balances);
       }
 
       // Then refresh balance, USDC (if applicable), and transactions
@@ -541,7 +505,6 @@ export const AccountDetailScreen = () => {
   useEffect(() => {
     // @ts-ignore - route params type
     if (route.params?.refreshTimestamp) {
-      console.log('AccountDetailScreen - Refresh triggered from navigation');
       onRefresh();
     }
   }, [route.params, onRefresh]);
@@ -572,13 +535,6 @@ export const AccountDetailScreen = () => {
           type = 'presale';
         } else if (normalizedTxType === 'payroll') {
           type = 'payroll';
-          console.log('[Transaction Type Detection]', {
-            txId: tx.id,
-            normalizedTxType,
-            rawTxType: tx.transactionType,
-            detectedType: type,
-            direction: tx.direction
-          });
         } else {
           type = tx.direction === 'sent' ? 'sent' : 'received';
         }
@@ -591,44 +547,19 @@ export const AccountDetailScreen = () => {
         let isActualInvitation = tx.isInvitation || false;
         if (isActualInvitation && tx.counterpartyUser && tx.counterpartyUser.id) {
           // If there's a counterparty user, this is not really an invitation
-          console.log('[AccountDetail] Correcting invitation flag - counterparty user exists:', tx.counterpartyUser.id);
           isActualInvitation = false;
         }
         // Check if it's an external wallet send (no phone number)
         if (isActualInvitation && tx.direction === 'sent' && !tx.counterpartyPhone) {
-          console.log('[AccountDetail] Not an invitation - external wallet send (no phone)');
           isActualInvitation = false;
         }
 
         // Debug logging
-        console.log('[AccountDetail] Transaction:', {
-          id: tx.id,
-          type: type,
-          p2pTradeId: tx.p2pTradeId,
-          internalId: tx.internalId, // Log this specifically
-          direction: tx.direction,
-          displayCounterparty: tx.displayCounterparty,
-          senderPhone: tx.senderPhone,
-          counterpartyPhone: tx.counterpartyPhone,
-          isInvitation: tx.isInvitation,
-          isActualInvitation: isActualInvitation,
-          senderAddress: tx.senderAddress,
-          counterpartyAddress: tx.counterpartyAddress,
-          // counterpartyUser: tx.counterpartyUser // reducing noise
-        });
 
         // For proper contact name lookup, we need to pass the phone numbers
         // The displayCounterparty is the DB name, but we want local contact names
         // Debug payment transaction
         if (type === 'payment') {
-          console.log('Unified payment transaction:', {
-            id: tx.id,
-            type,
-            direction: tx.direction,
-            displayCounterparty: tx.displayCounterparty,
-            shouldSetFrom: (type === 'payment' && tx.direction === 'received'),
-            shouldSetTo: (type === 'payment' && tx.direction === 'sent')
-          });
         }
 
         // Handle conversion transactions
@@ -641,28 +572,9 @@ export const AccountDetailScreen = () => {
         let conversionToToken: string | undefined;
 
         if (isConversion) {
-          console.log('[Conversion Raw Data]', {
-            id: tx.id,
-            description: tx.description,
-            conversionType: tx.conversionType,
-            fromAmount: tx.fromAmount,
-            toAmount: tx.toAmount,
-            fromToken: tx.fromToken,
-            toToken: tx.toToken,
-            displayAmount: tx.displayAmount,
-            tokenType: tx.tokenType
-          });
 
           // Parse conversion type from description if server fields not available
           conversionType = tx.conversionType;
-          console.log('[Conversion Type Detection]', {
-            txId: tx.id,
-            txConversionType: tx.conversionType,
-            description: tx.description,
-            hasUSDC: tx.description?.includes('USDC'),
-            hasCUSD: tx.description?.includes('cUSD'),
-            hasArrow: tx.description?.includes('→')
-          });
           if (!conversionType && tx.description) {
             // The description format is "Conversión: X USDC → Y cUSD"
             if (tx.description.includes('USDC →') && tx.description.includes('cUSD')) {
@@ -671,7 +583,6 @@ export const AccountDetailScreen = () => {
               conversionType = 'cusd_to_usdc';
             }
           }
-          console.log('[Conversion Type Result]', { txId: tx.id, conversionType });
           if (conversionType === 'usdc_to_cusd') {
             conversionFromToken = 'USDC';
             conversionToToken = 'cUSD';
@@ -684,17 +595,14 @@ export const AccountDetailScreen = () => {
           if (conversionType === 'usdc_to_cusd') {
             // USDC to cUSD: gaining cUSD (+)
             const toAmount = tx.toAmount || (tx.description ? tx.description.match(/→\s*([\d.]+)\s*cUSD/)?.[1] : null);
-            console.log('[Conversion USDC->cUSD]', { toAmount, fromAmount: tx.fromAmount, amount: tx.amount });
             const amount = parseFloat(String(toAmount || tx.fromAmount || tx.amount)).toFixed(2);
             conversionAmount = `+${amount}`;
           } else if (conversionType === 'cusd_to_usdc') {
             // cUSD to USDC: losing cUSD (-)
-            console.log('[Conversion cUSD->USDC]', { fromAmount: tx.fromAmount, amount: tx.amount });
             const amount = parseFloat(String(tx.fromAmount || tx.amount)).toFixed(2);
             conversionAmount = `-${amount}`;
           } else {
             // Fallback: no conversion type detected, still format properly
-            console.log('[Conversion Unknown Type]', { description: tx.description, amount: tx.amount });
             // Try to determine direction from token type
             const amount = parseFloat(String(tx.amount)).toFixed(2);
             if (tx.tokenType === 'USDC') {
@@ -714,14 +622,6 @@ export const AccountDetailScreen = () => {
 
         // Debug external deposits
         if (type === 'received' && tx.senderType) {
-          console.log('[External Deposit Debug]', {
-            id: tx.id,
-            type,
-            senderType: tx.senderType,
-            isExternalDeposit,
-            displayCounterparty: tx.displayCounterparty,
-            senderAddress: tx.senderAddress,
-          });
         }
 
         // Format the from field - truncate address if it's an external deposit
@@ -773,15 +673,6 @@ export const AccountDetailScreen = () => {
           } else {
             toDisplay = tx.counterpartyDisplayName || tx.displayCounterparty;
           }
-          console.log('[Payroll Transaction]', {
-            type,
-            direction: tx.direction,
-            senderDisplayName: tx.senderDisplayName,
-            counterpartyDisplayName: tx.counterpartyDisplayName,
-            displayCounterparty: tx.displayCounterparty,
-            fromDisplay,
-            toDisplay
-          });
         }
 
         // Ensure display amount has a sign for proper direction (helps payroll visibility)
@@ -927,11 +818,6 @@ export const AccountDetailScreen = () => {
 
         // Debug final transaction for external deposits
         if (isExternalDeposit) {
-          console.log('[External Deposit Final]', {
-            from: finalTransaction.from,
-            isExternalDeposit: finalTransaction.isExternalDeposit,
-            senderType: finalTransaction.senderType,
-          });
         }
 
         // Debug conversion amounts
@@ -955,22 +841,9 @@ export const AccountDetailScreen = () => {
 
   // Helper functions for transaction display
   const getTransactionTitle = (transaction: Transaction) => {
-    console.log('[getTransactionTitle]', {
-      id: transaction.id,
-      type: transaction.type,
-      from: transaction.from,
-      to: transaction.to
-    });
 
     // Debug payment transactions
     if (transaction.type === 'payment') {
-      console.log('Getting title for payment transaction:', {
-        type: transaction.type,
-        from: transaction.from,
-        to: transaction.to,
-        amount: transaction.amount,
-        startsWithPlus: transaction.amount.startsWith('+')
-      });
     }
 
     switch (transaction.type) {
@@ -1036,7 +909,7 @@ export const AccountDetailScreen = () => {
       case 'presale':
         return <Icon name="lock" size={20} color="#6366F1" />;
       case 'payroll':
-        return <Icon name="briefcase" size={20} color="#059669" />;
+        return <Icon name="briefcase" size={20} color="#10B981" />;
       default:
         return <Icon name="arrow-up" size={20} color="#6B7280" />;
     }
@@ -1046,25 +919,9 @@ export const AccountDetailScreen = () => {
   const transactions = formatUnifiedTransactions();
 
   // Debug which data source is being used
-  console.log('AccountDetailScreen - Transaction source:', {
-    usingUnified: !!unifiedTransactionsData,
-    unifiedCount: unifiedTransactionsData?.currentAccountTransactions?.length || 0,
-    allTransactionsCount: allTransactions.length,
-    formattedCount: transactions.length,
-    hasReachedEnd,
-    loadingMore,
-    firstTransaction: transactions[0],
-    rawData: unifiedTransactionsData?.currentAccountTransactions?.slice(0, 2)
-  });
 
   // Debug the actual transaction object
   if (transactions.length > 0 && transactions[0].type === 'payment') {
-    console.log('First payment transaction details:', {
-      type: transactions[0].type,
-      from: transactions[0].from,
-      to: transactions[0].to,
-      amount: transactions[0].amount
-    });
   }
 
   // Filter transactions based on search query and filters
@@ -1209,7 +1066,6 @@ export const AccountDetailScreen = () => {
 
     if (loadingMore || !canQueryTransactions) return;
 
-    console.log('Setting transactions from unified query:', currentTransactions.length);
     setAllTransactions(currentTransactions);
 
     if (!unifiedLoading) {
@@ -1366,19 +1222,8 @@ export const AccountDetailScreen = () => {
         }
       };
       // Navigate to different screens based on transaction type
-      console.log('[AccountDetail] onPress transaction:', {
-        type: transaction.type,
-        p2pTradeId: transaction.p2pTradeId,
-        internalId: transaction.internalId,
-        fullIds: { id: transaction.id, internal_id: (transaction as any).internal_id }
-      });
       if (transaction.type === 'exchange' && transaction.p2pTradeId) {
         // Navigate to ActiveTrade screen for P2P trades
-        console.log('[AccountDetail] Navigating to ActiveTrade:', {
-          p2pTradeId: transaction.p2pTradeId,
-          internalId: transaction.internalId,
-          fullTx: transaction
-        });
         // @ts-ignore - Navigation type mismatch, but works at runtime
         navigation.navigate('ActiveTrade', {
           trade: {
@@ -1517,21 +1362,16 @@ export const AccountDetailScreen = () => {
   // Handlers for exchange modal - removed, now handled in USDCConversion screen
   /*
   const handleConversion = async () => {
-    console.log('handleConversion called', { exchangeAmount, conversionDirection });
     
     if (!exchangeAmount || parseFloat(exchangeAmount) <= 0) {
-      console.log('Invalid amount, returning');
       return;
     }
     
     setIsProcessingConversion(true);
     
     try {
-      console.log('Starting conversion:', { direction: conversionDirection, amount: exchangeAmount });
-      console.log('Mutations available:', { convertUsdcToCusd, convertCusdToUsdc });
       
       const mutation = conversionDirection === 'usdc_to_cusd' ? convertUsdcToCusd : convertCusdToUsdc;
-      console.log('Selected mutation:', mutation);
       
       let data;
       try {
@@ -1541,7 +1381,6 @@ export const AccountDetailScreen = () => {
           }
         });
         data = response.data;
-        console.log('Mutation response:', response);
       } catch (mutationError) {
         console.error('Mutation error:', mutationError);
         throw mutationError;
@@ -1551,9 +1390,6 @@ export const AccountDetailScreen = () => {
         ? data?.convertUsdcToCusd 
         : data?.convertCusdToUsdc;
       
-      console.log('Conversion result:', result);
-      console.log('Conversion data:', data);
-      console.log('Full mutation response:', { data, result, errors: result?.errors });
       
       // Check if we even got a result
       if (!result) {
@@ -1568,7 +1404,7 @@ export const AccountDetailScreen = () => {
           `Has convertido ${exchangeAmount} ${conversionDirection === 'usdc_to_cusd' ? 'USDC' : 'cUSD'} exitosamente.`,
           [
             {
-              text: 'OK',
+              text: 'Entendido',
               onPress: () => {
                 setShowExchangeModal(false);
                 setExchangeAmount('');
@@ -1581,7 +1417,7 @@ export const AccountDetailScreen = () => {
         Alert.alert(
           'Error',
           result?.errors?.[0] || 'No se pudo completar la conversión. Por favor intenta de nuevo.',
-          [{ text: 'OK' }]
+          [{ text: 'Entendido' }]
         );
       }
     } catch (error) {
@@ -1589,7 +1425,7 @@ export const AccountDetailScreen = () => {
       Alert.alert(
         'Error',
         'Ocurrió un error al procesar la conversión. Por favor intenta de nuevo.',
-        [{ text: 'OK' }]
+        [{ text: 'Entendido' }]
       );
     } finally {
       setIsProcessingConversion(false);
@@ -1699,12 +1535,6 @@ export const AccountDetailScreen = () => {
                   (!exchangeAmount || parseFloat(exchangeAmount) <= 0 || isProcessingConversion) && styles.exchangeConfirmButtonDisabled
                 ]}
                 onPress={() => {
-                  console.log('Conversion button pressed');
-                  console.log('Button state:', {
-                    exchangeAmount,
-                    isProcessingConversion,
-                    disabled: !exchangeAmount || parseFloat(exchangeAmount) <= 0 || isProcessingConversion
-                  });
                   handleConversion();
                 }}
                 disabled={!exchangeAmount || parseFloat(exchangeAmount) <= 0 || isProcessingConversion}
@@ -1727,19 +1557,12 @@ export const AccountDetailScreen = () => {
 
   const loadMoreTransactions = useCallback(async () => {
     if (loadingMore || hasReachedEnd || !fetchMore) {
-      console.log('loadMoreTransactions - Skipping:', { loadingMore, hasReachedEnd, hasFetchMore: !!fetchMore });
       return;
     }
     if (!canQueryTransactions || !activeAccount) {
-      console.log('loadMoreTransactions - blocked, auth/account context not ready');
       return;
     }
 
-    console.log('loadMoreTransactions - Current state:', {
-      allTransactionsLength: allTransactions.length,
-      hasReachedEnd,
-      loadingMore
-    });
 
     setLoadingMore(true);
 
@@ -1747,7 +1570,6 @@ export const AccountDetailScreen = () => {
       // Calculate new offset
       const newOffset = allTransactions.length;
 
-      console.log('loadMoreTransactions - Fetching with offset:', newOffset);
 
       // Fetch more transactions with the new offset
       const { data } = await fetchMore({
@@ -1761,11 +1583,6 @@ export const AccountDetailScreen = () => {
             ['CONFIO']
         },
         updateQuery: (prev, { fetchMoreResult }) => {
-          console.log('loadMoreTransactions - fetchMoreResult:', {
-            hasResult: !!fetchMoreResult,
-            newTransactionsCount: fetchMoreResult?.currentAccountTransactions?.length || 0,
-            prevCount: prev?.currentAccountTransactions?.length || 0
-          });
 
           if (!fetchMoreResult) return prev;
 
@@ -1779,12 +1596,10 @@ export const AccountDetailScreen = () => {
 
           // Check if we've reached the end
           if (newTransactions.length < transactionLimit) {
-            console.log('Reached end - got fewer transactions than limit:', newTransactions.length, '<', transactionLimit);
             setHasReachedEnd(true);
           }
 
           setAllTransactions(prevTxs => {
-            console.log('Appending transactions:', prevTxs.length, '+', newTransactions.length);
             return [...prevTxs, ...newTransactions];
           });
 
@@ -2084,7 +1899,6 @@ export const AccountDetailScreen = () => {
         }
         onEndReached={() => {
           if (!loadingMore && !hasReachedEnd && filteredTransactions.length > 0 && !searchQuery) {
-            console.log('onEndReached triggered - loading more');
             loadMoreTransactions();
           }
         }}
@@ -2140,7 +1954,7 @@ export const AccountDetailScreen = () => {
                       style={[styles.usdcActionButton, { backgroundColor: '#FEF3C7', borderWidth: 1, borderColor: '#F59E0B' }]}
                       onPress={() => navigation.navigate('Sell')}
                     >
-                      <FAIcon name="bank" size={14} color="#92400E" style={{ marginRight: 8 }} />
+                      <MCIcon name="bank" size={14} color="#92400E" style={{ marginRight: 8 }} />
                       <View style={styles.actionTextContainer}>
                         <Text style={[styles.usdcActionButtonText, { color: '#92400E' }]}>Retirar</Text>
                         <Text style={[styles.usdcActionSubtext, { color: '#B45309' }]}>A tu banco</Text>
@@ -2151,7 +1965,6 @@ export const AccountDetailScreen = () => {
                       <TouchableOpacity
                         style={[styles.usdcActionButton, styles.usdcSecondaryButton]}
                         onPress={() => {
-                          console.log('Convert button pressed - navigating to USDCConversion screen');
                           navigation.navigate('USDCConversion');
                         }}
                       >

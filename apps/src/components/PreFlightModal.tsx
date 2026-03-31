@@ -83,7 +83,7 @@ const PreFlightModal: React.FC<PreFlightModalProps> = ({
                         {/* Header */}
                         <View style={styles.header}>
                             <View style={styles.iconContainer}>
-                                <Icon name="clock" size={24} color="#72D9BC" />
+                                <Icon name="clock" size={24} color="#34D399" />
                             </View>
                             <Text style={styles.title}>{title}</Text>
                             <Text style={styles.subtitle}>{subtitle}</Text>
@@ -219,7 +219,7 @@ const styles = StyleSheet.create({
         gap: 12,
     },
     primaryButton: {
-        backgroundColor: '#72D9BC',
+        backgroundColor: '#34D399',
         paddingVertical: 14,
         borderRadius: 16,
         flexDirection: 'row',
@@ -228,7 +228,7 @@ const styles = StyleSheet.create({
         gap: 8,
         ...Platform.select({
             ios: {
-                shadowColor: '#72D9BC',
+                shadowColor: '#34D399',
                 shadowOffset: { width: 0, height: 4 },
                 shadowOpacity: 0.2,
                 shadowRadius: 8,

@@ -18,17 +18,7 @@ import { NavigationProp } from '@react-navigation/native';
 import { MainStackParamList } from '../types/navigation';
 import { useAuth } from '../contexts/AuthContext';
 import { ReferralInputModal } from '../components/ReferralInputModal';
-
-const colors = {
-  background: '#F3F4F6',
-  surface: '#FFFFFF',
-  primary: '#10B981',
-  primaryMuted: '#6EE7B7',
-  primaryDark: '#047857',
-  text: '#111827',
-  textMuted: '#6B7280',
-  divider: '#E5E7EB',
-};
+import { colors } from '../config/theme';
 
 type Step = {
   title: string;
@@ -129,7 +119,7 @@ export const AchievementsScreen: React.FC = () => {
     <SafeAreaView style={styles.safeArea}>
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Icon name="arrow-left" size={20} color={colors.text} />
+          <Icon name="arrow-left" size={20} color={colors.textFlat} />
         </TouchableOpacity>
 
         <View style={styles.heroCard}>
@@ -276,12 +266,12 @@ const styles = StyleSheet.create({
   heroTitle: {
     fontSize: 24,
     fontWeight: '700',
-    color: colors.text,
+    color: colors.textFlat,
     marginBottom: 12,
   },
   heroSubtitle: {
     fontSize: 15,
-    color: colors.textMuted,
+    color: colors.textSecondary,
     lineHeight: 22,
   },
   usernamePill: {
@@ -359,11 +349,11 @@ const styles = StyleSheet.create({
   referrerTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.text,
+    color: colors.textFlat,
   },
   referrerSubtitle: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: colors.textSecondary,
     lineHeight: 19,
   },
   referrerButton: {
@@ -411,7 +401,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.text,
+    color: colors.textFlat,
     marginBottom: 16,
   },
   stepRow: {
@@ -439,12 +429,12 @@ const styles = StyleSheet.create({
   stepTitle: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.text,
+    color: colors.textFlat,
     marginBottom: 4,
   },
   stepDescription: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: colors.textSecondary,
     lineHeight: 19,
   },
   tipRow: {
@@ -456,7 +446,7 @@ const styles = StyleSheet.create({
   tipText: {
     flex: 1,
     fontSize: 13,
-    color: colors.textMuted,
+    color: colors.textSecondary,
     lineHeight: 19,
   },
   criteria: {
@@ -473,7 +463,7 @@ const styles = StyleSheet.create({
   },
   criteriaItem: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: colors.textSecondary,
     lineHeight: 18,
   },
   criteriaNote: {
@@ -483,7 +473,7 @@ const styles = StyleSheet.create({
   },
   futureText: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: colors.textSecondary,
     lineHeight: 20,
   },
   bottomSpacer: {

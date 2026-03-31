@@ -20,24 +20,10 @@ import { useAccount } from '../contexts/AccountContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useMutation, useQuery } from '@apollo/client';
 import { UPDATE_BUSINESS, GET_USER_ACCOUNTS, GET_BUSINESS_KYC_STATUS } from '../apollo/queries';
+import { colors } from '../config/theme';
+import { APP_LAYOUT } from '../config/layout';
 
 type EditBusinessScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
-
-const colors = {
-  primary: '#34d399',
-  primaryText: '#34d399',
-  primaryLight: '#d1fae5',
-  primaryDark: '#10b981',
-  secondary: '#8b5cf6',
-  secondaryText: '#8b5cf6',
-  accent: '#3b82f6',
-  accentText: '#3b82f6',
-  neutral: '#f9fafb',
-  neutralDark: '#f3f4f6',
-  dark: '#111827',
-  error: '#ef4444',
-  success: '#10b981',
-};
 
 export const EditBusinessScreen = () => {
   const navigation = useNavigation<EditBusinessScreenNavigationProp>();
@@ -69,14 +55,6 @@ export const EditBusinessScreen = () => {
   // Load current business data
   useEffect(() => {
     if (activeAccount && activeAccount.type.toLowerCase() === 'business' && activeAccount.business) {
-      console.log('EditBusinessScreen - Loading business data:', {
-        businessName: activeAccount.business.name,
-        businessCategory: activeAccount.business.category,
-        businessDescription: activeAccount.business.description,
-        businessRegistrationNumber: activeAccount.business.businessRegistrationNumber,
-        businessAddress: activeAccount.business.address,
-        avatar: activeAccount.avatar
-      });
 
       setBusinessName(activeAccount.business.name || '');
       setBusinessCategory(activeAccount.business.category || '');
@@ -95,31 +73,24 @@ export const EditBusinessScreen = () => {
   }, [businessName]);
 
   const getCategoryDisplayName = (categoryId: string) => {
-    console.log('getCategoryDisplayName called with:', categoryId);
-    console.log('Available categories:', businessCategories.map(cat => ({ id: cat.id, name: cat.name })));
 
     if (!categoryId) return 'No especificada';
 
     // First try to find by ID (for database values like 'food', 'retail', etc.)
     let category = businessCategories.find(cat => cat.id === categoryId);
-    console.log('Found category by exact match:', category);
 
     if (category) {
-      console.log('Returning display name:', category.name);
       return category.name;
     }
 
     // Try case-insensitive match
     category = businessCategories.find(cat => cat.id.toLowerCase() === categoryId.toLowerCase());
-    console.log('Found category by case-insensitive match:', category);
 
     if (category) {
-      console.log('Returning display name (case-insensitive):', category.name);
       return category.name;
     }
 
     // If not found by ID, it might be a display name already, so return as is
-    console.log('Category not found, returning as is:', categoryId);
     return categoryId;
   };
 
@@ -196,7 +167,7 @@ export const EditBusinessScreen = () => {
           'Información del negocio actualizada correctamente',
           [
             {
-              text: 'OK',
+              text: 'Entendido',
               onPress: () => navigation.goBack(),
             },
           ]
@@ -448,7 +419,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingTop: Platform.OS === 'ios' ? 48 : (StatusBar.currentHeight || 32),
+    paddingTop: Platform.OS === 'ios' ? APP_LAYOUT.topSafeArea : APP_LAYOUT.topSafeArea + 8,
     paddingBottom: 16,
   },
   backButton: {

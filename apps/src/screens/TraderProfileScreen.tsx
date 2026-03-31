@@ -163,14 +163,6 @@ export const TraderProfileScreen: React.FC = () => {
   
   // Debug logging
   if (isTraderView && trader) {
-    console.log('[TraderProfileScreen] Received trader data:', {
-      name: trader.name,
-      successRate: trader.successRate,
-      avgRating: trader.avgRating,
-      completedTrades: trader.completedTrades,
-      typeOfSuccessRate: typeof trader.successRate,
-      typeOfAvgRating: typeof trader.avgRating
-    });
   }
 
   const handleBack = () => {
@@ -198,23 +190,6 @@ export const TraderProfileScreen: React.FC = () => {
   const traderOffers = React.useMemo(() => {
     if (!offersData?.p2pOffers || !trader) return [];
     
-    console.log('[TraderProfile] Filtering offers for trader:', {
-      traderId: trader.id,
-      traderUserId: trader.userId,
-      traderBusinessId: trader.businessId,
-      traderName: trader.name,
-      totalOffers: offersData.p2pOffers.length,
-      sampleOffers: offersData.p2pOffers.slice(0, 3).map((o: any) => ({
-        id: o.id,
-        offerUserId: o.offerUser?.id,
-        offerUserName: o.offerUser?.username || `${o.offerUser?.firstName} ${o.offerUser?.lastName}`,
-        offerBusinessId: o.offerBusiness?.id,
-        offerBusinessName: o.offerBusiness?.name,
-        userStatsId: o.userStats?.id,
-        oldUserId: o.user?.id,
-        oldUserName: o.user?.username || `${o.user?.firstName} ${o.user?.lastName}`,
-      })),
-    });
     
     return offersData.p2pOffers.filter((offer: any) => {
       const offerUserId = offer.offerUser?.id || offer.user?.id;
@@ -236,17 +211,6 @@ export const TraderProfileScreen: React.FC = () => {
                                               offer.userStats.id === trader.businessId));
       
       if (matches || (offerBusinessName && trader.name.includes('Julian'))) {
-        console.log('[TraderProfile] Potential match found:', {
-          offerId: offer.id,
-          offerUserId,
-          offerUserName: offer.offerUser?.username || offer.offerUser?.firstName,
-          offerBusinessId,
-          offerBusinessName,
-          userStatsId: offer.userStats?.id,
-          traderId: trader.id,
-          traderName: trader.name,
-          matches,
-        });
       }
       
       return matches;

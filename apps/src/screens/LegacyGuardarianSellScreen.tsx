@@ -16,7 +16,7 @@ import {
     StatusBar,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
-import FAIcon from 'react-native-vector-icons/FontAwesome';
+import MCIcon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
@@ -33,6 +33,7 @@ import { getFlagForCurrency } from '../utils/currencyFlags';
 import USDCLogo from '../assets/png/USDC.png';
 import PreFlightModal from '../components/PreFlightModal';
 import GuardarianReturnModal from '../components/GuardarianReturnModal';
+import { APP_LAYOUT } from '../config/layout';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'Sell'>;
 
@@ -166,14 +167,6 @@ export const SellScreen = () => {
         const parsedAmount = parseFloat(amount);
         setLoading(true);
         try {
-            console.log('Guardarian Sell Request Payload:', {
-                amount: parsedAmount,
-                fromCurrency: 'USDC',
-                toCurrency: currencyCode,
-                email: userProfile?.email,
-                customerCountry: userProfile?.phoneCountry,
-                derivedCurrencyCode,
-            });
 
             const tx = await createGuardarianTransaction({
                 amount: parsedAmount,
@@ -201,7 +194,6 @@ export const SellScreen = () => {
                 // Case: No address returned (yet), but we have a redirect URL (common for ARS/KYC required)
                 // We don't show the "Order Created" screen because we have no address to show.
                 // We just send the user to Guardarian.
-                console.log('SellScreen - Guardarian redirect only (no address yet):', tx.redirect_url);
 
                 setAwaitingGuardarianReturn(true);
                 await Linking.openURL(tx.redirect_url);
@@ -320,7 +312,7 @@ export const SellScreen = () => {
             <ScrollView contentContainerStyle={styles.content}>
                 <View style={styles.heroSection}>
                     <View style={styles.heroIconContainer}>
-                        <FAIcon name="bank" size={28} color="#F59E0B" />
+                        <MCIcon name="bank" size={28} color="#F59E0B" />
                     </View>
                     <Text style={styles.heroTitle}>Retira a tu banco</Text>
                     <Text style={styles.heroSubtitle}>
@@ -466,7 +458,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: 16,
-        paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) + 12 : 12,
+        paddingTop: APP_LAYOUT.topSafeArea + 12,
         paddingBottom: 12,
         backgroundColor: '#fff',
         borderBottomWidth: 1,

@@ -146,12 +146,12 @@ export const InviteEmployeeModal: React.FC<InviteEmployeeModalProps> = ({
     const isUsernameMode = mode === 'username';
     if (isUsernameMode) {
       if (!employeeUsername.trim()) {
-        Alert.alert('Error', 'Ingresa el @usuario de Confío del empleado', [{ text: 'OK' }]);
+        Alert.alert('Error', 'Ingresa el @usuario de Confío del empleado', [{ text: 'Entendido' }]);
         return;
       }
     } else {
       if (!phoneNumber) {
-        Alert.alert('Error', 'Por favor ingresa el número de teléfono del empleado', [{ text: 'OK' }]);
+        Alert.alert('Error', 'Por favor ingresa el número de teléfono del empleado', [{ text: 'Entendido' }]);
         return;
       }
     }
@@ -175,14 +175,14 @@ export const InviteEmployeeModal: React.FC<InviteEmployeeModalProps> = ({
         Alert.alert(
           'Invitación enviada',
           'Se ha enviado una invitación al empleado. Expirará en 7 días.',
-          [{ text: 'OK', onPress: onSuccess }]
+          [{ text: 'Entendido', onPress: onSuccess }]
         );
         onClose();
       } else {
-        Alert.alert('Error', data?.inviteEmployee?.errors?.[0] || 'No se pudo enviar la invitación', [{ text: 'OK' }]);
+        Alert.alert('Error', data?.inviteEmployee?.errors?.[0] || 'No se pudo enviar la invitación', [{ text: 'Entendido' }]);
       }
     } catch (error) {
-      Alert.alert('Error', 'Ocurrió un error al enviar la invitación', [{ text: 'OK' }]);
+      Alert.alert('Error', 'Ocurrió un error al enviar la invitación', [{ text: 'Entendido' }]);
     }
   };
 

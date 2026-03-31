@@ -13,16 +13,9 @@ import { AuthStackParamList } from '../types/navigation';
 import { useAuth } from '../contexts/AuthContext';
 
 import Svg, { Defs, LinearGradient as SvgLinearGradient, Stop, Text as SvgText, RadialGradient, Ellipse } from 'react-native-svg';
+import { colors } from '../config/theme';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
-
-const colors = {
-  confioGreen: '#72D9BC',
-  white: '#FFFFFF',
-  accentPurple: '#8B5CF6',
-  darkGray: '#1F2937',
-  lightGray: '#F3F4F6',
-};
 
 type NavigationProp = NativeStackNavigationProp<AuthStackParamList, 'Login'>;
 
@@ -38,9 +31,7 @@ export const AuthScreen = () => {
   useEffect(() => {
     const initializeAuthService = async () => {
       try {
-        console.log('AuthScreen - Initializing auth service...');
         await authService.initialize();
-        console.log('AuthScreen - Auth service initialized successfully');
       } catch (error) {
         console.error('AuthScreen - Failed to initialize auth service:', error);
       }
@@ -75,7 +66,6 @@ export const AuthScreen = () => {
   const proceedWithGoogleSignIn = async (enableDrive: boolean) => {
     setShowBackupModal(false);
     try {
-      console.log(`AuthScreen - Starting Google Sign-In (Drive: ${enableDrive})...`);
 
       // Don't show loading during Google modal
       const result = await authService.signInWithGoogle((message) => {
@@ -92,8 +82,6 @@ export const AuthScreen = () => {
         setLoadingMessage('¡Casi listo! Finalizando configuración...');
       }
 
-      console.log('Google Sign-In result:', result);
-      console.log('Phone verification status:', result.walletData?.isPhoneVerified);
 
       await handleSuccessfulLogin(
         result.walletData?.isPhoneVerified || false,
@@ -113,7 +101,6 @@ export const AuthScreen = () => {
 
   const handleAppleSignIn = async () => {
     try {
-      console.log('AuthScreen - Starting Apple Sign-In...');
 
       // Don't show loading during Apple modal
       const result = await authService.signInWithApple((message) => {
@@ -130,8 +117,6 @@ export const AuthScreen = () => {
         setLoadingMessage('¡Casi listo! Finalizando configuración...');
       }
 
-      console.log('Apple Sign-In result:', result);
-      console.log('Phone verification status:', result.walletData?.isPhoneVerified);
 
       await handleSuccessfulLogin(result.walletData?.isPhoneVerified || false);
     } catch (error) {
@@ -192,9 +177,9 @@ export const AuthScreen = () => {
                 r="80"
                 gradientUnits="userSpaceOnUse"
               >
-                <Stop offset="0%" stopColor="#72D9BC" stopOpacity="0.7" />
-                <Stop offset="70%" stopColor="#72D9BC" stopOpacity="0.25" />
-                <Stop offset="100%" stopColor="#72D9BC" stopOpacity="0" />
+                <Stop offset="0%" stopColor="#34D399" stopOpacity="0.7" />
+                <Stop offset="70%" stopColor="#34D399" stopOpacity="0.25" />
+                <Stop offset="100%" stopColor="#34D399" stopOpacity="0" />
               </RadialGradient>
             </Defs>
             <Ellipse
@@ -216,7 +201,7 @@ export const AuthScreen = () => {
           <Svg height="44" width="100%" viewBox="0 0 320 44" style={{ alignSelf: 'center' }}>
             <Defs>
               <SvgLinearGradient id="grad" x1="0" y1="0" x2="1" y2="0">
-                <Stop offset="0" stopColor="#72D9BC" />
+                <Stop offset="0" stopColor="#34D399" />
                 <Stop offset="1" stopColor="#8B5CF6" />
               </SvgLinearGradient>
             </Defs>
@@ -278,7 +263,7 @@ export const AuthScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.white,
+    backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -293,7 +278,7 @@ const styles = StyleSheet.create({
     width: 220,
     height: 220,
     borderRadius: 110,
-    backgroundColor: colors.confioGreen,
+    backgroundColor: colors.primary,
     opacity: 0.10,
   },
   bottomRightCircle: {
@@ -303,7 +288,7 @@ const styles = StyleSheet.create({
     width: 320,
     height: 320,
     borderRadius: 160,
-    backgroundColor: colors.accentPurple,
+    backgroundColor: colors.secondary,
     opacity: 0.10,
   },
   dot1: {
@@ -313,7 +298,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: colors.confioGreen,
+    backgroundColor: colors.primary,
   },
   dot2: {
     position: 'absolute',
@@ -322,7 +307,7 @@ const styles = StyleSheet.create({
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: colors.accentPurple,
+    backgroundColor: colors.secondary,
     opacity: 0.2,
   },
   dot3: {
@@ -332,7 +317,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: colors.confioGreen,
+    backgroundColor: colors.primary,
     opacity: 0.3,
   },
   line1: {
@@ -342,7 +327,7 @@ const styles = StyleSheet.create({
     width: 64,
     height: 4,
     borderRadius: 2,
-    backgroundColor: colors.darkGray,
+    backgroundColor: colors.dark,
     opacity: 0.10,
     transform: [{ rotate: '45deg' }],
   },
@@ -353,7 +338,7 @@ const styles = StyleSheet.create({
     width: 80,
     height: 4,
     borderRadius: 2,
-    backgroundColor: colors.confioGreen,
+    backgroundColor: colors.primary,
     opacity: 0.10,
     transform: [{ rotate: '-45deg' }],
   },
@@ -384,18 +369,18 @@ const styles = StyleSheet.create({
     width: 96,
     height: 96,
     borderRadius: 48,
-    backgroundColor: colors.confioGreen,
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
     // Soft glow/shadow
-    shadowColor: colors.confioGreen,
+    shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.25,
     shadowRadius: 16,
     elevation: 8, // for Android
   },
   logoText: {
-    color: colors.white,
+    color: colors.background,
     fontSize: 48,
     fontWeight: 'bold',
   },
@@ -410,7 +395,7 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontSize: 16,
-    color: colors.darkGray,
+    color: colors.dark,
     textAlign: 'center',
     marginBottom: 32,
     marginTop: 4,
@@ -423,7 +408,7 @@ const styles = StyleSheet.create({
   googleButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.white,
+    backgroundColor: colors.background,
     borderColor: '#E5E7EB',
     borderWidth: 1,
     borderRadius: 16,
@@ -436,7 +421,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
   },
   googleButtonText: {
-    color: colors.darkGray,
+    color: colors.dark,
     fontWeight: '500',
     fontSize: 16,
     marginLeft: 8,
@@ -455,7 +440,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
   },
   appleButtonText: {
-    color: colors.white,
+    color: '#ffffff',
     fontWeight: '500',
     fontSize: 16,
     marginLeft: 8,
@@ -474,7 +459,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   termsLink: {
-    color: colors.confioGreen,
+    color: colors.primary,
     fontWeight: '500',
   },
   disabledButton: {
@@ -488,7 +473,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   loadingCard: {
-    backgroundColor: colors.white,
+    backgroundColor: colors.background,
     borderRadius: 20,
     padding: 32,
     alignItems: 'center',
@@ -511,7 +496,7 @@ const styles = StyleSheet.create({
   loadingText: {
     fontSize: 16,
     fontWeight: '600',
-    color: colors.darkGray,
+    color: colors.dark,
     marginBottom: 16,
     textAlign: 'center',
   },

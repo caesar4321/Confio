@@ -9,22 +9,10 @@ import { useMutation, useQuery } from '@apollo/client';
 import { UPDATE_USER_PROFILE, UPDATE_USERNAME, GET_ME, GET_MY_PERSONAL_KYC_STATUS, GET_MY_PERSONAL_VERIFIED_KYC } from '../apollo/queries';
 import { getCountryByIso } from '../utils/countries';
 import { biometricAuthService } from '../services/biometricAuthService';
+import { colors } from '../config/theme';
+import { APP_LAYOUT } from '../config/layout';
 
 // Colors from the design
-const colors = {
-  primary: '#34d399', // emerald-400
-  primaryText: '#34d399',
-  primaryLight: '#d1fae5', // emerald-100
-  primaryDark: '#10b981', // emerald-500
-  secondary: '#8b5cf6', // violet-500
-  secondaryText: '#8b5cf6',
-  accent: '#3b82f6', // blue-500
-  accentText: '#3b82f6',
-  neutral: '#f9fafb', // gray-50
-  neutralDark: '#f3f4f6', // gray-100
-  dark: '#111827', // gray-900
-};
-
 type EditProfileScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
 // Utility function to format phone number with country code
@@ -124,7 +112,7 @@ export const EditProfileScreen = () => {
           'Perfil actualizado correctamente',
           [
             {
-              text: 'OK',
+              text: 'Entendido',
               onPress: () => {
                 refreshProfile('personal');
                 navigation.goBack();
@@ -397,7 +385,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingTop: Platform.OS === 'ios' ? 48 : (StatusBar.currentHeight || 32),
+    paddingTop: Platform.OS === 'ios' ? APP_LAYOUT.topSafeArea : APP_LAYOUT.topSafeArea + 8,
     paddingBottom: 16,
   },
   backButton: {

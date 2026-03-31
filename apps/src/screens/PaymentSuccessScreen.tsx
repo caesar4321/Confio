@@ -46,7 +46,6 @@ type PaymentSuccessRouteProp = RouteProp<{
 const { width } = Dimensions.get('window');
 
 export const PaymentSuccessScreen = () => {
-  console.log('PaymentSuccessScreen: Component mounted');
   const navigation = useNavigation();
   const route = useRoute<PaymentSuccessRouteProp>();
   const { transactionData } = route.params;

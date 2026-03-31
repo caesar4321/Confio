@@ -10,6 +10,7 @@ import {
 import Icon from 'react-native-vector-icons/Feather';
 
 import { Gradient } from '../common/Gradient';
+import { APP_LAYOUT } from '../../config/layout';
 
 type Props = {
   eyebrow: string;
@@ -80,7 +81,7 @@ const styles = StyleSheet.create({
   },
   heroPadding: {
     paddingHorizontal: 24,
-    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 12 : 16,
+    paddingTop: APP_LAYOUT.topSafeArea + 12,
     paddingBottom: 32,
   },
   backButton: {

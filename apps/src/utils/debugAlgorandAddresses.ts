@@ -146,7 +146,7 @@ export async function debugStoreTestAddress(cacheKey: string, address: string) {
       address,
       {
         service: 'com.confio.algorand.addresses',
-        accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
+        accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK
       }
     );
     console.log('✅ Test address stored');

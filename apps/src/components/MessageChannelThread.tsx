@@ -16,7 +16,7 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
-import FAIcon from 'react-native-vector-icons/FontAwesome';
+
 
 import founderImage from '../assets/png/JulianMoon_Founder.jpeg';
 import { Channel, ChannelMessage, ChannelAvatar, channelMeta, messageReactionOptions, tealLight, tealGreen } from './MessageInboxShared';
@@ -369,7 +369,7 @@ function renderMessageContent(
     <View style={styles.supportMessageWrap}>
       <View style={styles.supportRow}>
         <View style={styles.supportAvatar}>
-          <FAIcon name="headphones" size={15} color="#0F9F74" />
+          <Icon name="headphones" size={15} color="#0F9F74" />
         </View>
         <View style={styles.supportBubble}>
           <Text style={styles.supportSenderLabel}>{message.senderName || 'Soporte de Confío'}</Text>

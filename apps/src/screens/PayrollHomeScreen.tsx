@@ -8,16 +8,10 @@ import { useQuery } from '@apollo/client';
 import { GET_PAYROLL_RECIPIENTS, GET_PAYROLL_VAULT_BALANCE, GET_CURRENT_BUSINESS_EMPLOYEES } from '../apollo/queries';
 import { usePayrollDelegates } from '../hooks/usePayrollDelegates';
 import { useAccount } from '../contexts/AccountContext';
+import { colors } from '../config/theme';
+import { APP_LAYOUT } from '../config/layout';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList>;
-
-const colors = {
-  primary: '#34d399',
-  text: '#111827',
-  muted: '#6b7280',
-  border: '#e5e7eb',
-  bg: '#f9fafb',
-};
 
 export const PayrollHomeScreen = () => {
   const navigation = useNavigation<NavigationProp>();
@@ -38,7 +32,6 @@ export const PayrollHomeScreen = () => {
 
   useFocusEffect(
     useCallback(() => {
-      console.log('[PayrollHome] Screen focused, refetching...');
       if (refetchEmployees) {
         refetchEmployees();
       }
@@ -69,9 +62,6 @@ export const PayrollHomeScreen = () => {
   }, [delegates, activeAccount]);
 
   useEffect(() => {
-    console.log('[PayrollHome] Delegates updated:', delegates);
-    console.log('[PayrollHome] Active account address:', activeAccount?.algorandAddress);
-    console.log('[PayrollHome] Filtered count (excluding business):', delegateCount);
   }, [delegates, activeAccount, delegateCount]);
 
   const recipients = useMemo(() => recipientsData?.payrollRecipients || [], [recipientsData]);
@@ -108,7 +98,7 @@ export const PayrollHomeScreen = () => {
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-            <Icon name="chevron-left" size={24} color={colors.text} />
+            <Icon name="chevron-left" size={24} color={colors.textFlat} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Nómina</Text>
           <View style={{ width: 32 }} />
@@ -127,7 +117,7 @@ export const PayrollHomeScreen = () => {
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-            <Icon name="chevron-left" size={24} color={colors.text} />
+            <Icon name="chevron-left" size={24} color={colors.textFlat} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Nómina</Text>
           <View style={{ width: 32 }} />
@@ -182,7 +172,7 @@ export const PayrollHomeScreen = () => {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Icon name="chevron-left" size={24} color={colors.text} />
+          <Icon name="chevron-left" size={24} color={colors.textFlat} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Nómina</Text>
         <View style={{ width: 32 }} />
@@ -292,7 +282,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    marginTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 10 : 0,
+    marginTop: Platform.OS === 'android' ? APP_LAYOUT.topSafeArea + 10 : 0,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
@@ -306,7 +296,7 @@ const styles = StyleSheet.create({
     flex: 1,
     textAlign: 'center',
     fontSize: 18,
-    color: colors.text,
+    color: colors.textFlat,
     fontWeight: '600',
   },
   scrollContent: {
@@ -322,7 +312,7 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: colors.text,
+    color: colors.textFlat,
     marginTop: 16,
   },
   emptySubtitle: {
@@ -351,7 +341,7 @@ const styles = StyleSheet.create({
   heroTitle: {
     fontSize: 22,
     fontWeight: '700',
-    color: colors.text,
+    color: colors.textFlat,
     textAlign: 'center',
     marginBottom: 8,
   },
@@ -374,7 +364,7 @@ const styles = StyleSheet.create({
   },
   featureText: {
     fontSize: 14,
-    color: colors.text,
+    color: colors.textFlat,
     flex: 1,
   },
   primaryButton: {
@@ -420,7 +410,7 @@ const styles = StyleSheet.create({
   vaultBalance: {
     fontSize: 28,
     fontWeight: '700',
-    color: colors.text,
+    color: colors.textFlat,
   },
   tokenLogo: {
     width: 28,
@@ -506,12 +496,12 @@ const styles = StyleSheet.create({
   statValue: {
     fontSize: 24,
     fontWeight: '700',
-    color: colors.text,
+    color: colors.textFlat,
   },
   statLabel: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.text,
+    color: colors.textFlat,
     marginBottom: 2,
   },
   statSubtext: {
@@ -544,7 +534,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 15,
     fontWeight: '600',
-    color: colors.text,
+    color: colors.textFlat,
   },
 });
 

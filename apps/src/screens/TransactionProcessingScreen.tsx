@@ -19,6 +19,7 @@ import { biometricAuthService } from '../services/biometricAuthService';
 import { gql } from '@apollo/client';
 import { useAuth } from '../contexts/AuthContext';
 import { getSupportCopy } from '../utils/supportMessaging';
+import { colors } from '../config/theme';
 
 const BUILD_AUTO_SWAP_TRANSACTIONS = gql`
   mutation BuildAutoSwapTransactions($inputAssetType: String!, $amount: String!) {
@@ -59,20 +60,6 @@ const BUILD_BURN_AND_SEND = gql`
     }
   }
 `;
-
-const colors = {
-  primary: '#34D399', // emerald-400
-  secondary: '#8B5CF6', // violet-500
-  accent: '#3B82F6', // blue-500
-  background: '#F9FAFB', // gray-50
-  neutralDark: '#F3F4F6', // gray-100
-  text: {
-    primary: '#1F2937', // gray-800
-    secondary: '#6B7280', // gray-500
-  },
-  success: '#10B981', // emerald-500
-  warning: '#F59E0B', // amber-500
-};
 
 function isTechnicalSendFlowError(message?: string | null): boolean {
   const normalized = (message || '').trim().toLowerCase();
@@ -137,7 +124,6 @@ interface TransactionData {
 }
 
 export const TransactionProcessingScreen = () => {
-  console.log('TransactionProcessingScreen: Component mounted');
   const navigation = useNavigation();
   const route = useRoute();
   const { activeAccount } = useAccount();
@@ -246,7 +232,6 @@ export const TransactionProcessingScreen = () => {
       const delayMs = 0;
       const timer = setTimeout(() => {
         try {
-          console.log('TransactionProcessingScreen: Navigating to TransactionSuccess (send/payment)');
         } catch { }
         (navigation as any).replace('TransactionSuccess', { transactionData });
       }, delayMs);
@@ -256,7 +241,7 @@ export const TransactionProcessingScreen = () => {
       Alert.alert(
         'Error al enviar',
         transactionError,
-        [{ text: 'OK', onPress: () => navigation.goBack() }]
+        [{ text: 'Entendido', onPress: () => navigation.goBack() }]
       );
     }
   }, [isComplete, transactionSuccess, transactionError, navigation]);
@@ -272,7 +257,7 @@ export const TransactionProcessingScreen = () => {
         Alert.alert(
           'Se requiere biometría',
           Platform.OS === 'ios' ? 'Confirma con Face ID o Touch ID para continuar.' : 'Confirma con tu huella digital para continuar.',
-          [{ text: 'OK', onPress: () => navigation.goBack() }]
+          [{ text: 'Entendido', onPress: () => navigation.goBack() }]
         );
         return;
       }
@@ -295,13 +280,9 @@ export const TransactionProcessingScreen = () => {
 
   useEffect(() => {
     if (!bioChecked) return;
-    console.log('TransactionProcessingScreen: useEffect triggered, hasProcessedRef.current:', hasProcessedRef.current);
-    console.log('TransactionProcessingScreen: transactionData:', transactionData);
-    console.log('TransactionProcessingScreen: Generated idempotencyKey:', idempotencyKey);
 
     // Prevent duplicate processing within this screen session
     if (hasProcessedRef.current) {
-      console.log('TransactionProcessingScreen: Transaction already processed in this session, skipping');
       return;
     }
 
@@ -310,10 +291,8 @@ export const TransactionProcessingScreen = () => {
         hasProcessedRef.current = true;
 
         if (transactionData.type === 'payment' && transactionData.invoiceId) {
-          console.log('TransactionProcessingScreen: Starting payment processing');
           await processPayment();
         } else if (transactionData.type === 'sent') {
-          console.log('TransactionProcessingScreen: Starting send processing');
           await processSend();
         } else {
           console.error('TransactionProcessingScreen: Unknown transaction type or missing data:', {
@@ -330,19 +309,12 @@ export const TransactionProcessingScreen = () => {
 
     const processPayment = async () => {
       try {
-        console.log('TransactionProcessingScreen: Processing payment for invoice:', transactionData.invoiceId);
 
         // Debug: Check current active account context before payment
         try {
           const accountManager = AccountManager.getInstance();
           const activeContext = await accountManager.getActiveAccountContext();
-          console.log('TransactionProcessingScreen - Active account context before payment:', {
-            type: activeContext.type,
-            index: activeContext.index,
-            accountId: `${activeContext.type}_${activeContext.index}`
-          });
         } catch (error) {
-          console.log('TransactionProcessingScreen - Could not get active account context:', error);
         }
 
         // Step 1: Verifying transaction
@@ -355,7 +327,6 @@ export const TransactionProcessingScreen = () => {
 
         // Step 3: Call the actual payment mutation with security checks
         setCurrentStep(2);
-        console.log('TransactionProcessingScreen: Calling payInvoice mutation with security checks and idempotency key:', idempotencyKey);
 
         // Perform payment operation
         const { data } = await payInvoice({
@@ -365,10 +336,8 @@ export const TransactionProcessingScreen = () => {
           }
         });
 
-        console.log('TransactionProcessingScreen: Payment mutation response:', data);
 
         if (data?.payInvoice?.success) {
-          console.log('TransactionProcessingScreen: Payment successful');
           setTransactionSuccess(true);
           setIsComplete(true);
         } else {
@@ -385,10 +354,8 @@ export const TransactionProcessingScreen = () => {
 
     const processSend = async () => {
       try {
-        console.log('TransactionProcessingScreen: Processing send transaction to:', transactionData.recipient);
 
         // All sends now go through the same mutation
-        console.log('TransactionProcessingScreen: Processing unified send');
         await processUnifiedSend();
       } catch (error) {
         console.error('TransactionProcessingScreen: Error in processSend:', error);
@@ -410,7 +377,6 @@ export const TransactionProcessingScreen = () => {
 
         // Prefer WebSocket prepare/submit for lower latency
         setCurrentStep(1);
-        console.log('TransactionProcessingScreen: Creating Algorand sponsored transaction (WS-first)...');
 
         // Build variables based on what recipient info we have
         const variables: any = {
@@ -422,13 +388,10 @@ export const TransactionProcessingScreen = () => {
         // Add recipient identification based on what's available
         if (transactionData.recipientUserId) {
           variables.recipientUserId = transactionData.recipientUserId;
-          console.log('TransactionProcessingScreen: Using recipientUserId:', transactionData.recipientUserId);
         } else if (transactionData.recipientPhone) {
           variables.recipientPhone = transactionData.recipientPhone;
-          console.log('TransactionProcessingScreen: Using recipientPhone:', transactionData.recipientPhone);
         } else if (transactionData.recipientAddress) {
           variables.recipientAddress = transactionData.recipientAddress;
-          console.log('TransactionProcessingScreen: Using recipientAddress:', transactionData.recipientAddress);
         } else {
           console.error('TransactionProcessingScreen: No recipient identification available');
           setTransactionError('No recipient information available');
@@ -437,13 +400,6 @@ export const TransactionProcessingScreen = () => {
         }
 
         try {
-          console.log('TransactionProcessingScreen: Calling algorandSponsoredSend', {
-            hasRecipientUserId: !!variables.recipientUserId,
-            hasRecipientPhone: !!variables.recipientPhone,
-            hasRecipientAddress: !!variables.recipientAddress,
-            amount: variables.amount,
-            assetType: variables.assetType
-          });
         } catch { }
 
         let userTransaction: string | null = null;
@@ -457,7 +413,6 @@ export const TransactionProcessingScreen = () => {
             userTransaction = txs.find((t: any) => t.index === 1)?.transaction || null;
           }
           if (userTransaction && sponsorTransaction) {
-            console.log('TransactionProcessingScreen: Using pre-prepared WS pack from confirm screen');
           }
         } catch { }
         try {
@@ -474,7 +429,6 @@ export const TransactionProcessingScreen = () => {
             const txs = pack?.transactions || [];
             sponsorTransaction = txs.find((t: any) => t.index === 0)?.transaction || null;
             userTransaction = txs.find((t: any) => t.index === 1)?.transaction || null;
-            console.log('TransactionProcessingScreen: WS prepare OK');
           }
         } catch (wsErr: any) {
           console.error('TransactionProcessingScreen: WS prepare failed:', wsErr);
@@ -501,12 +455,10 @@ export const TransactionProcessingScreen = () => {
 
         // Step 3: Sign the user transaction with Algorand wallet
         setCurrentStep(2);
-        console.log('TransactionProcessingScreen: Signing Algorand transaction...');
 
         // Load the stored wallet if not already loaded
         let currentAccount = algorandService.getCurrentAccount();
         if (!currentAccount) {
-          console.log('TransactionProcessingScreen: Loading stored Algorand wallet...');
           const loaded = await algorandService.loadStoredWallet();
           if (!loaded) {
             console.warn('TransactionProcessingScreen: No stored wallet found, but proceeding to allow auto-healing via signTransactionBytes...');
@@ -526,7 +478,6 @@ export const TransactionProcessingScreen = () => {
         const signedUserTxnBytes = await algorandService.signTransactionBytes(userTxnBytes);
         const signedUserTxnB64 = Buffer.from(signedUserTxnBytes).toString('base64');
 
-        console.log('TransactionProcessingScreen: Submitting signed Algorand transaction group (WS-first)...');
         let transactionId: string | undefined;
         let confirmedRound: number | undefined;
         try {
@@ -564,7 +515,6 @@ export const TransactionProcessingScreen = () => {
           return;
         }
         try {
-          console.log('TransactionProcessingScreen: Submit result received', { hasTxId: !!transactionId, confirmedRound });
         } catch { }
 
         // Store lightweight transaction details for success screen
@@ -627,7 +577,6 @@ export const TransactionProcessingScreen = () => {
 
     const processCusdSwap = async () => {
       try {
-        console.log('TransactionProcessingScreen: Starting cUSD to USDC swap step');
         let amountBaseUnits = Math.floor(parseFloat(transactionData.amount) * 1_000_000).toString();
 
         const res = await withTimeout(buildAutoSwapTransactions({
@@ -667,7 +616,6 @@ export const TransactionProcessingScreen = () => {
         if (!submitRes.data?.submitAutoSwapTransactions?.success) {
           throw new Error(submitRes.data?.submitAutoSwapTransactions?.error || 'Failed to submit intermediate swap');
         }
-        console.log('TransactionProcessingScreen: Swap to USDC succeeded', submitRes.data.submitAutoSwapTransactions.txid);
       } catch (err: any) {
         console.error('TransactionProcessingScreen: Error in cUSD to USDC swap:', err);
         throw new Error('Error al intercambiar el saldo a USDC. ' + err.message);
@@ -676,7 +624,6 @@ export const TransactionProcessingScreen = () => {
 
     const processAtomicBurnAndSend = async () => {
       try {
-        console.log('TransactionProcessingScreen: Starting ATOMIC cUSD burn + USDC send');
         setCurrentStep(1);
 
         const amountBaseUnits = Math.floor(parseFloat(transactionData.amount) * 1_000_000).toString();
@@ -702,12 +649,10 @@ export const TransactionProcessingScreen = () => {
 
           const errMsg = data?.error || 'Failed to build burn+send';
           if (errMsg === 'requires_app_optin' && attempt === 0) {
-            console.log('TransactionProcessingScreen: cUSD app opt-in required, running opt-in flow...');
             const optInResult = await cusdAppOptInService.handleAppOptIn(activeAccount);
             if (!optInResult.success) {
               throw new Error(optInResult.error || 'No se pudo completar la configuración inicial');
             }
-            console.log('TransactionProcessingScreen: cUSD app opt-in completed, retrying atomic build...');
             continue;
           }
 
@@ -727,7 +672,6 @@ export const TransactionProcessingScreen = () => {
 
         // Step 2: Sign the user transactions (indices 1 and 4)
         setCurrentStep(2);
-        console.log('TransactionProcessingScreen: Signing', transactions.length, 'user transactions...');
 
         // Load wallet if needed
         let currentAccount = algorandService.getCurrentAccount();
@@ -759,7 +703,6 @@ export const TransactionProcessingScreen = () => {
         }
 
         const txid = submitRes.data.submitAutoSwapTransactions.txid;
-        console.log('TransactionProcessingScreen: Atomic burn+send succeeded', txid);
 
         // Store transaction details for success screen
         if (transactionData) {
@@ -793,16 +736,13 @@ export const TransactionProcessingScreen = () => {
 
         // If recipient is not on Confío and we have a phone, route to Invite flow
         if (transactionData.isOnConfio === false && transactionData.recipientPhone) {
-          console.log('TransactionProcessingScreen: Processing InviteSend flow for non-Confío friend');
           await processInviteSend();
         } else {
           // Pre-flight check: if we need to swap cUSD to USDC first
           if ((transactionData as any)?.needsCusdSwap) {
-            console.log('TransactionProcessingScreen: Using ATOMIC burn+send flow');
             await processAtomicBurnAndSend();
           } else {
             // Sponsored direct send for Confío friends or direct address
-            console.log('TransactionProcessingScreen: Processing Algorand sponsored send...');
             await processAlgorandSponsoredSend();
           }
         }

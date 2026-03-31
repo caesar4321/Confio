@@ -135,7 +135,6 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
     }
 
     try {
-      console.log('Submitting referrer:', finalIdentifier, 'Type:', inputType);
       const { data, errors } = await setReferrer({
         variables: {
           referrerIdentifier: finalIdentifier,
@@ -146,7 +145,7 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
       if (errors && errors.length > 0) {
         const friendly = formatErrorMessage(errors[0].message);
         setError(friendly);
-        Alert.alert('Aviso', friendly, [{ text: 'OK' }]);
+        Alert.alert('Aviso', friendly, [{ text: 'Entendido' }]);
         return;
       }
 
@@ -157,7 +156,7 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
       } else {
         const friendly = formatErrorMessage(data?.setReferrer?.error);
         setError(friendly);
-        Alert.alert('Aviso', friendly, [{ text: 'OK' }]);
+        Alert.alert('Aviso', friendly, [{ text: 'Entendido' }]);
       }
     } catch (err: any) {
       console.error('Network error:', err);
@@ -167,10 +166,10 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
       if (errorMessage) {
         const friendly = formatErrorMessage(errorMessage);
         setError(friendly);
-        Alert.alert("Error", friendly, [{ text: 'OK' }]);
+        Alert.alert("Error", friendly, [{ text: 'Entendido' }]);
       } else {
         setError('Error de conexión. Intenta de nuevo.');
-        Alert.alert("Error", "Error de conexión. Intenta de nuevo.", [{ text: 'OK' }]);
+        Alert.alert("Error", "Error de conexión. Intenta de nuevo.", [{ text: 'Entendido' }]);
       }
     }
   };

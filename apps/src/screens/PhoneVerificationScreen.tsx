@@ -28,6 +28,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useCountrySelection } from '../hooks/useCountrySelection';
 import { AuthStackParamList, MainStackParamList } from '../types/navigation';
 import { navigationRef } from '../navigation/RootNavigation';
+import { colors } from '../config/theme';
 
 type PhoneVerificationScreenNavigationProp = CompositeNavigationProp<
   NativeStackNavigationProp<AuthStackParamList, 'PhoneVerification'>,
@@ -57,17 +58,6 @@ const PhoneVerificationScreen = () => {
   const CODE_REQUEST_COOLDOWN_SECONDS = 30;
 
   // Colors from the design
-  const colors = {
-    confioGreen: '#72D9BC',
-    white: '#FFFFFF',
-    accentPurple: '#8B5CF6',
-    darkGray: '#1F2937',
-    lightGray: '#F3F4F6',
-    grayBorder: '#E5E7EB',
-    grayText: '#6B7280',
-    buttonDisabled: '#CDEFE5',
-  };
-
   useEffect(() => {
     if (codeRequestCooldown === 0) return;
 
@@ -138,7 +128,6 @@ const PhoneVerificationScreen = () => {
         const countryCode = selectedCountry?.[2] || 'AR'; // ISO country code (e.g., 'AR' for Argentina)
         // Format phone number: remove any spaces, dashes, or other separators
         const cleanPhoneNumber = phoneNumber.replace(/[\s-]/g, '');
-        console.log('Sending verification with:', { phoneNumber: cleanPhoneNumber, countryCode });
 
         const { data } = await initiateTelegramVerification({
           variables: {
@@ -147,7 +136,6 @@ const PhoneVerificationScreen = () => {
           }
         });
 
-        console.log('Verification response:', data);
 
         if (data.initiateTelegramVerification.success) {
           setCurrentScreen('code');
@@ -223,7 +211,7 @@ const PhoneVerificationScreen = () => {
                 'Número de teléfono actualizado correctamente',
                 [
                   {
-                    text: 'OK',
+                    text: 'Entendido',
                     onPress: () => {
                       // Refresh user profile and go back
                       refreshProfile('personal');
@@ -295,7 +283,7 @@ const PhoneVerificationScreen = () => {
             });
             if (updateData?.updatePhoneNumber?.success) {
               Alert.alert('Éxito', 'Número de teléfono actualizado correctamente', [
-                { text: 'OK', onPress: () => { refreshProfile('personal'); navigation.goBack(); } },
+                { text: 'Entendido', onPress: () => { refreshProfile('personal'); navigation.goBack(); } },
               ]);
             } else {
               Alert.alert('Error', updateData?.updatePhoneNumber?.error || 'Failed to update phone number');
@@ -392,7 +380,7 @@ const PhoneVerificationScreen = () => {
             }
           }}
         >
-          <Feather name="arrow-left" size={24} color={colors.darkGray} />
+          <Feather name="arrow-left" size={24} color={colors.dark} />
         </TouchableOpacity>
 
         <Text style={styles.title}>{title}</Text>
@@ -462,7 +450,7 @@ const PhoneVerificationScreen = () => {
     return (
       <View style={styles.screenContainer}>
         <TouchableOpacity style={styles.backButton} onPress={handleBack}>
-          <Feather name="arrow-left" size={24} color={colors.darkGray} />
+          <Feather name="arrow-left" size={24} color={colors.dark} />
         </TouchableOpacity>
 
         <Text style={styles.title}>{title}</Text>
@@ -495,7 +483,7 @@ const PhoneVerificationScreen = () => {
                 <Text style={[styles.methodButtonText, codeRequestBlocked && styles.methodButtonTextDisabled]}>
                   {codeRequestBlocked ? methodCtaText : 'Enviar código'}
                 </Text>
-                <Feather name="arrow-right" size={16} color={colors.confioGreen} />
+                <Feather name="arrow-right" size={16} color={colors.primary} />
               </View>
             </View>
           </TouchableOpacity>
@@ -545,7 +533,7 @@ const PhoneVerificationScreen = () => {
     return (
       <View style={styles.screenContainer}>
         <TouchableOpacity style={styles.backButton} onPress={handleBack}>
-          <Feather name="arrow-left" size={24} color={colors.darkGray} />
+          <Feather name="arrow-left" size={24} color={colors.dark} />
         </TouchableOpacity>
 
         <Text style={styles.title}>{title}</Text>
@@ -595,7 +583,7 @@ const PhoneVerificationScreen = () => {
           disabled={isRequestingCode || codeRequestCooldown > 0}
         >
           <Text style={styles.resendButtonText}>¿No recibiste el código? </Text>
-          <Text style={[styles.resendButtonText, { color: colors.confioGreen }]}>
+          <Text style={[styles.resendButtonText, { color: colors.primary }]}>
             {codeRequestCooldown > 0 ? `Reenviar en ${codeRequestCooldown}s` : 'Reenviar código'}
           </Text>
         </TouchableOpacity>
@@ -634,7 +622,7 @@ const PhoneVerificationScreen = () => {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Selecciona un país</Text>
               <TouchableOpacity onPress={closeCountryModal}>
-                <Feather name="x" size={24} color={colors.darkGray} />
+                <Feather name="x" size={24} color={colors.dark} />
               </TouchableOpacity>
             </View>
             <FlatList
@@ -753,7 +741,7 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 16,
   },
   continueButton: {
-    backgroundColor: '#72D9BC',
+    backgroundColor: '#34D399',
     padding: 16,
     borderRadius: 12,
     alignItems: 'center',
@@ -795,7 +783,7 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   methodIconContainer: {
-    backgroundColor: '#72D9BC',
+    backgroundColor: '#34D399',
     width: 40,
     height: 40,
     borderRadius: 20,
@@ -846,7 +834,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   methodButtonText: {
-    color: '#72D9BC',
+    color: '#34D399',
     fontSize: 14,
     fontWeight: '600',
     marginRight: 4,

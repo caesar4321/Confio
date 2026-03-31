@@ -8,20 +8,7 @@ import { MainStackParamList } from '../types/navigation';
 import { formatNumber } from '../utils/numberFormatting';
 import { useCountry } from '../contexts/CountryContext';
 import CONFIOLogo from '../assets/png/CONFIO.png';
-
-const colors = {
-  primary: '#34d399',
-  primaryLight: '#d1fae5',
-  primaryDark: '#10b981',
-  secondary: '#8b5cf6',
-  secondaryLight: '#e9d5ff',
-  accent: '#3b82f6',
-  neutral: '#f9fafb',
-  neutralDark: '#f3f4f6',
-  dark: '#111827',
-  violet: '#8b5cf6',
-  violetLight: '#ddd6fe',
-};
+import { colors } from '../config/theme';
 
 type ConfioTokenomicsScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 

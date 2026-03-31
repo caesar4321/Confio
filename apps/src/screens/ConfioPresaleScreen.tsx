@@ -14,20 +14,7 @@ import algorandService from '../services/algorandService';
 import { formatNumber } from '../utils/numberFormatting';
 import { useCountry } from '../contexts/CountryContext';
 import { LoadingOverlay } from '../components/LoadingOverlay';
-
-const colors = {
-  primary: '#34d399',
-  primaryLight: '#d1fae5',
-  primaryDark: '#10b981',
-  secondary: '#8b5cf6',
-  secondaryLight: '#e9d5ff',
-  accent: '#3b82f6',
-  neutral: '#f9fafb',
-  neutralDark: '#f3f4f6',
-  dark: '#111827',
-  violet: '#8b5cf6',
-  violetLight: '#ddd6fe',
-};
+import { colors } from '../config/theme';
 
 type ConfioPresaleScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 type PresalePhaseCard = {
@@ -139,7 +126,7 @@ export const ConfioPresaleScreen = () => {
         Alert.alert(
           'Aviso',
           data?.joinPresaleWaitlist?.message || 'No se pudo unir a la lista de espera.',
-          [{ text: 'OK', style: 'default' }]
+          [{ text: 'Entendido', style: 'default' }]
         );
       }
     } catch (error: any) {
@@ -147,7 +134,7 @@ export const ConfioPresaleScreen = () => {
       Alert.alert(
         'Error',
         error.message || 'No se pudo unir a la lista de espera. Por favor intenta nuevamente.',
-        [{ text: 'OK', style: 'default' }]
+        [{ text: 'Entendido', style: 'default' }]
       );
     }
   };

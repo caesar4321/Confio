@@ -10,24 +10,7 @@ import CONFIOLogo from '../assets/png/CONFIO.png';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useAuth } from '../contexts/AuthContext';
 import { getSupportCopy } from '../utils/supportMessaging';
-
-const colors = {
-  primary: '#34D399', // emerald-400
-  secondary: '#8B5CF6', // violet-500
-  accent: '#3B82F6', // blue-500
-  background: '#F9FAFB', // gray-50
-  neutralDark: '#F3F4F6', // gray-100
-  text: {
-    primary: '#1F2937', // gray-800
-    secondary: '#6B7280', // gray-500
-  },
-  warning: {
-    background: '#FEF3C7', // yellow-50
-    border: '#FDE68A', // yellow-200
-    text: '#92400E', // yellow-800
-    icon: '#D97706', // yellow-600
-  },
-};
+import { colors } from '../config/theme';
 
 type TokenType = 'cusd' | 'confio';
 
@@ -75,11 +58,6 @@ export const SendToFriendScreen = () => {
   const friend: Friend = (route.params as any)?.friend || { name: 'Friend', avatar: 'F', isOnConfio: true, phone: '' };
 
   // Debug log to check friend data
-  console.log('SendToFriendScreen: route.params:', route.params);
-  console.log('SendToFriendScreen: friend data:', friend);
-  console.log('SendToFriendScreen: friend.isOnConfio:', friend.isOnConfio);
-  console.log('SendToFriendScreen: friend.algorandAddress:', friend.algorandAddress);
-  console.log('SendToFriendScreen: friend.algorandAddress length:', friend.algorandAddress?.length);
   const [tokenType, setTokenType] = useState<TokenType>((route.params as any)?.tokenType || 'cusd');
   const config = tokenConfig[tokenType];
 
@@ -152,7 +130,6 @@ export const SendToFriendScreen = () => {
         if (!alive) return;
         if (pack && Array.isArray((pack as any).transactions) && (pack as any).transactions.length >= 2) {
           setPrepared({ transactions: (pack as any).transactions });
-          console.log('SendToFriendScreen: Preflight prepared via WS');
         }
       } catch (e) {
         // ignore preflight errors; processing screen will fallback
@@ -162,11 +139,9 @@ export const SendToFriendScreen = () => {
   }, [amount, tokenType, friend?.userId, friend?.id, friend?.phone, friend?.isOnConfio]);
 
   const handleSend = async () => {
-    console.log('SendToFriendScreen: handleSend called');
 
     // Prevent double-clicks/rapid button presses
     if (isProcessing || navLock.current) {
-      console.log('SendToFriendScreen: Already processing, ignoring duplicate click');
       return;
     }
 
@@ -180,7 +155,6 @@ export const SendToFriendScreen = () => {
     navLock.current = true;
 
     try {
-      console.log('SendToFriendScreen: Navigating to TransactionProcessing');
 
       // For idempotency key, we need a stable identifier
       // For Confío users, use their user ID; for non-Confío, use phone number hash
@@ -352,11 +326,6 @@ export const SendToFriendScreen = () => {
             ]}
             disabled={!amount || parseFloat(amount) < config.minSend || parseFloat(amount || '0') > availableBalance || isProcessing}
             onPress={() => {
-              console.log('SendToFriendScreen: Button pressed');
-              console.log('SendToFriendScreen: amount:', amount);
-              console.log('SendToFriendScreen: config.minSend:', config.minSend);
-              console.log('SendToFriendScreen: availableBalance:', availableBalance);
-              console.log('SendToFriendScreen: button disabled:', !amount || parseFloat(amount) < config.minSend || parseFloat(amount || '0') > availableBalance || isProcessing);
               handleSend();
             }}
           >
@@ -677,11 +646,11 @@ const styles = StyleSheet.create({
   valueTitle: {
     fontWeight: 'bold',
     fontSize: 16,
-    color: '#059669',
+    color: '#10B981',
   },
   valueDescription: {
     fontSize: 14,
-    color: '#059669',
+    color: '#10B981',
     marginBottom: 12,
   },
   valueHighlightBox: {

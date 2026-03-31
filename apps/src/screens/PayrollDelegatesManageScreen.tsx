@@ -11,16 +11,10 @@ import { useAccount } from '../contexts/AccountContext';
 import { biometricAuthService } from '../services/biometricAuthService';
 import algorandService from '../services/algorandService';
 import { Buffer } from 'buffer';
+import { colors } from '../config/theme';
+import { APP_LAYOUT } from '../config/layout';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList>;
-
-const colors = {
-  primary: '#34d399',
-  text: '#111827',
-  muted: '#6b7280',
-  border: '#e5e7eb',
-  bg: '#f9fafb',
-};
 
 const SET_BUSINESS_DELEGATES_BY_EMPLOYEE = gql`
   mutation SetBusinessDelegatesByEmployee(
@@ -68,8 +62,6 @@ export const PayrollDelegatesManageScreen = () => {
   const employees = useMemo(() => data?.currentBusinessEmployees || [], [data]);
 
   useEffect(() => {
-    console.log('[Delegates Debug] delegates list:', delegates);
-    console.log('[Delegates Debug] employees count:', employees.length);
 
     const map: Record<string, boolean> = {};
     employees.forEach((e: any) => {
@@ -95,12 +87,6 @@ export const PayrollDelegatesManageScreen = () => {
       );
       const address = personalAccount?.algorandAddress;
 
-      console.log(`[Delegates Debug] Employee ${e.user?.firstName} ${e.user?.lastName}:`, {
-        personalAccount,
-        address,
-        accounts: e.user?.accounts,
-        accountsDetail: JSON.stringify(e.user?.accounts, null, 2),
-      });
 
       // Normalize addresses to uppercase for comparison
       const normalizedAddress = address?.trim().toUpperCase();
@@ -110,7 +96,6 @@ export const PayrollDelegatesManageScreen = () => {
       const role = (e.role || '').toLowerCase();
       const isDelegate = role === 'owner' || hasSendFunds || (normalizedAddress && normalizedDelegates.includes(normalizedAddress));
 
-      console.log(`[Delegates Debug] ${e.user?.firstName}: isDelegate=${isDelegate}, address=${normalizedAddress}, delegates=${normalizedDelegates.join(', ')}`);
 
       // Owner is always a delegate, but should be in the list anyway.
       // We rely on the list from the blockchain.
@@ -204,7 +189,7 @@ export const PayrollDelegatesManageScreen = () => {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Icon name="chevron-left" size={24} color={colors.text} />
+          <Icon name="chevron-left" size={24} color={colors.textFlat} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Delegados</Text>
         <View style={{ width: 32 }} />
@@ -311,7 +296,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    marginTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 10 : 0,
+    marginTop: Platform.OS === 'android' ? APP_LAYOUT.topSafeArea + 10 : 0,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
@@ -325,7 +310,7 @@ const styles = StyleSheet.create({
     flex: 1,
     textAlign: 'center',
     fontSize: 18,
-    color: colors.text,
+    color: colors.textFlat,
     fontWeight: '600',
   },
   infoCard: {
@@ -401,7 +386,7 @@ const styles = StyleSheet.create({
   employeeName: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.text,
+    color: colors.textFlat,
   },
   employeeRole: {
     fontSize: 13,
@@ -454,7 +439,7 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: colors.text,
+    color: colors.textFlat,
     marginTop: 16,
   },
   emptySubtitle: {
@@ -484,7 +469,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   blockerLogo: { width: 64, height: 64, resizeMode: 'contain' },
-  blockerText: { fontSize: 16, fontWeight: '700', color: colors.text },
+  blockerText: { fontSize: 16, fontWeight: '700', color: colors.textFlat },
   blockerSubtext: { fontSize: 13, color: colors.muted, textAlign: 'center' },
 });
 

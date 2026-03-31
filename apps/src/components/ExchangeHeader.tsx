@@ -51,13 +51,6 @@ export const ExchangeHeader = React.memo<ExchangeHeaderProps>(({
   children,
 }) => {
   headerRenderCount++;
-  console.log('[DEBUG] ExchangeHeader render #', headerRenderCount, {
-    activeList,
-    activeTab,
-    selectedCrypto,
-    showAdvancedFilters,
-    activeTradesLength: activeTrades.length,
-  });
 
   // Fixed header heights
   const HEADER_HEIGHT = activeList === 'offers' ? 320 : 100;

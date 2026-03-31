@@ -19,25 +19,7 @@ import { GET_BUSINESS_KYC_STATUS, GET_ME, GET_MY_KYC_STATUS, GET_MY_PERSONAL_KYC
 import { CREATE_DIDIT_VERIFICATION_SESSION, SYNC_DIDIT_VERIFICATION_SESSION } from '../apollo/mutations';
 import { useAccount } from '../contexts/AccountContext';
 import { getDiditResultSessionId, startDiditVerification } from '../services/diditService';
-
-const colors = {
-  primary: '#34D399',
-  primaryDark: '#059669',
-  primaryLight: '#D1FAE5',
-  info: '#2563EB',
-  infoLight: '#DBEAFE',
-  warning: '#F59E0B',
-  warningLight: '#FEF3C7',
-  danger: '#DC2626',
-  dangerLight: '#FEE2E2',
-  success: '#10B981',
-  successLight: '#D1FAE5',
-  dark: '#111827',
-  textMuted: '#6B7280',
-  surface: '#FFFFFF',
-  surfaceMuted: '#F9FAFB',
-  border: '#E5E7EB',
-};
+import { colors } from '../config/theme';
 
 type NormalizedStatus = 'unverified' | 'pending' | 'verified' | 'rejected';
 
@@ -495,7 +477,7 @@ const styles = StyleSheet.create({
   heroDescription: {
     fontSize: 15,
     lineHeight: 22,
-    color: colors.textMuted,
+    color: colors.textSecondary,
   },
   heroActions: {
     gap: 12,
@@ -582,7 +564,7 @@ const styles = StyleSheet.create({
   },
   levelSubtitle: {
     fontSize: 13,
-    color: colors.textMuted,
+    color: colors.textSecondary,
     marginTop: 2,
   },
   featureRow: {
@@ -633,7 +615,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.4,
     textTransform: 'uppercase',
-    color: colors.textMuted,
+    color: colors.textSecondary,
     marginTop: 6,
   },
   metaValue: {
@@ -647,7 +629,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   loadingText: {
-    color: colors.textMuted,
+    color: colors.textSecondary,
     fontSize: 14,
   },
 });

@@ -663,7 +663,7 @@ export class AuthService {
             {
               service: AUTH_KEYCHAIN_SERVICE,
               username: AUTH_KEYCHAIN_USERNAME,
-              accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
+              accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK
             }
           );
 
@@ -946,7 +946,7 @@ export class AuthService {
             {
               service: AUTH_KEYCHAIN_SERVICE,
               username: AUTH_KEYCHAIN_USERNAME,
-              accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
+              accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK
             }
           );
           console.log('Stored JWT tokens in Keychain before processing opt-ins (Apple)');
@@ -1318,7 +1318,7 @@ export class AuthService {
         address,   // password - the actual data to store
         {
           service: serviceName,
-          accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
+          accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK
         }
       );
       console.log('✅ Successfully stored Algorand address for account');
@@ -1506,7 +1506,7 @@ export class AuthService {
                 {
                   service: AUTH_KEYCHAIN_SERVICE,
                   username: AUTH_KEYCHAIN_USERNAME,
-                  accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
+                  accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK
                 }
               );
               await Keychain.resetGenericPassword({
@@ -1631,7 +1631,7 @@ export class AuthService {
         {
           service: AUTH_KEYCHAIN_SERVICE,
           username: AUTH_KEYCHAIN_USERNAME,
-          accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
+          accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK
         }
       );
 
@@ -1954,7 +1954,7 @@ export class AuthService {
             {
               service: AUTH_KEYCHAIN_SERVICE,
               username: AUTH_KEYCHAIN_USERNAME,
-              accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
+              accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK
             }
           );
 

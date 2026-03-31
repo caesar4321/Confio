@@ -8,6 +8,7 @@ import { GET_PAYROLL_RECIPIENTS, CREATE_PAYROLL_RUN } from '../apollo/queries';
 import Icon from 'react-native-vector-icons/Feather';
 import { biometricAuthService } from '../services/biometricAuthService';
 import LoadingOverlay from '../components/LoadingOverlay';
+import { APP_LAYOUT } from '../config/layout';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'PayrollRun'>;
 
@@ -73,7 +74,7 @@ export const PayrollRunScreen = () => {
         Alert.alert(
           'Biometría bloqueada',
           'Desbloquea tu dispositivo con passcode y vuelve a intentar.',
-          [{ text: 'OK', style: 'default' }],
+          [{ text: 'Entendido', style: 'default' }],
         );
         return;
       }
@@ -120,7 +121,7 @@ export const PayrollRunScreen = () => {
           ? 'Se guardó la nómina. Puedes proceder a firmar los pagos.'
           : `Nómina ${selectedSchedule?.label.toLowerCase()} creada. Se ejecutará automáticamente.`;
         Alert.alert('Nómina creada', msg, [
-          { text: 'OK', onPress: () => navigation.goBack() },
+          { text: 'Entendido', onPress: () => navigation.goBack() },
         ]);
         refetch();
       } else {
@@ -235,7 +236,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 12,
-    marginTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 10 : 0
+    marginTop: Platform.OS === 'android' ? APP_LAYOUT.topSafeArea + 10 : 0
   },
   backButton: { padding: 6 },
   headerTitle: { flex: 1, textAlign: 'center', fontSize: 18, fontWeight: '700', color: '#111827', marginRight: 24 },

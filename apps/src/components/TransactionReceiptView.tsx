@@ -82,7 +82,7 @@ export const TransactionReceiptView: React.FC<TransactionReceiptViewProps> = ({
             {/* Header - Confío Branding */}
             <View style={styles.brandContainer}>
                 <View style={styles.brandBadge}>
-                    <Icon name="shield" size={32} color="#059669" />
+                    <Icon name="shield" size={32} color="#10B981" />
                 </View>
                 <Text style={styles.brandTitle}>Confío</Text>
                 <Text style={styles.brandSubtitle}>Comprobante Oficial</Text>
@@ -94,7 +94,7 @@ export const TransactionReceiptView: React.FC<TransactionReceiptViewProps> = ({
                 <Icon
                     name={isCompleted ? 'check-circle' : 'clock'}
                     size={16}
-                    color={isCompleted ? '#059669' : '#d97706'}
+                    color={isCompleted ? '#10B981' : '#d97706'}
                 />
                 <Text style={[styles.statusText, isCompleted ? styles.statusCompletedText : styles.statusPendingText]}>
                     {statusText}
@@ -185,7 +185,7 @@ export const TransactionReceiptView: React.FC<TransactionReceiptViewProps> = ({
 
             {/* Certification Footer */}
             <View style={styles.certificationCard}>
-                <Icon name="award" size={20} color="#059669" />
+                <Icon name="award" size={20} color="#10B981" />
                 <Text style={styles.certificationTitle}>Certificado por Confío</Text>
                 <Text style={styles.certificationText}>
                     Confío certifica la coincidencia de los datos del comprobante con la transacción registrada en Algorand.
@@ -220,7 +220,7 @@ const styles = StyleSheet.create({
     brandTitle: {
         fontSize: 22,
         fontWeight: '700',
-        color: '#059669',
+        color: '#10B981',
         marginBottom: 2,
     },
     brandSubtitle: {
@@ -255,7 +255,7 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     statusCompletedText: {
-        color: '#059669',
+        color: '#10B981',
     },
     statusPendingText: {
         color: '#d97706',
@@ -337,7 +337,7 @@ const styles = StyleSheet.create({
     infoValueMono: {
         fontSize: 13,
         fontWeight: '500',
-        color: '#059669',
+        color: '#10B981',
         fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
         flex: 1,
     },
@@ -385,7 +385,7 @@ const styles = StyleSheet.create({
     certificationTitle: {
         fontSize: 14,
         fontWeight: '700',
-        color: '#059669',
+        color: '#10B981',
         marginTop: 8,
         marginBottom: 6,
     },

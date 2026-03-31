@@ -25,26 +25,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
 import Svg, { Defs, LinearGradient, Stop, Rect, Circle } from 'react-native-svg';
+import { colors } from '../config/theme';
 
 // Colors matching app design
-const colors = {
-  primary: '#34d399',
-  primaryLight: '#d1fae5',
-  primaryDark: '#10b981',
-  secondary: '#8b5cf6',
-  accent: '#3b82f6',
-  background: '#f9fafb',
-  neutralDark: '#f3f4f6',
-  text: {
-    primary: '#1f2937',
-    secondary: '#6b7280',
-    light: '#9ca3af',
-  },
-  success: '#10b981',
-  error: '#ef4444',
-  warning: '#f59e0b',
-};
-
 const KOYWE_SUPPORTED_COUNTRY_CODES = ['AR', 'BO', 'BR', 'CL', 'CO', 'MX', 'PE'];
 const FIRST_NAME_ONLY_METHOD_CODES = new Set(['QRI-AR', 'QRI', 'QRI-BO', 'SIP-QR', 'QRI-PE', 'LIGO']);
 const SAVABLE_PAYMENT_METHOD_CODES = new Set([
@@ -437,16 +420,6 @@ export const AddPayoutMethodModal = ({
     skip: !isVisible || !selectedCountry,
     fetchPolicy: 'cache-and-network', // Use same policy as CreateOfferScreen for consistency
     onCompleted: (data) => {
-      console.log('[AddPayoutMethodModal] Payment methods query completed:', {
-        component: 'AddPayoutMethodModal',
-        countryCode: selectedCountry?.code,
-        methodsCount: data?.rampPaymentMethods?.length,
-        methods: data?.rampPaymentMethods?.slice(0, 5).map((m: any) => ({
-          id: m.id,
-          name: m.code || m.displayName,
-          providerType: m.providerType
-        }))
-      });
     }
   });
 
@@ -856,55 +829,55 @@ export const AddPayoutMethodModal = ({
 
   const validateForm = () => {
     if (!selectedPaymentMethod) {
-      Alert.alert('Error', 'Por favor selecciona una forma de cobro', [{ text: 'OK' }]);
+      Alert.alert('Error', 'Por favor selecciona una forma de cobro', [{ text: 'Entendido' }]);
       return false;
     }
 
 
     if (!formData.accountHolderName.trim()) {
-      Alert.alert('Error', 'Por favor ingresa el nombre del titular', [{ text: 'OK' }]);
+      Alert.alert('Error', 'Por favor ingresa el nombre del titular', [{ text: 'Entendido' }]);
       return false;
     }
 
     // Validate required fields based on payment method
     if (fieldCopy.account.required && !formData.accountNumber.trim()) {
-      Alert.alert('Error', 'Por favor ingresa el número de cuenta', [{ text: 'OK' }]);
+      Alert.alert('Error', 'Por favor ingresa el número de cuenta', [{ text: 'Entendido' }]);
       return false;
     }
 
     const accountNumberValue = String(formData.accountNumber || '').trim();
     if (fieldCopy.account.show && accountNumberValue) {
       if (fieldCopy.account.minLength && accountNumberValue.length < fieldCopy.account.minLength) {
-        Alert.alert('Error', `${fieldCopy.account.label} debe tener al menos ${fieldCopy.account.minLength} dígitos`, [{ text: 'OK' }]);
+        Alert.alert('Error', `${fieldCopy.account.label} debe tener al menos ${fieldCopy.account.minLength} dígitos`, [{ text: 'Entendido' }]);
         return false;
       }
       if (fieldCopy.account.maxLength && accountNumberValue.length > fieldCopy.account.maxLength) {
-        Alert.alert('Error', `${fieldCopy.account.label} debe tener máximo ${fieldCopy.account.maxLength} dígitos`, [{ text: 'OK' }]);
+        Alert.alert('Error', `${fieldCopy.account.label} debe tener máximo ${fieldCopy.account.maxLength} dígitos`, [{ text: 'Entendido' }]);
         return false;
       }
     }
 
     if (fieldCopy.phone.required && !formData.phoneNumber.trim()) {
-      Alert.alert('Error', 'Por favor ingresa el número de teléfono', [{ text: 'OK' }]);
+      Alert.alert('Error', 'Por favor ingresa el número de teléfono', [{ text: 'Entendido' }]);
       return false;
     }
 
     // For bank payments, validate ID requirements
     if (selectedPaymentMethod.bank?.country?.requiresIdentification && !formData.identificationNumber.trim()) {
-      Alert.alert('Error', `Por favor ingresa tu ${selectedPaymentMethod.bank.country.identificationName}`, [{ text: 'OK' }]);
+      Alert.alert('Error', `Por favor ingresa tu ${selectedPaymentMethod.bank.country.identificationName}`, [{ text: 'Entendido' }]);
       return false;
     }
 
     for (const field of providerFieldConfigs) {
       const value = formData.providerMetadata[field.key];
       if (field.required && !value?.trim()) {
-        Alert.alert('Error', `Por favor completa ${field.label.toLowerCase()}`, [{ text: 'OK' }]);
+        Alert.alert('Error', `Por favor completa ${field.label.toLowerCase()}`, [{ text: 'Entendido' }]);
         return false;
       }
     }
 
     if (accountTypeRequired && !String(formData.accountType || '').trim()) {
-      Alert.alert('Error', 'Por favor selecciona el tipo de cuenta', [{ text: 'OK' }]);
+      Alert.alert('Error', 'Por favor selecciona el tipo de cuenta', [{ text: 'Entendido' }]);
       return false;
     }
 
@@ -992,7 +965,6 @@ export const AddPayoutMethodModal = ({
           await apolloClient.clearStore();
           apolloClient.reFetchObservableQueries();
 
-          console.log('Successfully reset Apollo store and refetched all queries');
         } catch (refetchError) {
           console.error('Error refetching queries:', refetchError);
           // Even if refetch fails, try to clear the cache
@@ -1007,14 +979,14 @@ export const AddPayoutMethodModal = ({
         Alert.alert(
           'Éxito',
           isEditing ? 'Forma de cobro actualizada' : 'Forma de cobro agregada',
-          [{ text: 'OK', onPress: onSuccess }]
+          [{ text: 'Entendido', onPress: onSuccess }]
         );
       } else {
-        Alert.alert('Error', data?.error || 'Error al guardar la forma de cobro', [{ text: 'OK' }]);
+        Alert.alert('Error', data?.error || 'Error al guardar la forma de cobro', [{ text: 'Entendido' }]);
       }
     } catch (error) {
       console.error('Error submitting payment method:', error);
-      Alert.alert('Error', 'Error de conexión', [{ text: 'OK' }]);
+      Alert.alert('Error', 'Error de conexión', [{ text: 'Entendido' }]);
     } finally {
       setIsSubmitting(false);
     }

@@ -75,7 +75,7 @@ export const ShareAchievementModal: React.FC<ShareAchievementModalProps> = ({
     const url = `whatsapp://send?text=${encodeURIComponent(message)}`;
 
     Linking.openURL(url).catch(() => {
-      Alert.alert('Error', 'No se pudo abrir WhatsApp', [{ text: 'OK' }]);
+      Alert.alert('Error', 'No se pudo abrir WhatsApp', [{ text: 'Entendido' }]);
     });
 
     onClose();
@@ -98,14 +98,14 @@ export const ShareAchievementModal: React.FC<ShareAchievementModalProps> = ({
 
   const submitTikTokUrl = async () => {
     if (!tiktokUrl.trim()) {
-      Alert.alert('Error', 'Por favor ingresa el link de tu TikTok', [{ text: 'OK' }]);
+      Alert.alert('Error', 'Por favor ingresa el link de tu TikTok', [{ text: 'Entendido' }]);
       return;
     }
 
     // Basic TikTok URL validation
     const tiktokRegex = /^https?:\/\/(www\.)?(tiktok\.com|vm\.tiktok\.com)/;
     if (!tiktokRegex.test(tiktokUrl)) {
-      Alert.alert('Error', 'Por favor ingresa un link válido de TikTok', [{ text: 'OK' }]);
+      Alert.alert('Error', 'Por favor ingresa un link válido de TikTok', [{ text: 'Entendido' }]);
       return;
     }
 
@@ -121,15 +121,15 @@ export const ShareAchievementModal: React.FC<ShareAchievementModalProps> = ({
         Alert.alert(
           '¡Excelente!',
           'Tu video ha sido registrado. Las vistas se actualizarán automáticamente cada hora.',
-          [{ text: 'OK', onPress: onClose }]
+          [{ text: 'Entendido', onPress: onClose }]
         );
         setTiktokUrl('');
         setShowTikTokForm(false);
       } else {
-        Alert.alert('Error', data?.trackTikTokShare?.error || 'No se pudo registrar tu video', [{ text: 'OK' }]);
+        Alert.alert('Error', data?.trackTikTokShare?.error || 'No se pudo registrar tu video', [{ text: 'Entendido' }]);
       }
     } catch (error) {
-      Alert.alert('Error', 'Ocurrió un error al registrar tu video', [{ text: 'OK' }]);
+      Alert.alert('Error', 'Ocurrió un error al registrar tu video', [{ text: 'Entendido' }]);
     }
   };
 
