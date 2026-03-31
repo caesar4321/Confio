@@ -297,7 +297,7 @@ export const ProfileScreen = () => {
         url = 'https://www.tiktok.com/@julianmoonluna';
         break;
       case 'instagram':
-        url = 'https://www.instagram.com/julianmoonluna';
+        url = 'https://www.instagram.com/julianmoonluna_';
         break;
       case 'youtube':
         url = 'https://www.youtube.com/@julianmoonluna';
