@@ -69,6 +69,36 @@ class WalletMigrationService {
         this.algodClient = new algosdk.Algodv2('', server, '');
     }
 
+    private async finalizeSelfHealedV2Address(v2Address: string, accountIndex: number, businessId?: string): Promise<void> {
+        // Keep backend, local storage, and migration status aligned once V1 is proven empty.
+        await apolloClient.mutate({
+            mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS,
+            variables: {
+                algorandAddress: v2Address,
+            }
+        });
+
+        try {
+            const markRes = await apolloClient.mutate({
+                mutation: MARK_WALLET_MIGRATED,
+            });
+            const markPayload = markRes?.data?.markWalletMigrated;
+            if (!markPayload?.success) {
+                console.warn('[MigrationService] Failed to mark self-healed V2 wallet as migrated:', markPayload?.error);
+            }
+        } catch (markErr) {
+            console.warn('[MigrationService] Error marking self-healed V2 wallet as migrated:', markErr);
+        }
+
+        if (authService) {
+            await authService.forceUpdateLocalAlgorandAddress(v2Address, {
+                type: 'personal',
+                index: accountIndex,
+                businessId
+            });
+        }
+    }
+
     private async hasMaterialBalanceAtRisk(address: string): Promise<boolean> {
         const info = await this.algodClient.accountInformation(address).do();
         const relevantAssets = (info.assets || []).filter((a: any) => {
@@ -157,53 +187,20 @@ class WalletMigrationService {
             if (!hasRelevantAssets) {
                 console.log('[MigrationService] V1 has no relevant asset opt-ins. Checking if we need to self-heal (Zombie State).');
 
-                // Check if actually migrated but backend missed it
+                // If a V2 secret exists and V1 is empty, it is safe to align the backend
+                // to the derived V2 address and mark the account as migrated. This covers:
+                // - zombie states where backend missed migration completion
+                // - users already operating on a V2 address with only zero-balance opt-ins
+                // - fresh V2/native users whose legacy V1 derivation is empty
                 if (v2Secret) {
                     try {
                         const v2Wallet = deriveWalletV2(v2Secret, {
                             iss, sub, aud, accountType: 'personal', accountIndex, businessId
                         });
                         const v2Address = v2Wallet.address;
-
-                        const v2Info = await this.algodClient.accountInformation(v2Address).do();
-                        // Check if V2 has FUNDED assets (balance > 0), not just opt-ins
-                        // This prevents false self-healing when V2 only has 0-balance opt-ins
-                        const v2FundedAssets = (v2Info.assets || []).filter((a: any) => {
-                            const aid = a['asset-id'];
-                            const amount = a['amount'];
-                            const isRelevant = (
-                                String(aid) === String(CONFIO_ASSET_ID) ||
-                                String(aid) === String(LEGACY_CONFIO_ASSET_ID) ||
-                                String(aid) === String(CUSD_ASSET_ID) ||
-                                String(aid) === String(USDC_ASSET_ID)
-                            );
-                            return isRelevant && amount > 0;
-                        });
-
-                        if (v2FundedAssets.length > 0) {
-                            console.log('[MigrationService] ZOMBIE DETECTED: V1 empty, V2 has FUNDED assets. Self-healing...');
-
-                            // 1. Tell Backend
-                            await apolloClient.mutate({
-                                mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS,
-                                variables: {
-                                    algorandAddress: v2Address,
-                                    isV2Wallet: true
-                                }
-                            });
-
-                            // 2. Update Local
-                            if (authService) {
-                                await authService.forceUpdateLocalAlgorandAddress(v2Address, {
-                                    type: 'personal', index: accountIndex, businessId
-                                });
-                            }
-
-                            console.log('[MigrationService] Self-healing complete. Switched to V2.');
-                            return { needsMigration: false, v2Address };
-                        } else {
-                            console.log('[MigrationService] V2 has only 0-balance opt-ins. Not a valid migration target.');
-                        }
+                        await this.finalizeSelfHealedV2Address(v2Address, accountIndex, businessId);
+                        console.log('[MigrationService] Self-healing complete. Switched to V2 and marked migrated.');
+                        return { needsMigration: false, v2Address };
                     } catch (e) {
                         console.warn('[MigrationService] Failed to check/heal V2 state:', e);
                     }
