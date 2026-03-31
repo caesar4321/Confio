@@ -69,23 +69,23 @@ const FriendlyFounder = () => {
               <a href="https://tiktok.com/@julianmoonluna" target="_blank" rel="noopener noreferrer" className={styles.socialIconLink} title="TikTok">
                 <img src={tiktokIcon} alt="TikTok" className={styles.socialIcon} />
               </a>
+              <a href="https://youtube.com/@julianmoonluna" target="_blank" rel="noopener noreferrer" className={styles.socialIconLink} title="YouTube">
+                <img src={youtubeIcon} alt="YouTube" className={styles.socialIcon} />
+              </a>
               <a href="https://instagram.com/julianmoonluna_" target="_blank" rel="noopener noreferrer" className={styles.socialIconLink} title="Instagram">
                 <img src={instagramIcon} alt="Instagram" className={styles.socialIcon} />
               </a>
-              <a href="https://x.com/julianmoonluna_" target="_blank" rel="noopener noreferrer" className={styles.socialIconLink} title="X">
-                <img src={xIcon} alt="X" className={styles.socialIcon} />
-              </a>
               <a href="https://facebook.com/julianmoonluna" target="_blank" rel="noopener noreferrer" className={styles.socialIconLink} title="Facebook">
                 <img src={facebookIcon} alt="Facebook" className={styles.socialIcon} />
+              </a>
+              <a href="https://x.com/julianmoonluna_" target="_blank" rel="noopener noreferrer" className={styles.socialIconLink} title="X">
+                <img src={xIcon} alt="X" className={styles.socialIcon} />
               </a>
               <a href="https://t.me/julianmoonluna" target="_blank" rel="noopener noreferrer" className={styles.socialIconLink} title="Telegram">
                 <img src={telegramIcon} alt="Telegram" className={styles.socialIcon} />
               </a>
               <a href="https://linkedin.com/in/julianmoonluna" target="_blank" rel="noopener noreferrer" className={styles.socialIconLink} title="LinkedIn">
                 <img src={linkedInIcon} alt="LinkedIn" className={styles.socialIcon} />
-              </a>
-              <a href="https://youtube.com/@julianmoonluna" target="_blank" rel="noopener noreferrer" className={styles.socialIconLink} title="YouTube">
-                <img src={youtubeIcon} alt="YouTube" className={styles.socialIcon} />
               </a>
             </div>
           </div>
