@@ -516,6 +516,12 @@ class KoyweClient:
             'countryCode': alpha3,
             'currencySymbol': fiat_symbol,
         }
+        normalized_email = str(email or normalized_contact_profile.get('email') or '').strip()
+        document_number = str(normalized_contact_profile.get('documentNumber') or '').strip()
+        if normalized_email:
+            payload['email'] = normalized_email
+        if document_number:
+            payload['documentNumber'] = document_number
         if account_number is not None:
             payload['accountNumber'] = str(account_number)
         if provider_metadata.get('bankCode'):
