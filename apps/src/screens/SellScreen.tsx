@@ -407,7 +407,7 @@ export const SellScreen = () => {
           subtitle="Elige cómo quieres recibir tu dinero, revisa el estimado y confirma al final."
           onBack={() => navigation.goBack()}
           compact={isCompact}
-          fromColor={colors.primaryLight}
+          fromColor={colors.primaryDark}
           toColor={colors.primary}
         />
         </RampReveal>
@@ -826,7 +826,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   providerBadge: {
-    backgroundColor: colors.primaryUltraLight,
+    backgroundColor: colors.primaryLight,
     paddingHorizontal: 12,
     paddingVertical: 5,
     borderRadius: 999,
@@ -996,7 +996,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: colors.primaryUltraLight,
+    backgroundColor: colors.primaryLight,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1103,7 +1103,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   savedCardSelected: {
-    backgroundColor: colors.primaryUltraLight,
+    backgroundColor: colors.primaryLight,
     borderColor: '#a7f3d0',
     shadowColor: colors.primary,
     shadowOpacity: 0.12,

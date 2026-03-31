@@ -258,7 +258,7 @@ export const RampHistoryScreen = () => {
 
     const statusColors = {
       success: { bg: colors.primaryLight, text: colors.primaryDark },
-      warning: { bg: colors.warningLight, text: colors.warning },
+      warning: { bg: colors.warningLight, text: colors.warning.text },
       error: { bg: colors.dangerLight, text: colors.danger },
       neutral: { bg: '#f3f4f6', text: colors.textSecondary },
     }[statusTone];
@@ -319,7 +319,7 @@ export const RampHistoryScreen = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.primaryLight} />
+      <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
       <FlatList
         data={listRows}
         keyExtractor={(row) => row.key}
@@ -343,7 +343,7 @@ export const RampHistoryScreen = () => {
               title={title}
               subtitle={subtitle}
               onBack={() => navigation.goBack()}
-              fromColor={colors.primaryLight}
+              fromColor={colors.primaryDark}
               toColor={colors.primary}
             />
             <View style={styles.filtersRow}>

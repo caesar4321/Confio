@@ -16,8 +16,8 @@ import DepositScreen from '../screens/DepositScreen';
 import USDCManageScreen from '../screens/USDCManageScreen';
 import { USDCHistoryScreen } from '../screens/USDCHistoryScreen';
 import { USDCConversionScreen } from '../screens/USDCConversionScreen';
-import LegacyGuardarianTopUpScreen from '../screens/LegacyGuardarianTopUpScreen';
-import { SellScreen as LegacyGuardarianSellScreen } from '../screens/LegacyGuardarianSellScreen';
+import TopUpScreen from '../screens/TopUpScreen';
+import { SellScreen } from '../screens/SellScreen';
 import RampInstructionsScreen from '../screens/RampInstructionsScreen';
 import RampHistoryScreen from '../screens/RampHistoryScreen';
 
@@ -241,14 +241,14 @@ export const MainNavigator = () => {
         />
         <Stack.Screen
           name="TopUp"
-          component={LegacyGuardarianTopUpScreen}
+          component={TopUpScreen}
           options={{
             headerShown: false,
           }}
         />
         <Stack.Screen
           name="Sell"
-          component={LegacyGuardarianSellScreen}
+          component={SellScreen}
           options={{
             headerShown: false,
           }}

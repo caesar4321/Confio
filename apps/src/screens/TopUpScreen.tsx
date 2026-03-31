@@ -336,7 +336,7 @@ const TopUpScreen = () => {
           subtitle="Elige tu medio de pago, revisa la cotización y confirma cuando estés listo."
           onBack={() => navigation.goBack()}
           compact={isCompact}
-          fromColor={colors.primaryLight}
+          fromColor={colors.primaryDark}
           toColor={colors.primary}
         />
         </RampReveal>

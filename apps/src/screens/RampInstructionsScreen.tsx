@@ -195,7 +195,7 @@ export const RampInstructionsScreen = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#10b981" />
+      <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <RampReveal delay={0}>
         <RampHero
@@ -204,7 +204,7 @@ export const RampInstructionsScreen = () => {
           subtitle={instructionView.subtitle}
           onBack={() => navigation.goBack()}
           compact={isCompact}
-          fromColor={colors.primaryLight}
+          fromColor={colors.primaryDark}
           toColor={colors.primary}
         />
         </RampReveal>
