@@ -465,6 +465,7 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         
         # Guardarian Metrics
         from usdc_transactions.models import GuardarianTransaction
+        from ramps.models import RampTransaction
         
         # Volume (Successful only - USDC)
         guardarian_volume = GuardarianTransaction.objects.filter(
@@ -544,6 +545,84 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         context['guardarian_recent'] = GuardarianTransaction.objects.select_related(
             'user'
         ).order_by('-created_at')[:10]
+
+        # Koywe Metrics (On-ramp, analogous to Guardarian grey-box analysis)
+        koywe_onramp_qs = RampTransaction.objects.filter(
+            provider='koywe',
+            direction='on_ramp',
+        ).select_related('actor_user')
+
+        koywe_provider_completed_statuses = ['DELIVERED', 'CRYPTO_DELIVERED', 'FIAT_DELIVERED']
+
+        koywe_volume = koywe_onramp_qs.filter(
+            status='COMPLETED',
+        ).aggregate(total=Sum('final_amount'))['total'] or Decimal('0')
+
+        koywe_total = koywe_onramp_qs.count()
+        koywe_provider_completed_count = koywe_onramp_qs.filter(
+            metadata__koywe_status__in=koywe_provider_completed_statuses,
+        ).count()
+        koywe_onchain_completed_count = koywe_onramp_qs.filter(
+            status='COMPLETED',
+        ).count()
+
+        koywe_abandoned_count = koywe_onramp_qs.filter(
+            status__in=['PENDING', 'PROCESSING'],
+            created_at__lt=one_hour_ago,
+        ).count()
+        koywe_real_active_count = koywe_onramp_qs.filter(
+            status__in=['PENDING', 'PROCESSING'],
+            created_at__gte=one_hour_ago,
+        ).count()
+
+        koywe_failed_count = koywe_onramp_qs.filter(status='FAILED').exclude(
+            Q(status_detail__icontains='refund') | Q(status_detail__icontains='refunded')
+        ).count()
+        koywe_expired_count = koywe_onramp_qs.filter(
+            Q(status_detail__icontains='expired')
+            | Q(status_detail__icontains='cancelled')
+            | Q(status_detail__icontains='canceled')
+        ).count()
+        koywe_refunded_count = koywe_onramp_qs.filter(
+            Q(status_detail__icontains='refund')
+            | Q(status_detail__icontains='refunded')
+        ).count()
+
+        koywe_onchain_rate = (
+            koywe_onchain_completed_count / koywe_provider_completed_count * 100
+        ) if koywe_provider_completed_count > 0 else 0
+        koywe_provider_rate = (
+            koywe_provider_completed_count / koywe_total * 100
+        ) if koywe_total > 0 else 0
+
+        context['koywe_stats'] = {
+            'volume': koywe_volume,
+            'total_sessions': koywe_total,
+            'onchain_completed': koywe_onchain_completed_count,
+            'provider_completed': koywe_provider_completed_count,
+            'onchain_rate': koywe_onchain_rate,
+            'provider_rate': koywe_provider_rate,
+            'abandoned_count': koywe_abandoned_count,
+            'real_active_count': koywe_real_active_count,
+            'failed_count': koywe_failed_count,
+            'expired_count': koywe_expired_count,
+            'refunded_count': koywe_refunded_count,
+        }
+
+        context['koywe_currencies'] = koywe_onramp_qs.filter(
+            status='COMPLETED'
+        ).values('fiat_currency').annotate(
+            volume=Sum('fiat_amount'),
+            count=Count('id')
+        ).order_by('-volume')[:5]
+
+        context['koywe_countries'] = koywe_onramp_qs.values(
+            'actor_user__phone_country'
+        ).annotate(
+            count=Count('actor_user', distinct=True)
+        ).order_by('-count')[:5]
+
+        context['koywe_recent'] = koywe_onramp_qs.order_by('-created_at')[:10]
 
         return render(request, 'admin/dashboard.html', context)
     
