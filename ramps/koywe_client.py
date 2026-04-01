@@ -530,7 +530,8 @@ class KoyweClient:
                 country_code=alpha3,
                 bank_name=raw_bank_code,
             ) or raw_bank_code
-            payload['bankCode'] = resolved_bank_code
+            if not (alpha3 == 'BRA' and raw_bank_code.upper() in {'PIX_QR', 'SULPAYMENTS'} and resolved_bank_code == raw_bank_code):
+                payload['bankCode'] = resolved_bank_code
         elif provider_metadata.get('bankName'):
             resolved_bank_code = self._resolve_bank_code(
                 country_code=alpha3,
@@ -539,17 +540,21 @@ class KoyweClient:
             if resolved_bank_code:
                 payload['bankCode'] = resolved_bank_code
         elif getattr(bank_info, 'bank', None) and getattr(bank_info.bank, 'code', None):
+            raw_bank_code = str(bank_info.bank.code).strip().upper()
             resolved_bank_code = self._resolve_bank_code(
                 country_code=alpha3,
-                bank_name=str(bank_info.bank.code),
-            ) or str(bank_info.bank.code).strip().upper()
-            payload['bankCode'] = resolved_bank_code
+                bank_name=raw_bank_code,
+            ) or raw_bank_code
+            if not (alpha3 == 'BRA' and raw_bank_code in {'PIX_QR', 'SULPAYMENTS'} and resolved_bank_code == raw_bank_code):
+                payload['bankCode'] = resolved_bank_code
         elif alpha3 == 'COL' and payment_method_code == 'NEQUI':
             payload['bankCode'] = 'co_nequi'
         elif alpha3 == 'COL' and payment_method_code == 'BANCOLOMBIA':
             payload['bankCode'] = 'co_bancolombia'
         elif alpha3 == 'COL' and not payload.get('bankCode'):
             raise KoyweError('"bankCode" is required for COP payouts — select a bank')
+        elif alpha3 == 'BRA' and not payload.get('bankCode'):
+            raise KoyweError('"bankCode" is required for BRL payouts — select a supported bank from Koywe bank-info/BRA')
         elif alpha3 == 'MEX' and payment_method_code == 'STP':
             payload['bankCode'] = 'STP'
         elif alpha3 == 'PER' and payment_method_code == 'QRI-PE':
