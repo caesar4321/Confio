@@ -3,6 +3,7 @@ import unicodedata
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
+from urllib.parse import quote
 
 import requests
 from django.conf import settings
@@ -725,11 +726,40 @@ class KoyweClient:
             self._request('POST', '/rest/accounts', email=normalized_email, json_payload=payload)
         except KoyweError as exc:
             if self._is_existing_account_error(str(exc)):
+                self._ensure_existing_account_profile(
+                    email=normalized_email,
+                    country_code=country_code,
+                    payload=payload,
+                )
                 cache.set(cache_key, True, timeout=_ACCOUNT_PROFILE_SYNC_CACHE_TTL)
                 return
             raise
 
         cache.set(cache_key, True, timeout=_ACCOUNT_PROFILE_SYNC_CACHE_TTL)
+
+    def _ensure_existing_account_profile(self, *, email: str, country_code: str, payload: dict[str, Any]) -> None:
+        try:
+            existing = self.get_account(email=email)
+        except KoyweError:
+            existing = {}
+
+        if self._account_profile_satisfies_payload(existing, payload):
+            return
+
+        self.update_account(email=email, payload=payload)
+
+    def get_account(self, *, email: str) -> dict[str, Any]:
+        normalized_email = str(email or '').strip().lower()
+        if not normalized_email:
+            raise KoyweError('Koywe account email is required')
+        encoded_email = quote(normalized_email, safe='')
+        return self._request('GET', f'/rest/accounts/{encoded_email}', email=normalized_email)
+
+    def update_account(self, *, email: str, payload: dict[str, Any]) -> dict[str, Any]:
+        normalized_email = str(email or '').strip().lower()
+        if not normalized_email:
+            raise KoyweError('Koywe account email is required')
+        return self._request('PUT', '/rest/accounts', email=normalized_email, json_payload=payload)
 
     def _build_account_profile_payload(self, *, email: str, country_code: str, contact_profile: dict[str, Any]) -> dict[str, Any] | None:
         alpha3 = _COUNTRY_ALPHA3.get((country_code or '').upper(), (country_code or '').upper())
@@ -779,6 +809,33 @@ class KoyweClient:
             )
         payload['address'] = address_fields
         return payload
+
+    def _account_profile_satisfies_payload(self, existing: dict[str, Any], payload: dict[str, Any]) -> bool:
+        if not isinstance(existing, dict):
+            return False
+
+        existing_document = existing.get('document') or {}
+        existing_personal_info = existing.get('personalInfo') or {}
+        existing_address = existing.get('address') or {}
+
+        wanted_document = payload.get('document') or {}
+        wanted_personal_info = payload.get('personalInfo') or {}
+        wanted_address = payload.get('address') or {}
+
+        document_matches = (
+            str(existing_document.get('documentNumber') or '').strip() == str(wanted_document.get('documentNumber') or '').strip()
+            and str(existing_document.get('documentType') or '').strip().upper() == str(wanted_document.get('documentType') or '').strip().upper()
+            and str(existing_document.get('country') or '').strip().upper() == str(wanted_document.get('country') or '').strip().upper()
+        )
+        personal_present = all(
+            str(existing_personal_info.get(field) or '').strip()
+            for field in ('names', 'firstLastname', 'phoneNumber', 'dob')
+        )
+        address_present = all(
+            str(existing_address.get(field) or '').strip()
+            for field in ('addressStreet', 'addressCountry', 'addressZipCode', 'addressCity', 'addressState')
+        )
+        return document_matches and personal_present and address_present
 
     def _is_existing_account_error(self, message: str) -> bool:
         normalized = str(message or '').strip().lower()
