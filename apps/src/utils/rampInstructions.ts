@@ -30,6 +30,7 @@ export type RampInstructionView = {
   allowExternalAction?: boolean;
   actionUrl?: string;
   qrValue?: string;
+  qrImageUri?: string;
   rows: RampInstructionRow[];
 };
 
@@ -83,28 +84,98 @@ const parseAddressRows = (rawAddress?: string | null): RampInstructionRow[] => {
 };
 
 const parseWirePeRows = (rawAddress?: string | null): RampInstructionRow[] => {
-  return splitAddressLines(rawAddress).flatMap((line, index) => {
+  const lines = splitAddressLines(rawAddress);
+  const rows: RampInstructionRow[] = [];
+  let pendingRucValue: string | null = null;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const nextLine = lines[index + 1];
+    const prevLine = index > 0 ? lines[index - 1] : null;
+
     if (line.includes('@') && !line.includes(' ')) {
-      return [{ label: 'Email', value: line }];
+      rows.push({ label: 'Email', value: line });
+      continue;
+    }
+
+    if (/^ruc$/i.test(line) && nextLine) {
+      pendingRucValue = nextLine.trim();
+      rows.push({ label: rows.some((row) => row.label === 'RUC') ? 'RUC (beneficiario)' : 'RUC', value: pendingRucValue });
+      index += 1;
+      continue;
+    }
+
+    if (/^cci$/i.test(line) && nextLine) {
+      const cciLabel = rows.some((row) => row.label === 'CCI') ? 'CCI interbancaria' : 'CCI';
+      rows.push({ label: cciLabel, value: nextLine.trim() });
+      index += 1;
+      continue;
+    }
+
+    if (/^ligo$/i.test(line)) {
+      rows.push({ label: 'Entidad receptora', value: 'Ligo' });
+      continue;
+    }
+
+    if (/^koywe$/i.test(line) && nextLine && /^per[uú]\s+sac$/i.test(nextLine)) {
+      rows.push({ label: 'Beneficiario', value: `${line} ${nextLine}`.trim() });
+      index += 1;
+      continue;
+    }
+
+    if (/^bcp$/i.test(line)) {
+      rows.push({ label: 'Banco', value: 'BCP' });
+      if (nextLine && /^cuenta\b/i.test(nextLine)) {
+        rows.push({ label: 'Tipo de cuenta', value: nextLine.trim() });
+        index += 1;
+      }
+      continue;
+    }
+
+    const nroMatch = line.match(/^(?:nro\.?|n[úu]mero)\s*(.+)$/i);
+    if (nroMatch) {
+      rows.push({ label: 'Número de cuenta', value: nroMatch[1].trim() });
+      continue;
+    }
+
+    const compactRucMatch = line.match(/^ruc\s+(.+)$/i);
+    if (compactRucMatch) {
+      const value = compactRucMatch[1].trim();
+      if (value !== pendingRucValue || !pendingRucValue) {
+        rows.push({ label: rows.some((row) => row.label === 'RUC') ? 'RUC (beneficiario)' : 'RUC', value });
+      }
+      continue;
+    }
+
+    const compactCciMatch = line.match(/^cci\s+(.+)$/i);
+    if (compactCciMatch) {
+      const cciLabel = rows.some((row) => row.label === 'CCI') ? 'CCI interbancaria' : 'CCI';
+      rows.push({ label: cciLabel, value: compactCciMatch[1].trim() });
+      continue;
+    }
+
+    if (/^koywe\b/i.test(line) && !/^koywe\s+per[uú]\s+sac$/i.test(line)) {
+      rows.push({ label: 'Beneficiario', value: line });
+      continue;
+    }
+
+    if (/^per[uú]\s+sac$/i.test(line) && prevLine && /^koywe$/i.test(prevLine)) {
+      continue;
     }
 
     const match = line.match(/^([A-Za-z]+)\s+(.*)$/);
     if (match) {
-      if (match[1].toLowerCase() === 'koywe' && /^per[uú]$/i.test(match[2].trim())) {
-        return [];
-      }
-      return [{
+      rows.push({
         label: prettifyRowLabel(match[1]),
         value: match[2].trim(),
-      }];
+      });
+      continue;
     }
 
-    if (/^ligo$/i.test(line)) {
-      return [{ label: 'Entidad receptora', value: line }];
-    }
+    rows.push({ label: `Dato ${index + 1}`, value: line });
+  }
 
-    return [{ label: `Dato ${index + 1}`, value: line }];
-  });
+  return rows;
 };
 
 const parseWireMxRows = (rawAddress?: string | null): RampInstructionRow[] => {
@@ -275,15 +346,207 @@ const parseWireClRows = (rawAddress?: string | null): RampInstructionRow[] => {
 };
 
 const resolveExternalActionUrl = (
+  details: Record<string, unknown> | null,
   providedAction: string | null,
   nextActionUrl: string | null | undefined,
 ) => {
-  if (providedAction && providedAction.startsWith('http')) {
-    return providedAction;
-  }
   if (nextActionUrl && nextActionUrl.startsWith('http')) {
     return nextActionUrl;
   }
+
+  const candidates = collectStringCandidates(details);
+  if (providedAction) {
+    candidates.unshift({ path: 'providedAction', value: providedAction });
+  }
+
+  const prioritized = [...candidates].sort((left, right) => {
+    const leftScore = scoreUrlCandidate(left.path);
+    const rightScore = scoreUrlCandidate(right.path);
+    return rightScore - leftScore;
+  });
+
+  for (const candidate of prioritized) {
+    const trimmed = candidate.value.trim();
+    if (trimmed.startsWith('http')) {
+      return trimmed;
+    }
+  }
+
+  return undefined;
+};
+
+type StringCandidate = {
+  path: string;
+  value: string;
+};
+
+const MAX_STRING_DISCOVERY_DEPTH = 5;
+
+const maybeParseNestedJson = (value: string): Record<string, unknown> | unknown[] | null => {
+  const trimmed = value.trim();
+  if (!(trimmed.startsWith('{') || trimmed.startsWith('['))) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(trimmed);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+const collectStringCandidates = (
+  value: unknown,
+  path = 'root',
+  depth = 0,
+  sink: StringCandidate[] = [],
+  seen = new Set<unknown>(),
+): StringCandidate[] => {
+  if (value == null || depth > MAX_STRING_DISCOVERY_DEPTH) {
+    return sink;
+  }
+  if (typeof value === 'string') {
+    sink.push({ path, value });
+    const nested = maybeParseNestedJson(value);
+    if (nested) {
+      collectStringCandidates(nested, `${path}.__parsed__`, depth + 1, sink, seen);
+    }
+    return sink;
+  }
+  if (typeof value !== 'object') {
+    return sink;
+  }
+  if (seen.has(value)) {
+    return sink;
+  }
+  seen.add(value);
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) => collectStringCandidates(entry, `${path}[${index}]`, depth + 1, sink, seen));
+    return sink;
+  }
+  Object.entries(value as Record<string, unknown>).forEach(([key, entry]) => {
+    collectStringCandidates(entry, `${path}.${key}`, depth + 1, sink, seen);
+  });
+  return sink;
+};
+
+const isImageLikeValue = (value: string) => {
+  const trimmed = value.trim();
+  return (
+    trimmed.startsWith('data:image/')
+    || trimmed.startsWith('iVBORw0KGgo')
+    || trimmed.startsWith('/9j/')
+    || trimmed.startsWith('PHN2Zy')
+    || trimmed.startsWith('<svg')
+  );
+};
+
+const toImageDataUri = (value: string) => {
+  const trimmed = value.trim();
+  if (trimmed.startsWith('data:image/')) {
+    return trimmed;
+  }
+  if (trimmed.startsWith('iVBORw0KGgo')) {
+    return `data:image/png;base64,${trimmed}`;
+  }
+  if (trimmed.startsWith('/9j/')) {
+    return `data:image/jpeg;base64,${trimmed}`;
+  }
+  if (trimmed.startsWith('PHN2Zy')) {
+    return `data:image/svg+xml;base64,${trimmed}`;
+  }
+  if (trimmed.startsWith('<svg')) {
+    return `data:image/svg+xml;utf8,${encodeURIComponent(trimmed)}`;
+  }
+  return undefined;
+};
+
+const scoreUrlCandidate = (path: string) => {
+  const normalized = path.toLowerCase();
+  let score = 0;
+  if (/providedaction|redirect|action|url|link|deeplink/.test(normalized)) score += 5;
+  if (/providerlinkurl/.test(normalized)) score += 3;
+  if (/response\.__parsed__/.test(normalized)) score += 1;
+  return score;
+};
+
+const scoreImageCandidate = (path: string) => {
+  const normalized = path.toLowerCase();
+  let score = 0;
+  if (/providerlinkurl/.test(normalized)) score += 8;
+  if (/qr|image|png|jpg|jpeg|svg/.test(normalized)) score += 5;
+  if (/response\.__parsed__/.test(normalized)) score += 2;
+  return score;
+};
+
+const scoreQrTextCandidate = (path: string) => {
+  const normalized = path.toLowerCase();
+  let score = 0;
+  if (/providedaction/.test(normalized)) score += 8;
+  if (/qr|payload|content|code|providerlinkurl/.test(normalized)) score += 5;
+  if (/response\.__parsed__/.test(normalized)) score += 2;
+  return score;
+};
+
+const resolveQrImageUri = (details: Record<string, unknown> | null, providedAction: string | null) => {
+  const imageLikeValues: StringCandidate[] = [];
+
+  const candidates = collectStringCandidates(details);
+  if (providedAction) {
+    imageLikeValues.push({ path: 'providedAction', value: providedAction });
+  }
+  imageLikeValues.push(...candidates);
+
+  const prioritized = imageLikeValues
+    .filter((candidate) => isImageLikeValue(candidate.value))
+    .sort((left, right) => scoreImageCandidate(right.path) - scoreImageCandidate(left.path));
+
+  for (const candidate of prioritized) {
+    const uri = toImageDataUri(candidate.value);
+    if (uri) {
+      return uri;
+    }
+  }
+
+  return undefined;
+};
+
+const resolveQrValue = (details: Record<string, unknown> | null, providedAction: string | null, qrImageUri?: string) => {
+  if (qrImageUri) {
+    return undefined;
+  }
+
+  const candidates = collectStringCandidates(details);
+  if (providedAction) {
+    candidates.unshift({ path: 'providedAction', value: providedAction });
+  }
+
+  const prioritized = [...candidates].sort((left, right) => {
+    const leftScore = scoreQrTextCandidate(left.path);
+    const rightScore = scoreQrTextCandidate(right.path);
+    return rightScore - leftScore;
+  });
+
+  for (const candidate of prioritized) {
+    const trimmed = candidate.value.trim();
+    if (!trimmed) {
+      continue;
+    }
+    if (trimmed.startsWith('http')) {
+      continue;
+    }
+    if (isImageLikeValue(trimmed)) {
+      continue;
+    }
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      continue;
+    }
+    if (trimmed.length > 3000) {
+      continue;
+    }
+    return trimmed;
+  }
+
   return undefined;
 };
 
@@ -300,7 +563,8 @@ export const buildRampInstructionView = ({
     typeof details?.providedAddress === 'string' ? details.providedAddress : null;
   const providedAction =
     typeof details?.providedAction === 'string' ? details.providedAction : null;
-  const externalActionUrl = resolveExternalActionUrl(providedAction, nextActionUrl);
+  const externalActionUrl = resolveExternalActionUrl(details, providedAction, nextActionUrl);
+  const qrImageUri = resolveQrImageUri(details, providedAction);
 
   if (normalizedCode.startsWith('WIRE') || normalizedCode === 'STP') {
     const payoutRows: RampInstructionRow[] = [];
@@ -395,7 +659,9 @@ export const buildRampInstructionView = ({
     normalizedCode === 'PIX_QR' ||
     normalizedCode === 'PIX-QR'
   ) {
-    if (direction === 'OFF_RAMP') {
+    const qrValue = resolveQrValue(details, providedAction, qrImageUri);
+
+    if (direction === 'OFF_RAMP' && !qrImageUri && !qrValue && !externalActionUrl) {
       return {
         variant: 'payout_pending',
         title: 'Retiro en proceso',
@@ -412,35 +678,62 @@ export const buildRampInstructionView = ({
         rows: [],
       };
     }
-
-    const qrValue = providedAction && !providedAction.startsWith('http') ? providedAction : undefined;
     return {
       variant: 'qr',
-      title: 'Paga con QR',
-      subtitle: qrValue
-        ? 'Escanea este QR desde tu app bancaria o billetera compatible.'
-        : 'Abre el proveedor para escanear o visualizar el QR interoperable.',
-      sectionTitle: 'Cómo pagar',
-      sectionBody: qrValue
-        ? 'Escanea el QR con una app compatible y confirma el pago por el monto indicado.'
-        : 'Abriremos el proveedor para que puedas ver o escanear el QR.',
-      steps: qrValue
-        ? [
-            'Escanea el QR desde tu app bancaria o billetera.',
-            'Confirma el pago.',
-            'Vuelve aquí para seguir el estado de la compra.',
-          ]
-        : [
-            'Abre el proveedor desde el botón de abajo.',
-            'Visualiza o escanea el QR.',
-            'Completa el pago y vuelve a esta pantalla.',
-          ],
-      note: qrValue
-        ? 'Si no puedes escanearlo, copia el código y ábrelo desde una app compatible.'
-        : 'Si tu app bancaria no abre el QR, prueba con otra app compatible.',
-      actionLabel: externalActionUrl ? 'Ver QR' : undefined,
-      allowExternalAction: Boolean(externalActionUrl) && !qrValue,
+      title: direction === 'ON_RAMP' ? 'Paga con QR' : 'Continúa con QR',
+      subtitle: qrImageUri || qrValue
+        ? direction === 'ON_RAMP'
+          ? 'Escanea este QR desde tu app bancaria o billetera compatible.'
+          : 'Usa o comparte este QR según las instrucciones del proveedor.'
+        : direction === 'ON_RAMP'
+          ? 'Abre el proveedor para escanear o visualizar el QR interoperable.'
+          : 'Abre el proveedor para ver el QR o continuar con el flujo indicado.',
+      sectionTitle: direction === 'ON_RAMP' ? 'Cómo pagar' : 'Qué sigue ahora',
+      sectionBody: qrImageUri || qrValue
+        ? direction === 'ON_RAMP'
+          ? 'Escanea el QR con una app compatible y confirma el pago por el monto indicado.'
+          : 'Usa este QR solo si el proveedor o la billetera de destino te lo solicita para completar el retiro.'
+        : direction === 'ON_RAMP'
+          ? 'Abriremos el proveedor para que puedas ver o escanear el QR.'
+          : 'Abriremos el proveedor para que puedas continuar con el flujo del retiro.',
+      steps: qrImageUri || qrValue
+        ? direction === 'ON_RAMP'
+          ? [
+              'Escanea el QR desde tu app bancaria o billetera.',
+              'Confirma el pago.',
+              'Vuelve aquí para seguir el estado de la compra.',
+            ]
+          : [
+              'Muestra, comparte o usa el QR según el flujo del proveedor.',
+              'Completa la confirmación requerida.',
+              'Vuelve aquí para seguir el estado del retiro.',
+            ]
+        : direction === 'ON_RAMP'
+          ? [
+              'Abre el proveedor desde el botón de abajo.',
+              'Visualiza o escanea el QR.',
+              'Completa el pago y vuelve a esta pantalla.',
+            ]
+          : [
+              'Abre el proveedor desde el botón de abajo.',
+              'Sigue el flujo que te muestre el proveedor.',
+              'Vuelve aquí para revisar el estado del retiro.',
+            ],
+      note: qrImageUri
+        ? direction === 'ON_RAMP'
+          ? 'Escanea el QR directamente desde otra app bancaria o billetera compatible.'
+          : 'Usa este QR solo si el proveedor lo requiere para el retiro.'
+        : qrValue
+        ? direction === 'ON_RAMP'
+          ? 'Si no puedes escanearlo, copia el código y ábrelo desde una app compatible.'
+          : 'Si el proveedor requiere el contenido del QR, copia el valor y úsalo solo en una app compatible.'
+        : direction === 'ON_RAMP'
+          ? 'Si tu app bancaria no abre el QR, prueba con otra app compatible.'
+          : 'Si el flujo no muestra un QR utilizable, continúa desde el proveedor y consulta el estado aquí.',
+      actionLabel: externalActionUrl ? (direction === 'ON_RAMP' ? 'Ver QR' : 'Continuar') : undefined,
+      allowExternalAction: Boolean(externalActionUrl) && !qrImageUri && !qrValue,
       actionUrl: externalActionUrl,
+      qrImageUri,
       qrValue,
       rows: [],
     };

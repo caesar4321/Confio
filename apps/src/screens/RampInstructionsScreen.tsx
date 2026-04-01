@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Clipboard,
+  Image,
   Linking,
   SafeAreaView,
   ScrollView,
@@ -104,6 +105,19 @@ const statusPillIconColor: Record<string, string> = {
   error: '#b91c1c',
 };
 
+const QR_RENDER_MAX_BYTES = 2048;
+
+const getQrPayloadByteLength = (value: string) => {
+  try {
+    if (typeof TextEncoder !== 'undefined') {
+      return new TextEncoder().encode(value).length;
+    }
+  } catch {
+    // Fall back to the raw string length when TextEncoder is unavailable.
+  }
+  return value.length;
+};
+
 export const RampInstructionsScreen = () => {
   const navigation = useNavigation<NavigationProp>();
   const { width } = useWindowDimensions();
@@ -163,7 +177,14 @@ export const RampInstructionsScreen = () => {
   const isTerminalError = statusCode === 'REJECTED' || statusCode === 'INVALID_WITHDRAWALS_DETAILS';
   const summaryLabel = direction === 'ON_RAMP' ? 'Recibirás aprox.' : 'Recibirás aprox.';
   const isCompact = width < 380;
-  const hasInstructionDetails = instructionView.rows.length > 0 || Boolean(instructionView.qrValue) || Boolean(instructionView.note);
+  const qrPayload = instructionView.qrValue?.trim() || undefined;
+  const qrPayloadByteLength = useMemo(() => (qrPayload ? getQrPayloadByteLength(qrPayload) : 0), [qrPayload]);
+  const canRenderQr = Boolean(qrPayload) && qrPayloadByteLength <= QR_RENDER_MAX_BYTES;
+  const hasInstructionDetails =
+    instructionView.rows.length > 0
+    || Boolean(instructionView.qrImageUri)
+    || Boolean(qrPayload)
+    || Boolean(instructionView.note);
 
   const copyInstructionValue = (label: string, value: string) => {
     Clipboard.setString(value);
@@ -196,7 +217,11 @@ export const RampInstructionsScreen = () => {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
         <RampReveal delay={0}>
         <RampHero
           eyebrow={direction === 'ON_RAMP' ? 'Pago' : 'Retiro'}
@@ -309,19 +334,46 @@ export const RampInstructionsScreen = () => {
               </>
             ) : null}
 
-            {instructionView.qrValue ? (
+            {instructionView.qrImageUri ? (
               <View style={styles.qrWrap}>
-                <View style={styles.qrFrame}>
-                  <QRCode value={instructionView.qrValue} size={190} />
+                <View style={[styles.qrFrame, styles.qrImageFrame]}>
+                  <Image
+                    source={{ uri: instructionView.qrImageUri }}
+                    style={styles.qrImage}
+                    resizeMode="contain"
+                  />
                 </View>
+              </View>
+            ) : null}
+
+            {qrPayload ? (
+              <View style={styles.qrWrap}>
+                {canRenderQr ? (
+                  <View style={styles.qrFrame}>
+                    <QRCode value={qrPayload} size={190} />
+                  </View>
+                ) : (
+                  <View style={[styles.qrFrame, styles.qrFrameFallback]}>
+                    <Icon name="alert-circle" size={28} color={colors.warning.icon} />
+                    <Text style={styles.qrFallbackTitle}>Código demasiado grande</Text>
+                    <Text style={styles.qrFallbackBody}>
+                      El proveedor devolvió un contenido muy largo y no se puede mostrar como QR dentro de la app.
+                    </Text>
+                  </View>
+                )}
                 <TouchableOpacity
                   style={styles.copyPill}
-                  onPress={() => copyInstructionValue('Código QR', instructionView.qrValue!)}
+                  onPress={() => copyInstructionValue('Código QR', qrPayload)}
                   activeOpacity={0.7}
                 >
                   <Icon name="copy" size={12} color={colors.primaryDark} />
-                  <Text style={styles.copyPillText}>Copiar código</Text>
+                  <Text style={styles.copyPillText}>{canRenderQr ? 'Copiar código' : 'Copiar contenido'}</Text>
                 </TouchableOpacity>
+                {!canRenderQr ? (
+                  <Text style={styles.qrFallbackNote}>
+                    Copia el contenido y ábrelo desde una app bancaria o billetera compatible.
+                  </Text>
+                ) : null}
               </View>
             ) : null}
 
@@ -395,6 +447,10 @@ export const RampInstructionsScreen = () => {
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
+    backgroundColor: colors.primaryDark,
+  },
+  scroll: {
     flex: 1,
     backgroundColor: colors.background,
   },
@@ -601,6 +657,39 @@ const styles = StyleSheet.create({
     elevation: 3,
     borderWidth: 1,
     borderColor: '#e5e7eb',
+  },
+  qrImageFrame: {
+    padding: 10,
+  },
+  qrImage: {
+    width: 240,
+    height: 240,
+  },
+  qrFrameFallback: {
+    minHeight: 190,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingHorizontal: 18,
+  },
+  qrFallbackTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.textFlat,
+    textAlign: 'center',
+  },
+  qrFallbackBody: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: colors.textSecondary,
+    textAlign: 'center',
+  },
+  qrFallbackNote: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: colors.textSecondary,
+    textAlign: 'center',
   },
   note: {
     fontSize: 13,
