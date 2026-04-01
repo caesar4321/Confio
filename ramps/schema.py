@@ -1339,28 +1339,24 @@ def _get_koywe_contact_profile(*, user, country_code: str, email_override: str |
     if override:
         profile['documentNumber'] = str(override.get('documentNumber') or '').strip()
         profile['documentType'] = str(override.get('documentType') or '').strip()
-        profile['_skipAccountProfileSync'] = True
     elif verification:
         profile['documentNumber'] = (verification.document_number or '').strip()
         profile['documentType'] = (verification.document_type or '').strip()
+    if verification:
         profile['dob'] = verification.verified_date_of_birth.isoformat() if verification.verified_date_of_birth else ''
-    if not override:
-        effective_address = _build_effective_ramp_address_snapshot(user)
-        if effective_address.address_street:
-            profile['address'] = effective_address.address_street
-            profile['addressStreet'] = effective_address.address_street
-        if effective_address.address_city:
-            profile['addressCity'] = effective_address.address_city
-        if effective_address.address_state:
-            profile['addressState'] = effective_address.address_state
-        if effective_address.address_zip_code:
-            profile['addressZipCode'] = effective_address.address_zip_code
-        if effective_address.address_country:
-            profile['addressCountry'] = effective_address.address_country
-    return {
-        key: value for key, value in profile.items()
-        if value or key == '_skipAccountProfileSync'
-    }
+    effective_address = _build_effective_ramp_address_snapshot(user)
+    if effective_address.address_street:
+        profile['address'] = effective_address.address_street
+        profile['addressStreet'] = effective_address.address_street
+    if effective_address.address_city:
+        profile['addressCity'] = effective_address.address_city
+    if effective_address.address_state:
+        profile['addressState'] = effective_address.address_state
+    if effective_address.address_zip_code:
+        profile['addressZipCode'] = effective_address.address_zip_code
+    if effective_address.address_country:
+        profile['addressCountry'] = effective_address.address_country
+    return {key: value for key, value in profile.items() if value}
 
 
 class Mutation(graphene.ObjectType):
