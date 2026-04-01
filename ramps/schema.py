@@ -28,6 +28,63 @@ from ramps.koywe import (
 
 logger = logging.getLogger(__name__)
 
+_KOYWE_TEST_OVERRIDE_USERNAMES = {
+    'julianmoonluna',
+    'julianm',
+}
+
+_KOYWE_TEST_ACCOUNT_OVERRIDES = {
+    'AR': {
+        'email': 'duende-argentina@koywe-test.com',
+        'documentType': 'DNI',
+        'documentNumber': '30123457',
+        'firstName': 'Duende',
+        'lastName': 'Argentina',
+    },
+    'BO': {
+        'email': 'duende-bolivia@koywe-test.com',
+        'documentType': 'CI',
+        'documentNumber': '1234567',
+        'firstName': 'Duende',
+        'lastName': 'Bolivia',
+    },
+    'BR': {
+        'email': 'duende-brazil@koywe-test.com',
+        'documentType': 'CPF',
+        'documentNumber': '24085179403',
+        'firstName': 'Duende',
+        'lastName': 'Brazil',
+    },
+    'CL': {
+        'email': 'duende-chile@koywe-test.com',
+        'documentType': 'RUT',
+        'documentNumber': '12345678-5',
+        'firstName': 'Duende',
+        'lastName': 'Chile',
+    },
+    'CO': {
+        'email': 'duende-colombia@koywe-test.com',
+        'documentType': 'CED_CIU',
+        'documentNumber': '1234567890',
+        'firstName': 'Duende',
+        'lastName': 'Colombia',
+    },
+    'MX': {
+        'email': 'duende-mexico@koywe-test.com',
+        'documentType': 'RFC',
+        'documentNumber': 'GODE561231GR8',
+        'firstName': 'Duende',
+        'lastName': 'Mexico',
+    },
+    'PE': {
+        'email': 'duende-peru@koywe-test.com',
+        'documentType': 'DNI',
+        'documentNumber': '12345678',
+        'firstName': 'Duende',
+        'lastName': 'Peru',
+    },
+}
+
 
 class KoyweBankInfoType(graphene.ObjectType):
     bank_code = graphene.String()
@@ -647,7 +704,11 @@ class CreateRampOrder(graphene.Mutation):
                 country_code=resolved_country_code,
                 bank_info=bank_info,
                 external_id=external_id,
-                contact_profile=_get_koywe_contact_profile(user=user, email_override=koywe_email),
+                contact_profile=_get_koywe_contact_profile(
+                    user=user,
+                    country_code=resolved_country_code,
+                    email_override=koywe_email,
+                ),
             )
         except KoyweConfigurationError as exc:
             return RampOrderType(success=False, error=str(exc))
@@ -1170,8 +1231,18 @@ def _get_koywe_destination_address(*, current_account) -> str | None:
     return getattr(settings, 'KOYWE_TEST_DESTINATION_ADDRESS', None)
 
 
+def _get_koywe_test_account_override(*, user, country_code: str) -> dict[str, str] | None:
+    if not user:
+        return None
+    username = str(getattr(user, 'username', '') or '').strip().lower()
+    if username not in _KOYWE_TEST_OVERRIDE_USERNAMES:
+        return None
+    return _KOYWE_TEST_ACCOUNT_OVERRIDES.get((country_code or '').strip().upper())
+
+
 def _get_koywe_auth_email(*, user, country_code: str) -> str:
-    email = (getattr(user, 'email', None) or '').strip()
+    override = _get_koywe_test_account_override(user=user, country_code=country_code)
+    email = str((override or {}).get('email') or getattr(user, 'email', None) or '').strip()
     if not email:
         raise KoyweError('Tu cuenta debe tener un email para usar recargas y retiros')
     return email
@@ -1238,12 +1309,23 @@ def _is_ramp_address_complete(value) -> bool:
     )
 
 
-def _get_koywe_contact_profile(*, user, email_override: str | None = None) -> dict[str, str]:
+def _get_koywe_contact_profile(*, user, country_code: str, email_override: str | None = None) -> dict[str, str]:
     verification = _get_latest_personal_verification(user)
+    override = _get_koywe_test_account_override(user=user, country_code=country_code)
 
-    first_name = (getattr(verification, 'verified_first_name', None) or getattr(user, 'first_name', None) or '').strip()
-    last_name = (getattr(verification, 'verified_last_name', None) or getattr(user, 'last_name', None) or '').strip()
-    email = (email_override or getattr(user, 'email', None) or '').strip()
+    first_name = str(
+        (override or {}).get('firstName')
+        or getattr(verification, 'verified_first_name', None)
+        or getattr(user, 'first_name', None)
+        or ''
+    ).strip()
+    last_name = str(
+        (override or {}).get('lastName')
+        or getattr(verification, 'verified_last_name', None)
+        or getattr(user, 'last_name', None)
+        or ''
+    ).strip()
+    email = str((override or {}).get('email') or email_override or getattr(user, 'email', None) or '').strip()
     phone_country_code = getattr(user, 'phone_country_code', None) or ''
     phone_number = (getattr(user, 'phone_number', None) or '').strip()
     phone = f'{phone_country_code}{phone_number}'.replace(' ', '') if phone_number else ''
@@ -1254,23 +1336,31 @@ def _get_koywe_contact_profile(*, user, email_override: str | None = None) -> di
         'email': email,
         'phone': phone,
     }
-    if verification:
+    if override:
+        profile['documentNumber'] = str(override.get('documentNumber') or '').strip()
+        profile['documentType'] = str(override.get('documentType') or '').strip()
+        profile['_skipAccountProfileSync'] = True
+    elif verification:
         profile['documentNumber'] = (verification.document_number or '').strip()
         profile['documentType'] = (verification.document_type or '').strip()
         profile['dob'] = verification.verified_date_of_birth.isoformat() if verification.verified_date_of_birth else ''
-    effective_address = _build_effective_ramp_address_snapshot(user)
-    if effective_address.address_street:
-        profile['address'] = effective_address.address_street
-        profile['addressStreet'] = effective_address.address_street
-    if effective_address.address_city:
-        profile['addressCity'] = effective_address.address_city
-    if effective_address.address_state:
-        profile['addressState'] = effective_address.address_state
-    if effective_address.address_zip_code:
-        profile['addressZipCode'] = effective_address.address_zip_code
-    if effective_address.address_country:
-        profile['addressCountry'] = effective_address.address_country
-    return {key: value for key, value in profile.items() if value}
+    if not override:
+        effective_address = _build_effective_ramp_address_snapshot(user)
+        if effective_address.address_street:
+            profile['address'] = effective_address.address_street
+            profile['addressStreet'] = effective_address.address_street
+        if effective_address.address_city:
+            profile['addressCity'] = effective_address.address_city
+        if effective_address.address_state:
+            profile['addressState'] = effective_address.address_state
+        if effective_address.address_zip_code:
+            profile['addressZipCode'] = effective_address.address_zip_code
+        if effective_address.address_country:
+            profile['addressCountry'] = effective_address.address_country
+    return {
+        key: value for key, value in profile.items()
+        if value or key == '_skipAccountProfileSync'
+    }
 
 
 class Mutation(graphene.ObjectType):

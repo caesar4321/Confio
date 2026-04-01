@@ -662,6 +662,7 @@ class KoyweClient:
         if not contact_profile:
             return {}
         normalized = dict(contact_profile)
+        skip_account_profile_sync = bool(normalized.get('_skipAccountProfileSync'))
         document_type = normalized.get('documentType')
         document_number = normalized.get('documentNumber')
         if document_number:
@@ -670,7 +671,10 @@ class KoyweClient:
                 document_type=document_type,
             )
             normalized['documentType'] = resolved_document_type
-        return {key: value for key, value in normalized.items() if value}
+        filtered = {key: value for key, value in normalized.items() if value}
+        if skip_account_profile_sync:
+            filtered['_skipAccountProfileSync'] = True
+        return filtered
 
     def _resolve_document_type(self, *, country_code: str, document_type: str | None) -> str:
         normalized_country = (country_code or '').strip().upper()
@@ -697,6 +701,8 @@ class KoyweClient:
             country_code=country_code,
         )
         if not normalized_contact:
+            return
+        if normalized_contact.get('_skipAccountProfileSync'):
             return
 
         normalized_email = str(email or normalized_contact.get('email') or '').strip().lower()
