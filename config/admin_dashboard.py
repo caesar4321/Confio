@@ -530,9 +530,10 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         context['guardarian_currencies'] = GuardarianTransaction.objects.filter(
             status='finished'
         ).values('from_currency').annotate(
-            volume=Sum('from_amount'),
+            usdc_volume=Sum('to_amount_actual'),
+            local_volume=Sum('from_amount'),
             count=Count('id')
-        ).order_by('-volume')[:5]
+        ).order_by('-usdc_volume')[:5]
         
         # Top Countries (by User count)
         context['guardarian_countries'] = GuardarianTransaction.objects.values(
@@ -614,9 +615,10 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             currencies = qs.filter(
                 status='COMPLETED'
             ).values('fiat_currency').annotate(
-                volume=Sum('fiat_amount'),
+                usdc_volume=Sum('final_amount'),
+                local_volume=Sum('fiat_amount'),
                 count=Count('id')
-            ).order_by('-volume')[:5]
+            ).order_by('-usdc_volume')[:5]
 
             countries = qs.values(
                 'actor_user__phone_country'

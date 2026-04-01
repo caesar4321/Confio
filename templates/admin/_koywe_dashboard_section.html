@@ -60,14 +60,14 @@
     <div class="data-table" style="margin-bottom: 0;">
         <div
             style="padding: 12px 16px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-weight: 600; color: #4b5563;">
-            Top Currencies (Volume)
+            Top Currencies (USDC Volume)
         </div>
         <table>
             <tbody>
                 {% for curr in section.currencies %}
                 <tr>
                     <td style="font-weight: 500;">{{ curr.fiat_currency }}</td>
-                    <td style="text-align: right;">${{ curr.volume|floatformat:0|intcomma }}</td>
+                    <td style="text-align: right;">${{ curr.usdc_volume|floatformat:0|intcomma }}</td>
                     <td style="text-align: right; color: #6b7280;">{{ curr.count }} txs</td>
                 </tr>
                 {% endfor %}
