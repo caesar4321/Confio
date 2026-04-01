@@ -208,10 +208,10 @@ def upsert_koywe_ramp_transaction(
         'actor_address': actor_address or '',
         'fiat_currency': fiat_currency or '',
         'fiat_amount': fiat_amount,
-        'crypto_currency': getattr(settings, 'KOYWE_CRYPTO_SYMBOL', 'USDC Solana'),
+        'crypto_currency': getattr(settings, 'KOYWE_CRYPTO_SYMBOL', 'USDC Polygon'),
         'crypto_amount_estimated': crypto_estimated,
         'crypto_amount_actual': None,
-        'final_currency': 'CUSD' if normalized_direction == 'on_ramp' else getattr(settings, 'KOYWE_CRYPTO_SYMBOL', 'USDC Solana'),
+        'final_currency': 'CUSD' if normalized_direction == 'on_ramp' else getattr(settings, 'KOYWE_CRYPTO_SYMBOL', 'USDC Polygon'),
         'final_amount': final_amount,
         'status_detail': status_detail,
         'metadata': _extract_metadata(
@@ -258,7 +258,7 @@ def sync_koywe_ramp_transaction_from_order(
         ramp_tx.fiat_amount = amount_out or ramp_tx.fiat_amount
         ramp_tx.crypto_amount_estimated = amount_in or ramp_tx.crypto_amount_estimated
         ramp_tx.crypto_amount_actual = amount_in or ramp_tx.crypto_amount_actual
-        ramp_tx.final_currency = getattr(settings, 'KOYWE_CRYPTO_SYMBOL', 'USDC Solana')
+        ramp_tx.final_currency = getattr(settings, 'KOYWE_CRYPTO_SYMBOL', 'USDC Polygon')
         ramp_tx.final_amount = amount_in or ramp_tx.final_amount
 
     ramp_tx.status = ramp_status

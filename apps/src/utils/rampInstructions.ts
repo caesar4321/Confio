@@ -225,6 +225,11 @@ const parseWireMxRows = (rawAddress?: string | null): RampInstructionRow[] => {
       continue;
     }
 
+    if (/^[A-Z]{3,10}$/.test(line)) {
+      rows.push({ label: 'Institución receptora', value: line });
+      continue;
+    }
+
     rows.push({ label: `Dato ${index + 1}`, value: line });
   }
 

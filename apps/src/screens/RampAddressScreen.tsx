@@ -132,7 +132,7 @@ export const RampAddressScreen: React.FC = () => {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="light-content" backgroundColor="#34d399" />
+      <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Icon name="arrow-left" size={20} color="#ffffff" />
@@ -263,7 +263,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#34d399',
+    backgroundColor: colors.primaryDark,
   },
   backButton: {
     width: 36,

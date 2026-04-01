@@ -948,7 +948,7 @@ class Query(graphene.ObjectType):
             network_display=RAMP_NETWORK_DISPLAY,
             asset_note=RAMP_USDC_ALGORAND_NOTE,
             quote_disclaimer=(
-                "Cotización estimada con datos de Koywe. Se enruta por Solana hasta conectar Algorand."
+                "Cotización estimada con datos de Koywe. Se enruta por Polygon hasta conectar Algorand."
             ),
         )
 

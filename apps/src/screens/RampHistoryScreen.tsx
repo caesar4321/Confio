@@ -323,6 +323,7 @@ export const RampHistoryScreen = () => {
       <FlatList
         data={listRows}
         keyExtractor={(row) => row.key}
+        style={styles.list}
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
         initialNumToRender={20}
@@ -380,6 +381,10 @@ export default RampHistoryScreen;
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
+    backgroundColor: colors.primaryDark,
+  },
+  list: {
     flex: 1,
     backgroundColor: colors.background,
   },

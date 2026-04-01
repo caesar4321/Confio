@@ -9,11 +9,11 @@ from users.models import Country
 
 RAMP_USDC_ALGORAND_SYMBOL = "USDC-a"
 RAMP_USDC_ALGORAND_NOTE = (
-    "USDC-a todavía se enruta por USDC en Solana. "
+    "USDC-a todavía se enruta por USDC en Polygon. "
     "Cámbialo a USDC en Algorand cuando Koywe soporte Algorand."
 )
-RAMP_NETWORK_SYMBOL = "USDC Solana"
-RAMP_NETWORK_DISPLAY = "Solana"
+RAMP_NETWORK_SYMBOL = "USDC Polygon"
+RAMP_NETWORK_DISPLAY = "Polygon"
 
 
 COUNTRY_METHODS = {
