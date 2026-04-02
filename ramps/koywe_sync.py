@@ -82,6 +82,7 @@ def extract_koywe_event_type(payload: dict[str, Any]) -> str:
     return str(
         payload.get('type')
         or payload.get('eventType')
+        or payload.get('eventName')
         or payload.get('event')
         or payload.get('status')
         or ''
