@@ -9,7 +9,7 @@ import {
 
 import './PortalConsole.css';
 
-const SUPPORT_POLL_INTERVAL_MS = 5000;
+const SUPPORT_POLL_INTERVAL_MS = 15000;
 
 /* ─── GraphQL ─── */
 
@@ -30,6 +30,22 @@ const GET_PORTAL_ME = gql`
 const GET_PORTAL_SUPPORT_CONVERSATIONS = gql`
   query GetPortalSupportConversations($status: String) {
     portalSupportConversations(status: $status) {
+      id
+      customerName
+      customerEmail
+      contextLabel
+      status
+      assignedToName
+      lastMessageAt
+      lastPreview
+      unreadCount
+    }
+  }
+`;
+
+const GET_PORTAL_SUPPORT_CONVERSATION = gql`
+  query GetPortalSupportConversation($conversationId: ID!) {
+    portalSupportConversation(conversationId: $conversationId) {
       id
       customerName
       customerEmail
@@ -558,6 +574,15 @@ export default function PortalConsole() {
     fetchPolicy: 'network-only',
     pollInterval: shouldPollSupport ? SUPPORT_POLL_INTERVAL_MS : 0,
   });
+  const shouldPollActiveConversation =
+    shouldPollSupport && Boolean(activeConversationId);
+  const supportConversationQuery = useQuery(GET_PORTAL_SUPPORT_CONVERSATION, {
+    variables: { conversationId: activeConversationId },
+    skip: !shouldPollActiveConversation,
+    fetchPolicy: 'network-only',
+    pollInterval: shouldPollActiveConversation ? SUPPORT_POLL_INTERVAL_MS : 0,
+    notifyOnNetworkStatusChange: true,
+  });
   const contentQuery = useQuery(GET_PORTAL_CONTENT_ITEMS, {
     variables: { channelSlug: contentChannelFilter || null, status: null },
     skip: !meQuery.data?.me?.isStaff || !isOtpVerified,
@@ -567,10 +592,20 @@ export default function PortalConsole() {
   /* ─── Mutations ─── */
 
   const [sendReply, sendReplyState] = useMutation(PORTAL_SEND_SUPPORT_REPLY, {
-    refetchQueries: [{ query: GET_PORTAL_SUPPORT_CONVERSATIONS, variables: { status: supportStatus } }],
+    refetchQueries: [
+      { query: GET_PORTAL_SUPPORT_CONVERSATIONS, variables: { status: supportStatus } },
+      ...(activeConversationId
+        ? [{ query: GET_PORTAL_SUPPORT_CONVERSATION, variables: { conversationId: activeConversationId } }]
+        : []),
+    ],
   });
   const [setSupportStatusMutation] = useMutation(PORTAL_SET_SUPPORT_STATUS, {
-    refetchQueries: [{ query: GET_PORTAL_SUPPORT_CONVERSATIONS, variables: { status: supportStatus } }],
+    refetchQueries: [
+      { query: GET_PORTAL_SUPPORT_CONVERSATIONS, variables: { status: supportStatus } },
+      ...(activeConversationId
+        ? [{ query: GET_PORTAL_SUPPORT_CONVERSATION, variables: { conversationId: activeConversationId } }]
+        : []),
+    ],
   });
   const [saveContentItem, saveContentState] = useMutation(PORTAL_SAVE_CONTENT_ITEM, {
     refetchQueries: [{ query: GET_PORTAL_CONTENT_ITEMS, variables: { channelSlug: contentChannelFilter || null, status: null } }],
@@ -598,10 +633,12 @@ export default function PortalConsole() {
     [conversations]
   );
 
-  const activeConversation = useMemo(
+  const activeConversationSummary = useMemo(
     () => filteredConversations.find((c) => c.id === activeConversationId) || filteredConversations[0] || null,
     [filteredConversations, activeConversationId]
   );
+  const activeConversation =
+    supportConversationQuery.data?.portalSupportConversation || activeConversationSummary;
 
   const contentItems = contentQuery.data?.portalContentItems || [];
   const filteredContentItems = useMemo(() => {
@@ -1255,7 +1292,9 @@ export default function PortalConsole() {
                   </div>
                 </div>
                 <div className="portal-thread" ref={supportThreadRef}>
-                  {activeConversation.messages.map((message) => (
+                  {supportConversationQuery.loading && !supportConversationQuery.data ? (
+                    <div className="portal-empty"><Spinner /> Cargando conversación...</div>
+                  ) : (activeConversation.messages || []).map((message) => (
                     <div
                       key={message.id}
                       className={`portal-message ${message.senderType === 'USER' ? 'from-user' : 'from-agent'}`}
