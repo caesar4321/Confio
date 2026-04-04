@@ -14,6 +14,7 @@ from .jwt import verify_auth_token_version
 from graphql_jwt.exceptions import PermissionDenied
 import logging
 from django.contrib.auth.models import AnonymousUser
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
@@ -41,28 +42,24 @@ class AuthTokenVersionMiddleware:
                 data = json.loads(body)
                 op_name = str(data.get('operationName') or '').strip()
                 if op_name in ('refreshToken', 'legalDocument'):
-                    logger.info("Skipping auth for whitelisted public operation: %s", op_name)
+                    if settings.DEBUG:
+                        logger.info("Skipping auth for whitelisted public operation: %s", op_name)
                     request.user = AnonymousUser()
                     return self.get_response(request)
             except Exception as e:
                 logger.error(f"Error checking for public GraphQL operation: {e}")
 
         # For all other requests, proceed with normal authentication
-        logger.info("=== AuthTokenVersionMiddleware ===")
-        
         # Get the Authorization header directly
         auth_header = request.headers.get('Authorization', '')
-        logger.info("Authorization header: %s", auth_header)
         
         if auth_header and auth_header.startswith('JWT'):
             # Extract the token part
             token = auth_header[4:] if auth_header.startswith('JWT ') else auth_header[3:]
-            logger.info("Found JWT token: %s...", token[:20])
             
             try:
                 # Verify the token version
                 payload = verify_auth_token_version(token)
-                logger.info("Token verified successfully. Payload: %s", payload)
                 
                 # Set the user on the request
                 from django.contrib.auth import get_user_model
@@ -70,13 +67,10 @@ class AuthTokenVersionMiddleware:
                 try:
                     user = User.objects.get(id=payload['user_id'])
                     request.user = user
-                    logger.info("User set on request: %s", user)
                 except User.DoesNotExist:
                     logger.error("User not found in database: id=%s", payload['user_id'])
                     # Set anonymous user instead of None
                     request.user = AnonymousUser()
-                    # Log the full payload for debugging
-                    logger.error("JWT payload: %s", payload)
                 
             except PermissionDenied as e:
                 logger.warning("Token verification failed: %s", str(e))
@@ -86,11 +80,6 @@ class AuthTokenVersionMiddleware:
                 logger.error("JWT verification error: %s", str(e))
                 request.user = existing_user if getattr(existing_user, 'is_authenticated', False) else AnonymousUser()
         else:
-            logger.info("No JWT token found in Authorization header")
             request.user = existing_user if getattr(existing_user, 'is_authenticated', False) else AnonymousUser()
-            
-        logger.info("Request user after middleware: %s", request.user)
-        logger.info("Is authenticated: %s", getattr(request.user, 'is_authenticated', None))
-        logger.info("=== End AuthTokenVersionMiddleware ===")
         
         return self.get_response(request) 

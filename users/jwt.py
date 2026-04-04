@@ -143,9 +143,7 @@ def refresh_token_payload_handler(user, account_type='personal', account_index=0
 def verify_auth_token_version(token):
     """Verify that the token's auth_token_version matches the user's current version"""
     try:
-        logger.info("Verifying JWT token...")
         payload = jwt_decode(token)
-        logger.info("Token decoded successfully. Payload: %s", payload)
         
         user_id = payload.get('user_id')
         token_version = payload.get('auth_token_version')
@@ -161,7 +159,6 @@ def verify_auth_token_version(token):
         User = get_user_model()
         try:
             user = User.objects.get(id=user_id)
-            logger.info(f"Found user: id={user.id}, username={user.username}, auth_token_version={user.auth_token_version}")
         except User.DoesNotExist:
             logger.error(f"User not found: id={user_id}")
             raise PermissionDenied('User not found')
@@ -170,7 +167,6 @@ def verify_auth_token_version(token):
             logger.error(f"Token version mismatch: token={token_version}, user={user.auth_token_version}")
             raise PermissionDenied('Token version mismatch')
             
-        logger.info("Token verification successful")
         return payload
         
     except Exception as e:

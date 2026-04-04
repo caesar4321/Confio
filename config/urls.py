@@ -32,6 +32,10 @@ admin.site.index_title = "Welcome to Confío Administration"
 
 logger = logging.getLogger(__name__)
 
+
+def _should_log_graphql_request_details():
+    return settings.DEBUG
+
 class LoggingGraphQLView(GraphQLView):
     def get_context(self, request):
         """Override to add account context to GraphQL context"""
@@ -65,7 +69,13 @@ class LoggingGraphQLView(GraphQLView):
             context.active_account_index = 0
             context.active_business_id = None
 
-        logger.info(f"GraphQL Context - User: {context.user}, Account Type: {context.active_account_type}, Account Index: {context.active_account_index}")
+        if _should_log_graphql_request_details():
+            logger.info(
+                "GraphQL Context - User: %s, Account Type: %s, Account Index: %s",
+                context.user,
+                context.active_account_type,
+                context.active_account_index,
+            )
 
         return context
     
@@ -74,8 +84,9 @@ class LoggingGraphQLView(GraphQLView):
             try:
                 body = json.loads(request.body)
                 query = body.get('query', '')
-                logger.info("GraphQL Query: %s", query)
-                logger.info("GraphQL Variables: %s", body.get('variables', {}))
+                if _should_log_graphql_request_details():
+                    logger.info("GraphQL Query: %s", query)
+                    logger.info("GraphQL Variables: %s", body.get('variables', {}))
 
                 # Derive and align request account context from JWT prior to logging
                 try:
@@ -95,18 +106,30 @@ class LoggingGraphQLView(GraphQLView):
                     pass
 
                 # Log aligned account context
-                logger.info(
-                    f"Request Account Context - Type: {getattr(request, 'active_account_type', 'not set')}, "
-                    f"Index: {getattr(request, 'active_account_index', 'not set')}"
-                )
+                if _should_log_graphql_request_details():
+                    logger.info(
+                        "Request Account Context - Type: %s, Index: %s",
+                        getattr(request, 'active_account_type', 'not set'),
+                        getattr(request, 'active_account_index', 'not set'),
+                    )
                 
                 # Log balance queries specifically
-                if 'accountBalance' in query:
-                    logger.info(f"BALANCE QUERY DETECTED - User: {request.user}, Authenticated: {request.user.is_authenticated}")
+                if settings.DEBUG and 'accountBalance' in query:
+                    logger.info(
+                        "BALANCE QUERY DETECTED - User: %s, Authenticated: %s",
+                        request.user,
+                        request.user.is_authenticated,
+                    )
                 
                 # Log conversion mutations specifically (informational)
-                if 'convertUsdcToCusd' in query or 'convertCusdToUsdc' in query:
-                    logger.info(f"CONVERSION MUTATION DETECTED - Query: {query[:200]}, Variables: {body.get('variables', {})}")
+                if settings.DEBUG and (
+                    'convertUsdcToCusd' in query or 'convertCusdToUsdc' in query
+                ):
+                    logger.info(
+                        "CONVERSION MUTATION DETECTED - Query: %s, Variables: %s",
+                        query[:200],
+                        body.get('variables', {}),
+                    )
             except Exception as e:
                 logger.error("Error parsing GraphQL request: %s", str(e))
         return super().dispatch(request, *args, **kwargs)
