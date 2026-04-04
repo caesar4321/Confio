@@ -557,6 +557,9 @@ export default function PortalConsole() {
   const [supportSearch, setSupportSearch] = useState('');
   const [contentSearch, setContentSearch] = useState('');
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [isDocumentVisible, setIsDocumentVisible] = useState(
+    typeof document === 'undefined' ? true : !document.hidden
+  );
   const supportThreadRef = useRef(null);
   const replyTextareaRef = useRef(null);
   const { toasts, addToast, dismissToast } = useToasts();
@@ -567,7 +570,11 @@ export default function PortalConsole() {
     fetchPolicy: 'network-only',
   });
   const isOtpVerified = Boolean(meQuery.data?.me?.isOtpVerified);
-  const shouldPollSupport = activeTab === 'support' && Boolean(meQuery.data?.me?.isStaff) && isOtpVerified;
+  const shouldPollSupport =
+    activeTab === 'support' &&
+    isDocumentVisible &&
+    Boolean(meQuery.data?.me?.isStaff) &&
+    isOtpVerified;
   const supportQuery = useQuery(GET_PORTAL_SUPPORT_CONVERSATIONS, {
     variables: { status: supportStatus },
     skip: !meQuery.data?.me?.isStaff || !isOtpVerified,
@@ -664,6 +671,17 @@ export default function PortalConsole() {
       setActiveConversationId(filteredConversations[0].id);
     }
   }, [activeConversationId, filteredConversations]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') {
+      return undefined;
+    }
+    const handleVisibilityChange = () => {
+      setIsDocumentVisible(!document.hidden);
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
 
   useEffect(() => {
     if (activeTab !== 'support' || !activeConversation) {

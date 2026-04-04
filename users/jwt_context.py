@@ -9,8 +9,13 @@ import logging
 from graphql_jwt.utils import jwt_decode
 from graphql_jwt.exceptions import PermissionDenied
 from graphql import GraphQLError
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _should_log_jwt_context_details():
+    return settings.DEBUG
 
 # Role-based permission matrix - defines what each role can do
 # This is a negative-check system: if not explicitly allowed here, it's denied
@@ -74,13 +79,15 @@ def get_jwt_business_context_with_validation(info, required_permission=None):
         # Get the request from GraphQL info
         request = info.context
         if not hasattr(request, 'META'):
-            logger.warning("No request META found in GraphQL context")
+            if _should_log_jwt_context_details():
+                logger.warning("No request META found in GraphQL context")
             return None
             
         # Get authorization header
         auth_header = request.META.get('HTTP_AUTHORIZATION', '')
         if not auth_header.startswith('JWT '):
-            logger.warning("No JWT token found in Authorization header")
+            if _should_log_jwt_context_details():
+                logger.warning("No JWT token found in Authorization header")
             return None
             
         # Extract token
@@ -97,8 +104,13 @@ def get_jwt_business_context_with_validation(info, required_permission=None):
             'business_id': payload.get('business_id'),  # Will be None for personal accounts
         }
         
-        logger.info(f"Extracted JWT context: {jwt_context}")
-        logger.info(f"JWT business_id type: {type(payload.get('business_id'))}, value: {payload.get('business_id')}")
+        if _should_log_jwt_context_details():
+            logger.info("Extracted JWT context: %s", jwt_context)
+            logger.info(
+                "JWT business_id type: %s, value: %s",
+                type(payload.get('business_id')),
+                payload.get('business_id'),
+            )
         
     except Exception as e:
         logger.error(f"Error extracting JWT business context: {str(e)}")
@@ -118,7 +130,8 @@ def get_jwt_business_context_with_validation(info, required_permission=None):
         from .models import Account
         
         biz_id = jwt_context['business_id']
-        logger.info(f"Validating business access: user_id={user.id}, business_id={biz_id}")
+        if _should_log_jwt_context_details():
+            logger.info("Validating business access: user_id=%s, business_id=%s", user.id, biz_id)
         
         # Check employee relationship
         employee_record = BusinessEmployee.objects.filter(
@@ -128,7 +141,12 @@ def get_jwt_business_context_with_validation(info, required_permission=None):
         ).first()
         
         if employee_record:
-            logger.info(f"Found employee record: role={employee_record.role}, business_name={employee_record.business.name}")
+            if _should_log_jwt_context_details():
+                logger.info(
+                    "Found employee record: role=%s, business_name=%s",
+                    employee_record.role,
+                    employee_record.business.name,
+                )
             jwt_context['employee_record'] = employee_record
             # If a specific permission is required, check it
             if required_permission and not check_role_permission(employee_record.role, required_permission):
@@ -145,7 +163,8 @@ def get_jwt_business_context_with_validation(info, required_permission=None):
             if not is_owner:
                 logger.warning(f"User {user.id} has no relation to business {biz_id} - access denied")
                 return None
-            logger.info(f"Ownership access granted for user {user.id} to business {biz_id}")
+            if _should_log_jwt_context_details():
+                logger.info("Ownership access granted for user %s to business %s", user.id, biz_id)
             # Owners bypass role permission checks
     
     return jwt_context
