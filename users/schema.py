@@ -1588,11 +1588,8 @@ class Query(EmployeeQueries, graphene.ObjectType):
 
 	def resolve_user_accounts(self, info):
 		user = getattr(info.context, 'user', None)
-		print(f"resolve_user_accounts - user: {user}")
-		print(f"resolve_user_accounts - user authenticated: {user and getattr(user, 'is_authenticated', False)}")
 		
 		if not (user and getattr(user, 'is_authenticated', False)):
-			print("resolve_user_accounts - returning empty list (not authenticated)")
 			return []
 		
 		# Get owned accounts (excluding soft-deleted ones)
@@ -1600,7 +1597,6 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			user=user,
 			deleted_at__isnull=True
 		).select_related('business')
-		print(f"resolve_user_accounts - found {owned_accounts.count()} owned accounts for user {user.id}")
 		
 		# Start with owned accounts
 		all_accounts = list(owned_accounts)
@@ -1612,8 +1608,6 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			is_active=True,
 			deleted_at__isnull=True
 		).select_related('business')
-		
-		print(f"resolve_user_accounts - found {employee_records.count()} employee relationships for user {user.id}")
 		
 		# For each employee relationship, get the business owner's account
 		for emp_record in employee_records:

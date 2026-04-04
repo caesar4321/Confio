@@ -87,7 +87,7 @@ def get_jwt_business_context_with_validation(info, required_permission=None):
         auth_header = request.META.get('HTTP_AUTHORIZATION', '')
         if not auth_header.startswith('JWT '):
             if _should_log_jwt_context_details():
-                logger.warning("No JWT token found in Authorization header")
+                logger.debug("No JWT token found in Authorization header")
             return None
             
         # Extract token
