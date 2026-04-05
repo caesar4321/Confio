@@ -373,6 +373,23 @@ def send_batch_notifications(
             results['sent'] += batch_response.success_count
             results['failed'] += batch_response.failure_count
             results['success'] = results['sent'] > 0
+
+            successful_token_ids = [
+                batch_tokens[idx][1]
+                for idx, response in enumerate(batch_response.responses)
+                if response.success
+            ]
+
+            if successful_token_ids:
+                success_time = timezone.now()
+                # Successful delivery means the token is still reachable.
+                FCMDeviceToken.objects.filter(id__in=successful_token_ids).update(
+                    last_used=success_time,
+                    failure_count=0,
+                    last_failure=None,
+                    last_failure_reason='',
+                    is_active=True,
+                )
             
             # Handle individual response errors
             for idx, response in enumerate(batch_response.responses):
