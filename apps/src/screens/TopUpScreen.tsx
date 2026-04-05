@@ -40,6 +40,7 @@ import { CREATE_RAMP_ORDER } from '../apollo/mutations';
 import LegacyGuardarianTopUpScreen from './LegacyGuardarianTopUpScreen';
 import { useBackupEnforcement } from '../hooks/useBackupEnforcement';
 import { colors } from '../config/theme';
+import { isKoyweRoutingEnabledForCountry } from '../config/env';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'TopUp'>;
 
@@ -79,8 +80,6 @@ const currencyNames: Record<string, string> = {
 };
 
 const friendlyCurrency = (code: string) => currencyNames[code] || code;
-const KOYWE_SUPPORTED_COUNTRIES = new Set(['AR', 'BO', 'BR', 'CL', 'CO', 'MX', 'PE', 'US']);
-
 const TopUpScreen = () => {
   const navigation = useNavigation<NavigationProp>();
   const { width } = useWindowDimensions();
@@ -100,7 +99,7 @@ const TopUpScreen = () => {
     return userProfile?.phoneCountry || selectedIso || userIso || 'AR';
   }, [selectedCountry, userCountry, userProfile?.phoneCountry]);
 
-  const isKoyweCountry = KOYWE_SUPPORTED_COUNTRIES.has(countryCode);
+  const isKoyweCountry = isKoyweRoutingEnabledForCountry(countryCode);
 
   const { data: meData } = useQuery(GET_ME);
   const { data: kycData } = useQuery(GET_MY_KYC_STATUS);

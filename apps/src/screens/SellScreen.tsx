@@ -46,6 +46,7 @@ import { CREATE_RAMP_ORDER } from '../apollo/mutations';
 import { tryFundKoyweOffRampInBackground } from '../services/koyweOffRampService';
 import { SellScreen as LegacyGuardarianSellScreen } from './LegacyGuardarianSellScreen';
 import { colors } from '../config/theme';
+import { isKoyweRoutingEnabledForCountry } from '../config/env';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'Sell'>;
 
@@ -101,8 +102,6 @@ const currencyNames: Record<string, string> = {
   EUR: 'euros',
 };
 const friendlyCurrency = (code: string) => currencyNames[code] || code;
-const KOYWE_SUPPORTED_COUNTRIES = new Set(['AR', 'BO', 'BR', 'CL', 'CO', 'MX', 'PE', 'US']);
-
 export const SellScreen = () => {
   const navigation = useNavigation<NavigationProp>();
   const { width } = useWindowDimensions();
@@ -124,7 +123,7 @@ export const SellScreen = () => {
     return userProfile?.phoneCountry || selectedIso || userIso || 'AR';
   }, [selectedCountry, userCountry, userProfile?.phoneCountry]);
 
-  const isKoyweCountry = KOYWE_SUPPORTED_COUNTRIES.has(countryCode);
+  const isKoyweCountry = isKoyweRoutingEnabledForCountry(countryCode);
 
   const { data: meData } = useQuery(GET_ME);
   const { data: balancesData, loading: balancesLoading } = useQuery(GET_MY_BALANCES, {
