@@ -125,7 +125,6 @@ export const UpdateUsernameScreen: React.FC = () => {
         setUsernameError(message);
       }
     } catch (error) {
-      console.error('Error actualizando usuario:', error);
       setUsernameError('No se pudo actualizar el usuario. Inténtalo nuevamente.');
     } finally {
       setIsSaving(false);
@@ -146,7 +145,7 @@ export const UpdateUsernameScreen: React.FC = () => {
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
         <TouchableOpacity style={styles.headerButton} onPress={() => navigation.goBack()}>
-          <Icon name="arrow-left" size={20} color="#FFFFFF" />
+          <Icon name="arrow-left" size={20} color={colors.white} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Actualizar usuario</Text>
         <TouchableOpacity
@@ -174,20 +173,28 @@ export const UpdateUsernameScreen: React.FC = () => {
 
         <View style={styles.inputCard}>
           <Text style={styles.inputLabel}>Nuevo usuario</Text>
-          <TextInput
-            style={[styles.input, usernameError && styles.inputError]}
-            value={username}
-            onChangeText={(text) => {
-              setUsername(text);
-              setUsernameError(null);
-            }}
-            autoCapitalize="none"
-            autoCorrect={false}
-            placeholder="ej: maria_confio"
-            placeholderTextColor="#9CA3AF"
-            maxLength={30}
-          />
-          <Text style={styles.inputHint}>Se permiten letras, números y guiones bajos.</Text>
+          <View style={[styles.inputRow, usernameError && styles.inputRowError]}>
+            <Text style={styles.inputPrefix}>@</Text>
+            <TextInput
+              style={styles.input}
+              value={username}
+              onChangeText={(text) => {
+                setUsername(text);
+                setUsernameError(null);
+              }}
+              autoCapitalize="none"
+              autoCorrect={false}
+              placeholder="maria_confio"
+              placeholderTextColor={colors.muted}
+              maxLength={30}
+            />
+          </View>
+          <View style={styles.inputFooter}>
+            <Text style={styles.inputHint}>Letras, números y guiones bajos.</Text>
+            <Text style={[styles.charCount, username.length > 25 && styles.charCountWarn]}>
+              {username.length}/30
+            </Text>
+          </View>
           {usernameError && <Text style={styles.errorText}>{usernameError}</Text>}
         </View>
 
@@ -230,26 +237,27 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: colors.primary,
+    backgroundColor: colors.primaryDark,
   },
   headerButton: {
     padding: 8,
     borderRadius: 8,
   },
   headerTitle: {
-    color: '#FFFFFF',
+    color: colors.white,
     fontSize: 18,
     fontWeight: '600',
   },
   saveButton: {
-    backgroundColor: '#10B981',
+    backgroundColor: colors.white,
+    paddingHorizontal: 14,
   },
   saveButtonDisabled: {
     opacity: 0.5,
   },
   saveButtonText: {
-    color: '#FFFFFF',
-    fontWeight: '600',
+    color: colors.primaryDark,
+    fontWeight: '700',
   },
   container: {
     flex: 1,
@@ -261,10 +269,10 @@ const styles = StyleSheet.create({
   },
   infoCard: {
     backgroundColor: colors.surface,
-    borderRadius: 18,
+    borderRadius: 16,
     padding: 20,
     gap: 12,
-    shadowColor: '#0F172A',
+    shadowColor: colors.shadowBase,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.06,
     shadowRadius: 12,
@@ -282,7 +290,7 @@ const styles = StyleSheet.create({
   },
   currentUsernameBox: {
     padding: 14,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: colors.neutral,
     borderRadius: 12,
   },
   currentLabel: {
@@ -303,10 +311,10 @@ const styles = StyleSheet.create({
   },
   inputCard: {
     backgroundColor: colors.surface,
-    borderRadius: 18,
+    borderRadius: 16,
     padding: 20,
     gap: 12,
-    shadowColor: '#0F172A',
+    shadowColor: colors.shadowBase,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.05,
     shadowRadius: 12,
@@ -317,33 +325,56 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.textFlat,
   },
-  input: {
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#D1D5DB',
+    borderColor: colors.borderMedium,
     borderRadius: 12,
-    paddingHorizontal: 16,
+    backgroundColor: colors.white,
+    paddingHorizontal: 14,
+  },
+  inputRowError: {
+    borderColor: colors.danger,
+  },
+  inputPrefix: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: colors.primaryDark,
+    marginRight: 4,
+  },
+  input: {
+    flex: 1,
     paddingVertical: 12,
     fontSize: 16,
     color: colors.textFlat,
-    backgroundColor: '#FFFFFF',
   },
-  inputError: {
-    borderColor: colors.error,
+  inputFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   inputHint: {
     fontSize: 12,
     color: colors.textSecondary,
   },
+  charCount: {
+    fontSize: 12,
+    color: colors.muted,
+  },
+  charCountWarn: {
+    color: colors.error.icon,
+  },
   errorText: {
     fontSize: 13,
-    color: colors.error,
+    color: colors.danger,
   },
   suggestionsCard: {
     backgroundColor: colors.surface,
-    borderRadius: 18,
+    borderRadius: 16,
     padding: 20,
     gap: 12,
-    shadowColor: '#0F172A',
+    shadowColor: colors.shadowBase,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.05,
     shadowRadius: 12,
@@ -362,8 +393,8 @@ const styles = StyleSheet.create({
   suggestionChip: {
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 20,
-    backgroundColor: '#ECFDF5',
+    borderRadius: 16,
+    backgroundColor: colors.primarySoft,
   },
   suggestionText: {
     color: colors.primaryDark,
@@ -371,10 +402,10 @@ const styles = StyleSheet.create({
   },
   tipsCard: {
     backgroundColor: colors.surface,
-    borderRadius: 18,
+    borderRadius: 16,
     padding: 20,
     gap: 8,
-    shadowColor: '#0F172A',
+    shadowColor: colors.shadowBase,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.05,
     shadowRadius: 12,

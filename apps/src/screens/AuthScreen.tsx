@@ -33,7 +33,6 @@ export const AuthScreen = () => {
       try {
         await authService.initialize();
       } catch (error) {
-        console.error('AuthScreen - Failed to initialize auth service:', error);
       }
     };
 
@@ -88,7 +87,6 @@ export const AuthScreen = () => {
         result.requiresBackupCompletion || false
       );
     } catch (error) {
-      console.error('Google Sign-In failed:', error);
       if (error instanceof AccountDeactivatedError) {
         Alert.alert('Cuenta desactivada', error.message);
       } else {
@@ -120,7 +118,6 @@ export const AuthScreen = () => {
 
       await handleSuccessfulLogin(result.walletData?.isPhoneVerified || false);
     } catch (error) {
-      console.error('Apple Sign-In Error:', error);
       if (error instanceof AccountDeactivatedError) {
         Alert.alert('Cuenta desactivada', error.message);
       } else {
@@ -135,7 +132,6 @@ export const AuthScreen = () => {
     try {
       navigation.navigate('LegalDocument', { docType });
     } catch (e) {
-      console.warn('Failed to navigate to legal document:', e);
     }
   };
 

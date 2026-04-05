@@ -177,7 +177,6 @@ export const EditBusinessScreen = () => {
         Alert.alert('Error', error);
       }
     } catch (error) {
-      console.error('Error updating business:', error);
       Alert.alert('Error', 'No se pudo actualizar la información del negocio');
     } finally {
       setIsLoading(false);

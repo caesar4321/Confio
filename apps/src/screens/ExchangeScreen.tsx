@@ -423,9 +423,7 @@ export const ExchangeScreen = () => {
       // Check if this is a store reset error (happens during account switching)
       if (tradesError.message?.includes('Store reset while query was in flight')) {
         // The query will automatically retry after the store reset
-      } else {
-        console.error('[ExchangeScreen] Trades query error:', tradesError);
-      }
+      } else {      }
     }
   }, [tradesLoading, tradesError, myTradesData, tradesQueryVariables, activeAccount]);
 
@@ -659,11 +657,7 @@ export const ExchangeScreen = () => {
 
   // Debug country changes - Apollo will automatically refetch when variables change
   useEffect(() => {
-    if (selectedCountry?.[2]) {
-      // Remove console.log to prevent re-renders
-      // console.log('🏴 Country changed to:', selectedCountry[0], 'Code:', selectedCountry[2]);
-      // console.log('📡 Apollo will automatically refetch payment methods...');
-    }
+    // Country selection changed
   }, [selectedCountry?.[2]]);
 
 
@@ -686,8 +680,7 @@ export const ExchangeScreen = () => {
   // Reset selected payment method if it's not available in the new country's methods
   useEffect(() => {
     if (paymentMethods.length > 0 && !paymentMethods.includes(selectedPaymentMethod)) {
-      // console.log('Resetting payment method from', selectedPaymentMethod, 'to "Todos los métodos"');
-      setSelectedPaymentMethod('Todos los métodos');
+      //      setSelectedPaymentMethod('Todos los métodos');
     }
   }, [paymentMethods, selectedPaymentMethod]);
 
@@ -1039,7 +1032,6 @@ export const ExchangeScreen = () => {
         });
       }
     } catch (error) {
-      console.error('Error refreshing data:', error);
     } finally {
       setRefreshing(false);
     }
@@ -1075,7 +1067,6 @@ export const ExchangeScreen = () => {
       });
 
     } catch (error) {
-      console.error('Error loading more trades:', error);
     } finally {
       setIsLoadingMoreTrades(false);
     }
@@ -1424,9 +1415,7 @@ export const ExchangeScreen = () => {
         } else if (offer.user?.id) {
           // Fallback to old user field
           mutationVariables = { traderUserId: offer.user.id };
-        } else {
-          console.error('[handleToggleFavorite] No trader ID found!');
-          Alert.alert('Error', 'No se pudo identificar al trader');
+        } else {          Alert.alert('Error', 'No se pudo identificar al trader');
           setLocalIsFavorite(!newFavoriteStatus); // Revert on error
           return;
         }
@@ -1449,7 +1438,6 @@ export const ExchangeScreen = () => {
           Alert.alert('Error', message);
         }
       } catch (error) {
-        console.error('Error toggling favorite:', error);
         Alert.alert('Error', 'Ocurrió un error al actualizar el favorito');
       } finally {
         setIsFavoriting(false);

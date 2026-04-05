@@ -130,7 +130,6 @@ export const ConfioPresaleScreen = () => {
         );
       }
     } catch (error: any) {
-      console.error('Error joining waitlist:', error);
       Alert.alert(
         'Error',
         error.message || 'No se pudo unir a la lista de espera. Por favor intenta nuevamente.',
@@ -165,9 +164,7 @@ export const ConfioPresaleScreen = () => {
       setClaimNotice('');
     } catch (e: any) {
       setBusy(false);
-      // Do not show alert on error; log to console for debugging
-      console.error('Error al reclamar $CONFIO:', e);
-      // Show a helpful inline message if it's clearly a no-claimable case
+      // Do not show alert on error; log to console for debugging      // Show a helpful inline message if it's clearly a no-claimable case
       if ((claimable ?? 0) <= 0) setClaimNotice('No tienes $CONFIO para reclamar');
     }
   };

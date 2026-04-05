@@ -68,17 +68,11 @@ export class SecurityService {
   /**
    * Initialize device fingerprinting
    */
-  public async initializeFingerprinting(): Promise<void> {
-    console.log('SecurityService - Initializing device fingerprinting...');
-    
+  public async initializeFingerprinting(): Promise<void> {    
     try {
       this.deviceFingerprint = await DeviceFingerprint.generateFingerprint();
       this.deviceFingerprintHash = await DeviceFingerprint.generateHash(this.deviceFingerprint);
-      this.isFingerprintReady = true;
-      
-      console.log('SecurityService - Device fingerprinting initialized');
-      console.log('SecurityService - Fingerprint hash:', this.deviceFingerprintHash);
-    } catch (error) {
+      this.isFingerprintReady = true;    } catch (error) {
       console.error('SecurityService - Failed to initialize fingerprinting:', error);
       // Use fallback fingerprint
       this.deviceFingerprint = await DeviceFingerprint.getFallbackFingerprint();
@@ -140,10 +134,6 @@ export class SecurityService {
       isTrustedDevice,
       requiresDeviceTrust: isNewDevice && !isTrustedDevice
     };
-
-    console.log('SecurityService - Secure authentication completed');
-    console.log('SecurityService - Security flags:', securityFlags);
-
     return {
       authData,
       deviceFingerprint: fingerprint,
@@ -178,7 +168,6 @@ export class SecurityService {
         };
       }
     } catch (error) {
-      console.log('SecurityService - Could not check device status (probably not authenticated yet)');
     }
 
     // Default to new device if we can't check

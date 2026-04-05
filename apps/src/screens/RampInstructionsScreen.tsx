@@ -1,8 +1,8 @@
 import React, { useMemo, useState } from 'react';
+import Clipboard from '@react-native-clipboard/clipboard';
 import {
   ActivityIndicator,
   Alert,
-  Clipboard,
   Image,
   Linking,
   SafeAreaView,

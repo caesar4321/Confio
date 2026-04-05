@@ -72,6 +72,10 @@ export const lightColors = {
   violet: '#8B5CF6',
   violetLight: '#EDE9FE',
   warningLight: '#FEF3C7',
+  primarySoft: '#ECFDF5', // emerald-50
+  borderMedium: '#D1D5DB', // gray-300
+  shadowBase: '#0F172A', // slate-900
+  gray700: '#374151', // gray-700
 };
 
 export const darkColors = {
@@ -146,6 +150,10 @@ export const darkColors = {
   violet: '#8B5CF6',
   violetLight: '#4C1D95',
   warningLight: '#78350F',
+  primarySoft: '#064E3B', // emerald-900 (dark mode equivalent of emerald-50)
+  borderMedium: '#4B5563', // gray-600 (dark mode equivalent of gray-300)
+  shadowBase: '#000000',
+  gray700: '#D1D5DB', // gray-300 (inverted for dark mode)
 };
 
 // Legacy export for backwards compatibility

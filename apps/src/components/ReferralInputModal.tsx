@@ -110,9 +110,7 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
             setError('');
           }
         }
-      }).catch(err => {
-        console.error('Error checking referral status:', err);
-      });
+      }).catch(() => {});
     }
   }, [visible]);
 
@@ -159,8 +157,6 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
         Alert.alert('Aviso', friendly, [{ text: 'Entendido' }]);
       }
     } catch (err: any) {
-      console.error('Network error:', err);
-
       // Try to extract a meaningful error message
       const errorMessage = err?.graphQLErrors?.[0]?.message || err?.message;
       if (errorMessage) {

@@ -10,11 +10,11 @@ import {
     Alert,
     ScrollView,
     Platform,
-    Clipboard,
     Linking,
     Image,
     StatusBar,
 } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 import Icon from 'react-native-vector-icons/Feather';
 import MCIcon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -33,7 +33,6 @@ import { getFlagForCurrency } from '../utils/currencyFlags';
 import USDCLogo from '../assets/png/USDC.png';
 import PreFlightModal from '../components/PreFlightModal';
 import GuardarianReturnModal from '../components/GuardarianReturnModal';
-import { APP_LAYOUT } from '../config/layout';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'Sell'>;
 
@@ -96,7 +95,6 @@ export const SellScreen = () => {
                         setShowGuardarianReturnModal(false);
                     }
                 } catch (e) {
-                    console.warn('SellScreen - Pending Guardarian ramp lookup failed', e);
                 }
             };
 
@@ -140,7 +138,6 @@ export const SellScreen = () => {
                 }
 
             } catch (err: any) {
-                console.warn('Guardarian fiat load failed', err);
                 setFiatError('No pudimos cargar monedas con retiro. Usaremos EUR.');
                 setCurrencyCode('EUR');
                 setPayoutFiats(SELL_SUPPORTED);
@@ -203,7 +200,6 @@ export const SellScreen = () => {
             }
 
         } catch (err: any) {
-            console.error('Guardarian sell error', err);
             const msg = String(err?.message || '').toLowerCase();
             if (msg.includes('payout')) {
                 setFiatError('Guardarian no ofrece métodos de retiro para esta moneda/país. Prueba otra moneda o cambia de país.');
@@ -458,7 +454,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: 16,
-        paddingTop: APP_LAYOUT.topSafeArea + 12,
+        paddingTop: 12,
         paddingBottom: 12,
         backgroundColor: '#fff',
         borderBottomWidth: 1,

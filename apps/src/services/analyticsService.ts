@@ -14,12 +14,9 @@ export const AnalyticsService = {
      */
     logEvent: async (name: string, params?: { [key: string]: any }) => {
         try {
-            if (__DEV__) {
-                console.log(`[Analytics] logEvent: ${name}`, params || '');
-            }
+            if (__DEV__) {            }
             await analytics().logEvent(name, params);
         } catch (error) {
-            console.warn('[Analytics] Failed to log event:', error);
         }
     },
 
@@ -30,12 +27,9 @@ export const AnalyticsService = {
      */
     setUserProperty: async (name: string, value: string) => {
         try {
-            if (__DEV__) {
-                console.log(`[Analytics] setUserProperty: ${name} = ${value}`);
-            }
+            if (__DEV__) {            }
             await analytics().setUserProperty(name, value);
         } catch (error) {
-            console.warn('[Analytics] Failed to set user property:', error);
         }
     },
 
@@ -49,7 +43,6 @@ export const AnalyticsService = {
                 screen_class: screenClass,
             });
         } catch (error) {
-            console.warn('[Analytics] Failed to log screen view:', error);
         }
     },
 
@@ -61,9 +54,7 @@ export const AnalyticsService = {
                 provider,
                 timestamp: new Date().toISOString(),
             });
-            if (__DEV__) console.log(`[Analytics] logBackupAttempt: ${provider}`);
         } catch (e) {
-            console.warn('[Analytics] Failed to log backup_attempt', e);
         }
     },
 
@@ -78,9 +69,7 @@ export const AnalyticsService = {
             // Update User User Property
             await analytics().setUserProperty('has_cloud_backup', 'true');
 
-            if (__DEV__) console.log(`[Analytics] logBackupSuccess: ${provider}`);
         } catch (e) {
-            console.warn('[Analytics] Failed to log backup_success', e);
         }
     },
 
@@ -91,9 +80,7 @@ export const AnalyticsService = {
                 error_message: error.substring(0, 100), // Truncate for safety
                 timestamp: new Date().toISOString(),
             });
-            if (__DEV__) console.log(`[Analytics] logBackupFailed: ${provider}`, error);
         } catch (e) {
-            console.warn('[Analytics] Failed to log backup_failed', e);
         }
     }
 };

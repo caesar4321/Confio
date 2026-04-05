@@ -125,15 +125,11 @@ export const PayrollPendingScreen = () => {
       });
       const prep = prepRes.data?.preparePayrollItemPayout;
       if (!prep?.success) {
-        const msg = prep?.errors?.[0] || 'No se pudo preparar el pago';
-        console.error('Payroll pay: prepare error', msg, prep?.errors);
-        throw new Error(msg);
+        const msg = prep?.errors?.[0] || 'No se pudo preparar el pago';        throw new Error(msg);
       }
       const sponsorTransaction = prep.sponsorTransaction;
 
-      if (!prep.unsignedTransactionB64) {
-        console.error('Payroll pay: missing unsignedTransactionB64');
-        throw new Error('Transacción inválida');
+      if (!prep.unsignedTransactionB64) {        throw new Error('Transacción inválida');
       }
 
       setProcessingMessage('Firmando transacción…');
@@ -156,16 +152,13 @@ export const PayrollPendingScreen = () => {
       });
       const submit = submitRes.data?.submitPayrollItemPayout;
       if (!submit?.success) {
-        const msg = submit?.errors?.[0] || 'No se pudo enviar la transacción';
-        console.error('Payroll pay: submit error', msg, submit?.errors);
-        throw new Error(msg);
+        const msg = submit?.errors?.[0] || 'No se pudo enviar la transacción';        throw new Error(msg);
       }
 
       setIsProcessing(false);
       Alert.alert('Pago enviado', 'La transacción de nómina fue enviada.');
       refetch();
     } catch (e: any) {
-      console.error('Payroll pay: unexpected error', e);
       setIsProcessing(false);
       Alert.alert('No se pudo pagar', e?.message || 'Error desconocido');
     } finally {
@@ -182,7 +175,7 @@ export const PayrollPendingScreen = () => {
         <Text style={styles.headerTitle}>Nómina pendiente</Text>
         <TouchableOpacity
           style={styles.historyButton}
-          onPress={() => navigation.navigate('PayrollRunsHistory' as never)}
+          onPress={() => navigation.navigate('PayrollRunsHistory')}
         >
           <Text style={styles.historyText}>Historial</Text>
         </TouchableOpacity>
@@ -206,7 +199,7 @@ export const PayrollPendingScreen = () => {
           </Text>
         </View>
         {isBusinessAccount ? (
-          <TouchableOpacity style={styles.topUpButton} onPress={() => navigation.navigate('PayrollTopUp' as never)}>
+          <TouchableOpacity style={styles.topUpButton} onPress={() => navigation.navigate('PayrollTopUp')}>
             <Icon name="arrow-up-right" size={16} color={colors.primary} />
             <Text style={styles.topUpText}>Agregar fondos</Text>
           </TouchableOpacity>

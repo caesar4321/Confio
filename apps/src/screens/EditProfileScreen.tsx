@@ -140,7 +140,6 @@ export const EditProfileScreen = () => {
         }
       }
     } catch (error) {
-      console.error('Error updating profile:', error);
       Alert.alert('Error', 'No se pudo actualizar el perfil. Inténtalo de nuevo.');
     } finally {
       setIsSaving(false);
@@ -161,7 +160,6 @@ export const EditProfileScreen = () => {
           return;
         }
       } catch (error) {
-        console.error('Biometric auth failed', error);
         return;
       }
     }

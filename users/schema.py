@@ -1130,7 +1130,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 	my_confio_transactions = graphene.List(ConfioRewardTransactionType, limit=graphene.Int(), offset=graphene.Int())
 	user_tiktok_shares = graphene.List(TikTokViralShareType, status=graphene.String())
 	my_referral_rewards = graphene.List(ReferralRewardEventType, status=graphene.String())
-	my_referrals = graphene.List(InfluencerReferralType, status=graphene.String())
+	my_referrals = graphene.List(InfluencerReferralType, status=graphene.String(), first=graphene.Int(), offset=graphene.Int())
 
 	# Real-time stats for $CONFIO info screen
 	stats_summary = graphene.Field(StatsSummaryType)
@@ -2270,7 +2270,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		logger.info("[referral_rewards] user=%s status=%s count=%s", user.id, status, qset.count())
 		return qset
 
-	def resolve_my_referrals(self, info, status=None):
+	def resolve_my_referrals(self, info, status=None, first=None, offset=None):
 		"""Get referrals from current user's perspective (both as referee and referrer)."""
 		user = getattr(info.context, 'user', None)
 		if not (user and getattr(user, 'is_authenticated', False)):
@@ -2291,7 +2291,12 @@ class Query(EmployeeQueries, graphene.ObjectType):
 				Q(referred_user=user, referee_reward_status__iexact=status_lower)
 			)
 
-		logger.info("[my_referrals] user=%s status=%s count=%s", user.id, status, qset.count())
+		# Apply pagination
+		if offset is not None:
+			qset = qset[offset:]
+		if first is not None:
+			qset = qset[:first]
+
 		return qset
 	
 	def resolve_user_tiktok_shares(self, info, status=None):

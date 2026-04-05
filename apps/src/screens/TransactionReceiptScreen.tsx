@@ -8,7 +8,6 @@ import {
   ScrollView,
   Alert,
   Platform,
-  StatusBar,
 } from 'react-native';
 import Share from 'react-native-share';
 import Icon from 'react-native-vector-icons/Feather';
@@ -20,6 +19,7 @@ import { MainStackParamList } from '../types/navigation';
 import { useAuth } from '../contexts/AuthContext';
 import { TransactionReceiptView } from '../components/TransactionReceiptView';
 import { APP_LAYOUT } from '../config/layout';
+import { colors } from '../config/theme';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'TransactionReceipt'>;
 type RouteProps = RouteProp<MainStackParamList, 'TransactionReceipt'>;
@@ -186,7 +186,7 @@ export const TransactionReceiptScreen = () => {
   const handleExportPDF = async () => {
     try {
       if (!viewShotRef.current) return;
-      const uri = await viewShotRef.current.capture();
+      const uri = await viewShotRef.current.capture?.();
       if (!uri) return;
 
       await CameraRoll.save(uri, { type: 'photo' });
@@ -214,14 +214,12 @@ export const TransactionReceiptScreen = () => {
                   filename: `Comprobante_${spanishType}_${transaction.id || 'confio'}`,
                 });
               } catch (error) {
-                console.error('Share error:', error);
               }
             },
           },
         ]
       );
     } catch (e: any) {
-      console.error('Export error', e);
       Alert.alert('Error', 'No se pudo guardar el comprobante.');
     }
   };
@@ -239,11 +237,11 @@ export const TransactionReceiptScreen = () => {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Icon name="arrow-left" size={22} color="#111827" />
+          <Icon name="arrow-left" size={22} color={colors.textFlat} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{getHeaderTitle()}</Text>
         <TouchableOpacity style={styles.downloadButton} onPress={handleExportPDF}>
-          <Icon name="download" size={20} color="#10B981" />
+          <Icon name="download" size={20} color={colors.primaryDark} />
         </TouchableOpacity>
       </View>
 
@@ -271,7 +269,7 @@ export const TransactionReceiptScreen = () => {
         </ViewShot>
 
         <TouchableOpacity style={styles.exportButton} onPress={handleExportPDF}>
-          <Icon name="download" size={20} color="#fff" />
+          <Icon name="download" size={20} color={colors.white} />
           <Text style={styles.exportButtonText}>Descargar comprobante</Text>
         </TouchableOpacity>
       </ScrollView>
@@ -282,7 +280,7 @@ export const TransactionReceiptScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: colors.neutral,
   },
   header: {
     flexDirection: 'row',
@@ -291,9 +289,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     marginTop: Platform.OS === 'android' ? APP_LAYOUT.topSafeArea + 10 : 0,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
+    borderBottomColor: colors.neutralDark,
   },
   backButton: {
     padding: 8,
@@ -301,7 +299,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.textFlat,
     flex: 1,
     marginLeft: 8,
   },
@@ -312,7 +310,7 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   exportButton: {
-    backgroundColor: '#10B981',
+    backgroundColor: colors.primaryDark,
     borderRadius: 12,
     paddingVertical: 16,
     paddingHorizontal: 24,
@@ -322,7 +320,7 @@ const styles = StyleSheet.create({
     gap: 8,
     margin: 20,
     marginTop: 24,
-    shadowColor: '#10B981',
+    shadowColor: colors.primaryDark,
     shadowOpacity: 0.3,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 4 },
@@ -331,7 +329,7 @@ const styles = StyleSheet.create({
   exportButtonText: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#fff',
+    color: colors.white,
   },
 });
 

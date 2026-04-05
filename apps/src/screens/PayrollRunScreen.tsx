@@ -128,7 +128,6 @@ export const PayrollRunScreen = () => {
         Alert.alert('Error', res.data?.createPayrollRun?.errors?.[0] || 'No se pudo crear la nómina');
       }
     } catch (e: any) {
-      console.error('Create payroll error:', e);
       setIsProcessing(false);
       Alert.alert('Error', e?.message || 'Ocurrió un error al crear la nómina');
     }

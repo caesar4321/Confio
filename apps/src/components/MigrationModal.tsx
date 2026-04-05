@@ -71,7 +71,6 @@ export const MigrationModal = () => {
                                     await authService.signOut(); // SignOut
                                     // The auth state listener in App.tsx will handle navigation to Auth flow
                                 } catch (e) {
-                                    console.error('Logout failed', e);
                                 }
                             }
                         }
@@ -101,7 +100,6 @@ export const MigrationModal = () => {
                 setVisible(false);
             }
         } catch (error) {
-            console.error('Migration check failed:', error);
         } finally {
             isCheckingRef.current = false;
         }
@@ -129,7 +127,6 @@ export const MigrationModal = () => {
                     await apolloClient.reFetchObservableQueries();
                     // Also clear any cached heavy data if needed   
                 } catch (e) {
-                    console.warn('Refetch failed', e);
                 }
 
                 setTimeout(() => {
@@ -140,7 +137,6 @@ export const MigrationModal = () => {
                 setTimeout(() => performMigration(iss, sub, aud, provider), 3000);
             }
         } catch (error) {
-            console.error('Migration failed:', error);
             Alert.alert(
                 'Actualización Fallida',
                 'No pudimos actualizar tu billetera. Por favor verifica tu conexión a internet e inténtalo de nuevo.',

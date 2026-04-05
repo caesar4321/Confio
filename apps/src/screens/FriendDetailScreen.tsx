@@ -173,9 +173,7 @@ export function FriendDetailScreen() {
     skip: false,
     onCompleted: (data) => {
     },
-    onError: (error) => {
-      console.error('Unified transactions query error:', error);
-    }
+    onError: (error) => {    }
   });
 
   // Get friend transactions directly from the friend-specific query (no client-side filtering needed)
@@ -440,7 +438,6 @@ export function FriendDetailScreen() {
     try {
       await unifiedRefetch();
     } catch (error) {
-      console.error('Error refreshing transactions:', error);
     } finally {
       setRefreshing(false);
     }
@@ -474,7 +471,6 @@ export function FriendDetailScreen() {
         setHasReachedEnd(true);
       }
     } catch (error) {
-      console.error('Error loading more transactions:', error);
     } finally {
       setLoadingMore(false);
     }

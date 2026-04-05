@@ -96,17 +96,14 @@ const PhoneVerificationScreen = () => {
     const hasMain = !!state?.routeNames?.includes?.('Main');
 
     if (hasMain) {
-      (navigation as any).navigate('Main' as never, params as never);
+      (navigation as any).navigate('Main', params);
       return;
     }
 
     if (navigationRef.isReady()) {
-      navigationRef.navigate('Main' as never, params as never);
+      navigationRef.navigate('Main', params);
       return;
-    }
-
-    console.warn('[PhoneVerification] Navigation to Main skipped; navigator not ready');
-  };
+    }  };
 
   const handleContinue = async () => {
     if (currentScreen === 'phone') {
@@ -158,7 +155,6 @@ const PhoneVerificationScreen = () => {
           return false;
         }
       } catch (e) {
-        console.error('Error sending verification:', e);
         Alert.alert(
           'No pudimos enviar el código por Telegram',
           'Intenta nuevamente o recibe tu código por SMS.',

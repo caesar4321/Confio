@@ -2,58 +2,51 @@ import { createNavigationContainerRef } from '@react-navigation/native';
 
 export const navigationRef = createNavigationContainerRef();
 
+function unsafeNavigate(name: string, params?: any) {
+  (navigationRef as any).navigate(name, params);
+}
+
 export function navigate(name: string, params?: any) {
-  console.log('[RootNavigation] navigate called:', { name, params, isReady: navigationRef.isReady() });
-  
   // LEGACY FORMAT DETECTION:
-  // The code detects if a notification is trying to use the old P2PTradeDetail screen name 
+  // The code detects if a notification is trying to use the old P2PTradeDetail screen name
   // and automatically converts it to ActiveTrade. This handles old/cached push notifications
   // that were created before the screen was renamed.
   // Old format: navigate('P2PTradeDetail', { tradeId: '26' })
   // New format: navigate('ActiveTrade', { trade: { id: '26' } })
-  // This conversion ensures backward compatibility with notifications already sent to users.
   if (name === 'P2PTradeDetail' && params?.tradeId) {
-    console.log('[RootNavigation] Converting legacy P2PTradeDetail navigation to ActiveTrade');
     name = 'ActiveTrade';
     params = { trade: { id: params.tradeId } };
   }
-  
+
   if (navigationRef.isReady()) {
     try {
-      navigationRef.navigate(name as never, params as never);
-      console.log('[RootNavigation] Navigation successful');
+      unsafeNavigate(name, params);
     } catch (error) {
-      console.error('[RootNavigation] Navigation error:', error);
       // If navigation fails, try to navigate to a safe fallback
       if (name.includes('Trade') || name.includes('P2P')) {
-        console.log('[RootNavigation] Falling back to Discover screen');
-        navigationRef.navigate('Main' as never, {
+        unsafeNavigate('Main', {
           screen: 'BottomTabs',
           params: {
             screen: 'Discover'
           }
-        } as never);
+        });
       }
     }
   } else {
-    console.log('[RootNavigation] Navigation not ready, queuing navigation...');
     // Queue the navigation for when the navigation is ready
     let retryCount = 0;
     const maxRetries = 50; // 5 seconds max
-    
+
     const tryNavigate = setInterval(() => {
       retryCount++;
       if (navigationRef.isReady()) {
-        console.log('[RootNavigation] Navigation ready after retry, navigating...');
         clearInterval(tryNavigate);
         try {
-          navigationRef.navigate(name as never, params as never);
-          console.log('[RootNavigation] Delayed navigation successful');
+          unsafeNavigate(name, params);
         } catch (error) {
-          console.error('[RootNavigation] Delayed navigation error:', error);
+          // Navigation failed after becoming ready
         }
       } else if (retryCount >= maxRetries) {
-        console.error('[RootNavigation] Navigation failed - timeout waiting for navigation to be ready');
         clearInterval(tryNavigate);
       }
     }, 100);

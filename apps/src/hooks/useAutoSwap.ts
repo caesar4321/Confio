@@ -133,7 +133,6 @@ export const useAutoSwap = ({
 
                 if (!swapAssetType) return;
                 if (!Number.isFinite(Number(swapAmount)) || Number(swapAmount) <= 0) {
-                    console.log(`[AutoSwap Hook] Invalid swap amount (${swapAmount}), skipping.`);
                     return;
                 }
 
@@ -141,13 +140,11 @@ export const useAutoSwap = ({
                 const now = Date.now();
                 const lastAttempt = lastAttemptTimestamps.current[swapKey] || 0;
                 if (now - lastAttempt < SWAP_COOLDOWN_MS) {
-                    console.log(`[AutoSwap Hook] Cooldown active for ${swapKey}, skipping.`);
                     return;
                 }
                 // Record this attempt time
                 lastAttemptTimestamps.current[swapKey] = now;
 
-                console.log(`[AutoSwap Hook] Threshold met for ${swapAssetType}. Amount: ${swapAmount}`);
                 isSwappingRef.current = true;
                 const modalStartTs = Date.now();
                 setSwapModalAsset(swapAssetType as 'ALGO' | 'USDC');
@@ -166,24 +163,19 @@ export const useAutoSwap = ({
                         if (data?.success) break;
 
                         if (data?.error === 'requires_app_optin' && attempt === 0) {
-                            console.log('[AutoSwap Hook] cUSD app opt-in required. Running opt-in flow...');
                             const optInResult = await cusdAppOptInService.handleAppOptIn(activeAccount);
                             if (!optInResult.success) {
-                                console.warn('[AutoSwap Hook] cUSD app opt-in failed:', optInResult.error);
                                 return;
                             }
-                            console.log('[AutoSwap Hook] cUSD app opt-in completed. Retrying auto-swap build...');
                             continue;
                         }
 
-                        console.warn('[AutoSwap Hook] Backend failed to build swap transactions:', data?.error);
                         return;
                     }
 
                     if (!data?.success) return;
 
                     if (!data.transactions) {
-                        console.warn('[AutoSwap Hook] No transactions field returned from backend');
                         return;
                     }
 
@@ -195,7 +187,6 @@ export const useAutoSwap = ({
                     const internalId: string = payload.internal_id;
 
                     if (!unsignedBase64Txns || unsignedBase64Txns.length === 0) {
-                        console.warn('[AutoSwap Hook] No transactions returned to sign.');
                         return;
                     }
 
@@ -224,9 +215,7 @@ export const useAutoSwap = ({
 
                     const submitData = submitRes.data?.submitAutoSwapTransactions;
                     if (!submitData?.success) {
-                        console.warn('[AutoSwap Hook] Failed to submit auto swap:', submitData?.error);
                     } else {
-                        console.log(`[AutoSwap Hook] Swap successful! TXID: ${submitData.txid}`);
                         // Keep a post-success cooldown so stale balances do not immediately retrigger the same swap.
                         lastAttemptTimestamps.current[swapKey] = Date.now();
                         refreshAccountBalance();

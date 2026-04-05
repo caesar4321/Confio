@@ -183,9 +183,7 @@ const VerificationScreen = () => {
 
   useFocusEffect(
     React.useCallback(() => {
-      refreshStatuses().catch((error) => {
-        console.warn('[Verification] Failed to refresh Didit status on focus:', error);
-      });
+      refreshStatuses().catch(() => {});
     }, [refreshStatuses]),
   );
 

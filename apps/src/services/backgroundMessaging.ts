@@ -4,15 +4,12 @@ import notificationDedup from './notificationDeduplication';
 
 // Register background handler
 messaging().setBackgroundMessageHandler(async remoteMessage => {
-  console.log('Message handled in the background!', remoteMessage);
-
   // Check for duplicates using global deduplication
   const messageId = remoteMessage.data?.message_id;
   const notificationId = remoteMessage.data?.notification_id;
   const firebaseMessageId = remoteMessage.messageId;
   
   if (notificationDedup.isDuplicate(messageId || firebaseMessageId, notificationId)) {
-    console.log('Background handler: Duplicate notification detected, skipping');
     return;
   }
 
@@ -46,9 +43,6 @@ messaging().setBackgroundMessageHandler(async remoteMessage => {
 });
 
 // Background event handler for Notifee
-notifee.onBackgroundEvent(async ({ type, detail }) => {
-  console.log('Background event:', type, detail);
-  if (type === EventType.PRESS && detail.notification) {
-    console.log('Background notification press received; app launch should recover it via notifee.getInitialNotification()');
+notifee.onBackgroundEvent(async ({ type, detail }) => {  if (type === EventType.PRESS && detail.notification) {
   }
 });

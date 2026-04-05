@@ -41,6 +41,16 @@ target 'Confio' do
     # Standard fixes for React Native
     installer.pods_project.targets.each do |target|
       target.build_configurations.each do |config|
+        definitions = Array(config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'])
+        cleaned_definitions = definitions.flat_map { |value| value.to_s.split(/\s+/) }.reject do |value|
+          [
+            'REACT_NATIVE_DEBUGGER_ENABLED=1',
+            'REACT_NATIVE_DEBUGGER_ENABLED_DEVONLY=1',
+            'REACT_NATIVE_DEBUGGER_ENABLED=1REACT_NATIVE_DEBUGGER_ENABLED_DEVONLY=1',
+          ].include?(value)
+        end
+        config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] = cleaned_definitions if cleaned_definitions.any?
+
         # Disable bitcode
         config.build_settings['ENABLE_BITCODE'] = 'NO'
         
@@ -53,6 +63,10 @@ target 'Confio' do
         # Fix for React Native Screens sheet presentation
         if target.name == 'RNScreens'
           config.build_settings['RCT_NEW_ARCH_ENABLED'] = '0'
+        end
+
+        if target.name == 'React-jsinspector'
+          config.build_settings['GCC_PREPROCESSOR_DEFINITIONS[config=*Debug*]'] = '$(inherited)'
         end
       end
     end

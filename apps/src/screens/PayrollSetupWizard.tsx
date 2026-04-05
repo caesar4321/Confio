@@ -189,7 +189,6 @@ export const PayrollSetupWizard = () => {
         Alert.alert('Error', res?.errors?.[0] || 'No se pudo activar nómina.');
       }
     } catch (e: any) {
-      console.error('Activation error:', e);
       Alert.alert('Error', e?.message || 'No se pudo activar nómina.');
     } finally {
       setActivating(false);

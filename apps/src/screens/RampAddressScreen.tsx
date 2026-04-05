@@ -119,7 +119,6 @@ export const RampAddressScreen: React.FC = () => {
 
       showSuccessBanner();
     } catch (mutationError) {
-      console.error('Error guardando dirección para ramps:', mutationError);
       setError('No se pudo guardar tu dirección. Inténtalo nuevamente.');
     } finally {
       setIsSaving(false);

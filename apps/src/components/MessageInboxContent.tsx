@@ -163,7 +163,6 @@ function mapChannels(channels?: InboxChannelDto[]): Channel[] {
         }),
       };
     } catch (error) {
-      console.warn('Skipping unsupported message channel', channel.id, error);
       return [];
     }
   });
@@ -267,9 +266,7 @@ export function MessageInboxContent({ onScreenStateChange, initialChannelId }: M
       prev.map((item) => (item.serverId === channel.serverId ? { ...item, time: channel.time } : item))
     );
     setScreen('channel');
-    void markChannelSeen({ variables: { channelId: toServerChannelId(channel) } }).catch((error) => {
-      console.warn('Failed to mark message channel seen', error);
-    });
+    void markChannelSeen({ variables: { channelId: toServerChannelId(channel) } }).catch((error) => {    });
   };
 
   const handleReactToMessage = async (messageId: number, emoji: string) => {

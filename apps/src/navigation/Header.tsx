@@ -165,9 +165,7 @@ export const Header: React.FC<HeaderProps> = ({
               alignItems: 'center',
               overflow: 'hidden',
             }} 
-            onPress={() => {
-              console.log('Header: Profile button pressed, onProfilePress:', !!onProfilePress);
-              if (onProfilePress) {
+            onPress={() => {              if (onProfilePress) {
                 onProfilePress();
               }
             }}

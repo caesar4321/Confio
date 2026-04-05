@@ -265,7 +265,6 @@ export const CreateOfferScreen = () => {
         }
       }
     } catch (error) {
-      console.error('Error creating/updating offer:', error);
       Alert.alert('Error', `Ocurrió un error al ${editMode ? 'actualizar' : 'crear'} la oferta. Por favor intenta de nuevo.`);
     }
   };

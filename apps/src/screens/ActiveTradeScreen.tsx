@@ -264,7 +264,7 @@ export const ActiveTradeScreen: React.FC = () => {
         <StatusBar barStyle="dark-content" backgroundColor="#fff" />
         <View style={styles.header}>
           <View style={styles.headerContent}>
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton} accessibilityRole="button" accessibilityLabel="Volver">
               <Icon name="arrow-left" size={24} color="#374151" />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Cargando intercambio...</Text>
@@ -290,7 +290,7 @@ export const ActiveTradeScreen: React.FC = () => {
         <StatusBar barStyle="dark-content" backgroundColor="#fff" />
         <View style={styles.header}>
           <View style={styles.headerContent}>
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton} accessibilityRole="button" accessibilityLabel="Volver">
               <Icon name="arrow-left" size={24} color="#374151" />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Error</Text>
@@ -356,7 +356,6 @@ export const ActiveTradeScreen: React.FC = () => {
         Alert.alert('Error', res.error || 'No se pudo iniciar la disputa.');
       }
     } catch (error) {
-      console.error('Error initiating dispute:', error);
       Alert.alert('Error', 'Ocurrió un error al iniciar la disputa. Por favor intenta de nuevo.');
     } finally {
       setIsSubmittingDispute(false);
@@ -370,7 +369,6 @@ export const ActiveTradeScreen: React.FC = () => {
       if (!uri) return;
       await handleSelectVideo(uri);
     } catch (e: any) {
-      console.error('[Dispute] pick video error:', e?.message || e);
       Alert.alert('Error', 'No se pudo abrir la galería de videos.');
     }
   };
@@ -387,7 +385,6 @@ export const ActiveTradeScreen: React.FC = () => {
       setShowEvidenceSheet(false);
       try { await refetch(); } catch { }
     } catch (e: any) {
-      console.error('[Dispute] upload evidence error:', e?.message || e);
       Alert.alert('Error', e?.message || 'No se pudo subir la evidencia.');
     } finally {
       setIsUploadingEvidence(false);
@@ -465,6 +462,8 @@ export const ActiveTradeScreen: React.FC = () => {
   const handleRateTrader = () => {
     Alert.alert('Calificación', 'Función de calificación en desarrollo');
   };
+
+  const chatAccessibilityLabel = `Abrir chat del intercambio con ${trade.trader?.name || 'la contraparte'}`;
 
   // Progress bar component
   const TradeProgressBar: React.FC<{ currentStep: number; totalSteps: number }> = ({ currentStep, totalSteps }) => (
@@ -573,7 +572,7 @@ export const ActiveTradeScreen: React.FC = () => {
             </View>
           </View>
 
-          <TouchableOpacity style={styles.primaryButton} onPress={handleOpenChat}>
+          <TouchableOpacity style={styles.primaryButton} onPress={handleOpenChat} accessibilityRole="button" accessibilityLabel={chatAccessibilityLabel}>
             <Icon name="message-circle" size={16} color="#fff" style={styles.buttonIcon} />
             <Text style={styles.primaryButtonText}>Ir al chat del intercambio</Text>
           </TouchableOpacity>
@@ -624,7 +623,7 @@ export const ActiveTradeScreen: React.FC = () => {
             </View>
           </View>
 
-          <TouchableOpacity style={styles.primaryButton} onPress={handleOpenChat}>
+          <TouchableOpacity style={styles.primaryButton} onPress={handleOpenChat} accessibilityRole="button" accessibilityLabel={chatAccessibilityLabel}>
             <Icon name="message-circle" size={16} color="#fff" style={styles.buttonIcon} />
             <Text style={styles.primaryButtonText}>Ir al chat del intercambio</Text>
           </TouchableOpacity>
@@ -680,7 +679,7 @@ export const ActiveTradeScreen: React.FC = () => {
             </View>
           </View>
 
-          <TouchableOpacity style={styles.primaryButton} onPress={handleOpenChat}>
+          <TouchableOpacity style={styles.primaryButton} onPress={handleOpenChat} accessibilityRole="button" accessibilityLabel={chatAccessibilityLabel}>
             <Icon name="message-circle" size={16} color="#ffffff" style={styles.buttonIcon} />
             <Text style={styles.primaryButtonText}>Ir al chat del intercambio</Text>
           </TouchableOpacity>
@@ -732,7 +731,7 @@ export const ActiveTradeScreen: React.FC = () => {
             </View>
           </View>
 
-          <TouchableOpacity style={styles.primaryButton} onPress={handleOpenChat}>
+          <TouchableOpacity style={styles.primaryButton} onPress={handleOpenChat} accessibilityRole="button" accessibilityLabel={chatAccessibilityLabel}>
             <Icon name="message-circle" size={16} color="#ffffff" style={styles.buttonIcon} />
             <Text style={styles.primaryButtonText}>Ir al chat del intercambio</Text>
           </TouchableOpacity>
@@ -792,7 +791,7 @@ export const ActiveTradeScreen: React.FC = () => {
             </View>
           </View>
 
-          <TouchableOpacity style={styles.primaryButton} onPress={handleOpenChat}>
+          <TouchableOpacity style={styles.primaryButton} onPress={handleOpenChat} accessibilityRole="button" accessibilityLabel={chatAccessibilityLabel}>
             <Icon name="message-circle" size={16} color="#fff" style={styles.buttonIcon} />
             <Text style={styles.primaryButtonText}>Ir al chat del intercambio</Text>
           </TouchableOpacity>
@@ -841,7 +840,7 @@ export const ActiveTradeScreen: React.FC = () => {
             </View>
           </View>
 
-          <TouchableOpacity style={styles.primaryButton} onPress={handleOpenChat}>
+          <TouchableOpacity style={styles.primaryButton} onPress={handleOpenChat} accessibilityRole="button" accessibilityLabel={chatAccessibilityLabel}>
             <Icon name="message-circle" size={16} color="#fff" style={styles.buttonIcon} />
             <Text style={styles.primaryButtonText}>Ir al chat del intercambio</Text>
           </TouchableOpacity>
@@ -907,7 +906,7 @@ export const ActiveTradeScreen: React.FC = () => {
           </View>
 
           <View style={styles.successButtons}>
-            <TouchableOpacity style={styles.secondaryButton} onPress={handleGoBack}>
+            <TouchableOpacity style={styles.secondaryButton} onPress={handleGoBack} accessibilityRole="button" accessibilityLabel="Volver">
               <Text style={styles.secondaryButtonText}>Volver a Intercambios</Text>
             </TouchableOpacity>
           </View>
@@ -936,7 +935,7 @@ export const ActiveTradeScreen: React.FC = () => {
               <View style={[styles.modalContent, { maxHeight: '85%' }]}>
                 <View style={styles.modalHeader}>
                   <Text style={styles.modalTitle}>Detalles técnicos</Text>
-                  <TouchableOpacity onPress={() => setShowTechnicalDetails(false)} style={styles.modalCloseButton}>
+                  <TouchableOpacity onPress={() => setShowTechnicalDetails(false)} style={styles.modalCloseButton} accessibilityRole="button" accessibilityLabel="Cerrar detalles técnicos">
                     <Icon name="x" size={20} color="#111827" />
                   </TouchableOpacity>
                 </View>
@@ -1137,7 +1136,7 @@ export const ActiveTradeScreen: React.FC = () => {
           }}>
             <Text style={styles.primaryButtonText}>Calificar a {trade.trader?.name || 'Comerciante'}</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.secondaryButton} onPress={handleGoBack}>
+          <TouchableOpacity style={styles.secondaryButton} onPress={handleGoBack} accessibilityRole="button" accessibilityLabel="Volver">
             <Text style={styles.secondaryButtonText}>Volver al Inicio</Text>
           </TouchableOpacity>
         </View>
@@ -1166,7 +1165,7 @@ export const ActiveTradeScreen: React.FC = () => {
             <View style={styles.modalContent}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Detalles técnicos</Text>
-                <TouchableOpacity onPress={() => setShowTechnicalDetails(false)} style={styles.modalCloseButton}>
+                <TouchableOpacity onPress={() => setShowTechnicalDetails(false)} style={styles.modalCloseButton} accessibilityRole="button" accessibilityLabel="Cerrar detalles técnicos">
                   <Icon name="x" size={20} color="#111827" />
                 </TouchableOpacity>
               </View>
@@ -1242,7 +1241,7 @@ export const ActiveTradeScreen: React.FC = () => {
 
       <View style={styles.header}>
         <View style={styles.headerContent}>
-          <TouchableOpacity onPress={handleGoBack} style={styles.backButton}>
+          <TouchableOpacity onPress={handleGoBack} style={styles.backButton} accessibilityRole="button" accessibilityLabel="Volver">
             <Icon name="arrow-left" size={24} color="#374151" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>
@@ -1273,6 +1272,8 @@ export const ActiveTradeScreen: React.FC = () => {
                   ],
                 );
               }}
+              accessibilityRole="button"
+              accessibilityLabel="Abrir opciones del intercambio"
             >
               <Icon name="more-vertical" size={20} color="#374151" />
             </TouchableOpacity>
@@ -1313,6 +1314,8 @@ export const ActiveTradeScreen: React.FC = () => {
             <TouchableOpacity
               style={styles.viewAllTradesHint}
               onPress={() => navigation.navigate('BottomTabs', { screen: 'Discover' })}
+              accessibilityRole="button"
+              accessibilityLabel="Ver todos mis intercambios"
             >
               <Icon name="list" size={12} color="#2563EB" style={styles.hintIcon} />
               <Text style={styles.hintText}>Ver todos mis intercambios</Text>
@@ -1344,6 +1347,8 @@ export const ActiveTradeScreen: React.FC = () => {
           <TouchableOpacity
             style={styles.disputeChatButton}
             onPress={handleOpenChat}
+            accessibilityRole="button"
+            accessibilityLabel={chatAccessibilityLabel}
           >
             <Icon name="message-circle" size={16} color="#0F766E" />
             <Text style={styles.disputeChatButtonText}>💬 Continuar conversación</Text>
@@ -1362,6 +1367,8 @@ export const ActiveTradeScreen: React.FC = () => {
               } catch { }
               setShowEvidenceSheet(true);
             }}
+            accessibilityRole="button"
+            accessibilityLabel="Subir evidencia del intercambio"
           >
             <Icon name="upload" size={16} color="#065F46" />
             <Text style={[styles.disputeChatButtonText, { color: '#065F46' }]}>⬆️ Subir evidencia (pantalla)</Text>
@@ -1456,6 +1463,8 @@ export const ActiveTradeScreen: React.FC = () => {
                       setDisputeReason('');
                     }}
                     style={styles.modalCloseButton}
+                    accessibilityRole="button"
+                    accessibilityLabel="Cerrar disputa"
                   >
                     <Icon name="x" size={24} color="#6B7280" />
                   </TouchableOpacity>
@@ -1494,6 +1503,8 @@ export const ActiveTradeScreen: React.FC = () => {
                       setDisputeReason('');
                     }}
                     disabled={isSubmittingDispute}
+                    accessibilityRole="button"
+                    accessibilityLabel="Cancelar disputa"
                   >
                     <Text style={styles.modalCancelButtonText}>Cancelar</Text>
                   </TouchableOpacity>
@@ -1505,6 +1516,8 @@ export const ActiveTradeScreen: React.FC = () => {
                     ]}
                     onPress={submitDispute}
                     disabled={isSubmittingDispute || disputeReason.trim().length < 10}
+                    accessibilityRole="button"
+                    accessibilityLabel="Enviar disputa"
                   >
                     <Text style={styles.modalSubmitButtonText}>
                       {isSubmittingDispute ? 'Enviando...' : 'Enviar disputa'}
@@ -1534,7 +1547,7 @@ export const ActiveTradeScreen: React.FC = () => {
               <View style={styles.modalContent}>
                 <View style={styles.modalHeader}>
                   <Text style={styles.modalTitle}>Subir evidencia</Text>
-                  <TouchableOpacity onPress={() => setShowEvidenceSheet(false)} style={styles.modalCloseButton}>
+                  <TouchableOpacity onPress={() => setShowEvidenceSheet(false)} style={styles.modalCloseButton} accessibilityRole="button" accessibilityLabel="Cerrar carga de evidencia">
                     <Icon name="x" size={24} color="#6B7280" />
                   </TouchableOpacity>
                 </View>
@@ -1570,7 +1583,7 @@ export const ActiveTradeScreen: React.FC = () => {
                   </ScrollView>
                 </View>
                 <View style={styles.modalActions}>
-                  <TouchableOpacity style={styles.modalSubmitButton} onPress={pickScreenRecordingFromGallery}>
+                  <TouchableOpacity style={styles.modalSubmitButton} onPress={pickScreenRecordingFromGallery} accessibilityRole="button" accessibilityLabel="Seleccionar video de pantalla">
                     <Text style={styles.modalSubmitButtonText}>Seleccionar video de pantalla</Text>
                   </TouchableOpacity>
                 </View>
@@ -1582,7 +1595,7 @@ export const ActiveTradeScreen: React.FC = () => {
             <View style={styles.modalContent}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Subir evidencia</Text>
-                <TouchableOpacity onPress={() => setShowEvidenceSheet(false)} style={styles.modalCloseButton}>
+                <TouchableOpacity onPress={() => setShowEvidenceSheet(false)} style={styles.modalCloseButton} accessibilityRole="button" accessibilityLabel="Cerrar carga de evidencia">
                   <Icon name="x" size={24} color="#6B7280" />
                 </TouchableOpacity>
               </View>
@@ -1621,7 +1634,7 @@ export const ActiveTradeScreen: React.FC = () => {
                 </ScrollView>
               </View>
               <View style={styles.modalActions}>
-                <TouchableOpacity style={styles.modalSubmitButton} onPress={pickScreenRecordingFromGallery}>
+                <TouchableOpacity style={styles.modalSubmitButton} onPress={pickScreenRecordingFromGallery} accessibilityRole="button" accessibilityLabel="Seleccionar video de pantalla">
                   <Text style={styles.modalSubmitButtonText}>Seleccionar video de pantalla</Text>
                 </TouchableOpacity>
               </View>

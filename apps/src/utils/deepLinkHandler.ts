@@ -49,7 +49,6 @@ export class DeepLinkHandler {
         if (!existingDeferred) {
           const referralCode = await this.checkReferralStrategies();
           if (referralCode) {
-            console.log('Found deferred referral code:', referralCode);
             const linkData: DeepLinkData = {
               type: 'referral',
               payload: referralCode,
@@ -75,7 +74,6 @@ export class DeepLinkHandler {
 
   private async checkReferralStrategies(): Promise<string | null> {
     /* MOCK FOR TESTING - UNCOMMENT TO USE
-    console.log('[DeepLink] Using MOCKED Play Store referrer value');
     await new Promise(resolve => setTimeout(resolve, 1000));
     return 'JULIANMOONLUNA';
     */
@@ -83,8 +81,6 @@ export class DeepLinkHandler {
     // 1. Check Install Referrer (Android only)
     if (Platform.OS === 'android') {
       try {
-        console.log('[DeepLink] Checking Play Install Referrer (New Lib)...');
-
         const referrerInfo = await new Promise((resolve, reject) => {
           PlayInstallReferrer.getInstallReferrerInfo((value: any, error: any) => {
             if (error) {
@@ -95,11 +91,8 @@ export class DeepLinkHandler {
           });
         }) as any;
 
-        console.log(`[DeepLink] Install Referrer raw data: ${JSON.stringify(referrerInfo)}`);
-
         if (referrerInfo && referrerInfo.installReferrer) {
           let ref = referrerInfo.installReferrer;
-          console.log(`[DeepLink] Raw referrer string: ${ref}`);
 
 
           // Ignore standard google play params if they don't look like our code
@@ -114,7 +107,6 @@ export class DeepLinkHandler {
             try {
               const decoded = decodeURIComponent(ref);
               if (decoded !== ref) {
-                console.log(`[DeepLink] Decoded referrer: ${decoded}`);
                 ref = decoded;
                 potentialCode = decoded;
               }
@@ -131,18 +123,13 @@ export class DeepLinkHandler {
             const campaign = params.get('utm_campaign');
             const source = params.get('utm_source');
 
-            console.log(`[DeepLink] Parsed UTMs - content: ${content}, campaign: ${campaign}, source: ${source}`);
-
             if (content && !content.includes('google')) {
               potentialCode = content;
-              console.log(`[DeepLink] Extracted potential code from utm_content: ${potentialCode}`);
             } else if (campaign && !campaign.includes('google-play')) {
               potentialCode = campaign;
-              console.log(`[DeepLink] Extracted potential code from utm_campaign: ${potentialCode}`);
             } else {
               // Checking for "organic"
               if (ref.includes('medium=organic') || (source && source.includes('google-play'))) {
-                console.log(`[DeepLink] Ignored organic/play-store install (no custom referrer params)`);
                 // Keep potentialCode as is, it will likely be rejected below
               }
             }
@@ -152,22 +139,15 @@ export class DeepLinkHandler {
           // If the code is simple (alphanumeric), we take it.
           // We fail if it STILL looks like a url param string (contains =) or is one of the restricted keywords
           if (!potentialCode.includes('utm_source') && !potentialCode.includes('gclid') && !potentialCode.includes('=')) {
-            console.log(`[DeepLink] Accepting referrer string: ${potentialCode}`);
             return potentialCode;
-          } else {
-            console.log(`[DeepLink] Rejected referrer string (contains utm/gclid or format invalid): ${potentialCode}`);
           }
-        } else {
-          console.log('[DeepLink] Install Referrer returned no referrer property');
         }
-      } catch (e: any) {
-        console.log(`[DeepLink] Install Referrer check failed or threw error: ${e?.message || e}`);
+      } catch {
       }
     }
 
     // 2. Check IP Fingerprint (Fallback for Android, Primary for iOS)
     try {
-      console.log('[DeepLink] Checking IP fingerprint for referral code...');
       // Use a short timeout to not block app startup too long
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 3000);
@@ -177,20 +157,13 @@ export class DeepLinkHandler {
       });
       clearTimeout(timeoutId);
 
-      console.log(`[DeepLink] IP fingerprint response status: ${response.status}`);
-
       if (response.ok) {
         const data = await response.json();
-        console.log(`[DeepLink] IP fingerprint data: ${JSON.stringify(data)}`);
         if (data.code) {
-          console.log(`[DeepLink] Found referral code via IP fingerprint: ${data.code}`);
           return data.code;
-        } else {
-          console.log('[DeepLink] No referral code found for this IP');
         }
       }
-    } catch (e: any) {
-      console.log(`[DeepLink] IP Fingerprint check failed: ${e?.message || e}`);
+    } catch {
     }
 
     return null;
@@ -264,7 +237,6 @@ export class DeepLinkHandler {
 
   private async processDeepLink(linkData: DeepLinkData) {
     if (!this.navigation) {
-      console.warn('Navigation not set, storing link for later');
       await this.storeDeferredLink(linkData);
       return;
     }
@@ -317,7 +289,6 @@ export class DeepLinkHandler {
     // Special handling for referral links - check 48h window
     if ((linkData.type === 'referral' || linkData.type === 'influencer') &&
       !this.isWithinTimeout(linkData)) {
-      console.log('Referral link expired (>48h)');
       await this.clearDeferredLink();
       return;
     }
@@ -376,7 +347,6 @@ export class DeepLinkHandler {
       // WORKAROUND: resetInternetCredentials checks arguments as array of maps on some Android versions
       // causing ClassCastException: String cannot be cast to ReadableNativeMap
       // Instead, we overwrite with "null" string which getDeferredLink handles.
-      console.log('[DeepLink] Soft-clearing deferred link via setInternetCredentials');
       await Keychain.setInternetCredentials(
         DEFERRED_LINK_KEY,
         'deferred_link',

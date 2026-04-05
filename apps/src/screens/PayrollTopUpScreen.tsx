@@ -164,7 +164,6 @@ const PayrollTopUpScreen = () => {
           );
         }
       } catch (err) {
-        console.error('[PayrollTopUpScreen] Error restoring wallet:', err);
       }
 
       // With sponsored transactions, we only sign the business AXFER transaction
@@ -204,7 +203,6 @@ const PayrollTopUpScreen = () => {
         { text: 'Entendido', onPress: () => navigation.goBack() },
       ]);
     } catch (e: any) {
-      console.error('Payroll top-up error', e);
       setProcessing(false);
       const gqlMsg = Array.isArray(e?.graphQLErrors) && e.graphQLErrors[0]?.message;
       const friendly = gqlMsg && gqlMsg.includes('preparePayrollVaultFunding')
@@ -299,7 +297,6 @@ const PayrollTopUpScreen = () => {
         { text: 'Entendido', onPress: () => navigation.goBack() },
       ]);
     } catch (e: any) {
-      console.error('Payroll withdraw error', e);
       setProcessing(false);
       const gqlMsg = Array.isArray(e?.graphQLErrors) && e.graphQLErrors[0]?.message;
       Alert.alert('No se pudo retirar', gqlMsg || e?.message || 'Error desconocido');

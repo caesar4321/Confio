@@ -195,7 +195,6 @@ export const SendToFriendScreen = () => {
         }
       });
     } catch (error) {
-      console.error('SendToFriendScreen: Error navigating to processing screen:', error);
       setErrorMessage('Error al procesar la transacción. Inténtalo de nuevo.');
       setShowError(true);
     } finally {

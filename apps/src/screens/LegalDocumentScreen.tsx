@@ -51,7 +51,6 @@ const LegalDocumentScreen = () => {
         await Linking.openURL(webUrl);
       }
     } catch (error) {
-      console.error('Error opening Telegram link:', error);
       // Fallback to t.me URL
       await Linking.openURL(webUrl);
     }

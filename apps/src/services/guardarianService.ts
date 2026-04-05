@@ -33,9 +33,7 @@ export interface GuardarianFiatCurrency {
 
 const deriveApiBase = () => {
   const url = getApiUrl() || '';
-  if (!url) {
-    console.warn('API_URL is missing! Guardarian service will fail.');
-  }
+  if (!url) {  }
   // Strip trailing graphql/ or graphql
   return url.replace(/graphql\/?$/i, '');
 };
@@ -73,12 +71,11 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
         headers['X-Firebase-AppCheck'] = tokenResult.token;
       }
     } catch (acErr) {
-      console.warn('App Check token error in Guardarian service', acErr);
     }
 
     return headers;
   } catch (err) {
-    console.warn('Guardarian proxy auth header error', err);
+
     return headers;
   }
 }
@@ -172,7 +169,6 @@ export async function createGuardarianTransaction(
   try {
     data = await res.json();
   } catch (parseErr) {
-    console.warn('Guardarian create transaction parse error', parseErr);
   }
 
   if (!res.ok) {
@@ -208,7 +204,6 @@ export async function fetchGuardarianCryptoCurrencies(): Promise<GuardarianCrypt
   });
 
   if (!res.ok) {
-    console.warn(`Guardarian crypto currencies fetch failed (${res.status})`);
     return [];
   }
 
@@ -216,7 +211,7 @@ export async function fetchGuardarianCryptoCurrencies(): Promise<GuardarianCrypt
   try {
     data = await res.json();
   } catch (parseErr) {
-    console.warn('Guardarian crypto currencies parse error', parseErr);
+
     return [];
   }
 

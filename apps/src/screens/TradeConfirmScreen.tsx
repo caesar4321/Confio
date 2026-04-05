@@ -186,13 +186,10 @@ export const TradeConfirmScreen: React.FC = () => {
               const res = await withBusy('Habilitando intercambio…', async () =>
                 p2pSponsoredService.createEscrowIfSeller(String(createdTrade.id), amt, crypto)
               );
-              if (!res.success) {
-                console.warn('[P2P] Escrow creation failed:', res.error);
-              }
+              if (!res.success) {              }
             }
           }
         } catch (e) {
-          console.warn('[P2P] Skipping escrow create hook:', e);
         }
 
         // Navigate to TradeChatScreen with the actual trade data
@@ -211,7 +208,6 @@ export const TradeConfirmScreen: React.FC = () => {
         Alert.alert('Error', errorMessage);
       }
     } catch (error) {
-      console.error('Error creating trade:', error);
       Alert.alert('Error', 'Ocurrió un error al crear el intercambio. Por favor intenta de nuevo.');
     }
   };

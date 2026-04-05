@@ -76,24 +76,16 @@ import messagingService from '../services/messagingService';
 import { pushNotificationService } from '../services/pushNotificationService';
 import { deepLinkHandler } from '../utils/deepLinkHandler';
 import { usePushNotificationContext } from '../hooks/usePushNotificationContext';
-
-console.log('MainNavigator: TransactionProcessingScreen imported:', !!TransactionProcessingScreen);
-console.log('MainNavigator: TransactionSuccessScreen imported:', !!TransactionSuccessScreen);
-
 const Stack = createNativeStackNavigator<MainStackParamList>();
 
 export const MainNavigator = () => {
-  console.log('MainNavigator: Component rendering at:', new Date().toISOString());
   const { checkAndShowPrompt } = usePushNotificationContext();
 
   useEffect(() => {
-    console.log('[MainNavigator] Mounted, processing pending notification/deep-link work');
     const timer = setTimeout(() => {
       pushNotificationService.processPendingNotification();
       messagingService.processPendingNotification();
-      deepLinkHandler.checkDeferredLinks().catch(error => {
-        console.error('[MainNavigator] Failed to process deferred deep link:', error);
-      });
+      deepLinkHandler.checkDeferredLinks().catch(() => {});
     }, 250);
 
     return () => clearTimeout(timer);
@@ -101,9 +93,7 @@ export const MainNavigator = () => {
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      checkAndShowPrompt().catch(error => {
-        console.error('[MainNavigator] Failed to check push notification prompt:', error);
-      });
+      checkAndShowPrompt().catch(() => {});
     }, 1200);
 
     return () => clearTimeout(timer);
@@ -347,9 +337,6 @@ export const MainNavigator = () => {
             gestureEnabled: false, // Prevent back gesture
             animation: 'slide_from_right'
           }}
-          listeners={{
-            focus: () => console.log('MainNavigator: TransactionProcessing screen focused'),
-          }}
         />
         <Stack.Screen
           name="TransactionSuccess"
@@ -358,9 +345,6 @@ export const MainNavigator = () => {
             headerShown: false,
             gestureEnabled: false, // Prevent back gesture
             animation: 'slide_from_right'
-          }}
-          listeners={{
-            focus: () => console.log('MainNavigator: TransactionSuccess screen focused'),
           }}
         />
         <Stack.Screen
@@ -381,9 +365,8 @@ export const MainNavigator = () => {
             presentation: 'modal' // Ensure it's treated as a modal
           }}
           listeners={{
-            focus: () => console.log('MainNavigator: PaymentProcessing screen focused'),
             beforeRemove: (e) => {
-              console.log('MainNavigator: PaymentProcessing screen being removed');
+              e.preventDefault();
             }
           }}
         />

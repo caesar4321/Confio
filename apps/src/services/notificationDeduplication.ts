@@ -55,20 +55,15 @@ export class NotificationDeduplication {
     
     // If no keys available, can't deduplicate
     if (keys.length === 0) {
-      console.log(`[NotificationDedup] No IDs available for deduplication`);
       return false;
     }
     
     // Check if any key exists in cache
     for (const key of keys) {
       if (cache.processedIds.has(key)) {
-        console.log(`[NotificationDedup] Duplicate detected: ${key}`);
         return true;
       }
-    }
-
-    console.log(`[NotificationDedup] New notification, adding keys:`, keys);
-    
+    }    
     // Add all keys to cache
     for (const key of keys) {
       cache.processedIds.add(key);

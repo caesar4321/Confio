@@ -44,7 +44,6 @@ if (typeof URL === 'undefined') {
         return this.href;
       }
     };
-    console.log('[algorandPolyfills] Added basic URL polyfill');
   }
 }
 
@@ -63,7 +62,6 @@ if (!ArrayBuffer.prototype.slice) {
     
     return result;
   };
-  console.log('[algorandPolyfills] Added ArrayBuffer.prototype.slice polyfill');
 }
 
 // Ensure crypto.getRandomValues is available
@@ -79,11 +77,9 @@ if (!globalThis.crypto.getRandomValues) {
   const rnGetRandomValues = require('react-native-get-random-values');
   if (rnGetRandomValues.getRandomValues) {
     globalThis.crypto.getRandomValues = rnGetRandomValues.getRandomValues;
-    console.log('[algorandPolyfills] Manually added getRandomValues to globalThis.crypto');
   } else if (global.crypto && global.crypto.getRandomValues) {
     // Copy from global.crypto if it exists there
     globalThis.crypto.getRandomValues = global.crypto.getRandomValues;
-    console.log('[algorandPolyfills] Copied getRandomValues from global.crypto');
   }
 }
 
@@ -134,7 +130,6 @@ if (!globalThis.crypto.subtle) {
       throw new Error('Verify not implemented in polyfill');
     }
   } as any;
-  console.log('[algorandPolyfills] Added subtle crypto polyfill');
 }
 
 // Add TextEncoder/TextDecoder if missing
@@ -144,7 +139,6 @@ if (typeof TextEncoder === 'undefined') {
       return Buffer.from(str, 'utf-8');
     }
   };
-  console.log('[algorandPolyfills] Added TextEncoder polyfill');
 }
 
 if (typeof TextDecoder === 'undefined') {
@@ -153,7 +147,6 @@ if (typeof TextDecoder === 'undefined') {
       return Buffer.from(bytes).toString('utf-8');
     }
   };
-  console.log('[algorandPolyfills] Added TextDecoder polyfill');
 }
 
 // Add performance.now if missing (needed by some crypto libraries)
@@ -163,20 +156,10 @@ if (typeof performance === 'undefined') {
   };
 }
 
-// Verify setup
-console.log('[algorandPolyfills] Setup complete:');
-console.log('[algorandPolyfills] - globalThis.crypto exists:', !!globalThis.crypto);
-console.log('[algorandPolyfills] - globalThis.crypto.getRandomValues exists:', !!globalThis.crypto.getRandomValues);
-console.log('[algorandPolyfills] - globalThis.crypto.subtle exists:', !!globalThis.crypto.subtle);
-console.log('[algorandPolyfills] - Buffer exists:', !!global.Buffer);
-console.log('[algorandPolyfills] - TextEncoder exists:', typeof TextEncoder !== 'undefined');
-console.log('[algorandPolyfills] - TextDecoder exists:', typeof TextDecoder !== 'undefined');
-
 // Test getRandomValues
 try {
   const testArray = new Uint8Array(16);
   globalThis.crypto.getRandomValues(testArray);
-  console.log('[algorandPolyfills] getRandomValues test: SUCCESS');
 } catch (e) {
   console.error('[algorandPolyfills] getRandomValues test: FAILED', e);
 }

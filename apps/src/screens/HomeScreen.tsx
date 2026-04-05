@@ -321,7 +321,6 @@ export const HomeScreen = () => {
               try {
                 await deepLinkHandler.clearDeferredLink();
               } catch (clearErr) {
-                console.error('[HomeScreen] Failed to clear deferred link:', clearErr);
               }
             } else {
               // Show alert for other errors with explicit button object
@@ -329,8 +328,6 @@ export const HomeScreen = () => {
           }
         }
       } catch (err: any) {
-        console.error('[HomeScreen] Failed to submit deferred referral:', err);
-
         // Try to extract a meaningful error message
         const errorMessage = err?.graphQLErrors?.[0]?.message || err?.message;
         if (errorMessage) {
@@ -464,9 +461,7 @@ export const HomeScreen = () => {
   }, [activeAccount, myBalancesLoading, myBalancesData]);
 
   useEffect(() => {
-    if (myBalancesError) {
-      console.error('Error fetching balances:', myBalancesError);
-    }
+    if (myBalancesError) {    }
   }, [myBalancesError]);
 
   // Auto-Swap logic has been refactored into the useAutoSwap hook
@@ -532,7 +527,6 @@ export const HomeScreen = () => {
         isVisible.toString()
       );
     } catch (error) {
-      console.error('Error saving balance visibility preference:', error);
     }
   };
 
@@ -618,7 +612,6 @@ export const HomeScreen = () => {
       ]);
       await refetchMyBalances();
     } catch (error) {
-      console.error('Error refreshing data:', error);
     } finally {
       setRefreshing(false);
     }
@@ -898,7 +891,6 @@ export const HomeScreen = () => {
         setAlgorandAddress(address);
 
       } catch (error) {
-        console.error('HomeScreen - Error during initialization:', error);
       }
     };
 
@@ -931,7 +923,6 @@ export const HomeScreen = () => {
           setAlgorandAddress(address);
         }
       } catch (e) {
-        console.error('HomeScreen - Error refreshing address:', e);
       }
     };
 
@@ -1003,7 +994,6 @@ export const HomeScreen = () => {
         return false;
       }
     } catch (error) {
-      console.error('Error switching account:', error);
       Alert.alert(
         'Error',
         'No se pudo cambiar la cuenta. Por favor intenta nuevamente.',
@@ -1045,12 +1035,8 @@ export const HomeScreen = () => {
               setTimeout(() => {
                 navigationToExecute();
               }, 500);
-            } else {
-              console.error('HomeScreen - Account switch failed');
             }
-          }).catch(error => {
-            console.error('HomeScreen - Error switching account:', error);
-          });
+          }).catch(() => {});
         }
       }, 100); // Small delay to ensure screen is ready
 
@@ -1188,7 +1174,7 @@ export const HomeScreen = () => {
         {showPayrollCard && (
           <TouchableOpacity
             style={[styles.payrollCard, { marginHorizontal: 16, marginBottom: 12 }]}
-            onPress={() => navigation.navigate('PayrollPending' as never)}
+            onPress={() => navigation.navigate('PayrollPending')}
             activeOpacity={0.9}
           >
             <View style={styles.payrollIconWrap}>

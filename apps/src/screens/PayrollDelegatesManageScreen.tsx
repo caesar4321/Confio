@@ -169,7 +169,6 @@ export const PayrollDelegatesManageScreen = () => {
       }, 5000);
       Alert.alert('Éxito', next ? `${name} ahora puede aprobar nómina.` : `Se revocó el permiso de ${name}.`);
     } catch (e: any) {
-      console.error('toggleDelegate error', e);
       Alert.alert('Error', e?.message || 'No se pudo actualizar la delegación.');
     } finally {
       setSigningModalVisible(false);

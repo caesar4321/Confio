@@ -90,7 +90,6 @@ const NotificationSettingsScreen: React.FC = () => {
         },
       });
     } catch (error) {
-      console.error('Error updating preference:', error);
       Alert.alert('Error', 'Failed to update notification preferences');
     }
   };
@@ -104,7 +103,6 @@ const NotificationSettingsScreen: React.FC = () => {
         Alert.alert('Error', 'Failed to send test notification');
       }
     } catch (error) {
-      console.error('Error sending test notification:', error);
       Alert.alert('Error', 'Failed to send test notification');
     }
   };
@@ -142,7 +140,6 @@ const NotificationSettingsScreen: React.FC = () => {
       });
       Alert.alert('Success', 'Local notification displayed');
     } catch (error) {
-      console.error('Error displaying local notification:', error);
       Alert.alert('Error', 'Failed to display local notification');
     }
   };

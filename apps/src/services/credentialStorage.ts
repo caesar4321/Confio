@@ -42,9 +42,7 @@ class CredentialStorageService implements SecureStorageInterface {
                 // Library stores strings as bytes (UTF-8). We pass our Base64 string.
                 // We enable 'shouldBackupToCloud' explicitly.
                 const result = await blockStoreSave(key, base64Secret, true);
-                if (result) {
-                    console.log('[CredentialStorage] Stored secret to BlockStore (Cloud Backup: true)');
-                } else {
+                if (result) {                } else {
                     throw new Error('BlockStore save returned false');
                 }
             } catch (error) {
@@ -77,7 +75,7 @@ class CredentialStorageService implements SecureStorageInterface {
                 }
                 return null;
             } catch (error) {
-                console.warn('[CredentialStorage] Keychain retrieve failed:', error);
+
                 return null;
             }
         } else {
@@ -89,7 +87,6 @@ class CredentialStorageService implements SecureStorageInterface {
                     try {
                         return base64ToBytes(val);
                     } catch (e) {
-                        console.warn('[CredentialStorage] Retrieved value is not valid base64, returning raw bytes if possible or null', e);
                         // Fallback? If it returns raw bytes as string?
                         // For now assume it returns exact string we saved.
                         return null;
@@ -97,7 +94,7 @@ class CredentialStorageService implements SecureStorageInterface {
                 }
                 return null;
             } catch (error) {
-                console.warn('[CredentialStorage] BlockStore retrieve failed or empty:', error);
+
                 return null;
             }
         }

@@ -19,9 +19,7 @@ export const BackupCompletionScreen = () => {
   const [hasLegacyBackup, setHasLegacyBackup] = useState(false);
 
   useEffect(() => {
-    refreshProfile('personal').catch(err => {
-      console.warn('[BackupCompletion] Failed to refresh profile on mount:', err);
-    });
+    refreshProfile('personal').catch(err => {    });
   }, [refreshProfile]);
 
   const continueOnboardingIfSafe = useCallback(async () => {
@@ -67,7 +65,6 @@ export const BackupCompletionScreen = () => {
 
       setError(result.error || 'No pudimos terminar el respaldo seguro.');
     } catch (retryErr: any) {
-      console.error('[BackupCompletion] Backup retry failed:', retryErr);
       setError(retryErr?.message || 'No pudimos terminar el respaldo seguro.');
     } finally {
       setIsRetrying(false);
@@ -88,7 +85,6 @@ export const BackupCompletionScreen = () => {
 
       await continueOnboardingIfSafe();
     } catch (restoreErr: any) {
-      console.error('[BackupCompletion] Restore failed:', restoreErr);
       setError(restoreErr?.message || 'No se pudo restaurar la billetera.');
     } finally {
       setIsRetrying(false);

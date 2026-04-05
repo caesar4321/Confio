@@ -149,7 +149,6 @@ export const EmployeesScreen = () => {
       Alert.alert('Éxito', 'Invitación cancelada correctamente.', [{ text: 'Entendido' }]);
       refetchInvitations();
     } catch (e) {
-      console.error('Error canceling invitation:', e);
       Alert.alert('Error', 'No se pudo cancelar la invitación', [{ text: 'Entendido' }]);
     }
   };
@@ -180,7 +179,7 @@ export const EmployeesScreen = () => {
 
         <TouchableOpacity
           style={[styles.actionButton, { borderColor: '#ebe9fe', backgroundColor: '#f5f3ff' }]}
-          onPress={() => navigation.navigate('PayrollHome' as never)}
+          onPress={() => navigation.navigate('PayrollHome')}
         >
           <View style={[styles.actionIconContainer, { backgroundColor: '#8B5CF6' }]}>
             <Icon name="dollar-sign" size={18} color="#fff" />

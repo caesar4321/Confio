@@ -1,9 +1,6 @@
 // polyfills.ts - Must be imported before anything else
 // Order matters!
 
-console.log('[polyfills] Starting polyfills setup...');
-
-
 // CRITICAL: Random values for cryptographic operations (must be first!)
 import 'react-native-get-random-values';
 
@@ -32,25 +29,18 @@ if (!(global as any).TextEncoder) {
   };
 }
 
-console.log('[polyfills] URL polyfill and TextDecoder/TextEncoder loaded');
-
 import { Buffer } from 'buffer';
 global.Buffer = global.Buffer ?? Buffer;
-console.log('[polyfills] Buffer setup complete');
 
 // Full WebCrypto (has AES-GCM & HMAC) from react-native-quick-crypto
 // Skip on iOS to avoid NativeEventEmitter initialization issues
-console.log('[polyfills] Skipping react-native-quick-crypto to avoid iOS crashes...');
 // TODO: Re-enable when iOS compatibility is fixed
 /*
-console.log('[polyfills] Installing react-native-quick-crypto...');
 import { install } from 'react-native-quick-crypto';
 try {
   install();
-  console.log('[polyfills] react-native-quick-crypto installed successfully');
 } catch (error) {
   console.error('[polyfills] Failed to install react-native-quick-crypto:', error);
-  console.log('[polyfills] Falling back to manual crypto setup...');
 }
 */
 
@@ -107,7 +97,6 @@ if (!(global as any).atob) (global as any).atob = atob;
 // Sanity check and punycode compatibility fix
 try {
   const punycode = require('punycode');
-  console.log('[polyfills] punycode loaded with keys:', Object.keys(punycode));
   
   // Fix punycode compatibility - react-native-url-polyfill expects punycode.ucs2.decode
   // but the actual module has ucs2decode as a direct function
@@ -116,22 +105,6 @@ try {
       decode: punycode.ucs2decode,
       encode: punycode.ucs2encode
     };
-    console.log('[polyfills] Fixed punycode.ucs2 compatibility');
-  }
-  
-  console.log('[polyfills] puny?', typeof punycode?.ucs2?.decode); // Should now be 'function'
-  
-  if (punycode?.ucs2?.decode) {
-    console.log('[polyfills] URL ok?', new URL('https://a.com').hostname); // Should be 'a.com'
-    
-    console.log(
-      '[polyfills ready]',
-      'URL→', new URL('https://a.com').hostname,
-      'slice→', typeof Uint8Array.prototype.slice,
-      'decrypt→', typeof global.crypto?.subtle?.decrypt,
-    );
-  } else {
-    console.error('[polyfills] punycode.ucs2.decode still not available after fix');
   }
 } catch (error) {
   console.error('[polyfills] Sanity check failed:', error);

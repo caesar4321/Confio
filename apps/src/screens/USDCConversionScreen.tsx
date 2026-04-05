@@ -179,9 +179,7 @@ export const USDCConversionScreen = () => {
         variables: { assetType: 'USDC' }
       });
 
-      if (errors) {
-        console.error('[USDCConversionScreen] GraphQL errors:', errors);
-        return false;
+      if (errors) {        return false;
       }
 
 
@@ -202,16 +200,11 @@ export const USDCConversionScreen = () => {
         if (txId) {
           await refetchOptIns();
           return true;
-        } else {
-          console.error('[USDCConversionScreen] Failed to submit USDC opt-in transaction');
-          return false;
+        } else {          return false;
         }
-      } else {
-        console.error('[USDCConversionScreen] Failed to generate USDC opt-in transaction:', data?.optInToAssetByType?.error);
-        return false;
+      } else {        return false;
       }
     } catch (error) {
-      console.error('[USDCConversionScreen] Error during USDC opt-in:', error);
       return false;
     }
   };
@@ -225,7 +218,7 @@ export const USDCConversionScreen = () => {
           text: 'Ver historial',
           onPress: () => {
             // Navigate to USDC History screen
-            navigation.navigate('USDCHistory' as never);
+            navigation.navigate('USDCHistory');
           },
         },
         {
@@ -234,14 +227,14 @@ export const USDCConversionScreen = () => {
             // Clear amount and navigate back
             setAmount('');
             // Navigate back to AccountDetail with refresh
-            navigation.navigate('AccountDetail' as never, {
+            navigation.navigate('AccountDetail', {
               accountType: 'cusd',
               accountName: 'Confío Dollar',
               accountSymbol: '$cUSD',
               accountBalance: '0', // AccountDetailScreen will fetch real balance
               accountAddress: activeAccount?.algorandAddress || '',
               refreshTimestamp: Date.now()
-            } as never);
+            });
           },
         },
       ]
@@ -312,9 +305,7 @@ export const USDCConversionScreen = () => {
               setLoadingMessage('Preparando conversión...');
               continue; // Retry the prepare call
             } catch (err) {
-              setLoadingMessage('');
-              console.error('[USDCConversionScreen] App opt-in error', err);
-              Alert.alert('Error', 'No se pudo completar la configuración inicial', [{ text: 'Entendido' }]);
+              setLoadingMessage('');              Alert.alert('Error', 'No se pudo completar la configuración inicial', [{ text: 'Entendido' }]);
               return;
             }
           } else if (errorMessage.includes('not opted') || errorMessage.includes('USDC') || errorMessage.includes('asset') || errorMessage.includes('Please opt-in to USDC and cUSD assets first')) {
@@ -331,7 +322,6 @@ export const USDCConversionScreen = () => {
                 return;
               }
             } catch (usdcErr) {
-              console.error('[USDCConversionScreen] USDC opt-in error', usdcErr);
               setLoadingMessage('');
               return;
             }
@@ -370,7 +360,6 @@ export const USDCConversionScreen = () => {
       await refetchUsdc();
       await handleConversionSuccess();
     } catch (error: any) {
-      console.error('[USDCConversionScreen] Conversion error:', error);
       const errorMessage = String(error?.message || error);
 
       // Handle opt-in related errors gracefully without showing alerts

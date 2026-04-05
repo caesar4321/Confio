@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Platform, ScrollView, TouchableOpacity, Alert, Clipboard, Linking, Share, Modal, Vibration } from 'react-native';
+import { View, Text, StyleSheet, Platform, ScrollView, TouchableOpacity, Alert, Linking, Share, Modal, Vibration } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 import WhatsAppLogo from '../assets/svg/WhatsApp.svg';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
@@ -264,9 +265,7 @@ export const TransactionSuccessScreen = () => {
       });
     } catch (error: any) {
       // User cancelled share — not an error
-      if (error?.message !== 'User did not share') {
-        console.error('Share screenshot error:', error);
-      }
+      if (error?.message !== 'User did not share') {      }
     }
   };
 

@@ -102,7 +102,6 @@ export const PaymentConfirmationScreen = () => {
         navigation.goBack();
       }
     } catch (e: any) {
-      console.error('Error fetching invoice:', e);
       Alert.alert('Error', 'No se pudo cargar la factura. Verifique su conexión.');
       navigation.goBack();
     } finally {

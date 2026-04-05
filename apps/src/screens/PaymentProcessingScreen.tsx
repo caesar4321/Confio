@@ -81,9 +81,7 @@ export const PaymentProcessingScreen = () => {
 
   // Safety check - if no transaction data, go back
   useEffect(() => {
-    if (!isValid) {
-      console.warn('PaymentProcessingScreen: Invalid transaction data, navigating back');
-      navigation.goBack();
+    if (!isValid) {      navigation.goBack();
     }
   }, [isValid, navigation]);
 
@@ -283,7 +281,6 @@ export const PaymentProcessingScreen = () => {
             );
           }
         } catch (err) {
-          console.error('[PaymentProcessingScreen] Error restoring wallet:', err);
         }
 
         const tSignStart = now();
@@ -454,7 +451,6 @@ export const PaymentProcessingScreen = () => {
                       transaction: signedTxnB64
                     });
                   } catch (signError) {
-                    console.error(`PaymentProcessingScreen: Failed to sign transaction ${txnIndex}:`, signError);
                     throw new Error(`Failed to sign transaction ${txnIndex}: ${signError.message}`);
                   }
                 } else {
@@ -474,9 +470,7 @@ export const PaymentProcessingScreen = () => {
                 }
               }
             } else {
-              // No 4-transaction group received
-              console.error('PaymentProcessingScreen: Invalid transaction count - expected 4 transactions');
-              throw new Error(`Invalid transaction format: Expected 4 transactions, received ${transactions.length}`);
+              // No 4-transaction group received              throw new Error(`Invalid transaction format: Expected 4 transactions, received ${transactions.length}`);
             }
             
             const tSignEnd = now();
@@ -489,7 +483,6 @@ export const PaymentProcessingScreen = () => {
               try {
                 const decoded = Buffer.from(txn.transaction, 'base64');
               } catch (e) {
-                console.error(`PaymentProcessingScreen: Tx ${txn.index} has invalid base64`);
               }
             }
             
@@ -533,7 +526,6 @@ export const PaymentProcessingScreen = () => {
               throw new Error(submitResult.data?.submitSponsoredPayment?.error || 'Failed to submit blockchain payment');
             }
           } catch (blockchainError: any) {
-            console.error('PaymentProcessingScreen: Blockchain payment failed:', blockchainError);
             // Show error - opt-ins should have been handled during invoice generation
             setPaymentError(`Error en el pago blockchain: ${blockchainError.message || 'Error desconocido'}`);
             setIsComplete(false);
@@ -619,20 +611,16 @@ export const PaymentProcessingScreen = () => {
                 await new Promise(r => setTimeout(r, 250));
               }
             } catch (e) {
-              console.warn('PaymentProcessingScreen: Recovery after race failed:', e);
             }
           }
           // Fallback: show error
           setIsComplete(true);
           setPaymentResponse(data.payInvoice);
         } else {
-          const errors = data?.payInvoice?.errors || ['Error desconocido'];
-          console.error('PaymentProcessingScreen: Payment failed:', errors);
-          setPaymentError(errors.join(', '));
+          const errors = data?.payInvoice?.errors || ['Error desconocido'];          setPaymentError(errors.join(', '));
         }
         */
       } catch (error) {
-        console.error('PaymentProcessingScreen: Payment error:', error);
         setPaymentError('Error al procesar el pago. Inténtalo de nuevo.');
       } finally {
         setIsProcessing(false);

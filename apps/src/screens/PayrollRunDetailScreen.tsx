@@ -140,7 +140,6 @@ export const PayrollRunDetailScreen = () => {
                   filename: `Comprobante_Corrida_Nomina_${run?.runId || 'N/A'}`,
                 });
               } catch (error) {
-                console.error('Share error:', error);
               }
               setCapturingFullRun(false);
             },
@@ -148,7 +147,6 @@ export const PayrollRunDetailScreen = () => {
         ]
       );
     } catch (e: any) {
-      console.error('PDF share error', e);
       Alert.alert('Error', 'No se pudo guardar el comprobante. Verifica los permisos de galería.', [{ text: 'Entendido' }]);
       setCapturingFullRun(false);
     }
@@ -201,7 +199,6 @@ export const PayrollRunDetailScreen = () => {
                   filename: `Comprobante_Nomina_${it.internalId || 'pago'}`,
                 });
               } catch (error) {
-                console.error('Share error:', error);
               }
               setCapturingIndex(null);
             },
@@ -209,7 +206,6 @@ export const PayrollRunDetailScreen = () => {
         ]
       );
     } catch (e: any) {
-      console.error('Item PDF share error', e);
       Alert.alert('Error', 'No se pudo guardar el comprobante. Verifica los permisos de galería.');
       setCapturingIndex(null);
     }

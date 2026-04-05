@@ -47,7 +47,6 @@ export const VerifyTransactionScreen = () => {
             try {
                 setMetadata(JSON.parse(data.verifyTransaction.metadata));
             } catch (e) {
-                console.warn('Failed to parse metadata');
             }
         }
     }, [data]);

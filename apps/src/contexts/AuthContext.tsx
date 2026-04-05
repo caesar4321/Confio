@@ -124,14 +124,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   const lastBiometricSuccessRef = useRef<number>(0);
   const bootstrapAuthRanRef = useRef<boolean>(false);
 
-  const perfLog = (label: string, startTime: number, extra?: Record<string, any>) => {
-    const durationMs = Date.now() - startTime;
-    if (extra) {
-      console.log(`[PERF][AuthContext] ${label}: ${durationMs}ms`, extra);
-      return;
-    }
-    console.log(`[PERF][AuthContext] ${label}: ${durationMs}ms`);
-  };
+  const perfLog = (_label: string, _startTime: number, _extra?: Record<string, any>) => {};
 
   const resetAuthStack = (screen: keyof AuthStackParamList, params?: AuthStackParamList[keyof AuthStackParamList]) => {
     if (!isNavigationReady || !navigationRef.current) return;
@@ -160,7 +153,6 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
         if (!settled) {
           settled = true;
           subscription.remove();
-          console.warn('[AuthContext] Timed out waiting for app to become active before biometric prompt');
           resolve(AppState.currentState === 'active');
         }
       }, timeoutMs);
@@ -174,6 +166,38 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
         }
       });
     });
+  };
+
+  const getStoredAuthCredentials = async (
+    retries = Platform.OS === 'ios' ? 3 : 1,
+    retryDelayMs = 300
+  ) => {
+    let lastError: unknown;
+
+    for (let attempt = 0; attempt < retries; attempt += 1) {
+      try {
+        const credentials = await Keychain.getGenericPassword({
+          service: AUTH_KEYCHAIN_SERVICE,
+          username: AUTH_KEYCHAIN_USERNAME,
+        });
+
+        if (credentials && 'password' in credentials && credentials.password) {
+          return credentials;
+        }
+      } catch (error) {
+        lastError = error;
+      }
+
+      if (attempt < retries - 1) {
+        await new Promise(resolve => setTimeout(resolve, retryDelayMs));
+      }
+    }
+
+    if (lastError) {
+      throw lastError;
+    }
+
+    return false;
   };
 
   // Reset auth gate on mount so cold starts don't inherit a stale ready state
@@ -190,9 +214,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
         fetchPolicy: 'network-only',
         context: { skipProactiveRefresh: true },
       });
-      console.log('AuthContext - Prefetched userAccounts (' + reason + ')');
     } catch (prefetchErr) {
-      console.warn('AuthContext - Failed to prefetch userAccounts (' + reason + '):', prefetchErr);
     }
   };
 
@@ -209,37 +231,24 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   // Set up navigation ready listener and check auth state
   useEffect(() => {
     if (navigationRef.current) {
-      console.log('Navigation is ready, checking auth state...');
       setIsNavigationReady(true);
       if (!bootstrapAuthRanRef.current) {
         bootstrapAuthRanRef.current = true;
         checkAuthState();
-      } else {
-        console.log('Auth bootstrap already executed; skipping duplicate checkAuthState');
       }
     }
   }, [navigationRef.current]);
 
   const navigateToScreen = (screenName: keyof RootStackParamList) => {
-    console.log(`[NAV] navigateToScreen called for ${screenName}`, {
-      isNavigationReady,
-      hasNavigationRef: !!navigationRef.current,
-      currentRoute: navigationRef.current?.getCurrentRoute()?.name
-    });
-
     if (!isNavigationReady || !navigationRef.current) {
-      console.log('[NAV] Navigation not ready yet, queuing navigation');
       // Queue navigation for when ready
       setTimeout(() => {
         if (isNavigationReady && navigationRef.current) {
-          console.log(`[NAV] Retrying navigation to ${screenName}`);
           navigateToScreen(screenName);
         }
       }, 100);
       return;
     }
-
-    console.log(`[NAV] Executing navigation to ${screenName}`);
 
     // Use setTimeout to ensure navigation happens on next tick
     // This fixes Android navigation freeze issue
@@ -253,11 +262,9 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
             state: undefined
           }],
         });
-        console.log(`[NAV] Navigation reset completed for ${screenName}`);
 
         // After navigating to Main, process any pending push notifications
         if (screenName === 'Main') {
-          console.log('[AuthContext] Navigated to Main, processing pending notifications...');
           setTimeout(() => {
             pushNotificationService.processPendingNotification();
             deepLinkHandler.checkDeferredLinks().catch(error => {
@@ -294,11 +301,9 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
         // Instead, we let the auth error handlers/checkAuthState deal with the invalid session
         if (data?.me) {
           const serverPhoneVerified = data.me.phoneNumber && data.me.phoneCountry;
-          console.log('Profile refresh - Server phone verification status:', serverPhoneVerified);
 
           // If phone verification was lost on server but user is authenticated, require re-verification
           if (!serverPhoneVerified && isAuthenticated) {
-            console.log('Profile refresh - Phone verification lost on server, requiring re-verification');
             setIsAuthenticated(false);
             if (isNavigationReady && navigationRef.current) {
               navigationRef.current.reset({
@@ -340,7 +345,6 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           });
           userProfile = userData?.me || null;
         } catch (e) {
-          console.warn('AuthContext - Failed to fetch user profile in business mode:', e);
           // Fallback: keep existing user profile if available
           userProfile = profileData?.userProfile || null;
         }
@@ -367,12 +371,9 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           const authService = AuthService.getInstance();
           const accountContext = await authService.getActiveAccountContext();
 
-          console.log('AuthContext - Loading profile for account type:', accountContext.type);
-
           // CRITICAL: Sync JWT token with stored active account context on app startup
           // This ensures the JWT has the correct business context after app restart
           if (accountContext.type === 'business' && accountContext.businessId) {
-            console.log('AuthContext - Business account detected on startup, syncing JWT token...');
             try {
               const { SWITCH_ACCOUNT_TOKEN } = await import('../apollo/queries');
               const { data } = await apolloClient.mutate({
@@ -385,7 +386,6 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
               });
 
               if (data?.switchAccountToken?.token) {
-                console.log('AuthContext - JWT token synced with business context on startup');
                 // Update stored tokens with the new JWT that has business context
                 const Keychain = await import('react-native-keychain');
                 const AUTH_KEYCHAIN_SERVICE = 'com.confio.auth';
@@ -412,7 +412,6 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
                       accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK
                     }
                   );
-                  console.log('AuthContext - Stored updated JWT token with business context');
                   setAccountContextTick((t) => t + 1);
                   // Now signal that auth is ready: final token is aligned with stored business context
                   try { signalAuthReady(); } catch { }
@@ -463,7 +462,6 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
 
         // If credentials are gone but we're still marked as authenticated, log out
         if (!credentials && isAuthenticated) {
-          console.log('[AuthContext] Credentials cleared externally (token invalidated), logging out...');
           setIsAuthenticated(false);
           setProfileData(null);
 
@@ -532,7 +530,6 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
             try {
               const activeCtx = await AuthService.getInstance().getActiveAccountContext();
               if (activeCtx) {
-                console.log('[AuthContext] Refreshing token with preserved context:', activeCtx);
                 contextArgs = {
                   accountType: activeCtx.type,
                   accountIndex: activeCtx.index,
@@ -540,7 +537,6 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
                 };
               }
             } catch (err) {
-              console.warn('[AuthContext] Failed to get active context during refresh, defaulting to token payload:', err);
             }
 
             const { data } = await apolloClient.mutate({
@@ -579,8 +575,6 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
               isAuthenticating = true;
               lastAuthAttempt = Date.now();
               lastPromptedCycle = currentCycle;
-
-              console.log('[AuthContext] Requesting biometric unlock after', Math.round(awayMs / 1000), 'seconds away');
               const ok = await biometricAuthService.authenticate('Desbloquea Confío');
               isAuthenticating = false;
 
@@ -662,7 +656,6 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     await refreshProfile('personal');
 
     // Ensure FCM token is registered for the user
-    console.log('[AuthContext] Registering FCM token after auth...');
     try {
       const { default: messagingService } = await import('../services/messagingService');
       await messagingService.ensureTokenRegisteredForCurrentUser();
@@ -673,8 +666,6 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
 
     // Handle auto opt-in after successful auth
     try {
-      console.log('[AuthContext] Checking for required asset opt-ins...');
-
       // Check if user needs opt-ins
       const GENERATE_OPT_IN_TRANSACTIONS = gql`
         mutation GenerateOptInTransactions {
@@ -704,20 +695,14 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
         }
 
         if (Array.isArray(transactions) && transactions.length > 0) {
-          console.log('[AuthContext] Opt-in transactions needed, processing...');
           const { default: algorandService } = await import('../services/algorandService');
           const optInSuccess = await algorandService.processSponsoredOptIn(transactions);
 
           if (optInSuccess) {
-            console.log('[AuthContext] Auto opt-in completed successfully');
           } else {
             console.error('[AuthContext] Auto opt-in failed');
           }
-        } else {
-          console.log('[AuthContext] No opt-in transactions returned; user likely already opted in');
         }
-      } else if (mutationResult?.success) {
-        console.log('[AuthContext] User already opted into all required assets');
       } else {
         console.error('[AuthContext] Failed to generate opt-in transactions:', mutationResult?.error);
       }
@@ -732,7 +717,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     // On iOS, Implicitly Report Safety (iCloud Keychain is auto-synced)
     if (Platform.OS === 'ios') {
       import('../services/secureDeterministicWallet').then(({ reportBackupStatus }) => {
-        reportBackupStatus('icloud').catch(err => console.warn('[Auth] Failed implicit iCloud report:', err));
+        reportBackupStatus('icloud').catch(() => {});
       });
     }
 
@@ -773,19 +758,15 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
 
   const handleSuccessfulLogin = async (isPhoneVerified: boolean, requiresBackupCompletion: boolean = false) => {
     try {
-      console.log('Handling successful login...');
       if (requiresBackupCompletion) {
-        console.log('User must complete secure backup before entering the app');
         resetAuthStack('BackupCompletion');
         return;
       }
 
       if (isPhoneVerified) {
-        console.log('User has verified phone number');
         // Route to biometric setup screen; completion will trigger the remaining flow
         resetAuthStack('BiometricSetup', { origin: 'login' as const });
       } else {
-        console.log('User needs phone verification');
         // Don't set isAuthenticated to true yet - keep user in Auth flow
         resetAuthStack('PhoneVerification');
       }
@@ -800,22 +781,11 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   const checkAuthState = async () => {
     const checkAuthStateStart = Date.now();
     try {
-      console.log('Checking auth state...');
-
       // Check for JWT tokens instead of zkLogin data
-      const Keychain = await import('react-native-keychain');
       const keychainReadStart = Date.now();
-      const credentials = await Keychain.getGenericPassword({
-        service: 'com.confio.auth',
-        username: 'auth_tokens'
-      });
+      const credentials = await getStoredAuthCredentials();
       perfLog('Keychain.getGenericPassword during checkAuthState', keychainReadStart, {
         hasCredentials: !!credentials,
-      });
-
-      console.log('Auth state JWT tokens:', {
-        hasCredentials: !!credentials,
-        credentialType: typeof credentials
       });
 
       if (credentials) {
@@ -824,11 +794,21 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           const tokens = JSON.parse(credentials.password);
           perfLog('JSON.parse stored auth tokens', parseStart);
           const hasValidTokens = tokens.accessToken && tokens.refreshToken;
-          console.log('Has valid JWT tokens:', hasValidTokens);
 
           if (hasValidTokens) {
             let accessToken = tokens.accessToken;
             const refreshToken = tokens.refreshToken;
+            let startupAccountContext: {
+              type: 'personal' | 'business';
+              index: number;
+              businessId?: string;
+            } | null = null;
+
+            try {
+              startupAccountContext = await AuthService.getInstance().getActiveAccountContext();
+            } catch (contextError) {
+              console.warn('[AuthContext] Failed to load active account context before startup refresh:', contextError);
+            }
 
             // Show biometric prompt FIRST — it's local and doesn't need a valid token.
             // Token refresh happens in parallel so it's ready by the time biometric completes.
@@ -844,7 +824,6 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
                 appIsActive,
               });
               if (!appIsActive) {
-                console.warn('[AuthContext] App never became active for startup biometric prompt');
                 setIsAuthenticated(false);
                 setProfileData(null);
                 navigateToScreen('Auth');
@@ -865,18 +844,26 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
                 if (!decoded?.exp || decoded.exp <= nowTs + 30) {
                   const { gql } = await import('@apollo/client');
                   const REFRESH_TOKEN = gql`
-                    mutation RefreshToken($refreshToken: String!) {
-                      refreshToken(refreshToken: $refreshToken) {
+                    mutation RefreshToken($refreshToken: String!, $accountType: String, $accountIndex: Int, $businessId: ID) {
+                      refreshToken(refreshToken: $refreshToken, accountType: $accountType, accountIndex: $accountIndex, businessId: $businessId) {
                         token
                         refreshExpiresIn
                       }
                     }
                   `;
                   const { apolloClient } = await import('../apollo/client');
+                  const refreshVariables: Record<string, any> = { refreshToken };
+                  if (startupAccountContext) {
+                    refreshVariables.accountType = startupAccountContext.type;
+                    refreshVariables.accountIndex = startupAccountContext.index;
+                    if (startupAccountContext.businessId) {
+                      refreshVariables.businessId = startupAccountContext.businessId;
+                    }
+                  }
                   const refreshStart = Date.now();
                   const { data } = await apolloClient.mutate({
                     mutation: REFRESH_TOKEN,
-                    variables: { refreshToken },
+                    variables: refreshVariables,
                     context: { skipAuth: true },
                   });
                   perfLog('Startup RefreshToken mutation', refreshStart, {
@@ -906,20 +893,17 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
             // Run biometric auth and token refresh in parallel
             try {
               if (bioEnabled) {
-                console.log('[AuthContext] Biometrics enabled, enforcing check on startup...');
                 const startupBiometricStart = Date.now();
                 const bioOk = await biometricAuthService.authenticate('Desbloquea Confío');
                 perfLog('Startup biometricAuthService.authenticate', startupBiometricStart, {
                   bioOk,
                 });
                 if (!bioOk) {
-                  console.log('[AuthContext] Startup biometric authentication failed or cancelled');
                   setIsAuthenticated(false);
                   setProfileData(null);
                   navigateToScreen('Auth');
                   return;
                 }
-                console.log('[AuthContext] Startup biometric authentication successful');
                 lastBiometricSuccessRef.current = Date.now();
               }
 
@@ -928,7 +912,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
 
               const authService = AuthService.getInstance();
               const activeContextStart = Date.now();
-              const accountContext = await authService.getActiveAccountContext();
+              const accountContext = startupAccountContext || await authService.getActiveAccountContext();
               perfLog('AuthService.getActiveAccountContext on startup', activeContextStart, {
                 type: accountContext?.type,
                 businessId: accountContext?.businessId,
@@ -1024,11 +1008,9 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
               } : null);
               requiresBackupCompletion = !!me?.requiresBackupCompletion;
             } catch (profileErr) {
-              console.warn('[AuthContext] Failed to fetch profile during startup auth checkpoint:', profileErr);
             }
 
             if (requiresBackupCompletion) {
-              console.log('[AuthContext] Backup completion required before entering main app');
               setIsAuthenticated(false);
               resetAuthStack('BackupCompletion');
               setIsLoading(false);
@@ -1047,12 +1029,9 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
                 const prefetchStart = Date.now();
                 await apolloClient.query({ query: GET_USER_ACCOUNTS, fetchPolicy: 'network-only' });
                 perfLog('Prefetch userAccounts after navigating to Main', prefetchStart);
-              } catch (prefetchErr) {
-                console.warn('Failed to prefetch userAccounts (post-nav):', prefetchErr);
-              }
+              } catch (prefetchErr) {}
             })();
           } else {
-            console.log('Invalid token structure');
             setIsAuthenticated(false);
             navigateToScreen('Auth');
           }
@@ -1062,7 +1041,6 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           navigateToScreen('Auth');
         }
       } else {
-        console.log('No JWT tokens found, user not authenticated');
         setIsAuthenticated(false);
         navigateToScreen('Auth');
       }
@@ -1081,11 +1059,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   const checkLocalAuthState = async (): Promise<boolean> => {
     try {
       // Check for JWT tokens instead of zkLogin data
-      const Keychain = await import('react-native-keychain');
-      const credentials = await Keychain.getGenericPassword({
-        service: 'com.confio.auth',
-        username: 'auth_tokens'
-      });
+      const credentials = await getStoredAuthCredentials();
 
       if (credentials) {
         const tokens = JSON.parse(credentials.password);
@@ -1105,7 +1079,6 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
 
   const signOut = async () => {
     try {
-      console.log('Starting sign out process...');
       resetAuthReady();
       const authService = AuthService.getInstance();
       await authService.signOut();
@@ -1122,7 +1095,6 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
 
   const completePhoneVerification = async () => {
     try {
-      console.log('Completing phone verification...');
       // After phone verification, send user to biometric setup flow
       if (isNavigationReady && navigationRef.current) {
         navigationRef.current.reset({

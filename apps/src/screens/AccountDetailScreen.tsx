@@ -19,8 +19,8 @@ import {
   Pressable,
   Alert,
   Linking,
-  Clipboard,
 } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 import Icon from 'react-native-vector-icons/Feather';
 import MCIcon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -822,12 +822,10 @@ export const AccountDetailScreen = () => {
 
         // Debug conversion amounts
         if (isConversion) {
-          // console.log('[Conversion Final]', { ... });
         }
 
         // Debug payroll final transaction
         if (type === 'payroll') {
-          // console.log('[Payroll Final Transaction]', { ... });
         }
 
         formattedTransactions.push(finalTransaction);
@@ -1283,8 +1281,16 @@ export const AccountDetailScreen = () => {
       }
     };
 
+    const transactionAccessibilityLabel = `${getEnhancedTransactionTitle()}. ${formatTransactionAmount(transaction.amount)} ${transaction.currency}. ${formattedDate} ${formattedTime}.`;
+
     return (
-      <TouchableOpacity style={[styles.transactionItem, transaction.isInvitation && styles.invitedTransactionItem]} onPress={handlePress}>
+      <TouchableOpacity
+        style={[styles.transactionItem, transaction.isInvitation && styles.invitedTransactionItem]}
+        onPress={handlePress}
+        accessibilityRole="button"
+        accessibilityLabel={transactionAccessibilityLabel}
+        accessibilityHint="Abre el detalle de la transacción."
+      >
         <View style={styles.transactionIconContainer}>
           {getTransactionIcon(transaction)}
         </View>
@@ -1645,7 +1651,7 @@ export const AccountDetailScreen = () => {
                 : account.balanceHidden)}
           </Text>
           {canViewBalance && (
-            <TouchableOpacity onPress={toggleBalanceVisibility}>
+            <TouchableOpacity onPress={toggleBalanceVisibility} accessibilityRole="button" accessibilityLabel={showBalance ? 'Ocultar saldo' : 'Mostrar saldo'}>
               <Icon
                 name={showBalance ? 'eye' : 'eye-off'}
                 size={20}
@@ -1687,7 +1693,7 @@ export const AccountDetailScreen = () => {
                 Clipboard.setString(account.address);
                 Alert.alert('Copiado', 'Dirección copiada al portapapeles');
               }
-            }}>
+            }} accessibilityRole="button" accessibilityLabel="Copiar dirección">
               <Icon name="copy" size={16} color="#ffffff" style={styles.copyIcon} />
             </TouchableOpacity>
           </View>
@@ -1725,6 +1731,8 @@ export const AccountDetailScreen = () => {
               <TouchableOpacity
                 style={styles.actionButton}
                 onPress={handleSend}
+                accessibilityRole="button"
+                accessibilityLabel="Enviar"
               >
                 <View style={{
                   width: 52,
@@ -1750,6 +1758,8 @@ export const AccountDetailScreen = () => {
                     tokenType: route.params.accountType === 'cusd' ? 'cusd' : 'confio'
                   });
                 }}
+                accessibilityRole="button"
+                accessibilityLabel="Recibir"
               >
                 <View style={{
                   width: 52,
@@ -1776,6 +1786,8 @@ export const AccountDetailScreen = () => {
                     screen: isBusinessAccount ? 'Charge' : 'Scan'
                   });
                 }}
+                accessibilityRole="button"
+                accessibilityLabel="Pagar"
               >
                 <View style={{
                   width: 52,
@@ -1798,6 +1810,8 @@ export const AccountDetailScreen = () => {
                 onPress={() => {
                   navigation.navigate('TopUp');
                 }}
+                accessibilityRole="button"
+                accessibilityLabel="Recargar"
               >
                 <View style={{
                   width: 52,
@@ -1861,6 +1875,8 @@ export const AccountDetailScreen = () => {
                 <TouchableOpacity
                   style={styles.emptyActionButton}
                   onPress={handleSend}
+                  accessibilityRole="button"
+                  accessibilityLabel="Hacer mi primera transacción"
                 >
                   <Icon name="send" size={16} color="#fff" />
                   <Text style={styles.emptyActionButtonText}>Hacer mi primera transacción</Text>
@@ -1876,6 +1892,8 @@ export const AccountDetailScreen = () => {
                 style={styles.loadMoreButton}
                 onPress={loadMoreTransactions}
                 disabled={loadingMore}
+                accessibilityRole="button"
+                accessibilityLabel="Ver más transacciones"
               >
                 {loadingMore ? (
                   <ActivityIndicator size="small" color={colors.primary} />
@@ -2038,6 +2056,8 @@ export const AccountDetailScreen = () => {
                   <TouchableOpacity
                     style={[styles.filterButton, showSearch && styles.filterButtonActive]}
                     onPress={() => setShowSearch(!showSearch)}
+                    accessibilityRole="button"
+                    accessibilityLabel={showSearch ? 'Ocultar búsqueda' : 'Mostrar búsqueda'}
                   >
                     <Icon name="search" size={16} color={showSearch ? account.textColor : "#6b7280"} />
                   </TouchableOpacity>
@@ -2047,6 +2067,8 @@ export const AccountDetailScreen = () => {
                       hasActiveFilters() && styles.filterButtonActive
                     ]}
                     onPress={() => setShowFilterModal(true)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Abrir filtros de transacciones"
                   >
                     <Icon
                       name="filter"
@@ -2089,7 +2111,7 @@ export const AccountDetailScreen = () => {
                     autoCorrect={false}
                   />
                   {searchQuery.length > 0 && (
-                    <TouchableOpacity onPress={() => setSearchQuery('')}>
+                    <TouchableOpacity onPress={() => setSearchQuery('')} accessibilityRole="button" accessibilityLabel="Limpiar búsqueda">
                       <Icon name="x" size={18} color="#9ca3af" />
                     </TouchableOpacity>
                   )}
@@ -2116,7 +2138,7 @@ export const AccountDetailScreen = () => {
           <View style={styles.helpModalContent}>
             <View style={styles.helpModalHeader}>
               <Text style={styles.helpModalTitle}>¿Qué es la Gestión Avanzada?</Text>
-              <TouchableOpacity onPress={() => setShowHelpModal(false)}>
+              <TouchableOpacity onPress={() => setShowHelpModal(false)} accessibilityRole="button" accessibilityLabel="Cerrar ayuda">
                 <Icon name="x" size={24} color="#6b7280" />
               </TouchableOpacity>
             </View>
@@ -2177,6 +2199,8 @@ export const AccountDetailScreen = () => {
             <TouchableOpacity
               style={styles.helpModalButton}
               onPress={() => setShowHelpModal(false)}
+              accessibilityRole="button"
+              accessibilityLabel="Entendido"
             >
               <Text style={styles.helpModalButtonText}>Entendido</Text>
             </TouchableOpacity>
@@ -2207,6 +2231,8 @@ export const AccountDetailScreen = () => {
                 setShowMoreOptionsModal(false);
                 navigation.navigate('USDCDeposit', { tokenType: 'usdc' });
               }}
+              accessibilityRole="button"
+              accessibilityLabel="Depositar USDC"
             >
               <Icon name="download" size={20} color="#1f2937" />
               <Text style={styles.moreOptionsItemText}>Depositar USDC</Text>
@@ -2219,6 +2245,8 @@ export const AccountDetailScreen = () => {
                 // @ts-ignore
                 navigation.navigate('SendWithAddress', { tokenType: 'usdc' });
               }}
+              accessibilityRole="button"
+              accessibilityLabel="Retirar USDC a Algorand"
             >
               <Icon name="arrow-up-circle" size={20} color="#1f2937" />
               <Text style={styles.moreOptionsItemText}>Retirar USDC a Algorand</Text>
@@ -2230,6 +2258,8 @@ export const AccountDetailScreen = () => {
                 setShowMoreOptionsModal(false);
                 navigation.navigate('USDCHistory');
               }}
+              accessibilityRole="button"
+              accessibilityLabel="Ver historial de conversiones"
             >
               <Icon name="clock" size={20} color="#1f2937" />
               <Text style={styles.moreOptionsItemText}>Historial de conversiones</Text>
@@ -2240,6 +2270,8 @@ export const AccountDetailScreen = () => {
             <TouchableOpacity
               style={[styles.moreOptionsItem, styles.moreOptionsCancelItem]}
               onPress={() => setShowMoreOptionsModal(false)}
+              accessibilityRole="button"
+              accessibilityLabel="Cerrar más opciones"
             >
               <Text style={styles.moreOptionsCancelText}>Cancelar</Text>
             </TouchableOpacity>

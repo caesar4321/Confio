@@ -49,7 +49,7 @@ export const googleDriveStorage = {
             const data = await response.json();
             return data.files || [];
         } catch (error) {
-            console.warn('[GoogleDrive] List files failed:', error);
+
             throw error;
         }
     },
@@ -82,7 +82,7 @@ export const googleDriveStorage = {
             // We expect the content to be the Base64 string of the secret
             return await response.text();
         } catch (error) {
-            console.warn('[GoogleDrive] Download failed:', error);
+
             throw error;
         }
     },
@@ -107,7 +107,7 @@ export const googleDriveStorage = {
             const data = await response.json();
             return data.revisions || [];
         } catch (e) {
-            console.warn('[GoogleDrive] Failed to list revisions', e);
+
             return [];
         }
     },
@@ -155,7 +155,7 @@ export const googleDriveStorage = {
             const data = await response.json();
             return data.id;
         } catch (error) {
-            console.warn('[GoogleDrive] Create file failed:', error);
+
             throw error;
         }
     },
@@ -182,7 +182,7 @@ export const googleDriveStorage = {
                 throw new Error(`Drive Update Failed: ${response.status} ${errorText}`);
             }
         } catch (error) {
-            console.warn('[GoogleDrive] Update file failed:', error);
+
             throw error;
         }
     }

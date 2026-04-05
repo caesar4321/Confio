@@ -82,8 +82,8 @@ android {
         applicationId "com.Confio.Confio"
         minSdkVersion 24
         targetSdkVersion 35
-        versionCode 74
-        versionName "4.0.6"
+        versionCode 75
+        versionName "4.0.7"
         ndk {
             abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64"
         }
@@ -252,4 +252,5 @@ dependencies {
     implementation project(':react-native-worklets-core')
     implementation project(':react-native-view-shot')
     implementation project(':react-native-share')
+    implementation project(':react-native-clipboard_clipboard')
 }

@@ -12,8 +12,6 @@ class CUSDAppOptInService {
    */
   async handleAppOptIn(account?: any, appId?: number | string): Promise<{ success: boolean; error?: string }> {
     try {
-      console.log('[CUSDAppOptInService] Starting sponsored app opt-in flow');
-
       // Preflight: ensure the derived wallet matches the backend address; otherwise skip silently
       try {
         const { oauthStorage } = await import('../services/oauthStorageService');
@@ -35,7 +33,6 @@ class CUSDAppOptInService {
           );
           const serverAddr = account?.algorandAddress;
           if (serverAddr && wallet?.address && wallet.address !== serverAddr) {
-            console.warn('[CUSDAppOptInService] Derived address does not match server address; skipping app opt-in');
             return { 
               success: false, 
               error: 'No se pudo verificar la billetera. Por favor, asegúrate de haber restaurado tu copia de seguridad.' 
@@ -43,7 +40,6 @@ class CUSDAppOptInService {
           }
         }
       } catch (prefError) {
-        console.warn('[CUSDAppOptInService] Preflight check failed; continuing anyway:', prefError);
       }
 
       // Step 1: Generate the sponsored opt-in transaction from server
@@ -55,10 +51,7 @@ class CUSDAppOptInService {
       });
 
       const optInData = optInResult.data?.generateAppOptInTransaction;
-      console.log('[CUSDAppOptInService] Opt-in mutation result:', optInData);
-
       if (optInData?.alreadyOptedIn) {
-        console.log('[CUSDAppOptInService] Already opted into app');
         return { success: true };
       }
 
@@ -73,11 +66,6 @@ class CUSDAppOptInService {
 
       const userTransaction = optInData.userTransaction;
       const sponsorTransaction = optInData.sponsorTransaction;
-
-      console.log('[CUSDAppOptInService] Transactions received:',
-        'user:', userTransaction ? 'present' : 'missing',
-        'sponsor:', sponsorTransaction ? 'present' : 'missing');
-
       if (!userTransaction) {
         console.error('[CUSDAppOptInService] Missing user transaction data. Full optInData:', optInData);
         return {
@@ -90,8 +78,6 @@ class CUSDAppOptInService {
       const isSponsored = !!sponsorTransaction;
 
       if (isSponsored) {
-        console.log('[CUSDAppOptInService] Got sponsored opt-in transactions, preparing signer...');
-
         // Ensure the signer scope matches the active account (business) before signing
         try {
           const { oauthStorage } = await import('../services/oauthStorageService');
@@ -114,12 +100,7 @@ class CUSDAppOptInService {
             );
           }
         } catch (scopeErr) {
-          console.warn('[CUSDAppOptInService] Could not initialize signer scope (will attempt anyway):', scopeErr);
-        }
-
-        console.log('[CUSDAppOptInService] Signing user transaction...');
-      } else {
-        console.log('[CUSDAppOptInService] Got solo opt-in transaction, signing...');
+        }      } else {
       }
 
       // Step 2: Sign the user transaction
@@ -130,8 +111,6 @@ class CUSDAppOptInService {
       let executeResult;
 
       if (isSponsored) {
-        console.log('[CUSDAppOptInService] User transaction signed, submitting sponsored group...');
-
         // Step 3a: Submit the signed sponsored group
         // Sponsor is always first - no need for a flag
 
@@ -144,8 +123,6 @@ class CUSDAppOptInService {
           }
         });
       } else {
-        console.log('[CUSDAppOptInService] Submitting solo transaction...');
-
         // Step 3b: Submit the solo signed transaction
         // We'll need to create a simple submission mutation for this
         // For now, use the sponsored group mutation with only the user transaction
@@ -159,10 +136,6 @@ class CUSDAppOptInService {
       }
 
       if (executeResult.data?.submitSponsoredGroup?.success) {
-        console.log('[CUSDAppOptInService] App opt-in successful! Transaction ID:',
-          executeResult.data.submitSponsoredGroup.transactionId);
-        console.log('[CUSDAppOptInService] Fees saved:',
-          executeResult.data.submitSponsoredGroup.feesSaved, 'ALGO');
         return {
           success: true
         };
@@ -171,7 +144,6 @@ class CUSDAppOptInService {
         console.error('[CUSDAppOptInService] Failed to submit sponsored group:', errMsg);
         // Idempotency: treat "already opted in" as success
         if (/already\s+opted\s+in/i.test(errMsg)) {
-          console.log('[CUSDAppOptInService] Treating "already opted in" as success');
           return { success: true };
         }
         return { success: false, error: errMsg || 'Failed to submit opt-in transaction' };

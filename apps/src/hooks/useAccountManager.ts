@@ -71,16 +71,6 @@ export const useAccountManager = (): UseAccountManagerReturn => {
     } catch { }
   }, [authService]);
 
-  // Debug profile loading
-  console.log('useAccountManager - Profile state:', {
-    profileDataLoaded: !!profileData,
-    currentAccountType: profileData?.currentAccountType,
-    userProfileName: profileData?.userProfile?.firstName || profileData?.userProfile?.username,
-    businessProfileName: profileData?.businessProfile?.name,
-    userProfileId: profileData?.userProfile?.id,
-    businessProfileId: profileData?.businessProfile?.id
-  });
-
   // Delay any server-bound account queries until the auth gate is truly ready
   useEffect(() => {
     let cancelled = false;
@@ -151,16 +141,6 @@ export const useAccountManager = (): UseAccountManagerReturn => {
 
       // Get server accounts
       const serverAccounts = serverAccountsData?.userAccounts || [];
-      console.log('useAccountManager - Server accounts data:', {
-        serverAccountsData: !!serverAccountsData,
-        userAccounts: serverAccounts,
-        accountsCount: serverAccounts.length,
-        accountTypes: serverAccounts.map((acc: any) => acc.accountType),
-        isEmployee: serverAccounts.map((acc: any) => acc.isEmployee),
-        accountIds: serverAccounts.map((acc: any) => acc.id),
-        serverError: serverError?.message || 'none',
-      });
-
       // Convert server accounts to StoredAccount format
       // Filter out any null accounts first
       const convertedAccounts: StoredAccount[] = dedupeById(convertServerAccounts(serverAccounts));
@@ -171,8 +151,6 @@ export const useAccountManager = (): UseAccountManagerReturn => {
 
       // If no server accounts, create a temporary default personal account so UI isn't blank
       if (convertedAccounts.length === 0) {
-        console.log('useAccountManager - No server accounts found, creating temporary default personal account for display');
-
         // Create a default personal account with user profile data
         const displayName = profileData?.userProfile?.firstName || profileData?.userProfile?.username || 'Personal';
         const avatar = displayName.charAt(0).toUpperCase();
@@ -190,7 +168,6 @@ export const useAccountManager = (): UseAccountManagerReturn => {
         };
 
         convertedAccounts.push(defaultAccount);
-        console.log('useAccountManager - Created default personal account:', defaultAccount);
       }
 
       // Generate the expected active account ID from context
@@ -201,28 +178,8 @@ export const useAccountManager = (): UseAccountManagerReturn => {
         expectedActiveAccountId = accountManager.generateAccountId(activeContext.type, activeContext.index);
       }
 
-      console.log('loadAccounts - Active context:', {
-        activeContextType: activeContext.type,
-        activeContextIndex: activeContext.index,
-        activeContextBusinessId: activeContext.businessId,
-        expectedActiveAccountId: expectedActiveAccountId,
-        serverAccountsCount: convertedAccounts.length,
-        serverAccountIds: convertedAccounts.map(acc => acc.id)
-      });
-
       // Find the active account by exact ID match
       const active = convertedAccounts.find(acc => acc.id === expectedActiveAccountId);
-
-      console.log('loadAccounts - Found active account:', {
-        foundActive: !!active,
-        expectedActiveAccountId: expectedActiveAccountId,
-        actualActiveAccountId: active?.id,
-        activeAccountType: active?.type,
-        activeAccountIndex: active?.index,
-        activeAccountName: active?.name,
-        activeAccountAvatar: active?.avatar,
-        allAccountIds: convertedAccounts.map(acc => acc.id)
-      });
 
       if (active) {
         // Get the address for the active account (may already be computed)
@@ -238,36 +195,13 @@ export const useAccountManager = (): UseAccountManagerReturn => {
         };
 
         setActiveAccount(activeWithAddress);
-        console.log('loadAccounts - setActiveAccount called with:', {
-          ...active,
-          addressPreview: currentAddress ? currentAddress.substring(0, 10) + '...' : 'none'
-        });
 
         // Note: Profile refresh is handled by AuthContext, not here
         // This prevents circular dependencies and unnecessary network requests
       } else {
-        console.warn(
-          '[AccountMgr] Expected active account ID', expectedActiveAccountId,
-          'not found in convertedAccounts:', convertedAccounts.map(acc => acc.id)
-        );
         // Do NOT reset to null here; keep the old value until we know more
-        console.log('loadAccounts - Keeping existing activeAccount, not setting to null');
         // As a safety, ensure we still have a valid activeAccount selection
         await ensureActiveAccountFrom(convertedAccounts);
-      }
-
-      // Debug the active account state
-      if (active) {
-        console.log('loadAccounts - Active account details:', {
-          id: active.id,
-          type: active.type,
-          name: active.name,
-          typeIsDefined: active.type !== undefined,
-          typeIsString: typeof active.type === 'string',
-          typeValue: active.type
-        });
-      } else {
-        console.log('loadAccounts - No active account found, setting to null');
       }
     } catch (error) {
       console.error('Error loading accounts:', error);
@@ -279,7 +213,6 @@ export const useAccountManager = (): UseAccountManagerReturn => {
   /* MOVED HERE TO FIX HOISTING ISSUE */
   const refreshAccounts = useCallback(async () => {
     try {
-      console.log('refreshAccounts: forcing network fetch of userAccounts');
       // Ensure tokens are fresh/finalized before forcing any network fetch
       try { await waitForAuthReady(); } catch { }
       // Seed fast placeholder into AccountContext so UI never empties
@@ -316,10 +249,6 @@ export const useAccountManager = (): UseAccountManagerReturn => {
         context: { fetchOptions: { cache: 'no-store' } as any, skipProactiveRefresh: true },
       });
       const list1 = result1?.data?.userAccounts || [];
-      console.log('refreshAccounts: first result count =', list1.length);
-      if ((result1 as any)?.errors?.length) {
-        console.warn('GET_USER_ACCOUNTS errors:', (result1 as any).errors.map((e: any) => e.message));
-      }
 
       let serverAccounts = list1;
       if (serverAccounts.length === 0) {
@@ -332,15 +261,10 @@ export const useAccountManager = (): UseAccountManagerReturn => {
           context: { fetchOptions: { cache: 'no-store' } as any, skipProactiveRefresh: true },
         });
         const list2 = result2?.data?.userAccounts || [];
-        console.log('refreshAccounts: retry result count =', list2.length);
-        if ((result2 as any)?.errors?.length) {
-          console.warn('GET_USER_ACCOUNTS retry errors:', (result2 as any).errors.map((e: any) => e.message));
-        }
         serverAccounts = list2;
       }
 
       const converted = dedupeById(convertServerAccounts(serverAccounts));
-      console.log('refreshAccounts: converted accounts =', converted.map(a => a.id));
 
       // Always provide at least one safe placeholder so header/menu never disappears.
       // If we have a business profile available, include it too so the menu shows both entries.
@@ -471,14 +395,12 @@ export const useAccountManager = (): UseAccountManagerReturn => {
   // Whenever JWT account context changes (via AuthContext), force-refresh accounts from server
   useEffect(() => {
     if (isAuthenticated && !authLoading) {
-      console.log('useAccountManager - accountContextTick changed, refreshing accounts');
       refreshAccounts();
     }
   }, [accountContextTick, isAuthenticated, authLoading, refreshAccounts]);
 
   const switchAccount = useCallback(async (accountId: string) => {
     try {
-      console.log('useAccountManager - switchAccount called with:', accountId);
       setIsLoading(true);
 
       // Directly update the active account state for immediate UI update
@@ -495,15 +417,6 @@ export const useAccountManager = (): UseAccountManagerReturn => {
 
           // 🔥 IMPORTANT: Normalize the account type to lowercase
           const normalizedType = accountType.toLowerCase() as 'personal' | 'business';
-
-          console.log('🔄 switchAccount - Converting account:', {
-            accountId: serverAcc.id, // Use serverAcc.id instead of serverAcc.accountId
-            originalType: accountType,
-            normalizedType,
-            baseName,
-            isEmployee: serverAcc.isEmployee,
-            accountIndex: serverAcc.accountIndex
-          });
 
           // Generate proper ID based on account type
           let accountId: string;
@@ -543,28 +456,14 @@ export const useAccountManager = (): UseAccountManagerReturn => {
       // Find the new active account by server ID
       const newActiveAccount = convertedAccounts.find(acc => acc.id === accountId);
       if (newActiveAccount) {
-        console.log('✅ useAccountManager - Setting active account with normalized type:', {
-          id: newActiveAccount.id,
-          type: newActiveAccount.type,
-          name: newActiveAccount.name,
-          typeIsLowercase: newActiveAccount.type === newActiveAccount.type.toLowerCase()
-        });
         setActiveAccount(newActiveAccount);
-        console.log('useAccountManager - setActiveAccount called successfully');
 
         // Switch account in auth service
         // Use the server-provided ID directly for ALL accounts
-        console.log('useAccountManager - About to call authService.switchAccount with:', {
-          accountId: newActiveAccount.id,
-          accountType: newActiveAccount.type,
-          businessId: newActiveAccount.business?.id,
-          isEmployee: newActiveAccount.isEmployee
-        });
         await authService.switchAccount(newActiveAccount.id, apolloClient);
 
         // Get the new active account context
         const newActiveContext = await authService.getActiveAccountContext();
-        console.log('useAccountManager - New active context:', newActiveContext);
 
         // Update the active account context state
         setActiveAccountContext(newActiveContext);
@@ -578,16 +477,12 @@ export const useAccountManager = (): UseAccountManagerReturn => {
           apolloClient.stop(); // stop polls/in-flight operations
           await apolloClient.clearStore(); // clear cache without auto-refetch
           apolloClient.reFetchObservableQueries(); // restart and refetch active observers
-          console.log('useAccountManager - Apollo store cleared after account switch');
         } catch (error) {
-          console.log('useAccountManager - Error clearing Apollo store:', error);
           // Fallback to cache eviction
           try {
             apolloClient.cache.evict({});
             apolloClient.cache.gc();
-            console.log('useAccountManager - Cache evicted as fallback');
           } catch (evictError) {
-            console.log('useAccountManager - Error evicting cache:', evictError);
           }
         }
 
@@ -595,10 +490,8 @@ export const useAccountManager = (): UseAccountManagerReturn => {
         try {
           if (newActiveAccount.type === 'business' && newActiveAccount.business?.id) {
             await refreshProfile('business', newActiveAccount.business.id);
-            console.log('useAccountManager - Refreshed business profile after account switch');
           } else {
             await refreshProfile('personal');
-            console.log('useAccountManager - Refreshed personal profile after account switch');
           }
         } catch (error) {
           console.error('useAccountManager - Error refreshing profile after account switch:', error);
@@ -618,16 +511,8 @@ export const useAccountManager = (): UseAccountManagerReturn => {
             algorandAddress: computedAddress
           };
           setActiveAccount(activeWithAddress);
-          console.log('useAccountManager - Account has address after switch:', {
-            addressPreview: computedAddress.substring(0, 10) + '...'
-          });
         }
-      } else {
-        console.log('useAccountManager - Could not find account with ID:', accountId);
-        console.log('useAccountManager - Available accounts:', convertedAccounts.map(acc => acc.id));
       }
-
-      console.log('useAccountManager - switchAccount completed');
     } catch (error) {
       console.error('Error switching account:', error);
       throw error;

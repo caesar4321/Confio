@@ -75,7 +75,6 @@ function normalizeDetailBlocks(
         return parsedBlocks;
       }
     } catch (error) {
-      console.warn('Failed to parse discover detail blocks', error);
     }
   }
   const fallbackBlocks: Array<
@@ -169,7 +168,6 @@ export const DiscoverPostDetailScreen = () => {
       }
       await Linking.openURL(url);
     } catch (error) {
-      console.warn('Failed to open discover platform link', error);
     }
   };
 

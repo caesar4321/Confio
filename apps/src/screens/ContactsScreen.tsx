@@ -53,6 +53,12 @@ interface EmployeeCardProps {
   onCancelInvitation: (contact: any) => void;
 }
 
+const getContactCardLabel = (contact: any, isOnConfio: boolean) =>
+  `${isOnConfio ? 'Contacto en Confío' : 'Contacto para invitar'}: ${contact.name}. ${contact.phone || 'Sin teléfono'}`;
+
+const getEmployeeCardLabel = (contact: any) =>
+  `${contact.isInvitation ? 'Invitación pendiente' : 'Empleado'}: ${contact.name}. ${contact.phone || 'Sin teléfono'}. Rol ${getRoleLabel(contact.role)}`;
+
 const getRoleLabel = (role: string) => {
   switch (role) {
     case 'cashier': return 'Cajero';
@@ -67,7 +73,13 @@ const EmployeeCard = memo(({ contact, onPress, onRemove, onCancelInvitation }: E
   const role = getRoleLabel(contact.role);
 
   return (
-    <TouchableOpacity style={styles.contactCard} onPress={() => onPress(contact)}>
+    <TouchableOpacity
+      style={styles.contactCard}
+      onPress={() => onPress(contact)}
+      accessibilityRole="button"
+      accessibilityLabel={getEmployeeCardLabel(contact)}
+      accessibilityHint={contact.isInvitation ? 'Abre las opciones de la invitación pendiente.' : 'Abre el detalle del empleado.'}
+    >
       <View style={[
         styles.avatarContainer,
         { backgroundColor: isInvitation ? '#fef3c7' : colors.primaryLight }
@@ -94,6 +106,8 @@ const EmployeeCard = memo(({ contact, onPress, onRemove, onCancelInvitation }: E
               e.stopPropagation();
               onCancelInvitation(contact);
             }}
+            accessibilityRole="button"
+            accessibilityLabel={`Cancelar invitación para ${contact.name}`}
           >
             <Icon name="x" size={20} color="#ef4444" />
           </TouchableOpacity>
@@ -104,6 +118,8 @@ const EmployeeCard = memo(({ contact, onPress, onRemove, onCancelInvitation }: E
               e.stopPropagation();
               onRemove(contact);
             }}
+            accessibilityRole="button"
+            accessibilityLabel={`Ver opciones de ${contact.name}`}
           >
             <Icon name="more-vertical" size={20} color="#6b7280" />
           </TouchableOpacity>
@@ -114,7 +130,13 @@ const EmployeeCard = memo(({ contact, onPress, onRemove, onCancelInvitation }: E
 });
 
 const ContactCard = memo(({ contact, isOnConfio = false, onPress, onSendPress, onInvitePress }: ContactCardProps) => (
-  <TouchableOpacity style={styles.contactCard} onPress={() => onPress(contact)}>
+  <TouchableOpacity
+    style={styles.contactCard}
+    onPress={() => onPress(contact)}
+    accessibilityRole="button"
+    accessibilityLabel={getContactCardLabel(contact, isOnConfio)}
+    accessibilityHint={isOnConfio ? 'Abre el detalle del contacto.' : 'Abre la invitación para este contacto.'}
+  >
     <View style={[
       styles.avatarContainer,
       { backgroundColor: isOnConfio ? colors.primaryLight : '#e5e7eb' }
@@ -139,6 +161,8 @@ const ContactCard = memo(({ contact, isOnConfio = false, onPress, onSendPress, o
           e.stopPropagation();
           onSendPress(contact);
         }}
+        accessibilityRole="button"
+        accessibilityLabel={`Enviar dinero a ${contact.name}`}
       >
         <Icon name="send" size={20} color="#fff" />
       </TouchableOpacity>
@@ -149,6 +173,8 @@ const ContactCard = memo(({ contact, isOnConfio = false, onPress, onSendPress, o
           e.stopPropagation();
           onInvitePress(contact);
         }}
+        accessibilityRole="button"
+        accessibilityLabel={`Enviar e invitar a ${contact.name}`}
       >
         <Icon name="gift" size={16} color="#fff" style={{ marginRight: 6 }} />
         <Text style={styles.inviteButtonText}>Enviar & Invitar</Text>
@@ -206,6 +232,7 @@ const SearchInput = React.memo(({
       autoCapitalize="none"
       returnKeyType="search"
       blurOnSubmit={false}
+      accessibilityLabel={isBusinessAccount ? 'Buscar empleados' : 'Buscar contactos'}
     />
   );
 });
@@ -263,10 +290,9 @@ export const ContactsScreen = () => {
         }));
       }
     },
-    onError: (error) => {
-      console.error('Error fetching current business employees:', error);
+    onError: () => {
       setEmployeesState(prev => ({ ...prev, loading: false, refreshing: false }));
-    }
+    },
   });
 
   const { data: invitationsData, loading: invitationsLoading, error: invitationsError, refetch: refetchInvitations } = useQuery(GET_CURRENT_BUSINESS_INVITATIONS, {
@@ -274,9 +300,7 @@ export const ContactsScreen = () => {
     skip: !isBusinessAccount,
     fetchPolicy: 'cache-and-network',
     errorPolicy: 'all',
-    onError: (error) => {
-      console.error('Error fetching current business invitations:', error);
-    }
+    onError: () => {},
   });
 
   // Pending payroll items for delegates (personal account context)
@@ -392,7 +416,6 @@ export const ContactsScreen = () => {
         }
       }
     } catch (error) {
-      console.error('Error checking contact permission:', error);
     }
   };
 
@@ -456,7 +479,6 @@ export const ContactsScreen = () => {
         await displayContacts(allContacts);
       }
     } catch (error) {
-      console.error('Error syncing contacts:', error);
       // Show empty state with sync button if error occurs
     } finally {
       setIsLoadingContacts(false);
@@ -718,7 +740,6 @@ export const ContactsScreen = () => {
         Alert.alert('Error', result.data?.cancelInvitation?.errors?.[0] || 'Error al cancelar la invitación');
       }
     } catch (error) {
-      console.error('Error canceling invitation:', error);
       Alert.alert('Error', 'No se pudo cancelar la invitación. Intenta de nuevo.');
     }
   }, [cancelInvitation, refetchInvitations]);
@@ -751,7 +772,6 @@ export const ContactsScreen = () => {
         }));
       }
     } catch (error) {
-      console.error('Error loading more employees:', error);
       setEmployeesState(prev => ({ ...prev, loading: false }));
     }
   }, [employeesState.hasNextPage, employeesState.loading, employeesState.cursor, isBusinessAccount, fetchMore]);
@@ -781,7 +801,6 @@ export const ContactsScreen = () => {
       // Also refresh invitations
       refetchInvitations();
     } catch (error) {
-      console.error('Error refreshing employees:', error);
       setEmployeesState(prev => ({ ...prev, refreshing: false }));
     }
   }, [isBusinessAccount, refetchEmployees, refetchInvitations]);
@@ -798,7 +817,11 @@ export const ContactsScreen = () => {
         <View style={styles.modalContent}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Selecciona la moneda</Text>
-            <TouchableOpacity onPress={() => setShowSendTokenSelection(false)}>
+            <TouchableOpacity
+              onPress={() => setShowSendTokenSelection(false)}
+              accessibilityRole="button"
+              accessibilityLabel="Cerrar selección de moneda"
+            >
               <Icon name="x" size={24} color="#6B7280" />
             </TouchableOpacity>
           </View>
@@ -807,6 +830,8 @@ export const ContactsScreen = () => {
             <TouchableOpacity
               style={styles.tokenOption}
               onPress={() => handleSendTokenSelection('cusd')}
+              accessibilityRole="button"
+              accessibilityLabel="Seleccionar Confío Dollar para enviar"
             >
               <View style={styles.tokenInfo}>
                 <Image source={cUSDLogo} style={styles.tokenLogo} />
@@ -821,6 +846,8 @@ export const ContactsScreen = () => {
             <TouchableOpacity
               style={styles.tokenOption}
               onPress={() => handleSendTokenSelection('usdc')}
+              accessibilityRole="button"
+              accessibilityLabel="Seleccionar USDC para enviar"
             >
               <View style={styles.tokenInfo}>
                 <Image source={USDCLogo} style={styles.tokenLogo} />
@@ -835,6 +862,8 @@ export const ContactsScreen = () => {
             <TouchableOpacity
               style={styles.tokenOption}
               onPress={() => handleSendTokenSelection('confio')}
+              accessibilityRole="button"
+              accessibilityLabel="Seleccionar Confío para enviar"
             >
               <View style={styles.tokenInfo}>
                 <Image source={CONFIOLogo} style={styles.tokenLogo} />
@@ -850,6 +879,8 @@ export const ContactsScreen = () => {
           <TouchableOpacity
             style={styles.cancelButton}
             onPress={() => setShowSendTokenSelection(false)}
+            accessibilityRole="button"
+            accessibilityLabel="Cerrar selección de moneda"
           >
             <Text style={styles.cancelButtonText}>Cancelar</Text>
           </TouchableOpacity>
@@ -869,7 +900,11 @@ export const ContactsScreen = () => {
         <View style={styles.modalContent}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Selecciona la moneda</Text>
-            <TouchableOpacity onPress={() => setShowFriendTokenSelection(false)}>
+            <TouchableOpacity
+              onPress={() => setShowFriendTokenSelection(false)}
+              accessibilityRole="button"
+              accessibilityLabel="Cerrar selección de moneda"
+            >
               <Icon name="x" size={24} color="#6B7280" />
             </TouchableOpacity>
           </View>
@@ -878,6 +913,8 @@ export const ContactsScreen = () => {
             <TouchableOpacity
               style={styles.tokenOption}
               onPress={() => handleFriendTokenSelection('cusd')}
+              accessibilityRole="button"
+              accessibilityLabel={`Seleccionar Confío Dollar para enviar a ${selectedFriend?.name || 'este contacto'}`}
             >
               <View style={styles.tokenInfo}>
                 <Image source={cUSDLogo} style={styles.tokenLogo} />
@@ -892,6 +929,8 @@ export const ContactsScreen = () => {
             <TouchableOpacity
               style={styles.tokenOption}
               onPress={() => handleFriendTokenSelection('confio')}
+              accessibilityRole="button"
+              accessibilityLabel={`Seleccionar Confío para enviar a ${selectedFriend?.name || 'este contacto'}`}
             >
               <View style={styles.tokenInfo}>
                 <Image source={CONFIOLogo} style={styles.tokenLogo} />
@@ -907,6 +946,8 @@ export const ContactsScreen = () => {
           <TouchableOpacity
             style={styles.cancelButton}
             onPress={() => setShowFriendTokenSelection(false)}
+            accessibilityRole="button"
+            accessibilityLabel="Cerrar selección de moneda"
           >
             <Text style={styles.cancelButtonText}>Cancelar</Text>
           </TouchableOpacity>
@@ -1031,6 +1072,8 @@ export const ContactsScreen = () => {
             <TouchableOpacity
               style={styles.addEmployeeHeaderButton}
               onPress={() => setShowInviteModal(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Añadir empleado"
             >
               <Icon name="user-plus" size={16} color={colors.primary} />
             </TouchableOpacity>
@@ -1074,6 +1117,8 @@ export const ContactsScreen = () => {
             onPress={() => {
               setShowInviteModal(true);
             }}
+            accessibilityRole="button"
+            accessibilityLabel="Añadir empleado"
           >
             <Icon name="user-plus" size={16} color="#fff" style={{ marginRight: 8 }} />
             <Text style={styles.addEmployeeFromInfoButtonText}>Añadir empleado</Text>
@@ -1124,6 +1169,8 @@ export const ContactsScreen = () => {
               onPress={() => {
                 setShowInviteModal(true);
               }}
+              accessibilityRole="button"
+              accessibilityLabel="Añadir empleado"
             >
               <View style={styles.actionButtonContent}>
                 <View style={[styles.actionIconContainer, { backgroundColor: colors.violet }]}>
@@ -1142,6 +1189,8 @@ export const ContactsScreen = () => {
             <TouchableOpacity
               style={styles.addEmployeeActionButton}
               onPress={() => navigation.navigate('PayrollHome' as any)}
+              accessibilityRole="button"
+              accessibilityLabel="Abrir nómina"
             >
               <View style={styles.actionButtonContent}>
                 <View style={[styles.actionIconContainer, { backgroundColor: '#8B5CF6' }]}>
@@ -1188,6 +1237,8 @@ export const ContactsScreen = () => {
                   setShowPermissionModal(true);
                 }
               }}
+              accessibilityRole="button"
+              accessibilityLabel="Activar contactos"
             >
               <View style={styles.permissionPromptIcon}>
                 <Icon name="shield" size={20} color={colors.primary} />
@@ -1224,6 +1275,8 @@ export const ContactsScreen = () => {
               <TouchableOpacity
                 style={styles.actionButton}
                 onPress={handleSendWithAddress}
+                accessibilityRole="button"
+                accessibilityLabel="Enviar con dirección"
               >
                 <View style={styles.actionButtonContent}>
                   <View style={styles.actionIconContainer}>
@@ -1240,6 +1293,8 @@ export const ContactsScreen = () => {
               <TouchableOpacity
                 style={styles.actionButton}
                 onPress={handleReceiveWithAddress}
+                accessibilityRole="button"
+                accessibilityLabel="Recibir con dirección"
               >
                 <View style={styles.actionButtonContent}>
                   <View style={styles.actionIconContainer}>
@@ -1266,13 +1321,6 @@ export const ContactsScreen = () => {
     if (isBusinessAccount) {
       // Check if there was an error loading employees  
       if ((employeesError || invitationsError) && !activeAccount?.isEmployee) {
-        console.error('ContactsScreen - Error details:', {
-          employeesError: employeesError?.message,
-          invitationsError: invitationsError?.message,
-          networkError: employeesError?.networkError,
-          graphQLErrors: employeesError?.graphQLErrors
-        });
-
         return (
           <View style={styles.emptyState}>
             <View style={styles.emptyIconContainer}>
@@ -1289,6 +1337,8 @@ export const ContactsScreen = () => {
                 refetchEmployees();
                 refetchInvitations();
               }}
+              accessibilityRole="button"
+              accessibilityLabel="Reintentar carga de empleados"
             >
               <Icon name="refresh-cw" size={20} color="#fff" style={{ marginRight: 8 }} />
               <Text style={styles.retryButtonText}>Reintentar</Text>
@@ -1318,6 +1368,8 @@ export const ContactsScreen = () => {
             onPress={() => {
               setShowInviteModal(true);
             }}
+            accessibilityRole="button"
+            accessibilityLabel="Añadir empleado"
           >
             <Icon name="user-plus" size={20} color="#fff" style={{ marginRight: 8 }} />
             <Text style={styles.addEmployeeButtonText}>Añadir empleado</Text>
@@ -1385,6 +1437,8 @@ export const ContactsScreen = () => {
                     setShowPermissionModal(true);
                   }
                 }}
+                accessibilityRole="button"
+                accessibilityLabel="Permitir acceso a contactos"
               >
                 <Icon name="shield" size={20} color="#fff" style={{ marginRight: 8 }} />
                 <Text style={styles.permissionButtonText}>Permitir acceso a contactos</Text>
@@ -1393,6 +1447,8 @@ export const ContactsScreen = () => {
               <TouchableOpacity
                 style={styles.permissionButton}
                 onPress={handleRefresh}
+                accessibilityRole="button"
+                accessibilityLabel="Sincronizar contactos"
               >
                 <Icon name="refresh-cw" size={20} color="#fff" style={{ marginRight: 8 }} />
                 <Text style={styles.permissionButtonText}>Sincronizar contactos</Text>
@@ -1411,6 +1467,8 @@ export const ContactsScreen = () => {
                     setShowPermissionModal(true);
                   }
                 }}
+                accessibilityRole="button"
+                accessibilityLabel={Platform.OS === 'ios' ? 'Abrir configuración' : 'Ver información de privacidad'}
               >
                 <Text style={styles.secondaryButtonText}>
                   {Platform.OS === 'ios' ? 'Abrir Configuración' : 'Ver información de privacidad'}
@@ -1475,6 +1533,8 @@ export const ContactsScreen = () => {
                 }
               }}
               disabled={isLoadingContacts || refreshing}
+              accessibilityRole="button"
+              accessibilityLabel={isBusinessAccount || hasContactPermission ? 'Actualizar contactos' : 'Permisos de contactos'}
             >
               <Icon
                 name={isBusinessAccount || hasContactPermission ? "refresh-cw" : "shield"}

@@ -42,7 +42,6 @@ async function getJwtToken(): Promise<string | null> {
       return tokens.accessToken || null;
     }
   } catch (e) {
-    console.log('[p2pWs] token error', e);
   }
   return null;
 }
@@ -60,15 +59,12 @@ export class P2PWsSession {
       try {
         const token = await getJwtToken();
         if (!token) throw new Error('no_token');
-        const wsUrl = `${getWsBase()}ws/p2p_session?token=${encodeURIComponent(token)}`;
-        console.log('[p2pWs] Opening', wsUrl.replace(token, '***'));
-        const ws = new WebSocket(wsUrl);
+        const wsUrl = `${getWsBase()}ws/p2p_session?token=${encodeURIComponent(token)}`;        const ws = new WebSocket(wsUrl);
         this.ws = ws;
-        const timeout = setTimeout(() => { console.log('[p2pWs] open timeout'); reject(new Error('open_timeout')); }, 15000);
-        ws.onopen = () => { clearTimeout(timeout); console.log('[p2pWs] open'); resolve(); };
-        ws.onerror = (e) => { clearTimeout(timeout); console.log('[p2pWs] error', e); if (!this.closeRequested) reject(e); };
+        const timeout = setTimeout(() => { reject(new Error('open_timeout')); }, 15000);
+        ws.onopen = () => { clearTimeout(timeout); resolve(); };
+        ws.onerror = (e) => { clearTimeout(timeout); if (!this.closeRequested) reject(e); };
         ws.onclose = (e) => {
-          console.log('[p2pWs] close', e.code, e.reason);
           if (!this.closeRequested) {
             Object.keys(this.pendingRejectors).forEach((k) => this.pendingRejectors[k](new Error('ws_closed')));
             this.pendingRejectors = {}; this.pendingResolvers = {};
@@ -76,20 +72,16 @@ export class P2PWsSession {
         };
         ws.onmessage = (ev) => {
           try {
-            const msg = JSON.parse(ev.data);
-            console.log('[p2pWs] message', msg?.type, msg?.action);
-            if (msg.type === 'prepare_ready') {
+            const msg = JSON.parse(ev.data);            if (msg.type === 'prepare_ready') {
               this.resolve(`prepare:${msg.action}`, msg.pack);
             } else if (msg.type === 'submit_ok') {
               this.resolve(`submit:${msg.action}`, msg);
             } else if (msg.type === 'error') {
-              console.log('[p2pWs] server error', msg?.message);
               this.rejectAll(new Error(msg.message || 'ws_error'));
             }
           } catch { }
         };
       } catch (e) {
-        console.log('[p2pWs] open failed', e);
         reject(e);
       }
     });
@@ -114,13 +106,11 @@ export class P2PWsSession {
       this.pendingRejectors[key] = reject as any;
       const t = setTimeout(() => {
         if (this.pendingRejectors[key]) {
-          console.log('[p2pWs] prepare timeout');
           this.pendingRejectors[key](new Error('prepare_timeout'));
           delete this.pendingRejectors[key]; delete this.pendingResolvers[key];
         }
       }, timeoutMs);
       try {
-        console.log('[p2pWs] -> prepare', args.action);
         const payload: any = { type: 'prepare', action: args.action, trade_id: String(args.tradeId) };
         if (args.amount != null) payload.amount = args.amount;
         if (args.assetType) payload.asset_type = args.assetType;
@@ -143,13 +133,11 @@ export class P2PWsSession {
       this.pendingRejectors[key] = reject as any;
       const t = setTimeout(() => {
         if (this.pendingRejectors[key]) {
-          console.log('[p2pWs] submit timeout');
           this.pendingRejectors[key](new Error('submit_timeout'));
           delete this.pendingRejectors[key]; delete this.pendingResolvers[key];
         }
       }, timeoutMs);
       try {
-        console.log('[p2pWs] -> submit', args.action);
         const payload: any = { type: 'submit', action: args.action, trade_id: String(args.tradeId) };
         if (args.signedUserTxns) payload.signed_user_txns = args.signedUserTxns;
         if (args.signedUserTxn) payload.signed_user_txn = args.signedUserTxn;

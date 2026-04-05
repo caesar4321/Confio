@@ -94,7 +94,6 @@ export const USDCHistoryScreen = () => {
       setTransactions(newTransactions);
       setHasMore(newTransactions.length === ITEMS_PER_PAGE);
     } catch (error) {
-      console.error('Error refreshing USDC transactions:', error);
     } finally {
       setRefreshing(false);
     }
@@ -120,7 +119,6 @@ export const USDCHistoryScreen = () => {
         setHasMore(false);
       }
     } catch (error) {
-      console.error('Error loading more transactions:', error);
     } finally {
       setLoadingMore(false);
     }

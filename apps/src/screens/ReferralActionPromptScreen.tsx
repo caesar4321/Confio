@@ -1,13 +1,13 @@
 import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
-import { useNavigation, RouteProp, useRoute } from '@react-navigation/native';
+import { useNavigation, NavigationProp, RouteProp, useRoute } from '@react-navigation/native';
 import { MainStackParamList } from '../types/navigation';
 
 type ReferralActionRouteProp = RouteProp<MainStackParamList, 'ReferralActionPrompt'>;
 
 export const ReferralActionPromptScreen: React.FC = () => {
-  const navigation = useNavigation();
+  const navigation = useNavigation<NavigationProp<MainStackParamList>>();
   const route = useRoute<ReferralActionRouteProp>();
   const event = route.params?.event || 'top_up';
 
@@ -26,7 +26,7 @@ export const ReferralActionPromptScreen: React.FC = () => {
           label: 'Recargar en Confío',
           icon: 'credit-card',
           onPress: () =>
-            navigation.navigate('TopUp' as never),
+            navigation.navigate('TopUp'),
         },
         {
           label: 'Depositar USDC/cUSD',

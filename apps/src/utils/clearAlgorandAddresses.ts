@@ -5,8 +5,6 @@
 import * as Keychain from 'react-native-keychain';
 
 export async function clearAllAlgorandAddresses(): Promise<void> {
-  console.log('🧹 Clearing all stored Algorand addresses...');
-
   // With per-account generic password services, clear by known key patterns
   const patterns = [
     'algo_address_personal_0',
@@ -20,18 +18,14 @@ export async function clearAllAlgorandAddresses(): Promise<void> {
     try {
       await Keychain.resetGenericPassword({ service });
       cleared += 1;
-      console.log(`Cleared service: ${service}`);
     } catch {}
   }
-  console.log(`✅ Cleared ${cleared} Algorand address entries`);
 }
 
 /**
  * Debug function to list all stored Algorand addresses
  */
 export async function listStoredAlgorandAddresses(): Promise<void> {
-  console.log('📋 Listing stored Algorand addresses (sample)...');
-
   const samples = [
     { key: 'algo_address_personal_0', desc: 'Personal Account' },
     { key: 'algo_address_business_1_0', desc: 'Business 1' },
@@ -42,14 +36,8 @@ export async function listStoredAlgorandAddresses(): Promise<void> {
   for (const s of samples) {
     const service = `com.confio.algorand.addresses.${s.key}`;
     try {
-      const credentials = await Keychain.getGenericPassword({ service });
-      if (credentials && credentials.password) {
-        console.log(`✓ ${s.desc} (${s.key}): ${credentials.password}`);
-      } else {
-        console.log(`• ${s.desc} (${s.key}): not set`);
-      }
+      await Keychain.getGenericPassword({ service });
     } catch {
-      console.log(`• ${s.desc} (${s.key}): not set`);
     }
   }
 }

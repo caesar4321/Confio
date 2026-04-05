@@ -67,16 +67,9 @@ async function performRefreshWithFetch(rt: string): Promise<string> {
     headers: { 'Content-Type': 'application/json' }, // no Authorization
     body: JSON.stringify(body),
   } as any);
-  console.log(`[PERF][Apollo] performRefreshWithFetch network: ${Date.now() - startTime}ms`, {
-    ok: res.ok,
-    status: res.status,
-  });
-  const jsonParseStart = Date.now();
   const json = await res.json();
-  console.log(`[PERF][Apollo] performRefreshWithFetch res.json(): ${Date.now() - jsonParseStart}ms`);
   const newAccess = json?.data?.refreshToken?.token;
   if (!newAccess) throw new Error('Failed to refresh token');
-  const keychainWriteStart = Date.now();
   await Keychain.setGenericPassword(
     AUTH_KEYCHAIN_USERNAME,
     JSON.stringify({ accessToken: newAccess, refreshToken: rt }),
@@ -86,13 +79,10 @@ async function performRefreshWithFetch(rt: string): Promise<string> {
       accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK
     }
   );
-  console.log(`[PERF][Apollo] performRefreshWithFetch Keychain write: ${Date.now() - keychainWriteStart}ms`);
-  console.log(`[PERF][Apollo] performRefreshWithFetch total: ${Date.now() - startTime}ms`);
   return newAccess as string;
 }
 
 const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: ErrorResponse): void | ApolloObservable<FetchResult> => {
-  console.log('[Apollo][onError] op:', operation.operationName);
   if (graphQLErrors) {
     for (const err of graphQLErrors) {
       console.error('[GraphQL error]:', {
@@ -113,7 +103,6 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
       if (err.message === 'Token has been invalidated' ||
         err.message === 'Token version mismatch' ||
         err.message.includes('Invalid token payload')) {
-        console.log('[Apollo] Token invalidated, clearing credentials and requiring re-login');
         // Clear stored credentials immediately
         Keychain.resetGenericPassword({ service: AUTH_KEYCHAIN_SERVICE }).catch(console.error);
         // Don't retry - user must log in again
@@ -185,11 +174,7 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
   }
 });
 
-const AUTH_DEBUG = true; // Toggle verbose auth logs
 const authLink = setContext(async (operation, previousContext) => {
-  const authLinkStart = Date.now();
-  if (AUTH_DEBUG) console.log('AuthLink called for operation:', operation.operationName);
-
   // Extract headers from previous context
   const { headers = {} } = previousContext || {};
 
@@ -203,50 +188,31 @@ const authLink = setContext(async (operation, previousContext) => {
 
   // 1. ALWAYS Try to attach Firebase App Check header (Public or Private)
   try {
-    const appCheckStart = Date.now();
     const appCheckToken = await appCheckService.getTokenForHeader();
-    console.log(`[PERF][Apollo] appCheckService.getTokenForHeader for ${operation.operationName || 'anonymous'}: ${Date.now() - appCheckStart}ms`, {
-      hasToken: !!appCheckToken,
-    });
     if (appCheckToken) {
       nextHeaders['X-Firebase-AppCheck'] = appCheckToken;
-      if (AUTH_DEBUG) console.log('[AuthLink] Attached X-Firebase-AppCheck header');
     }
   } catch (acError: any) {
-    if (AUTH_DEBUG) console.warn('[AuthLink] Failed to get App Check token:', acError);
     // DEBUG: Send error to backend to see why it failed
     nextHeaders['X-AppCheck-Debug-Error'] = acError?.message || String(acError);
   }
 
   // Check if we should skip authentication (for login mutations)
   if (previousContext?.skipAuth) {
-    if (AUTH_DEBUG) console.log('Skipping authentication for operation:', operation.operationName);
-    console.log(`[PERF][Apollo] authLink total for ${operation.operationName || 'anonymous'} (skipAuth): ${Date.now() - authLinkStart}ms`);
     return { headers: nextHeaders };
   }
 
   // Skip token refresh/auth for the refresh token mutation itself
   if (operation.operationName === 'RefreshToken') {
-    if (AUTH_DEBUG) console.log('Skipping token refresh for RefreshToken operation');
-    console.log(`[PERF][Apollo] authLink total for ${operation.operationName || 'anonymous'} (refresh op): ${Date.now() - authLinkStart}ms`);
     return { headers: nextHeaders };
   }
 
   try {
-    if (AUTH_DEBUG) console.log('Attempting to retrieve tokens from Keychain:', {
-      service: AUTH_KEYCHAIN_SERVICE,
-      username: AUTH_KEYCHAIN_USERNAME
-    });
-
     let credentials;
     try {
-      const keychainReadStart = Date.now();
       credentials = await Keychain.getGenericPassword({
         service: AUTH_KEYCHAIN_SERVICE,
         username: AUTH_KEYCHAIN_USERNAME
-      });
-      console.log(`[PERF][Apollo] Keychain.getGenericPassword for ${operation.operationName || 'anonymous'}: ${Date.now() - keychainReadStart}ms`, {
-        hasCredentials: !!credentials,
       });
     } catch (keychainError: any) {
       if (keychainError?.message?.includes('No entry found')) {
@@ -258,27 +224,18 @@ const authLink = setContext(async (operation, previousContext) => {
     }
 
     if (!credentials) {
-      console.log('No credentials found in Keychain');
-      console.log(`[PERF][Apollo] authLink total for ${operation.operationName || 'anonymous'} (no credentials): ${Date.now() - authLinkStart}ms`);
       return { headers: nextHeaders };
     }
 
     // Type assertion to handle the false | UserCredentials type
     const userCredentials = credentials as any;
 
-    if (AUTH_DEBUG) console.log('Found credentials in Keychain:', {
-      hasPassword: !!userCredentials.password,
-      passwordLength: userCredentials.password?.length
-    });
-
     let token: string;
     let refreshToken: string;
 
     try {
       // Parse tokens from JSON
-      const parseStart = Date.now();
       const tokens = JSON.parse(userCredentials.password);
-      console.log(`[PERF][Apollo] JSON.parse credentials for ${operation.operationName || 'anonymous'}: ${Date.now() - parseStart}ms`);
       if (!tokens.accessToken || !tokens.refreshToken) {
         throw new Error('Invalid token format');
       }
@@ -294,11 +251,7 @@ const authLink = setContext(async (operation, previousContext) => {
 
     // Check if token is expired or about to expire (within 5 minutes)
     try {
-      const decodeStart = Date.now();
       let decoded = jwtDecode<CustomJwtPayload>(token);
-      console.log(`[PERF][Apollo] jwtDecode access token for ${operation.operationName || 'anonymous'}: ${Date.now() - decodeStart}ms`, {
-        exp: decoded?.exp,
-      });
 
       const ctx = (typeof (operation as any).getContext === 'function') ? (operation as any).getContext() : previousContext;
       const hardSkipForAccounts = operation.operationName === 'GetUserAccounts';
@@ -309,9 +262,7 @@ const authLink = setContext(async (operation, previousContext) => {
 
       // For GetUserAccounts we do not refresh here; allow request to hit server first
       if (!hardSkipForAccounts && decoded.exp && (decoded.exp < currentTime || decoded.exp - currentTime < fiveMinutes)) {
-        if (AUTH_DEBUG) console.log('Token expired or about to expire, refreshing...');
         try {
-          const refreshStart = Date.now();
           if (!refreshPromise) {
             refreshPromise = (async () => {
               return await performRefreshWithFetch(refreshToken);
@@ -319,10 +270,8 @@ const authLink = setContext(async (operation, previousContext) => {
           }
           const newAccess = await refreshPromise;
           refreshPromise = null;
-          console.log(`[PERF][Apollo] expired-token refresh before ${operation.operationName || 'anonymous'}: ${Date.now() - refreshStart}ms`);
 
           nextHeaders['Authorization'] = `JWT ${newAccess}`;
-          console.log(`[PERF][Apollo] authLink total for ${operation.operationName || 'anonymous'} (expired refresh path): ${Date.now() - authLinkStart}ms`);
           return { headers: nextHeaders };
         } catch (error) {
           console.error('Token refresh failed:', error);
@@ -343,7 +292,6 @@ const authLink = setContext(async (operation, previousContext) => {
       // Proactively refresh if access token is expired or near expiry
       if (hardSkipForAccounts) {
         nextHeaders['Authorization'] = `JWT ${token}`;
-        console.log(`[PERF][Apollo] authLink total for ${operation.operationName || 'anonymous'} (hard skip proactive): ${Date.now() - authLinkStart}ms`);
         return { headers: nextHeaders } as any;
       }
 
@@ -353,7 +301,6 @@ const authLink = setContext(async (operation, previousContext) => {
           const exp = (decoded as any)?.exp ?? 0;
           const willExpireSoon = exp <= now + 30; // 30s safety window
           if (willExpireSoon) {
-            const proactiveRefreshStart = Date.now();
             const credentialsForRefresh = await Keychain.getGenericPassword({
               service: AUTH_KEYCHAIN_SERVICE,
               username: AUTH_KEYCHAIN_USERNAME
@@ -383,7 +330,6 @@ const authLink = setContext(async (operation, previousContext) => {
                 }
               }
             }
-            console.log(`[PERF][Apollo] proactive refresh before ${operation.operationName || 'anonymous'}: ${Date.now() - proactiveRefreshStart}ms`);
           }
         } catch (refreshError) {
           console.error('Proactive refresh error:', refreshError);
@@ -392,9 +338,6 @@ const authLink = setContext(async (operation, previousContext) => {
 
       // Always include the token in the header for authenticated requests
       nextHeaders['Authorization'] = `JWT ${token}`;
-      console.log(`[PERF][Apollo] authLink total for ${operation.operationName || 'anonymous'}: ${Date.now() - authLinkStart}ms`, {
-        hasAuthorization: true,
-      });
 
       return { headers: nextHeaders };
 
@@ -403,12 +346,10 @@ const authLink = setContext(async (operation, previousContext) => {
       await Keychain.resetGenericPassword({
         service: AUTH_KEYCHAIN_SERVICE
       });
-      console.log(`[PERF][Apollo] authLink total for ${operation.operationName || 'anonymous'} (decode error): ${Date.now() - authLinkStart}ms`);
       return { headers: nextHeaders };
     }
   } catch (error) {
     console.error('Error in authLink:', error);
-    console.log(`[PERF][Apollo] authLink total for ${operation.operationName || 'anonymous'} (outer error): ${Date.now() - authLinkStart}ms`);
     return { headers: nextHeaders };
   }
 });
@@ -434,7 +375,5 @@ export const apolloClient = new ApolloClient({
     },
   },
 });
-
-console.log('Apollo client initialized successfully');
 
 export default apolloClient;

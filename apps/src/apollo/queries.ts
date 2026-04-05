@@ -3423,8 +3423,8 @@ export const GET_MY_REFERRAL_REWARDS = gql`
 `;
 
 export const GET_MY_REFERRALS = gql`
-  query GetMyReferrals($status: String) {
-    myReferrals(status: $status) {
+  query GetMyReferrals($status: String, $first: Int, $offset: Int) {
+    myReferrals(status: $status, first: $first, offset: $offset) {
       id
       referredUser {
         id

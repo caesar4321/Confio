@@ -45,7 +45,7 @@ class BusinessOptInService {
       }
       return {};
     } catch (error) {
-      console.log('No opt-in statuses found in Keychain');
+
       return {};
     }
   }
@@ -63,9 +63,7 @@ class BusinessOptInService {
           username: this.KEYCHAIN_USERNAME,
           accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK
         }
-      );
-      console.log('Saved opt-in statuses to Keychain');
-    } catch (error) {
+      );    } catch (error) {
       console.error('Error saving opt-in statuses to Keychain:', error);
     }
   }
@@ -79,12 +77,11 @@ class BusinessOptInService {
       const businessStatus = allStatuses[businessId];
       
       if (businessStatus && businessStatus.optedIn) {
-        console.log(`BusinessOptInService - Found cached opt-in status for business ${businessId}: ${businessStatus.optedIn}`);
         return true;
       }
       return null; // Not found or not opted in
     } catch (error) {
-      console.log('Error loading opt-in status from Keychain:', error);
+
       return null;
     }
   }
@@ -101,9 +98,7 @@ class BusinessOptInService {
         timestamp: new Date().toISOString()
       };
       
-      await this.saveAllOptInStatuses(allStatuses);
-      console.log(`Saved opt-in status for business ${businessId}: ${optedIn}`);
-    } catch (error) {
+      await this.saveAllOptInStatuses(allStatuses);    } catch (error) {
       console.error('Error saving opt-in status to Keychain:', error);
     }
   }
@@ -161,13 +156,9 @@ class BusinessOptInService {
    */
   public async checkAndHandleOptIns(progressCallback?: (message: string) => void): Promise<boolean> {
     try {
-      console.log('BusinessOptInService - Checking if opt-ins are needed...');
-
       // 1. Check if current user is a business owner
       const isOwner = await this.isBusinessOwner();
-      if (!isOwner) {
-        console.log('BusinessOptInService - User is not a business owner (non-owner employee), skipping opt-in check');
-        // Non-owner employees cannot opt-in business accounts as they don't have the owner's OAuth credentials
+      if (!isOwner) {        // Non-owner employees cannot opt-in business accounts as they don't have the owner's OAuth credentials
         // The business account's Algorand address was derived from the owner's OAuth sub
         return true; // Skip opt-in for non-owner employees - they can't sign for the business
       }
@@ -175,40 +166,21 @@ class BusinessOptInService {
       // 2. Get business ID
       const businessId = await this.getBusinessId();
       if (!businessId) {
-        console.log('BusinessOptInService - No business ID found');
         return false;
       }
 
       // 3. Check if already opted in (from Keychain cache)
       const isOptedIn = await this.getOptInStatus(businessId);
       if (isOptedIn === true) {
-        console.log('BusinessOptInService - Business already opted in (from Keychain cache)');
         return true;
       }
-      console.log('BusinessOptInService - Not in cache, checking with backend...');
-
-      // 4. Check with backend if opt-ins are needed
-      console.log('BusinessOptInService - Checking with backend for opt-in status...');
-      progressCallback?.('Preparando factura...');
+      // 4. Check with backend if opt-ins are needed      progressCallback?.('Preparando factura...');
 
       const { data } = await apolloClient.mutate({
         mutation: CHECK_BUSINESS_OPT_IN
-      });
-
-      console.log('BusinessOptInService - Backend response:', {
-        needsOptIn: data.checkBusinessOptIn.needsOptIn,
-        assets: data.checkBusinessOptIn.assets,
-        error: data.checkBusinessOptIn.error,
-        hasTransactions: !!data.checkBusinessOptIn.optInTransactions,
-        transactionsType: typeof data.checkBusinessOptIn.optInTransactions,
-        transactionsLength: data.checkBusinessOptIn.optInTransactions?.length
-      });
-      
+      });      
       // Log the actual transactions structure for debugging
-      if (data.checkBusinessOptIn.optInTransactions) {
-        console.log('BusinessOptInService - Transactions structure:', 
-          JSON.stringify(data.checkBusinessOptIn.optInTransactions, null, 2).substring(0, 500));
-      }
+      if (data.checkBusinessOptIn.optInTransactions) {      }
 
       if (data.checkBusinessOptIn.error) {
         const backendError: string = data.checkBusinessOptIn.error || '';
@@ -218,7 +190,6 @@ class BusinessOptInService {
         if (backendError.includes('empleados') || 
             backendError.includes('employee') ||
             backendError.includes('dueño')) {
-          console.log('BusinessOptInService - Employee cannot opt-in; blocking until owner configures');
           return false; // Block employees here
         }
 
@@ -230,7 +201,6 @@ class BusinessOptInService {
 
           // Employees cannot fix this; block and surface owner-required message upstream
           if (!isOwner) {
-            console.log('BusinessOptInService - Non-owner employee on missing address; blocking');
             return false;
           }
 
@@ -242,7 +212,6 @@ class BusinessOptInService {
               const { oauthStorage } = await import('./oauthStorageService');
               const oauth = await oauthStorage.getOAuthSubject();
               if (!oauth?.subject || !oauth?.provider) {
-                console.warn('BusinessOptInService - Missing OAuth subject; cannot derive business address');
                 return false;
               }
 
@@ -265,28 +234,23 @@ class BusinessOptInService {
               );
 
               if (wallet?.address) {
-                console.log('BusinessOptInService - Derived business address, updating backend');
                 const upd2 = await apolloClient.mutate({
                   mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS,
                   variables: { algorandAddress: wallet.address }
                 });
                 const ok2 = upd2?.data?.updateAccountAlgorandAddress?.success;
                 const err2 = upd2?.data?.updateAccountAlgorandAddress?.error;
-                console.log('BusinessOptInService - Address update result:', { ok: ok2, error: err2 });
-
                 // Retry the opt-in check once after updating address
                 const retry = await apolloClient.mutate({ mutation: CHECK_BUSINESS_OPT_IN });
                 const retryErr = retry?.data?.checkBusinessOptIn?.error as string | undefined;
                 if (!retryErr) {
                   // Continue with the now-updated response object
-                  data.checkBusinessOptIn = retry.data.checkBusinessOptIn;
-                  console.log('BusinessOptInService - Retry succeeded after address update');
-                } else {
-                  console.warn('BusinessOptInService - Retry still failing:', retryErr);
+                  data.checkBusinessOptIn = retry.data.checkBusinessOptIn;                } else {
+
                   return false;
                 }
               } else {
-                console.warn('BusinessOptInService - Could not derive business address');
+
                 return false;
               }
             } catch (deriveError) {
@@ -294,7 +258,7 @@ class BusinessOptInService {
               return false;
             }
           } else {
-            console.warn('BusinessOptInService - Not in a business context while handling address error');
+
             return false;
           }
         } else {
@@ -304,7 +268,6 @@ class BusinessOptInService {
       }
 
       if (!data.checkBusinessOptIn.needsOptIn) {
-        console.log('BusinessOptInService - No opt-ins needed');
         await this.saveOptInStatus(businessId, true);
         return true;
       }
@@ -318,9 +281,7 @@ class BusinessOptInService {
         return false;
       }
       
-      const { assets, optInTransactions } = data.checkBusinessOptIn;
-      console.log('BusinessOptInService - Opt-ins needed for assets:', assets);
-      
+      const { assets, optInTransactions } = data.checkBusinessOptIn;      
       progressCallback?.('Configurando cuenta...');
 
       if (!optInTransactions) {
@@ -333,28 +294,15 @@ class BusinessOptInService {
       try {
         if (typeof optInTransactions === 'string') {
           // First parse
-          let parsed = JSON.parse(optInTransactions);
-          console.log('BusinessOptInService - First parse result type:', typeof parsed);
-          
+          let parsed = JSON.parse(optInTransactions);          
           // If it's still a string, parse again (double-encoded)
-          if (typeof parsed === 'string') {
-            console.log('BusinessOptInService - Double-encoded JSON detected, parsing again...');
-            transactions = JSON.parse(parsed);
+          if (typeof parsed === 'string') {            transactions = JSON.parse(parsed);
           } else {
             transactions = parsed;
-          }
-          console.log('BusinessOptInService - Final parsed transactions:', transactions?.length);
-        } else {
-          transactions = optInTransactions;
-          console.log('BusinessOptInService - Using transactions as-is:', transactions?.length);
-        }
+          }        } else {
+          transactions = optInTransactions;        }
         
-        // Debug: Log the parsed structure
-        console.log('BusinessOptInService - Transactions type:', typeof transactions);
-        console.log('BusinessOptInService - Is array?:', Array.isArray(transactions));
-        if (Array.isArray(transactions) && transactions.length > 0) {
-          console.log('BusinessOptInService - First transaction:', JSON.stringify(transactions[0], null, 2).substring(0, 200));
-        }
+        // Debug: Log the parsed structure        if (Array.isArray(transactions) && transactions.length > 0) {        }
       } catch (error) {
         console.error('BusinessOptInService - Failed to parse transactions:', error);
         console.error('BusinessOptInService - Raw optInTransactions:', optInTransactions);
@@ -379,9 +327,7 @@ class BusinessOptInService {
         return false;
       }
 
-      // Process opt-ins - we'll sign the transactions directly
-      console.log('BusinessOptInService - Processing opt-in transactions...');
-      progressCallback?.('Procesando...');
+      // Process opt-ins - we'll sign the transactions directly      progressCallback?.('Procesando...');
       
       // Since processSponsoredOptIn checks for currentAccount which doesn't exist for business,
       // we need to process the transactions directly here
@@ -395,18 +341,14 @@ class BusinessOptInService {
         }
         
         // Get opt-in transactions
-        const optInTransactions = transactions.filter(t => t.type === 'opt-in');
-        console.log(`BusinessOptInService - Found ${optInTransactions.length} opt-in transactions to sign`);
-        
+        const optInTransactions = transactions.filter(t => t.type === 'opt-in');        
         // Start group with the sponsor transaction FIRST to fund fees/MBR
         // Then append each signed opt-in transaction
         const signedTransactions: string[] = [];
         
         for (const optInData of optInTransactions) {
           try {
-            const assetName = optInData.assetName || 'Unknown';
-            console.log(`BusinessOptInService - Signing opt-in for ${assetName}`);
-            
+            const assetName = optInData.assetName || 'Unknown';            
             // Decode and sign the transaction
             const userTxnBytes = Uint8Array.from(Buffer.from(optInData.transaction, 'base64'));
             const signedUserTxn = await algorandService.signTransactionBytes(userTxnBytes);
@@ -419,26 +361,18 @@ class BusinessOptInService {
           }
         }
         
-        // Add the pre-signed sponsor transaction at the BEGINNING
-        console.log('BusinessOptInService - Sponsor transaction type:', typeof sponsorTxnData.transaction);
-        console.log('BusinessOptInService - Sponsor transaction length:', sponsorTxnData.transaction?.length);
-        console.log('BusinessOptInService - Sponsor transaction first 100 chars:', sponsorTxnData.transaction?.substring(0, 100));
-        
+        // Add the pre-signed sponsor transaction at the BEGINNING        
         // Ensure the sponsor transaction is properly padded
         let sponsorTxn = sponsorTxnData.transaction;
         if (typeof sponsorTxn === 'string') {
           // Add base64 padding if needed
           const padding = sponsorTxn.length % 4;
           if (padding) {
-            sponsorTxn += '='.repeat(4 - padding);
-            console.log(`BusinessOptInService - Added ${4 - padding} padding chars to sponsor transaction`);
-          }
+            sponsorTxn += '='.repeat(4 - padding);          }
           
           // Validate it's valid base64
           try {
-            const decoded = Buffer.from(sponsorTxn, 'base64');
-            console.log(`BusinessOptInService - Sponsor transaction decodes to ${decoded.length} bytes`);
-          } catch (e) {
+            const decoded = Buffer.from(sponsorTxn, 'base64');          } catch (e) {
             console.error('BusinessOptInService - Invalid base64 in sponsor transaction:', e);
           }
         }
@@ -447,11 +381,7 @@ class BusinessOptInService {
         signedTransactions.unshift(sponsorTxn);
         
         // Submit the group transaction
-        // For group transactions with multiple opt-ins, we need a different approach
-        console.log('BusinessOptInService - Submitting group transaction...');
-        console.log('BusinessOptInService - Total transactions:', signedTransactions.length);
-        console.log('BusinessOptInService - Transaction types:', signedTransactions.map(t => typeof t));
-        
+        // For group transactions with multiple opt-ins, we need a different approach        
         // Import the mutation for submitting business opt-in group
         const SUBMIT_BUSINESS_OPT_IN_GROUP = gql`
           mutation SubmitBusinessOptInGroup($signedTransactions: JSONString!) {
@@ -474,10 +404,7 @@ class BusinessOptInService {
         if (!submitData.submitBusinessOptInGroup.success) {
           console.error('BusinessOptInService - Failed to submit group:', submitData.submitBusinessOptInGroup.error);
           return false;
-        }
-        
-        console.log('BusinessOptInService - Group transaction submitted successfully');
-        
+        }        
         // 7. Notify backend of completion
         progressCallback?.('Casi listo...');
         
@@ -488,10 +415,7 @@ class BusinessOptInService {
         });
 
         // 8. Save the successful opt-in to Keychain
-        await this.saveOptInStatus(businessId, true);
-
-        console.log('BusinessOptInService - All opt-ins completed successfully');
-        progressCallback?.('¡Listo!');
+        await this.saveOptInStatus(businessId, true);        progressCallback?.('¡Listo!');
         
         // Brief delay to show success message
         await new Promise(resolve => setTimeout(resolve, 500));
@@ -519,16 +443,12 @@ class BusinessOptInService {
         // Clear specific business
         const allStatuses = await this.getAllOptInStatuses();
         delete allStatuses[businessId];
-        await this.saveAllOptInStatuses(allStatuses);
-        console.log(`Cleared opt-in status for business ${businessId}`);
-      } else {
+        await this.saveAllOptInStatuses(allStatuses);      } else {
         // Clear all
         await Keychain.resetGenericPassword({
           service: this.KEYCHAIN_SERVICE,
           username: this.KEYCHAIN_USERNAME
-        });
-        console.log('Cleared all business opt-in statuses');
-      }
+        });      }
     } catch (error) {
       console.error('Error clearing opt-in status:', error);
     }

@@ -147,7 +147,7 @@ const PayrollRunsHistoryScreen = () => {
     return (
       <TouchableOpacity
         style={styles.card}
-        onPress={() => navigation.navigate('PayrollRunDetail' as never, { run: item } as never)}
+        onPress={() => navigation.navigate('PayrollRunDetail', { run: item })}
         activeOpacity={0.7}
       >
         <View style={styles.cardHeader}>

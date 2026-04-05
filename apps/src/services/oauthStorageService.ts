@@ -75,10 +75,7 @@ class OAuthStorageService {
           // Note: authenticatePrompt would require biometric every time
           // which might be too frequent for address generation
         }
-      );
-
-      console.log('OAuthStorage - Stored OAuth subject securely');
-    } catch (error) {
+      );    } catch (error) {
       console.error('OAuthStorage - Error storing OAuth subject:', error);
       throw error;
     }
@@ -96,7 +93,6 @@ class OAuthStorageService {
       );
 
       if (!credentials || !credentials.password) {
-        console.log('OAuthStorage - No stored OAuth subject found');
         return null;
       }
 
@@ -116,10 +112,7 @@ class OAuthStorageService {
       if (!data.subject || !data.provider) {
         console.error('OAuthStorage - Invalid OAuth data structure');
         return null;
-      }
-
-      console.log('OAuthStorage - Retrieved OAuth subject successfully');
-      return data;
+      }      return data;
     } catch (error) {
       console.error('OAuthStorage - Error retrieving OAuth subject:', error);
       return null;
@@ -131,9 +124,7 @@ class OAuthStorageService {
    */
   async clearOAuthSubject(): Promise<void> {
     try {
-      await Keychain.resetInternetCredentials({ server: OAUTH_KEYCHAIN_SERVICE });
-      console.log('OAuthStorage - Cleared OAuth subject');
-    } catch (error) {
+      await Keychain.resetInternetCredentials({ server: OAUTH_KEYCHAIN_SERVICE });    } catch (error) {
       console.error('OAuthStorage - Error clearing OAuth subject:', error);
       // Don't throw - this is part of cleanup
     }

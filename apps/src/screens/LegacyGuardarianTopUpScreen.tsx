@@ -37,7 +37,6 @@ import { oauthStorage } from '../services/oauthStorageService';
 import { apolloClient } from '../apollo/client';
 import PreFlightModal from '../components/PreFlightModal';
 import { useBackupEnforcement } from '../hooks/useBackupEnforcement';
-import { APP_LAYOUT } from '../config/layout';
 
 
 // GraphQL mutation for USDC opt-in
@@ -154,7 +153,6 @@ const TopUpScreen = () => {
         const res = await fetchGuardarianFiatCurrencies();
         setFiatOptions(res || []);
       } catch (err: any) {
-        console.warn('Guardarian fiat load failed', err);
         setFiatError('No pudimos cargar todas las monedas. Usa las sugeridas.');
       } finally {
         setFiatLoading(false);
@@ -236,9 +234,7 @@ const TopUpScreen = () => {
         variables: { assetType: 'USDC' }
       });
 
-      if (errors) {
-        console.error('[TopUpScreen] GraphQL errors:', errors);
-        setLoadingMessage('');
+      if (errors) {        setLoadingMessage('');
         return false;
       }
 
@@ -260,18 +256,13 @@ const TopUpScreen = () => {
         if (txId) {
           setLoadingMessage('');
           return true;
-        } else {
-          console.error('[TopUpScreen] Failed to submit USDC opt-in transaction');
-          setLoadingMessage('');
+        } else {          setLoadingMessage('');
           return false;
         }
-      } else {
-        console.error('[TopUpScreen] Failed to generate USDC opt-in transaction:', data?.optInToAssetByType?.error);
-        setLoadingMessage('');
+      } else {        setLoadingMessage('');
         return false;
       }
     } catch (error) {
-      console.error('[TopUpScreen] Error during USDC opt-in:', error);
       setLoadingMessage('');
       return false;
     }
@@ -335,7 +326,6 @@ const TopUpScreen = () => {
       await Linking.openURL(checkoutUrl);
 
     } catch (err: any) {
-      console.error('Guardarian top-up error', err);
       const errorMessage = translateGuardarianError(err?.message || 'Error desconocido');
       Alert.alert('No se pudo iniciar la recarga', errorMessage);
     } finally {
@@ -538,7 +528,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingTop: APP_LAYOUT.topSafeArea + 12,
+    paddingTop: 12,
     paddingBottom: 12,
     backgroundColor: '#fff',
     borderBottomWidth: 1,

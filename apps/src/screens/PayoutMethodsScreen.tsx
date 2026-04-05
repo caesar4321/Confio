@@ -289,7 +289,6 @@ export const PayoutMethodsScreen = () => {
     try {
       await refetchBankAccounts();
     } catch (e) {
-      console.error('Error refreshing bank accounts:', e);
     } finally {
       setRefreshing(false);
     }

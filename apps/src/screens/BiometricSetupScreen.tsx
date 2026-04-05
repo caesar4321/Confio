@@ -32,7 +32,6 @@ export const BiometricSetupScreen = () => {
       }
       return supported;
     } catch (e) {
-      console.error('[BiometricSetup] Error checking biometric support:', e);
       return false;
     }
   }, []);
@@ -210,7 +209,6 @@ export const BiometricSetupScreen = () => {
                             // Final fallback: open app settings
                             await Linking.openSettings();
                           } catch (e) {
-                            console.error('[BiometricSetup] Failed to open any settings:', e);
                             Alert.alert(
                               'No se pudo abrir ajustes',
                               'Por favor abre manualmente los Ajustes del dispositivo > Seguridad > Biometría',
@@ -235,7 +233,6 @@ export const BiometricSetupScreen = () => {
                             // iOS can only open app settings, not specific system settings
                             await Linking.openSettings();
                           } catch (e) {
-                            console.error('[BiometricSetup] Failed to open settings:', e);
                           }
                         }
                       }

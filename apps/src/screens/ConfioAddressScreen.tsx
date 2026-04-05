@@ -7,19 +7,21 @@ import {
   TouchableOpacity,
   Share,
   Alert,
-  Clipboard,
   Linking,
 } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, NavigationProp } from '@react-navigation/native';
-import { RootStackParamList } from '../types/navigation';
+import { MainStackParamList, RootStackParamList } from '../types/navigation';
 import { useAuth } from '../contexts/AuthContext';
 import { Header } from '../navigation/Header';
 import { ReferralInputModal } from '../components/ReferralInputModal';
+import WhatsAppLogo from '../assets/svg/WhatsApp.svg';
 import { colors } from '../config/theme';
 
 export const ConfioAddressScreen: React.FC = () => {
-  const navigation = useNavigation<NavigationProp<RootStackParamList>>();
+  const rootNavigation = useNavigation<NavigationProp<RootStackParamList>>();
+  const navigation = useNavigation<NavigationProp<MainStackParamList>>();
   const { userProfile } = useAuth();
   const rawUsername = userProfile?.username || '';
   const username = rawUsername ? `@${rawUsername}` : '';
@@ -69,14 +71,12 @@ export const ConfioAddressScreen: React.FC = () => {
         await Linking.openURL(whatsappWebUrl);
       }
     } catch (error) {
-      console.error('Error abriendo WhatsApp:', error);
       try {
         await Share.share({
           message: shareMessage,
           title: 'Invitación Confío',
         });
       } catch (fallbackError) {
-        console.error('Error compartiendo invitación:', fallbackError);
       }
     }
   }, [shareMessage]);
@@ -96,7 +96,7 @@ export const ConfioAddressScreen: React.FC = () => {
   return (
     <View style={styles.container}>
       <Header
-        navigation={navigation}
+        navigation={rootNavigation}
         title="Comparte tu usuario Confío"
         backgroundColor={colors.primary}
         isLight={true}
@@ -129,7 +129,7 @@ export const ConfioAddressScreen: React.FC = () => {
               <Text style={styles.copyButtonText}>Copiar</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.shareButton} onPress={handleShare}>
-              <Icon name="share-2" size={16} color="#FFFFFF" />
+              <WhatsAppLogo width={18} height={18} style={{ marginRight: 4 }} />
               <Text style={styles.shareButtonText}>Compartir por WhatsApp</Text>
             </TouchableOpacity>
           </View>
@@ -159,13 +159,28 @@ export const ConfioAddressScreen: React.FC = () => {
 
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Operaciones que activan el bono</Text>
-          <Text style={styles.reasonText}>Tu invitado debe completar una de estas acciones para liberar el bono:</Text>
+          <Text style={styles.reasonText}>Tu invitado debe completar una de estas acciones:</Text>
           <View style={styles.criteriaList}>
-            <Text style={styles.criteriaItem}>• Primera recarga de dólares digitales mayor a US$20</Text>
-            <Text style={styles.criteriaItem}>• Primer depósito de USDC convertido a cUSD (≥ US$20)</Text>
-            <Text style={styles.criteriaItem}>• Primer envío dentro de Confío</Text>
-            <Text style={styles.criteriaItem}>• Primer pago a comercio con Confío</Text>
-            <Text style={styles.criteriaItem}>• Primer trade P2P completado</Text>
+            <View style={styles.criteriaRow}>
+              <Icon name="dollar-sign" size={14} color={colors.primaryDark} />
+              <Text style={styles.criteriaItem}>Recarga de dólares digitales (US$20+)</Text>
+            </View>
+            <View style={styles.criteriaRow}>
+              <Icon name="download" size={14} color={colors.primaryDark} />
+              <Text style={styles.criteriaItem}>Depósito de USDC convertido a cUSD (≥ US$20)</Text>
+            </View>
+            <View style={styles.criteriaRow}>
+              <Icon name="send" size={14} color={colors.primaryDark} />
+              <Text style={styles.criteriaItem}>Primer envío dentro de Confío</Text>
+            </View>
+            <View style={styles.criteriaRow}>
+              <Icon name="shopping-bag" size={14} color={colors.primaryDark} />
+              <Text style={styles.criteriaItem}>Primer pago a comercio</Text>
+            </View>
+            <View style={styles.criteriaRow}>
+              <Icon name="repeat" size={14} color={colors.primaryDark} />
+              <Text style={styles.criteriaItem}>Primer trade P2P completado</Text>
+            </View>
           </View>
           <Text style={styles.criteriaNote}>El bono se acredita en $CONFIO al tipo equivalente a US$5.</Text>
         </View>
@@ -201,9 +216,9 @@ const styles = StyleSheet.create({
   },
   heroCard: {
     backgroundColor: colors.surface,
-    borderRadius: 20,
+    borderRadius: 16,
     padding: 24,
-    shadowColor: '#0F172A',
+    shadowColor: colors.shadowBase,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.08,
     shadowRadius: 16,
@@ -230,9 +245,9 @@ const styles = StyleSheet.create({
   },
   usernameCard: {
     backgroundColor: colors.surface,
-    borderRadius: 18,
+    borderRadius: 16,
     padding: 20,
-    shadowColor: '#0F172A',
+    shadowColor: colors.shadowBase,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.06,
     shadowRadius: 12,
@@ -263,7 +278,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 12,
     borderRadius: 12,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.neutralDark,
   },
   updateUsernameText: {
     flex: 1,
@@ -297,15 +312,15 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   shareButtonText: {
-    color: '#FFFFFF',
+    color: colors.white,
     fontWeight: '600',
     fontSize: 14,
   },
   sectionCard: {
     backgroundColor: colors.surface,
-    borderRadius: 18,
+    borderRadius: 16,
     padding: 20,
-    shadowColor: '#0F172A',
+    shadowColor: colors.shadowBase,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.05,
     shadowRadius: 14,
@@ -358,9 +373,15 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   criteriaList: {
-    gap: 6,
+    gap: 10,
+  },
+  criteriaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
   },
   criteriaItem: {
+    flex: 1,
     fontSize: 13,
     color: colors.textSecondary,
     lineHeight: 18,
@@ -377,7 +398,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 12,
     borderRadius: 12,
-    backgroundColor: '#ECFDF5',
+    backgroundColor: colors.primarySoft,
   },
   referralButtonText: {
     flex: 1,

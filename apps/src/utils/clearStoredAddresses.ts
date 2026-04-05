@@ -1,13 +1,18 @@
 import * as Keychain from 'react-native-keychain';
-import { AccountType } from '../types';
+
+interface StoredAddressAccount {
+  accountType: 'personal' | 'business';
+  accountIndex: number;
+  business?: {
+    id?: string;
+  };
+}
 
 /**
  * Clear all stored Algorand addresses to force regeneration
  * This is needed when addresses were stored incorrectly
  */
-export async function clearAllStoredAlgorandAddresses(accounts?: AccountType[]): Promise<void> {
-  console.log('🧹 Clearing all stored Algorand addresses...');
-  
+export async function clearAllStoredAlgorandAddresses(accounts?: StoredAddressAccount[]): Promise<void> {
   const keyPatterns: string[] = [];
   
   if (accounts && accounts.length > 0) {
@@ -35,11 +40,8 @@ export async function clearAllStoredAlgorandAddresses(accounts?: AccountType[]):
     try {
       await Keychain.resetGenericPassword({ service });
       cleared += 1;
-      console.log(`  Cleared: ${service}`);
     } catch {
       // Silently ignore - the key might not exist
     }
   }
-
-  console.log(`🧹 Cleared ${cleared} stored addresses`);
 }

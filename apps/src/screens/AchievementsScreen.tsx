@@ -7,9 +7,9 @@ import {
   TouchableOpacity,
   Share,
   Alert,
-  Clipboard,
   Linking,
 } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 import Icon from 'react-native-vector-icons/Feather';
 import WhatsAppLogo from '../assets/svg/WhatsApp.svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -94,14 +94,12 @@ export const AchievementsScreen: React.FC = () => {
         await Linking.openURL(whatsappWebUrl);
       }
     } catch (error) {
-      console.error('Error abriendo WhatsApp:', error);
       try {
         await Share.share({
           message: shareMessage,
           title: 'Invitación Confío',
         });
       } catch (fallbackError) {
-        console.error('Error compartiendo invitación:', fallbackError);
       }
     }
   };
@@ -117,13 +115,19 @@ export const AchievementsScreen: React.FC = () => {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Icon name="arrow-left" size={20} color={colors.textFlat} />
+          <Icon name="arrow-left" size={20} color={colors.white} />
         </TouchableOpacity>
+        <Text style={styles.headerTitle}>Programa de referidos</Text>
+        <View style={styles.headerSpacer} />
+      </View>
 
+      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
         <View style={styles.heroCard}>
-          <Text style={styles.heroEyebrow}>Programa de referidos Confío</Text>
+          <View style={styles.heroIconWrap}>
+            <Icon name="gift" size={24} color={colors.primaryDark} />
+          </View>
           <Text style={styles.heroTitle}>Regalá US$5 en $CONFIO y recibí US$5 vos también</Text>
           <Text style={styles.heroSubtitle}>
             Tu amigo se crea la cuenta con tu link.{'\n'}
@@ -202,13 +206,26 @@ export const AchievementsScreen: React.FC = () => {
           </View>
         </View>
 
+        <TouchableOpacity
+          style={styles.claimCard}
+          activeOpacity={0.8}
+          onPress={() => navigation.navigate('ReferralRewardClaim')}
+        >
+          <View style={styles.claimCardContent}>
+            <View style={styles.claimIconWrap}>
+              <Icon name="unlock" size={20} color={colors.primaryDark} />
+            </View>
+            <View style={styles.claimCardText}>
+              <Text style={styles.claimCardTitle}>Desbloquear recompensas</Text>
+              <Text style={styles.claimCardSubtitle}>Revisa si tienes $CONFIO listos para reclamar</Text>
+            </View>
+            <Icon name="chevron-right" size={18} color={colors.primaryDark} />
+          </View>
+        </TouchableOpacity>
+
         <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Estado de tus invitaciones</Text>
-          <Text style={styles.futureText}>
-            Estamos simplificando el programa. Pronto verás aquí tu historial de invitaciones y recompensas.
-          </Text>
+          <Text style={styles.sectionTitle}>Operaciones que activan el bono</Text>
           <View style={styles.criteria}>
-            <Text style={styles.criteriaTitle}>Operaciones para desbloquear el bono:</Text>
             <Text style={styles.criteriaItem}>• Primera recarga de al menos 20 USDC (y pasarlos a cUSD)</Text>
             <Text style={styles.criteriaItem}>• Primer depósito de USDC convertido a cUSD (≥ 20 USDC)</Text>
             <Text style={styles.criteriaNote}>El bono se acredita en $CONFIO automáticamente.</Text>
@@ -221,7 +238,6 @@ export const AchievementsScreen: React.FC = () => {
           onSuccess={() => setShowReferralModal(false)}
         />
 
-        <View style={styles.bottomSpacer} />
       </ScrollView>
     </SafeAreaView>
   );
@@ -232,36 +248,52 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: colors.primaryDark,
+  },
+  backButton: {
+    padding: 8,
+    borderRadius: 8,
+  },
+  headerTitle: {
+    color: colors.white,
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  headerSpacer: {
+    width: 36,
+  },
   container: {
     flex: 1,
   },
   content: {
-    paddingHorizontal: 20,
+    padding: 20,
     paddingBottom: 32,
-  },
-  backButton: {
-    alignSelf: 'flex-start',
-    paddingVertical: 8,
-    marginBottom: 12,
+    gap: 16,
   },
   heroCard: {
     backgroundColor: colors.surface,
-    borderRadius: 20,
+    borderRadius: 16,
     padding: 24,
-    marginBottom: 24,
-    shadowColor: '#0F172A',
+    shadowColor: colors.shadowBase,
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.06,
     shadowRadius: 18,
     elevation: 3,
   },
-  heroEyebrow: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.primaryDark,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    marginBottom: 8,
+  heroIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
   },
   heroTitle: {
     fontSize: 24,
@@ -276,7 +308,7 @@ const styles = StyleSheet.create({
   },
   usernamePill: {
     marginTop: 20,
-    borderRadius: 14,
+    borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 12,
     backgroundColor: colors.primaryMuted,
@@ -312,7 +344,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 12,
-    backgroundColor: '#ECFDF5',
+    backgroundColor: colors.primarySoft,
     gap: 8,
   },
   copyButtonText: {
@@ -330,17 +362,49 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   shareButtonText: {
-    color: '#FFFFFF',
+    color: colors.white,
     fontWeight: '600',
     fontSize: 14,
   },
+  claimCard: {
+    backgroundColor: colors.primarySoft,
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: colors.primaryLight,
+  },
+  claimCardContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  claimIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  claimCardText: {
+    flex: 1,
+  },
+  claimCardTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.primaryDark,
+  },
+  claimCardSubtitle: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
   referrerCard: {
     backgroundColor: colors.surface,
-    borderRadius: 18,
+    borderRadius: 16,
     padding: 20,
-    marginBottom: 20,
     gap: 12,
-    shadowColor: '#0F172A',
+    shadowColor: colors.shadowBase,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.05,
     shadowRadius: 14,
@@ -363,7 +427,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 12,
     paddingHorizontal: 12,
-    backgroundColor: '#ECFDF5',
+    backgroundColor: colors.primarySoft,
   },
   referrerButtonText: {
     flex: 1,
@@ -379,7 +443,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 12,
     borderRadius: 12,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.neutralDark,
   },
   updateUsernameText: {
     flex: 1,
@@ -389,10 +453,9 @@ const styles = StyleSheet.create({
   },
   sectionCard: {
     backgroundColor: colors.surface,
-    borderRadius: 18,
+    borderRadius: 16,
     padding: 20,
-    marginBottom: 20,
-    shadowColor: '#0F172A',
+    shadowColor: colors.shadowBase,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.05,
     shadowRadius: 14,
@@ -413,7 +476,7 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: '#ECFDF5',
+    backgroundColor: colors.primarySoft,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
@@ -452,14 +515,14 @@ const styles = StyleSheet.create({
   criteria: {
     marginTop: 16,
     padding: 14,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: colors.neutral,
     borderRadius: 12,
     gap: 6,
   },
   criteriaTitle: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#374151',
+    color: colors.gray700,
   },
   criteriaItem: {
     fontSize: 13,
@@ -470,14 +533,6 @@ const styles = StyleSheet.create({
     marginTop: 6,
     fontSize: 12,
     color: colors.primaryDark,
-  },
-  futureText: {
-    fontSize: 13,
-    color: colors.textSecondary,
-    lineHeight: 20,
-  },
-  bottomSpacer: {
-    height: 32,
   },
 });
 

@@ -82,6 +82,15 @@ function isTechnicalSendFlowError(message?: string | null): boolean {
 
 const AUTO_SWAP_REQUEST_TIMEOUT_MS = 20000;
 
+const withTimeout = async <T,>(promise: Promise<T>, ms: number, label: string): Promise<T> => {
+  return await Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`timeout:${label}`)), ms)
+    )
+  ]);
+};
+
 function parseAutoSwapPayload(raw: any) {
   if (!raw) {
     throw new Error('missing_auto_swap_payload');
@@ -269,9 +278,7 @@ export const TransactionProcessingScreen = () => {
     if (!bioChecked) return;
     // Watchdog: fail fast if processing stalls
     const watchdog = setTimeout(() => {
-      if (isComplete) return;
-      console.warn('TransactionProcessingScreen: Watchdog triggered, aborting transaction');
-      setTransactionError('La transacción tardó demasiado. Revisa tu conexión e inténtalo de nuevo.');
+      if (isComplete) return;      setTransactionError('La transacción tardó demasiado. Revisa tu conexión e inténtalo de nuevo.');
       setIsComplete(true);
     }, 20000);
 
@@ -294,16 +301,8 @@ export const TransactionProcessingScreen = () => {
           await processPayment();
         } else if (transactionData.type === 'sent') {
           await processSend();
-        } else {
-          console.error('TransactionProcessingScreen: Unknown transaction type or missing data:', {
-            type: transactionData.type,
-            hasRecipient: !!transactionData.recipient,
-            hasRecipientPhone: !!transactionData.recipientPhone,
-            hasRecipientUserId: !!transactionData.recipientUserId
-          });
-        }
+        } else {        }
       } catch (error) {
-        console.error('TransactionProcessingScreen: Error in initializeProcessing:', error);
       }
     };
 
@@ -340,13 +339,10 @@ export const TransactionProcessingScreen = () => {
         if (data?.payInvoice?.success) {
           setTransactionSuccess(true);
           setIsComplete(true);
-        } else {
-          console.error('TransactionProcessingScreen: Payment failed:', data?.payInvoice?.errors);
-          setTransactionError(data?.payInvoice?.errors?.join('\n') || 'Error al procesar el pago');
+        } else {          setTransactionError(data?.payInvoice?.errors?.join('\n') || 'Error al procesar el pago');
           setIsComplete(true);
         }
       } catch (error) {
-        console.error('TransactionProcessingScreen: Error processing payment:', error);
         setTransactionError('Error al procesar el pago. Por favor, inténtalo de nuevo.');
         setIsComplete(true);
       }
@@ -358,7 +354,6 @@ export const TransactionProcessingScreen = () => {
         // All sends now go through the same mutation
         await processUnifiedSend();
       } catch (error) {
-        console.error('TransactionProcessingScreen: Error in processSend:', error);
         setTransactionError('Error al procesar la transacción. Por favor, inténtalo de nuevo.');
         setIsComplete(true);
       }
@@ -366,15 +361,6 @@ export const TransactionProcessingScreen = () => {
 
     const processAlgorandSponsoredSend = async () => {
       try {
-        const withTimeout = async <T,>(promise: Promise<T>, ms: number, label: string): Promise<T> => {
-          return await Promise.race([
-            promise,
-            new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error(`timeout:${label}`)), ms)
-            )
-          ]);
-        };
-
         // Prefer WebSocket prepare/submit for lower latency
         setCurrentStep(1);
 
@@ -392,9 +378,7 @@ export const TransactionProcessingScreen = () => {
           variables.recipientPhone = transactionData.recipientPhone;
         } else if (transactionData.recipientAddress) {
           variables.recipientAddress = transactionData.recipientAddress;
-        } else {
-          console.error('TransactionProcessingScreen: No recipient identification available');
-          setTransactionError('No recipient information available');
+        } else {          setTransactionError('No recipient information available');
           setIsComplete(true);
           return;
         }
@@ -431,7 +415,6 @@ export const TransactionProcessingScreen = () => {
             userTransaction = txs.find((t: any) => t.index === 1)?.transaction || null;
           }
         } catch (wsErr: any) {
-          console.error('TransactionProcessingScreen: WS prepare failed:', wsErr);
           const errMsg = typeof wsErr === 'string' ? wsErr : (wsErr?.message || '');
           if (errMsg.includes('must optin') || errMsg.includes('missing from')) {
             const assetName = transactionData.tokenType || transactionData.currency || 'este token';
@@ -460,16 +443,12 @@ export const TransactionProcessingScreen = () => {
         let currentAccount = algorandService.getCurrentAccount();
         if (!currentAccount) {
           const loaded = await algorandService.loadStoredWallet();
-          if (!loaded) {
-            console.warn('TransactionProcessingScreen: No stored wallet found, but proceeding to allow auto-healing via signTransactionBytes...');
-            // We do NOT return here anymore. We let signTransactionBytes try to restore the wallet context derived from Auth.
+          if (!loaded) {            // We do NOT return here anymore. We let signTransactionBytes try to restore the wallet context derived from Auth.
           }
           currentAccount = algorandService.getCurrentAccount();
         }
 
-        if (!currentAccount) {
-          console.warn('TransactionProcessingScreen: Wallet still not loaded, hoping signTransactionBytes heals it...');
-        }
+        if (!currentAccount) {        }
 
         // Decode user transaction (base64 -> bytes)
         const userTxnBytes = Uint8Array.from(Buffer.from(userTransaction, 'base64'));
@@ -498,7 +477,6 @@ export const TransactionProcessingScreen = () => {
             (transactionData as any).internalId = internalId;
           }
         } catch (wsSubmitErr: any) {
-          console.error('TransactionProcessingScreen: WS submit failed:', wsSubmitErr);
           const errMsg = typeof wsSubmitErr === 'string' ? wsSubmitErr : (wsSubmitErr?.message || '');
           if (errMsg.includes('must optin') || errMsg.includes('missing from')) {
             const assetName = transactionData.tokenType || transactionData.currency || 'este token';
@@ -530,7 +508,6 @@ export const TransactionProcessingScreen = () => {
         setIsComplete(true);
 
       } catch (error) {
-        console.error('TransactionProcessingScreen: Error processing Algorand sponsored send:', error);
         setTransactionError('Failed to process Algorand transaction. Please try again.');
         setIsComplete(true);
       }
@@ -569,7 +546,6 @@ export const TransactionProcessingScreen = () => {
         setTransactionSuccess(true);
         setIsComplete(true);
       } catch (error) {
-        console.error('TransactionProcessingScreen: Error processing invite send:', error);
         setTransactionError('Error al procesar la invitación. Inténtalo de nuevo.');
         setIsComplete(true);
       }
@@ -617,7 +593,6 @@ export const TransactionProcessingScreen = () => {
           throw new Error(submitRes.data?.submitAutoSwapTransactions?.error || 'Failed to submit intermediate swap');
         }
       } catch (err: any) {
-        console.error('TransactionProcessingScreen: Error in cUSD to USDC swap:', err);
         throw new Error('Error al intercambiar el saldo a USDC. ' + err.message);
       }
     };
@@ -715,7 +690,6 @@ export const TransactionProcessingScreen = () => {
         setTransactionSuccess(true);
         setIsComplete(true);
       } catch (err: any) {
-        console.error('TransactionProcessingScreen: Error in atomic burn+send:', err);
         const errMsg = err?.message || '';
         if (errMsg.includes('La billetera de destino')) {
           setTransactionError(errMsg);
@@ -747,14 +721,6 @@ export const TransactionProcessingScreen = () => {
           }
         }
       } catch (error: any) {
-        console.error('TransactionProcessingScreen: Error processing send:', error);
-        console.error('TransactionProcessingScreen: Error details:', {
-          message: error.message,
-          networkError: error.networkError,
-          graphQLErrors: error.graphQLErrors,
-          stack: error.stack
-        });
-
         setTransactionError('No se pudo conectar con el servidor. Por favor, verifica tu conexión e inténtalo de nuevo.');
         setIsComplete(true);
       }

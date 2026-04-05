@@ -155,7 +155,6 @@ export const TradeChatScreen: React.FC = () => {
 
         setContextEnsured(true);
       } catch (e) {
-        console.warn('[TradeChatScreen] Failed to ensure account context:', e);
       }
     };
     ensureContext();
@@ -227,9 +226,7 @@ export const TradeChatScreen: React.FC = () => {
         });
       }
     },
-    onError: (error) => {
-      console.error('❌ Bank accounts query error:', error);
-    }
+    onError: (error) => {    }
   });
 
   // Log query state
@@ -465,13 +462,10 @@ export const TradeChatScreen: React.FC = () => {
             const tokens = JSON.parse(credentials.password);
             token = tokens.accessToken || '';
           } catch (error) {
-            console.error('❌ Error parsing tokens for WebSocket:', error);
           }
         }
 
-        if (!token) {
-          console.error('❌ No JWT token available');
-          setIsConnected(false);
+        if (!token) {          setIsConnected(false);
           return;
         }
 
@@ -497,7 +491,6 @@ export const TradeChatScreen: React.FC = () => {
               messageHandlerRef.current(data);
             }
           } catch (error) {
-            console.error('❌ Error parsing WebSocket message:', error);
           }
         };
 
@@ -514,13 +507,10 @@ export const TradeChatScreen: React.FC = () => {
           }
         };
 
-        websocket.current.onerror = (error) => {
-          console.error('❌ WebSocket error:', error);
-          setIsConnected(false);
+        websocket.current.onerror = (error) => {          setIsConnected(false);
         };
 
       } catch (error) {
-        console.error('Failed to create WebSocket connection:', error);
       }
     };
 
@@ -544,9 +534,7 @@ export const TradeChatScreen: React.FC = () => {
       const userProfileIdStr = userProfile?.id ? String(userProfile.id) : '';
 
       // Get active account info
-      if (!activeAccount) {
-        console.warn('No active account available for message sender check');
-        return false;
+      if (!activeAccount) {        return false;
       }
 
 
@@ -876,17 +864,13 @@ export const TradeChatScreen: React.FC = () => {
         }
         break;
 
-      case 'error':
-        console.error('WebSocket error:', data.message);
-        break;
+      case 'error':        break;
     }
   };
 
   // Mock data for development when no tradeId
   useEffect(() => {
-    if (!tradeId) {
-      console.warn('No tradeId provided, using mock data');
-      setMessages([
+    if (!tradeId) {      setMessages([
         // Messages in descending order (newest first) for inverted FlatList
         {
           id: 7,
@@ -973,9 +957,7 @@ export const TradeChatScreen: React.FC = () => {
         const amountFromTrade = trade?.cryptoAmount ? parseFloat(String(trade.cryptoAmount)) : NaN;
         const amt = !isNaN(amountFromRoute) && amountFromRoute > 0 ? amountFromRoute
           : (!isNaN(amountFromTrade) && amountFromTrade > 0 ? amountFromTrade : NaN);
-        if (isNaN(amt) || amt <= 0) {
-          console.warn('[TradeChatScreen] Skipping escrow create: missing/invalid amount', { amountFromRoute, amountFromTrade, tokenToEscrow });
-          return;
+        if (isNaN(amt) || amt <= 0) {          return;
         }
         // Avoid duplicate attempts per tradeId
         if (escrowAttemptedRef.current === String(tradeId)) return;
@@ -989,9 +971,7 @@ export const TradeChatScreen: React.FC = () => {
           }
         }).catch((e) => {
           // allow retry on next mount if it failed quickly
-          escrowAttemptedRef.current = null;
-          console.warn('[TradeChatScreen] Escrow create error', e);
-        });
+          escrowAttemptedRef.current = null;        });
       } catch { }
     };
     autoEscrow();
@@ -1031,9 +1011,7 @@ export const TradeChatScreen: React.FC = () => {
     // force counterparty to the opposite user/business side to avoid showing self.
     const sameBusiness = trade.buyerBusiness && trade.sellerBusiness &&
       String(trade.buyerBusiness.id) === String(trade.sellerBusiness.id);
-    if (sameBusiness) {
-      console.warn('[TradeChat] buyerBusiness == sellerBusiness; applying UI guard for counterparty name');
-    }
+    if (sameBusiness) {    }
 
     if (iAmBuyer) {
       // I'm the buyer, show seller's name
@@ -1336,7 +1314,6 @@ export const TradeChatScreen: React.FC = () => {
       });
 
     } catch (error) {
-      console.error('Error sharing payment details:', error);
       Alert.alert('Error', 'No se pudieron compartir los datos de pago');
     }
   };
@@ -1431,7 +1408,6 @@ export const TradeChatScreen: React.FC = () => {
       // Debug the current state after sharing payment details
 
     } catch (error) {
-      console.error('Error sharing payment details:', error);
       Alert.alert('Error', 'No se pudieron compartir los datos de pago');
     }
   };
@@ -1462,7 +1438,6 @@ export const TradeChatScreen: React.FC = () => {
             throw new Error(chain.error || 'On-chain mark paid failed');
           }
         } catch (e) {
-          console.warn('[P2P] markAsPaid on-chain error:', e);
           throw e;
         }
         // Confirm payment sent using the new mutation
@@ -1493,7 +1468,6 @@ export const TradeChatScreen: React.FC = () => {
         }
       });
     } catch (error) {
-      console.error('Error confirming payment sent:', error);
       Alert.alert('Error', 'No se pudo actualizar el estado del intercambio. Por favor intenta de nuevo.');
     }
   };
@@ -1536,7 +1510,6 @@ export const TradeChatScreen: React.FC = () => {
             throw new Error(chain.error || 'On-chain confirm received failed');
           }
         } catch (e) {
-          console.warn('[P2P] confirmReceived on-chain error:', e);
           throw e;
         }
         // Then reflect in app status
@@ -1629,7 +1602,6 @@ export const TradeChatScreen: React.FC = () => {
         }
       });
     } catch (e) {
-      console.error('[P2P] confirmReleaseFunds error:', e);
     }
   };
 
@@ -1683,7 +1655,6 @@ export const TradeChatScreen: React.FC = () => {
         sendTypingIndicator(false);
 
       } catch (error) {
-        console.error('Error sending message:', error);
         Alert.alert('Error', 'No se pudo enviar el mensaje. Intenta de nuevo.');
         // Restore message text if failed
         setMessage(messageContent);
@@ -1836,9 +1807,7 @@ export const TradeChatScreen: React.FC = () => {
           ]);
         } catch { }
       } else {
-        const msg = res?.error || 'No se pudo habilitar el intercambio.';
-        console.error('[P2P][EnableEscrow][ERROR]', { tradeId, token, amount: amt, error: msg });
-        // Friendlier copy for insufficient balance
+        const msg = res?.error || 'No se pudo habilitar el intercambio.';        // Friendlier copy for insufficient balance
         const sanitized = (msg || '').replace(/\son\s(mainnet|testnet).*/i, '').trim();
         const insuffMatch = sanitized.match(/Insufficient\s+([A-Z]+)\s+balance:\s*need\s*([\d.]+),\s*have\s*([\d.]+)/i);
         if (insuffMatch) {
@@ -1856,7 +1825,6 @@ export const TradeChatScreen: React.FC = () => {
       }
     } catch (e: any) {
       setEnablingTrade(false);
-      console.error('[P2P][EnableEscrow][ERROR]', { tradeId, error: String(e?.message || e) });
       const raw = String(e?.message || '');
       const sanitized = raw.replace(/\son\s(mainnet|testnet).*/i, '').trim();
       const insuffMatch = sanitized.match(/Insufficient\s+([A-Z]+)\s+balance:\s*need\s*([\d.]+),\s*have\s*([\d.]+)/i);

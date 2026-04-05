@@ -85,7 +85,6 @@ export const PayrollHomeScreen = () => {
         refetchRecipients?.(),
       ]);
     } catch (e) {
-      console.warn('[PayrollHome] Refresh failed', e);
     } finally {
       setRefreshing(false);
     }
@@ -156,7 +155,7 @@ export const PayrollHomeScreen = () => {
             </View>
             <TouchableOpacity
               style={styles.primaryButton}
-              onPress={() => navigation.navigate('PayrollSetupWizard' as never)}
+              onPress={() => navigation.navigate('PayrollSetupWizard')}
             >
               <Text style={styles.primaryButtonText}>Activar nómina</Text>
               <Icon name="arrow-right" size={18} color="#fff" />
@@ -200,7 +199,7 @@ export const PayrollHomeScreen = () => {
           )}
           <TouchableOpacity
             style={styles.vaultButton}
-            onPress={() => navigation.navigate('PayrollTopUp' as never)}
+            onPress={() => navigation.navigate('PayrollTopUp')}
           >
             <Icon name="plus" size={16} color={colors.primary} />
             <Text style={styles.vaultButtonText}>Agregar fondos</Text>
@@ -210,7 +209,7 @@ export const PayrollHomeScreen = () => {
         {/* Main Action */}
         <TouchableOpacity
           style={styles.mainActionButton}
-          onPress={() => navigation.navigate('PayrollRun' as never)}
+          onPress={() => navigation.navigate('PayrollRun')}
         >
           <View style={styles.mainActionIcon}>
             <Icon name="send" size={24} color="#fff" />
@@ -226,7 +225,7 @@ export const PayrollHomeScreen = () => {
         <View style={styles.statsGrid}>
           <TouchableOpacity
             style={styles.statCard}
-            onPress={() => navigation.navigate('PayrollRecipientsManage' as never)}
+            onPress={() => navigation.navigate('PayrollRecipientsManage')}
           >
             <View style={styles.statHeader}>
               <Icon name="users" size={18} color={colors.primary} />
@@ -244,7 +243,7 @@ export const PayrollHomeScreen = () => {
 
           <TouchableOpacity
             style={styles.statCard}
-            onPress={() => navigation.navigate('PayrollDelegatesManage' as never)}
+            onPress={() => navigation.navigate('PayrollDelegatesManage')}
           >
             <View style={styles.statHeader}>
               <Icon name="shield" size={18} color={colors.primary} />
@@ -264,7 +263,7 @@ export const PayrollHomeScreen = () => {
         {/* History */}
         <TouchableOpacity
           style={styles.historyButton}
-          onPress={() => navigation.navigate('PayrollRunsHistory' as never)}
+          onPress={() => navigation.navigate('PayrollRunsHistory')}
         >
           <Icon name="clock" size={18} color={colors.muted} />
           <Text style={styles.historyText}>Historial de nóminas</Text>

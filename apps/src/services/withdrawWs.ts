@@ -37,7 +37,6 @@ async function getJwtToken(): Promise<string | null> {
       return tokens.accessToken || null;
     }
   } catch (e) {
-    console.log('[withdrawWs] token error', e);
   }
   return null;
 }
@@ -63,25 +62,21 @@ export class WithdrawWsSession {
         try {
           const { token } = await appCheck().getToken();
           if (token) appCheckToken = token;
-        } catch (e) { console.log('[withdrawWs] App Check token error', e); }
+        } catch (e) { }
 
-        const wsUrl = `${getWsBase()}ws/withdraw_session?token=${encodeURIComponent(token)}&app_check_token=${encodeURIComponent(appCheckToken)}`;
-        console.log('[withdrawWs] Opening', wsUrl.replace(token, '***').replace(appCheckToken, '***'));
-        const ws = new WebSocket(wsUrl);
+        const wsUrl = `${getWsBase()}ws/withdraw_session?token=${encodeURIComponent(token)}&app_check_token=${encodeURIComponent(appCheckToken)}`;        const ws = new WebSocket(wsUrl);
         this.ws = ws;
-        const timeout = setTimeout(() => { console.log('[withdrawWs] open timeout'); reject(new Error('open_timeout')); }, 15000);
+        const timeout = setTimeout(() => { reject(new Error('open_timeout')); }, 15000);
         const resolveOpen = () => {
           if (this.isOpenResolved) return;
           this.isOpenResolved = true;
           clearTimeout(timeout);
           resolve();
         };
-        ws.onopen = () => { console.log('[withdrawWs] open'); resolveOpen(); };
-        ws.onerror = (e) => { clearTimeout(timeout); console.log('[withdrawWs] error', e); if (!this.closeRequested) reject(e); };
+        ws.onopen = () => { resolveOpen(); };
+        ws.onerror = (e) => { clearTimeout(timeout); if (!this.closeRequested) reject(e); };
         ws.onclose = (e) => {
-          clearTimeout(timeout);
-          console.log('[withdrawWs] close', e.code, e.reason);
-          if (!this.closeRequested) {
+          clearTimeout(timeout);          if (!this.closeRequested) {
             Object.keys(this.pendingRejectors).forEach((k) => this.pendingRejectors[k](new Error('ws_closed')));
             this.pendingRejectors = {}; this.pendingResolvers = {};
           }
@@ -89,20 +84,16 @@ export class WithdrawWsSession {
         ws.onmessage = (ev) => {
           try {
             resolveOpen();
-            const msg = JSON.parse(ev.data);
-            console.log('[withdrawWs] message', msg?.type);
-            if (msg.type === 'prepare_ready') {
+            const msg = JSON.parse(ev.data);            if (msg.type === 'prepare_ready') {
               this.resolve('prepare', msg.pack);
             } else if (msg.type === 'submit_ok') {
               this.resolve('submit', msg);
             } else if (msg.type === 'error') {
-              console.log('[withdrawWs] server error', msg?.message);
               this.rejectAll(new Error(msg.message || 'ws_error'));
             }
           } catch { }
         };
       } catch (e) {
-        console.log('[withdrawWs] open failed', e);
         reject(e);
       }
     });
@@ -125,7 +116,6 @@ export class WithdrawWsSession {
     return new Promise<PreparePack>((resolve, reject) => {
       const t = setTimeout(() => {
         if (this.pendingRejectors['prepare']) {
-          console.log('[withdrawWs] prepare timeout');
           this.pendingRejectors['prepare'](new Error('prepare_timeout'));
           delete this.pendingRejectors['prepare']; delete this.pendingResolvers['prepare'];
         }
@@ -139,7 +129,6 @@ export class WithdrawWsSession {
         reject(err);
       }) as any;
       try {
-        console.log('[withdrawWs] -> prepare', args.amount, args.destinationAddress);
         this.ws!.send(JSON.stringify({ type: 'prepare', amount: String(args.amount), destination_address: args.destinationAddress }));
       } catch (e) {
         clearTimeout(t);
@@ -154,7 +143,6 @@ export class WithdrawWsSession {
     return new Promise<SubmitResult>((resolve, reject) => {
       const t = setTimeout(() => {
         if (this.pendingRejectors['submit']) {
-          console.log('[withdrawWs] submit timeout');
           this.pendingRejectors['submit'](new Error('submit_timeout'));
           delete this.pendingRejectors['submit']; delete this.pendingResolvers['submit'];
         }
@@ -168,7 +156,6 @@ export class WithdrawWsSession {
         reject(err);
       }) as any;
       try {
-        console.log('[withdrawWs] -> submit', args.internalId);
         const sponsors = (args.sponsorTransactions || []).map((e: any) => (typeof e === 'string' ? e : JSON.stringify(e)));
         this.ws!.send(JSON.stringify({
           type: 'submit',
@@ -185,7 +172,7 @@ export class WithdrawWsSession {
 
   close() {
     this.closeRequested = true;
-    try { console.log('[withdrawWs] closing'); this.ws?.close(1000, 'flow_end'); } catch { }
+    try { this.ws?.close(1000, 'flow_end'); } catch { }
     this.ws = null;
     this.openPromise = null;
     this.isOpenResolved = false;

@@ -51,16 +51,7 @@ export const BottomTabNavigator = () => {
   const isEmployee = activeAccount?.isEmployee || false;
   const permissions = activeAccount?.employeePermissions || {};
 
-  // console.log('🔍 BottomTabNavigator - Active account:', {
-  //   accountId: activeAccount?.id,
-  //   originalType: activeAccount?.type,
-  //   normalizedType: accountType,
-  //   accountName: activeAccount?.name,
-  //   isBusiness,
-  //   isEmployee,
-  //   permissions
-  // });
-
+  //
   const handleNotificationPress = useCallback(() => {
     navigation.navigate('Notification' as any);
   }, [navigation]);
@@ -234,8 +225,7 @@ export const BottomTabNavigator = () => {
   //   [activeAccount?.id, accountType] // Use normalized accountType
   // );
 
-  // console.log('🔑 TabNavigator Key:', tabNavigatorKey, 'isBusinessAccount:', isBusinessAccount);
-
+  //
   return (
     <>
       <Tabs.Navigator

@@ -53,8 +53,6 @@ export const useBackupEnforcement = () => {
                 checkBalance = cusd + usdc;
             }
 
-            console.log('checkBackupEnforcement: Action app_launch. Check Balance:', checkBalance);
-
             // If balance is low, we don't annoy them on launch
             if (checkBalance <= 50) return true;
         }
@@ -89,8 +87,6 @@ export const useBackupEnforcement = () => {
                 resolveRef.current?.(true);
             } else if (result.existingBackups) {
                 // Conflict found: Show Custom Modal
-                console.log('UseBackupEnforcement: Existing backups found, prompting with ExistingBackupModal');
-
                 // Set data for modal
                 const entries = result.existingBackups.entriesToShow || result.existingBackups.entries || [];
                 // Sort by lastBackupAt desc (newest first)
@@ -121,7 +117,6 @@ export const useBackupEnforcement = () => {
         try {
             // Restore from specific entry (or legacy if id is null/undefined)
             const entryId = entry?.id;
-            console.log('User chose to restore. Target:', entryId || 'Legacy');
 
             const restoreRes = await AuthService.getInstance().restoreFromDriveBackup(entryId);
             if (restoreRes.success) {
@@ -141,7 +136,6 @@ export const useBackupEnforcement = () => {
     const handleUseCurrentWallet = async () => {
         setExistingBackupModalVisible(false);
         try {
-            console.log('User chose to Create New (Force Backup)');
             const forceRes = await AuthService.getInstance().enableDriveBackup(true);
             if (forceRes.success) {
                 Alert.alert('Respaldo Activado', 'Tu copia de seguridad actual está lista.');

@@ -22,7 +22,7 @@ import { useAccount } from '../contexts/AccountContext';
 import { useMutation, useQuery } from '@apollo/client';
 import { CREATE_INVOICE, GET_INVOICES, GET_INVOICE } from '../apollo/queries';
 import QRCode from 'react-native-qrcode-svg';
-import { Clipboard } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 import { jwtDecode } from 'jwt-decode';
 import authService from '../services/authService';
 import businessOptInService from '../services/businessOptInService';
@@ -199,8 +199,6 @@ const ChargeScreen = () => {
           setIsOptingIn(false);
 
           if (!optInSuccess) {
-            console.error('ChargeScreen: Business opt-in failed, cannot generate invoice');
-
             // Check if this is a non-owner employee who can't opt-in
             const token = await authService.getToken();
             const decoded: any = token ? jwtDecode(token) : {};
@@ -223,7 +221,6 @@ const ChargeScreen = () => {
             return;
           }
         } catch (optInError) {
-          console.error('ChargeScreen: Error during opt-in check:', optInError);
           setIsOptingIn(false);
           Alert.alert(
             'Error',
@@ -262,7 +259,6 @@ const ChargeScreen = () => {
         Alert.alert('Error', errors.join(', '), [{ text: 'Entendido' }]);
       }
     } catch (error) {
-      console.error('Error creating invoice:', error);
       Alert.alert('Error', 'No se pudo crear la factura. Inténtalo de nuevo.', [{ text: 'Entendido' }]);
     } finally {
       setIsLoading(false);
@@ -297,7 +293,6 @@ const ChargeScreen = () => {
           title: 'Pago'
         });
       } catch (error) {
-        console.error('Share error:', error);
       }
     } else {
       // Fallback or alert
@@ -314,7 +309,6 @@ const ChargeScreen = () => {
       await CameraRoll.save(uri, { type: 'photo' });
       Alert.alert('Guardado', 'Código QR guardado en la galería', [{ text: 'Entendido' }]);
     } catch (error) {
-      console.error('Download error:', error);
       Alert.alert('Error', 'No se pudo guardar la imagen');
     }
   };
@@ -332,7 +326,6 @@ const ChargeScreen = () => {
         type: 'image/jpeg',
       });
     } catch (error) {
-      console.error('Share QR error:', error);
     }
   };
 

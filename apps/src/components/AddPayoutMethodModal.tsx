@@ -966,13 +966,11 @@ export const AddPayoutMethodModal = ({
           apolloClient.reFetchObservableQueries();
 
         } catch (refetchError) {
-          console.error('Error refetching queries:', refetchError);
           // Even if refetch fails, try to clear the cache
           try {
             apolloClient.cache.evict({ fieldName: 'userBankAccounts' });
             apolloClient.cache.gc();
           } catch (cacheError) {
-            console.error('Error clearing cache:', cacheError);
           }
         }
 
@@ -985,7 +983,6 @@ export const AddPayoutMethodModal = ({
         Alert.alert('Error', data?.error || 'Error al guardar la forma de cobro', [{ text: 'Entendido' }]);
       }
     } catch (error) {
-      console.error('Error submitting payment method:', error);
       Alert.alert('Error', 'Error de conexión', [{ text: 'Entendido' }]);
     } finally {
       setIsSubmitting(false);

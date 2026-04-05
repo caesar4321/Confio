@@ -152,7 +152,6 @@ export const TraderProfileScreen: React.FC = () => {
         Alert.alert('Error', message);
       }
     } catch (error) {
-      console.error('Error toggling favorite:', error);
       // Revert on error
       setIsFavorite(!isFavorite);
       Alert.alert('Error', 'Ocurrió un error al actualizar el favorito');

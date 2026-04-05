@@ -176,17 +176,14 @@ class BiometricAuthService {
     const timeSinceLastSuccess = now - this.lastSuccessTime;
 
     if (this.isAuthenticating) {
-      console.log('[BiometricAuthService] Authentication already in progress, skipping duplicate prompt');
       return false;
     }
 
     if (this.lastSuccessTime > 0 && timeSinceLastSuccess < this.SUCCESS_COOLDOWN_MS) {
-      console.log('[BiometricAuthService] Recent successful biometric (< cooldown), skipping new prompt');
       return true;
     }
 
     if (!forcePrompt && timeSinceLastAuth < this.DEBOUNCE_MS) {
-      console.log('[BiometricAuthService] Authentication requested too soon after last attempt, skipping (debounce)');
       return true; // Return true to avoid blocking the flow
     }
 
@@ -199,9 +196,6 @@ class BiometricAuthService {
     try {
       this.isAuthenticating = true;
       this.lastAuthenticationTime = Date.now();
-
-      console.log('[BiometricAuthService] Prompting for biometric authentication:', reason);
-
       const biometryType = await Keychain.getSupportedBiometryType();
       const accessControl = this.getAccessControlForCurrentDevice(biometryType);
 
@@ -221,19 +215,13 @@ class BiometricAuthService {
       });
 
       const success = !!authResult && authResult.username === BIOMETRIC_SECRET_USERNAME;
-      if (!success) {
-        console.warn('[BiometricAuthService] Biometric auth failed or was cancelled');
-      } else {
+      if (!success) {      } else {
         this.lastSuccessTime = Date.now();
         this.lastError = null;
-        this.lastLockout = false;
-        console.log('[BiometricAuthService] Biometric authentication successful');
-      }
+        this.lastLockout = false;      }
       return success;
     } catch (error: any) {
-      // Do not allow device passcode fallback; fail closed
-      console.warn('[BiometricAuthService] Biometric auth error:', error?.message || error);
-      const msg = typeof error?.message === 'string' ? error.message : '';
+      // Do not allow device passcode fallback; fail closed      const msg = typeof error?.message === 'string' ? error.message : '';
       const lower = msg.toLowerCase();
       const lockout = lower.includes('lockout') || lower.includes('locked out') || lower.includes('biometry is locked') || lower.includes('lockedout');
       this.lastError = msg || 'Biometric authentication failed';

@@ -422,7 +422,6 @@ export function MessageChannelThread({
       });
       await Linking.openURL(link);
     } catch (error) {
-      console.warn('Failed to open link', error);
     }
   };
 

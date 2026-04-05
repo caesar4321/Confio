@@ -37,6 +37,7 @@ import com.learnium.RNDeviceInfo.RNDeviceInfo
 import com.Confio.Confio.MediaPickerPackage
 import cl.json.RNSharePackage
 import com.sdkreactnative.SdkReactNativePackage
+import com.reactnativecommunity.clipboard.ClipboardPackage
 
 import com.uerceg.play_install_referrer.PlayInstallReferrerPackage
 import com.blockstore.BlockStorePackage
@@ -75,6 +76,7 @@ class MainApplication : Application(), ReactApplication {
             RNDeviceInfo(),
             MediaPickerPackage(),
             RNSharePackage(),
+            ClipboardPackage(),
             SdkReactNativePackage(),
 
             PlayInstallReferrerPackage(),

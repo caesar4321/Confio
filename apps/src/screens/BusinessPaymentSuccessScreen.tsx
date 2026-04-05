@@ -9,11 +9,11 @@ import {
   Dimensions,
   Platform,
   StatusBar,
-  Clipboard,
   Modal,
   Linking,
   Vibration,
 } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';

@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, Linking, Image, Share, Alert, Clipboard, AppState, AppStateStatus } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, Linking, Image, Share, Alert, AppState, AppStateStatus } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 import Icon from 'react-native-vector-icons/Feather';
 import WhatsAppLogo from '../assets/svg/WhatsApp.svg';
 import { useAuth } from '../contexts/AuthContext';
@@ -104,14 +105,12 @@ export const ProfileScreen = () => {
         await Linking.openURL(whatsappWebUrl);
       }
     } catch (error) {
-      console.error('Error al abrir WhatsApp:', error);
       try {
         await Share.share({
           message: referralShareMessage,
           title: 'Invitación Confío',
         });
       } catch (shareError) {
-        console.error('Error al usar el menú compartir:', shareError);
       }
     }
   }, [referralShareMessage]);
@@ -163,7 +162,6 @@ export const ProfileScreen = () => {
       }
       setBiometricError(null);
     } catch (error) {
-      console.error('[Profile] Failed to load biometric status:', error);
       setBiometricError('No se pudo validar la biometría del dispositivo.');
     } finally {
       setBiometricLoading(false);
@@ -229,7 +227,6 @@ export const ProfileScreen = () => {
         setBiometricError('No pudimos activar la biometría. Inténtalo nuevamente.');
       }
     } catch (error) {
-      console.error('[Profile] Failed to update biometrics:', error);
       setBiometricError('Ocurrió un problema al actualizar la biometría.');
     } finally {
       setBiometricActionLoading(false);
@@ -282,7 +279,6 @@ export const ProfileScreen = () => {
     try {
       await Linking.openURL(url);
     } catch (error) {
-      console.error(`Error opening ${platform} link:`, error);
     }
   };
 
@@ -428,7 +424,7 @@ export const ProfileScreen = () => {
                 // Change style if claimable
                 referralStats.claimable > 0 && { backgroundColor: '#ECFDF5', borderColor: '#10B981', borderLeftWidth: 4 }
               ]}
-              onPress={() => navigation.navigate('ReferralRewardClaim' as never)}
+              onPress={() => navigation.navigate('ReferralRewardClaim')}
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
                 {referralStats.claimable > 0 ? (
@@ -465,7 +461,7 @@ export const ProfileScreen = () => {
             {!referralStats.isReferred && (
               <TouchableOpacity
                 style={styles.referralUpdateUsername}
-                onPress={() => navigation.navigate('Achievements' as never)}
+                onPress={() => navigation.navigate('Achievements')}
               >
                 <Icon name="user-plus" size={16} color="#047857" />
                 <Text style={styles.referralUpdateUsernameText}>¿Te invitó alguien? Poné su código</Text>
@@ -479,7 +475,7 @@ export const ProfileScreen = () => {
               <Text style={styles.referralCriteriaItem}>2. Tu amigo se crea la cuenta (recibe US$5 en $CONFIO que se activan luego).</Text>
               <Text style={styles.referralCriteriaItem}>3. Carga 20 USDC, pásalos a cUSD y se activan los US$5 en $CONFIO para los dos.</Text>
 
-              <TouchableOpacity onPress={() => navigation.navigate('Achievements' as never)}>
+              <TouchableOpacity onPress={() => navigation.navigate('Achievements')}>
                 <Text style={[styles.referralCriteriaItem, { color: '#3B82F6', marginTop: 4, fontWeight: '600' }]}>
                   Ver instrucciones completas
                 </Text>
@@ -730,7 +726,6 @@ export const ProfileScreen = () => {
               Alert.alert('Error', result.error);
             }
           } catch (e) {
-            console.error(e);
           }
         }}
         onCancel={() => setShowBackupModal(false)}
@@ -769,7 +764,6 @@ export const ProfileScreen = () => {
               Alert.alert('Error', result.error);
             }
           } catch (e) {
-            console.error(e);
             Alert.alert('Error', 'No se pudo restaurar');
           }
         }}
@@ -786,7 +780,6 @@ export const ProfileScreen = () => {
               Alert.alert('Error', result.error);
             }
           } catch (e) {
-            console.error(e);
             Alert.alert('Error', 'No se pudo crear el respaldo');
           }
         }}

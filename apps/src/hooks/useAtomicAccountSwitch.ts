@@ -50,7 +50,6 @@ export const useAtomicAccountSwitch = (): UseAtomicAccountSwitchReturn => {
   const switchAccount = useCallback(async (accountId: string): Promise<boolean> => {
     // Prevent concurrent account switches
     if (switchInProgressRef.current) {
-      console.warn('Account switch already in progress, ignoring request');
       Alert.alert(
         'Cambio en progreso',
         'Ya hay un cambio de cuenta en progreso. Por favor espera a que termine.',
@@ -63,8 +62,6 @@ export const useAtomicAccountSwitch = (): UseAtomicAccountSwitchReturn => {
     setState({ isLoading: true, error: null, progress: 'Iniciando cambio de cuenta...' });
 
     try {
-      console.log('🔄 [AtomicAccountSwitch] Starting account switch to:', accountId);
-
       // Step 1: Validate the target account exists
       setState(prev => ({ ...prev, progress: 'Validando cuenta...' }));
       const targetAccount = accountsRef.current.find(acc => acc.id === accountId);
@@ -72,25 +69,15 @@ export const useAtomicAccountSwitch = (): UseAtomicAccountSwitchReturn => {
         throw new Error('Cuenta no encontrada');
       }
 
-      console.log('✅ [AtomicAccountSwitch] Target account found:', {
-        id: targetAccount.id,
-        type: targetAccount.type,
-        name: targetAccount.name,
-        businessId: targetAccount.business?.id,
-      });
-
       // Step 2: Pause all queries to prevent race conditions
       setState(prev => ({ ...prev, progress: 'Pausando consultas activas...' }));
       apolloClient.stop();
-      console.log('⏸️ [AtomicAccountSwitch] Apollo queries paused');
 
       // Step 3: Clear Apollo cache to prevent stale data
       setState(prev => ({ ...prev, progress: 'Limpiando caché...' }));
       try {
         await apolloClient.cache.reset();
-        console.log('🧹 [AtomicAccountSwitch] Apollo cache cleared');
       } catch (cacheError) {
-        console.warn('Warning clearing cache:', cacheError);
         // Continue anyway - cache clear is not critical
       }
 
@@ -103,12 +90,10 @@ export const useAtomicAccountSwitch = (): UseAtomicAccountSwitchReturn => {
       };
 
       await accountManager.setActiveAccountContext(accountContext);
-      console.log('💾 [AtomicAccountSwitch] Account context saved to Keychain');
 
       // Step 5: Get new JWT token with the updated account context
       setState(prev => ({ ...prev, progress: 'Obteniendo nuevo token de autenticación...' }));
       await authService.switchAccount(accountId, apolloClient);
-      console.log('🎫 [AtomicAccountSwitch] New JWT token obtained');
 
       // Step 6: Small delay to ensure token propagation
       await new Promise(resolve => setTimeout(resolve, 300));
@@ -118,10 +103,8 @@ export const useAtomicAccountSwitch = (): UseAtomicAccountSwitchReturn => {
       try {
         if (targetAccount.type === 'business' && targetAccount.business?.id) {
           await refreshProfileRef.current('business', targetAccount.business.id);
-          console.log('👤 [AtomicAccountSwitch] Business profile refreshed');
         } else {
           await refreshProfileRef.current('personal');
-          console.log('👤 [AtomicAccountSwitch] Personal profile refreshed');
         }
       } catch (profileError) {
         console.error('Error refreshing profile:', profileError);
@@ -131,12 +114,10 @@ export const useAtomicAccountSwitch = (): UseAtomicAccountSwitchReturn => {
       // Step 8: Refresh accounts to update UI
       setState(prev => ({ ...prev, progress: 'Actualizando lista de cuentas...' }));
       await refreshAccountsRef.current();
-      console.log('📋 [AtomicAccountSwitch] Accounts list refreshed');
 
       // Step 9: Resume Apollo queries
       setState(prev => ({ ...prev, progress: 'Reiniciando consultas...' }));
       apolloClient.reFetchObservableQueries();
-      console.log('▶️ [AtomicAccountSwitch] Apollo queries resumed');
 
       // Step 10: Final validation - ensure everything is in sync
       setState(prev => ({ ...prev, progress: 'Validando sincronización...' }));
@@ -150,7 +131,6 @@ export const useAtomicAccountSwitch = (): UseAtomicAccountSwitchReturn => {
         throw new Error('La sincronización de cuenta falló. Por favor intenta nuevamente.');
       }
 
-      console.log('✅ [AtomicAccountSwitch] Account switch completed successfully');
       setState({ isLoading: false, error: null, progress: '' });
       switchInProgressRef.current = false;
 

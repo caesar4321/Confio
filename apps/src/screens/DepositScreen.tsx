@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView, Clipboard, Image, ActivityIndicator, Share } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView, Image, ActivityIndicator, Share } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
@@ -104,7 +105,6 @@ const DepositScreen = () => {
           setLocalAddress(address);
         }
       } catch (e) {
-        console.error('[DepositScreen] Error fetching address:', e);
       }
     };
     fetchAddress();
@@ -115,9 +115,7 @@ const DepositScreen = () => {
 
   // GraphQL mutation for opt-in
   const [optInToAsset] = useMutation(OPT_IN_TO_USDC, {
-    onError: (error) => {
-      console.error('[DepositScreen] Mutation error:', error);
-      setOptingIn(false);
+    onError: (error) => {      setOptingIn(false);
     }
   });
 
@@ -125,9 +123,7 @@ const DepositScreen = () => {
   const { data: optInData, loading: loadingOptIns, refetch: refetchOptIns } = useQuery(CHECK_ASSET_OPT_INS, {
     fetchPolicy: 'network-only',
     onError: (err) => {
-      // If the opt-in status query fails (e.g., auth race), default to showing the activation CTA
-      console.warn('[DepositScreen] CHECK_ASSET_OPT_INS error:', err?.message || err);
-      setIsOptedIn(false);
+      // If the opt-in status query fails (e.g., auth race), default to showing the activation CTA      setIsOptedIn(false);
       setNeedsWalletSetup(false);
       setCheckingOptIn(false);
     }
@@ -146,7 +142,6 @@ const DepositScreen = () => {
         try {
           parsedAssetDetails = JSON.parse(assetDetails);
         } catch (e) {
-          console.error('[DepositScreen] Failed to parse assetDetails:', e);
           parsedAssetDetails = {};
         }
       }
@@ -211,7 +206,6 @@ const DepositScreen = () => {
       try {
         const appOptIn = await cusdAppOptInService.handleAppOptIn(activeAccount);
       } catch (e) {
-        console.warn('[DepositScreen] cUSD app opt-in step failed or not required:', e);
       }
 
       // Step B: Ensure asset opt-ins for cUSD and CONFIO on business accounts
@@ -219,7 +213,6 @@ const DepositScreen = () => {
         const ok = await businessOptInService.checkAndHandleOptIns((msg) => {
         });
       } catch (e) {
-        console.warn('[DepositScreen] Business asset opt-in step failed or not needed:', e);
       }
 
       // Request USDC opt-in from backend
@@ -227,9 +220,7 @@ const DepositScreen = () => {
         variables: { assetType: 'USDC' }
       });
 
-      if (errors) {
-        console.error('[DepositScreen] GraphQL errors:', errors);
-        return;
+      if (errors) {        return;
       }
 
 
@@ -264,14 +255,9 @@ const DepositScreen = () => {
           await refreshAccounts();
           setIsOptedIn(true);
           setNeedsWalletSetup(false);
-        } else {
-          console.error('[DepositScreen] Failed to submit opt-in transaction');
-        }
-      } else {
-        console.error('[DepositScreen] Failed to generate opt-in transaction:', data?.optInToAssetByType?.error);
-      }
+        } else {        }
+      } else {      }
     } catch (error) {
-      console.error('[DepositScreen] Error during USDC opt-in:', error);
     } finally {
       setOptingIn(false);
     }
@@ -298,7 +284,6 @@ const DepositScreen = () => {
         message,
       });
     } catch (error) {
-      console.error('[DepositScreen] Error al compartir dirección:', error);
     }
   }, [depositAddress]);
 

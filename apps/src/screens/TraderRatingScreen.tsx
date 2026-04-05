@@ -139,7 +139,6 @@ export const TraderRatingScreen: React.FC = () => {
         Alert.alert('Error', errors.join('\n'));
       }
     } catch (error) {
-      console.error('Error submitting rating:', error);
       Alert.alert('Error', 'No se pudo enviar la calificación. Por favor intenta de nuevo.');
     }
   };

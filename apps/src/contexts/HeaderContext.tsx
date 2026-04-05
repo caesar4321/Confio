@@ -56,7 +56,6 @@ export const HeaderProvider: React.FC<HeaderProviderProps> = ({ children }) => {
   useEffect(() => {
     const handleAppStateChange = (nextAppState: AppStateStatus) => {
       if (nextAppState === 'active') {
-        console.log('[HeaderContext] App became active, refetching notification count...');
         refetchUnreadCount();
       }
     };

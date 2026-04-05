@@ -11,10 +11,10 @@ import {
   Linking,
   StatusBar,
   Image,
-  Clipboard,
   ActivityIndicator,
   Share,
 } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -1020,7 +1020,6 @@ export const TransactionDetailScreen = () => {
     try {
       transactionData = JSON.parse(rawTransactionData);
     } catch (e) {
-      console.error('[TransactionDetailScreen] Failed to parse transaction data:', e);
       transactionData = null;
     }
   }
@@ -2418,7 +2417,6 @@ export const TransactionDetailScreen = () => {
                       await Share.share({ message });
                     }
                   } catch (error) {
-                    console.error('[WhatsApp Share] Error:', error);
                     try {
                       // Use the same format as line 2397 for consistency
                       const rawUsername = userProfile?.username || '';

@@ -1883,6 +1883,8 @@ PODS:
   - RecaptchaInterop (101.0.0)
   - RNAppleAuthentication (2.4.1):
     - React-Core
+  - RNCClipboard (1.16.3):
+    - React-Core
   - RNDeviceInfo (14.0.4):
     - React-Core
   - RNFBAnalytics (22.2.0):
@@ -2254,6 +2256,7 @@ DEPENDENCIES:
   - ReactCodegen (from `build/generated/ios`)
   - ReactCommon/turbomodule/core (from `../node_modules/react-native/ReactCommon`)
   - "RNAppleAuthentication (from `../node_modules/@invertase/react-native-apple-authentication`)"
+  - "RNCClipboard (from `../node_modules/@react-native-clipboard/clipboard`)"
   - RNDeviceInfo (from `../node_modules/react-native-device-info`)
   - "RNFBAnalytics (from `../node_modules/@react-native-firebase/analytics`)"
   - "RNFBApp (from `../node_modules/@react-native-firebase/app`)"
@@ -2457,6 +2460,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native/ReactCommon"
   RNAppleAuthentication:
     :path: "../node_modules/@invertase/react-native-apple-authentication"
+  RNCClipboard:
+    :path: "../node_modules/@react-native-clipboard/clipboard"
   RNDeviceInfo:
     :path: "../node_modules/react-native-device-info"
   RNFBAnalytics:
@@ -2597,6 +2602,7 @@ SPEC CHECKSUMS:
   ReactCommon: 4dbe3f8218c0b6589e982081f503725057457d2b
   RecaptchaInterop: 11e0b637842dfb48308d242afc3f448062325aba
   RNAppleAuthentication: c3dddf5918126c9aae85dc2e2ce9fb87835e9e04
+  RNCClipboard: f6679d470d0da2bce2a37b0af7b9e0bf369ecda5
   RNDeviceInfo: d863506092aef7e7af3a1c350c913d867d795047
   RNFBAnalytics: c95efeb35d463b522b2734597f16114cb6ea0d1c
   RNFBApp: 2b2bb0f17eb6732e2e90d9c57bfde443cd7fc681
@@ -2617,6 +2623,6 @@ SPEC CHECKSUMS:
   VisionCamera: 9a8f98ae344fe5d148f84bb45829f9e4caab9d2f
   Yoga: b2eaabf17044cd4273a661b14eb83f9fd2c90491
 
-PODFILE CHECKSUM: 2129781ac66c8951482a9b3771638d547b79c7f9
+PODFILE CHECKSUM: 7b6ed7e70c3cbe474a65f3b9104bfbf8341f5b2e
 
 COCOAPODS: 1.16.2

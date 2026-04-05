@@ -173,7 +173,6 @@ export const CreateBusinessScreen = () => {
         Alert.alert('Error', error);
       }
     } catch (error) {
-      console.error('Error creating business:', error);
       Alert.alert(
         'Error',
         'No se pudo crear la cuenta de negocio. Por favor, inténtalo de nuevo.',

@@ -6,12 +6,7 @@
 // Toggle verbose logging for icon resolution
 const DEBUG_PAYMENT_METHOD_ICONS = false;
 
-function debugLog(...args: any[]) {
-  if (DEBUG_PAYMENT_METHOD_ICONS) {
-    // eslint-disable-next-line no-console
-    console.log('[PaymentMethodIcon]', ...args);
-  }
-}
+function debugLog(..._args: any[]) {}
 
 // Map of payment method types/names to appropriate Feather icons
 const PAYMENT_METHOD_ICONS: { [key: string]: string } = {

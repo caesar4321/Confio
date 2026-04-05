@@ -4,9 +4,7 @@ import { Platform } from 'react-native';
 export async function initializeNotifee() {
   // Request permissions for iOS
   if (Platform.OS === 'ios') {
-    const settings = await notifee.requestPermission();
-    console.log('iOS notification permissions:', settings);
-    
+    const settings = await notifee.requestPermission();    
     // Set foreground notification presentation options
     await notifee.setNotificationCategories([
       {

@@ -57,20 +57,13 @@ export class ContactService {
       // Try to load from array format (fastest)
       const keychainStart = Date.now();
       const arrayCredentials = await Keychain.getInternetCredentials(CONTACTS_KEYCHAIN_SERVICE + '_array');
-      console.log(`[PERF] Keychain read took: ${Date.now() - keychainStart}ms`);
-
       if (arrayCredentials && arrayCredentials.username === CONTACTS_KEYCHAIN_KEY) {
         const parseStart = Date.now();
         const contactsArray = JSON.parse(arrayCredentials.password);
-        console.log(`[PERF] JSON parse took: ${Date.now() - parseStart}ms`);
-
         if (Array.isArray(contactsArray)) {
-          this.contactsArray = contactsArray;
-          console.log(`[PERF] Preloaded ${contactsArray.length} contacts in ${Date.now() - startTime}ms`);
-        }
+          this.contactsArray = contactsArray;        }
       }
     } catch (error) {
-      console.log('Failed to preload contacts:', error);
     }
   }
 
@@ -202,13 +195,9 @@ export class ContactService {
       // Query the server in batches of 50 phone numbers
       const batchSize = 50;
       const totalBatches = Math.ceil(phoneNumbers.length / batchSize);
-      console.log(`[SYNC] Will check users in ${totalBatches} batches`);
-
       for (let i = 0; i < phoneNumbers.length; i += batchSize) {
         const batch = phoneNumbers.slice(i, i + batchSize);
         const batchNum = Math.floor(i / batchSize) + 1;
-        console.log(`[SYNC] Checking batch ${batchNum}/${totalBatches} with ${batch.length} phone numbers`);
-
         const result = await apolloClient.query({
           query: CHECK_USERS_BY_PHONES,
           variables: { phoneNumbers: batch },
@@ -242,7 +231,6 @@ export class ContactService {
     try {
       const hasPermission = await this.hasContactPermission();
       if (!hasPermission) {
-        console.log('No contact permission');
         return false;
       }
 
@@ -250,7 +238,6 @@ export class ContactService {
       const contacts = await Contacts.getAll();
 
       if (!contacts || contacts.length === 0) {
-        console.log('No contacts found');
         return true; // Return true as sync was successful, just no contacts
       }
 
@@ -322,17 +309,12 @@ export class ContactService {
       let canUpload = true;
       if (Platform.OS === 'ios') {
         canUpload = await this.hasUploadConsent();
-        if (!canUpload) {
-          console.log('[PRIVACY] iOS upload consent not granted — skipping server match');
-        }
+        if (!canUpload) {        }
       }
 
       if (apolloClient && allPhoneNumbers.length > 0 && canUpload) {
-        console.log(`[SYNC] Checking ${allPhoneNumbers.length} phone numbers against Confío database...`);
         const startCheck = Date.now();
         const confioUsersMap = await this.checkConfioUsers(allPhoneNumbers, apolloClient);
-        console.log(`[SYNC] Checked users in ${Date.now() - startCheck}ms`);
-
         // Update contacts with Confío user information
         confioUsersMap.forEach((userInfo, phoneNumber) => {
           // Find all contacts that match this phone number
@@ -348,10 +330,7 @@ export class ContactService {
               // Users should see the names they have saved in their contacts
             }
           });
-        });
-
-        console.log(`Found ${confioUsersMap.size} Confío users among contacts`);
-      }
+        });      }
 
       // Store in keychain
       const contactsData = JSON.stringify(contactMap);
@@ -386,10 +365,7 @@ export class ContactService {
         CONTACTS_KEYCHAIN_SERVICE + '_array',
         CONTACTS_KEYCHAIN_KEY,
         arrayData
-      );
-
-      console.log(`Synced ${this.contactsArray.length} unique contacts`);
-      return true;
+      );      return true;
     } catch (error) {
       console.error('Error syncing contacts:', error);
       return false;
@@ -422,12 +398,8 @@ export class ContactService {
 
     // Return immediately if contacts are already in memory
     if (this.contactsArray && this.contactsArray.length > 0) {
-      console.log(`[PERF] getAllContacts returned ${this.contactsArray.length} contacts from memory in ${Date.now() - startTime}ms`);
       return this.contactsArray;
     }
-
-    console.log(`[PERF] getAllContacts - no contacts in memory, returning empty`);
-
     // If no contacts in memory, return empty array immediately
     // and trigger background load
     if (!this.contactsArray) {

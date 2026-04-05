@@ -39,11 +39,9 @@ class AppCheckService {
             }
 
             try {
-                const installer = await DeviceInfo.getInstallerPackageName();
-                console.log('[AppCheck] Android installer package:', installer || 'none');
-                return installer !== 'com.android.vending';
+                const installer = await DeviceInfo.getInstallerPackageName();                return installer !== 'com.android.vending';
             } catch (error: any) {
-                console.warn('[AppCheck] Failed to read Android installer package:', error?.message, error);
+
                 return true;
             }
         }
@@ -68,12 +66,7 @@ class AppCheckService {
                     : FIREBASE_APP_CHECK_DEBUG_TOKEN_IOS;
             const useDebugProvider = await this.shouldUseDebugProvider();
 
-            if (__DEV__ || useDebugProvider) {
-                console.log(
-                    '[AppCheck] Configuring debug token suffix:',
-                    configuredDebugToken ? configuredDebugToken.slice(-6) : 'missing',
-                );
-            }
+            if (__DEV__ || useDebugProvider) {            }
 
             rnfbProvider.configure({
                 android: {
@@ -91,15 +84,7 @@ class AppCheckService {
                 isTokenAutoRefreshEnabled: true,
             });
 
-            this.isInitialized = true;
-            console.log(
-                '[AppCheck] Initialized successfully on',
-                Platform.OS,
-                useDebugProvider ? '(debug token mode)' : '(production attestation mode)',
-            );
-            console.log(`[PERF][AppCheck] initialize total: ${Date.now() - initStart}ms`);
-        } catch (error: any) {
-            console.warn('[AppCheck] Failed to initialize:', error?.message, error);
+            this.isInitialized = true;        } catch (error: any) {
             // Don't throw - allow app to continue in monitoring mode
         }
     }
@@ -119,16 +104,10 @@ class AppCheckService {
             if (token) {
                 this.lastToken = token;
                 this.lastTokenAt = Date.now();
-            }
-            console.log(`[PERF][AppCheck] fetchToken total: ${Date.now() - startTime}ms`, {
-                hasToken: !!token,
-            });
-            return token;
+            }            return token;
         } catch (error: any) {
-            console.warn('[AppCheck] Failed to get token:', error?.message, error);
-            this.lastFailureAt = Date.now();
-            console.log(`[PERF][AppCheck] fetchToken failed after: ${Date.now() - startTime}ms`);
-            return null;
+
+            this.lastFailureAt = Date.now();            return null;
         }
     }
 
@@ -140,17 +119,10 @@ class AppCheckService {
         const now = Date.now();
 
         if (this.lastToken && now - this.lastTokenAt < AppCheckService.TOKEN_REUSE_MS) {
-            console.log(`[PERF][AppCheck] getTokenForHeader cache hit: 0ms`, {
-                tokenAgeMs: now - this.lastTokenAt,
-            });
             return this.lastToken;
         }
 
         if (this.lastFailureAt && now - this.lastFailureAt < AppCheckService.FAILURE_BACKOFF_MS) {
-            console.log(`[PERF][AppCheck] getTokenForHeader backoff hit: 0ms`, {
-                failureAgeMs: now - this.lastFailureAt,
-                hasCachedToken: !!this.lastToken,
-            });
             return this.lastToken;
         }
 

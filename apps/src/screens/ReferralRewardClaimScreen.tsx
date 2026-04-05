@@ -11,7 +11,8 @@ import {
   Platform,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, NavigationProp } from '@react-navigation/native';
+import { MainStackParamList } from '../types/navigation';
 import { useQuery, useMutation } from '@apollo/client';
 import { Buffer } from 'buffer';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -51,19 +52,47 @@ type Referral = {
 };
 
 export const ReferralRewardClaimScreen: React.FC = () => {
-  const navigation = useNavigation();
+  const navigation = useNavigation<NavigationProp<MainStackParamList>>();
   const { userProfile } = useAuth();
   const currentUserId = userProfile?.id ? String(userProfile.id) : null;
   const insets = useSafeAreaInsets();
-  const { data, loading, error, refetch } = useQuery(GET_MY_REFERRALS, {
+  const PAGE_SIZE = 20;
+  const { data, loading, error, refetch, fetchMore } = useQuery(GET_MY_REFERRALS, {
     fetchPolicy: 'cache-and-network',
+    variables: { first: PAGE_SIZE, offset: 0 },
   });
   const [prepareClaim] = useMutation(PREPARE_REFERRAL_REWARD_CLAIM);
   const [submitClaim] = useMutation(SUBMIT_REFERRAL_REWARD_CLAIM);
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [loadingMessage, setLoadingMessage] = React.useState<string>('');
+  const [loadingMore, setLoadingMore] = React.useState(false);
+  const [hasMore, setHasMore] = React.useState(true);
 
   const referrals: Referral[] = data?.myReferrals || [];
+
+  const handleLoadMore = React.useCallback(async () => {
+    if (loadingMore || !hasMore || loading) return;
+    setLoadingMore(true);
+    try {
+      const { data: moreData } = await fetchMore({
+        variables: { first: PAGE_SIZE, offset: referrals.length },
+        updateQuery: (prev, { fetchMoreResult }) => {
+          if (!fetchMoreResult?.myReferrals?.length) return prev;
+          return {
+            ...prev,
+            myReferrals: [...(prev.myReferrals || []), ...fetchMoreResult.myReferrals],
+          };
+        },
+      });
+      if (!moreData?.myReferrals?.length || moreData.myReferrals.length < PAGE_SIZE) {
+        setHasMore(false);
+      }
+    } catch {
+      // Silently fail — user can scroll again to retry
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, hasMore, loading, fetchMore, referrals.length]);
 
   // Determine viewer role for each referral
   const getViewerRole = React.useCallback(
@@ -142,17 +171,17 @@ export const ReferralRewardClaimScreen: React.FC = () => {
       const nextEvent = 'top_up';
       if (isPending) {
         navigation.navigate(
-          'ReferralActionPrompt' as never,
+          'ReferralActionPrompt',
           {
             event: nextEvent,
-          } as never,
+          },
         );
       } else {
         navigation.navigate(
-          'ReferralFriendJoined' as never,
+          'ReferralFriendJoined',
           {
             event: nextEvent,
-          } as never,
+          },
         );
       }
     },
@@ -200,164 +229,12 @@ export const ReferralRewardClaimScreen: React.FC = () => {
     return `${item.type}-${index}`;
   }, []);
 
-  const renderListItem = React.useCallback(
-    ({ item }: { item: ListSection }) => {
-      if (item.type === 'summary') {
-        return (
-          <View style={styles.summaryCard}>
-            <Text style={styles.summaryLabel}>Listo para desbloquear</Text>
-            <Text style={styles.summaryValue}>
-              {item.totalClaimable.toFixed(2)} $CONFIO
-            </Text>
-            <Text style={styles.summarySubtext}>
-              Estas recompensas fueron confirmadas on-chain y ya puedes
-              desbloquearlas. Firmaremos una transacción para liberarlas en tu
-              billetera Confío.
-            </Text>
-          </View>
-        );
-      }
-
-      if (item.type === 'empty') {
-        return (
-          <View style={styles.emptyState}>
-            <Icon name="gift" size={32} color={colors.textSecondary} />
-            <Text style={styles.emptyTitle}>Sin recompensas pendientes</Text>
-            <Text style={styles.emptySubtitle}>
-              Si completaste una misión, asegúrate de iniciar sesión con la
-              cuenta que ganó el bono o inténtalo más tarde.
-            </Text>
-            <TouchableOpacity
-              style={styles.emptyButton}
-              onPress={() => navigation.goBack()}
-            >
-              <Text style={styles.emptyButtonText}>Invitar amigos ahora 🚀</Text>
-            </TouchableOpacity>
-          </View>
-        );
-      }
-
-      if (item.type === 'pendingHeader') {
-        return (
-          <View style={styles.pendingSection}>
-            <Text style={styles.pendingTitle}>Bonos en progreso</Text>
-            <Text style={styles.pendingSubtitle}>
-              Completa tu primera transacción para desbloquear estos bonos.
-            </Text>
-          </View>
-        );
-      }
-
-      if (item.type === 'claimable') {
-        const referral = item.referral;
-        const amount = getReferralAmount(referral);
-        const isReferrer = getViewerRole(referral) === 'referrer';
-        const otherUser = isReferrer ? referral.referredUser : referral.referrerUser;
-
-        return (
-          <View key={referral.id} style={styles.rewardCard}>
-            <View style={styles.rewardHeader}>
-              <View>
-                <Text style={styles.rewardTitle}>
-                  {amount.toFixed(2)} $CONFIO
-                </Text>
-                <Text style={styles.rewardSubtitle}>
-                  {isReferrer ? 'Invitaste a' : 'Te invitó'}{' '}
-                  {getUserDisplayName(otherUser)}
-                </Text>
-              </View>
-              <TouchableOpacity
-                style={[
-                  styles.claimButton,
-                  busyId === referral.id && styles.claimButtonDisabled,
-                ]}
-                disabled={busyId === referral.id}
-                onPress={() => handleClaim(referral)}>
-                {busyId === referral.id ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <>
-                    <Icon name="unlock" size={16} color="#fff" />
-                    <Text style={styles.claimButtonText}>Desbloquear</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.rewardMeta}>
-              Rol: {isReferrer ? 'Invitador' : 'Referido'}
-            </Text>
-            <Text style={styles.rewardMeta}>
-              Fecha: {new Date(referral.createdAt).toLocaleString()}
-            </Text>
-          </View>
-        );
-      }
-
-      if (item.type === 'pending') {
-        const referral = item.referral;
-        const isReferrer = getViewerRole(referral) === 'referrer';
-        const amount = getReferralAmount(referral);
-        const otherUser = isReferrer ? referral.referredUser : referral.referrerUser;
-        const otherUserDisplay = getUserDisplayName(otherUser);
-
-        const requirementText = isReferrer
-          ? `Ayuda a ${otherUserDisplay} a completar su primera transacción válida para liberar el bono para ambos.`
-          : 'Completa tu primera transacción válida para desbloquear el bono.';
-
-        return (
-          <TouchableOpacity
-            key={`pending-${referral.id}`}
-            style={[styles.rewardCard, styles.pendingCard]}
-            activeOpacity={0.85}
-            onPress={() => handlePendingPress(referral)}>
-            <View style={styles.rewardHeader}>
-              <View>
-                <Text style={styles.rewardTitle}>
-                  {amount.toFixed(2)} $CONFIO
-                </Text>
-                <Text style={styles.rewardSubtitle}>
-                  {isReferrer ? 'Invitaste a' : 'Te invitó'}{' '}
-                  {otherUserDisplay}
-                </Text>
-              </View>
-              <View style={styles.pendingBadge}>
-                <Icon name="clock" size={14} color={colors.accent} />
-                <Text style={styles.pendingBadgeText}>Pendiente</Text>
-              </View>
-            </View>
-            <Text style={styles.rewardMeta}>
-              Rol: {isReferrer ? 'Invitador' : 'Referido'}
-            </Text>
-            {isReferrer && (
-              <Text style={styles.rewardMeta}>
-                Invitado: {otherUserDisplay}
-              </Text>
-            )}
-            <Text style={styles.rewardMeta}>{requirementText}</Text>
-            <Text style={styles.rewardMeta}>
-              Registrado: {new Date(referral.createdAt).toLocaleString()}
-            </Text>
-            <View style={styles.pendingHint}>
-              <Text style={styles.pendingHintText}>Ver guía</Text>
-              <Icon name="chevron-right" size={16} color={colors.accent} />
-            </View>
-          </TouchableOpacity>
-        );
-      }
-
-      return null;
-    },
-    [busyId, getReferralAmount, getUserDisplayName, handleClaim, handlePendingPress, getViewerRole],
-  );
-
   const handleClaim = React.useCallback(
     async (referral: Referral) => {
       if (busyId) return;
       setBusyId(referral.id);
 
       try {
-
-
         const eventId = referral.viewerRewardEventId || null;
         if (!eventId) {
           throw new Error('No pudimos encontrar la recompensa para este rol.');
@@ -373,8 +250,6 @@ export const ReferralRewardClaimScreen: React.FC = () => {
 
         const unsigned = payload.unsignedTransaction;
         const token = payload.claimToken;
-
-
 
         setLoadingMessage('Firmando transacción...');
         const unsignedBytes = Buffer.from(unsigned, 'base64');
@@ -398,11 +273,12 @@ export const ReferralRewardClaimScreen: React.FC = () => {
         }
 
         Alert.alert('¡Listo!', 'Tus $CONFIO fueron desbloqueados con éxito.');
-        await refetch();
+        setHasMore(true);
+        await refetch({ first: PAGE_SIZE, offset: 0 });
       } catch (err: any) {
         const message =
           err?.message || 'Ocurrió un error al desbloquear la recompensa.';
-        Alert.alert('Ups', message);
+        Alert.alert('Error', message);
       } finally {
         setLoadingMessage('');
         setBusyId(null);
@@ -410,6 +286,169 @@ export const ReferralRewardClaimScreen: React.FC = () => {
     },
     [busyId, prepareClaim, submitClaim, refetch],
   );
+
+  const renderListItem = React.useCallback(
+    ({ item }: { item: ListSection }) => {
+      if (item.type === 'summary') {
+        return (
+          <View style={styles.summaryCard}>
+            <View style={styles.summaryIconRow}>
+              <View style={styles.summaryIconWrap}>
+                <Icon name="gift" size={20} color={colors.primaryDark} />
+              </View>
+              <Text style={styles.summaryLabel}>Listo para desbloquear</Text>
+            </View>
+            <Text style={styles.summaryValue}>
+              {item.totalClaimable.toFixed(2)} $CONFIO
+            </Text>
+            <Text style={styles.summarySubtext}>
+              Recompensas confirmadas on-chain. Firma para liberarlas en tu
+              billetera Confío.
+            </Text>
+          </View>
+        );
+      }
+
+      if (item.type === 'empty') {
+        return (
+          <View style={styles.emptyState}>
+            <Icon name="gift" size={32} color={colors.textSecondary} />
+            <Text style={styles.emptyTitle}>Sin recompensas pendientes</Text>
+            <Text style={styles.emptySubtitle}>
+              Si completaste una misión, asegúrate de iniciar sesión con la
+              cuenta que ganó el bono o inténtalo más tarde.
+            </Text>
+            <TouchableOpacity
+              style={styles.emptyButton}
+              onPress={() => navigation.navigate('ConfioAddress')}
+            >
+              <Icon name="share-2" size={16} color={colors.white} />
+              <Text style={styles.emptyButtonText}>Invitar amigos</Text>
+            </TouchableOpacity>
+          </View>
+        );
+      }
+
+      if (item.type === 'pendingHeader') {
+        return (
+          <View style={styles.pendingSection}>
+            <Text style={styles.pendingTitle}>Bonos en progreso</Text>
+            <Text style={styles.pendingSubtitle}>
+              Completa tu primera transacción para desbloquear estos bonos.
+            </Text>
+          </View>
+        );
+      }
+
+      if (item.type === 'claimable') {
+        const referral = item.referral;
+        const amount = getReferralAmount(referral);
+        const isReferrer = getViewerRole(referral) === 'referrer';
+        const otherUser = isReferrer ? referral.referredUser : referral.referrerUser;
+
+        return (
+          <View key={referral.id} style={[styles.rewardCard, styles.claimableCard]}>
+            <View style={styles.rewardHeader}>
+              <View style={styles.rewardHeaderText}>
+                <Text style={styles.rewardTitle}>
+                  {amount.toFixed(2)} $CONFIO
+                </Text>
+                <Text style={styles.rewardSubtitle} numberOfLines={1}>
+                  {isReferrer ? 'Invitaste a' : 'Te invitó'}{' '}
+                  {getUserDisplayName(otherUser)}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={[
+                  styles.claimButton,
+                  busyId === referral.id && styles.claimButtonDisabled,
+                ]}
+                disabled={busyId === referral.id}
+                onPress={() => handleClaim(referral)}>
+                {busyId === referral.id ? (
+                  <ActivityIndicator color={colors.white} size="small" />
+                ) : (
+                  <>
+                    <Icon name="unlock" size={16} color={colors.white} />
+                    <Text style={styles.claimButtonText}>Desbloquear</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+            <View style={styles.rewardMetaRow}>
+              <View style={styles.rewardMetaItem}>
+                <Icon name={isReferrer ? 'send' : 'user-check'} size={12} color={colors.textSecondary} />
+                <Text style={styles.rewardMeta}>{isReferrer ? 'Invitador' : 'Referido'}</Text>
+              </View>
+              <View style={styles.rewardMetaItem}>
+                <Icon name="calendar" size={12} color={colors.textSecondary} />
+                <Text style={styles.rewardMeta}>
+                  {new Date(referral.createdAt).toLocaleDateString('es', { day: 'numeric', month: 'short', year: 'numeric' })}
+                </Text>
+              </View>
+            </View>
+          </View>
+        );
+      }
+
+      if (item.type === 'pending') {
+        const referral = item.referral;
+        const isReferrer = getViewerRole(referral) === 'referrer';
+        const amount = getReferralAmount(referral);
+        const otherUser = isReferrer ? referral.referredUser : referral.referrerUser;
+        const otherUserDisplay = getUserDisplayName(otherUser);
+
+        const requirementText = isReferrer
+          ? `Ayuda a ${otherUserDisplay} a completar su primera transacción válida para liberar el bono para ambos.`
+          : 'Completa tu primera transacción válida para desbloquear el bono.';
+
+        return (
+          <TouchableOpacity
+            key={`pending-${referral.id}`}
+            style={[styles.rewardCard, styles.pendingCard]}
+            activeOpacity={0.85}
+            onPress={() => handlePendingPress(referral)}>
+            <View style={styles.rewardHeader}>
+              <View style={styles.rewardHeaderText}>
+                <Text style={styles.rewardTitle}>
+                  {amount.toFixed(2)} $CONFIO
+                </Text>
+                <Text style={styles.rewardSubtitle} numberOfLines={1}>
+                  {isReferrer ? 'Invitaste a' : 'Te invitó'}{' '}
+                  {otherUserDisplay}
+                </Text>
+              </View>
+              <View style={styles.pendingBadge}>
+                <Icon name="clock" size={14} color={colors.accent} />
+                <Text style={styles.pendingBadgeText}>Pendiente</Text>
+              </View>
+            </View>
+            <Text style={styles.rewardRequirement}>{requirementText}</Text>
+            <View style={styles.rewardMetaRow}>
+              <View style={styles.rewardMetaItem}>
+                <Icon name={isReferrer ? 'send' : 'user-check'} size={12} color={colors.textSecondary} />
+                <Text style={styles.rewardMeta}>{isReferrer ? 'Invitador' : 'Referido'}</Text>
+              </View>
+              <View style={styles.rewardMetaItem}>
+                <Icon name="calendar" size={12} color={colors.textSecondary} />
+                <Text style={styles.rewardMeta}>
+                  {new Date(referral.createdAt).toLocaleDateString('es', { day: 'numeric', month: 'short', year: 'numeric' })}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.pendingHint}>
+              <Text style={styles.pendingHintText}>Ver guía</Text>
+              <Icon name="chevron-right" size={16} color={colors.accent} />
+            </View>
+          </TouchableOpacity>
+        );
+      }
+
+      return null;
+    },
+    [busyId, getReferralAmount, getUserDisplayName, handleClaim, handlePendingPress, getViewerRole],
+  );
+
 
   const headerPaddingTop = Platform.OS === 'android' ? insets.top + 12 : 12;
 
@@ -433,7 +472,7 @@ export const ReferralRewardClaimScreen: React.FC = () => {
         </View>
       ) : error ? (
         <View style={styles.errorState}>
-          <Icon name="alert-circle" size={32} color="#DC2626" />
+          <Icon name="alert-circle" size={32} color={colors.error.icon} />
           <Text style={styles.errorTitle}>No pudimos cargar tus bonos</Text>
           <Text style={styles.errorSubtitle}>
             {error.message || 'Intenta de nuevo en unos segundos.'}
@@ -449,10 +488,19 @@ export const ReferralRewardClaimScreen: React.FC = () => {
           keyExtractor={keyExtractor}
           style={styles.scroll}
           contentContainerStyle={{ padding: 20, paddingBottom: 32 }}
-          initialNumToRender={50}
-          maxToRenderPerBatch={20}
-          windowSize={10}
+          initialNumToRender={15}
+          maxToRenderPerBatch={10}
+          windowSize={21}
+          onEndReached={handleLoadMore}
+          onEndReachedThreshold={0.5}
           removeClippedSubviews={false}
+          ListFooterComponent={
+            loadingMore ? (
+              <View style={styles.loadMoreFooter}>
+                <ActivityIndicator size="small" color={colors.primaryDark} />
+              </View>
+            ) : null
+          }
         />
       )}
     </SafeAreaView>
@@ -497,22 +545,41 @@ const styles = StyleSheet.create({
   scroll: {
     flex: 1,
   },
+  loadMoreFooter: {
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
   summaryCard: {
-    backgroundColor: colors.surface,
+    backgroundColor: colors.primarySoft,
     borderRadius: 16,
     padding: 20,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: colors.border,
-    shadowColor: '#0f172a',
+    borderColor: colors.primaryLight,
+    shadowColor: colors.shadowBase,
     shadowOpacity: 0.05,
     shadowOffset: { width: 0, height: 6 },
     shadowRadius: 12,
     elevation: 2,
   },
+  summaryIconRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 4,
+  },
+  summaryIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   summaryLabel: {
-    color: colors.textSecondary,
+    color: colors.primaryDark,
     fontSize: 14,
+    fontWeight: '600',
   },
   summaryValue: {
     color: colors.textFlat,
@@ -544,18 +611,22 @@ const styles = StyleSheet.create({
   },
   emptyButton: {
     marginTop: 24,
-    backgroundColor: colors.accent,
-    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: colors.primaryDark,
+    paddingVertical: 14,
     paddingHorizontal: 24,
-    borderRadius: 24,
-    shadowColor: colors.accent,
+    borderRadius: 12,
+    shadowColor: colors.primaryDark,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
     shadowRadius: 8,
     elevation: 4,
   },
   emptyButtonText: {
-    color: '#ffffff',
+    color: colors.white,
     fontWeight: '700',
     fontSize: 15,
   },
@@ -566,7 +637,7 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     borderWidth: 1,
     borderColor: colors.border,
-    shadowColor: '#0f172a',
+    shadowColor: colors.shadowBase,
     shadowOpacity: 0.04,
     shadowOffset: { width: 0, height: 4 },
     shadowRadius: 10,
@@ -577,9 +648,20 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 12,
+    gap: 12,
+  },
+  rewardHeaderText: {
+    flex: 1,
+    flexShrink: 1,
+  },
+  claimableCard: {
+    borderLeftWidth: 3,
+    borderLeftColor: colors.primaryDark,
   },
   pendingCard: {
-    borderColor: colors.accent,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.accent,
+    borderColor: colors.border,
   },
   pendingSection: {
     marginTop: 24,
@@ -600,7 +682,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 999,
+    borderRadius: 16,
     backgroundColor: colors.accentSoft,
   },
   pendingBadgeText: {
@@ -632,24 +714,43 @@ const styles = StyleSheet.create({
     marginTop: 2,
     textTransform: 'capitalize',
   },
+  rewardMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    marginTop: 8,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  rewardMetaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   rewardMeta: {
     color: colors.textSecondary,
     fontSize: 12,
+  },
+  rewardRequirement: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    lineHeight: 18,
     marginTop: 4,
   },
   claimButton: {
     backgroundColor: colors.accent,
     paddingHorizontal: 18,
     paddingVertical: 10,
-    borderRadius: 999,
+    borderRadius: 16,
     flexDirection: 'row',
     alignItems: 'center',
   },
   claimButtonDisabled: {
-    backgroundColor: 'rgba(4,120,87,0.35)',
+    opacity: 0.5,
   },
   claimButtonText: {
-    color: '#fff',
+    color: colors.white,
     fontWeight: '600',
     marginLeft: 6,
   },
@@ -678,7 +779,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   retryButtonText: {
-    color: '#fff',
+    color: colors.white,
     fontWeight: '600',
   },
 });

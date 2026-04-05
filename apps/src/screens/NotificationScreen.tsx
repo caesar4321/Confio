@@ -333,7 +333,6 @@ export const NotificationScreen = () => {
           variables: { notificationId: notification.id }
         });
       } catch (error) {
-        console.error('Error marking notification as read:', error);
       }
     }
 
@@ -393,7 +392,7 @@ export const NotificationScreen = () => {
         return;
       }
       if (normalizedUrl.includes('referrals/reward-claim')) {
-        navigation.navigate('ReferralRewardClaim' as never);
+        navigation.navigate('ReferralRewardClaim');
         return;
       }
       if (normalizedUrl.includes('referrals')) {
@@ -517,7 +516,7 @@ export const NotificationScreen = () => {
       } else if (url.includes('transaction/')) {
         const transactionId = url.split('transaction/')[1];
         if (parsedData?.pending_auto_swap === true || parsedData?.pending_auto_swap === 'true') {
-          navigation.navigate('BottomTabs', { screen: 'Home' } as never);
+          navigation.navigate('BottomTabs', { screen: 'Home' });
           return;
         }
         // Prefer server fetch for full fidelity; pass minimal payload with id and type hint
@@ -1039,7 +1038,6 @@ export const NotificationScreen = () => {
       try {
         parsedData = JSON.parse(data);
       } catch (e) {
-        console.warn('Failed to parse notification data:', e);
         return text;
       }
     }
@@ -1090,7 +1088,6 @@ export const NotificationScreen = () => {
           }
         }
       } catch (error) {
-        console.error('Error getting contact names:', error);
       }
     }
 
@@ -1141,7 +1138,6 @@ export const NotificationScreen = () => {
         </TouchableOpacity>
       );
     } catch (error) {
-      console.error('[NotificationScreen] Error rendering notification:', item.id, error);
       return null;
     }
   };
