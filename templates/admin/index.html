@@ -213,7 +213,7 @@
             <div class="stat-label">Review Queue</div>
             <div class="stat-value danger">{{ fraud_stats.duplicate_identity_review_users|default:"0" }}</div>
             <div class="stat-sublabel">
-                Duplicate identity reviews pending
+                Duplicate identities detected
             </div>
         </div>
         
@@ -244,8 +244,8 @@
     <div class="alert-warning">
         <strong>⚠️ Reward controls active:</strong>
         {{ fraud_stats.unverified_reward_users|default:"0" }} reward holder{{ fraud_stats.unverified_reward_users|pluralize }}
-        still need personal KYC, and {{ fraud_stats.duplicate_identity_review_users|default:"0" }} duplicate identity review{{ fraud_stats.duplicate_identity_review_users|pluralize }}
-        {{ fraud_stats.duplicate_identity_review_users|pluralize:"is,are" }} pending.
+        still need personal KYC, and {{ fraud_stats.duplicate_identity_review_users|default:"0" }} duplicate identit{{ fraud_stats.duplicate_identity_review_users|pluralize:"y,ies" }}
+        {{ fraud_stats.duplicate_identity_review_users|pluralize:"has,have" }} been detected.
     </div>
     {% endif %}
     

@@ -858,7 +858,7 @@
     {% if fraud_stats %}
     <h2 class="section-title">🔍 $CONFIO Reward Security</h2>
     <p style="margin-bottom: 18px; color: #1f2937;">
-        Monitoring referral-earned $CONFIO balances, KYC holds, and duplicate-identity review queues.
+        Monitoring referral-earned $CONFIO balances, KYC holds, and duplicate identities tied to referee rewards.
         Presale and externally deposited tokens stay unrestricted.
     </p>
     <div class="metrics-grid">
@@ -882,9 +882,9 @@
         </div>
 
         <div class="metric-card">
-            <div class="metric-label">Duplicate Identity Reviews</div>
+            <div class="metric-label">Duplicate Identities</div>
             <div class="metric-value" style="color: #dc2626;">{{ fraud_stats.duplicate_identity_review_users|default:"0" }}</div>
-            <div class="metric-change">Pending manual review in personal KYC</div>
+            <div class="metric-change">Verified identities with duplicate documents detected</div>
         </div>
 
         <div class="metric-card">
@@ -907,7 +907,7 @@
         <div>
             <strong>Reward controls active:</strong>
             {{ fraud_stats.unverified_reward_users|default:"0" }} reward holder{{ fraud_stats.unverified_reward_users|pluralize }} still need personal KYC and
-            {{ fraud_stats.duplicate_identity_review_users|default:"0" }} duplicate identity review{{ fraud_stats.duplicate_identity_review_users|pluralize }} {{ fraud_stats.duplicate_identity_review_users|pluralize:"is,are" }} pending.
+            {{ fraud_stats.duplicate_identity_review_users|default:"0" }} duplicate identit{{ fraud_stats.duplicate_identity_review_users|pluralize:"y,ies" }} {{ fraud_stats.duplicate_identity_review_users|pluralize:"has,have" }} been detected.
         </div>
     </div>
     {% endif %}

@@ -7,6 +7,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from achievements.models import ReferralRewardEvent, UserReferral
+from achievements.referral_security import DUPLICATE_REFEREE_REWARD_ERROR
 from achievements.signals import sync_pending_reward_events
 from achievements.services.referral_rewards import (
     EventContext,
@@ -14,6 +15,7 @@ from achievements.services.referral_rewards import (
 )
 from blockchain.rewards_service import RewardSyncResult
 from notifications.models import Notification, NotificationType as NotificationTypeChoices
+from security.models import IdentityVerification
 from users.models import Account
 
 
@@ -281,6 +283,73 @@ class ReferralRewardServiceTests(TestCase):
 
         referrer_event.refresh_from_db()
         self.assertEqual(referrer_event.reward_status, "eligible")
+
+    @patch("achievements.services.referral_rewards.ConfioRewardsService")
+    def test_duplicate_verified_identity_blocks_later_referee_eligibility(self, mock_service):
+        duplicate_user = get_user_model().objects.create_user(
+            username="duplicate-referred",
+            email="duplicate@example.com",
+            password="password",
+            firebase_uid="duplicate-uid",
+        )
+        _, dup_addr = account.generate_account()
+        Account.objects.create(
+            user=duplicate_user,
+            account_type="personal",
+            account_index=0,
+            algorand_address=dup_addr,
+        )
+        later_referral = UserReferral.objects.create(
+            referred_user=duplicate_user,
+            referrer_identifier="@referrer",
+            referrer_user=self.referrer,
+        )
+
+        IdentityVerification.objects.create(
+            user=self.referred,
+            verified_first_name="Ana",
+            verified_last_name="Perez",
+            verified_date_of_birth=timezone.now().date(),
+            verified_nationality="VEN",
+            verified_address="Main street",
+            verified_city="Bogota",
+            verified_state="Cundinamarca",
+            verified_country="COL",
+            document_type="passport",
+            document_number="P123456",
+            document_issuing_country="VEN",
+            status="verified",
+            risk_factors={},
+        )
+        IdentityVerification.objects.create(
+            user=duplicate_user,
+            verified_first_name="Ana",
+            verified_last_name="Perez",
+            verified_date_of_birth=timezone.now().date(),
+            verified_nationality="VEN",
+            verified_address="Main street",
+            verified_city="Bogota",
+            verified_state="Cundinamarca",
+            verified_country="COL",
+            document_type="passport",
+            document_number="P123456",
+            document_issuing_country="VEN",
+            status="verified",
+            risk_factors={},
+        )
+
+        sync_referral_reward_for_event(
+            duplicate_user,
+            EventContext(event="send", amount=Decimal("25")),
+        )
+
+        later_referral.refresh_from_db()
+        event = ReferralRewardEvent.objects.get(user=duplicate_user, trigger="send")
+        self.assertEqual(later_referral.reward_status, "failed")
+        self.assertEqual(later_referral.referee_reward_status, "failed")
+        self.assertEqual(event.reward_status, "failed")
+        self.assertEqual(event.error, DUPLICATE_REFEREE_REWARD_ERROR)
+        mock_service.assert_not_called()
 
     def test_friend_joined_notifications_created(self):
         new_referral = UserReferral.objects.create(

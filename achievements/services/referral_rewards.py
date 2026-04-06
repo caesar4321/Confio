@@ -14,6 +14,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from achievements.models import ReferralRewardEvent, UserReferral
+from achievements.referral_security import get_duplicate_referee_reward_error
 from blockchain.rewards_service import ConfioRewardsService
 from notifications.models import NotificationType as NotificationTypeChoices
 from notifications.utils import create_notification
@@ -370,6 +371,28 @@ def sync_referral_reward_for_event(user, event_ctx: EventContext) -> Optional[Us
 
     if referral is None:
         return None
+
+    duplicate_referee_error = None
+    if (actor_role or "referee") != "referrer":
+        duplicate_referee_error = get_duplicate_referee_reward_error(referral)
+    if duplicate_referee_error:
+        event.reward_status = "failed"
+        event.error = duplicate_referee_error
+        event.save(update_fields=["reward_status", "error", "updated_at"])
+        referral.reward_error = duplicate_referee_error
+        referral.reward_last_attempt_at = timezone.now()
+        referral.reward_status = "failed"
+        referral.referee_reward_status = "failed"
+        referral.save(
+            update_fields=[
+                "reward_error",
+                "reward_last_attempt_at",
+                "reward_status",
+                "referee_reward_status",
+                "updated_at",
+            ]
+        )
+        return referral
 
     # Handle chained prerequisites (e.g., top_up -> conversion)
     if config.get("records_checkpoint") and referral:

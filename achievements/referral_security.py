@@ -1,10 +1,23 @@
 from decimal import Decimal
 
+from django.db import transaction
 from django.db.models import Q, Sum
 from django.db.models.functions import Coalesce
+from django.utils import timezone
 
-from achievements.models import ConfioRewardTransaction, ReferralWithdrawalLog, UserAchievement
+from achievements.models import (
+    ConfioRewardTransaction,
+    ReferralRewardEvent,
+    ReferralWithdrawalLog,
+    UserAchievement,
+    UserReferral,
+)
 from blockchain.constants import REFERRAL_ACHIEVEMENT_SLUGS
+
+DUPLICATE_REFEREE_REWARD_ERROR = (
+    "Este documento ya fue utilizado para una recompensa de referido en otra cuenta. "
+    "Solo se permite un bono de referido por identidad verificada."
+)
 
 
 def get_referral_reward_transactions(user=None):
@@ -64,6 +77,115 @@ def get_referral_reward_summary(user=None):
     }
 
 
+def _get_verified_identity_user_ids(document_issuing_country: str, document_number_normalized: str):
+    from security.models import IdentityVerification
+
+    if not document_issuing_country or not document_number_normalized:
+        return []
+
+    return list(
+        IdentityVerification.objects.filter(
+            status='verified',
+            document_issuing_country=document_issuing_country,
+            document_number_normalized=document_number_normalized,
+        )
+        .filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'))
+        .values_list('user_id', flat=True)
+        .distinct()
+    )
+
+
+def _get_identity_referrals(document_issuing_country: str, document_number_normalized: str):
+    user_ids = _get_verified_identity_user_ids(document_issuing_country, document_number_normalized)
+    if not user_ids:
+        return []
+
+    return list(
+        UserReferral.objects.filter(
+            referred_user_id__in=user_ids,
+            deleted_at__isnull=True,
+        ).order_by('created_at', 'id')
+    )
+
+
+def enforce_referee_reward_uniqueness_for_identity(document_issuing_country: str, document_number_normalized: str):
+    referrals = _get_identity_referrals(document_issuing_country, document_number_normalized)
+    if len(referrals) <= 1:
+        return {'winner_referral_id': referrals[0].id if referrals else None, 'blocked_referral_ids': []}
+
+    winner = referrals[0]
+    blocked_referrals = referrals[1:]
+    now = timezone.now()
+
+    with transaction.atomic():
+        for referral in blocked_referrals:
+            reward_metadata = dict(referral.reward_metadata or {})
+            reward_metadata['duplicate_identity_referee_block'] = {
+                'document_issuing_country': document_issuing_country,
+                'document_number_normalized': document_number_normalized,
+                'winner_referral_id': winner.id,
+                'blocked_at': now.isoformat(),
+            }
+
+            referral.reward_metadata = reward_metadata
+            referral.reward_error = DUPLICATE_REFEREE_REWARD_ERROR
+            referral.reward_last_attempt_at = now
+
+            update_fields = ['reward_metadata', 'reward_error', 'reward_last_attempt_at', 'updated_at']
+
+            if referral.referee_reward_status != 'claimed':
+                referral.referee_reward_status = 'failed'
+                update_fields.append('referee_reward_status')
+
+            if referral.reward_status in {'pending', 'eligible', 'skipped'}:
+                referral.reward_status = 'failed'
+                update_fields.append('reward_status')
+
+            referral.save(update_fields=update_fields)
+
+            ReferralRewardEvent.objects.filter(
+                referral=referral,
+                actor_role='referee',
+            ).exclude(reward_status='claimed').update(
+                reward_status='failed',
+                error=DUPLICATE_REFEREE_REWARD_ERROR,
+                updated_at=now,
+            )
+
+    return {
+        'winner_referral_id': winner.id,
+        'blocked_referral_ids': [referral.id for referral in blocked_referrals],
+    }
+
+
+def get_duplicate_referee_reward_error(referral: UserReferral | None):
+    if not referral or not referral.referred_user_id:
+        return None
+
+    from security.models import IdentityVerification
+
+    verification = (
+        IdentityVerification.objects.filter(
+            user_id=referral.referred_user_id,
+            status='verified',
+        )
+        .filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'))
+        .exclude(document_number_normalized='')
+        .order_by('-verified_at', '-updated_at', '-created_at')
+        .first()
+    )
+    if not verification:
+        return None
+
+    result = enforce_referee_reward_uniqueness_for_identity(
+        verification.document_issuing_country,
+        verification.document_number_normalized,
+    )
+    if result['winner_referral_id'] and result['winner_referral_id'] != referral.id:
+        return DUPLICATE_REFEREE_REWARD_ERROR
+    return None
+
+
 def get_referral_reward_policy_stats():
     """Return verification and review metrics for referral-earned CONFIO."""
     from security.models import IdentityVerification
@@ -112,7 +234,6 @@ def get_referral_reward_policy_stats():
 
     duplicate_identity_review_users = set(
         IdentityVerification.objects.filter(
-            status='pending',
             risk_factors__duplicate_identity__isnull=False,
         )
         .filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'))

@@ -4047,7 +4047,10 @@ class PrepareReferralRewardClaim(graphene.Mutation):
 						referral.referee_reward_status = 'claimed'
 						referral.save(update_fields=['referee_reward_status', 'updated_at'])
 				return PrepareReferralRewardClaim(success=False, error="Esta recompensa ya fue reclamada.")
-				
+
+			if event.reward_status == 'failed' and event.error:
+				return PrepareReferralRewardClaim(success=False, error=event.error)
+
 			return PrepareReferralRewardClaim(success=False, error="Esta recompensa aún no está lista para desbloquear.")
 
 		logger.debug("[PrepareReferralRewardClaim] Processing event=%s user=%s", event.id, user.id)
@@ -4355,6 +4358,13 @@ class SubmitReferralRewardClaim(graphene.Mutation):
 		except ReferralRewardEvent.DoesNotExist:
 			cache.delete(cache_key)
 			return SubmitReferralRewardClaim(success=False, error="No encontramos esa recompensa.")
+
+		if event.reward_status == 'failed' and event.error:
+			cache.delete(cache_key)
+			return SubmitReferralRewardClaim(success=False, error=event.error)
+		if event.reward_status != 'eligible':
+			cache.delete(cache_key)
+			return SubmitReferralRewardClaim(success=False, error="Esta recompensa aún no está lista para desbloquear.")
 
 		referral = event.referral
 		# For two-sided referrals, check if this specific actor already claimed their portion

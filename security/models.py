@@ -212,18 +212,10 @@ class IdentityVerification(SoftDeleteModel):
     @property
     def requires_manual_review(self) -> bool:
         risk_factors = self.risk_factors or {}
-        return bool(risk_factors.get('requires_review') or risk_factors.get('duplicate_identity'))
+        return bool(risk_factors.get('requires_review'))
 
     @property
     def status_detail(self) -> str:
-        risk_factors = self.risk_factors or {}
-        duplicate_identity = risk_factors.get('duplicate_identity') or {}
-
-        if duplicate_identity:
-            return (
-                'Tu verificación requiere revisión manual porque detectamos otra cuenta '
-                'con el mismo documento. Te avisaremos cuando termine la revisión.'
-            )
         if self.status == 'verified':
             return 'Tu identidad quedó verificada correctamente.'
         if self.status == 'rejected':
@@ -305,8 +297,8 @@ def _collect_duplicate_identity_context(user_ids):
 
 
 @receiver(post_save, sender=IdentityVerification)
-def defer_duplicate_personal_identity_verifications(sender, instance: 'IdentityVerification', created, **kwargs):
-    """Prevent automatic verification when the same personal identity appears on another user."""
+def flag_duplicate_personal_identity_verifications(sender, instance: 'IdentityVerification', created, **kwargs):
+    """Flag duplicate personal identities but keep verification successful."""
     try:
         if instance.status != 'verified' or not _is_personal_context(instance):
             return
@@ -327,7 +319,6 @@ def defer_duplicate_personal_identity_verifications(sender, instance: 'IdentityV
         related_user_ids = list(duplicate_qs.values_list('user_id', flat=True).distinct())
         context = _collect_duplicate_identity_context([instance.user_id, *related_user_ids])
         risk_factors = dict(instance.risk_factors or {})
-        risk_factors['requires_review'] = True
         risk_factors['duplicate_identity'] = {
             'document_issuing_country': instance.document_issuing_country,
             'document_number_normalized': instance.document_number_normalized,
@@ -338,11 +329,17 @@ def defer_duplicate_personal_identity_verifications(sender, instance: 'IdentityV
         }
 
         IdentityVerification.objects.filter(pk=instance.pk).update(
-            status='pending',
-            verified_at=None,
-            rejected_reason='La verificación requiere revisión manual por identidad duplicada.',
             risk_factors=risk_factors,
             updated_at=timezone.now(),
+        )
+
+        from achievements.referral_security import enforce_referee_reward_uniqueness_for_identity
+
+        transaction.on_commit(
+            lambda: enforce_referee_reward_uniqueness_for_identity(
+                instance.document_issuing_country,
+                instance.document_number_normalized,
+            )
         )
 
         def create_review_flag():
@@ -359,7 +356,7 @@ def defer_duplicate_personal_identity_verifications(sender, instance: 'IdentityV
                     'related_devices': context['related_devices'],
                 },
                 severity_score=9,
-                action_taken='Deferred automatic verification pending manual review.',
+                action_taken='Verified duplicate identity; duplicate referee rewards restricted.',
             )
             if related_user_ids:
                 activity.related_users.add(*related_user_ids)
