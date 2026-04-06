@@ -48,5 +48,7 @@ This is a **monolithic repository** containing the full Confío stack.
 ├── usdc_transactions/ # USDC specific transaction handling
 │
 ├── docs/              # Project Documentation
+│   └── security/      # Security, KYC, and reward-control policy docs
+│       └── REFERRAL_REWARD_IDENTITY_POLICY.md # Referral reward, Didit KYC, and duplicate-identity controls
 └── manage.py          # Django entry point
 ```
