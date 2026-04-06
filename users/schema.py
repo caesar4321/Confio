@@ -2277,10 +2277,19 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			return []
 
 		# Get referrals where user is either the referrer or the referee
-		from django.db.models import Q
+		from django.db.models import Q, Case, When, Value, IntegerField
 		qset = InfluencerReferral.objects.filter(
 			Q(referrer_user=user) | Q(referred_user=user)
-		).select_related('referred_user', 'referrer_user').order_by('-created_at')
+		).select_related('referred_user', 'referrer_user').annotate(
+			_reward_priority=Case(
+				When(Q(referrer_user=user, referrer_reward_status__iexact='eligible'), then=Value(0)),
+				When(Q(referred_user=user, referee_reward_status__iexact='eligible'), then=Value(0)),
+				When(Q(referrer_user=user, referrer_reward_status__iexact='pending'), then=Value(1)),
+				When(Q(referred_user=user, referee_reward_status__iexact='pending'), then=Value(1)),
+				default=Value(2),
+				output_field=IntegerField(),
+			)
+		).order_by('_reward_priority', '-created_at')
 
 		# Filter by reward status if provided
 		if status:
