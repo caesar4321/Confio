@@ -16,7 +16,7 @@ from achievements.models import (
     AmbassadorActivity,
     ReferralRewardEvent,
 )
-from achievements.referral_security import get_duplicate_referee_reward_error
+from achievements.referral_security import get_duplicate_referral_reward_error
 InfluencerReferral = UserReferral
 from django.db import transaction as db_transaction
 from django.db.models import Sum, Q, F
@@ -4059,11 +4059,10 @@ class PrepareReferralRewardClaim(graphene.Mutation):
 		referral = event.referral
 		# For two-sided referrals, check if this specific actor already claimed their portion
 		actor_role = (event.actor_role or '').lower()
-		if actor_role != 'referrer':
-			duplicate_referee_error = get_duplicate_referee_reward_error(referral)
-			if duplicate_referee_error:
-				event.refresh_from_db()
-				return PrepareReferralRewardClaim(success=False, error=event.error or duplicate_referee_error)
+		duplicate_reward_error = get_duplicate_referral_reward_error(referral, actor_role or 'referee')
+		if duplicate_reward_error:
+			event.refresh_from_db()
+			return PrepareReferralRewardClaim(success=False, error=event.error or duplicate_reward_error)
 		if referral:
 			if actor_role == 'referrer' and referral.referrer_confio_awarded and referral.referrer_confio_awarded > Decimal('0'):
 				if event.reward_status != 'claimed' or referral.referrer_reward_status != 'claimed':
@@ -4375,12 +4374,11 @@ class SubmitReferralRewardClaim(graphene.Mutation):
 		referral = event.referral
 		# For two-sided referrals, check if this specific actor already claimed their portion
 		actor_role = (event.actor_role or '').lower()
-		if actor_role != 'referrer':
-			duplicate_referee_error = get_duplicate_referee_reward_error(referral)
-			if duplicate_referee_error:
-				cache.delete(cache_key)
-				event.refresh_from_db()
-				return SubmitReferralRewardClaim(success=False, error=event.error or duplicate_referee_error)
+		duplicate_reward_error = get_duplicate_referral_reward_error(referral, actor_role or 'referee')
+		if duplicate_reward_error:
+			cache.delete(cache_key)
+			event.refresh_from_db()
+			return SubmitReferralRewardClaim(success=False, error=event.error or duplicate_reward_error)
 		if referral:
 			if actor_role == 'referrer' and referral.referrer_confio_awarded and referral.referrer_confio_awarded > Decimal('0'):
 				cache.delete(cache_key)

@@ -18,6 +18,10 @@ DUPLICATE_REFEREE_REWARD_ERROR = (
     "Este documento ya fue utilizado para una recompensa de referido en otra cuenta. "
     "Solo se permite un bono de referido por identidad verificada."
 )
+DUPLICATE_REFERRER_REWARD_ERROR = (
+    "Este referido fue bloqueado por identidad duplicada. No se otorga bono al referidor "
+    "cuando la misma identidad verificada intenta reclamar más de una recompensa."
+)
 
 
 def get_referral_reward_transactions(user=None):
@@ -136,6 +140,9 @@ def enforce_referee_reward_uniqueness_for_identity(document_issuing_country: str
             if referral.referee_reward_status != 'claimed':
                 referral.referee_reward_status = 'failed'
                 update_fields.append('referee_reward_status')
+            if referral.referrer_reward_status != 'claimed':
+                referral.referrer_reward_status = 'failed'
+                update_fields.append('referrer_reward_status')
 
             if referral.reward_status in {'pending', 'eligible', 'skipped'}:
                 referral.reward_status = 'failed'
@@ -145,10 +152,22 @@ def enforce_referee_reward_uniqueness_for_identity(document_issuing_country: str
 
             ReferralRewardEvent.objects.filter(
                 referral=referral,
-                actor_role='referee',
             ).exclude(reward_status='claimed').update(
                 reward_status='failed',
+                updated_at=now,
+            )
+            ReferralRewardEvent.objects.filter(
+                referral=referral,
+                actor_role='referee',
+            ).exclude(reward_status='claimed').update(
                 error=DUPLICATE_REFEREE_REWARD_ERROR,
+                updated_at=now,
+            )
+            ReferralRewardEvent.objects.filter(
+                referral=referral,
+                actor_role='referrer',
+            ).exclude(reward_status='claimed').update(
+                error=DUPLICATE_REFERRER_REWARD_ERROR,
                 updated_at=now,
             )
 
@@ -184,6 +203,15 @@ def get_duplicate_referee_reward_error(referral: UserReferral | None):
     if result['winner_referral_id'] and result['winner_referral_id'] != referral.id:
         return DUPLICATE_REFEREE_REWARD_ERROR
     return None
+
+
+def get_duplicate_referral_reward_error(referral: UserReferral | None, actor_role: str = 'referee'):
+    referee_error = get_duplicate_referee_reward_error(referral)
+    if not referee_error:
+        return None
+    if (actor_role or '').lower() == 'referrer':
+        return DUPLICATE_REFERRER_REWARD_ERROR
+    return referee_error
 
 
 def get_referral_reward_policy_stats():
