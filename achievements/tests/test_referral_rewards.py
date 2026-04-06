@@ -7,7 +7,10 @@ from django.test import TestCase
 from django.utils import timezone
 
 from achievements.models import ReferralRewardEvent, UserReferral
-from achievements.referral_security import DUPLICATE_REFEREE_REWARD_ERROR
+from achievements.referral_security import (
+    DUPLICATE_REFEREE_REWARD_ERROR,
+    get_referrer_claim_verification_error,
+)
 from achievements.signals import sync_pending_reward_events
 from achievements.services.referral_rewards import (
     EventContext,
@@ -350,6 +353,30 @@ class ReferralRewardServiceTests(TestCase):
         self.assertEqual(event.reward_status, "failed")
         self.assertEqual(event.error, DUPLICATE_REFEREE_REWARD_ERROR)
         mock_service.assert_not_called()
+
+    def test_referrer_claim_waits_for_referee_verification(self):
+        error = get_referrer_claim_verification_error(self.referral)
+        self.assertIn("debe completar su verificación de identidad", error)
+
+    def test_referrer_claim_mentions_pending_referee_verification(self):
+        IdentityVerification.objects.create(
+            user=self.referred,
+            verified_first_name="Ana",
+            verified_last_name="Perez",
+            verified_date_of_birth=timezone.now().date(),
+            verified_nationality="VEN",
+            verified_address="Main street",
+            verified_city="Bogota",
+            verified_state="Cundinamarca",
+            verified_country="COL",
+            document_type="passport",
+            document_number="PENDING123",
+            document_issuing_country="VEN",
+            status="pending",
+            risk_factors={},
+        )
+        error = get_referrer_claim_verification_error(self.referral)
+        self.assertIn("todavía debe terminar su verificación", error)
 
     def test_friend_joined_notifications_created(self):
         new_referral = UserReferral.objects.create(

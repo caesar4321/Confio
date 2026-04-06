@@ -16,7 +16,10 @@ from achievements.models import (
     AmbassadorActivity,
     ReferralRewardEvent,
 )
-from achievements.referral_security import get_duplicate_referral_reward_error
+from achievements.referral_security import (
+    get_duplicate_referral_reward_error,
+    get_referrer_claim_verification_error,
+)
 InfluencerReferral = UserReferral
 from django.db import transaction as db_transaction
 from django.db.models import Sum, Q, F
@@ -4059,6 +4062,10 @@ class PrepareReferralRewardClaim(graphene.Mutation):
 		referral = event.referral
 		# For two-sided referrals, check if this specific actor already claimed their portion
 		actor_role = (event.actor_role or '').lower()
+		if actor_role == 'referrer':
+			referrer_claim_verification_error = get_referrer_claim_verification_error(referral)
+			if referrer_claim_verification_error:
+				return PrepareReferralRewardClaim(success=False, error=referrer_claim_verification_error)
 		duplicate_reward_error = get_duplicate_referral_reward_error(referral, actor_role or 'referee')
 		if duplicate_reward_error:
 			event.refresh_from_db()
@@ -4374,6 +4381,11 @@ class SubmitReferralRewardClaim(graphene.Mutation):
 		referral = event.referral
 		# For two-sided referrals, check if this specific actor already claimed their portion
 		actor_role = (event.actor_role or '').lower()
+		if actor_role == 'referrer':
+			referrer_claim_verification_error = get_referrer_claim_verification_error(referral)
+			if referrer_claim_verification_error:
+				cache.delete(cache_key)
+				return SubmitReferralRewardClaim(success=False, error=referrer_claim_verification_error)
 		duplicate_reward_error = get_duplicate_referral_reward_error(referral, actor_role or 'referee')
 		if duplicate_reward_error:
 			cache.delete(cache_key)

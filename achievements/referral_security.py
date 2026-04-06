@@ -214,6 +214,26 @@ def get_duplicate_referral_reward_error(referral: UserReferral | None, actor_rol
     return referee_error
 
 
+def get_referrer_claim_verification_error(referral: UserReferral | None):
+    if not referral or not referral.referred_user:
+        return "No encontramos al referido para esta recompensa."
+
+    referred_user = referral.referred_user
+    if referred_user.is_identity_verified:
+        return None
+
+    verification_status = (getattr(referred_user, 'verification_status', None) or 'unverified').lower()
+    if verification_status == 'pending':
+        return (
+            "Tu referido ya activó este bono, pero todavía debe terminar su verificación de identidad en Didit "
+            "para que puedas reclamar la recompensa."
+        )
+    return (
+        "Tu referido ya activó este bono, pero debe completar su verificación de identidad en Didit "
+        "para liberar esta recompensa."
+    )
+
+
 def get_referral_reward_policy_stats():
     """Return verification and review metrics for referral-earned CONFIO."""
     from security.models import IdentityVerification
