@@ -123,6 +123,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   const lastInactiveAtRef = useRef<number | null>(null);
   const lastBiometricSuccessRef = useRef<number>(0);
   const bootstrapAuthRanRef = useRef<boolean>(false);
+  const deferredBootstrapOnActiveRef = useRef(false);
 
   const perfLog = (_label: string, _startTime: number, _extra?: Record<string, any>) => {};
 
@@ -780,6 +781,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
 
   const checkAuthState = async () => {
     const checkAuthStateStart = Date.now();
+    let shouldKeepLoading = false;
     try {
       // Check for JWT tokens instead of zkLogin data
       const keychainReadStart = Date.now();
@@ -824,9 +826,18 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
                 appIsActive,
               });
               if (!appIsActive) {
-                setIsAuthenticated(false);
+                shouldKeepLoading = true;
                 setProfileData(null);
-                navigateToScreen('Auth');
+                if (!deferredBootstrapOnActiveRef.current) {
+                  deferredBootstrapOnActiveRef.current = true;
+                  const subscription = AppState.addEventListener('change', (state) => {
+                    if (state === 'active') {
+                      subscription.remove();
+                      deferredBootstrapOnActiveRef.current = false;
+                      void checkAuthState();
+                    }
+                  });
+                }
                 return;
               }
             }
@@ -1052,7 +1063,9 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       perfLog('checkAuthState total', checkAuthStateStart, {
         finalIsAuthenticated: isAuthenticated,
       });
-      setIsLoading(false);
+      if (!shouldKeepLoading) {
+        setIsLoading(false);
+      }
     }
   };
 

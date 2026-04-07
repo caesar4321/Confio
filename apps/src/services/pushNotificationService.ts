@@ -3,6 +3,10 @@ import notifee from '@notifee/react-native';
 import { Platform, PermissionsAndroid } from 'react-native';
 import * as Keychain from 'react-native-keychain';
 import * as RootNavigation from '../navigation/RootNavigation';
+import {
+  clearPendingNotificationOpen,
+  loadPendingNotificationOpen,
+} from './notificationOpenStore';
 
 const NOTIFICATION_PERMISSION_KEY = 'push_notification_permission';
 const NOTIFICATION_TOKEN_KEY = 'push_notification_token';
@@ -543,6 +547,22 @@ export class PushNotificationService {
             },
           } as FirebaseMessagingTypes.RemoteMessage;
           console.log('[PushNotificationService] Stored Notifee initial notification as pending');
+        }
+      }
+
+      if (!this.pendingNotification) {
+        const persistedNotificationOpen = await loadPendingNotificationOpen();
+        if (persistedNotificationOpen?.data) {
+          console.log('[PushNotificationService] Restoring persisted notification press from background store');
+          this.pendingNotification = {
+            data: persistedNotificationOpen.data,
+            notification: {
+              title: persistedNotificationOpen.title,
+              body: persistedNotificationOpen.body,
+            },
+          } as FirebaseMessagingTypes.RemoteMessage;
+          await clearPendingNotificationOpen();
+          console.log('[PushNotificationService] Stored persisted notification press as pending');
         }
       }
 

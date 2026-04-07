@@ -1,6 +1,7 @@
 import messaging from '@react-native-firebase/messaging';
 import notifee, { AndroidImportance, EventType } from '@notifee/react-native';
 import notificationDedup from './notificationDeduplication';
+import { savePendingNotificationOpen } from './notificationOpenStore';
 
 // Register background handler
 messaging().setBackgroundMessageHandler(async remoteMessage => {
@@ -38,11 +39,18 @@ messaging().setBackgroundMessageHandler(async remoteMessage => {
     },
     ios: {
       sound: 'default',
+      categoryId: 'default',
     },
   });
 });
 
 // Background event handler for Notifee
-notifee.onBackgroundEvent(async ({ type, detail }) => {  if (type === EventType.PRESS && detail.notification) {
+notifee.onBackgroundEvent(async ({ type, detail }) => {
+  if (type === EventType.PRESS && detail.notification) {
+    await savePendingNotificationOpen({
+      data: (detail.notification.data || undefined) as Record<string, string> | undefined,
+      title: detail.notification.title,
+      body: detail.notification.body,
+    });
   }
 });

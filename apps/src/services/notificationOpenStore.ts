@@ -16,7 +16,8 @@ export async function savePendingNotificationOpen(
       PENDING_NOTIFICATION_OPEN_SERVICE,
       'pending_notification_open',
       JSON.stringify(notification)
-    );  } catch (error) {
+    );
+  } catch (error) {
     console.error('[NotificationOpenStore] Failed to save pending notification open:', error);
   }
 }
@@ -24,11 +25,11 @@ export async function savePendingNotificationOpen(
 export async function loadPendingNotificationOpen(): Promise<PendingNotificationOpen | null> {
   try {
     const credentials = await Keychain.getInternetCredentials(PENDING_NOTIFICATION_OPEN_SERVICE);
-    if (!credentials?.password) {
+    if (!credentials || !('password' in credentials) || !credentials.password) {
       return null;
     }
 
-    const parsed = JSON.parse(credentials.password) as PendingNotificationOpen;    return parsed;
+    return JSON.parse(credentials.password) as PendingNotificationOpen;
   } catch (error) {
     console.error('[NotificationOpenStore] Failed to load pending notification open:', error);
     return null;
@@ -37,7 +38,8 @@ export async function loadPendingNotificationOpen(): Promise<PendingNotification
 
 export async function clearPendingNotificationOpen(): Promise<void> {
   try {
-    await Keychain.resetInternetCredentials({ server: PENDING_NOTIFICATION_OPEN_SERVICE });  } catch (error) {
+    await Keychain.resetInternetCredentials({ server: PENDING_NOTIFICATION_OPEN_SERVICE });
+  } catch (error) {
     console.error('[NotificationOpenStore] Failed to clear pending notification open:', error);
   }
 }
