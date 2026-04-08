@@ -432,10 +432,18 @@ def handle_fcm_error(response, token_id: int, results: Dict[str, Any]):
     
     error = response.exception
     error_code = getattr(error, 'code', None)
+    error_text = str(error)
+    error_text_lower = error_text.lower()
     
     # Determine if token should be removed based on error type
     should_remove = False
-    reason = str(error)
+    reason = error_text
+
+    # Oversized payloads are server-side bugs, not token-health issues.
+    if 'message is too big' in error_text_lower or 'payload size limit exceeded' in error_text_lower:
+        logger.error(f"Oversized FCM payload for token ID {token_id}: {error}")
+        results['errors'].append(error_text)
+        return
     
     if isinstance(error, messaging.UnregisteredError):
         # Device token is no longer registered

@@ -23,11 +23,21 @@ logger = logging.getLogger(__name__)
 
 CHANNEL_ID_MESSAGES = 'messages'
 CHANNEL_ID_DISCOVER = 'discover'
+MAX_PUSH_CONTENT_BODY_CHARS = 240
 DISCOVER_TAG_COLORS = {
     'VIDEO': '#FF4444',
     'NEWS': '#F59E0B',
     'TEXT': '#1DB587',
 }
+
+
+def _content_push_body_preview(item: ContentItem) -> str:
+    text = (item.body or '').strip()
+    if not text:
+        return ''
+    if len(text) <= MAX_PUSH_CONTENT_BODY_CHARS:
+        return text
+    return f"{text[:MAX_PUSH_CONTENT_BODY_CHARS - 1].rstrip()}…"
 
 
 def _is_push_allowed_for_membership(membership: ChannelMembership, item: ContentItem) -> bool:
@@ -170,7 +180,7 @@ def _build_channel_push_payload(item: ContentItem, membership: ChannelMembership
         'data_channel_id': item.channel.slug,
         'data_content_item_id': str(item.id),
         'data_title': item.title or '',
-        'data_body': item.body or '',
+        'data_body': _content_push_body_preview(item),
         'data_tag': item.tag or '',
         'data_item_type': item.item_type.lower(),
     }
@@ -194,7 +204,7 @@ def _build_discover_push_payload(item: ContentItem, membership: ChannelMembershi
         'content_item_id': str(item.id),
         'data_content_item_id': str(item.id),
         'data_title': item.title or '',
-        'data_body': item.body or '',
+        'data_body': _content_push_body_preview(item),
         'data_tag': item.tag or '',
         'data_item_type': _discover_item_type(item),
         'data_tag_color': tag_color,
@@ -292,7 +302,7 @@ def _send_channel_push(item: ContentItem) -> Dict[str, int]:
                 'data_channel_id': item.channel.slug,
                 'data_content_item_id': str(item.id),
                 'data_title': item.title or '',
-                'data_body': item.body or '',
+                'data_body': _content_push_body_preview(item),
                 'data_tag': item.tag or '',
                 'data_item_type': item.item_type.lower(),
             },
