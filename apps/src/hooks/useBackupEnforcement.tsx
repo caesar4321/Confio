@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef } from 'react';
-import { Platform, Alert } from 'react-native';
+import { Platform, Alert, ActivityIndicator, Modal, StyleSheet, Text, View } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { AuthService } from '../services/authService';
 import { useQuery } from '@apollo/client';
@@ -7,13 +7,21 @@ import { GET_MY_BALANCES } from '../apollo/queries';
 import { BackupConsentModal } from '../components/BackupConsentModal';
 import { ExistingBackupModal } from '../components/ExistingBackupModal';
 import { AnalyticsService } from '../services/analyticsService';
+import { migrationService } from '../services/migrationService';
+import { oauthStorage } from '../services/oauthStorageService';
+import authService from '../services/authService';
+import { GOOGLE_CLIENT_IDS } from '../config/env';
 
 type EnforcementAction = 'presale' | 'transaction' | 'app_launch' | 'deposit';
+
+let activeMigrationPromise: Promise<boolean> | null = null;
 
 export const useBackupEnforcement = () => {
     const { userProfile, refreshProfile } = useAuth();
     const [modalVisible, setModalVisible] = useState(false);
-    const [strictMode, setStrictMode] = useState(false);
+    const [, setStrictMode] = useState(false);
+    const [migrationVisible, setMigrationVisible] = useState(false);
+    const [migrationStatus, setMigrationStatus] = useState('Verificando estado de la billetera...');
 
     // State for existing backup handling
     const [existingBackupModalVisible, setExistingBackupModalVisible] = useState(false);
@@ -27,7 +35,99 @@ export const useBackupEnforcement = () => {
         fetchPolicy: 'cache-first',
     });
 
+    const ensureV2Migration = useCallback(async (): Promise<boolean> => {
+        if (activeMigrationPromise) {
+            return activeMigrationPromise;
+        }
+
+        activeMigrationPromise = (async () => {
+            try {
+                const oauthData = await oauthStorage.getOAuthSubject();
+
+                if (!oauthData?.subject || !oauthData?.provider) {
+                    Alert.alert(
+                        'Actualización de Seguridad',
+                        'Para completar la actualización de tu billetera y asegurar tus fondos, necesitas iniciar sesión nuevamente.',
+                        [
+                            {
+                                text: 'Iniciar Sesión',
+                                onPress: async () => {
+                                    try {
+                                        await authService.signOut();
+                                    } catch (error) {
+                                        console.error('Migration enforcement sign-out error:', error);
+                                    }
+                                }
+                            }
+                        ],
+                        { cancelable: false }
+                    );
+                    return false;
+                }
+
+                const provider = oauthData.provider;
+                const sub = oauthData.subject;
+                const googleClientIds = GOOGLE_CLIENT_IDS[__DEV__ ? 'development' : 'production'];
+                const iss = provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
+                const aud = provider === 'google' ? googleClientIds.web : 'com.confio.app';
+
+                setMigrationStatus('Verificando estado de la billetera...');
+                const migrationState = await migrationService.checkNeedsMigration(
+                    iss,
+                    sub,
+                    aud,
+                    provider,
+                    0
+                );
+
+                if (!migrationState.needsMigration) {
+                    return true;
+                }
+
+                setMigrationVisible(true);
+                setMigrationStatus('Actualizando la seguridad de tu billetera...\nPor favor no cierres la aplicación.');
+
+                const success = await migrationService.performMigration(
+                    iss,
+                    sub,
+                    aud,
+                    provider,
+                    0
+                );
+
+                if (!success) {
+                    Alert.alert(
+                        'Actualización requerida',
+                        'No pudimos completar la migración de tu billetera. Intenta nuevamente con conexión estable antes de continuar.'
+                    );
+                    return false;
+                }
+
+                setMigrationStatus('¡Actualización completada!');
+                return true;
+            } catch (error) {
+                console.error('Migration enforcement error:', error);
+                Alert.alert(
+                    'Actualización requerida',
+                    'No pudimos verificar o completar la migración de tu billetera. Intenta nuevamente antes de continuar.'
+                );
+                return false;
+            } finally {
+                setTimeout(() => {
+                    setMigrationVisible(false);
+                    setMigrationStatus('Verificando estado de la billetera...');
+                }, 400);
+                activeMigrationPromise = null;
+            }
+        })();
+
+        return activeMigrationPromise;
+    }, []);
+
     const checkBackupEnforcement = useCallback(async (action: EnforcementAction, totalBalanceUSD?: number): Promise<boolean> => {
+        const migrationReady = await ensureV2Migration();
+        if (!migrationReady) return false;
+
         // 1. iOS Check - Implicitly backed up via iCloud
         if (Platform.OS === 'ios') return true;
 
@@ -71,7 +171,7 @@ export const useBackupEnforcement = () => {
         return new Promise<boolean>((resolve) => {
             resolveRef.current = resolve;
         });
-    }, [userProfile, myBalancesData]);
+    }, [ensureV2Migration, userProfile, myBalancesData]);
 
     const handleContinue = async () => {
         // We close the modal to allow native Google Sign In UI to show
@@ -153,6 +253,15 @@ export const useBackupEnforcement = () => {
 
     const BackupEnforcementModal = () => (
         <>
+            <Modal visible={migrationVisible} transparent={false} animationType="fade">
+                <View style={styles.migrationContainer}>
+                    <View style={styles.migrationContent}>
+                        <ActivityIndicator size="large" color="#2563EB" />
+                        <Text style={styles.migrationTitle}>Actualizando Billetera</Text>
+                        <Text style={styles.migrationMessage}>{migrationStatus}</Text>
+                    </View>
+                </View>
+            </Modal>
             <BackupConsentModal
                 visible={modalVisible}
                 onContinue={handleContinue}
@@ -174,3 +283,29 @@ export const useBackupEnforcement = () => {
         BackupEnforcementModal
     };
 };
+
+const styles = StyleSheet.create({
+    migrationContainer: {
+        flex: 1,
+        backgroundColor: '#fff',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 24,
+    },
+    migrationContent: {
+        alignItems: 'center',
+        gap: 20,
+    },
+    migrationTitle: {
+        fontSize: 24,
+        fontWeight: '700',
+        color: '#1F2937',
+        textAlign: 'center',
+    },
+    migrationMessage: {
+        fontSize: 16,
+        lineHeight: 24,
+        color: '#4B5563',
+        textAlign: 'center',
+    },
+});

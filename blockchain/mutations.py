@@ -26,6 +26,22 @@ from .constants import (
 logger = logging.getLogger(__name__)
 
 
+def _get_wallet_upgrade_blocker(*, user, account):
+    if not user or not account:
+        return None
+
+    if getattr(account, 'account_type', None) != 'personal':
+        return None
+
+    if not getattr(account, 'is_keyless_migrated', False):
+        return 'Actualiza tu app para completar la migracion de tu billetera antes de continuar.'
+
+    if getattr(user, 'requires_backup_completion', False):
+        return 'Por favor, realiza un respaldo en Google Drive para proteger tu cuenta antes de continuar.'
+
+    return None
+
+
 def _link_autoswap_conversion_to_recent_guardarian_ramp(*, user, account, conversion):
     if not user or not account or not conversion:
         return
@@ -1421,6 +1437,7 @@ class OptInToAssetByTypeMutation(graphene.Mutation):
             jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
 
             sender_address = None
+            active_account = None
             if jwt_context and jwt_context.get('account_type') == 'business' and jwt_context.get('business_id'):
                 business_id = jwt_context.get('business_id')
                 business_account = Account.objects.filter(
@@ -1429,6 +1446,7 @@ class OptInToAssetByTypeMutation(graphene.Mutation):
                     deleted_at__isnull=True
                 ).order_by('account_index').first()
                 if business_account and business_account.algorand_address:
+                    active_account = business_account
                     sender_address = business_account.algorand_address
             else:
                 # Personal account
@@ -1440,10 +1458,15 @@ class OptInToAssetByTypeMutation(graphene.Mutation):
                     deleted_at__isnull=True
                 ).first()
                 if personal_account and personal_account.algorand_address:
+                    active_account = personal_account
                     sender_address = personal_account.algorand_address
             
             if not sender_address:
                 return cls(success=False, error='No Algorand address found for account')
+
+            wallet_upgrade_blocker = _get_wallet_upgrade_blocker(user=user, account=active_account)
+            if wallet_upgrade_blocker:
+                return cls(success=False, error=wallet_upgrade_blocker)
 
             # Validate it's an Algorand address
             if not sender_address or len(sender_address) != 58:

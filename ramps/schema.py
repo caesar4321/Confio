@@ -86,6 +86,22 @@ _KOYWE_TEST_ACCOUNT_OVERRIDES = {
 }
 
 
+def _get_wallet_upgrade_blocker(*, user, account):
+    if not user or not account:
+        return None
+
+    if getattr(account, 'account_type', None) != 'personal':
+        return None
+
+    if not getattr(account, 'is_keyless_migrated', False):
+        return 'Actualiza tu app para completar la migracion de tu billetera antes de continuar.'
+
+    if getattr(user, 'requires_backup_completion', False):
+        return 'Por favor, realiza un respaldo en Google Drive para proteger tu cuenta antes de continuar.'
+
+    return None
+
+
 class KoyweBankInfoType(graphene.ObjectType):
     bank_code = graphene.String()
     name = graphene.String()
@@ -667,6 +683,10 @@ class CreateRampOrder(graphene.Mutation):
         if not current_account:
             return RampOrderType(success=False, error='No active account available for ramp operations')
 
+        wallet_upgrade_blocker = _get_wallet_upgrade_blocker(user=user, account=current_account)
+        if wallet_upgrade_blocker:
+            return RampOrderType(success=False, error=wallet_upgrade_blocker)
+
         bank_info = None
         if normalized_direction == 'OFF_RAMP':
             if not bank_info_id:
@@ -773,6 +793,10 @@ class CreateMockRampOrder(graphene.Mutation):
     Output = RampOrderType
 
     def mutate(self, info, direction, amount, payment_method_code, country_code=None, fiat_currency=None):
+        user = getattr(info.context, "user", None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return RampOrderType(success=False, error='Authentication required')
+
         resolved_country_code = _resolve_ramp_country_code(info, country_code)
         normalized_direction = (direction or "").strip().upper()
         if normalized_direction not in {"ON_RAMP", "OFF_RAMP"}:
@@ -785,6 +809,14 @@ class CreateMockRampOrder(graphene.Mutation):
 
         if decimal_amount <= 0:
             return RampOrderType(success=False, error="Amount must be greater than zero")
+
+        current_account = _get_ramp_account_for_user(info, user)
+        if not current_account:
+            return RampOrderType(success=False, error='No active account available for ramp operations')
+
+        wallet_upgrade_blocker = _get_wallet_upgrade_blocker(user=user, account=current_account)
+        if wallet_upgrade_blocker:
+            return RampOrderType(success=False, error=wallet_upgrade_blocker)
 
         config = get_country_ramp_config(resolved_country_code)
         if not config:

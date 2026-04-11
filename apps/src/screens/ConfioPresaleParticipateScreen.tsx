@@ -16,12 +16,14 @@ import { LoadingOverlay } from '../components/LoadingOverlay';
 import algorandService from '../services/algorandService';
 import { biometricAuthService } from '../services/biometricAuthService';
 import { colors } from '../config/theme';
+import { useBackupEnforcement } from '../hooks/useBackupEnforcement';
 
 type ConfioPresaleParticipateScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
 export const ConfioPresaleParticipateScreen = () => {
   const navigation = useNavigation<ConfioPresaleParticipateScreenNavigationProp>();
   const { selectedCountry } = useCountry();
+  const { checkBackupEnforcement, BackupEnforcementModal } = useBackupEnforcement();
 
   const [amount, setAmount] = useState('');
   const [hasAcceptedTerms, setHasAcceptedTerms] = useState(false);
@@ -100,6 +102,12 @@ export const ConfioPresaleParticipateScreen = () => {
   React.useEffect(() => {
     (async () => {
       try {
+        const allowed = await checkBackupEnforcement('presale');
+        if (!allowed) {
+          navigation.goBack();
+          return;
+        }
+
         setLoadingMessage('Preparando preventa...');
         const s = new PresaleWsSession();
         await s.open();
@@ -118,7 +126,7 @@ export const ConfioPresaleParticipateScreen = () => {
         setLoadingMessage('');
       }
     })();
-  }, []);
+  }, [checkBackupEnforcement, navigation]);
 
   const executeSwap = async () => {
     try {
@@ -209,6 +217,11 @@ export const ConfioPresaleParticipateScreen = () => {
   };
 
   const handleSwap = async () => {
+    const allowed = await checkBackupEnforcement('presale');
+    if (!allowed) {
+      return;
+    }
+
     const iso = selectedCountry?.[2];
     if (iso === 'US') {
       Alert.alert('Restricción', 'Lo sentimos, los residentes de Estados Unidos no pueden participar en la preventa.');
@@ -251,6 +264,7 @@ export const ConfioPresaleParticipateScreen = () => {
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
+        <BackupEnforcementModal />
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
             <Icon name="arrow-left" size={24} color="#fff" />
@@ -269,6 +283,7 @@ export const ConfioPresaleParticipateScreen = () => {
   if (error || !presale) {
     return (
       <SafeAreaView style={styles.container}>
+        <BackupEnforcementModal />
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
             <Icon name="arrow-left" size={24} color="#fff" />
@@ -289,6 +304,7 @@ export const ConfioPresaleParticipateScreen = () => {
 
   return (
     <SafeAreaView style={styles.container}>
+      <BackupEnforcementModal />
       <LoadingOverlay visible={initializing || busy} message={loadingMessage || (busy ? 'Procesando intercambio...' : 'Preparando preventa...')} />
       {busy && (
         <View style={styles.overlay}>
