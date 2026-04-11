@@ -181,6 +181,11 @@ class MessageInboxType(graphene.ObjectType):
     channels = graphene.List(MessageChannelType, required=True)
 
 
+class MessageChannelThreadPageType(graphene.ObjectType):
+    channel = graphene.Field(MessageChannelType, required=True)
+    has_more = graphene.Boolean(required=True)
+
+
 class PlatformLinkType(graphene.ObjectType):
     platform = graphene.String(required=True)
     url = graphene.String(required=True)
@@ -516,6 +521,84 @@ def build_editorial_channel_payload(membership: ChannelMembership):
     )
 
 
+def build_editorial_message_payload(item: ContentItem, membership: ChannelMembership):
+    metadata = item.metadata or {}
+    blocks = metadata.get('blocks') or []
+    preview_image = metadata.get('image') or next(
+        (
+            block.get('image')
+            for block in blocks
+            if block.get('type') == 'image' and isinstance(block.get('image'), dict) and block.get('image', {}).get('url')
+        ),
+        {},
+    )
+    item_type = item.item_type.lower()
+    message_payload = {
+        'id': str(item.id),
+        'type': item_type,
+        'is_pinned': item.visibility_policy == VisibilityPolicy.PINNED,
+        'occurred_at': item.published_at or item.created_at,
+        'tag': item.tag or '',
+        'title': item.title or '',
+        'body': item.body or '',
+        'text': item.body or item.title or '',
+        'time': humanize_relative(item.published_at or item.created_at),
+        'link': '',
+        'platforms': metadata.get('platforms') or [],
+        'platform_links': [
+            PlatformLinkType(platform=platform, url=url)
+            for platform, url in (metadata.get('platform_links') or {}).items()
+            if url
+        ],
+        'image_url': preview_image.get('url') or '',
+        'reaction_summary': [],
+        'viewer_reaction': '',
+        'can_react': True,
+    }
+    reaction_counts = {}
+    viewer_reaction = ''
+    for reaction in item.reactions.all():
+        emoji = reaction.reaction_type.emoji
+        reaction_counts[emoji] = reaction_counts.get(emoji, 0) + 1
+        if membership.business_id:
+            if reaction.business_id == membership.business_id and reaction.user_id == membership.user_id:
+                viewer_reaction = emoji
+        elif membership.account_id:
+            if reaction.account_id == membership.account_id and reaction.user_id == membership.user_id:
+                viewer_reaction = emoji
+    message_payload['reaction_summary'] = [
+        MessageReactionType(emoji=emoji, count=count)
+        for emoji, count in sorted(reaction_counts.items(), key=lambda item: item[1], reverse=True)
+    ]
+    message_payload['viewer_reaction'] = viewer_reaction
+    return MessageThreadItemType(**message_payload)
+
+
+def build_editorial_channel_thread_page(membership: ChannelMembership, offset=0, limit=20):
+    offset = max(offset or 0, 0)
+    limit = min(max(limit or 20, 1), 50)
+    queryset = get_visible_content_queryset(membership).prefetch_related('reactions__reaction_type')
+    page_items = list(queryset[offset:offset + limit + 1])
+    has_more = len(page_items) > limit
+    if has_more:
+        page_items = page_items[:limit]
+
+    base_channel = build_editorial_channel_payload(membership)
+    return MessageChannelThreadPageType(
+        channel=MessageChannelType(
+            id=base_channel.id,
+            name=base_channel.name,
+            subtitle=base_channel.subtitle,
+            preview=base_channel.preview,
+            time=base_channel.time,
+            unread_count=base_channel.unread_count,
+            is_muted=base_channel.is_muted,
+            messages=[build_editorial_message_payload(item, membership) for item in page_items],
+        ),
+        has_more=has_more,
+    )
+
+
 def build_support_channel_payload(user, account, business):
     conversation = get_or_create_support_conversation(user, account, business)
     state, _ = SupportConversationState.objects.get_or_create(conversation=conversation, user=user)
@@ -565,6 +648,65 @@ def build_support_channel_payload(user, account, business):
     )
 
 
+def build_support_channel_thread_page(user, account, business, offset=0, limit=50):
+    offset = max(offset or 0, 0)
+    limit = min(max(limit or 20, 1), 50)
+    conversation = get_or_create_support_conversation(user, account, business)
+    state, _ = SupportConversationState.objects.get_or_create(conversation=conversation, user=user)
+    recent_messages_desc = list(
+        conversation.messages.select_related('sender_user').order_by('-created_at')[offset:offset + limit + 1]
+    )
+    has_more = len(recent_messages_desc) > limit
+    if has_more:
+        recent_messages_desc = recent_messages_desc[:limit]
+    messages_qs = list(reversed(recent_messages_desc))
+    latest_message = conversation.messages.order_by('-created_at').first()
+
+    if state.last_seen_at:
+        unread_count = conversation.messages.filter(created_at__gt=state.last_seen_at).exclude(
+            sender_type='USER'
+        ).count()
+    else:
+        unread_count = conversation.messages.exclude(sender_type='USER').count()
+
+    thread_messages = [
+        MessageThreadItemType(
+            id=str(message.id),
+            type='support',
+            is_pinned=False,
+            occurred_at=message.created_at,
+            tag='',
+            title='',
+            body=message.body,
+            text=message.body,
+            time=humanize_relative(message.created_at),
+            link='',
+            platforms=[],
+            platform_links=[],
+            reaction_summary=[],
+            viewer_reaction='',
+            can_react=False,
+            sender_type=message.sender_type,
+            sender_name=get_support_sender_name(message),
+        )
+        for message in messages_qs
+    ]
+
+    return MessageChannelThreadPageType(
+        channel=MessageChannelType(
+            id='soporte',
+            name='Soporte',
+            subtitle='Equipo Confío · Respuesta en ~2h',
+            preview=latest_message.body if latest_message else 'En que podemos ayudarte hoy?',
+            time=humanize_relative(latest_message.created_at) if latest_message else 'Ahora',
+            unread_count=unread_count,
+            is_muted=False,
+            messages=thread_messages,
+        ),
+        has_more=has_more,
+    )
+
+
 def build_message_inbox_payload(info):
     user, account, business, _ = get_context_models(info)
 
@@ -590,6 +732,13 @@ def build_message_inbox_payload(info):
 class Query(graphene.ObjectType):
     message_inbox = graphene.Field(MessageInboxType, context_key=graphene.String(required=False))
     message_inbox_unread_count = graphene.Int(context_key=graphene.String(required=False))
+    message_channel_thread = graphene.Field(
+        MessageChannelThreadPageType,
+        channel_id=graphene.String(required=True),
+        offset=graphene.Int(required=False),
+        limit=graphene.Int(required=False),
+        context_key=graphene.String(required=False),
+    )
     discover_post = graphene.Field(
         DiscoverFeedItemType,
         content_item_id=graphene.ID(required=True),
@@ -621,6 +770,30 @@ class Query(graphene.ObjectType):
     def resolve_message_inbox_unread_count(self, info, context_key=None):
         inbox = build_message_inbox_payload(info)
         return inbox.total_unread_count
+
+    @login_required
+    def resolve_message_channel_thread(self, info, channel_id, offset=0, limit=20, context_key=None):
+        user, account, business, _ = get_context_models(info)
+
+        normalized_channel_id = 'confio-news' if channel_id == 'confio' else channel_id
+        if normalized_channel_id == 'soporte':
+            return build_support_channel_thread_page(user, account, business, offset=offset, limit=limit)
+
+        membership_filter = {'user': user, 'is_subscribed': True, 'channel__slug': normalized_channel_id}
+        if business is not None:
+            membership_filter.update({'business': business, 'account__isnull': True})
+        else:
+            membership_filter.update({'account': account, 'business__isnull': True})
+
+        membership = (
+            ChannelMembership.objects.select_related('channel')
+            .filter(**membership_filter)
+            .first()
+        )
+        if membership is None:
+            raise GraphQLError('Channel not found')
+
+        return build_editorial_channel_thread_page(membership, offset=offset, limit=limit)
 
     @login_required
     def resolve_discover_post(self, info, content_item_id):

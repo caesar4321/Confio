@@ -4,8 +4,10 @@ import {
   Linking,
   Pressable,
   ScrollView,
+  StyleProp,
   StyleSheet,
   Text,
+  TextStyle,
   View,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -36,6 +38,8 @@ type DiscoverPostDto = {
   imageUrl?: string | null;
   blocks?: Array<
     | { id?: string; type: 'paragraph'; text?: string }
+    | { id?: string; type: 'title'; text?: string }
+    | { id?: string; type: 'quote'; text?: string }
     | { id?: string; type: 'image'; image?: { url?: string; width?: number; height?: number } }
   > | string | null;
   reactionSummary?: Array<{ emoji: string; count: number }> | null;
@@ -63,6 +67,8 @@ function normalizeDetailBlocks(
   fallbackImageUrl?: string | null
 ): Array<
   | { id?: string; type: 'paragraph'; text?: string }
+  | { id?: string; type: 'title'; text?: string }
+  | { id?: string; type: 'quote'; text?: string }
   | { id?: string; type: 'image'; image?: { url?: string; width?: number; height?: number } }
 > {
   if (Array.isArray(blocks)) {
@@ -79,6 +85,8 @@ function normalizeDetailBlocks(
   }
   const fallbackBlocks: Array<
     | { id?: string; type: 'paragraph'; text?: string }
+    | { id?: string; type: 'title'; text?: string }
+    | { id?: string; type: 'quote'; text?: string }
     | { id?: string; type: 'image'; image?: { url?: string; width?: number; height?: number } }
   > = [{ id: 'fallback-body', type: 'paragraph', text: fallbackBody }];
   if (fallbackImageUrl) {
@@ -92,6 +100,15 @@ function normalizeDetailBlocks(
 }
 
 function renderParagraphWithLinks(text: string, onOpenLink: (url: string) => void) {
+  return renderTextBlockWithLinks(text, onOpenLink, styles.body);
+}
+
+function renderTextBlockWithLinks(
+  text: string,
+  onOpenLink: (url: string) => void,
+  textStyle: StyleProp<TextStyle>,
+  useQuoteLinkStyle = false
+) {
   const parts: Array<{ type: 'text' | 'link'; value: string; url?: string }> = [];
   const pattern = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
   let lastIndex = 0;
@@ -115,13 +132,13 @@ function renderParagraphWithLinks(text: string, onOpenLink: (url: string) => voi
   }
 
   return (
-    <Text style={styles.body}>
+    <Text style={textStyle}>
       {parts.map((part, index) => {
         if (part.type === 'link' && part.url) {
           return (
             <Text
               key={`${part.value}-${index}`}
-              style={styles.inlineLink}
+              style={[styles.inlineLink, useQuoteLinkStyle ? styles.quoteInlineLink : null]}
               onPress={() => {
                 void onOpenLink(part.url!);
               }}
@@ -130,7 +147,17 @@ function renderParagraphWithLinks(text: string, onOpenLink: (url: string) => voi
             </Text>
           );
         }
-        return <Text key={`${part.value}-${index}`}>{part.value}</Text>;
+        const lines = part.value.split('\n');
+        return (
+          <Text key={`${part.value}-${index}`}>
+            {lines.map((line, lineIndex) => (
+              <React.Fragment key={`${part.value}-${index}-${lineIndex}`}>
+                {line}
+                {lineIndex < lines.length - 1 ? '\n\n' : ''}
+              </React.Fragment>
+            ))}
+          </Text>
+        );
       })}
     </Text>
   );
@@ -253,6 +280,20 @@ export const DiscoverPostDetailScreen = () => {
                     uri={block.image.url}
                     style={styles.postImage}
                   />
+                );
+              }
+              if (block.type === 'title') {
+                return (
+                  <View key={block.id || `title-${index}`}>
+                    {renderTextBlockWithLinks(block.text || '', handleOpenLink, styles.sectionTitle)}
+                  </View>
+                );
+              }
+              if (block.type === 'quote') {
+                return (
+                  <View key={block.id || `quote-${index}`} style={styles.quoteBlock}>
+                    {renderTextBlockWithLinks(block.text || '', handleOpenLink, styles.quoteText, true)}
+                  </View>
                 );
               }
               return (
@@ -417,9 +458,33 @@ const styles = StyleSheet.create({
     color: '#475467',
     marginBottom: 14,
   },
+  sectionTitle: {
+    fontSize: 17,
+    lineHeight: 24,
+    fontWeight: '700',
+    color: '#111827',
+    marginTop: 8,
+    marginBottom: 12,
+  },
   inlineLink: {
     color: '#2563EB',
     fontWeight: '600',
+  },
+  quoteBlock: {
+    borderLeftWidth: 3,
+    borderLeftColor: '#D0D5DD',
+    paddingLeft: 14,
+    marginBottom: 14,
+  },
+  quoteText: {
+    fontSize: 15,
+    lineHeight: 24,
+    color: '#344054',
+    fontStyle: 'italic',
+    marginBottom: 0,
+  },
+  quoteInlineLink: {
+    color: '#1D4ED8',
   },
   blocksWrap: {
     marginTop: 2,

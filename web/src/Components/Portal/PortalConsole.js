@@ -230,6 +230,22 @@ function createParagraphBlock(text = '') {
   };
 }
 
+function createTitleBlock(text = '') {
+  return {
+    id: `title-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    type: 'title',
+    text,
+  };
+}
+
+function createQuoteBlock(text = '') {
+  return {
+    id: `quote-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    type: 'quote',
+    text,
+  };
+}
+
 function createImageBlock(image) {
   return {
     id: `image-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -243,6 +259,7 @@ function normalizeBlocks(metadata, fallbackBody) {
   if (existingBlocks.length > 0) {
     return existingBlocks.map((block, index) => ({
       id: block.id || `${block.type || 'block'}-${index}`,
+      text: typeof block.text === 'string' ? block.text : '',
       ...block,
     }));
   }
@@ -461,7 +478,7 @@ function isDraftDirty(draft) {
     draft.tag !== empty.tag ||
     draft.id !== null ||
     draft.blocks.some((block) =>
-      block.type === 'paragraph' ? block.text.trim() !== '' : block.type === 'image'
+      block.type === 'image' ? true : (block.text || '').trim() !== ''
     )
   );
 }
@@ -909,6 +926,20 @@ export default function PortalConsole() {
     }));
   };
 
+  const addTitleBlock = () => {
+    setDraft((current) => ({
+      ...current,
+      blocks: [...current.blocks, createTitleBlock('')],
+    }));
+  };
+
+  const addQuoteBlock = () => {
+    setDraft((current) => ({
+      ...current,
+      blocks: [...current.blocks, createQuoteBlock('')],
+    }));
+  };
+
   const submitReply = async () => {
     if (!activeConversation || !replyDraft.trim()) {
       return;
@@ -989,10 +1020,10 @@ export default function PortalConsole() {
 
     const cleanedBlocks = draft.blocks
       .map((block) => {
-        if (block.type === 'paragraph') {
+        if (block.type === 'paragraph' || block.type === 'title' || block.type === 'quote') {
           return {
             id: block.id,
-            type: 'paragraph',
+            type: block.type,
             text: block.text || '',
           };
         }
@@ -1016,7 +1047,7 @@ export default function PortalConsole() {
     }
 
     const bodyPreview = cleanedBlocks
-      .filter((block) => block.type === 'paragraph')
+      .filter((block) => block.type === 'paragraph' || block.type === 'title' || block.type === 'quote')
       .map((block) => stripInlineLinks(block.text || '').trim())
       .filter(Boolean)
       .join('\n\n');
@@ -1479,6 +1510,12 @@ export default function PortalConsole() {
                     <button type="button" className="portal-secondary-button" onClick={addParagraphBlock}>
                       Agregar texto
                     </button>
+                    <button type="button" className="portal-secondary-button" onClick={addTitleBlock}>
+                      Agregar título
+                    </button>
+                    <button type="button" className="portal-secondary-button" onClick={addQuoteBlock}>
+                      Agregar cita
+                    </button>
                     <label className="portal-upload-button">
                       {isUploadingImage ? <><Spinner size={14} /> Subiendo...</> : 'Agregar imagen'}
                       <input
@@ -1495,7 +1532,13 @@ export default function PortalConsole() {
                     <div key={block.id} className="portal-block-item">
                       <div className="portal-block-toolbar">
                         <span className="portal-upload-meta">
-                          {block.type === 'paragraph' ? `Texto ${index + 1}` : `Imagen ${index + 1}`}
+                          {block.type === 'paragraph'
+                            ? `Texto ${index + 1}`
+                            : block.type === 'title'
+                              ? `Título ${index + 1}`
+                              : block.type === 'quote'
+                                ? `Cita ${index + 1}`
+                                : `Imagen ${index + 1}`}
                         </span>
                         <div className="portal-inline-actions">
                           <button type="button" className="portal-secondary-button" onClick={() => moveBlock(block.id, 'up')}>
@@ -1509,7 +1552,7 @@ export default function PortalConsole() {
                           </button>
                         </div>
                       </div>
-                      {block.type === 'paragraph' ? (
+                      {block.type === 'paragraph' || block.type === 'title' || block.type === 'quote' ? (
                         <div className="portal-block-text-wrap">
                           <textarea
                             value={block.text || ''}
@@ -1517,7 +1560,11 @@ export default function PortalConsole() {
                             className="portal-block-textarea"
                           />
                           <div className="portal-upload-meta">
-                            Usa enlaces inline como <code>[Koywe](https://koywe.com)</code>. Solo se verán en el detalle.
+                            {block.type === 'title'
+                              ? 'Subtítulo interno del detalle. En apps viejas se verá como texto normal.'
+                              : block.type === 'quote'
+                                ? 'Cita destacada. En apps viejas se verá como texto normal.'
+                                : <>Usa enlaces inline como <code>[Koywe](https://koywe.com)</code>. Solo se verán en el detalle.</>}
                           </div>
                         </div>
                       ) : (

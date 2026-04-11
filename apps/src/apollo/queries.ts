@@ -2713,6 +2713,49 @@ export const GET_MESSAGE_INBOX = gql`
   }
 `;
 
+export const GET_MESSAGE_CHANNEL_THREAD = gql`
+  query GetMessageChannelThread($channelId: String!, $offset: Int, $limit: Int, $contextKey: String) {
+    messageChannelThread(channelId: $channelId, offset: $offset, limit: $limit, contextKey: $contextKey) {
+      hasMore
+      channel {
+        id
+        name
+        subtitle
+        preview
+        time
+        unreadCount
+        isMuted
+        messages {
+          id
+          type
+          isPinned
+          occurredAt
+          tag
+          title
+          body
+          text
+          time
+          link
+          platforms
+          platformLinks {
+            platform
+            url
+          }
+          imageUrl
+          reactionSummary {
+            emoji
+            count
+          }
+          viewerReaction
+          canReact
+          senderType
+          senderName
+        }
+      }
+    }
+  }
+`;
+
 export const GET_MESSAGE_INBOX_UNREAD_COUNT = gql`
   query GetMessageInboxUnreadCount($contextKey: String) {
     messageInboxUnreadCount(contextKey: $contextKey)

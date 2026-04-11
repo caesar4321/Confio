@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
-import { useMutation, useQuery } from '@apollo/client';
+import { ActivityIndicator, BackHandler, Platform, StyleSheet, Text, View } from 'react-native';
+import { useLazyQuery, useMutation, useQuery } from '@apollo/client';
 
 import { MessageInboxList } from './MessageInboxList';
 import { MessageChannelThread } from './MessageChannelThread';
 import { Channel, ScreenState } from './MessageInboxShared';
-import { GET_MESSAGE_INBOX, GET_MESSAGE_INBOX_UNREAD_COUNT } from '../apollo/queries';
+import { GET_MESSAGE_CHANNEL_THREAD, GET_MESSAGE_INBOX, GET_MESSAGE_INBOX_UNREAD_COUNT } from '../apollo/queries';
 import {
   MARK_MESSAGE_CHANNEL_SEEN,
   REACT_TO_MESSAGE_CONTENT,
@@ -80,6 +80,83 @@ function toServerChannelId(channel: Pick<Channel, 'id' | 'serverId'>): string {
   return channel.id;
 }
 
+function getMessagePreview(message: InboxMessageDto): string {
+  if (message.type === 'video') {
+    return message.title || '';
+  }
+  if (message.type === 'news') {
+    return message.title || message.body || '';
+  }
+  return message.text || message.body || '';
+}
+
+function mapInboxMessage(message: InboxMessageDto) {
+  if (message.type === 'video') {
+    return {
+      id: Number(message.id),
+      type: 'video' as const,
+      isPinned: message.isPinned ?? false,
+      occurredAt: message.occurredAt || '',
+      platform: (message.platforms?.[0] || 'TikTok') as string,
+      platforms: (message.platforms || []) as Array<'TikTok' | 'Instagram' | 'YouTube'>,
+      platformLinks: (message.platformLinks || []).filter((item) => item.url),
+      reactionSummary: message.reactionSummary || [],
+      viewerReaction: message.viewerReaction,
+      canReact: message.canReact ?? true,
+      title: message.title || '',
+      time: message.time,
+      imageUrl: message.imageUrl || '',
+    };
+  }
+
+  if (message.type === 'news') {
+    return {
+      id: Number(message.id),
+      type: 'news' as const,
+      isPinned: message.isPinned ?? false,
+      occurredAt: message.occurredAt || '',
+      reactionSummary: message.reactionSummary || [],
+      viewerReaction: message.viewerReaction,
+      canReact: message.canReact ?? true,
+      tag: message.tag || '',
+      title: message.title || '',
+      body: message.body || '',
+      time: message.time,
+      imageUrl: message.imageUrl || '',
+    };
+  }
+
+  if (message.type === 'support') {
+    return {
+      id: Number(message.id),
+      type: 'support' as const,
+      isPinned: false,
+      occurredAt: message.occurredAt || '',
+      reactionSummary: message.reactionSummary || [],
+      viewerReaction: message.viewerReaction,
+      canReact: message.canReact ?? false,
+      senderType: message.senderType,
+      senderName: message.senderName,
+      text: message.text || message.body || '',
+      time: message.time,
+    };
+  }
+
+  return {
+    id: Number(message.id),
+    type: 'text' as const,
+    isPinned: message.isPinned ?? false,
+    occurredAt: message.occurredAt || '',
+    tag: message.tag || '',
+    reactionSummary: message.reactionSummary || [],
+    viewerReaction: message.viewerReaction,
+    canReact: message.canReact ?? true,
+    text: message.text || message.body || '',
+    time: message.time,
+    imageUrl: message.imageUrl || '',
+  };
+}
+
 function mapChannels(channels?: InboxChannelDto[]): Channel[] {
   if (!channels?.length) {
     return [];
@@ -87,80 +164,21 @@ function mapChannels(channels?: InboxChannelDto[]): Channel[] {
 
   return channels.flatMap((channel) => {
     try {
+      const latestUnpinnedMessage = channel.messages.find((message) => !message.isPinned);
+      const preview = latestUnpinnedMessage
+        ? getMessagePreview(latestUnpinnedMessage)
+        : channel.preview;
+      const time = latestUnpinnedMessage?.time || channel.time;
+
       return {
         id: normalizeChannelId(channel.id),
         serverId: channel.id,
         name: channel.name,
         subtitle: channel.subtitle,
-        preview: channel.preview,
-        time: channel.time,
+        preview,
+        time,
         isMuted: channel.isMuted,
-        messages: channel.messages.map((message) => {
-          if (message.type === 'video') {
-            return {
-              id: Number(message.id),
-              type: 'video' as const,
-              isPinned: message.isPinned ?? false,
-              occurredAt: message.occurredAt || '',
-              platform: (message.platforms?.[0] || 'TikTok') as string,
-              platforms: (message.platforms || []) as Array<'TikTok' | 'Instagram' | 'YouTube'>,
-              platformLinks: (message.platformLinks || []).filter((item) => item.url),
-              reactionSummary: message.reactionSummary || [],
-              viewerReaction: message.viewerReaction,
-              canReact: message.canReact ?? true,
-              title: message.title || '',
-              time: message.time,
-              imageUrl: message.imageUrl || '',
-            };
-          }
-
-          if (message.type === 'news') {
-            return {
-              id: Number(message.id),
-              type: 'news' as const,
-              isPinned: message.isPinned ?? false,
-              occurredAt: message.occurredAt || '',
-              reactionSummary: message.reactionSummary || [],
-              viewerReaction: message.viewerReaction,
-              canReact: message.canReact ?? true,
-              tag: message.tag || '',
-              title: message.title || '',
-              body: message.body || '',
-              time: message.time,
-              imageUrl: message.imageUrl || '',
-            };
-          }
-
-          if (message.type === 'support') {
-            return {
-              id: Number(message.id),
-              type: 'support' as const,
-              isPinned: false,
-              occurredAt: message.occurredAt || '',
-              reactionSummary: message.reactionSummary || [],
-              viewerReaction: message.viewerReaction,
-              canReact: message.canReact ?? false,
-              senderType: message.senderType,
-              senderName: message.senderName,
-              text: message.text || message.body || '',
-              time: message.time,
-            };
-          }
-
-          return {
-            id: Number(message.id),
-            type: 'text' as const,
-            isPinned: message.isPinned ?? false,
-            occurredAt: message.occurredAt || '',
-            tag: message.tag || '',
-            reactionSummary: message.reactionSummary || [],
-            viewerReaction: message.viewerReaction,
-            canReact: message.canReact ?? true,
-            text: message.text || message.body || '',
-            time: message.time,
-            imageUrl: message.imageUrl || '',
-          };
-        }),
+        messages: channel.messages.map(mapInboxMessage),
       };
     } catch (error) {
       return [];
@@ -201,6 +219,10 @@ export function MessageInboxContent({ onScreenStateChange, initialChannelId }: M
   const [reactToMessageContent] = useMutation(REACT_TO_MESSAGE_CONTENT);
   const [updateChannelMute] = useMutation(UPDATE_MESSAGE_CHANNEL_MUTE);
   const [sendSupportMessage] = useMutation(SEND_SUPPORT_MESSAGE);
+  const [hasMoreThreadMessages, setHasMoreThreadMessages] = useState(false);
+  const [loadThreadPage, { loading: isLoadingMoreThread }] = useLazyQuery(GET_MESSAGE_CHANNEL_THREAD, {
+    fetchPolicy: 'network-only',
+  });
 
   const handleRefresh = async () => {
     if (!canQuery) {
@@ -259,6 +281,20 @@ export function MessageInboxContent({ onScreenStateChange, initialChannelId }: M
     }
   }, [initialChannelId, channels, activeChannel, screen]);
 
+  useEffect(() => {
+    if (Platform.OS !== 'android' || screen !== 'channel') {
+      return;
+    }
+
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      setActiveChannel(null);
+      setScreen('inbox');
+      return true;
+    });
+
+    return () => subscription.remove();
+  }, [screen]);
+
   const openChannel = (channel: Channel) => {
     setActiveChannel(channel);
     setUnreadCounts((prev) => ({ ...prev, [channel.id]: 0 }));
@@ -266,8 +302,17 @@ export function MessageInboxContent({ onScreenStateChange, initialChannelId }: M
       prev.map((item) => (item.serverId === channel.serverId ? { ...item, time: channel.time } : item))
     );
     setScreen('channel');
+    setHasMoreThreadMessages(channel.messages.length >= getThreadPageSize(channel.id));
     void markChannelSeen({ variables: { channelId: toServerChannelId(channel) } }).catch((error) => {    });
   };
+
+  const closeChannel = () => {
+    setActiveChannel(null);
+    setScreen('inbox');
+    setHasMoreThreadMessages(false);
+  };
+
+  const getThreadPageSize = (channelId: Channel['id']) => (channelId === 'soporte' ? 50 : 20);
 
   const handleReactToMessage = async (messageId: number, emoji: string) => {
     const response = await reactToMessageContent({
@@ -358,14 +403,53 @@ export function MessageInboxContent({ onScreenStateChange, initialChannelId }: M
     );
   };
 
+  const handleLoadOlderMessages = async () => {
+    if (!activeChannel || isLoadingMoreThread || !hasMoreThreadMessages) {
+      return;
+    }
+
+    const response = await loadThreadPage({
+      variables: {
+        channelId: activeChannel.id,
+        offset: activeChannel.messages.length,
+        limit: getThreadPageSize(activeChannel.id),
+        contextKey,
+      },
+    });
+
+    const page = response.data?.messageChannelThread;
+    const nextMessages = (page?.channel?.messages || []).map(mapInboxMessage);
+    const shouldPrepend = activeChannel.id === 'soporte';
+
+    setChannels((prev) =>
+      prev.map((channel) =>
+        channel.serverId !== activeChannel.serverId
+          ? channel
+          : {
+              ...channel,
+              messages: shouldPrepend
+                ? [...nextMessages, ...channel.messages]
+                : [...channel.messages, ...nextMessages],
+            }
+      )
+    );
+    setHasMoreThreadMessages(Boolean(page?.hasMore));
+  };
+
   if (screen === 'channel' && activeChannel) {
     return (
       <MessageChannelThread
         channel={activeChannel}
-        onBack={() => setScreen('inbox')}
+        onBack={closeChannel}
         onReact={handleReactToMessage}
         onToggleMute={handleToggleChannelMute}
         onSendSupportMessage={handleSendSupportMessage}
+        hasMore={hasMoreThreadMessages}
+        loadingMore={isLoadingMoreThread}
+        onLoadMore={() => {
+          void handleLoadOlderMessages();
+        }}
+        loadMorePosition={activeChannel.id === 'soporte' ? 'top' : 'bottom'}
         refreshing={isRefreshing}
         onRefresh={() => {
           void handleRefresh();

@@ -37,6 +37,10 @@ type MessageChannelThreadProps = {
   onReact: (messageId: number, emoji: string) => Promise<void>;
   onToggleMute: (channel: Channel) => Promise<void>;
   onSendSupportMessage: (body: string) => Promise<void>;
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
+  loadMorePosition?: 'top' | 'bottom';
   refreshing?: boolean;
   onRefresh?: () => void;
 };
@@ -80,7 +84,7 @@ function renderMessageContent(
 
     return (
       <View style={[styles.messageCard, styles.videoMessageCard, message.isPinned && styles.pinnedMessageCard]}>
-        <Pressable onPress={() => onOpenDetail(message.id)}>
+        <Pressable onPress={() => onOpenDetail(message.id)} style={styles.messageContentPressable}>
           <View style={styles.messageMetaRow}>
             <View style={styles.messageMetaTagsRow}>
               {message.isPinned ? (
@@ -98,6 +102,9 @@ function renderMessageContent(
           <Text style={styles.videoTitle} numberOfLines={2}>
             {message.title}
           </Text>
+          {message.imageUrl ? (
+            <ResponsiveImage uri={message.imageUrl} style={styles.inlineImage} />
+          ) : null}
         </Pressable>
         <View style={styles.videoPlatformsRow}>
           {availablePlatformLinks.map(({ platform, url }) => (
@@ -129,9 +136,6 @@ function renderMessageContent(
             </Pressable>
           ))}
         </View>
-        {message.imageUrl ? (
-          <ResponsiveImage uri={message.imageUrl} style={styles.inlineImage} />
-        ) : null}
         <View style={styles.reactionRow}>
           {topReactions.map(({ emoji, count }) => {
             const active = message.viewerReaction === emoji;
@@ -185,7 +189,7 @@ function renderMessageContent(
 
     return (
       <View style={[styles.messageCard, styles.founderMessageCard, message.isPinned && styles.pinnedMessageCard]}>
-        <Pressable onPress={() => onOpenDetail(message.id)}>
+        <Pressable onPress={() => onOpenDetail(message.id)} style={styles.messageContentPressable}>
           {message.isPinned ? (
             <View style={styles.pinnedRow}>
               <View style={styles.pinnedPill}>
@@ -221,10 +225,10 @@ function renderMessageContent(
           <Text style={styles.textMessageBody} numberOfLines={4}>
             {message.text}
           </Text>
+          {message.imageUrl ? (
+            <ResponsiveImage uri={message.imageUrl} style={styles.inlineImage} />
+          ) : null}
         </Pressable>
-        {message.imageUrl ? (
-          <ResponsiveImage uri={message.imageUrl} style={styles.inlineImage} />
-        ) : null}
         <View style={styles.reactionRow}>
           {topReactions.map(({ emoji, count }) => {
             const active = message.viewerReaction === emoji;
@@ -276,7 +280,7 @@ function renderMessageContent(
   if (message.type === 'news') {
     return (
       <View style={[styles.messageCard, styles.newsMessageCard, message.isPinned && styles.pinnedMessageCard]}>
-        <Pressable onPress={() => onOpenDetail(message.id)}>
+        <Pressable onPress={() => onOpenDetail(message.id)} style={styles.messageContentPressable}>
           <View style={styles.messageMetaRow}>
             <View style={styles.messageMetaTagsRow}>
               {message.isPinned ? (
@@ -297,10 +301,10 @@ function renderMessageContent(
           <Text style={styles.newsBody} numberOfLines={4}>
             {message.body}
           </Text>
+          {message.imageUrl ? (
+            <ResponsiveImage uri={message.imageUrl} style={styles.inlineImage} />
+          ) : null}
         </Pressable>
-        {message.imageUrl ? (
-          <ResponsiveImage uri={message.imageUrl} style={styles.inlineImage} />
-        ) : null}
         <View style={styles.reactionRow}>
           {topReactions.map(({ emoji, count }) => {
             const active = message.viewerReaction === emoji;
@@ -387,6 +391,10 @@ export function MessageChannelThread({
   onReact,
   onToggleMute,
   onSendSupportMessage,
+  hasMore = false,
+  loadingMore = false,
+  onLoadMore,
+  loadMorePosition = 'bottom',
   refreshing = false,
   onRefresh,
 }: MessageChannelThreadProps) {
@@ -397,15 +405,28 @@ export function MessageChannelThread({
   const scrollViewRef = React.useRef<ScrollView | null>(null);
   const previousMessageCountRef = React.useRef(channel.messages.length);
   const shouldScrollToBottomRef = React.useRef(false);
+  const loadMoreRequestedRef = React.useRef(false);
+  const contentHeightRef = React.useRef(0);
+  const scrollOffsetRef = React.useRef(0);
+  const prependAdjustmentRef = React.useRef<{ previousContentHeight: number; previousOffset: number } | null>(null);
 
   React.useEffect(() => {
     const messageCount = channel.messages.length;
     const previousMessageCount = previousMessageCountRef.current;
-    if (messageCount > previousMessageCount || previousMessageCount === 0) {
+    if (
+      (messageCount > previousMessageCount || previousMessageCount === 0)
+      && !prependAdjustmentRef.current
+    ) {
       shouldScrollToBottomRef.current = true;
     }
     previousMessageCountRef.current = messageCount;
   }, [channel.id, channel.messages.length]);
+
+  React.useEffect(() => {
+    if (!loadingMore) {
+      loadMoreRequestedRef.current = false;
+    }
+  }, [loadingMore]);
 
   const openLink = async (messageId: number, platform: 'TikTok' | 'Instagram' | 'YouTube', link: string) => {
     if (!link || link === '#') {
@@ -478,19 +499,61 @@ export function MessageChannelThread({
       <ScrollView
         ref={scrollViewRef}
         contentContainerStyle={styles.channelContent}
-        onContentSizeChange={() => {
+        onContentSizeChange={(_, contentHeight) => {
+          const prependAdjustment = prependAdjustmentRef.current;
+          if (prependAdjustment) {
+            const delta = contentHeight - prependAdjustment.previousContentHeight;
+            scrollViewRef.current?.scrollTo({
+              y: prependAdjustment.previousOffset + delta,
+              animated: false,
+            });
+            prependAdjustmentRef.current = null;
+          }
+          contentHeightRef.current = contentHeight;
           if (!shouldScrollToBottomRef.current) {
             return;
           }
           shouldScrollToBottomRef.current = false;
           scrollViewRef.current?.scrollToEnd({ animated: true });
         }}
+        onScroll={(event) => {
+          scrollOffsetRef.current = event.nativeEvent.contentOffset.y;
+          if (!hasMore || loadingMore || !onLoadMore || loadMoreRequestedRef.current) {
+            return;
+          }
+
+          const offsetY = event.nativeEvent.contentOffset.y;
+          const layoutHeight = event.nativeEvent.layoutMeasurement.height;
+          const contentHeight = event.nativeEvent.contentSize.height;
+          const threshold = 120;
+          const reachedTop = offsetY <= threshold;
+          const reachedBottom = contentHeight - (offsetY + layoutHeight) <= threshold;
+          const shouldLoadMore = loadMorePosition === 'top' ? reachedTop : reachedBottom;
+          if (!shouldLoadMore) {
+            return;
+          }
+
+          loadMoreRequestedRef.current = true;
+          if (loadMorePosition === 'top') {
+            prependAdjustmentRef.current = {
+              previousContentHeight: contentHeightRef.current || contentHeight,
+              previousOffset: scrollOffsetRef.current,
+            };
+          }
+          onLoadMore();
+        }}
+        scrollEventThrottle={16}
         refreshControl={
           onRefresh ? (
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={tealGreen} />
           ) : undefined
         }
       >
+        {loadingMore && loadMorePosition === 'top' ? (
+          <View style={styles.loadMoreIndicator}>
+            <Text style={styles.loadMoreText}>Cargando mensajes anteriores...</Text>
+          </View>
+        ) : null}
         <View style={styles.channelContextCard}>
           <Text style={styles.channelContextText}>{channelMeta[channel.id].description}</Text>
         </View>
@@ -547,6 +610,11 @@ export function MessageChannelThread({
             );
           })}
         </View>
+        {loadingMore && loadMorePosition === 'bottom' ? (
+          <View style={styles.loadMoreIndicator}>
+            <Text style={styles.loadMoreText}>Cargando mensajes anteriores...</Text>
+          </View>
+        ) : null}
       </ScrollView>
       {channel.id === 'soporte' && (
         <View style={styles.composerWrap}>
@@ -645,6 +713,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingTop: 12,
   },
+  loadMoreIndicator: {
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    alignItems: 'center',
+  },
+  loadMoreText: {
+    fontSize: 12,
+    color: '#98A2B3',
+    fontWeight: '600',
+  },
   pinnedSection: {
     marginBottom: 4,
   },
@@ -692,6 +770,9 @@ const styles = StyleSheet.create({
   },
   founderMessageCard: {
     borderColor: '#E6EAF2',
+  },
+  messageContentPressable: {
+    width: '100%',
   },
   founderAuthorRow: {
     flexDirection: 'row',
