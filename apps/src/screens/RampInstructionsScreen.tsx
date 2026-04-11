@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
+import { CameraRoll } from '@react-native-camera-roll/camera-roll';
 import Clipboard from '@react-native-clipboard/clipboard';
 import {
   ActivityIndicator,
@@ -14,8 +15,10 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import Share from 'react-native-share';
 import Icon from 'react-native-vector-icons/Feather';
 import QRCode from 'react-native-qrcode-svg';
+import ViewShot from 'react-native-view-shot';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQuery } from '@apollo/client';
@@ -135,6 +138,7 @@ export const RampInstructionsScreen = () => {
     paymentDetails,
   } = route.params;
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
+  const qrCaptureRef = useRef<ViewShot | null>(null);
 
   const { data, loading, refetch, networkStatus } = useQuery(GET_RAMP_ORDER_STATUS, {
     variables: {
@@ -180,6 +184,7 @@ export const RampInstructionsScreen = () => {
   const qrPayload = instructionView.qrValue?.trim() || undefined;
   const qrPayloadByteLength = useMemo(() => (qrPayload ? getQrPayloadByteLength(qrPayload) : 0), [qrPayload]);
   const canRenderQr = Boolean(qrPayload) && qrPayloadByteLength <= QR_RENDER_MAX_BYTES;
+  const hasQrAsset = Boolean(instructionView.qrImageUri) || canRenderQr;
   const hasInstructionDetails =
     instructionView.rows.length > 0
     || Boolean(instructionView.qrImageUri)
@@ -211,6 +216,44 @@ export const RampInstructionsScreen = () => {
       setRefreshMessage(refreshedStatus?.error || 'No pudimos actualizar el estado.');
     } catch (error: any) {
       setRefreshMessage(error?.message || 'No pudimos actualizar el estado.');
+    }
+  };
+
+  const captureQrImage = async () => {
+    const captureUri = await qrCaptureRef.current?.capture?.();
+    if (!captureUri) {
+      throw new Error('No pudimos preparar la imagen del QR.');
+    }
+    return captureUri;
+  };
+
+  const handleSaveQr = async () => {
+    try {
+      const captureUri = await captureQrImage();
+      await CameraRoll.save(captureUri, { type: 'photo', album: 'Confio' });
+      Alert.alert('Guardado', 'QR guardado en tu galería.');
+    } catch (error: any) {
+      Alert.alert('Error', error?.message || 'No se pudo guardar la imagen del QR.');
+    }
+  };
+
+  const handleShareQr = async () => {
+    try {
+      const captureUri = await captureQrImage();
+      await Share.open({
+        title: 'QR de pago',
+        message: direction === 'ON_RAMP'
+          ? 'Abre este QR desde tu app bancaria o billetera compatible.'
+          : 'Comparte este QR solo si el proveedor te lo pidió para completar el retiro.',
+        url: captureUri,
+        type: 'image/png',
+        filename: `confio-qr-${orderId}`,
+      });
+    } catch (error: any) {
+      if (error?.message?.includes('User did not share')) {
+        return;
+      }
+      Alert.alert('Error', error?.message || 'No se pudo compartir el QR.');
     }
   };
 
@@ -334,25 +377,69 @@ export const RampInstructionsScreen = () => {
               </>
             ) : null}
 
-            {instructionView.qrImageUri ? (
+            {hasQrAsset ? (
               <View style={styles.qrWrap}>
-                <View style={[styles.qrFrame, styles.qrImageFrame]}>
-                  <Image
-                    source={{ uri: instructionView.qrImageUri }}
-                    style={styles.qrImage}
-                    resizeMode="contain"
-                  />
+                {direction === 'ON_RAMP' ? (
+                  <View style={styles.sameDeviceCallout}>
+                    <View style={styles.sameDeviceHeader}>
+                      <Icon name="smartphone" size={16} color={colors.primaryDark} />
+                      <Text style={styles.sameDeviceTitle}>¿Estás en este mismo celular?</Text>
+                    </View>
+                    <Text style={styles.sameDeviceBody}>
+                      Guarda este QR y luego ábrelo desde tu app bancaria o billetera con la opción "Desde galería" o "Cargar imagen".
+                    </Text>
+                    <View style={styles.sameDeviceSteps}>
+                      <Text style={styles.sameDeviceStep}>1. Guarda la imagen del QR.</Text>
+                      <Text style={styles.sameDeviceStep}>2. Abre tu app bancaria o billetera.</Text>
+                      <Text style={styles.sameDeviceStep}>3. Busca "Pagar con QR" y luego "Desde galería".</Text>
+                    </View>
+                  </View>
+                ) : null}
+                <ViewShot
+                  ref={qrCaptureRef}
+                  options={{ format: 'png', quality: 1, fileName: `confio-qr-${orderId}` }}
+                  style={styles.qrShot}
+                >
+                  <View style={styles.qrCaptureSurface}>
+                    {instructionView.qrImageUri ? (
+                      <View style={[styles.qrFrame, styles.qrImageFrame]}>
+                        <Image
+                          source={{ uri: instructionView.qrImageUri }}
+                          style={styles.qrImage}
+                          resizeMode="contain"
+                        />
+                      </View>
+                    ) : canRenderQr ? (
+                      <View style={styles.qrFrame}>
+                        <QRCode value={qrPayload!} size={190} />
+                      </View>
+                    ) : null}
+                  </View>
+                </ViewShot>
+                <View style={styles.qrActionRow}>
+                  <TouchableOpacity
+                    style={styles.primaryQrButton}
+                    onPress={handleSaveQr}
+                    activeOpacity={0.7}
+                  >
+                    <Icon name="download" size={14} color="#ffffff" />
+                    <Text style={styles.primaryQrButtonText}>Guardar imagen QR</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.secondaryQrButton}
+                    onPress={handleShareQr}
+                    activeOpacity={0.7}
+                  >
+                    <Icon name="share-2" size={14} color={colors.primaryDark} />
+                    <Text style={styles.secondaryQrButtonText}>Compartir</Text>
+                  </TouchableOpacity>
                 </View>
               </View>
             ) : null}
 
             {qrPayload ? (
               <View style={styles.qrWrap}>
-                {canRenderQr ? (
-                  <View style={styles.qrFrame}>
-                    <QRCode value={qrPayload} size={190} />
-                  </View>
-                ) : (
+                {!canRenderQr ? (
                   <View style={[styles.qrFrame, styles.qrFrameFallback]}>
                     <Icon name="alert-circle" size={28} color={colors.warning.icon} />
                     <Text style={styles.qrFallbackTitle}>Código demasiado grande</Text>
@@ -360,14 +447,14 @@ export const RampInstructionsScreen = () => {
                       El proveedor devolvió un contenido muy largo y no se puede mostrar como QR dentro de la app.
                     </Text>
                   </View>
-                )}
+                ) : null}
                 <TouchableOpacity
                   style={styles.copyPill}
                   onPress={() => copyInstructionValue('Código QR', qrPayload)}
                   activeOpacity={0.7}
                 >
                   <Icon name="copy" size={12} color={colors.primaryDark} />
-                  <Text style={styles.copyPillText}>{canRenderQr ? 'Copiar código' : 'Copiar contenido'}</Text>
+                  <Text style={styles.copyPillText}>{hasQrAsset ? 'Copiar contenido del QR' : canRenderQr ? 'Copiar código' : 'Copiar contenido'}</Text>
                 </TouchableOpacity>
                 {!canRenderQr ? (
                   <Text style={styles.qrFallbackNote}>
@@ -645,6 +732,17 @@ const styles = StyleSheet.create({
     gap: 14,
     marginVertical: 10,
     paddingVertical: 10,
+    width: '100%',
+  },
+  qrShot: {
+    width: '100%',
+    alignItems: 'center',
+  },
+  qrCaptureSurface: {
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
   },
   qrFrame: {
     backgroundColor: '#ffffff',
@@ -690,6 +788,77 @@ const styles = StyleSheet.create({
     lineHeight: 19,
     color: colors.textSecondary,
     textAlign: 'center',
+  },
+  sameDeviceCallout: {
+    width: '100%',
+    backgroundColor: '#eff6ff',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
+    padding: 14,
+    gap: 10,
+  },
+  sameDeviceHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  sameDeviceTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: colors.primaryDark,
+  },
+  sameDeviceBody: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: colors.textFlat,
+  },
+  sameDeviceSteps: {
+    gap: 4,
+  },
+  sameDeviceStep: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: colors.textSecondary,
+  },
+  qrActionRow: {
+    width: '100%',
+    flexDirection: 'row',
+    gap: 10,
+  },
+  primaryQrButton: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: 14,
+    backgroundColor: colors.primary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+  },
+  primaryQrButtonText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#ffffff',
+  },
+  secondaryQrButton: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: 14,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+  },
+  secondaryQrButtonText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.primaryDark,
   },
   note: {
     fontSize: 13,

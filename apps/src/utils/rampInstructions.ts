@@ -69,6 +69,9 @@ const prettifyRowLabel = (raw: string) => {
 
 const parseAddressRows = (rawAddress?: string | null): RampInstructionRow[] => {
   return splitAddressLines(rawAddress).map((line, index) => {
+    if (/^0x[a-f0-9]{40}$/i.test(line)) {
+      return { label: 'Dirección del proveedor', value: line };
+    }
     if (line.includes('@') && !line.includes(' ')) {
       return { label: 'Email', value: line };
     }
@@ -688,7 +691,7 @@ export const buildRampInstructionView = ({
       title: direction === 'ON_RAMP' ? 'Paga con QR' : 'Continúa con QR',
       subtitle: qrImageUri || qrValue
         ? direction === 'ON_RAMP'
-          ? 'Escanea este QR desde tu app bancaria o billetera compatible.'
+          ? 'Paga con una app bancaria o billetera compatible. Si estás en este mismo celular, guarda la imagen y ábrela desde tu otra app.'
           : 'Usa o comparte este QR según las instrucciones del proveedor.'
         : direction === 'ON_RAMP'
           ? 'Abre el proveedor para escanear o visualizar el QR interoperable.'
@@ -696,7 +699,7 @@ export const buildRampInstructionView = ({
       sectionTitle: direction === 'ON_RAMP' ? 'Cómo pagar' : 'Qué sigue ahora',
       sectionBody: qrImageUri || qrValue
         ? direction === 'ON_RAMP'
-          ? 'Escanea el QR con una app compatible y confirma el pago por el monto indicado.'
+          ? 'Escanea el QR con una app compatible y confirma el pago por el monto indicado. Si estás usando un solo celular, guarda la imagen y usa la opción "Desde galería" o "Cargar imagen" en tu banco o billetera.'
           : 'Usa este QR solo si el proveedor o la billetera de destino te lo solicita para completar el retiro.'
         : direction === 'ON_RAMP'
           ? 'Abriremos el proveedor para que puedas ver o escanear el QR.'
@@ -704,9 +707,9 @@ export const buildRampInstructionView = ({
       steps: qrImageUri || qrValue
         ? direction === 'ON_RAMP'
           ? [
-              'Escanea el QR desde tu app bancaria o billetera.',
-              'Confirma el pago.',
-              'Vuelve aquí para seguir el estado de la compra.',
+              'Si estás en este mismo celular, guarda la imagen del QR.',
+              'Abre tu app bancaria o billetera y busca "Pagar con QR".',
+              'Elige "Desde galería" o "Cargar imagen" y confirma el pago.',
             ]
           : [
               'Muestra, comparte o usa el QR según el flujo del proveedor.',
@@ -726,11 +729,11 @@ export const buildRampInstructionView = ({
             ],
       note: qrImageUri
         ? direction === 'ON_RAMP'
-          ? 'Escanea el QR directamente desde otra app bancaria o billetera compatible.'
+          ? 'Si tu banco o billetera no permite escanear desde la misma pantalla, guarda la imagen y ábrela desde la galería.'
           : 'Usa este QR solo si el proveedor lo requiere para el retiro.'
         : qrValue
         ? direction === 'ON_RAMP'
-          ? 'Si no puedes escanearlo, copia el código y ábrelo desde una app compatible.'
+          ? 'Además del QR, puedes copiar el contenido solo si tu app bancaria o billetera admite pegarlo o importarlo.'
           : 'Si el proveedor requiere el contenido del QR, copia el valor y úsalo solo en una app compatible.'
         : direction === 'ON_RAMP'
           ? 'Si tu app bancaria no abre el QR, prueba con otra app compatible.'
@@ -758,8 +761,8 @@ export const buildRampInstructionView = ({
           ? 'Abriremos Nequi para que completes el pago.'
           : 'El retiro se enviará a tu cuenta Nequi una vez que el proveedor lo procese.',
       note: direction === 'OFF_RAMP' ? 'Verifica que el número de celular sea correcto.' : undefined,
-      actionLabel: externalActionUrl ? 'Abrir Nequi' : undefined,
-      allowExternalAction: Boolean(externalActionUrl),
+      actionLabel: externalActionUrl && direction === 'ON_RAMP' ? 'Abrir Nequi' : undefined,
+      allowExternalAction: Boolean(externalActionUrl) && direction === 'ON_RAMP',
       actionUrl: externalActionUrl,
       rows: [],
     };
@@ -852,8 +855,8 @@ export const buildRampInstructionView = ({
       direction === 'ON_RAMP'
         ? 'Completa el pago con el método elegido y revisa el estado aquí.'
         : 'Tu retiro fue creado. Sigue este estado hasta ver el procesamiento final.',
-    actionLabel: externalActionUrl ? 'Abrir proveedor' : undefined,
-    allowExternalAction: Boolean(externalActionUrl),
+    actionLabel: externalActionUrl && direction === 'ON_RAMP' ? 'Abrir proveedor' : undefined,
+    allowExternalAction: Boolean(externalActionUrl) && direction === 'ON_RAMP',
     actionUrl: externalActionUrl,
     rows: parseAddressRows(providedAddress),
   };
