@@ -326,12 +326,18 @@ class KoyweClient:
         if cached:
             return cached
 
+        normalized_email = str(email or '').strip() or None
         payload: dict[str, Any] = {
             'clientId': self.client_id,
             'secret': self.secret,
         }
-        if email:
-            payload['email'] = email
+        if normalized_email:
+            payload['email'] = normalized_email
+
+        logger.info(
+            'Koywe authenticate request',
+            extra={'koywe_email': normalized_email},
+        )
 
         response = self.session.post(
             f'{self.base_url}/rest/auth',
@@ -348,8 +354,20 @@ class KoyweClient:
 
     def _request(self, method: str, path: str, *, email: str | None = None, params: dict[str, Any] | None = None, json_payload: dict[str, Any] | None = None, auth: bool = True) -> dict[str, Any]:
         headers = {'Content-Type': 'application/json'}
+        normalized_email = str(email or '').strip() or None
+        logger.info(
+            'Koywe request',
+            extra={
+                'method': method,
+                'path': path,
+                'auth': auth,
+                'koywe_email': normalized_email,
+                'json_payload': json_payload,
+                'params': params,
+            },
+        )
         if auth:
-            headers['Authorization'] = f'Bearer {self.authenticate(email=email)}'
+            headers['Authorization'] = f'Bearer {self.authenticate(email=normalized_email)}'
         try:
             response = self.session.request(
                 method,
@@ -361,6 +379,15 @@ class KoyweClient:
             )
         except requests.RequestException as exc:
             raise KoyweError(f'Koywe request failed: {method} {path}: {exc}') from exc
+        logger.info(
+            'Koywe response',
+            extra={
+                'method': method,
+                'path': path,
+                'status_code': response.status_code,
+                'koywe_email': normalized_email,
+            },
+        )
         return self._parse_response(response, f'Koywe request failed: {method} {path}')
 
     def _parse_response(self, response: requests.Response, default_message: str) -> dict[str, Any]:
@@ -589,6 +616,18 @@ class KoyweClient:
         normalized_contact_profile = self._normalize_contact_profile(
             contact_profile=contact_profile,
             country_code=country_code,
+        )
+        logger.info(
+            'Koywe create_ramp_order input',
+            extra={
+                'direction': normalized_direction,
+                'fiat_symbol': fiat_symbol,
+                'payment_method_code': payment_method_code,
+                'country_code': country_code,
+                'koywe_email': str(email or '').strip() or None,
+                'wallet_address': wallet_address,
+                'contact_profile': normalized_contact_profile,
+            },
         )
         self.ensure_account_profile(
             email=email,
