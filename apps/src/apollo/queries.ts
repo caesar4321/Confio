@@ -460,12 +460,14 @@ export const UPSERT_RAMP_USER_ADDRESS = gql`
     $addressCity: String!
     $addressState: String!
     $addressZipCode: String!
+    $authEmail: String
   ) {
     upsertRampUserAddress(
       addressStreet: $addressStreet
       addressCity: $addressCity
       addressState: $addressState
       addressZipCode: $addressZipCode
+      authEmail: $authEmail
     ) {
       success
       error
@@ -476,6 +478,7 @@ export const UPSERT_RAMP_USER_ADDRESS = gql`
         addressZipCode
         addressCountry
         countryName
+        authEmail
         isComplete
         updatedAt
       }

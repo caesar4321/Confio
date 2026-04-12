@@ -610,6 +610,7 @@ class UpsertRampUserAddress(graphene.Mutation):
         address_city = graphene.String(required=True)
         address_state = graphene.String(required=True)
         address_zip_code = graphene.String(required=True)
+        auth_email = graphene.String()
 
     success = graphene.Boolean()
     error = graphene.String()
@@ -621,7 +622,7 @@ class UpsertRampUserAddress(graphene.Mutation):
         return self.ramp_address
 
     @classmethod
-    def mutate(cls, root, info, address_street, address_city, address_state, address_zip_code):
+    def mutate(cls, root, info, address_street, address_city, address_state, address_zip_code, auth_email=None):
         user = getattr(info.context, "user", None)
         if not (user and getattr(user, 'is_authenticated', False)):
             return cls(success=False, error='Authentication required', ramp_address=None)
@@ -633,11 +634,23 @@ class UpsertRampUserAddress(graphene.Mutation):
                 ramp_address=None,
             )
 
+        normalized_auth_email = str(auth_email or '').strip().lower()
+        if normalized_auth_email:
+            try:
+                validate_email(normalized_auth_email)
+            except ValidationError:
+                return cls(
+                    success=False,
+                    error='Ingresa un email valido para recibir codigos del proveedor.',
+                    ramp_address=None,
+                )
+
         values = {
             'address_street': str(address_street or '').strip(),
             'address_city': str(address_city or '').strip(),
             'address_state': str(address_state or '').strip(),
             'address_zip_code': str(address_zip_code or '').strip(),
+            'auth_email': normalized_auth_email,
         }
         missing = [label for label, value in (
             ('dirección', values['address_street']),

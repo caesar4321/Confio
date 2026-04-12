@@ -35,6 +35,7 @@ export const RampAddressScreen: React.FC = () => {
   const [addressCity, setAddressCity] = useState('');
   const [addressState, setAddressState] = useState('');
   const [addressZipCode, setAddressZipCode] = useState('');
+  const [authEmail, setAuthEmail] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
@@ -47,17 +48,22 @@ export const RampAddressScreen: React.FC = () => {
     if (!phoneCountryIso) return null;
     return getCountryByIso(phoneCountryIso);
   }, [phoneCountryIso]);
+  const accountEmail = String(userProfile?.email || '').trim().toLowerCase();
+  const isAppleRelayEmail = /@privaterelay\.appleid\.com$/i.test(accountEmail);
+  const shouldShowAuthEmailField = phoneCountryIso === 'CO' && isAppleRelayEmail;
 
   useEffect(() => {
     setAddressStreet(rampAddress?.addressStreet || '');
     setAddressCity(rampAddress?.addressCity || '');
     setAddressState(rampAddress?.addressState || '');
     setAddressZipCode(rampAddress?.addressZipCode || '');
+    setAuthEmail(rampAddress?.authEmail || '');
   }, [
     rampAddress?.addressStreet,
     rampAddress?.addressCity,
     rampAddress?.addressState,
     rampAddress?.addressZipCode,
+    rampAddress?.authEmail,
   ]);
 
   const hasChanges = useMemo(() => {
@@ -65,9 +71,10 @@ export const RampAddressScreen: React.FC = () => {
       addressStreet.trim() !== (rampAddress?.addressStreet || '') ||
       addressCity.trim() !== (rampAddress?.addressCity || '') ||
       addressState.trim() !== (rampAddress?.addressState || '') ||
-      addressZipCode.trim() !== (rampAddress?.addressZipCode || '')
+      addressZipCode.trim() !== (rampAddress?.addressZipCode || '') ||
+      (shouldShowAuthEmailField && authEmail.trim().toLowerCase() !== String(rampAddress?.authEmail || '').trim().toLowerCase())
     );
-  }, [addressStreet, addressCity, addressState, addressZipCode, rampAddress]);
+  }, [addressStreet, addressCity, addressState, addressZipCode, authEmail, rampAddress, shouldShowAuthEmailField]);
 
   const showSuccessBanner = () => {
     setSavedSuccess(true);
@@ -86,6 +93,12 @@ export const RampAddressScreen: React.FC = () => {
     if (!addressCity.trim()) return 'Ingresa tu ciudad.';
     if (!addressState.trim()) return 'Ingresa tu provincia o estado.';
     if (!addressZipCode.trim()) return 'Ingresa tu código postal.';
+    if (shouldShowAuthEmailField) {
+      const normalizedAuthEmail = authEmail.trim().toLowerCase();
+      if (!normalizedAuthEmail) return 'Ingresa un email real para recibir códigos de PSE.';
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedAuthEmail)) return 'Ingresa un email válido.';
+      if (/@privaterelay\.appleid\.com$/i.test(normalizedAuthEmail)) return 'Usa un email real, no un Apple private relay.';
+    }
     if (!phoneCountryIso) return 'Primero configura el país de tu número de teléfono.';
     return null;
   };
@@ -106,6 +119,7 @@ export const RampAddressScreen: React.FC = () => {
           addressCity: addressCity.trim(),
           addressState: addressState.trim(),
           addressZipCode: addressZipCode.trim(),
+          authEmail: shouldShowAuthEmailField ? authEmail.trim().toLowerCase() : undefined,
         },
         refetchQueries: [{ query: GET_MY_RAMP_ADDRESS }],
         awaitRefetchQueries: true,
@@ -160,6 +174,11 @@ export const RampAddressScreen: React.FC = () => {
           <Text style={styles.infoHint}>
             El país se toma automáticamente desde el país de tu número de teléfono.
           </Text>
+          {shouldShowAuthEmailField ? (
+            <Text style={styles.infoHint}>
+              Como tu cuenta usa Apple private relay, aquí puedes guardar el email real donde quieres recibir códigos de PSE en Colombia.
+            </Text>
+          ) : null}
         </View>
 
         <View style={styles.formCard}>
@@ -227,9 +246,28 @@ export const RampAddressScreen: React.FC = () => {
             />
           </View>
 
+          {shouldShowAuthEmailField ? (
+            <>
+              <Text style={styles.label}>Email para códigos de PSE</Text>
+              <View style={styles.inputWrapper}>
+                <Icon name="mail" size={15} color={colors.textSecondary} style={styles.inputIcon} />
+                <TextInput
+                  style={styles.inputWithIcon}
+                  value={authEmail}
+                  onChangeText={t => { setAuthEmail(t); setError(null); }}
+                  placeholder="tuemail@dominio.com"
+                  placeholderTextColor={colors.textSecondary}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="email-address"
+                />
+              </View>
+            </>
+          ) : null}
+
           {error ? (
             <View style={styles.errorBanner}>
-              <Icon name="alert-circle" size={14} color={colors.error} />
+              <Icon name="alert-circle" size={14} color={colors.error.icon} />
               <Text style={styles.errorText}>{error}</Text>
             </View>
           ) : null}
@@ -397,7 +435,7 @@ const styles = StyleSheet.create({
   errorText: {
     flex: 1,
     fontSize: 13,
-    color: colors.error,
+    color: colors.error.text,
   },
   saveButton: {
     marginTop: 20,
