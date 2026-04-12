@@ -168,9 +168,11 @@ const TopUpScreen = () => {
   const quoteRateLine = quote ? `1 cUSD = ${formatRampRate(quote.exchangeRate, fiatCurrency)}` : '';
   const isCompact = width < 380;
   const accountEmail = String(meData?.me?.email || userProfile?.email || '').trim();
+  const storedRampAuthEmail = String(rampAddressData?.myRampAddress?.authEmail || '').trim().toLowerCase();
   const normalizedSelectedMethodCode = String(selectedMethod?.code || '').trim().toUpperCase();
   const isAppleRelayEmail = /@privaterelay\.appleid\.com$/i.test(accountEmail);
-  const requiresRealEmailForPse = countryCode === 'CO' && ['PSE', 'NEQUI', 'BANCOLOMBIA'].includes(normalizedSelectedMethodCode) && isAppleRelayEmail;
+  const hasStoredDeliverableRampEmail = Boolean(storedRampAuthEmail) && !/@privaterelay\.appleid\.com$/i.test(storedRampAuthEmail);
+  const requiresRealEmailForPse = countryCode === 'CO' && ['PSE', 'NEQUI', 'BANCOLOMBIA'].includes(normalizedSelectedMethodCode) && isAppleRelayEmail && !hasStoredDeliverableRampEmail;
 
   useEffect(() => {
     if (!selectedMethodCode && methods.length > 0) {
@@ -182,10 +184,14 @@ const TopUpScreen = () => {
     if (!showAuthEmailModal) {
       return;
     }
-    if (!authEmailInput.trim() && accountEmail && !isAppleRelayEmail) {
-      setAuthEmailInput(accountEmail);
+    if (!authEmailInput.trim()) {
+      if (hasStoredDeliverableRampEmail) {
+        setAuthEmailInput(storedRampAuthEmail);
+      } else if (accountEmail && !isAppleRelayEmail) {
+        setAuthEmailInput(accountEmail);
+      }
     }
-  }, [accountEmail, authEmailInput, isAppleRelayEmail, showAuthEmailModal]);
+  }, [accountEmail, authEmailInput, hasStoredDeliverableRampEmail, isAppleRelayEmail, showAuthEmailModal, storedRampAuthEmail]);
 
   const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 
@@ -306,9 +312,21 @@ const TopUpScreen = () => {
     if (!selectedMethod || !quote) {
       return;
     }
+    if (countryCode === 'CO' && ['PSE', 'NEQUI', 'BANCOLOMBIA'].includes(normalizedSelectedMethodCode) && hasStoredDeliverableRampEmail) {
+      const authenticated = await requestRampCriticalAuth({
+        amount: parsedAmount,
+        assetLabel: 'cUSD',
+        actionLabel: 'compra',
+      });
+      if (!authenticated) {
+        return;
+      }
+      await submitRampOrder(storedRampAuthEmail);
+      return;
+    }
     if (requiresRealEmailForPse) {
       setAuthEmailError(null);
-      setAuthEmailInput('');
+      setAuthEmailInput(hasStoredDeliverableRampEmail ? storedRampAuthEmail : '');
       setShowAuthEmailModal(true);
       return;
     }

@@ -98,6 +98,7 @@ class RampUserAddress(models.Model):
     address_city = models.CharField(max_length=100)
     address_state = models.CharField(max_length=100)
     address_zip_code = models.CharField(max_length=30)
+    auth_email = models.EmailField(blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

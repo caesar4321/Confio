@@ -30,6 +30,7 @@ export const GET_MY_RAMP_ADDRESS = gql`
       addressZipCode
       addressCountry
       countryName
+      authEmail
       isComplete
       updatedAt
     }

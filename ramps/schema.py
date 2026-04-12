@@ -548,6 +548,7 @@ class RampUserAddressType(graphene.ObjectType):
     address_zip_code = graphene.String()
     address_country = graphene.String()
     country_name = graphene.String()
+    auth_email = graphene.String()
     is_complete = graphene.Boolean()
     updated_at = graphene.DateTime()
 
@@ -557,6 +558,7 @@ class RampUserAddressType(graphene.ObjectType):
     addressZipCode = graphene.String()
     addressCountry = graphene.String()
     countryName = graphene.String()
+    authEmail = graphene.String()
     isComplete = graphene.Boolean()
     updatedAt = graphene.DateTime()
 
@@ -566,6 +568,9 @@ class RampUserAddressType(graphene.ObjectType):
     def resolve_country_name(self, info):
         user = getattr(self, 'user', None)
         return getattr(user, 'phone_country_name', None) or ''
+
+    def resolve_auth_email(self, info):
+        return str(getattr(self, 'auth_email', '') or '').strip()
 
     def resolve_is_complete(self, info):
         return _is_ramp_address_complete(self)
@@ -588,6 +593,9 @@ class RampUserAddressType(graphene.ObjectType):
     def resolve_countryName(self, info):
         user = getattr(self, 'user', None)
         return getattr(user, 'phone_country_name', None) or ''
+
+    def resolve_authEmail(self, info):
+        return str(getattr(self, 'auth_email', '') or '').strip()
 
     def resolve_isComplete(self, info):
         return _is_ramp_address_complete(self)
@@ -716,6 +724,7 @@ class CreateRampOrder(graphene.Mutation):
                 country_code=resolved_country_code,
                 email_override=auth_email,
             )
+            _store_koywe_auth_email(user=user, auth_email=koywe_email)
             external_id = f'confio-ramp-{normalized_direction.lower()}-{timezone.now().strftime("%Y%m%d%H%M%S")}'
             result = client.create_ramp_order(
                 direction=normalized_direction,
@@ -1283,10 +1292,45 @@ def _get_koywe_auth_email(*, user, country_code: str, email_override: str | None
             validate_email(normalized_override)
         except ValidationError as exc:
             raise KoyweError('Ingresa un email valido para continuar con este pago') from exc
-    email = str(normalized_override or (override or {}).get('email') or getattr(user, 'email', None) or '').strip()
+    stored_ramp_email = ''
+    if user:
+        stored_ramp_email = str(
+            getattr(getattr(user, 'ramp_user_address', None), 'auth_email', '') or ''
+        ).strip()
+    email = str(
+        normalized_override
+        or stored_ramp_email
+        or (override or {}).get('email')
+        or getattr(user, 'email', None)
+        or ''
+    ).strip()
     if not email:
         raise KoyweError('Tu cuenta debe tener un email para usar recargas y retiros')
     return email
+
+
+def _store_koywe_auth_email(*, user, auth_email: str | None) -> None:
+    normalized_email = str(auth_email or '').strip().lower()
+    if not user or not normalized_email:
+        return
+    try:
+        validate_email(normalized_email)
+    except ValidationError:
+        return
+
+    ramp_address, _ = RampUserAddress.objects.get_or_create(
+        user=user,
+        defaults={
+            'address_street': '',
+            'address_city': '',
+            'address_state': '',
+            'address_zip_code': '',
+            'auth_email': normalized_email,
+        },
+    )
+    if ramp_address.auth_email != normalized_email:
+        ramp_address.auth_email = normalized_email
+        ramp_address.save(update_fields=['auth_email', 'updated_at'])
 
 
 def _get_user_phone_country_alpha3(user) -> str:
@@ -1335,6 +1379,7 @@ def _build_effective_ramp_address_snapshot(user):
         address_city=address_city,
         address_state=address_state,
         address_zip_code=address_zip_code,
+        auth_email=(ramp_address.auth_email or '').strip() if ramp_address and getattr(ramp_address, 'auth_email', None) else '',
         address_country=address_country,
         updated_at=getattr(ramp_address, 'updated_at', None) or getattr(verification, 'updated_at', None),
     )
