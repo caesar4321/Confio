@@ -8,6 +8,7 @@ export const CREATE_RAMP_ORDER = gql`
     $fiatCurrency: String
     $paymentMethodCode: String!
     $bankInfoId: ID
+    $authEmail: String
   ) {
     createRampOrder(
       direction: $direction
@@ -16,6 +17,7 @@ export const CREATE_RAMP_ORDER = gql`
       fiatCurrency: $fiatCurrency
       paymentMethodCode: $paymentMethodCode
       bankInfoId: $bankInfoId
+      authEmail: $authEmail
     ) {
       success
       error

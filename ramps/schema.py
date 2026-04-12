@@ -6,6 +6,7 @@ import graphene
 from graphene_django import DjangoObjectType
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from django.utils import timezone
 
 from security.didit import ISO2_TO_ISO3
@@ -658,10 +659,11 @@ class CreateRampOrder(graphene.Mutation):
         fiat_currency = graphene.String()
         payment_method_code = graphene.String(required=True)
         bank_info_id = graphene.ID()
+        auth_email = graphene.String()
 
     Output = RampOrderType
 
-    def mutate(self, info, direction, amount, payment_method_code, country_code=None, fiat_currency=None, bank_info_id=None):
+    def mutate(self, info, direction, amount, payment_method_code, country_code=None, fiat_currency=None, bank_info_id=None, auth_email=None):
         user = getattr(info.context, "user", None)
         if not (user and getattr(user, 'is_authenticated', False)):
             return RampOrderType(success=False, error='Authentication required')
@@ -712,6 +714,7 @@ class CreateRampOrder(graphene.Mutation):
             koywe_email = _get_koywe_auth_email(
                 user=user,
                 country_code=resolved_country_code,
+                email_override=auth_email,
             )
             external_id = f'confio-ramp-{normalized_direction.lower()}-{timezone.now().strftime("%Y%m%d%H%M%S")}'
             result = client.create_ramp_order(
@@ -1272,9 +1275,15 @@ def _get_koywe_test_account_override(*, user, country_code: str) -> dict[str, st
     return _KOYWE_TEST_ACCOUNT_OVERRIDES.get((country_code or '').strip().upper())
 
 
-def _get_koywe_auth_email(*, user, country_code: str) -> str:
+def _get_koywe_auth_email(*, user, country_code: str, email_override: str | None = None) -> str:
     override = _get_koywe_test_account_override(user=user, country_code=country_code)
-    email = str((override or {}).get('email') or getattr(user, 'email', None) or '').strip()
+    normalized_override = str(email_override or '').strip()
+    if normalized_override:
+        try:
+            validate_email(normalized_override)
+        except ValidationError as exc:
+            raise KoyweError('Ingresa un email valido para continuar con este pago') from exc
+    email = str(normalized_override or (override or {}).get('email') or getattr(user, 'email', None) or '').strip()
     if not email:
         raise KoyweError('Tu cuenta debe tener un email para usar recargas y retiros')
     return email
@@ -1357,7 +1366,7 @@ def _get_koywe_contact_profile(*, user, country_code: str, email_override: str |
         or getattr(user, 'last_name', None)
         or ''
     ).strip()
-    email = str((override or {}).get('email') or email_override or getattr(user, 'email', None) or '').strip()
+    email = str(email_override or (override or {}).get('email') or getattr(user, 'email', None) or '').strip()
     phone_country_code = getattr(user, 'phone_country_code', None) or ''
     phone_number = (getattr(user, 'phone_number', None) or '').strip()
     phone = f'{phone_country_code}{phone_number}'.replace(' ', '') if phone_number else ''

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Modal,
   SafeAreaView,
   ScrollView,
   StatusBar,
@@ -92,6 +93,9 @@ const TopUpScreen = () => {
   const [step, setStep] = useState<'form' | 'review'>('form');
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const [amountFocused, setAmountFocused] = useState(false);
+  const [showAuthEmailModal, setShowAuthEmailModal] = useState(false);
+  const [authEmailInput, setAuthEmailInput] = useState('');
+  const [authEmailError, setAuthEmailError] = useState<string | null>(null);
 
   const countryCode = useMemo(() => {
     const selectedIso = selectedCountry?.[2];
@@ -163,12 +167,80 @@ const TopUpScreen = () => {
   const quoteHeadline = quote ? `Recibes aprox. ${formatRampMoney(quote.amountOut, 'cUSD')}` : '';
   const quoteRateLine = quote ? `1 cUSD = ${formatRampRate(quote.exchangeRate, fiatCurrency)}` : '';
   const isCompact = width < 380;
+  const accountEmail = String(meData?.me?.email || userProfile?.email || '').trim();
+  const normalizedSelectedMethodCode = String(selectedMethod?.code || '').trim().toUpperCase();
+  const isAppleRelayEmail = /@privaterelay\.appleid\.com$/i.test(accountEmail);
+  const requiresRealEmailForPse = countryCode === 'CO' && ['PSE', 'NEQUI', 'BANCOLOMBIA'].includes(normalizedSelectedMethodCode) && isAppleRelayEmail;
 
   useEffect(() => {
     if (!selectedMethodCode && methods.length > 0) {
       setSelectedMethodCode(methods[0].code);
     }
   }, [methods, selectedMethodCode]);
+
+  useEffect(() => {
+    if (!showAuthEmailModal) {
+      return;
+    }
+    if (!authEmailInput.trim() && accountEmail && !isAppleRelayEmail) {
+      setAuthEmailInput(accountEmail);
+    }
+  }, [accountEmail, authEmailInput, isAppleRelayEmail, showAuthEmailModal]);
+
+  const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+
+  const submitRampOrder = async (authEmailOverride?: string | null) => {
+    if (!selectedMethod || !quote) {
+      return;
+    }
+    if (!hasCompleteRampAddress) {
+      Alert.alert(
+        'Completa tu dirección',
+        'Antes de confirmar, necesitamos tu dirección para habilitar las recargas y retiros bancarios.',
+        [
+          { text: 'Ahora no', style: 'cancel' },
+          { text: 'Completar', onPress: () => navigation.navigate('RampAddress') },
+        ],
+      );
+      return;
+    }
+
+    setIsSubmittingOrder(true);
+    createRampOrder({
+      variables: {
+        direction: 'ON_RAMP',
+        amount: String(parsedAmount),
+        countryCode: availability?.countryCode,
+        fiatCurrency,
+        paymentMethodCode: selectedMethod.code,
+        authEmail: authEmailOverride || undefined,
+      },
+    })
+      .then(({ data }) => {
+        const result = data?.createRampOrder;
+        if (!result?.success || !result?.orderId) {
+          Alert.alert('No se pudo crear la orden', getFriendlyRampError(result?.error));
+          return;
+        }
+        navigation.replace('RampInstructions', {
+          direction: 'ON_RAMP',
+          orderId: result.orderId,
+          countryCode: availability?.countryCode,
+          paymentMethodCode: selectedMethod.code,
+          paymentMethodDisplay: result.paymentMethodDisplay || selectedMethod.displayName,
+          amountOut: result.amountOut || undefined,
+          fiatCurrency,
+          nextActionUrl: result.nextActionUrl || undefined,
+          paymentDetails: result.paymentDetails,
+        });
+      })
+      .catch((error) => {
+        Alert.alert('No se pudo crear la orden', getFriendlyRampError(error?.message));
+      })
+      .finally(() => {
+        setIsSubmittingOrder(false);
+      });
+  };
 
   const openVerificationPrompt = () => {
     Alert.alert(
@@ -234,6 +306,12 @@ const TopUpScreen = () => {
     if (!selectedMethod || !quote) {
       return;
     }
+    if (requiresRealEmailForPse) {
+      setAuthEmailError(null);
+      setAuthEmailInput('');
+      setShowAuthEmailModal(true);
+      return;
+    }
     const authenticated = await requestRampCriticalAuth({
       amount: parsedAmount,
       assetLabel: 'cUSD',
@@ -242,52 +320,7 @@ const TopUpScreen = () => {
     if (!authenticated) {
       return;
     }
-    if (!hasCompleteRampAddress) {
-      Alert.alert(
-        'Completa tu dirección',
-        'Antes de confirmar, necesitamos tu dirección para habilitar las recargas y retiros bancarios.',
-        [
-          { text: 'Ahora no', style: 'cancel' },
-          { text: 'Completar', onPress: () => navigation.navigate('RampAddress') },
-        ],
-      );
-      return;
-    }
-
-    setIsSubmittingOrder(true);
-    createRampOrder({
-      variables: {
-        direction: 'ON_RAMP',
-        amount: String(parsedAmount),
-        countryCode: availability?.countryCode,
-        fiatCurrency,
-        paymentMethodCode: selectedMethod.code,
-      },
-    })
-      .then(({ data }) => {
-        const result = data?.createRampOrder;
-        if (!result?.success || !result?.orderId) {
-          Alert.alert('No se pudo crear la orden', getFriendlyRampError(result?.error));
-          return;
-        }
-        navigation.replace('RampInstructions', {
-          direction: 'ON_RAMP',
-          orderId: result.orderId,
-          countryCode: availability?.countryCode,
-          paymentMethodCode: selectedMethod.code,
-          paymentMethodDisplay: result.paymentMethodDisplay || selectedMethod.displayName,
-          amountOut: result.amountOut || undefined,
-          fiatCurrency,
-          nextActionUrl: result.nextActionUrl || undefined,
-          paymentDetails: result.paymentDetails,
-        });
-      })
-      .catch((error) => {
-        Alert.alert('No se pudo crear la orden', getFriendlyRampError(error?.message));
-      })
-      .finally(() => {
-        setIsSubmittingOrder(false);
-      });
+    await submitRampOrder();
   };
 
   if (!isKoyweCountry) {
@@ -523,6 +556,86 @@ const TopUpScreen = () => {
         )}
       </ScrollView>
       </SafeAreaView>
+      <Modal
+        visible={showAuthEmailModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowAuthEmailModal(false)}
+        statusBarTranslucent
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalIconWrap}>
+              <Icon name="mail" size={22} color={colors.primary} />
+            </View>
+            <Text style={styles.modalTitle}>Email para continuar con PSE</Text>
+            <Text style={styles.modalText}>
+              Tu cuenta usa un correo privado de Apple y el codigo de verificacion de PSE no llega ahi.
+              Ingresa un email real donde si puedas recibir el codigo para esta operacion en Colombia.
+            </Text>
+            <TextInput
+              value={authEmailInput}
+              onChangeText={(value) => {
+                setAuthEmailInput(value);
+                if (authEmailError) {
+                  setAuthEmailError(null);
+                }
+              }}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              placeholder="tuemail@dominio.com"
+              placeholderTextColor={colors.textSecondary}
+              style={[styles.modalInput, authEmailError && styles.modalInputError]}
+            />
+            {authEmailError ? <Text style={styles.modalErrorText}>{authEmailError}</Text> : null}
+            <Text style={styles.modalFootnote}>Solo lo usaremos para recibir el codigo de esta operacion.</Text>
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalSecondaryButton}
+                onPress={() => {
+                  setShowAuthEmailModal(false);
+                  setAuthEmailError(null);
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.modalSecondaryButtonText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalPrimaryButton}
+                activeOpacity={0.85}
+                onPress={async () => {
+                  const normalizedEmail = authEmailInput.trim().toLowerCase();
+                  if (!normalizedEmail) {
+                    setAuthEmailError('Ingresa un email para recibir el codigo.');
+                    return;
+                  }
+                  if (!isValidEmail(normalizedEmail)) {
+                    setAuthEmailError('Ingresa un email valido.');
+                    return;
+                  }
+                  if (/[@]privaterelay\.appleid\.com$/i.test(normalizedEmail)) {
+                    setAuthEmailError('Usa un email real, no un Apple private relay.');
+                    return;
+                  }
+                  setShowAuthEmailModal(false);
+                  const authenticated = await requestRampCriticalAuth({
+                    amount: parsedAmount,
+                    assetLabel: 'cUSD',
+                    actionLabel: 'compra',
+                  });
+                  if (!authenticated) {
+                    return;
+                  }
+                  await submitRampOrder(normalizedEmail);
+                }}
+              >
+                <Text style={styles.modalPrimaryButtonText}>Continuar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
       <BackupEnforcementModal />
     </>
   );
@@ -899,6 +1012,103 @@ const styles = StyleSheet.create({
     color: colors.primaryDark,
     lineHeight: 22,
     textAlign: 'right',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.48)',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  modalCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 24,
+    padding: 22,
+    borderWidth: 1,
+    borderColor: '#d1fae5',
+    shadowColor: '#000000',
+    shadowOpacity: 0.16,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 10,
+  },
+  modalIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: colors.textFlat,
+    marginBottom: 8,
+  },
+  modalText: {
+    fontSize: 14,
+    lineHeight: 21,
+    color: colors.textSecondary,
+    marginBottom: 16,
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    fontSize: 15,
+    color: colors.textFlat,
+    backgroundColor: '#f8fafc',
+  },
+  modalInputError: {
+    borderColor: colors.error.border,
+  },
+  modalErrorText: {
+    marginTop: 8,
+    fontSize: 13,
+    color: colors.error.text,
+  },
+  modalFootnote: {
+    marginTop: 10,
+    fontSize: 12,
+    lineHeight: 18,
+    color: colors.textSecondary,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12,
+    marginTop: 20,
+  },
+  modalSecondaryButton: {
+    minWidth: 96,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#eef2f7',
+  },
+  modalSecondaryButtonText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.textSecondary,
+  },
+  modalPrimaryButton: {
+    minWidth: 112,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primary,
+  },
+  modalPrimaryButtonText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#ffffff',
   },
 });
 

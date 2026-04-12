@@ -1,16 +1,14 @@
 import React from 'react';
 import {
-  Platform,
-  StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 
 import { Gradient } from '../common/Gradient';
-import { APP_LAYOUT } from '../../config/layout';
 
 type Props = {
   eyebrow: string;
@@ -31,13 +29,15 @@ export const RampHero = ({
   fromColor = '#10b981',
   toColor = '#6ee7b7',
 }: Props) => {
+  const insets = useSafeAreaInsets();
+
   return (
     <View style={styles.heroWrapper}>
       <Gradient fromColor={fromColor} toColor={toColor} style={styles.heroGradient}>
         {/* Decorative circles for depth */}
         <View style={styles.decorCircleLarge} />
         <View style={styles.decorCircleSmall} />
-        <View style={styles.heroPadding}>
+        <View style={[styles.heroPadding, { paddingTop: Math.max(insets.top, 12) + 12 }]}>
           <TouchableOpacity onPress={onBack} style={styles.backButton}>
             <Icon name="arrow-left" size={20} color="#ffffff" />
           </TouchableOpacity>
@@ -81,7 +81,6 @@ const styles = StyleSheet.create({
   },
   heroPadding: {
     paddingHorizontal: 24,
-    paddingTop: APP_LAYOUT.topSafeArea + 12,
     paddingBottom: 32,
   },
   backButton: {
