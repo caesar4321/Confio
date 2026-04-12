@@ -1094,19 +1094,23 @@ class Query(graphene.ObjectType):
         if not client.is_configured:
             return RampOrderStatusType(success=False, error="Koywe credentials are not configured on the server")
 
+        ramp_tx = RampTransaction.objects.filter(
+            provider='koywe',
+            provider_order_id=order_id,
+            actor_user=user,
+        ).first()
+
         try:
-            koywe_email = _get_koywe_auth_email(
-                user=user,
-                country_code=resolved_country_code,
-            )
+            koywe_email = str((ramp_tx.metadata or {}).get('auth_email') or '').strip() if ramp_tx else ''
+            if not koywe_email:
+                koywe_email = _get_koywe_auth_email(
+                    user=user,
+                    country_code=resolved_country_code,
+                )
             result = client.get_ramp_order_status(
                 order_id=order_id,
                 email=koywe_email,
             )
-            ramp_tx = RampTransaction.objects.filter(
-                provider='koywe',
-                provider_order_id=order_id,
-            ).first()
             if ramp_tx:
                 sync_koywe_ramp_transaction_from_order(
                     ramp_tx=ramp_tx,
