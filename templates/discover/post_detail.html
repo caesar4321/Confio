@@ -98,11 +98,11 @@
     {% if post.blocks %}
         {% for block in post.blocks %}
             {% if block.type == "title" %}
-                <h2 class="post-block-title">{{ block.text }}</h2>
+                <h2 class="post-block-title">{{ block.text|linebreaksbr }}</h2>
             {% elif block.type == "paragraph" %}
-                <p class="post-block-paragraph">{{ block.text }}</p>
+                <p class="post-block-paragraph">{{ block.text|linebreaksbr }}</p>
             {% elif block.type == "quote" %}
-                <blockquote class="post-block-quote">{{ block.text }}</blockquote>
+                <blockquote class="post-block-quote">{{ block.text|linebreaksbr }}</blockquote>
             {% elif block.type == "image" %}
                 <figure>
                     <img class="post-block-image" src="{{ block.url }}" alt="{{ block.caption|default:post.title }}" loading="lazy">
