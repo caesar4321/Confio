@@ -64,19 +64,23 @@
 {% endblock %}
 
 {% block breadcrumb %}
-<nav class="discover-nav" aria-label="Breadcrumb">
-    <a href="/discover/">&larr; Descubrir</a>
-    {% if post.tag %}
-    <span style="color: #ccc;">/</span>
-    <span style="font-size: 0.875rem; color: #666;">{{ post.tag }}</span>
-    {% endif %}
+<nav class="breadcrumb-bar" aria-label="Breadcrumb">
+    <div class="breadcrumb-inner">
+        <a href="/discover/">&larr; Descubrir</a>
+        {% if post.tag %}
+        <span class="breadcrumb-sep">/</span>
+        <span class="breadcrumb-current">{{ post.tag }}</span>
+        {% endif %}
+    </div>
 </nav>
 {% endblock %}
+
+{% block container_class %}container--narrow{% endblock %}
 
 {% block content %}
 <article class="post-detail">
     {% if post.tag %}
-    <span class="post-tag{% if post.item_type == 'VIDEO' %} post-tag--video{% elif post.item_type == 'NEWS' %} post-tag--news{% endif %}">{{ post.tag }}</span>
+    <span class="post-tag" style="color: {{ post.tag_color }}; background: {{ post.tag_color }}18;">{{ post.tag }}</span>
     {% endif %}
 
     <h1 class="post-detail-title">{{ post.title }}</h1>
@@ -115,7 +119,8 @@
     {% if post.platform_links %}
     <div class="platform-links">
         {% for link in post.platform_links %}
-        <a class="platform-link" href="{{ link.url }}" target="_blank" rel="noopener noreferrer">
+        <a class="platform-link {% if link.platform == 'TIKTOK' or link.platform == 'tiktok' %}platform-link--tiktok{% elif link.platform == 'INSTAGRAM' or link.platform == 'instagram' %}platform-link--instagram{% elif link.platform == 'YOUTUBE' or link.platform == 'youtube' %}platform-link--youtube{% else %}platform-link--default{% endif %}"
+           href="{{ link.url }}" target="_blank" rel="noopener noreferrer">
             {% if link.platform == "TIKTOK" or link.platform == "tiktok" %}TikTok
             {% elif link.platform == "INSTAGRAM" or link.platform == "instagram" %}Instagram
             {% elif link.platform == "YOUTUBE" or link.platform == "youtube" %}YouTube
@@ -130,6 +135,6 @@
 <div class="app-cta">
     <h2>Lee mas en la app de Confio</h2>
     <p>Descarga Confio para acceder a todo el contenido, reaccionar y recibir notificaciones.</p>
-    <a href="/">Descargar Confio</a>
+    <a href="/" class="app-cta-btn">Descargar Confio</a>
 </div>
 {% endblock %}

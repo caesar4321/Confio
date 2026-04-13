@@ -29,7 +29,7 @@
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
     <!-- Favicon -->
     <link rel="icon" type="image/png" href="/images/$CONFIO.png">
@@ -40,210 +40,672 @@
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
         body {
-            font-family: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: #f8faf9;
-            color: #1a1a2e;
+            font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #F4F6F8;
+            color: #1F2937;
             line-height: 1.6;
             -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
         }
 
-        .discover-header {
-            background: linear-gradient(135deg, #1DB587 0%, #159e74 100%);
-            color: white;
-            padding: 1.5rem 1rem;
-            text-align: center;
+        /* ── Header ── */
+        .site-header {
+            background: #FFFFFF;
+            border-bottom: 1px solid #E5E7EB;
+            position: sticky;
+            top: 0;
+            z-index: 100;
         }
 
-        .discover-header a {
-            color: white;
+        .site-header-inner {
+            max-width: 1120px;
+            margin: 0 auto;
+            padding: 0 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            height: 64px;
+        }
+
+        .site-logo {
+            font-size: 1.5rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, #34D399, #10B981);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
             text-decoration: none;
         }
 
-        .discover-header h1 {
-            font-size: 1.5rem;
-            font-weight: 700;
-        }
-
-        .discover-header p {
-            font-size: 0.9rem;
-            opacity: 0.9;
-            margin-top: 0.25rem;
-        }
-
-        .discover-nav {
-            background: white;
-            border-bottom: 1px solid #e5e7eb;
-            padding: 0.75rem 1rem;
+        .site-nav {
             display: flex;
             align-items: center;
-            gap: 1rem;
+            gap: 2rem;
         }
 
-        .discover-nav a {
+        .site-nav a {
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: #6B7280;
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+
+        .site-nav a:hover { color: #1DB587; }
+
+        .site-nav a.active {
+            color: #1DB587;
+            font-weight: 600;
+        }
+
+        .header-cta {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            background: linear-gradient(135deg, #34D399, #10B981);
+            color: white;
+            padding: 0.5rem 1.25rem;
+            border-radius: 999px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-decoration: none;
+            transition: opacity 0.2s;
+        }
+
+        .header-cta:hover { opacity: 0.9; }
+
+        /* ── Hero banner (feed page) ── */
+        .discover-hero {
+            background: linear-gradient(135deg, #1DB587 0%, #0D9668 50%, #065F46 100%);
+            color: white;
+            padding: 3rem 1.5rem;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .discover-hero::before {
+            content: '';
+            position: absolute;
+            top: -60px;
+            right: -40px;
+            width: 200px;
+            height: 200px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.06);
+        }
+
+        .discover-hero::after {
+            content: '';
+            position: absolute;
+            bottom: -80px;
+            left: -50px;
+            width: 260px;
+            height: 260px;
+            border-radius: 50%;
+            background: rgba(52,211,153,0.15);
+        }
+
+        .discover-hero h1 {
+            font-size: 2rem;
+            font-weight: 800;
+            margin-bottom: 0.5rem;
+            position: relative;
+            z-index: 1;
+        }
+
+        .discover-hero p {
+            font-size: 1rem;
+            opacity: 0.9;
+            max-width: 480px;
+            margin: 0 auto;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* ── Breadcrumb ── */
+        .breadcrumb-bar {
+            background: #FFFFFF;
+            border-bottom: 1px solid #E5E7EB;
+        }
+
+        .breadcrumb-inner {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 0.75rem 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.8rem;
+        }
+
+        .breadcrumb-inner a {
             color: #1DB587;
             text-decoration: none;
             font-weight: 500;
-            font-size: 0.875rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
         }
 
-        .discover-nav a:hover { text-decoration: underline; }
+        .breadcrumb-inner a:hover { text-decoration: underline; }
+        .breadcrumb-sep { color: #D1D5DB; }
+        .breadcrumb-current { color: #6B7280; }
 
+        /* ── Container ── */
         .container {
-            max-width: 720px;
+            max-width: 1120px;
             margin: 0 auto;
-            padding: 1.5rem 1rem;
+            padding: 2rem 1.5rem;
         }
 
-        /* Feed styles */
+        .container--narrow {
+            max-width: 800px;
+        }
+
+        /* ── Feed grid ── */
+        .feed-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 1.25rem;
+        }
+
+        /* ── Post card ── */
         .post-card {
-            background: white;
-            border-radius: 12px;
+            background: #FFFFFF;
+            border-radius: 16px;
             overflow: hidden;
-            margin-bottom: 1.25rem;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-            transition: box-shadow 0.2s;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+            transition: box-shadow 0.25s, transform 0.25s;
+            display: flex;
+            flex-direction: column;
         }
 
-        .post-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.12); }
+        .post-card:hover {
+            box-shadow: 0 8px 24px rgba(0,0,0,0.1);
+            transform: translateY(-2px);
+        }
 
-        .post-card a { text-decoration: none; color: inherit; display: block; }
+        .post-card a {
+            text-decoration: none;
+            color: inherit;
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+        }
+
+        .post-card-image-wrap {
+            position: relative;
+            width: 100%;
+            padding-top: 56.25%; /* 16:9 */
+            overflow: hidden;
+            background: #E5E7EB;
+        }
 
         .post-card-image {
+            position: absolute;
+            top: 0;
+            left: 0;
             width: 100%;
-            height: 200px;
+            height: 100%;
             object-fit: cover;
-            display: block;
+            transition: transform 0.3s;
         }
 
-        .post-card-body { padding: 1rem 1.25rem; }
+        .post-card:hover .post-card-image { transform: scale(1.03); }
 
-        .post-tag {
-            display: inline-block;
+        /* Video overlay */
+        .post-card-video-overlay {
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, #111827 0%, #1F2937 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .post-card-play-btn {
+            width: 48px;
+            height: 48px;
+            background: rgba(255,255,255,0.95);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .post-card-play-btn::after {
+            content: '';
+            width: 0;
+            height: 0;
+            border-top: 8px solid transparent;
+            border-bottom: 8px solid transparent;
+            border-left: 14px solid #111827;
+            margin-left: 3px;
+        }
+
+        .post-card-video-badge {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            background: rgba(255,255,255,0.15);
+            backdrop-filter: blur(8px);
+            padding: 4px 10px;
+            border-radius: 999px;
+            color: white;
             font-size: 0.7rem;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            color: #1DB587;
-            background: #e6f9f1;
-            padding: 0.2rem 0.6rem;
-            border-radius: 4px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .post-card-body {
+            padding: 1rem 1.25rem 1.25rem;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .post-card-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 0.5rem;
             margin-bottom: 0.5rem;
         }
 
-        .post-tag--video { color: #FF4444; background: #ffecec; }
-        .post-tag--news { color: #F59E0B; background: #fef3cd; }
+        .post-tag {
+            display: inline-block;
+            font-size: 0.65rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            padding: 0.2rem 0.6rem;
+            border-radius: 20px;
+            white-space: nowrap;
+        }
+
+        .post-card-date {
+            font-size: 0.7rem;
+            color: #AAAAAA;
+            white-space: nowrap;
+            padding-top: 0.15rem;
+        }
 
         .post-card-title {
-            font-size: 1.1rem;
-            font-weight: 600;
-            margin-bottom: 0.4rem;
-            line-height: 1.35;
+            font-size: 0.95rem;
+            font-weight: 700;
+            line-height: 1.4;
+            margin-bottom: 0.35rem;
+            color: #111111;
         }
 
         .post-card-excerpt {
-            font-size: 0.875rem;
-            color: #555;
+            font-size: 0.8rem;
+            line-height: 1.55;
+            color: #555555;
             display: -webkit-box;
             -webkit-line-clamp: 3;
             -webkit-box-orient: vertical;
             overflow: hidden;
+            flex: 1;
         }
 
-        .post-card-date {
-            font-size: 0.75rem;
-            color: #999;
-            margin-top: 0.75rem;
+        /* ── Pagination ── */
+        .pagination {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            margin-top: 2.5rem;
+            flex-wrap: wrap;
         }
 
-        /* Detail styles */
-        .post-detail { background: white; border-radius: 12px; padding: 2rem 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
-        .post-detail-title { font-size: 1.75rem; font-weight: 700; margin-bottom: 0.75rem; line-height: 1.3; }
-        .post-detail-meta { font-size: 0.8rem; color: #999; margin-bottom: 1.5rem; }
+        .pagination a, .pagination span {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 40px;
+            height: 40px;
+            padding: 0 0.75rem;
+            border-radius: 10px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            text-decoration: none;
+            transition: all 0.2s;
+        }
 
-        .post-block-title { font-size: 1.25rem; font-weight: 600; margin: 1.5rem 0 0.75rem; }
-        .post-block-paragraph { margin-bottom: 1rem; font-size: 1rem; color: #333; }
+        .pagination a {
+            background: #FFFFFF;
+            color: #6B7280;
+            border: 1px solid #E5E7EB;
+        }
+
+        .pagination a:hover {
+            background: #F0FDF7;
+            border-color: #1DB587;
+            color: #1DB587;
+        }
+
+        .pagination .current {
+            background: #1DB587;
+            color: white;
+            border: 1px solid #1DB587;
+            font-weight: 700;
+        }
+
+        .pagination .disabled {
+            background: #F9FAFB;
+            color: #D1D5DB;
+            border: 1px solid #F3F4F6;
+            cursor: default;
+        }
+
+        .pagination .ellipsis {
+            border: none;
+            background: none;
+            color: #9CA3AF;
+            min-width: auto;
+            padding: 0 0.25rem;
+        }
+
+        /* ── Detail article ── */
+        .post-detail {
+            background: #FFFFFF;
+            border-radius: 18px;
+            padding: 2.5rem 2rem;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+        }
+
+        .post-detail-title {
+            font-size: 1.75rem;
+            font-weight: 700;
+            line-height: 1.3;
+            margin-bottom: 0.75rem;
+            color: #111111;
+        }
+
+        .post-detail-meta {
+            font-size: 0.8rem;
+            color: #AAAAAA;
+            margin-bottom: 1.75rem;
+            padding-bottom: 1.25rem;
+            border-bottom: 1px solid #F3F4F6;
+        }
+
+        .post-block-title {
+            font-size: 1.2rem;
+            font-weight: 700;
+            line-height: 1.45;
+            color: #111827;
+            margin: 1.75rem 0 0.75rem;
+        }
+
+        .post-block-paragraph {
+            font-size: 0.95rem;
+            line-height: 1.7;
+            color: #475467;
+            margin-bottom: 1rem;
+        }
+
         .post-block-quote {
-            border-left: 3px solid #1DB587;
-            padding: 0.75rem 1rem;
-            margin: 1rem 0;
-            background: #f0fdf7;
+            border-left: 3px solid #D0D5DD;
+            padding: 0.75rem 1.25rem;
+            margin: 1.25rem 0;
             font-style: italic;
-            color: #444;
+            color: #344054;
+            font-size: 0.95rem;
+            line-height: 1.7;
         }
-        .post-block-image { max-width: 100%; border-radius: 8px; margin: 1rem 0; }
-        .post-block-caption { font-size: 0.8rem; color: #888; text-align: center; margin-top: 0.25rem; }
 
-        .platform-links { margin-top: 2rem; display: flex; gap: 0.75rem; flex-wrap: wrap; }
+        .post-block-image {
+            max-width: 100%;
+            border-radius: 14px;
+            margin: 1.25rem 0;
+            display: block;
+        }
+
+        .post-block-caption {
+            font-size: 0.75rem;
+            color: #9CA3AF;
+            text-align: center;
+            margin-top: -0.75rem;
+            margin-bottom: 1.25rem;
+        }
+
+        /* ── Platform links ── */
+        .platform-links {
+            margin-top: 2rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid #F3F4F6;
+            display: flex;
+            gap: 0.6rem;
+            flex-wrap: wrap;
+        }
+
         .platform-link {
             display: inline-flex;
             align-items: center;
             gap: 0.4rem;
             padding: 0.5rem 1rem;
-            border-radius: 8px;
-            background: #f3f4f6;
-            color: #333;
+            border-radius: 999px;
+            color: white;
             text-decoration: none;
-            font-size: 0.875rem;
-            font-weight: 500;
-            transition: background 0.2s;
-        }
-        .platform-link:hover { background: #e5e7eb; }
-
-        .discover-footer {
-            text-align: center;
-            padding: 2rem 1rem;
-            font-size: 0.8rem;
-            color: #999;
+            font-size: 0.75rem;
+            font-weight: 700;
+            transition: opacity 0.2s;
         }
 
-        .discover-footer a { color: #1DB587; text-decoration: none; }
-        .discover-footer a:hover { text-decoration: underline; }
+        .platform-link:hover { opacity: 0.85; }
+        .platform-link--tiktok { background: #111111; }
+        .platform-link--instagram { background: #C13584; }
+        .platform-link--youtube { background: #DC2626; }
+        .platform-link--default { background: #6B7280; }
 
+        /* ── CTA banner ── */
         .app-cta {
-            background: linear-gradient(135deg, #1DB587 0%, #159e74 100%);
+            background: linear-gradient(135deg, #1DB587 0%, #0D9668 50%, #065F46 100%);
             color: white;
             text-align: center;
-            padding: 2rem 1.5rem;
-            border-radius: 12px;
-            margin-top: 2rem;
+            padding: 3rem 2rem;
+            border-radius: 18px;
+            margin-top: 2.5rem;
+            position: relative;
+            overflow: hidden;
         }
-        .app-cta h2 { font-size: 1.25rem; margin-bottom: 0.5rem; }
-        .app-cta p { font-size: 0.9rem; opacity: 0.9; margin-bottom: 1rem; }
-        .app-cta a {
+
+        .app-cta::before {
+            content: '';
+            position: absolute;
+            top: -40px;
+            right: -30px;
+            width: 140px;
+            height: 140px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.06);
+        }
+
+        .app-cta h2 {
+            font-size: 1.35rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+            position: relative;
+        }
+
+        .app-cta p {
+            font-size: 0.9rem;
+            opacity: 0.9;
+            margin-bottom: 1.25rem;
+            max-width: 400px;
+            margin-left: auto;
+            margin-right: auto;
+            position: relative;
+        }
+
+        .app-cta-btn {
             display: inline-block;
             background: white;
             color: #1DB587;
-            padding: 0.6rem 1.5rem;
-            border-radius: 8px;
-            font-weight: 600;
+            padding: 0.7rem 2rem;
+            border-radius: 999px;
+            font-weight: 700;
+            font-size: 0.9rem;
             text-decoration: none;
+            transition: transform 0.2s, box-shadow 0.2s;
+            position: relative;
         }
 
+        .app-cta-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+        /* ── Footer ── */
+        .site-footer {
+            background: #1E293B;
+            color: #94A3B8;
+            padding: 2.5rem 1.5rem;
+            margin-top: 4rem;
+        }
+
+        .site-footer-inner {
+            max-width: 1120px;
+            margin: 0 auto;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .site-footer a {
+            color: #94A3B8;
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+
+        .site-footer a:hover { color: #34D399; }
+
+        .footer-links {
+            display: flex;
+            gap: 1.5rem;
+            font-size: 0.8rem;
+        }
+
+        .footer-copy {
+            font-size: 0.8rem;
+        }
+
+        .footer-hashtags {
+            width: 100%;
+            text-align: center;
+            font-size: 0.75rem;
+            color: #64748B;
+            margin-top: 0.5rem;
+        }
+
+        /* ── Empty state ── */
         .empty-state {
             text-align: center;
-            padding: 3rem 1rem;
-            color: #999;
+            padding: 4rem 2rem;
+            color: #9CA3AF;
+        }
+
+        .empty-state p {
+            font-size: 1rem;
+        }
+
+        /* ── Responsive ── */
+
+        /* Tablet */
+        @media (max-width: 768px) {
+            .discover-hero { padding: 2rem 1rem; }
+            .discover-hero h1 { font-size: 1.5rem; }
+            .discover-hero p { font-size: 0.875rem; }
+
+            .feed-grid {
+                grid-template-columns: 1fr;
+                gap: 0.75rem;
+            }
+
+            .container { padding: 1rem; }
+
+            .post-card { border-radius: 16px; }
+            .post-card-body { padding: 0.875rem 1rem 1rem; }
+
+            .post-detail {
+                border-radius: 0;
+                padding: 1.5rem 1rem;
+                box-shadow: none;
+            }
+
+            .post-detail-title { font-size: 1.35rem; }
+
+            .app-cta {
+                border-radius: 16px;
+                padding: 2rem 1.25rem;
+                margin-top: 1.5rem;
+            }
+
+            .site-header-inner { padding: 0 1rem; height: 56px; }
+            .site-logo { font-size: 1.25rem; }
+            .site-nav { gap: 1rem; }
+            .site-nav a { font-size: 0.8rem; }
+            .header-cta { padding: 0.4rem 1rem; font-size: 0.75rem; }
+
+            .site-footer { padding: 1.5rem 1rem; margin-top: 2rem; }
+            .site-footer-inner { flex-direction: column; text-align: center; }
+            .footer-links { justify-content: center; }
+
+            .breadcrumb-inner { padding: 0.6rem 1rem; }
+
+            .container--narrow { padding: 0; }
+        }
+
+        /* Large desktop */
+        @media (min-width: 1024px) {
+            .discover-hero { padding: 4rem 2rem; }
+            .discover-hero h1 { font-size: 2.5rem; }
+            .discover-hero p { font-size: 1.1rem; }
+
+            .post-detail { padding: 3rem 3.5rem; }
+            .post-detail-title { font-size: 2rem; }
         }
     </style>
     {% block extra_styles %}{% endblock %}
 </head>
 <body>
-    <header class="discover-header">
-        <a href="/discover/">
-            <h1>Confio</h1>
-            <p>Descubrir</p>
-        </a>
+    <header class="site-header">
+        <div class="site-header-inner">
+            <a href="/" class="site-logo">Confio</a>
+            <nav class="site-nav">
+                <a href="/discover/" class="active">Descubrir</a>
+                <a href="/terms/">Legal</a>
+                <a href="/" class="header-cta">Descargar App &#8599;</a>
+            </nav>
+        </div>
     </header>
 
+    {% block hero %}{% endblock %}
     {% block breadcrumb %}{% endblock %}
 
-    <main class="container">
+    <main class="container {% block container_class %}{% endblock %}">
         {% block content %}{% endblock %}
     </main>
 
-    <footer class="discover-footer">
-        <p>&copy; 2024-2026 Confio. <a href="/">Inicio</a> &middot; <a href="/terms/">Terminos</a> &middot; <a href="/privacy/">Privacidad</a></p>
-        <p style="margin-top: 0.5rem;">#Confio #RetoConfio #LogroConfio #AppDeDolares #DolarDigital</p>
+    <footer class="site-footer">
+        <div class="site-footer-inner">
+            <span class="footer-copy">&copy; 2024-2026 Confio</span>
+            <div class="footer-links">
+                <a href="/">Inicio</a>
+                <a href="/discover/">Descubrir</a>
+                <a href="/terms/">Terminos</a>
+                <a href="/privacy/">Privacidad</a>
+                <a href="mailto:support@confio.lat">Contacto</a>
+            </div>
+            <div class="footer-hashtags">#Confio #RetoConfio #LogroConfio #AppDeDolares #DolarDigital</div>
+        </div>
     </footer>
 </body>
 </html>

@@ -36,27 +36,81 @@
 </script>
 {% endblock %}
 
+{% block hero %}
+<section class="discover-hero">
+    <h1>Descubrir</h1>
+    <p>Noticias, guias y videos sobre dolares digitales y pagos en Latinoamerica</p>
+</section>
+{% endblock %}
+
 {% block content %}
 {% if posts %}
+    <div class="feed-grid">
     {% for post in posts %}
-    <article class="post-card">
-        <a href="/discover/{{ post.id }}/{{ post.slug }}/">
-            {% if post.image_url %}
-            <img class="post-card-image" src="{{ post.image_url }}" alt="{{ post.title }}" loading="lazy">
-            {% endif %}
-            <div class="post-card-body">
-                {% if post.tag %}
-                <span class="post-tag{% if post.item_type == 'VIDEO' %} post-tag--video{% elif post.item_type == 'NEWS' %} post-tag--news{% endif %}">{{ post.tag }}</span>
+        <article class="post-card">
+            <a href="/discover/{{ post.id }}/{{ post.slug }}/">
+                {% if post.image_url %}
+                <div class="post-card-image-wrap">
+                    {% if post.item_type == 'VIDEO' %}
+                    <div class="post-card-video-overlay">
+                        <span class="post-card-video-badge">&#9654; Video</span>
+                        <div class="post-card-play-btn"></div>
+                    </div>
+                    {% else %}
+                    <img class="post-card-image" src="{{ post.image_url }}" alt="{{ post.title }}" loading="lazy">
+                    {% endif %}
+                </div>
+                {% elif post.item_type == 'VIDEO' %}
+                <div class="post-card-image-wrap">
+                    <div class="post-card-video-overlay">
+                        <span class="post-card-video-badge">&#9654; Video</span>
+                        <div class="post-card-play-btn"></div>
+                    </div>
+                </div>
                 {% endif %}
-                <h2 class="post-card-title">{{ post.title }}</h2>
-                <p class="post-card-excerpt">{{ post.body }}</p>
-                {% if post.published_at %}
-                <time class="post-card-date" datetime="{{ post.published_at|date:'c' }}">{{ post.published_at|date:"d M Y" }}</time>
-                {% endif %}
-            </div>
-        </a>
-    </article>
+                <div class="post-card-body">
+                    <div class="post-card-header">
+                        {% if post.tag %}
+                        <span class="post-tag" style="color: {{ post.tag_color }}; background: {{ post.tag_color }}18;">{{ post.tag }}</span>
+                        {% endif %}
+                        {% if post.published_at %}
+                        <time class="post-card-date" datetime="{{ post.published_at|date:'c' }}">{{ post.published_at|date:"d M Y" }}</time>
+                        {% endif %}
+                    </div>
+                    <h2 class="post-card-title">{{ post.title }}</h2>
+                    <p class="post-card-excerpt">{{ post.body }}</p>
+                </div>
+            </a>
+        </article>
     {% endfor %}
+    </div>
+
+    {% if page.paginator.num_pages > 1 %}
+    <nav class="pagination" aria-label="Paginacion">
+        {% if page.has_previous %}
+        <a href="?page={{ page.previous_page_number }}" aria-label="Anterior">&larr; Anterior</a>
+        {% else %}
+        <span class="disabled">&larr; Anterior</span>
+        {% endif %}
+
+        {% for num in page.paginator.page_range %}
+            {% if num == page.number %}
+            <span class="current" aria-current="page">{{ num }}</span>
+            {% elif num == 1 or num == page.paginator.num_pages or num >= page.number|add:"-2" and num <= page.number|add:"2" %}
+            <a href="?page={{ num }}">{{ num }}</a>
+            {% elif num == 2 and page.number > 4 or num == page.paginator.num_pages|add:"-1" and page.number < page.paginator.num_pages|add:"-3" %}
+            <span class="ellipsis">&hellip;</span>
+            {% endif %}
+        {% endfor %}
+
+        {% if page.has_next %}
+        <a href="?page={{ page.next_page_number }}" aria-label="Siguiente">Siguiente &rarr;</a>
+        {% else %}
+        <span class="disabled">Siguiente &rarr;</span>
+        {% endif %}
+    </nav>
+    {% endif %}
+
 {% else %}
     <div class="empty-state">
         <p>No hay publicaciones disponibles en este momento.</p>
@@ -66,6 +120,6 @@
 <div class="app-cta">
     <h2>Descarga Confio</h2>
     <p>Envia y recibe dolares digitales sin comisiones. Protege tu dinero de la inflacion.</p>
-    <a href="/">Conoce mas</a>
+    <a href="/" class="app-cta-btn">Conoce mas</a>
 </div>
 {% endblock %}
