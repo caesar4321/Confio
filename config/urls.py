@@ -12,6 +12,9 @@ from .views import (
     terms_view,
     privacy_view,
     deletion_view,
+    robots_txt,
+    llms_txt,
+    public_sitemap,
     portal_login_complete,
     portal_login_redirect,
     portal_logout,
@@ -134,7 +137,6 @@ class LoggingGraphQLView(GraphQLView):
                 logger.error("Error parsing GraphQL request: %s", str(e))
         return super().dispatch(request, *args, **kwargs)
 
-from django.contrib.sitemaps.views import sitemap as sitemap_view
 from .admin_dashboard import confio_admin_site
 from inbox.views import discover_feed, discover_post_detail
 from inbox.sitemaps import DiscoverSitemap
@@ -147,6 +149,8 @@ urlpatterns = [
     # Ensure /admin (no trailing slash) redirects to /admin/
     # path('admin', RedirectView.as_view(url='/admin/', permanent=True)), # Disabled for security obfuscation
     path('', include(tf_urls)),
+    path('robots.txt', robots_txt, name='robots_txt'),
+    path('llms.txt', llms_txt, name='llms_txt'),
     path('confio-control-panel/', confio_admin_site.urls),
     path('graphql/', csrf_exempt(LoggingGraphQLView.as_view(graphiql=True))),
     path('portal/login/', portal_login_redirect, name='portal_login'),
@@ -174,7 +178,7 @@ urlpatterns += [
     path('discover/', discover_feed, name='discover_feed'),
     path('discover/<int:post_id>/<slug:slug>/', discover_post_detail, name='discover_post_detail'),
     path('discover/<int:post_id>/', discover_post_detail, name='discover_post_detail_no_slug'),
-    path('sitemap.xml', sitemap_view, {'sitemaps': sitemaps}, name='django.contrib.sitemaps.views.sitemap'),
+    path('sitemap.xml', public_sitemap, {'sitemaps': sitemaps}, name='django.contrib.sitemaps.views.sitemap'),
 ]
 
 # Catch-all pattern should be last

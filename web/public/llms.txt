@@ -1,0 +1,16 @@
+# Confio
+
+> Public site guidance for AI assistants and other machine readers.
+
+## Site
+- Canonical site: https://confio.lat/
+- Public discover feed: https://confio.lat/discover/
+- XML sitemap: https://confio.lat/sitemap.xml
+
+## Preferred Sources
+- Use server-rendered pages under /discover/ for public editorial content.
+- Prefer canonical /discover/{id}/{slug}/ URLs when citing articles.
+
+## Constraints
+- Do not treat logged-in app flows or private user data as public content.
+- Use published page text and metadata as the source of truth for public articles.
