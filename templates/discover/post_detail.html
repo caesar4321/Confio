@@ -1,0 +1,135 @@
+{% extends "discover/base.html" %}
+
+{% block title %}{{ post.title }} - Confio{% endblock %}
+
+{% block meta_description %}{{ post.body|truncatewords:30 }}{% endblock %}
+
+{% block canonical %}https://confio.lat/discover/{{ post.id }}/{{ post.slug }}/{% endblock %}
+
+{% block og_tags %}
+<meta property="og:title" content="{{ post.title }}">
+<meta property="og:description" content="{{ post.body|truncatewords:30 }}">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://confio.lat/discover/{{ post.id }}/{{ post.slug }}/">
+{% if post.image_url %}
+<meta property="og:image" content="{{ post.image_url }}">
+{% else %}
+<meta property="og:image" content="https://confio.lat/static/images/ConfioApp.jpeg">
+{% endif %}
+{% if post.published_at %}
+<meta property="article:published_time" content="{{ post.published_at|date:'c' }}">
+{% endif %}
+<meta property="article:section" content="{{ post.tag }}">
+{% endblock %}
+
+{% block twitter_card_type %}{% if post.image_url %}summary_large_image{% else %}summary{% endif %}{% endblock %}
+
+{% block twitter_tags %}
+<meta name="twitter:title" content="{{ post.title }}">
+<meta name="twitter:description" content="{{ post.body|truncatewords:30 }}">
+{% if post.image_url %}
+<meta name="twitter:image" content="{{ post.image_url }}">
+{% endif %}
+{% endblock %}
+
+{% block structured_data %}
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "Article",
+    "headline": "{{ post.title|escapejs }}",
+    "description": "{{ post.body|truncatewords:30|escapejs }}",
+    "url": "https://confio.lat/discover/{{ post.id }}/{{ post.slug }}/",
+    {% if post.image_url %}"image": "{{ post.image_url }}",{% endif %}
+    {% if post.published_at %}"datePublished": "{{ post.published_at|date:'c' }}",{% endif %}
+    "author": {
+        "@type": "Organization",
+        "name": "Confio"
+    },
+    "publisher": {
+        "@type": "Organization",
+        "name": "Confio",
+        "url": "https://confio.lat",
+        "logo": {
+            "@type": "ImageObject",
+            "url": "https://confio.lat/static/images/ConfioApp.jpeg"
+        }
+    },
+    "mainEntityOfPage": {
+        "@type": "WebPage",
+        "@id": "https://confio.lat/discover/{{ post.id }}/{{ post.slug }}/"
+    }
+}
+</script>
+{% endblock %}
+
+{% block breadcrumb %}
+<nav class="discover-nav" aria-label="Breadcrumb">
+    <a href="/discover/">&larr; Descubrir</a>
+    {% if post.tag %}
+    <span style="color: #ccc;">/</span>
+    <span style="font-size: 0.875rem; color: #666;">{{ post.tag }}</span>
+    {% endif %}
+</nav>
+{% endblock %}
+
+{% block content %}
+<article class="post-detail">
+    {% if post.tag %}
+    <span class="post-tag{% if post.item_type == 'VIDEO' %} post-tag--video{% elif post.item_type == 'NEWS' %} post-tag--news{% endif %}">{{ post.tag }}</span>
+    {% endif %}
+
+    <h1 class="post-detail-title">{{ post.title }}</h1>
+
+    <div class="post-detail-meta">
+        {% if post.published_at %}
+        <time datetime="{{ post.published_at|date:'c' }}">{{ post.published_at|date:"d M Y" }}</time>
+        {% endif %}
+    </div>
+
+    {% if post.image_url and not post.blocks %}
+    <img class="post-block-image" src="{{ post.image_url }}" alt="{{ post.title }}">
+    {% endif %}
+
+    {% if post.blocks %}
+        {% for block in post.blocks %}
+            {% if block.type == "title" %}
+                <h2 class="post-block-title">{{ block.text }}</h2>
+            {% elif block.type == "paragraph" %}
+                <p class="post-block-paragraph">{{ block.text }}</p>
+            {% elif block.type == "quote" %}
+                <blockquote class="post-block-quote">{{ block.text }}</blockquote>
+            {% elif block.type == "image" %}
+                <figure>
+                    <img class="post-block-image" src="{{ block.url }}" alt="{{ block.caption|default:post.title }}" loading="lazy">
+                    {% if block.caption %}
+                    <figcaption class="post-block-caption">{{ block.caption }}</figcaption>
+                    {% endif %}
+                </figure>
+            {% endif %}
+        {% endfor %}
+    {% else %}
+        <div class="post-block-paragraph">{{ post.body|linebreaksbr }}</div>
+    {% endif %}
+
+    {% if post.platform_links %}
+    <div class="platform-links">
+        {% for link in post.platform_links %}
+        <a class="platform-link" href="{{ link.url }}" target="_blank" rel="noopener noreferrer">
+            {% if link.platform == "TIKTOK" or link.platform == "tiktok" %}TikTok
+            {% elif link.platform == "INSTAGRAM" or link.platform == "instagram" %}Instagram
+            {% elif link.platform == "YOUTUBE" or link.platform == "youtube" %}YouTube
+            {% else %}{{ link.platform }}{% endif %}
+            &#8599;
+        </a>
+        {% endfor %}
+    </div>
+    {% endif %}
+</article>
+
+<div class="app-cta">
+    <h2>Lee mas en la app de Confio</h2>
+    <p>Descarga Confio para acceder a todo el contenido, reaccionar y recibir notificaciones.</p>
+    <a href="/">Descargar Confio</a>
+</div>
+{% endblock %}

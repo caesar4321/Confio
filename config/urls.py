@@ -134,7 +134,14 @@ class LoggingGraphQLView(GraphQLView):
                 logger.error("Error parsing GraphQL request: %s", str(e))
         return super().dispatch(request, *args, **kwargs)
 
+from django.contrib.sitemaps.views import sitemap as sitemap_view
 from .admin_dashboard import confio_admin_site
+from inbox.views import discover_feed, discover_post_detail
+from inbox.sitemaps import DiscoverSitemap
+
+sitemaps = {
+    'discover': DiscoverSitemap,
+}
 
 urlpatterns = [
     # Ensure /admin (no trailing slash) redirects to /admin/
@@ -161,6 +168,14 @@ from .views import index
 from .views import guardarian_transaction_proxy, guardarian_fiat_currencies
 from ramps.views import koywe_webhook
 from security.views import didit_webhook
+
+# Discover pages (server-rendered for SEO / crawlers)
+urlpatterns += [
+    path('discover/', discover_feed, name='discover_feed'),
+    path('discover/<int:post_id>/<slug:slug>/', discover_post_detail, name='discover_post_detail'),
+    path('discover/<int:post_id>/', discover_post_detail, name='discover_post_detail_no_slug'),
+    path('sitemap.xml', sitemap_view, {'sitemaps': sitemaps}, name='django.contrib.sitemaps.views.sitemap'),
+]
 
 # Catch-all pattern should be last
 urlpatterns += [

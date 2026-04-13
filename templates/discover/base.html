@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Descubrir - Confio{% endblock %}</title>
+
+    <!-- SEO Meta -->
+    <meta name="description" content="{% block meta_description %}Descubre noticias, guias y videos sobre dolares digitales, stablecoins y pagos en Latinoamerica con Confio.{% endblock %}">
+    <meta name="robots" content="index, follow">
+    <link rel="canonical" href="{% block canonical %}https://confio.lat/discover/{% endblock %}">
+
+    <!-- Open Graph -->
+    <meta property="og:site_name" content="Confio">
+    <meta property="og:locale" content="es_LA">
+    {% block og_tags %}
+    <meta property="og:title" content="Descubrir - Confio">
+    <meta property="og:description" content="Descubre noticias, guias y videos sobre dolares digitales, stablecoins y pagos en Latinoamerica.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://confio.lat/discover/">
+    <meta property="og:image" content="https://confio.lat/static/images/ConfioApp.jpeg">
+    {% endblock %}
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="{% block twitter_card_type %}summary{% endblock %}">
+    <meta name="twitter:site" content="@confio4world">
+    {% block twitter_tags %}{% endblock %}
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="/images/$CONFIO.png">
+
+    {% block structured_data %}{% endblock %}
+
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: #f8faf9;
+            color: #1a1a2e;
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .discover-header {
+            background: linear-gradient(135deg, #1DB587 0%, #159e74 100%);
+            color: white;
+            padding: 1.5rem 1rem;
+            text-align: center;
+        }
+
+        .discover-header a {
+            color: white;
+            text-decoration: none;
+        }
+
+        .discover-header h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+
+        .discover-header p {
+            font-size: 0.9rem;
+            opacity: 0.9;
+            margin-top: 0.25rem;
+        }
+
+        .discover-nav {
+            background: white;
+            border-bottom: 1px solid #e5e7eb;
+            padding: 0.75rem 1rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .discover-nav a {
+            color: #1DB587;
+            text-decoration: none;
+            font-weight: 500;
+            font-size: 0.875rem;
+        }
+
+        .discover-nav a:hover { text-decoration: underline; }
+
+        .container {
+            max-width: 720px;
+            margin: 0 auto;
+            padding: 1.5rem 1rem;
+        }
+
+        /* Feed styles */
+        .post-card {
+            background: white;
+            border-radius: 12px;
+            overflow: hidden;
+            margin-bottom: 1.25rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            transition: box-shadow 0.2s;
+        }
+
+        .post-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.12); }
+
+        .post-card a { text-decoration: none; color: inherit; display: block; }
+
+        .post-card-image {
+            width: 100%;
+            height: 200px;
+            object-fit: cover;
+            display: block;
+        }
+
+        .post-card-body { padding: 1rem 1.25rem; }
+
+        .post-tag {
+            display: inline-block;
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #1DB587;
+            background: #e6f9f1;
+            padding: 0.2rem 0.6rem;
+            border-radius: 4px;
+            margin-bottom: 0.5rem;
+        }
+
+        .post-tag--video { color: #FF4444; background: #ffecec; }
+        .post-tag--news { color: #F59E0B; background: #fef3cd; }
+
+        .post-card-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 0.4rem;
+            line-height: 1.35;
+        }
+
+        .post-card-excerpt {
+            font-size: 0.875rem;
+            color: #555;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .post-card-date {
+            font-size: 0.75rem;
+            color: #999;
+            margin-top: 0.75rem;
+        }
+
+        /* Detail styles */
+        .post-detail { background: white; border-radius: 12px; padding: 2rem 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+        .post-detail-title { font-size: 1.75rem; font-weight: 700; margin-bottom: 0.75rem; line-height: 1.3; }
+        .post-detail-meta { font-size: 0.8rem; color: #999; margin-bottom: 1.5rem; }
+
+        .post-block-title { font-size: 1.25rem; font-weight: 600; margin: 1.5rem 0 0.75rem; }
+        .post-block-paragraph { margin-bottom: 1rem; font-size: 1rem; color: #333; }
+        .post-block-quote {
+            border-left: 3px solid #1DB587;
+            padding: 0.75rem 1rem;
+            margin: 1rem 0;
+            background: #f0fdf7;
+            font-style: italic;
+            color: #444;
+        }
+        .post-block-image { max-width: 100%; border-radius: 8px; margin: 1rem 0; }
+        .post-block-caption { font-size: 0.8rem; color: #888; text-align: center; margin-top: 0.25rem; }
+
+        .platform-links { margin-top: 2rem; display: flex; gap: 0.75rem; flex-wrap: wrap; }
+        .platform-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            background: #f3f4f6;
+            color: #333;
+            text-decoration: none;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+        .platform-link:hover { background: #e5e7eb; }
+
+        .discover-footer {
+            text-align: center;
+            padding: 2rem 1rem;
+            font-size: 0.8rem;
+            color: #999;
+        }
+
+        .discover-footer a { color: #1DB587; text-decoration: none; }
+        .discover-footer a:hover { text-decoration: underline; }
+
+        .app-cta {
+            background: linear-gradient(135deg, #1DB587 0%, #159e74 100%);
+            color: white;
+            text-align: center;
+            padding: 2rem 1.5rem;
+            border-radius: 12px;
+            margin-top: 2rem;
+        }
+        .app-cta h2 { font-size: 1.25rem; margin-bottom: 0.5rem; }
+        .app-cta p { font-size: 0.9rem; opacity: 0.9; margin-bottom: 1rem; }
+        .app-cta a {
+            display: inline-block;
+            background: white;
+            color: #1DB587;
+            padding: 0.6rem 1.5rem;
+            border-radius: 8px;
+            font-weight: 600;
+            text-decoration: none;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem 1rem;
+            color: #999;
+        }
+    </style>
+    {% block extra_styles %}{% endblock %}
+</head>
+<body>
+    <header class="discover-header">
+        <a href="/discover/">
+            <h1>Confio</h1>
+            <p>Descubrir</p>
+        </a>
+    </header>
+
+    {% block breadcrumb %}{% endblock %}
+
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="discover-footer">
+        <p>&copy; 2024-2026 Confio. <a href="/">Inicio</a> &middot; <a href="/terms/">Terminos</a> &middot; <a href="/privacy/">Privacidad</a></p>
+        <p style="margin-top: 0.5rem;">#Confio #RetoConfio #LogroConfio #AppDeDolares #DolarDigital</p>
+    </footer>
+</body>
+</html>

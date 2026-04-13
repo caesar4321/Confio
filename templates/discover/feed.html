@@ -1,0 +1,71 @@
+{% extends "discover/base.html" %}
+{% load tz %}
+
+{% block title %}Descubrir - Confio | Noticias y guias sobre dolares digitales{% endblock %}
+
+{% block structured_data %}
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "CollectionPage",
+    "name": "Confio - Descubrir",
+    "description": "Noticias, guias y videos sobre dolares digitales, stablecoins y pagos en Latinoamerica.",
+    "url": "https://confio.lat/discover/",
+    "publisher": {
+        "@type": "Organization",
+        "name": "Confio",
+        "url": "https://confio.lat",
+        "logo": {
+            "@type": "ImageObject",
+            "url": "https://confio.lat/static/images/ConfioApp.jpeg"
+        }
+    },
+    "mainEntity": {
+        "@type": "ItemList",
+        "itemListElement": [
+            {% for post in posts %}
+            {
+                "@type": "ListItem",
+                "position": {{ forloop.counter }},
+                "url": "https://confio.lat/discover/{{ post.id }}/{{ post.slug }}/"
+            }{% if not forloop.last %},{% endif %}
+            {% endfor %}
+        ]
+    }
+}
+</script>
+{% endblock %}
+
+{% block content %}
+{% if posts %}
+    {% for post in posts %}
+    <article class="post-card">
+        <a href="/discover/{{ post.id }}/{{ post.slug }}/">
+            {% if post.image_url %}
+            <img class="post-card-image" src="{{ post.image_url }}" alt="{{ post.title }}" loading="lazy">
+            {% endif %}
+            <div class="post-card-body">
+                {% if post.tag %}
+                <span class="post-tag{% if post.item_type == 'VIDEO' %} post-tag--video{% elif post.item_type == 'NEWS' %} post-tag--news{% endif %}">{{ post.tag }}</span>
+                {% endif %}
+                <h2 class="post-card-title">{{ post.title }}</h2>
+                <p class="post-card-excerpt">{{ post.body }}</p>
+                {% if post.published_at %}
+                <time class="post-card-date" datetime="{{ post.published_at|date:'c' }}">{{ post.published_at|date:"d M Y" }}</time>
+                {% endif %}
+            </div>
+        </a>
+    </article>
+    {% endfor %}
+{% else %}
+    <div class="empty-state">
+        <p>No hay publicaciones disponibles en este momento.</p>
+    </div>
+{% endif %}
+
+<div class="app-cta">
+    <h2>Descarga Confio</h2>
+    <p>Envia y recibe dolares digitales sin comisiones. Protege tu dinero de la inflacion.</p>
+    <a href="/">Conoce mas</a>
+</div>
+{% endblock %}

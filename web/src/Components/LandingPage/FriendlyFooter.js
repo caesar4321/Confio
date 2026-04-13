@@ -18,7 +18,10 @@ const FriendlyFooter = () => {
           </div>
           
           <div className={styles.links}>
-            <h4 className={styles.linksTitle}>{t('Legal', 'Legal', '법률')}</h4>
+            <h4 className={styles.linksTitle}>{t('Explorar', 'Explore', '탐색')}</h4>
+            <a href="/discover/" className={styles.link}>
+              {t('Descubrir', 'Discover', '발견하기')}
+            </a>
             <Link to="/terms" className={styles.link}>
               {t('Términos de Servicio', 'Terms of Service', '서비스 약관')}
             </Link>
