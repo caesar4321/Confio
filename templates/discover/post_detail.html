@@ -1,6 +1,6 @@
 {% extends "discover/base.html" %}
 
-{% block title %}{{ post.title }} - Confio{% endblock %}
+{% block title %}{{ post.title }} - Confío{% endblock %}
 
 {% block meta_description %}{{ post.body|truncatewords:30 }}{% endblock %}
 
@@ -44,11 +44,11 @@
     {% if post.published_at %}"datePublished": "{{ post.published_at|date:'c' }}",{% endif %}
     "author": {
         "@type": "Organization",
-        "name": "Confio"
+        "name": "Confío"
     },
     "publisher": {
         "@type": "Organization",
-        "name": "Confio",
+        "name": "Confío",
         "url": "https://confio.lat",
         "logo": {
             "@type": "ImageObject",
@@ -133,8 +133,8 @@
 </article>
 
 <div class="app-cta">
-    <h2>Lee mas en la app de Confio</h2>
-    <p>Descarga Confio para acceder a todo el contenido, reaccionar y recibir notificaciones.</p>
-    <a href="/" class="app-cta-btn">Descargar Confio</a>
+    <h2>Lee mas en la app de Confío</h2>
+    <p>Descarga Confío para acceder a todo el contenido, reaccionar y recibir notificaciones.</p>
+    <a href="/" class="app-cta-btn">Descargar Confío</a>
 </div>
 {% endblock %}
