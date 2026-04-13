@@ -17,8 +17,17 @@ export const getFriendlyRampError = (rawError?: string | null): string => {
     return 'Este medio de pago no está disponible por el momento. Prueba con otro método.';
   }
 
-  if (normalized.includes('invalid address')) {
+  if (
+    normalized.includes('the active account does not have a destination wallet address configured')
+  ) {
     return 'No pudimos preparar la compra por un problema con la dirección de destino. Inténtalo de nuevo en unos segundos.';
+  }
+
+  if (
+    normalized.includes('invalid address') &&
+    normalized.includes('different country than the document')
+  ) {
+    return 'No pudimos preparar la compra porque los datos del perfil no coinciden con el país de la operación. Revisa tu documento y país e inténtalo de nuevo.';
   }
 
   if (normalized.includes('koywe credentials are not configured')) {
