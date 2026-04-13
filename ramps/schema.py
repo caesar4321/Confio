@@ -10,7 +10,7 @@ from django.core.validators import validate_email
 from django.utils import timezone
 
 from security.didit import ISO2_TO_ISO3
-from security.models import IdentityVerification
+from security.models import IdentityVerification, normalize_document_number
 from users.models import Account, BankInfo, Country
 from ramps.models import KoyweBankInfo, RampPaymentMethod, RampTransaction, RampUserAddress
 from ramps.koywe_sync import sync_koywe_ramp_transaction_from_order, upsert_koywe_ramp_transaction
@@ -752,6 +752,11 @@ class CreateRampOrder(graphene.Mutation):
             )
             _store_koywe_auth_email(user=user, auth_email=koywe_email)
             external_id = f'confio-ramp-{normalized_direction.lower()}-{timezone.now().strftime("%Y%m%d%H%M%S")}'
+            contact_profile = _get_koywe_contact_profile(
+                user=user,
+                country_code=resolved_country_code,
+                email_override=koywe_email,
+            )
             result = client.create_ramp_order(
                 direction=normalized_direction,
                 amount=decimal_amount,
@@ -762,12 +767,11 @@ class CreateRampOrder(graphene.Mutation):
                 country_code=resolved_country_code,
                 bank_info=bank_info,
                 external_id=external_id,
-                contact_profile=_get_koywe_contact_profile(
-                    user=user,
+                contact_profile=contact_profile,
+                previous_emails=_get_koywe_previous_emails(
                     country_code=resolved_country_code,
-                    email_override=koywe_email,
+                    document_number=contact_profile.get('documentNumber') or '',
                 ),
-                previous_emails=_get_koywe_previous_emails(country_code=resolved_country_code),
             )
         except KoyweConfigurationError as exc:
             return RampOrderType(success=False, error=str(exc))
@@ -1317,14 +1321,46 @@ def _get_koywe_test_account_override(*, user, country_code: str) -> dict[str, st
     return _KOYWE_TEST_ACCOUNT_OVERRIDES.get((country_code or '').strip().upper())
 
 
-def _get_koywe_previous_emails(*, country_code: str) -> list[str]:
-    """Return known previous emails that may hold an existing Koywe account for this country."""
+def _get_koywe_previous_emails(*, country_code: str, document_number: str) -> list[str]:
+    """Return emails that may hold an existing Koywe account for this document.
+
+    Queries IdentityVerification for all users sharing the same document number
+    and collects their user emails plus any stored ramp auth emails. Also includes
+    the test override email for the country, since accounts may have been created
+    under test identities.
+    """
+    normalized_doc = normalize_document_number(document_number)
+    emails: list[str] = []
+    if normalized_doc:
+        verifications = (
+            IdentityVerification.objects
+            .filter(document_number_normalized=normalized_doc, status='verified')
+            .select_related('user', 'user__ramp_user_address')
+        )
+        for v in verifications:
+            user = v.user
+            if user:
+                user_email = str(getattr(user, 'email', '') or '').strip().lower()
+                if user_email:
+                    emails.append(user_email)
+                ramp_email = str(
+                    getattr(getattr(user, 'ramp_user_address', None), 'auth_email', '') or ''
+                ).strip().lower()
+                if ramp_email:
+                    emails.append(ramp_email)
     override = _KOYWE_TEST_ACCOUNT_OVERRIDES.get((country_code or '').strip().upper())
     if override:
-        email = str(override.get('email') or '').strip()
-        if email:
-            return [email]
-    return []
+        override_email = str(override.get('email') or '').strip().lower()
+        if override_email:
+            emails.append(override_email)
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    unique: list[str] = []
+    for e in emails:
+        if e not in seen:
+            seen.add(e)
+            unique.append(e)
+    return unique
 
 
 def _get_koywe_auth_email(*, user, country_code: str, email_override: str | None = None) -> str:
