@@ -334,11 +334,6 @@ class KoyweClient:
         if normalized_email:
             payload['email'] = normalized_email
 
-        logger.info(
-            'Koywe authenticate request',
-            extra={'koywe_email': normalized_email},
-        )
-
         response = self.session.post(
             f'{self.base_url}/rest/auth',
             json=payload,
@@ -355,10 +350,6 @@ class KoyweClient:
     def _request(self, method: str, path: str, *, email: str | None = None, params: dict[str, Any] | None = None, json_payload: dict[str, Any] | None = None, auth: bool = True) -> dict[str, Any]:
         headers = {'Content-Type': 'application/json'}
         normalized_email = str(email or '').strip() or None
-        logger.info(
-            'Koywe request %s %s email=%s payload=%s',
-            method, path, normalized_email, json_payload,
-        )
         if auth:
             headers['Authorization'] = f'Bearer {self.authenticate(email=normalized_email)}'
         try:
@@ -372,11 +363,6 @@ class KoyweClient:
             )
         except requests.RequestException as exc:
             raise KoyweError(f'Koywe request failed: {method} {path}: {exc}') from exc
-        logger.info(
-            'Koywe response %s %s status=%s email=%s body=%s',
-            method, path, response.status_code, normalized_email,
-            response.text[:500] if response.text else '',
-        )
         return self._parse_response(response, f'Koywe request failed: {method} {path}')
 
     def _parse_response(self, response: requests.Response, default_message: str) -> dict[str, Any]:
@@ -498,11 +484,6 @@ class KoyweClient:
             payload['destinationAddress'] = destination_address
         if external_id:
             payload['externalId'] = external_id
-        logger.info(
-            'Koywe create_order attempt quote=%s email=%s dest=%s doc=%s',
-            quote_id, str(email or '').strip() or None,
-            destination_address, document_number,
-        )
         return self._request('POST', '/rest/orders', email=email, json_payload=payload)
 
     def get_order(self, *, order_id: str, email: str | None = None) -> dict[str, Any]:
@@ -614,11 +595,6 @@ class KoyweClient:
             contact_profile=contact_profile,
             country_code=country_code,
         )
-        logger.info(
-            'Koywe create_ramp_order input direction=%s fiat=%s method=%s country=%s email=%s wallet=%s profile=%s',
-            normalized_direction, fiat_symbol, payment_method_code, country_code,
-            str(email or '').strip() or None, wallet_address, normalized_contact_profile,
-        )
         resolved_email = self.ensure_account_profile(
             email=email,
             country_code=country_code,
@@ -626,10 +602,6 @@ class KoyweClient:
             previous_emails=previous_emails,
         )
         if resolved_email:
-            logger.info(
-                'Koywe create_ramp_order email resolved from %s to %s',
-                email, resolved_email,
-            )
             email = resolved_email
         payment_method_id, payment_method_display = self.resolve_payment_provider(
             fiat_symbol=fiat_symbol,
@@ -765,21 +737,9 @@ class KoyweClient:
         if not payload:
             return None
 
-        logger.info(
-            'Koywe ensure_account_profile start country=%s email=%s doc=%s',
-            country_code, normalized_email, document_number,
-        )
         try:
-            logger.info(
-                'Koywe ensure_account_profile create attempt country=%s email=%s',
-                country_code, normalized_email,
-            )
             self._request('POST', '/rest/accounts', email=normalized_email, json_payload=payload)
         except KoyweError as exc:
-            logger.warning(
-                'Koywe ensure_account_profile create failed country=%s email=%s error=%s',
-                country_code, normalized_email, exc,
-            )
             if self._is_existing_account_error(str(exc)):
                 resolved = self._ensure_existing_account_profile(
                     email=normalized_email,
@@ -801,16 +761,8 @@ class KoyweClient:
         *email*, so callers can use the correct email for subsequent API calls.
         """
         try:
-            logger.info(
-                'Koywe ensure_existing_account_profile get attempt country=%s email=%s',
-                country_code, email,
-            )
             existing = self.get_account(email=email)
-        except KoyweError as exc:
-            logger.warning(
-                'Koywe ensure_existing_account_profile get failed country=%s email=%s error=%s',
-                country_code, email, exc,
-            )
+        except KoyweError:
             existing = {}
 
         # If account not found by current email, try previous emails.
@@ -821,33 +773,16 @@ class KoyweClient:
                 if not prev_email or prev_email == email:
                     continue
                 try:
-                    logger.info(
-                        'Koywe ensure_existing_account_profile fallback get country=%s prev_email=%s',
-                        country_code, prev_email,
-                    )
                     existing = self.get_account(email=prev_email)
                     if existing:
-                        logger.info(
-                            'Koywe ensure_existing_account_profile found under prev_email=%s, using for flow',
-                            prev_email,
-                        )
-                        # Update the profile data under the old email
                         self.update_account(email=prev_email, payload=payload)
                         return prev_email
                 except KoyweError:
                     continue
 
         if self._account_profile_satisfies_payload(existing, payload):
-            logger.info(
-                'Koywe ensure_existing_account_profile already_satisfied country=%s email=%s',
-                country_code, email,
-            )
             return None
 
-        logger.info(
-            'Koywe ensure_existing_account_profile update attempt country=%s email=%s',
-            country_code, email,
-        )
         self.update_account(email=email, payload=payload)
         return None
 

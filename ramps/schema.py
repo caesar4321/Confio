@@ -739,17 +739,6 @@ class CreateRampOrder(graphene.Mutation):
                 country_code=resolved_country_code,
                 email_override=auth_email,
             )
-            logger.info(
-                'CreateRampOrder resolved Koywe email',
-                extra={
-                    'user_id': getattr(user, 'id', None),
-                    'country_code': resolved_country_code,
-                    'direction': normalized_direction,
-                    'payment_method_code': payment_method_code,
-                    'email_override': str(auth_email or '').strip() or None,
-                    'koywe_email': koywe_email,
-                },
-            )
             _store_koywe_auth_email(user=user, auth_email=koywe_email)
             external_id = f'confio-ramp-{normalized_direction.lower()}-{timezone.now().strftime("%Y%m%d%H%M%S")}'
             contact_profile = _get_koywe_contact_profile(
