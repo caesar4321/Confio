@@ -1310,8 +1310,6 @@ def _get_koywe_destination_address(*, current_account) -> str | None:
 def _get_koywe_test_account_override(*, user, country_code: str) -> dict[str, str] | None:
     if not user:
         return None
-    if str(getattr(settings, 'KOYWE_ENV', '') or '').strip().lower() in {'production', 'prod'}:
-        return None
     username = str(getattr(user, 'username', '') or '').strip().lower()
     if username not in _KOYWE_TEST_OVERRIDE_USERNAMES:
         return None
