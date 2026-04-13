@@ -767,6 +767,7 @@ class CreateRampOrder(graphene.Mutation):
                     country_code=resolved_country_code,
                     email_override=koywe_email,
                 ),
+                previous_emails=_get_koywe_previous_emails(country_code=resolved_country_code),
             )
         except KoyweConfigurationError as exc:
             return RampOrderType(success=False, error=str(exc))
@@ -1314,6 +1315,16 @@ def _get_koywe_test_account_override(*, user, country_code: str) -> dict[str, st
     if username not in _KOYWE_TEST_OVERRIDE_USERNAMES:
         return None
     return _KOYWE_TEST_ACCOUNT_OVERRIDES.get((country_code or '').strip().upper())
+
+
+def _get_koywe_previous_emails(*, country_code: str) -> list[str]:
+    """Return known previous emails that may hold an existing Koywe account for this country."""
+    override = _KOYWE_TEST_ACCOUNT_OVERRIDES.get((country_code or '').strip().upper())
+    if override:
+        email = str(override.get('email') or '').strip()
+        if email:
+            return [email]
+    return []
 
 
 def _get_koywe_auth_email(*, user, country_code: str, email_override: str | None = None) -> str:

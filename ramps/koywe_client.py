@@ -508,7 +508,7 @@ class KoyweClient:
     def get_order(self, *, order_id: str, email: str | None = None) -> dict[str, Any]:
         return self._request('GET', f'/rest/orders/{order_id}', email=email)
 
-    def create_bank_account(self, *, bank_info: Any, email: str | None, country_code: str, fiat_symbol: str, contact_profile: dict[str, Any] | None = None) -> dict[str, Any]:
+    def create_bank_account(self, *, bank_info: Any, email: str | None, country_code: str, fiat_symbol: str, contact_profile: dict[str, Any] | None = None, previous_emails: list[str] | None = None) -> dict[str, Any]:
         alpha3 = _COUNTRY_ALPHA3.get((country_code or '').upper(), (country_code or '').upper())
         normalized_contact_profile = self._normalize_contact_profile(
             contact_profile=contact_profile,
@@ -518,6 +518,7 @@ class KoyweClient:
             email=email,
             country_code=country_code,
             contact_profile=normalized_contact_profile,
+            previous_emails=previous_emails,
         )
         provider_metadata = getattr(bank_info, 'provider_metadata', None) or {}
         payment_method = getattr(bank_info, 'payment_method', None)
@@ -603,7 +604,7 @@ class KoyweClient:
             return None
         return _BANK_CODE_ALIASES.get(normalized_country, {}).get(normalized_name)
 
-    def create_ramp_order(self, *, direction: str, amount: Decimal, fiat_symbol: str, payment_method_code: str, email: str | None, wallet_address: str | None, country_code: str, bank_info: Any = None, external_id: str | None = None, contact_profile: dict[str, Any] | None = None) -> KoyweOrderResult:
+    def create_ramp_order(self, *, direction: str, amount: Decimal, fiat_symbol: str, payment_method_code: str, email: str | None, wallet_address: str | None, country_code: str, bank_info: Any = None, external_id: str | None = None, contact_profile: dict[str, Any] | None = None, previous_emails: list[str] | None = None) -> KoyweOrderResult:
         normalized_direction = direction.upper()
         if normalized_direction == 'ON_RAMP' and not wallet_address:
             raise KoyweError('The active account does not have a destination wallet address configured')
@@ -620,6 +621,7 @@ class KoyweClient:
             email=email,
             country_code=country_code,
             contact_profile=normalized_contact_profile,
+            previous_emails=previous_emails,
         )
         payment_method_id, payment_method_display = self.resolve_payment_provider(
             fiat_symbol=fiat_symbol,
@@ -647,6 +649,7 @@ class KoyweClient:
                 country_code=country_code,
                 fiat_symbol=fiat_symbol,
                 contact_profile=normalized_contact_profile,
+                previous_emails=previous_emails,
             )
             created_bank_account_id = str(bank_account.get('_id') or bank_account.get('id') or bank_account.get('bankAccountId') or '')
             if not created_bank_account_id:
@@ -723,7 +726,7 @@ class KoyweClient:
 
         raise KoyweError(f'Document type "{document_type or "unknown"}" is not mapped for Koywe delegated KYC in country {normalized_country}')
 
-    def ensure_account_profile(self, *, email: str | None, country_code: str, contact_profile: dict[str, Any] | None = None) -> None:
+    def ensure_account_profile(self, *, email: str | None, country_code: str, contact_profile: dict[str, Any] | None = None, previous_emails: list[str] | None = None) -> None:
         normalized_contact = self._normalize_contact_profile(
             contact_profile=contact_profile,
             country_code=country_code,
@@ -768,6 +771,7 @@ class KoyweClient:
                     email=normalized_email,
                     country_code=country_code,
                     payload=payload,
+                    previous_emails=previous_emails,
                 )
                 cache.set(cache_key, True, timeout=_ACCOUNT_PROFILE_SYNC_CACHE_TTL)
                 return
@@ -775,7 +779,7 @@ class KoyweClient:
 
         cache.set(cache_key, True, timeout=_ACCOUNT_PROFILE_SYNC_CACHE_TTL)
 
-    def _ensure_existing_account_profile(self, *, email: str, country_code: str, payload: dict[str, Any]) -> None:
+    def _ensure_existing_account_profile(self, *, email: str, country_code: str, payload: dict[str, Any], previous_emails: list[str] | None = None) -> None:
         try:
             logger.info(
                 'Koywe ensure_existing_account_profile get attempt country=%s email=%s',
@@ -788,6 +792,30 @@ class KoyweClient:
                 country_code, email, exc,
             )
             existing = {}
+
+        # If account not found by current email, try previous emails (e.g. test override emails).
+        # The account may exist under an old email with the same document number.
+        if not existing and previous_emails:
+            for prev_email in previous_emails:
+                prev_email = str(prev_email or '').strip().lower()
+                if not prev_email or prev_email == email:
+                    continue
+                try:
+                    logger.info(
+                        'Koywe ensure_existing_account_profile fallback get country=%s prev_email=%s',
+                        country_code, prev_email,
+                    )
+                    existing = self.get_account(email=prev_email)
+                    if existing:
+                        logger.info(
+                            'Koywe ensure_existing_account_profile found under prev_email=%s, updating to email=%s',
+                            prev_email, email,
+                        )
+                        payload['email'] = email
+                        self.update_account(email=prev_email, payload=payload)
+                        return
+                except KoyweError:
+                    continue
 
         if self._account_profile_satisfies_payload(existing, payload):
             logger.info(
