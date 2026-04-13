@@ -72,8 +72,8 @@ COUNTRY_METHODS = {
         "network_fee_fiat": Decimal("0.13"),
         "on_ramp_min_amount": Decimal("1"),
         "on_ramp_max_amount": Decimal("56000"),
-        "off_ramp_min_amount": Decimal("0.10"),
-        "off_ramp_max_amount": Decimal("5622.87"),
+        "off_ramp_min_amount": Decimal("0"),
+        "off_ramp_max_amount": Decimal("0"),
         "methods": [
             {
                 "code": "QRI-BO",
@@ -85,7 +85,7 @@ COUNTRY_METHODS = {
                 "requires_phone": False,
                 "requires_email": False,
                 "supports_on_ramp": True,
-                "supports_off_ramp": True,
+                "supports_off_ramp": False,
             },
         ],
     },

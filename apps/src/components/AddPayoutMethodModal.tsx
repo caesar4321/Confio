@@ -28,11 +28,10 @@ import Svg, { Defs, LinearGradient, Stop, Rect, Circle } from 'react-native-svg'
 import { colors } from '../config/theme';
 
 // Colors matching app design
-const KOYWE_SUPPORTED_COUNTRY_CODES = ['AR', 'BO', 'BR', 'CL', 'CO', 'MX', 'PE'];
-const FIRST_NAME_ONLY_METHOD_CODES = new Set(['QRI-AR', 'QRI', 'QRI-BO', 'SIP-QR', 'QRI-PE', 'LIGO']);
+const KOYWE_SUPPORTED_COUNTRY_CODES = ['AR', 'BR', 'CL', 'CO', 'MX', 'PE'];
+const FIRST_NAME_ONLY_METHOD_CODES = new Set(['QRI-AR', 'QRI', 'SIP-QR', 'QRI-PE', 'LIGO']);
 const SAVABLE_PAYMENT_METHOD_CODES = new Set([
   'WIREAR',
-  'QRI-BO',
   'SULPAYMENTS',
   'WIRECL',
   'NEQUI',
@@ -589,7 +588,7 @@ export const AddPayoutMethodModal = ({
       };
     }
 
-    if (FIRST_NAME_ONLY_METHOD_CODES.has(methodCode) && methodCode !== 'QRI-BO' && methodCode !== 'QRI-PE') {
+    if (FIRST_NAME_ONLY_METHOD_CODES.has(methodCode) && methodCode !== 'QRI-PE') {
       return {
         account: { ...defaultAccount, show: false, required: false },
         phone: { ...defaultPhone, show: false, required: false },
@@ -652,14 +651,6 @@ export const AddPayoutMethodModal = ({
         phone: { ...defaultPhone, show: false, required: false },
         email: { ...defaultEmail, show: false, required: false },
         holderLabel: 'Titular de la cuenta',
-      };
-    }
-    if (countryCode === 'BO' && methodCode === 'QRI-BO') {
-      return {
-        account: { ...defaultAccount, show: false, required: false },
-        phone: { ...defaultPhone, label: 'Teléfono de la billetera', placeholder: 'Número asociado a la billetera', show: true, required: true },
-        email: { ...defaultEmail, show: false, required: false },
-        holderLabel: 'Titular de la billetera',
       };
     }
     return {
@@ -789,17 +780,6 @@ export const AddPayoutMethodModal = ({
           label: 'CCI (opcional)',
           placeholder: 'Código de Cuenta Interbancario',
           keyboardType: 'numeric',
-        },
-      ];
-    }
-
-    if (countryCode === 'BO' && methodCode === 'QRI-BO') {
-      return [
-        {
-          key: 'walletApp',
-          label: 'App o banco del QR',
-          placeholder: 'Banco o billetera que recibirá el QR',
-          helpText: 'Sirve para identificar la app que el usuario usará con el QR interoperable.',
         },
       ];
     }

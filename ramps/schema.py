@@ -693,6 +693,8 @@ class CreateRampOrder(graphene.Mutation):
         normalized_direction = (direction or '').strip().upper()
         if normalized_direction not in {'ON_RAMP', 'OFF_RAMP'}:
             return RampOrderType(success=False, error='direction must be ON_RAMP or OFF_RAMP')
+        if resolved_country_code == 'BO' and normalized_direction == 'OFF_RAMP':
+            return RampOrderType(success=False, error='Bolivia off-ramp is not yet enabled by Koywe')
 
         try:
             decimal_amount = Decimal(str(amount))
@@ -837,6 +839,8 @@ class CreateMockRampOrder(graphene.Mutation):
         normalized_direction = (direction or "").strip().upper()
         if normalized_direction not in {"ON_RAMP", "OFF_RAMP"}:
             return RampOrderType(success=False, error="direction must be ON_RAMP or OFF_RAMP")
+        if resolved_country_code == "BO" and normalized_direction == "OFF_RAMP":
+            return RampOrderType(success=False, error="Bolivia off-ramp is not yet enabled by Koywe")
 
         try:
             decimal_amount = Decimal(str(amount))
