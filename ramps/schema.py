@@ -1436,15 +1436,20 @@ def _is_ramp_address_complete(value) -> bool:
 def _get_koywe_contact_profile(*, user, country_code: str, email_override: str | None = None) -> dict[str, str]:
     verification = _get_latest_personal_verification(user)
     override = _get_koywe_test_account_override(user=user, country_code=country_code)
+    normalized_email_override = str(email_override or '').strip().lower()
+    override_email = str((override or {}).get('email') or '').strip().lower()
+    use_override_identity = bool(override) and (
+        not normalized_email_override or normalized_email_override == override_email
+    )
 
     first_name = str(
-        (override or {}).get('firstName')
+        (override or {}).get('firstName') if use_override_identity else ''
         or getattr(verification, 'verified_first_name', None)
         or getattr(user, 'first_name', None)
         or ''
     ).strip()
     last_name = str(
-        (override or {}).get('lastName')
+        (override or {}).get('lastName') if use_override_identity else ''
         or getattr(verification, 'verified_last_name', None)
         or getattr(user, 'last_name', None)
         or ''
@@ -1460,7 +1465,7 @@ def _get_koywe_contact_profile(*, user, country_code: str, email_override: str |
         'email': email,
         'phone': phone,
     }
-    if override:
+    if use_override_identity:
         profile['documentNumber'] = str(override.get('documentNumber') or '').strip()
         profile['documentType'] = str(override.get('documentType') or '').strip()
     elif verification:
