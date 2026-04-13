@@ -583,6 +583,7 @@ def build_ramp_field_schema(*, country_code: str, method: dict) -> dict:
                 "placeholder": "Selecciona el banco",
                 "required": True,
                 "picker": "bank",
+                "helpText": "Koywe exige identificar el banco receptor además del CCI para registrar el cobro en Perú.",
             },
         ]
     elif country_code == "PE" and code == "RECAUDO-PE":
