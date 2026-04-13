@@ -352,6 +352,76 @@
             flex: 1;
         }
 
+        .post-card-actions,
+        .post-detail-actions {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+
+        .post-card-actions {
+            padding: 0 1.25rem 1.1rem;
+        }
+
+        .post-detail-actions {
+            margin-top: 1.25rem;
+            padding-top: 1.25rem;
+            border-top: 1px solid #F3F4F6;
+        }
+
+        .reaction-group {
+            display: flex;
+            align-items: center;
+            gap: 0.45rem;
+            flex-wrap: wrap;
+        }
+
+        .reaction-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            padding: 0.38rem 0.65rem;
+            border-radius: 999px;
+            background: #F8FAFC;
+            border: 1px solid #E5E7EB;
+            font-size: 0.78rem;
+            font-weight: 600;
+            color: #475467;
+        }
+
+        .reaction-pill-emoji {
+            font-size: 0.9rem;
+            line-height: 1;
+        }
+
+        .reaction-empty {
+            font-size: 0.78rem;
+            color: #98A2B3;
+        }
+
+        .share-button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.45rem;
+            border: 1px solid #D0D5DD;
+            background: #FFFFFF;
+            color: #344054;
+            border-radius: 999px;
+            padding: 0.5rem 0.95rem;
+            font-size: 0.78rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background 0.2s, border-color 0.2s, color 0.2s;
+        }
+
+        .share-button:hover {
+            background: #F9FAFB;
+            border-color: #98A2B3;
+        }
+
         /* ── Pagination ── */
         .pagination {
             display: flex;
@@ -676,6 +746,12 @@
             .post-card { border-radius: 16px; }
             .post-card-body { padding: 0.875rem 1rem 1rem; }
 
+            .post-card-actions,
+            .post-detail-actions {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+
             .post-detail {
                 border-radius: 0;
                 padding: 1.5rem 1rem;
@@ -749,5 +825,34 @@
             <div class="footer-hashtags">#LATAM #Stablecoin #Blockchain #NonCustodial #ConfioDollar</div>
         </div>
     </footer>
+    <script>
+        async function shareDiscoverPost(button) {
+            const url = button.getAttribute('data-share-url');
+            const title = button.getAttribute('data-share-title') || 'Confio';
+            if (!url) {
+                return;
+            }
+
+            try {
+                if (navigator.share) {
+                    await navigator.share({ title, url });
+                    return;
+                }
+
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    await navigator.clipboard.writeText(url);
+                    const originalLabel = button.textContent;
+                    button.textContent = 'Copiado';
+                    setTimeout(() => {
+                        button.textContent = originalLabel;
+                    }, 1500);
+                    return;
+                }
+            } catch (error) {
+            }
+
+            window.prompt('Copia este enlace:', url);
+        }
+    </script>
 </body>
 </html>

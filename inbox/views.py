@@ -9,6 +9,8 @@ from django.utils.text import slugify
 
 from .models import ContentItem, ContentStatus, ContentSurfaceType
 
+TOP_REACTIONS_LIMIT = 3
+
 
 def _render_markdown_links(text):
     """Convert markdown links and preserve app-style line spacing."""
@@ -29,7 +31,7 @@ FEED_PAGE_SIZE = 12
 def _get_discover_queryset():
     return (
         ContentItem.objects.select_related('channel')
-        .prefetch_related('surfaces')
+        .prefetch_related('surfaces', 'reactions__reaction_type')
         .filter(
             status=ContentStatus.PUBLISHED,
             published_at__isnull=False,
@@ -38,6 +40,22 @@ def _get_discover_queryset():
         .distinct()
         .order_by('-surfaces__is_pinned', 'surfaces__rank', '-published_at', '-created_at')
     )
+
+
+def _build_reaction_summary(item):
+    reaction_counts = {}
+    for reaction in item.reactions.all():
+        emoji = reaction.reaction_type.emoji
+        reaction_counts[emoji] = reaction_counts.get(emoji, 0) + 1
+
+    return [
+        {'emoji': emoji, 'count': count}
+        for emoji, count in sorted(
+            reaction_counts.items(),
+            key=lambda reaction_item: reaction_item[1],
+            reverse=True,
+        )[:TOP_REACTIONS_LIMIT]
+    ]
 
 
 def _build_post_card(item):
@@ -72,6 +90,7 @@ def _build_post_card(item):
         'published_at': item.published_at,
         'image_url': preview_image.get('url', '') if isinstance(preview_image, dict) else '',
         'slug': slugify(item.title or f'post-{item.id}'),
+        'reaction_summary': _build_reaction_summary(item),
     }
 
 
@@ -98,7 +117,7 @@ def discover_post_detail(request, post_id, slug=None):
     try:
         item = (
             ContentItem.objects.select_related('channel')
-            .prefetch_related('surfaces')
+            .prefetch_related('surfaces', 'reactions__reaction_type')
             .filter(
                 id=post_id,
                 status=ContentStatus.PUBLISHED,
@@ -175,5 +194,6 @@ def discover_post_detail(request, post_id, slug=None):
             'slug': canonical_slug,
             'blocks': rendered_blocks,
             'platform_links': platform_links,
+            'reaction_summary': _build_reaction_summary(item),
         },
     })

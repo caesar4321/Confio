@@ -130,6 +130,30 @@
         {% endfor %}
     </div>
     {% endif %}
+
+    <div class="post-detail-actions">
+        <div class="reaction-group" aria-label="Reacciones">
+            {% if post.reaction_summary %}
+                {% for reaction in post.reaction_summary %}
+                <span class="reaction-pill">
+                    <span class="reaction-pill-emoji">{{ reaction.emoji }}</span>
+                    <span>{{ reaction.count }}</span>
+                </span>
+                {% endfor %}
+            {% else %}
+                <span class="reaction-empty">Sin reacciones todavía</span>
+            {% endif %}
+        </div>
+        <button
+            class="share-button"
+            type="button"
+            data-share-url="https://confio.lat/discover/{{ post.id }}/{{ post.slug }}/"
+            data-share-title="{{ post.title }}"
+            onclick="shareDiscoverPost(this)"
+        >
+            Compartir
+        </button>
+    </div>
 </article>
 
 <div class="post-bottom-nav">

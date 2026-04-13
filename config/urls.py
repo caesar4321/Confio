@@ -151,6 +151,10 @@ urlpatterns = [
     path('', include(tf_urls)),
     path('robots.txt', robots_txt, name='robots_txt'),
     path('llms.txt', llms_txt, name='llms_txt'),
+    path('discover/', discover_feed, name='discover_feed'),
+    path('discover/<int:post_id>/<slug:slug>/', discover_post_detail, name='discover_post_detail'),
+    path('discover/<int:post_id>/', discover_post_detail, name='discover_post_detail_no_slug'),
+    path('sitemap.xml', public_sitemap, {'sitemaps': sitemaps}, name='django.contrib.sitemaps.views.sitemap'),
     path('confio-control-panel/', confio_admin_site.urls),
     path('graphql/', csrf_exempt(LoggingGraphQLView.as_view(graphiql=True))),
     path('portal/login/', portal_login_redirect, name='portal_login'),
@@ -172,14 +176,6 @@ from .views import index
 from .views import guardarian_transaction_proxy, guardarian_fiat_currencies
 from ramps.views import koywe_webhook
 from security.views import didit_webhook
-
-# Discover pages (server-rendered for SEO / crawlers)
-urlpatterns += [
-    path('discover/', discover_feed, name='discover_feed'),
-    path('discover/<int:post_id>/<slug:slug>/', discover_post_detail, name='discover_post_detail'),
-    path('discover/<int:post_id>/', discover_post_detail, name='discover_post_detail_no_slug'),
-    path('sitemap.xml', public_sitemap, {'sitemaps': sitemaps}, name='django.contrib.sitemaps.views.sitemap'),
-]
 
 # Catch-all pattern should be last
 urlpatterns += [
