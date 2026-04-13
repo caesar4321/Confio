@@ -550,13 +550,40 @@ def build_ramp_field_schema(*, country_code: str, method: dict) -> dict:
                 "helpText": "Guarda la institución receptora para transferencias SPEI.",
             },
         ]
-    elif country_code == "PE" and code in {"WIREPE", "RECAUDO-PE"}:
+    elif country_code == "PE" and code == "WIREPE":
+        schema["accountField"] = {
+            "label": "CCI",
+            "placeholder": "Ingresa tu CCI de 20 dígitos",
+            "show": True,
+            "required": True,
+            "keyboardType": "numeric",
+            "minLength": 20,
+            "maxLength": 20,
+        }
+        schema["phoneField"] = {
+            "label": "Número de teléfono",
+            "placeholder": "Número de teléfono",
+            "show": False,
+            "required": False,
+            "keyboardType": "phone-pad",
+        }
+        schema["emailField"] = {
+            "label": "Correo electrónico",
+            "placeholder": "Correo electrónico",
+            "show": False,
+            "required": False,
+            "keyboardType": "email-address",
+        }
+        schema["showAccountTypeField"] = False
+        schema["accountTypeRequired"] = False
+        schema["providerFields"] = []
+    elif country_code == "PE" and code == "RECAUDO-PE":
         schema["providerFields"] = [
             {
                 "key": "bankName",
                 "label": "Banco receptor",
                 "placeholder": "Selecciona el banco",
-                "required": code != "RECAUDO-PE",
+                "required": False,
                 "picker": "bank",
             },
             {
