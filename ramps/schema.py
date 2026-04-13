@@ -1317,7 +1317,8 @@ def _get_koywe_test_account_override(*, user, country_code: str) -> dict[str, st
 
 
 def _get_koywe_auth_email(*, user, country_code: str, email_override: str | None = None) -> str:
-    override = _get_koywe_test_account_override(user=user, country_code=country_code)
+    normalized_country_code = str(country_code or '').strip().upper()
+    override = _get_koywe_test_account_override(user=user, country_code=normalized_country_code)
     normalized_override = str(email_override or '').strip()
     if normalized_override:
         try:
@@ -1329,10 +1330,15 @@ def _get_koywe_auth_email(*, user, country_code: str, email_override: str | None
         stored_ramp_email = str(
             getattr(getattr(user, 'ramp_user_address', None), 'auth_email', '') or ''
         ).strip()
+    country_default_email = (
+        stored_ramp_email
+        if normalized_country_code == 'CO'
+        else str((override or {}).get('email') or '').strip()
+        or stored_ramp_email
+    )
     email = str(
         normalized_override
-        or stored_ramp_email
-        or (override or {}).get('email')
+        or country_default_email
         or getattr(user, 'email', None)
         or ''
     ).strip()
