@@ -777,8 +777,12 @@ class KoyweClient:
                 try:
                     existing = self.get_account(email=prev_email)
                     if existing:
-                        # Migrate account to the new email via Koywe's updateEmail field.
-                        migration_payload = {**payload, 'email': prev_email, 'updateEmail': email}
+                        migration_payload = self._build_migration_payload(
+                            existing=existing,
+                            target_payload=payload,
+                            current_email=prev_email,
+                            new_email=email,
+                        )
                         self.update_account(email=prev_email, payload=migration_payload)
                         return None
                 except KoyweError:
@@ -787,8 +791,36 @@ class KoyweClient:
         if self._account_profile_satisfies_payload(existing, payload):
             return None
 
-        self.update_account(email=email, payload=payload)
+        update_payload = self._build_migration_payload(
+            existing=existing,
+            target_payload=payload,
+            current_email=email,
+            new_email=None,
+        )
+        self.update_account(email=email, payload=update_payload)
         return None
+
+    def _build_migration_payload(self, *, existing: dict[str, Any], target_payload: dict[str, Any], current_email: str, new_email: str | None) -> dict[str, Any]:
+        """Build a PUT payload with updateEmail/updateDocumentNumber/updateDocumentType as needed."""
+        result = {**target_payload, 'email': current_email}
+
+        if new_email and new_email != current_email:
+            result['updateEmail'] = new_email
+
+        existing_doc = existing.get('document') or {}
+        target_doc = target_payload.get('document') or {}
+
+        existing_doc_number = str(existing_doc.get('documentNumber') or '').strip()
+        target_doc_number = str(target_doc.get('documentNumber') or '').strip()
+        if target_doc_number and target_doc_number != existing_doc_number:
+            result['updateDocumentNumber'] = target_doc_number
+
+        existing_doc_type = str(existing_doc.get('documentType') or '').strip().upper()
+        target_doc_type = str(target_doc.get('documentType') or '').strip().upper()
+        if target_doc_type and target_doc_type != existing_doc_type:
+            result['updateDocumentType'] = target_doc_type
+
+        return result
 
     def get_account(self, *, email: str) -> dict[str, Any]:
         normalized_email = str(email or '').strip().lower()
