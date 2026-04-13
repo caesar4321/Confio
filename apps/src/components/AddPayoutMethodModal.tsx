@@ -645,14 +645,6 @@ export const AddPayoutMethodModal = ({
         holderLabel: 'Nombre completo',
       };
     }
-    if (countryCode === 'PE' && methodCode === 'WIREPE') {
-      return {
-        account: { ...defaultAccount, label: 'CCI', placeholder: 'Ingresa tu CCI de 20 dígitos', show: true, required: true, keyboardType: 'numeric' as const },
-        phone: { ...defaultPhone, show: false, required: false },
-        email: { ...defaultEmail, show: false, required: false },
-        holderLabel: 'Titular de la cuenta',
-      };
-    }
     if (countryCode === 'PE' && methodCode === 'QRI-PE') {
       return {
         account: { ...defaultAccount, label: 'CCI o número interbancario', placeholder: 'Ingresa el número interbancario de 20 dígitos', show: true, required: true, keyboardType: 'numeric' as const },
@@ -774,7 +766,7 @@ export const AddPayoutMethodModal = ({
       ];
     }
 
-    if (countryCode === 'PE' && ['RECAUDO-PE', 'WIREUSDPE', 'WIREUSDPE-INTERBANK'].includes(methodCode)) {
+    if (countryCode === 'PE' && ['WIREPE', 'RECAUDO-PE', 'WIREUSDPE', 'WIREUSDPE-INTERBANK'].includes(methodCode)) {
       return [
         {
           key: 'bankName',
