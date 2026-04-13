@@ -151,9 +151,6 @@ urlpatterns = [
     path('', include(tf_urls)),
     path('robots.txt', robots_txt, name='robots_txt'),
     path('llms.txt', llms_txt, name='llms_txt'),
-    path('discover/', discover_feed, name='discover_feed'),
-    path('discover/<int:post_id>/<slug:slug>/', discover_post_detail, name='discover_post_detail'),
-    path('discover/<int:post_id>/', discover_post_detail, name='discover_post_detail_no_slug'),
     path('sitemap.xml', public_sitemap, {'sitemaps': sitemaps}, name='django.contrib.sitemaps.views.sitemap'),
     path('confio-control-panel/', confio_admin_site.urls),
     path('graphql/', csrf_exempt(LoggingGraphQLView.as_view(graphiql=True))),
@@ -161,9 +158,12 @@ urlpatterns = [
     path('portal/login-complete/', portal_login_complete, name='portal_login_complete'),
     path('portal/logout/', portal_logout, name='portal_logout'),
     path('portal/setup-2fa/', portal_setup_2fa_redirect, name='portal_setup_2fa'),
-    path('terms/', terms_view, name='terms'),
-    path('privacy/', privacy_view, name='privacy'),
-    path('deletion/', deletion_view, name='deletion'),
+    re_path(r'^discover/?$', discover_feed, name='discover_feed'),
+    re_path(r'^discover/(?P<post_id>\d+)/(?P<slug>[-\w]+)/?$', discover_post_detail, name='discover_post_detail'),
+    re_path(r'^discover/(?P<post_id>\d+)/?$', discover_post_detail, name='discover_post_detail_no_slug'),
+    re_path(r'^terms/?$', terms_view, name='terms'),
+    re_path(r'^privacy/?$', privacy_view, name='privacy'),
+    re_path(r'^deletion/?$', deletion_view, name='deletion'),
 ]
 
 # Add media files before catch-all pattern in DEBUG mode

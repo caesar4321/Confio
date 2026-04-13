@@ -389,6 +389,20 @@
             font-size: 0.78rem;
             font-weight: 600;
             color: #475467;
+            cursor: pointer;
+            transition: background 0.2s, border-color 0.2s, color 0.2s;
+        }
+
+        button.reaction-pill {
+            appearance: none;
+            -webkit-appearance: none;
+            font-family: inherit;
+        }
+
+        .reaction-pill:hover {
+            background: #F0FDF7;
+            border-color: #A7F3D0;
+            color: #065F46;
         }
 
         .reaction-pill-emoji {
@@ -826,6 +840,10 @@
         </div>
     </footer>
     <script>
+        function showReactionAppNotice() {
+            window.alert('Las reacciones por ahora solo estan disponibles desde la app de Confio.');
+        }
+
         async function shareDiscoverPost(button) {
             const url = button.getAttribute('data-share-url');
             const title = button.getAttribute('data-share-title') || 'Confio';
