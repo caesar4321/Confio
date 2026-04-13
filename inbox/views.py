@@ -1,9 +1,26 @@
+import re
+
 from django.core.paginator import Paginator
 from django.http import Http404
 from django.shortcuts import render
+from django.utils.html import escape
+from django.utils.safestring import mark_safe
 from django.utils.text import slugify
 
 from .models import ContentItem, ContentStatus, ContentSurfaceType
+
+
+def _render_markdown_links(text):
+    """Convert [text](url) markdown links to HTML anchor tags."""
+    escaped = escape(text)
+    # Replace markdown links — we escaped the HTML, so angle brackets in URLs
+    # are &lt;/&gt; which won't appear in real URLs. Re-match on the escaped text.
+    def _replace(m):
+        label = m.group(1)
+        url = m.group(2)
+        return f'<a href="{url}" target="_blank" rel="noopener noreferrer">{label}</a>'
+
+    return mark_safe(re.sub(r'\[([^\]]+)\]\(([^)]+)\)', _replace, escaped))
 
 FEED_PAGE_SIZE = 12
 
@@ -113,17 +130,17 @@ def discover_post_detail(request, post_id, slug=None):
     platform_links = []
     for platform, url in (metadata.get('platform_links') or {}).items():
         if url:
-            platform_links.append({'platform': platform, 'url': url})
+            platform_links.append({'platform': platform.lower(), 'url': url})
 
     rendered_blocks = []
     for block in blocks:
         block_type = block.get('type', '')
         if block_type == 'title':
-            rendered_blocks.append({'type': 'title', 'text': block.get('text', '')})
+            rendered_blocks.append({'type': 'title', 'text': _render_markdown_links(block.get('text', ''))})
         elif block_type == 'paragraph':
-            rendered_blocks.append({'type': 'paragraph', 'text': block.get('text', '')})
+            rendered_blocks.append({'type': 'paragraph', 'text': _render_markdown_links(block.get('text', ''))})
         elif block_type == 'quote':
-            rendered_blocks.append({'type': 'quote', 'text': block.get('text', '')})
+            rendered_blocks.append({'type': 'quote', 'text': _render_markdown_links(block.get('text', ''))})
         elif block_type == 'image':
             img = block.get('image', {})
             if isinstance(img, dict) and img.get('url'):

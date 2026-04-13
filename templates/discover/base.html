@@ -605,6 +605,48 @@
             margin-top: 0.5rem;
         }
 
+        /* ── Inline links (markdown rendered) ── */
+        .post-block-paragraph a,
+        .post-block-quote a,
+        .post-block-title a {
+            color: #2563EB;
+            font-weight: 600;
+            text-decoration: none;
+            border-bottom: 1px solid transparent;
+            transition: border-color 0.2s;
+        }
+
+        .post-block-paragraph a:hover,
+        .post-block-quote a:hover,
+        .post-block-title a:hover {
+            border-bottom-color: #2563EB;
+        }
+
+        /* ── Back to discover ── */
+        .post-bottom-nav {
+            margin-top: 2rem;
+            text-align: center;
+        }
+
+        .back-to-discover {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            color: #1DB587;
+            font-weight: 600;
+            font-size: 0.9rem;
+            text-decoration: none;
+            padding: 0.6rem 1.5rem;
+            border: 2px solid #1DB587;
+            border-radius: 999px;
+            transition: all 0.2s;
+        }
+
+        .back-to-discover:hover {
+            background: #1DB587;
+            color: white;
+        }
+
         /* ── Empty state ── */
         .empty-state {
             text-align: center;
@@ -681,8 +723,8 @@
             <a href="/" class="site-logo">Confío</a>
             <nav class="site-nav">
                 <a href="/discover/" class="active">Descubrir</a>
-                <a href="/terms">Legal</a>
-                <a href="/" class="header-cta">Descargar App &#8599;</a>
+                <a href="/terms" target="_blank" rel="noopener noreferrer">Legal</a>
+                <a href="/" target="_blank" rel="noopener noreferrer" class="header-cta">Descargar App &#8599;</a>
             </nav>
         </div>
     </header>
@@ -700,11 +742,11 @@
             <div class="footer-links">
                 <a href="/">Inicio</a>
                 <a href="/discover/">Descubrir</a>
-                <a href="/terms">Terminos</a>
-                <a href="/privacy">Privacidad</a>
+                <a href="/terms" target="_blank" rel="noopener noreferrer">Terminos</a>
+                <a href="/privacy" target="_blank" rel="noopener noreferrer">Privacidad</a>
                 <a href="mailto:support@confio.lat">Contacto</a>
             </div>
-            <div class="footer-hashtags">#Confio #Stablecoin #Blockchain #NonCustodial #ConfioDollar</div>
+            <div class="footer-hashtags">#LATAM #Stablecoin #Blockchain #NonCustodial #ConfioDollar</div>
         </div>
     </footer>
 </body>

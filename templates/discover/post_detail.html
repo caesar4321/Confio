@@ -119,11 +119,11 @@
     {% if post.platform_links %}
     <div class="platform-links">
         {% for link in post.platform_links %}
-        <a class="platform-link {% if link.platform == 'TIKTOK' or link.platform == 'tiktok' %}platform-link--tiktok{% elif link.platform == 'INSTAGRAM' or link.platform == 'instagram' %}platform-link--instagram{% elif link.platform == 'YOUTUBE' or link.platform == 'youtube' %}platform-link--youtube{% else %}platform-link--default{% endif %}"
+        <a class="platform-link {% if link.platform == 'tiktok' %}platform-link--tiktok{% elif link.platform == 'instagram' %}platform-link--instagram{% elif link.platform == 'youtube' %}platform-link--youtube{% else %}platform-link--default{% endif %}"
            href="{{ link.url }}" target="_blank" rel="noopener noreferrer">
-            {% if link.platform == "TIKTOK" or link.platform == "tiktok" %}TikTok
-            {% elif link.platform == "INSTAGRAM" or link.platform == "instagram" %}Instagram
-            {% elif link.platform == "YOUTUBE" or link.platform == "youtube" %}YouTube
+            {% if link.platform == "tiktok" %}TikTok
+            {% elif link.platform == "instagram" %}Instagram
+            {% elif link.platform == "youtube" %}YouTube
             {% else %}{{ link.platform }}{% endif %}
             &#8599;
         </a>
@@ -131,6 +131,10 @@
     </div>
     {% endif %}
 </article>
+
+<div class="post-bottom-nav">
+    <a href="/discover/" class="back-to-discover">&larr; Volver a Descubrir</a>
+</div>
 
 <div class="app-cta">
     <h2>Lee mas en la app de Confío</h2>
