@@ -356,15 +356,8 @@ class KoyweClient:
         headers = {'Content-Type': 'application/json'}
         normalized_email = str(email or '').strip() or None
         logger.info(
-            'Koywe request',
-            extra={
-                'method': method,
-                'path': path,
-                'auth': auth,
-                'koywe_email': normalized_email,
-                'json_payload': json_payload,
-                'params': params,
-            },
+            'Koywe request %s %s email=%s payload=%s',
+            method, path, normalized_email, json_payload,
         )
         if auth:
             headers['Authorization'] = f'Bearer {self.authenticate(email=normalized_email)}'
@@ -380,13 +373,9 @@ class KoyweClient:
         except requests.RequestException as exc:
             raise KoyweError(f'Koywe request failed: {method} {path}: {exc}') from exc
         logger.info(
-            'Koywe response',
-            extra={
-                'method': method,
-                'path': path,
-                'status_code': response.status_code,
-                'koywe_email': normalized_email,
-            },
+            'Koywe response %s %s status=%s email=%s body=%s',
+            method, path, response.status_code, normalized_email,
+            response.text[:500] if response.text else '',
         )
         return self._parse_response(response, f'Koywe request failed: {method} {path}')
 
@@ -510,14 +499,9 @@ class KoyweClient:
         if external_id:
             payload['externalId'] = external_id
         logger.info(
-            'Koywe create_order attempt',
-            extra={
-                'quote_id': quote_id,
-                'koywe_email': str(email or '').strip() or None,
-                'destination_address': destination_address,
-                'external_id': external_id,
-                'document_number': document_number,
-            },
+            'Koywe create_order attempt quote=%s email=%s dest=%s doc=%s',
+            quote_id, str(email or '').strip() or None,
+            destination_address, document_number,
         )
         return self._request('POST', '/rest/orders', email=email, json_payload=payload)
 
@@ -628,16 +612,9 @@ class KoyweClient:
             country_code=country_code,
         )
         logger.info(
-            'Koywe create_ramp_order input',
-            extra={
-                'direction': normalized_direction,
-                'fiat_symbol': fiat_symbol,
-                'payment_method_code': payment_method_code,
-                'country_code': country_code,
-                'koywe_email': str(email or '').strip() or None,
-                'wallet_address': wallet_address,
-                'contact_profile': normalized_contact_profile,
-            },
+            'Koywe create_ramp_order input direction=%s fiat=%s method=%s country=%s email=%s wallet=%s profile=%s',
+            normalized_direction, fiat_symbol, payment_method_code, country_code,
+            str(email or '').strip() or None, wallet_address, normalized_contact_profile,
         )
         self.ensure_account_profile(
             email=email,
@@ -772,27 +749,19 @@ class KoyweClient:
             return
 
         logger.info(
-            'Koywe ensure_account_profile start',
-            extra={
-                'country_code': country_code,
-                'koywe_email': normalized_email,
-                'document_number': document_number,
-            },
+            'Koywe ensure_account_profile start country=%s email=%s doc=%s',
+            country_code, normalized_email, document_number,
         )
         try:
             logger.info(
-                'Koywe ensure_account_profile create attempt',
-                extra={'country_code': country_code, 'koywe_email': normalized_email},
+                'Koywe ensure_account_profile create attempt country=%s email=%s',
+                country_code, normalized_email,
             )
             self._request('POST', '/rest/accounts', email=normalized_email, json_payload=payload)
         except KoyweError as exc:
             logger.warning(
-                'Koywe ensure_account_profile create failed',
-                extra={
-                    'country_code': country_code,
-                    'koywe_email': normalized_email,
-                    'error': str(exc),
-                },
+                'Koywe ensure_account_profile create failed country=%s email=%s error=%s',
+                country_code, normalized_email, exc,
             )
             if self._is_existing_account_error(str(exc)):
                 self._ensure_existing_account_profile(
@@ -809,31 +778,27 @@ class KoyweClient:
     def _ensure_existing_account_profile(self, *, email: str, country_code: str, payload: dict[str, Any]) -> None:
         try:
             logger.info(
-                'Koywe ensure_existing_account_profile get attempt',
-                extra={'country_code': country_code, 'koywe_email': email},
+                'Koywe ensure_existing_account_profile get attempt country=%s email=%s',
+                country_code, email,
             )
             existing = self.get_account(email=email)
         except KoyweError as exc:
             logger.warning(
-                'Koywe ensure_existing_account_profile get failed',
-                extra={
-                    'country_code': country_code,
-                    'koywe_email': email,
-                    'error': str(exc),
-                },
+                'Koywe ensure_existing_account_profile get failed country=%s email=%s error=%s',
+                country_code, email, exc,
             )
             existing = {}
 
         if self._account_profile_satisfies_payload(existing, payload):
             logger.info(
-                'Koywe ensure_existing_account_profile already_satisfied',
-                extra={'country_code': country_code, 'koywe_email': email},
+                'Koywe ensure_existing_account_profile already_satisfied country=%s email=%s',
+                country_code, email,
             )
             return
 
         logger.info(
-            'Koywe ensure_existing_account_profile update attempt',
-            extra={'country_code': country_code, 'koywe_email': email},
+            'Koywe ensure_existing_account_profile update attempt country=%s email=%s',
+            country_code, email,
         )
         self.update_account(email=email, payload=payload)
 
