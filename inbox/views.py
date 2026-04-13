@@ -11,7 +11,7 @@ from .models import ContentItem, ContentStatus, ContentSurfaceType
 
 
 def _render_markdown_links(text):
-    """Convert [text](url) markdown links to HTML anchor tags."""
+    """Convert markdown links and preserve app-style line spacing."""
     escaped = escape(text)
     # Replace markdown links — we escaped the HTML, so angle brackets in URLs
     # are &lt;/&gt; which won't appear in real URLs. Re-match on the escaped text.
@@ -20,7 +20,8 @@ def _render_markdown_links(text):
         url = m.group(2)
         return f'<a href="{url}" target="_blank" rel="noopener noreferrer">{label}</a>'
 
-    return mark_safe(re.sub(r'\[([^\]]+)\]\(([^)]+)\)', _replace, escaped))
+    linked = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', _replace, escaped)
+    return mark_safe(linked.replace('\n', '<br><br>'))
 
 FEED_PAGE_SIZE = 12
 
