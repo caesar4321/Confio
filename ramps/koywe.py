@@ -576,16 +576,7 @@ def build_ramp_field_schema(*, country_code: str, method: dict) -> dict:
         }
         schema["showAccountTypeField"] = False
         schema["accountTypeRequired"] = False
-        schema["providerFields"] = [
-            {
-                "key": "bankName",
-                "label": "Banco receptor",
-                "placeholder": "Selecciona el banco",
-                "required": True,
-                "picker": "bank",
-                "helpText": "Koywe exige identificar el banco receptor además del CCI para registrar el cobro en Perú.",
-            },
-        ]
+        schema["providerFields"] = []
     elif country_code == "PE" and code == "RECAUDO-PE":
         schema["providerFields"] = [
             {

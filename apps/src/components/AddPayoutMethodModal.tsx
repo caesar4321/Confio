@@ -792,18 +792,6 @@ export const AddPayoutMethodModal = ({
       ];
     }
 
-    if (countryCode === 'PE' && methodCode === 'WIREPE') {
-      return [
-        {
-          key: 'bankName',
-          label: 'Banco receptor',
-          placeholder: 'Selecciona el banco',
-          required: true,
-          helpText: 'Koywe exige identificar el banco receptor además del CCI para registrar el cobro en Perú.',
-        },
-      ];
-    }
-
     if (countryCode === 'PE' && methodCode === 'QRI-PE') {
       return [
         {

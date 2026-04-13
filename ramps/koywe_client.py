@@ -589,8 +589,6 @@ class KoyweClient:
             payload['bankCode'] = 'LIGO'
         elif alpha3 == 'PER' and payment_method_code == 'RECAUDO-PE':
             payload['bankCode'] = 'CREDITO'
-        elif alpha3 == 'PER' and payment_method_code == 'WIREPE' and not payload.get('bankCode'):
-            raise KoyweError('"bankCode" is required for PEN payouts — select the receiving bank for the CCI')
         elif alpha3 == 'BOL' and payment_method_code in {'QRI-BO', 'QRI_BO'}:
             payload['bankCode'] = 'SIP_QR'
         normalized_account_type = _normalize_account_type(getattr(bank_info, 'account_type', None))
