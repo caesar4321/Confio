@@ -514,12 +514,14 @@ class KoyweClient:
             contact_profile=contact_profile,
             country_code=country_code,
         )
-        self.ensure_account_profile(
+        resolved_email = self.ensure_account_profile(
             email=email,
             country_code=country_code,
             contact_profile=normalized_contact_profile,
             previous_emails=previous_emails,
         )
+        if resolved_email:
+            email = resolved_email
         provider_metadata = getattr(bank_info, 'provider_metadata', None) or {}
         payment_method = getattr(bank_info, 'payment_method', None)
         payment_method_code = (
@@ -617,12 +619,18 @@ class KoyweClient:
             normalized_direction, fiat_symbol, payment_method_code, country_code,
             str(email or '').strip() or None, wallet_address, normalized_contact_profile,
         )
-        self.ensure_account_profile(
+        resolved_email = self.ensure_account_profile(
             email=email,
             country_code=country_code,
             contact_profile=normalized_contact_profile,
             previous_emails=previous_emails,
         )
+        if resolved_email:
+            logger.info(
+                'Koywe create_ramp_order email resolved from %s to %s',
+                email, resolved_email,
+            )
+            email = resolved_email
         payment_method_id, payment_method_display = self.resolve_payment_provider(
             fiat_symbol=fiat_symbol,
             payment_method_code=payment_method_code,
@@ -726,22 +734,28 @@ class KoyweClient:
 
         raise KoyweError(f'Document type "{document_type or "unknown"}" is not mapped for Koywe delegated KYC in country {normalized_country}')
 
-    def ensure_account_profile(self, *, email: str | None, country_code: str, contact_profile: dict[str, Any] | None = None, previous_emails: list[str] | None = None) -> None:
+    def ensure_account_profile(self, *, email: str | None, country_code: str, contact_profile: dict[str, Any] | None = None, previous_emails: list[str] | None = None) -> str | None:
+        """Sync the Koywe account profile, returning the resolved email.
+
+        Returns the email that owns the account at Koywe. This may differ from
+        the requested *email* when the document already exists under a previous
+        email and Koywe does not allow email migration.
+        """
         normalized_contact = self._normalize_contact_profile(
             contact_profile=contact_profile,
             country_code=country_code,
         )
         if not normalized_contact:
-            return
+            return None
 
         normalized_email = str(email or normalized_contact.get('email') or '').strip().lower()
         document_number = str(normalized_contact.get('documentNumber') or '').strip()
         if not normalized_email or not document_number:
-            return
+            return None
 
         cache_key = f'koywe:account-profile:{normalized_email}:{country_code.upper()}:{document_number}'
         if cache.get(cache_key):
-            return
+            return None
 
         payload = self._build_account_profile_payload(
             email=normalized_email,
@@ -749,7 +763,7 @@ class KoyweClient:
             contact_profile=normalized_contact,
         )
         if not payload:
-            return
+            return None
 
         logger.info(
             'Koywe ensure_account_profile start country=%s email=%s doc=%s',
@@ -767,19 +781,25 @@ class KoyweClient:
                 country_code, normalized_email, exc,
             )
             if self._is_existing_account_error(str(exc)):
-                self._ensure_existing_account_profile(
+                resolved = self._ensure_existing_account_profile(
                     email=normalized_email,
                     country_code=country_code,
                     payload=payload,
                     previous_emails=previous_emails,
                 )
                 cache.set(cache_key, True, timeout=_ACCOUNT_PROFILE_SYNC_CACHE_TTL)
-                return
+                return resolved
             raise
 
         cache.set(cache_key, True, timeout=_ACCOUNT_PROFILE_SYNC_CACHE_TTL)
+        return None
 
-    def _ensure_existing_account_profile(self, *, email: str, country_code: str, payload: dict[str, Any], previous_emails: list[str] | None = None) -> None:
+    def _ensure_existing_account_profile(self, *, email: str, country_code: str, payload: dict[str, Any], previous_emails: list[str] | None = None) -> str | None:
+        """Update an existing Koywe account profile.
+
+        Returns the email that actually owns the account if it differs from
+        *email*, so callers can use the correct email for subsequent API calls.
+        """
         try:
             logger.info(
                 'Koywe ensure_existing_account_profile get attempt country=%s email=%s',
@@ -793,7 +813,7 @@ class KoyweClient:
             )
             existing = {}
 
-        # If account not found by current email, try previous emails (e.g. test override emails).
+        # If account not found by current email, try previous emails.
         # The account may exist under an old email with the same document number.
         if not existing and previous_emails:
             for prev_email in previous_emails:
@@ -808,12 +828,12 @@ class KoyweClient:
                     existing = self.get_account(email=prev_email)
                     if existing:
                         logger.info(
-                            'Koywe ensure_existing_account_profile found under prev_email=%s, updating to email=%s',
-                            prev_email, email,
+                            'Koywe ensure_existing_account_profile found under prev_email=%s, using for flow',
+                            prev_email,
                         )
-                        payload['email'] = email
+                        # Update the profile data under the old email
                         self.update_account(email=prev_email, payload=payload)
-                        return
+                        return prev_email
                 except KoyweError:
                     continue
 
@@ -822,13 +842,14 @@ class KoyweClient:
                 'Koywe ensure_existing_account_profile already_satisfied country=%s email=%s',
                 country_code, email,
             )
-            return
+            return None
 
         logger.info(
             'Koywe ensure_existing_account_profile update attempt country=%s email=%s',
             country_code, email,
         )
         self.update_account(email=email, payload=payload)
+        return None
 
     def get_account(self, *, email: str) -> dict[str, Any]:
         normalized_email = str(email or '').strip().lower()
