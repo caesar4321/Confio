@@ -757,8 +757,10 @@ class KoyweClient:
     def _ensure_existing_account_profile(self, *, email: str, country_code: str, payload: dict[str, Any], previous_emails: list[str] | None = None) -> str | None:
         """Update an existing Koywe account profile.
 
-        Returns the email that actually owns the account if it differs from
-        *email*, so callers can use the correct email for subsequent API calls.
+        Returns ``None`` when the account already belongs to *email*.  When the
+        account is found under a previous email, it is migrated to *email* via
+        Koywe's ``updateEmail`` field, and ``None`` is returned (the caller
+        should continue using *email*).
         """
         try:
             existing = self.get_account(email=email)
@@ -775,8 +777,10 @@ class KoyweClient:
                 try:
                     existing = self.get_account(email=prev_email)
                     if existing:
-                        self.update_account(email=prev_email, payload=payload)
-                        return prev_email
+                        # Migrate account to the new email via Koywe's updateEmail field.
+                        migration_payload = {**payload, 'email': prev_email, 'updateEmail': email}
+                        self.update_account(email=prev_email, payload=migration_payload)
+                        return None
                 except KoyweError:
                     continue
 
@@ -797,6 +801,7 @@ class KoyweClient:
         normalized_email = str(email or '').strip().lower()
         if not normalized_email:
             raise KoyweError('Koywe account email is required')
+        payload.setdefault('email', normalized_email)
         return self._request('PUT', '/rest/accounts', email=normalized_email, json_payload=payload)
 
     def _build_account_profile_payload(self, *, email: str, country_code: str, contact_profile: dict[str, Any]) -> dict[str, Any] | None:
