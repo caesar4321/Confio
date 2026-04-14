@@ -16,6 +16,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     {% block structured_data %}{% endblock %}
+    {% block extra_style %}{% endblock %}
     <style>
         body {
             margin: 0;
@@ -73,7 +74,7 @@
         }
     </style>
 </head>
-<body>
+<body class="{% block body_class %}{% endblock %}">
     {% block content %}{% endblock %}
 </body>
 </html>

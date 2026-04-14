@@ -7,6 +7,7 @@
 {% block og_description %}{{ meta_description }}{% endblock %}
 {% block og_url %}{{ canonical_url }}{% endblock %}
 {% block og_image %}{% if entity.image_url %}{{ entity.image_url }}{% else %}{{ organization.logo_url }}{% endif %}{% endblock %}
+{% block body_class %}entity-page-body{% endblock %}
 
 {% block structured_data %}
 <script type="application/ld+json">
@@ -32,17 +33,366 @@
 </script>
 {% endblock %}
 
+{% block extra_style %}
+<style>
+    .entity-page-body {
+        background:
+            radial-gradient(circle at top right, rgba(52, 211, 153, 0.18), transparent 30%),
+            radial-gradient(circle at left 20%, rgba(16, 185, 129, 0.14), transparent 25%),
+            linear-gradient(180deg, #F8FFFC 0%, #F8FAFC 42%, #EEF6F2 100%);
+        color: #1F2937;
+    }
+
+    .entity-shell {
+        min-height: 100vh;
+        padding: 0 20px 72px;
+    }
+
+    .entity-topbar {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 28px 0 20px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+    }
+
+    .entity-brand {
+        font-size: 1.8rem;
+        font-weight: 800;
+        background: linear-gradient(135deg, #34D399, #10B981);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        text-decoration: none;
+    }
+
+    .entity-nav {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+    }
+
+    .entity-nav a {
+        color: #4B5563;
+        text-decoration: none;
+        font-weight: 500;
+        font-size: 0.95rem;
+    }
+
+    .entity-nav a.entity-cta {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0.75rem 1.2rem;
+        border-radius: 999px;
+        background: linear-gradient(135deg, #34D399, #10B981);
+        color: #fff;
+        font-weight: 600;
+    }
+
+    .entity-layout {
+        max-width: 1180px;
+        margin: 0 auto;
+        display: grid;
+        grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.2fr);
+        gap: 34px;
+        align-items: start;
+    }
+
+    .entity-hero-card,
+    .entity-story-card,
+    .entity-links-card {
+        border-radius: 28px;
+        overflow: hidden;
+        box-shadow: 0 24px 70px rgba(15, 23, 42, 0.08);
+    }
+
+    .entity-hero-card {
+        background: linear-gradient(160deg, #F0FDF4 0%, #ECFDF5 50%, #D1FAE5 100%);
+        border: 1px solid rgba(16, 185, 129, 0.14);
+        position: sticky;
+        top: 28px;
+    }
+
+    .entity-hero-media {
+        padding: 26px 26px 0;
+    }
+
+    .entity-portrait {
+        width: 100%;
+        display: block;
+        border-radius: 22px;
+        object-fit: cover;
+        box-shadow: 0 18px 44px rgba(16, 24, 40, 0.16);
+        background: #fff;
+    }
+
+    .entity-placeholder {
+        min-height: 320px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 22px;
+        background: linear-gradient(135deg, #0F172A, #1F2937);
+        color: #ECFDF5;
+        font-size: 4rem;
+        font-weight: 800;
+        letter-spacing: -0.04em;
+    }
+
+    .entity-hero-body {
+        padding: 24px 26px 28px;
+    }
+
+    .entity-kicker {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 9px 18px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.78);
+        color: #047857;
+        font-size: 0.82rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 18px;
+    }
+
+    .entity-hero-body h1 {
+        margin: 0 0 10px;
+        font-size: clamp(2rem, 4vw, 3.3rem);
+        line-height: 1.05;
+        color: #0F172A;
+    }
+
+    .entity-subheading {
+        margin: 0 0 16px;
+        color: #475467;
+        font-size: 1.04rem;
+        line-height: 1.7;
+    }
+
+    .entity-meta-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 18px;
+    }
+
+    .entity-pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.6rem 0.9rem;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.78);
+        color: #0F172A;
+        font-size: 0.88rem;
+        font-weight: 600;
+    }
+
+    .entity-story-card {
+        background: rgba(255, 255, 255, 0.88);
+        border: 1px solid rgba(148, 163, 184, 0.18);
+        backdrop-filter: blur(12px);
+    }
+
+    .entity-story-inner {
+        padding: 36px;
+    }
+
+    .entity-story-title {
+        margin: 0 0 20px;
+        color: #0F172A;
+        font-size: 1.45rem;
+        font-weight: 700;
+    }
+
+    .entity-story-copy p {
+        margin: 0 0 18px;
+        color: #475467;
+        font-size: 1.02rem;
+        line-height: 1.9;
+    }
+
+    .entity-story-copy p:last-child {
+        margin-bottom: 0;
+    }
+
+    .entity-story-copy strong {
+        color: #111827;
+    }
+
+    .entity-links-card {
+        margin-top: 22px;
+        background: linear-gradient(135deg, #0F172A, #1F2937);
+        color: white;
+    }
+
+    .entity-links-inner {
+        padding: 28px 30px 30px;
+    }
+
+    .entity-links-title {
+        margin: 0 0 14px;
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: #F8FAFC;
+    }
+
+    .entity-links-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 12px;
+    }
+
+    .entity-link-chip {
+        display: inline-flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 0.95rem 1rem;
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        color: #E5E7EB;
+        text-decoration: none;
+        font-weight: 500;
+    }
+
+    .entity-link-chip:hover {
+        background: rgba(52, 211, 153, 0.14);
+        border-color: rgba(52, 211, 153, 0.34);
+        color: #FFFFFF;
+    }
+
+    .entity-note {
+        margin-top: 18px;
+        color: #CBD5E1;
+        font-size: 0.95rem;
+        line-height: 1.7;
+    }
+
+    @media (max-width: 960px) {
+        .entity-topbar {
+            padding-top: 22px;
+        }
+
+        .entity-layout {
+            grid-template-columns: 1fr;
+        }
+
+        .entity-hero-card {
+            position: static;
+        }
+    }
+
+    @media (max-width: 640px) {
+        .entity-shell {
+            padding: 0 14px 52px;
+        }
+
+        .entity-topbar {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+
+        .entity-story-inner,
+        .entity-links-inner {
+            padding: 24px 20px;
+        }
+
+        .entity-hero-media {
+            padding: 18px 18px 0;
+        }
+
+        .entity-hero-body {
+            padding: 20px 18px 22px;
+        }
+
+        .entity-placeholder {
+            min-height: 220px;
+            font-size: 3rem;
+        }
+    }
+</style>
+{% endblock %}
+
 {% block content %}
-<div class="legal-container">
-    <h1>{{ heading }}</h1>
-    <p class="last-updated">{{ subheading }}</p>
+<div class="entity-shell">
+    <div class="entity-topbar">
+        <a href="/" class="entity-brand">Confío</a>
+        <div class="entity-nav">
+            <a href="/discover/">Descubrir</a>
+            <a href="/terms/">Términos</a>
+            <a href="/privacy/">Privacidad</a>
+            <a href="/discover/" class="entity-cta">Leer publicaciones</a>
+        </div>
+    </div>
 
-    {% for paragraph in body %}
-    <p>{{ paragraph }}</p>
-    {% endfor %}
+    <div class="entity-layout">
+        <section class="entity-hero-card">
+            <div class="entity-hero-media">
+                {% if entity.image_url %}
+                <img src="{{ entity.image_url }}" alt="{{ entity.name }}" class="entity-portrait">
+                {% else %}
+                <div class="entity-placeholder">{{ entity.name|slice:":1" }}</div>
+                {% endif %}
+            </div>
+            <div class="entity-hero-body">
+                <div class="entity-kicker">
+                    {% if entity_type == 'Person' %}
+                    Founder Identity
+                    {% else %}
+                    Editorial Identity
+                    {% endif %}
+                </div>
+                <h1>{{ heading }}</h1>
+                <p class="entity-subheading">{{ subheading }}</p>
+                <div class="entity-meta-row">
+                    <span class="entity-pill">{{ entity_type }}</span>
+                    {% if entity.job_title %}
+                    <span class="entity-pill">{{ entity.job_title }}</span>
+                    {% endif %}
+                    <span class="entity-pill">{{ organization.name }}</span>
+                </div>
+            </div>
+        </section>
 
-    <div class="back-link">
-        <a href="/discover/">Ir a Descubrir</a>
+        <div>
+            <section class="entity-story-card">
+                <div class="entity-story-inner">
+                    <h2 class="entity-story-title">Public entity reference</h2>
+                    <div class="entity-story-copy">
+                        {% for paragraph in body %}
+                        <p>{{ paragraph }}</p>
+                        {% endfor %}
+                    </div>
+                </div>
+            </section>
+
+            {% if entity.same_as %}
+            <section class="entity-links-card">
+                <div class="entity-links-inner">
+                    <h2 class="entity-links-title">Official links</h2>
+                    <div class="entity-links-grid">
+                        {% for url in entity.same_as %}
+                        <a href="{{ url }}" target="_blank" rel="noopener noreferrer" class="entity-link-chip">
+                            <span>{{ url }}</span>
+                            <span>&rarr;</span>
+                        </a>
+                        {% endfor %}
+                    </div>
+                    <p class="entity-note">
+                        This page is the canonical public reference for this entity on Confío.
+                    </p>
+                </div>
+            </section>
+            {% endif %}
+        </div>
     </div>
 </div>
 {% endblock %}
