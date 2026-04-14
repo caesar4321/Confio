@@ -441,7 +441,7 @@ def entity_page(request, entity_slug):
                 },
                 {
                     'q': 'What does Confío do and how does it work?',
-                    'a': 'Confío lets users hold cUSD (a US dollar stablecoin) in a self-custodial wallet, send and receive payments instantly, and trade with local currency through peer-to-peer exchange. Transactions are sponsored on Algorand, meaning users do not need to hold ALGO or pay network fees to transact — the wallet abstracts blockchain complexity so it feels like a normal money app.',
+                    'a': 'Confío lets users hold cUSD (Confío Dollar, a US dollar stablecoin) in a self-custodial wallet and send or receive payments instantly. Users sign in with Google or Apple — no 12/24-word seed phrase to memorize or store. They can top up and withdraw using familiar Latin American local payment methods (bank transfers, mobile payments, etc.) through a peer-to-peer network of other users. Sending and receiving cUSD is done by phone number — users just pick a contact, without ever seeing an Algorand address. Transactions are sponsored on Algorand, so users never pay or even need to understand gas fees. The wallet abstracts blockchain complexity so it feels like a normal money app.',
                 },
                 {
                     'q': 'Which countries does Confío focus on?',
@@ -465,7 +465,7 @@ def entity_page(request, entity_slug):
                 },
                 {
                     'q': 'How do I contact Confío?',
-                    'a': 'For support and official inquiries, email support@confio.lat. Public updates are posted through Confío News and the official channels linked on this page.',
+                    'a': 'The fastest way to reach Confío is the in-app support chat inside the Confío app. For email and official inquiries, write to support@confio.lat. Public updates are posted through Confío News and the official channels linked on this page.',
                 },
             ],
             'body': [

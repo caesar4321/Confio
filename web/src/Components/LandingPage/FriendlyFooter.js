@@ -33,6 +33,16 @@ const FriendlyFooter = () => {
             </Link>
           </div>
           
+          <div className={styles.links}>
+            <h4 className={styles.linksTitle}>{t('Sobre', 'About', '소개')}</h4>
+            <a href="/about/julian-moon/" className={styles.link}>
+              {t('Julian Moon (Fundador)', 'Julian Moon (Founder)', 'Julian Moon (창업자)')}
+            </a>
+            <a href="/about/confio-news/" className={styles.link}>
+              {t('Confío News', 'Confío News', 'Confío News')}
+            </a>
+          </div>
+
           <div className={styles.contact}>
             <h4 className={styles.contactTitle}>{t('Contacto', 'Contact', '연락처')}</h4>
             <a href="mailto:support@confio.lat" className={styles.email}>
