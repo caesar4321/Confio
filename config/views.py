@@ -360,7 +360,7 @@ def entity_page(request, entity_slug):
                 },
                 {
                     'q': 'Is Julian Moon the same person as @julianmoonluna on TikTok?',
-                    'a': 'Yes. Julian Moon publishes Spanish-language content as @julianmoonluna on TikTok, YouTube, Instagram, Facebook, X, Telegram, and LinkedIn. All of those profiles are linked from this page as sameAs references to the same Person entity.',
+                    'a': 'Yes. Julian Moon publishes Spanish-language content as @julianmoonluna on TikTok, YouTube, Instagram, Facebook, X, Telegram, and LinkedIn. All of those profiles belong to the same person and are linked from this page.',
                 },
                 {
                     'q': 'Where has Julian Moon been covered in the press?',
