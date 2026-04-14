@@ -68,6 +68,26 @@
     }
 }
 </script>
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+        {
+            "@type": "ListItem",
+            "position": 1,
+            "name": "Descubrir",
+            "item": "https://confio.lat/discover/"
+        },
+        {
+            "@type": "ListItem",
+            "position": 2,
+            "name": "{{ post.title|escapejs }}",
+            "item": "https://confio.lat/discover/{{ post.id }}/{{ post.slug }}/"
+        }
+    ]
+}
+</script>
 {% endblock %}
 
 {% block breadcrumb %}

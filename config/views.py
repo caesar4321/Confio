@@ -18,6 +18,39 @@ from graphql_jwt.utils import jwt_decode
 
 logger = logging.getLogger(__name__)
 
+CONFIO_ORGANIZATION = {
+    'name': 'Confío',
+    'url': 'https://confio.lat/',
+    'logo_url': 'https://confio.lat/static/images/ConfioApp.jpeg',
+    'same_as': [
+        'https://t.me/confio4world',
+        'https://medium.com/confio4world',
+    ],
+}
+
+JULIAN_MOON_PERSON = {
+    'name': 'Julian Moon',
+    'url': 'https://confio.lat/about/julian-moon/',
+    'job_title': 'Founder',
+    'description': 'Founder of Confío, building digital dollar payments for Latin America.',
+    'image_url': 'https://confio.lat/static/media/JulianMoon_Founder.77611b65ceb3c7457238.jpeg',
+    'same_as': [
+        'https://tiktok.com/@julianmoonluna',
+        'https://youtube.com/@julianmoonluna',
+        'https://instagram.com/julianmoonluna_',
+        'https://facebook.com/julianmoonluna',
+        'https://x.com/julianmoonluna_',
+        'https://t.me/julianmoonluna',
+        'https://linkedin.com/in/julianmoonluna',
+    ],
+}
+
+CONFIO_NEWS_ORGANIZATION = {
+    'name': 'Confío News',
+    'url': 'https://confio.lat/about/confio-news/',
+    'description': 'Editorial and product updates from the Confío team.',
+}
+
 
 def robots_txt(request):
     lines = [
@@ -39,6 +72,8 @@ def llms_txt(request):
         '## Site',
         '- Canonical site: https://confio.lat/',
         '- Public discover feed: https://confio.lat/discover/',
+        '- Founder page: https://confio.lat/about/julian-moon/',
+        '- Confío News page: https://confio.lat/about/confio-news/',
         '- XML sitemap: https://confio.lat/sitemap.xml',
         '',
         '## Preferred Sources',
@@ -234,7 +269,48 @@ def index(request):
 		'ogImage': og_image,
 		'main_js_url': main_js_url,
 		'main_css_url': main_css_url,
+        'organization_schema': CONFIO_ORGANIZATION,
 	})
+
+
+def entity_page(request, entity_slug):
+    if entity_slug == 'julian-moon':
+        return render(request, 'entity_page.html', {
+            'title': 'Julian Moon - Founder of Confío',
+            'meta_description': JULIAN_MOON_PERSON['description'],
+            'canonical_url': JULIAN_MOON_PERSON['url'],
+            'entity_type': 'Person',
+            'entity': JULIAN_MOON_PERSON,
+            'organization': CONFIO_ORGANIZATION,
+            'heading': 'Julian Moon',
+            'subheading': 'Founder of Confío',
+            'body': [
+                'Julian Moon is the founder of Confío, focused on building digital dollar payments and financial tools for Latin America.',
+                'He publishes founder updates on Confío and helps define the product vision behind Confío’s public editorial content.',
+            ],
+        })
+
+    if entity_slug == 'confio-news':
+        return render(request, 'entity_page.html', {
+            'title': 'Confío News',
+            'meta_description': CONFIO_NEWS_ORGANIZATION['description'],
+            'canonical_url': CONFIO_NEWS_ORGANIZATION['url'],
+            'entity_type': 'Organization',
+            'entity': {
+                **CONFIO_NEWS_ORGANIZATION,
+                'logo_url': CONFIO_ORGANIZATION['logo_url'],
+                'same_as': CONFIO_ORGANIZATION['same_as'],
+            },
+            'organization': CONFIO_ORGANIZATION,
+            'heading': 'Confío News',
+            'subheading': 'Editorial and product updates from Confío',
+            'body': [
+                'Confío News is the editorial identity used for product announcements, company updates, explainers, and discover content published by Confío.',
+                'Use Confío News as the organization author for Discover posts published under the Confío News channel.',
+            ],
+        })
+
+    return redirect('/')
 
 class LegalPageView(TemplateView):
 	template_name = None

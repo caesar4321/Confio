@@ -1,12 +1,21 @@
-# sitemaps.py
-from django.contrib import sitemaps
-from django.urls import reverse
+from django.contrib.sitemaps import Sitemap
 
 
-class StaticViewSitemap(sitemaps.Sitemap):
+class StaticPageSitemap(Sitemap):
+    changefreq = 'weekly'
+    priority = 0.6
+    protocol = 'https'
 
     def items(self):
-        return ['about', 'terms_of_service', 'privacy_policy', 'frequently_asked_questions',]
+        return [
+            '/',
+            '/discover/',
+            '/about/julian-moon/',
+            '/about/confio-news/',
+            '/terms/',
+            '/privacy/',
+            '/deletion/',
+        ]
 
     def location(self, item):
-        return reverse(item)
+        return item

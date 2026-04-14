@@ -13,7 +13,7 @@ TOP_REACTIONS_LIMIT = 3
 DEFAULT_DISCOVER_AUTHOR = {
     'type': 'Organization',
     'name': 'Confío News',
-    'url': 'https://confio.lat/discover/',
+    'url': 'https://confio.lat/about/confio-news/',
 }
 DEFAULT_DISCOVER_PUBLISHER = {
     'name': 'Confío',
@@ -43,11 +43,16 @@ def _build_author_schema(item):
     author_url = str(metadata.get('schema_author_url') or '').strip()
     author_job_title = str(metadata.get('schema_author_job_title') or '').strip()
 
+    if author_name == 'Confío News' and author_url in {'', 'https://confio.lat/discover/'}:
+        author_url = DEFAULT_DISCOVER_AUTHOR['url']
+    elif author_name == 'Julian Moon' and author_url in {'', 'https://confio.lat/'}:
+        author_url = 'https://confio.lat/about/julian-moon/'
+
     if author_type == 'person' and author_name:
         return {
             'type': 'Person',
             'name': author_name,
-            'url': author_url or 'https://confio.lat/',
+            'url': author_url or 'https://confio.lat/about/julian-moon/',
             'job_title': author_job_title or 'Founder',
             'works_for_name': 'Confío',
             'works_for_url': 'https://confio.lat',
@@ -64,7 +69,7 @@ def _build_author_schema(item):
         return {
             'type': 'Person',
             'name': 'Julian Moon',
-            'url': 'https://confio.lat/',
+            'url': 'https://confio.lat/about/julian-moon/',
             'job_title': 'Founder',
             'works_for_name': 'Confío',
             'works_for_url': 'https://confio.lat',
@@ -80,7 +85,7 @@ def _build_author_schema(item):
             return {
                 'type': 'Person',
                 'name': display_name,
-                'url': author_url or 'https://confio.lat/',
+                'url': author_url or 'https://confio.lat/about/julian-moon/',
             }
 
     return DEFAULT_DISCOVER_AUTHOR.copy()

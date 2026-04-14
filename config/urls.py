@@ -12,6 +12,7 @@ from .views import (
     terms_view,
     privacy_view,
     deletion_view,
+    entity_page,
     robots_txt,
     llms_txt,
     public_sitemap,
@@ -138,10 +139,12 @@ class LoggingGraphQLView(GraphQLView):
         return super().dispatch(request, *args, **kwargs)
 
 from .admin_dashboard import confio_admin_site
+from config.sitemaps import StaticPageSitemap
 from inbox.views import discover_feed, discover_post_detail
 from inbox.sitemaps import DiscoverSitemap
 
 sitemaps = {
+    'static': StaticPageSitemap,
     'discover': DiscoverSitemap,
 }
 
@@ -161,6 +164,7 @@ urlpatterns = [
     re_path(r'^discover/?$', discover_feed, name='discover_feed'),
     re_path(r'^discover/(?P<post_id>\d+)/(?P<slug>[-\w]+)/?$', discover_post_detail, name='discover_post_detail'),
     re_path(r'^discover/(?P<post_id>\d+)/?$', discover_post_detail, name='discover_post_detail_no_slug'),
+    re_path(r'^about/(?P<entity_slug>julian-moon|confio-news)/?$', entity_page, name='entity_page'),
     re_path(r'^terms/?$', terms_view, name='terms'),
     re_path(r'^privacy/?$', privacy_view, name='privacy'),
     re_path(r'^deletion/?$', deletion_view, name='deletion'),

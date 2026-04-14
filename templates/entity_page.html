@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+{% block meta_description %}{{ meta_description }}{% endblock %}
+{% block canonical_url %}{{ canonical_url }}{% endblock %}
+{% block og_title %}{{ title }}{% endblock %}
+{% block og_description %}{{ meta_description }}{% endblock %}
+{% block og_url %}{{ canonical_url }}{% endblock %}
+{% block og_image %}{% if entity.image_url %}{{ entity.image_url }}{% else %}{{ organization.logo_url }}{% endif %}{% endblock %}
+
+{% block structured_data %}
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "{{ entity_type }}",
+    "name": "{{ entity.name|escapejs }}",
+    "url": "{{ entity.url }}",
+    "description": "{{ entity.description|escapejs }}"{% if entity.image_url %},
+    "image": "{{ entity.image_url }}"{% endif %}{% if entity.job_title %},
+    "jobTitle": "{{ entity.job_title|escapejs }}"{% endif %}{% if entity_type == 'Person' %},
+    "worksFor": {
+        "@type": "Organization",
+        "name": "{{ organization.name|escapejs }}",
+        "url": "{{ organization.url }}"
+    }{% endif %},
+    "sameAs": [
+        {% for url in entity.same_as %}
+        "{{ url }}"{% if not forloop.last %},{% endif %}
+        {% endfor %}
+    ]
+}
+</script>
+{% endblock %}
+
+{% block content %}
+<div class="legal-container">
+    <h1>{{ heading }}</h1>
+    <p class="last-updated">{{ subheading }}</p>
+
+    {% for paragraph in body %}
+    <p>{{ paragraph }}</p>
+    {% endfor %}
+
+    <div class="back-link">
+        <a href="/discover/">Ir a Descubrir</a>
+    </div>
+</div>
+{% endblock %}
