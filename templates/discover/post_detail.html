@@ -36,12 +36,13 @@
 <script type="application/ld+json">
 {
     "@context": "https://schema.org",
-    "@type": "Article",
+    "@type": "{{ post.schema_type|default:'Article' }}",
     "headline": "{{ post.title|escapejs }}",
     "description": "{{ post.body|truncatewords:30|escapejs }}",
     "url": "https://confio.lat/discover/{{ post.id }}/{{ post.slug }}/",
     {% if post.image_url %}"image": "{{ post.image_url }}",{% endif %}
     {% if post.published_at %}"datePublished": "{{ post.published_at|date:'c' }}",{% endif %}
+    {% if post.updated_at %}"dateModified": "{{ post.updated_at|date:'c' }}",{% endif %}
     "author": {
         "@type": "{{ post.author_schema.type }}",
         "name": "{{ post.author_schema.name|escapejs }}"{% if post.author_schema.url %},

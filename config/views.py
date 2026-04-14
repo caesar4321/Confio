@@ -33,6 +33,14 @@ CONFIO_ORGANIZATION = {
             'url': 'https://medium.com/confio4world',
             'icon': '/images/$CONFIO.png',
         },
+        {
+            'label': 'GitHub',
+            'url': 'https://github.com/caesar4321/Confio',
+        },
+        {
+            'label': 'Algorand Foundation Q4 2025 Transparency Report',
+            'url': 'https://algorand.co/hubfs/Website-2024/Transparency%20Reports/Algorand%20-%20Transparency%20Report%20-%20Q4%20-%20V3%20-%20Final.pdf',
+        },
     ],
 }
 
@@ -42,6 +50,16 @@ JULIAN_MOON_PERSON = {
     'job_title': 'Founder',
     'description': 'Korean founder of Confío, a non-custodial digital dollar wallet for Latin America, and a Spanish-speaking public explainer of inflation, dollarization, and everyday money systems across the region.',
     'image_url': 'https://confio.lat/static/media/JulianMoon_Founder.77611b65ceb3c7457238.jpeg',
+    'nationality': 'Korean',
+    'knows_about': [
+        'Stablecoins',
+        'Digital dollars',
+        'Inflation',
+        'Dollarization',
+        'Latin American fintech',
+        'Non-custodial wallets',
+        'Algorand',
+    ],
     'same_as': [
         {
             'label': 'TikTok',

@@ -247,6 +247,8 @@ def discover_post_detail(request, post_id, slug=None):
         or {'VIDEO': '#FF4444', 'NEWS': '#F59E0B', 'TEXT': '#1DB587'}.get(item.item_type, '#1DB587')
     )
 
+    schema_type = 'NewsArticle' if item.item_type == 'NEWS' else 'Article'
+
     return render(request, 'discover/post_detail.html', {
         'post': {
             'id': item.id,
@@ -255,7 +257,9 @@ def discover_post_detail(request, post_id, slug=None):
             'tag': tag,
             'tag_color': tag_color,
             'item_type': item.item_type,
+            'schema_type': schema_type,
             'published_at': item.published_at,
+            'updated_at': item.updated_at,
             'image_url': image_url,
             'slug': canonical_slug,
             'blocks': rendered_blocks,

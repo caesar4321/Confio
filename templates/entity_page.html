@@ -14,20 +14,33 @@
 {
     "@context": "https://schema.org",
     "@type": "{{ entity_type }}",
+    "@id": "{{ entity.url }}#{{ entity_type|lower }}",
     "name": "{{ entity.name|escapejs }}",
     "url": "{{ entity.url }}",
     "description": "{{ entity.description|escapejs }}"{% if entity.image_url %},
     "image": "{{ entity.image_url }}"{% endif %}{% if entity.job_title %},
-    "jobTitle": "{{ entity.job_title|escapejs }}"{% endif %}{% if entity_type == 'Person' %},
+    "jobTitle": "{{ entity.job_title|escapejs }}"{% endif %}{% if entity.nationality %},
+    "nationality": "{{ entity.nationality|escapejs }}"{% endif %}{% if entity.knows_about %},
+    "knowsAbout": [{% for topic in entity.knows_about %}"{{ topic|escapejs }}"{% if not forloop.last %}, {% endif %}{% endfor %}]{% endif %}{% if entity_type == 'Person' %},
     "worksFor": {
         "@type": "Organization",
+        "@id": "{{ organization.url }}#organization",
+        "name": "{{ organization.name|escapejs }}",
+        "url": "{{ organization.url }}",
+        "logo": "{{ organization.logo_url }}",
+        "sameAs": [
+            {% for link in organization.same_as %}"{{ link.url }}"{% if not forloop.last %}, {% endif %}{% endfor %}
+        ]
+    }{% endif %}{% if entity_type == 'Organization' %},
+    "logo": "{{ entity.logo_url|default:organization.logo_url }}",
+    "parentOrganization": {
+        "@type": "Organization",
+        "@id": "{{ organization.url }}#organization",
         "name": "{{ organization.name|escapejs }}",
         "url": "{{ organization.url }}"
     }{% endif %},
     "sameAs": [
-        {% for link in entity.same_as %}
-        "{{ link.url }}"{% if not forloop.last %},{% endif %}
-        {% endfor %}
+        {% for link in entity.same_as %}"{{ link.url }}"{% if not forloop.last %}, {% endif %}{% endfor %}
     ]
 }
 </script>
