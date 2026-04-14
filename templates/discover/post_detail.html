@@ -3,6 +3,8 @@
 {% block title %}{{ post.title }} - Confío{% endblock %}
 
 {% block meta_description %}{{ post.body|truncatewords:30 }}{% endblock %}
+{% block meta_author %}{{ post.author_schema.name }}{% endblock %}
+{% block meta_publisher %}{{ publisher_schema.name }}{% endblock %}
 
 {% block canonical %}https://confio.lat/discover/{{ post.id }}/{{ post.slug }}/{% endblock %}
 

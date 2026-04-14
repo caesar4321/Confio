@@ -140,6 +140,7 @@ class LoggingGraphQLView(GraphQLView):
 
 from .admin_dashboard import confio_admin_site
 from config.sitemaps import StaticPageSitemap
+from inbox.feeds import DiscoverFeed
 from inbox.views import discover_feed, discover_post_detail
 from inbox.sitemaps import DiscoverSitemap
 
@@ -161,6 +162,7 @@ urlpatterns = [
     path('portal/login-complete/', portal_login_complete, name='portal_login_complete'),
     path('portal/logout/', portal_logout, name='portal_logout'),
     path('portal/setup-2fa/', portal_setup_2fa_redirect, name='portal_setup_2fa'),
+    path('discover/feed.xml', DiscoverFeed(), name='discover_feed_xml'),
     re_path(r'^discover/?$', discover_feed, name='discover_feed'),
     re_path(r'^discover/(?P<post_id>\d+)/(?P<slug>[-\w]+)/?$', discover_post_detail, name='discover_post_detail'),
     re_path(r'^discover/(?P<post_id>\d+)/?$', discover_post_detail, name='discover_post_detail_no_slug'),

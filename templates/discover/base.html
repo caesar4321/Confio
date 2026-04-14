@@ -9,6 +9,9 @@
     <meta name="description" content="{% block meta_description %}Descubre noticias, guias y videos sobre dolares digitales, stablecoins y pagos en Latinoamerica con Confío.{% endblock %}">
     <meta name="robots" content="index, follow">
     <link rel="canonical" href="{% block canonical %}https://confio.lat/discover/{% endblock %}">
+    <meta name="author" content="{% block meta_author %}Confío News{% endblock %}">
+    <meta name="publisher" content="{% block meta_publisher %}Confío{% endblock %}">
+    <link rel="alternate" type="application/rss+xml" title="Confío Descubrir RSS" href="https://confio.lat/discover/feed.xml">
 
     <!-- Open Graph -->
     <meta property="og:site_name" content="Confío">
@@ -35,6 +38,7 @@
     <link rel="icon" type="image/png" href="/images/$CONFIO.png">
 
     {% block structured_data %}{% endblock %}
+    {% block head_extras %}{% endblock %}
 
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
