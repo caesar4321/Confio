@@ -44,6 +44,36 @@
     ]
 }
 </script>
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "Confío", "item": "https://confio.lat/" },
+        { "@type": "ListItem", "position": 2, "name": "{{ heading|escapejs }}", "item": "{{ entity.url }}" }
+    ]
+}
+</script>
+{% if faqs %}
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+        {% for faq in faqs %}
+        {
+            "@type": "Question",
+            "name": "{{ faq.q|escapejs }}",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "{{ faq.a|escapejs }}"
+            }
+        }{% if not forloop.last %},{% endif %}
+        {% endfor %}
+    ]
+}
+</script>
+{% endif %}
 {% endblock %}
 
 {% block extra_style %}
@@ -343,6 +373,51 @@
         text-decoration: underline;
     }
 
+    .entity-faq {
+        margin-top: 22px;
+        background: rgba(255, 255, 255, 0.88);
+        border: 1px solid rgba(148, 163, 184, 0.18);
+        border-radius: 24px;
+        backdrop-filter: blur(12px);
+    }
+
+    .entity-faq-inner {
+        padding: 28px 30px 30px;
+    }
+
+    .entity-faq-title {
+        margin: 0 0 18px;
+        font-size: 1.15rem;
+        font-weight: 700;
+        color: #0F172A;
+    }
+
+    .entity-faq-list {
+        display: grid;
+        gap: 18px;
+    }
+
+    .entity-faq-item {
+        padding: 16px 18px;
+        border-radius: 16px;
+        background: rgba(236, 253, 245, 0.55);
+        border: 1px solid rgba(16, 185, 129, 0.14);
+    }
+
+    .entity-faq-question {
+        margin: 0 0 8px;
+        font-size: 1rem;
+        font-weight: 700;
+        color: #0F172A;
+    }
+
+    .entity-faq-answer {
+        margin: 0;
+        color: #475467;
+        font-size: 0.98rem;
+        line-height: 1.75;
+    }
+
     @media (max-width: 960px) {
         .entity-topbar {
             padding-top: 22px;
@@ -470,6 +545,22 @@
                     <div class="entity-reference-list">
                         {% for reference in references %}
                         <a href="{{ reference.url }}" target="_blank" rel="noopener noreferrer">{{ reference.label }}</a>
+                        {% endfor %}
+                    </div>
+                </div>
+            </section>
+            {% endif %}
+
+            {% if faqs %}
+            <section class="entity-faq">
+                <div class="entity-faq-inner">
+                    <h2 class="entity-faq-title">Frequently asked questions</h2>
+                    <div class="entity-faq-list">
+                        {% for faq in faqs %}
+                        <div class="entity-faq-item">
+                            <h3 class="entity-faq-question">{{ faq.q }}</h3>
+                            <p class="entity-faq-answer">{{ faq.a }}</p>
+                        </div>
                         {% endfor %}
                     </div>
                 </div>

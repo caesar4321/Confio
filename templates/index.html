@@ -24,14 +24,51 @@
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
-        "@type": "Organization",
-        "name": "{{ organization_schema.name|escapejs }}",
-        "url": "{{ organization_schema.url }}",
-        "logo": "{{ organization_schema.logo_url }}",
-        "sameAs": [
-            {% for url in organization_schema.same_as %}
-            "{{ url }}"{% if not forloop.last %},{% endif %}
-            {% endfor %}
+        "@graph": [
+            {
+                "@type": "Organization",
+                "@id": "https://confio.lat/#organization",
+                "name": "Confío",
+                "alternateName": ["Confio", "$CONFIO"],
+                "url": "https://confio.lat/",
+                "logo": {
+                    "@type": "ImageObject",
+                    "url": "{{ organization_schema.logo_url }}"
+                },
+                "description": "Non-custodial digital dollar wallet for Latin America built on the Algorand blockchain.",
+                "foundingDate": "2024",
+                "founder": { "@id": "https://confio.lat/about/julian-moon/#person" },
+                "sameAs": [
+                    {% for link in organization_schema.same_as %}"{{ link.url }}"{% if not forloop.last %}, {% endif %}{% endfor %}
+                ]
+            },
+            {
+                "@type": "WebSite",
+                "@id": "https://confio.lat/#website",
+                "url": "https://confio.lat/",
+                "name": "Confío",
+                "description": "{{ ogDescription|escapejs }}",
+                "inLanguage": ["es", "en", "ko"],
+                "publisher": { "@id": "https://confio.lat/#organization" }
+            },
+            {
+                "@type": "Person",
+                "@id": "https://confio.lat/about/julian-moon/#person",
+                "name": "Julian Moon",
+                "url": "https://confio.lat/about/julian-moon/",
+                "jobTitle": "Founder",
+                "nationality": "Korean",
+                "worksFor": { "@id": "https://confio.lat/#organization" },
+                "sameAs": [
+                    "https://tiktok.com/@julianmoonluna",
+                    "https://youtube.com/@julianmoonluna",
+                    "https://instagram.com/julianmoonluna_",
+                    "https://facebook.com/julianmoonluna",
+                    "https://x.com/julianmoonluna_",
+                    "https://t.me/julianmoonluna",
+                    "https://linkedin.com/in/julianmoonluna"
+                ]
+            }
         ]
     }
     </script>
