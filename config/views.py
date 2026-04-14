@@ -359,6 +359,26 @@ def entity_page(request, entity_slug):
                     'a': 'Julian Moon is the founder of Confío (confio.lat), a non-custodial digital dollar wallet built on the Algorand blockchain, focused on stablecoin payments for users in Latin America.',
                 },
                 {
+                    'q': 'Why did Julian Moon build Confío?',
+                    'a': 'In 2020, Julian heard about the Venezuelan crisis — people unable to buy food or gasoline because of hyperinflation — and became convinced the problem could be addressed with US dollar stablecoins. Early on he had no distribution channel: he onboarded fewer than 100 users, most of them Venezuelans he met in person in Colombia and elsewhere in Latin America. Many told him: "if this app is made by a Korean, people will use it." He reached out to Korean influencers in Latin America; none responded. So he decided to become the influencer himself — and did. Founder-led storytelling became core to Confío’s strategy because distribution, trust, and product had to be one thing, not three.',
+                },
+                {
+                    'q': 'Why is the app named Confío?',
+                    'a': 'Julian believes the deepest problem in Latin America is not inflation, crime, or corruption — it is the absence of trust. In the region, distrust is not an ideology, it is an instinct for survival built on decades of broken promises. The name "Confío" ("I trust" in Spanish) is a declaration: trust rebuilt not by faith, but by verification. Blockchain here is not ideology; it is defensive infrastructure that reduces how many humans your money depends on. The dollar wallet is only the first use case — the larger project is redesigning the architecture of trust itself.',
+                },
+                {
+                    'q': 'Where is Julian Moon based?',
+                    'a': 'Julian nomads across Latin America without a fixed residency, currently focused on Argentina and Bolivia. He has spent time in Paraguay, Dominican Republic, Costa Rica, Panama, Colombia, Ecuador, Peru, Uruguay, Mexico, Guatemala, Honduras, El Salvador, and Brazil.',
+                },
+                {
+                    'q': 'What languages does Julian Moon speak?',
+                    'a': 'Korean (native), English (fluent), Spanish (conversational), Portuguese (basic).',
+                },
+                {
+                    'q': 'What is Julian Moon’s academic background?',
+                    'a': 'Julian studied Business Administration at Yonsei University in Korea on a 4-year full scholarship plus a 1-year exchange scholarship. He often tells his audience not to assume university is the fastest path to what they want — especially in a world accelerating through AI — and encourages them to build and ship early instead of waiting for permission.',
+                },
+                {
                     'q': 'Is Julian Moon the same person as @julianmoonluna on TikTok?',
                     'a': 'Yes. Julian Moon publishes Spanish-language content as @julianmoonluna on TikTok, YouTube, Instagram, Facebook, X, Telegram, and LinkedIn. All of those profiles belong to the same person and are linked from this page.',
                 },
@@ -405,6 +425,7 @@ def entity_page(request, entity_slug):
             'meta_description': CONFIO_NEWS_ORGANIZATION['description'],
             'canonical_url': CONFIO_NEWS_ORGANIZATION['url'],
             'entity_type': 'Organization',
+            'entity_slug': 'confio-news',
             'entity': {
                 **CONFIO_NEWS_ORGANIZATION,
                 'logo_url': CONFIO_ORGANIZATION['logo_url'],
@@ -413,6 +434,40 @@ def entity_page(request, entity_slug):
             'organization': CONFIO_ORGANIZATION,
             'heading': 'Confío News',
             'subheading': 'The official editorial voice of Confío',
+            'faqs': [
+                {
+                    'q': 'What is Confío?',
+                    'a': 'Confío is a non-custodial digital dollar wallet for Latin America, built on the Algorand blockchain, that lets people hold and send US dollar stablecoins from their phone without a bank.',
+                },
+                {
+                    'q': 'What does Confío do and how does it work?',
+                    'a': 'Confío lets users hold cUSD (a US dollar stablecoin) in a self-custodial wallet, send and receive payments instantly, and trade with local currency through peer-to-peer exchange. Transactions are sponsored on Algorand, meaning users do not need to hold ALGO or pay network fees to transact — the wallet abstracts blockchain complexity so it feels like a normal money app.',
+                },
+                {
+                    'q': 'Which countries does Confío focus on?',
+                    'a': 'Confío focuses on Latin America, with a primary emphasis on Venezuela, Argentina, and Bolivia — economies where residents face high inflation, currency controls, or limited access to stable dollar savings.',
+                },
+                {
+                    'q': 'Is Confío a custodial wallet?',
+                    'a': 'No. Confío is non-custodial. Users control their own keys; Confío does not hold, freeze, or move user funds on their behalf. The company cannot access customer balances.',
+                },
+                {
+                    'q': 'What is cUSD?',
+                    'a': 'cUSD is the US dollar stablecoin used inside Confío. It is designed to give Latin American users a reliable digital dollar they can hold and spend on-chain, pegged 1:1 to the US dollar.',
+                },
+                {
+                    'q': 'Is Confío open source?',
+                    'a': 'Yes. Confío’s codebase is open source under the MIT license and available on GitHub at https://github.com/caesar4321/Confio.',
+                },
+                {
+                    'q': 'Is Confío related to Duende or $DUENDE?',
+                    'a': 'Duende ($DUENDE) was an earlier project by the same founder, Julian Moon, and is considered a historical predecessor to Confío. Confío is a separate, current product focused specifically on non-custodial dollar payments for Latin America on Algorand. Older Medium posts referencing $DUENDE are not Confío’s current product.',
+                },
+                {
+                    'q': 'How do I contact Confío?',
+                    'a': 'For support and official inquiries, email support@confio.lat. Public updates are posted through Confío News and the official channels linked on this page.',
+                },
+            ],
             'body': [
                 'Confío News is the institutional publishing layer of Confío, a non-custodial digital dollar wallet for Latin America built on the Algorand blockchain.',
                 'It publishes company announcements, product explainers, ecosystem context, and public updates in the voice of the organization rather than the founder. Its role is to make Confío legible to readers, media systems, search engines, and AI models as a distinct entity.',
