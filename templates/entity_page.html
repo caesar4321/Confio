@@ -25,8 +25,8 @@
         "url": "{{ organization.url }}"
     }{% endif %},
     "sameAs": [
-        {% for url in entity.same_as %}
-        "{{ url }}"{% if not forloop.last %},{% endif %}
+        {% for link in entity.same_as %}
+        "{{ link.url }}"{% if not forloop.last %},{% endif %}
         {% endfor %}
     ]
 }
@@ -263,6 +263,26 @@
         font-weight: 500;
     }
 
+    .entity-link-chip-left {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        min-width: 0;
+    }
+
+    .entity-link-icon {
+        width: 28px;
+        height: 28px;
+        object-fit: contain;
+        flex: 0 0 auto;
+    }
+
+    .entity-link-label {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
     .entity-link-chip:hover {
         background: rgba(52, 211, 153, 0.14);
         border-color: rgba(52, 211, 153, 0.34);
@@ -274,6 +294,40 @@
         color: #CBD5E1;
         font-size: 0.95rem;
         line-height: 1.7;
+    }
+
+    .entity-references {
+        margin-top: 22px;
+        background: rgba(255, 255, 255, 0.88);
+        border: 1px solid rgba(148, 163, 184, 0.18);
+        border-radius: 24px;
+        backdrop-filter: blur(12px);
+    }
+
+    .entity-references-inner {
+        padding: 24px 28px 28px;
+    }
+
+    .entity-references-title {
+        margin: 0 0 12px;
+        font-size: 1rem;
+        font-weight: 700;
+        color: #0F172A;
+    }
+
+    .entity-reference-list {
+        display: grid;
+        gap: 10px;
+    }
+
+    .entity-reference-list a {
+        color: #047857;
+        text-decoration: none;
+        font-weight: 600;
+    }
+
+    .entity-reference-list a:hover {
+        text-decoration: underline;
     }
 
     @media (max-width: 960px) {
@@ -379,9 +433,14 @@
                 <div class="entity-links-inner">
                     <h2 class="entity-links-title">Official links</h2>
                     <div class="entity-links-grid">
-                        {% for url in entity.same_as %}
-                        <a href="{{ url }}" target="_blank" rel="noopener noreferrer" class="entity-link-chip">
-                            <span>{{ url }}</span>
+                        {% for link in entity.same_as %}
+                        <a href="{{ link.url }}" target="_blank" rel="noopener noreferrer" class="entity-link-chip">
+                            <span class="entity-link-chip-left">
+                                {% if link.icon %}
+                                <img src="{{ link.icon }}" alt="{{ link.label }}" class="entity-link-icon">
+                                {% endif %}
+                                <span class="entity-link-label">{{ link.label }}</span>
+                            </span>
                             <span>&rarr;</span>
                         </a>
                         {% endfor %}
@@ -389,6 +448,19 @@
                     <p class="entity-note">
                         This page is the canonical public reference for this entity on Confío.
                     </p>
+                </div>
+            </section>
+            {% endif %}
+
+            {% if references %}
+            <section class="entity-references">
+                <div class="entity-references-inner">
+                    <h2 class="entity-references-title">Public references</h2>
+                    <div class="entity-reference-list">
+                        {% for reference in references %}
+                        <a href="{{ reference.url }}" target="_blank" rel="noopener noreferrer">{{ reference.label }}</a>
+                        {% endfor %}
+                    </div>
                 </div>
             </section>
             {% endif %}

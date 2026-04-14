@@ -23,8 +23,16 @@ CONFIO_ORGANIZATION = {
     'url': 'https://confio.lat/',
     'logo_url': 'https://confio.lat/static/images/ConfioApp.jpeg',
     'same_as': [
-        'https://t.me/confio4world',
-        'https://medium.com/confio4world',
+        {
+            'label': 'Telegram',
+            'url': 'https://t.me/confio4world',
+            'icon': '/images/Telegram.png',
+        },
+        {
+            'label': 'Medium',
+            'url': 'https://medium.com/confio4world',
+            'icon': '/images/$CONFIO.png',
+        },
     ],
 }
 
@@ -32,16 +40,44 @@ JULIAN_MOON_PERSON = {
     'name': 'Julian Moon',
     'url': 'https://confio.lat/about/julian-moon/',
     'job_title': 'Founder',
-    'description': 'Founder of Confío, building digital dollar payments for Latin America.',
+    'description': 'Founder of Confío and a Korean creator building digital dollar payments for Latin America.',
     'image_url': 'https://confio.lat/static/media/JulianMoon_Founder.77611b65ceb3c7457238.jpeg',
     'same_as': [
-        'https://tiktok.com/@julianmoonluna',
-        'https://youtube.com/@julianmoonluna',
-        'https://instagram.com/julianmoonluna_',
-        'https://facebook.com/julianmoonluna',
-        'https://x.com/julianmoonluna_',
-        'https://t.me/julianmoonluna',
-        'https://linkedin.com/in/julianmoonluna',
+        {
+            'label': 'TikTok',
+            'url': 'https://tiktok.com/@julianmoonluna',
+            'icon': '/images/TikTok.png',
+        },
+        {
+            'label': 'YouTube',
+            'url': 'https://youtube.com/@julianmoonluna',
+            'icon': '/images/YouTube.png',
+        },
+        {
+            'label': 'Instagram',
+            'url': 'https://instagram.com/julianmoonluna_',
+            'icon': '/images/Instagram.png',
+        },
+        {
+            'label': 'Facebook',
+            'url': 'https://facebook.com/julianmoonluna',
+            'icon': '/images/Facebook.png',
+        },
+        {
+            'label': 'X',
+            'url': 'https://x.com/julianmoonluna_',
+            'icon': '/images/X.png',
+        },
+        {
+            'label': 'Telegram',
+            'url': 'https://t.me/julianmoonluna',
+            'icon': '/images/Telegram.png',
+        },
+        {
+            'label': 'LinkedIn',
+            'url': 'https://linkedin.com/in/julianmoonluna',
+            'icon': '/images/LinkedIn.png',
+        },
     ],
 }
 
@@ -49,6 +85,7 @@ CONFIO_NEWS_ORGANIZATION = {
     'name': 'Confío News',
     'url': 'https://confio.lat/about/confio-news/',
     'description': 'Editorial and product updates from the Confío team.',
+    'image_url': 'https://confio.lat/images/$CONFIO.png',
 }
 
 
@@ -285,8 +322,23 @@ def entity_page(request, entity_slug):
             'heading': 'Julian Moon',
             'subheading': 'Founder of Confío',
             'body': [
-                'Julian Moon is the founder of Confío, focused on building digital dollar payments and financial tools for Latin America.',
-                'He publishes founder updates on Confío and helps define the product vision behind Confío’s public editorial content.',
+                'Julian Moon publicly presents himself as a Korean founder and creator focused on Latin America, combining fintech product building with creator-led distribution across Spanish-speaking audiences.',
+                'Across Confío’s public publisher profile and founder-authored materials, he describes Confío as a mission to rebuild financial trust in Latin America through digital dollar payments and stablecoin-based infrastructure.',
+                'Public professional references also present him as the founder of Confío and a large TikTok creator, tying his public content work directly to the product vision behind Confío.',
+            ],
+            'references': [
+                {
+                    'label': 'Confío on Medium',
+                    'url': 'https://medium.com/confio4world',
+                },
+                {
+                    'label': 'Confío Tokenomics by Julian Moon',
+                    'url': 'https://medium.com/confio4world/conf%C3%ADo-official-tokenomics-2025-english-edition-421a310a18fb',
+                },
+                {
+                    'label': 'Public LinkedIn reference',
+                    'url': 'https://ar.linkedin.com/jobs/view/join-as-a-core-contributor-%E2%80%93-react-native-%2B-blockchain-side-project-latam-focused-at-conf%C3%ADo-4204264246',
+                },
             ],
         })
 
@@ -305,8 +357,19 @@ def entity_page(request, entity_slug):
             'heading': 'Confío News',
             'subheading': 'Editorial and product updates from Confío',
             'body': [
-                'Confío News is the editorial identity used for product announcements, company updates, explainers, and discover content published by Confío.',
-                'Use Confío News as the organization author for Discover posts published under the Confío News channel.',
+                'Confío News is the editorial identity used for product announcements, explainers, ecosystem updates, and company communications published by Confío.',
+                'Its role is to separate institutional editorial content from founder-authored posts, so search engines and AI systems can distinguish organization voice from person voice across Discover.',
+                'Public publisher references on Confío’s Medium presence describe the broader project as focused on helping Latin American users access trusted digital dollar payments and protection against inflation.',
+            ],
+            'references': [
+                {
+                    'label': 'Confío publication on Medium',
+                    'url': 'https://medium.com/confio4world',
+                },
+                {
+                    'label': 'Confío platform overview',
+                    'url': 'https://medium.com/confio4world/duende-cryptocurrency-and-its-exclusive-payment-platform-to-facilitate-cryptocurrency-mass-c0a7499d0e81',
+                },
             ],
         })
 
