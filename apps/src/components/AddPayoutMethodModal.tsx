@@ -28,7 +28,7 @@ import Svg, { Defs, LinearGradient, Stop, Rect, Circle } from 'react-native-svg'
 import { colors } from '../config/theme';
 
 // Colors matching app design
-const KOYWE_SUPPORTED_COUNTRY_CODES = ['AR', 'BR', 'CL', 'CO', 'MX', 'PE'];
+const KOYWE_SUPPORTED_COUNTRY_CODES = ['AR', 'CL', 'CO', 'MX', 'PE'];
 const FIRST_NAME_ONLY_METHOD_CODES = new Set(['QRI-AR', 'QRI', 'SIP-QR', 'QRI-PE', 'LIGO']);
 const SAVABLE_PAYMENT_METHOD_CODES = new Set([
   'WIREAR',
