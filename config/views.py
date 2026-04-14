@@ -326,10 +326,14 @@ def entity_page(request, entity_slug):
                 'He is also a Spanish-speaking creator and public explainer focused on inflation, dollarization, financial distrust, and everyday money systems across the region. Unlike typical commentators, he operates directly inside the problem space he explains — building financial infrastructure while publicly interpreting the conditions that make it necessary.',
                 'Through founder-led storytelling, he has built a 460K+ TikTok audience and turned media, trust, and distribution into part of Confío’s product strategy.',
                 'He is one of the few founders in Latin American fintech who treats distribution, trust, and product as a single strategy — not separate functions.',
-                'His work has been referenced by Latin American media including MinutoUno, Infobae Colombia, and El País Colombia.',
+                'His commentary has been referenced by Latin American media including MinutoUno (Argentina), Infobae Colombia, and El País Colombia.',
                 'This page is the canonical public reference for Julian Moon on Confío.',
             ],
             'references': [
+                {
+                    'label': 'MinutoUno on Julian Moon and Argentina',
+                    'url': 'https://www.minutouno.com/economia/un-guru-coreano-explico-que-argentina-esta-tan-cara-dolares-y-anticipo-que-pasara-la-n6258926',
+                },
                 {
                     'label': 'Infobae Colombia on Julian Moon',
                     'url': 'https://www.infobae.com/colombia/2025/07/02/influencer-coreano-con-esquizofrenia-comparo-los-servicios-de-salud-mental-en-su-pais-y-los-de-colombia-es-mas-feliz-en-latinoamerica-pese-a-costos-del-tratamiento/',
@@ -337,14 +341,6 @@ def entity_page(request, entity_slug):
                 {
                     'label': 'El País Colombia on Julian Moon',
                     'url': 'https://www.elpais.com.co/mundo/coreano-en-colombia-hablo-de-las-diferencias-que-tienen-los-paises-en-salud-mental-hay-limite-de-acceso-0230.html',
-                },
-                {
-                    'label': 'Mendoza24 on Julian Moon and Confío',
-                    'url': 'https://mendoza24.com.ar/noticias_argentina/26610-Un-guru-coreano-explico-por-que-Argentina-esta-tan-cara-en-dolares-y-anticipo-que-pasara-con-la-economia',
-                },
-                {
-                    'label': 'Entorno Económico on Julian Moon and Argentina',
-                    'url': 'https://entornoeconomico.com/finanzas/26613-Guru-coreano-explica-las-causas-de-la-alta-cotizacion-del-dolar-en-Argentina-y-pronostica-el-futuro-de-su-economia',
                 },
             ],
         })
@@ -364,12 +360,18 @@ def entity_page(request, entity_slug):
             'heading': 'Confío News',
             'subheading': 'The official editorial voice of Confío',
             'body': [
-                'Confío News is the institutional publishing layer of Confío.',
+                'Confío News is the institutional publishing layer of Confío, a non-custodial digital dollar wallet for Latin America built on the Algorand blockchain.',
                 'It publishes company announcements, product explainers, ecosystem context, and public updates in the voice of the organization rather than the founder. Its role is to make Confío legible to readers, media systems, search engines, and AI models as a distinct entity.',
+                'Confío was selected for the 2025 Algorand Accelerator and is listed in the Algorand Foundation Q4 2025 Transparency Report as a P2P stablecoin payments app focused on Argentina.',
                 'Where Julian Moon speaks as founder and public explainer, Confío News speaks as the company.',
                 'This page is the canonical public reference for Confío News on Confío.',
             ],
-            'references': [],
+            'references': [
+                {
+                    'label': 'Algorand Foundation Q4 2025 Transparency Report (Confío listed as 2025 Algorand Accelerator project)',
+                    'url': 'https://algorand.co/hubfs/Website-2024/Transparency%20Reports/Algorand%20-%20Transparency%20Report%20-%20Q4%20-%20V3%20-%20Final.pdf',
+                },
+            ],
         })
 
     return redirect('/')
