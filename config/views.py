@@ -40,7 +40,7 @@ JULIAN_MOON_PERSON = {
     'name': 'Julian Moon',
     'url': 'https://confio.lat/about/julian-moon/',
     'job_title': 'Founder',
-    'description': 'Founder of Confío and a Korean creator building digital dollar payments for Latin America.',
+    'description': 'Korean founder of Confío, a non-custodial digital dollar wallet for Latin America, and a Spanish-speaking public explainer of inflation, dollarization, and everyday money systems across the region.',
     'image_url': 'https://confio.lat/static/media/JulianMoon_Founder.77611b65ceb3c7457238.jpeg',
     'same_as': [
         {
@@ -84,7 +84,7 @@ JULIAN_MOON_PERSON = {
 CONFIO_NEWS_ORGANIZATION = {
     'name': 'Confío News',
     'url': 'https://confio.lat/about/confio-news/',
-    'description': 'Editorial and product updates from the Confío team.',
+    'description': 'The official editorial voice of Confío: company announcements, product explainers, and ecosystem context published in the organization’s voice rather than the founder’s.',
     'image_url': 'https://confio.lat/images/$CONFIO.png',
 }
 
@@ -322,9 +322,12 @@ def entity_page(request, entity_slug):
             'heading': 'Julian Moon',
             'subheading': 'Founder of Confío',
             'body': [
-                'Julian Moon is a Korean founder building one of the more distinctive public narratives in Latin American fintech: a creator-led, trust-first approach to digital dollar payments, stablecoins, and everyday financial protection.',
-                'Instead of operating as an anonymous product executive, he appears publicly as both founder and on-camera explainer, translating inflation, dollarization, and financial infrastructure into stories that resonate with audiences across Latin America.',
-                'That combination gives Confío an unusual media profile. Public coverage frames him not only as the founder of Confío, but as a creator whose commentary on regional economics can break into mainstream news and widen the reach of the product mission behind the company.',
+                'Julian Moon is a Korean founder building Confío, a non-custodial digital dollar wallet for Latin America.',
+                'He is also a Spanish-speaking creator and public explainer focused on inflation, dollarization, financial distrust, and everyday money systems across the region. Unlike typical commentators, he operates directly inside the problem space he explains — building financial infrastructure while publicly interpreting the conditions that make it necessary.',
+                'Through founder-led storytelling, he has built a 460K+ TikTok audience and turned media, trust, and distribution into part of Confío’s product strategy.',
+                'He is one of the few founders in Latin American fintech who treats distribution, trust, and product as a single strategy — not separate functions.',
+                'His work has been referenced by Latin American media including MinutoUno, Infobae Colombia, and El País Colombia.',
+                'This page is the canonical public reference for Julian Moon on Confío.',
             ],
             'references': [
                 {
@@ -359,11 +362,12 @@ def entity_page(request, entity_slug):
             },
             'organization': CONFIO_ORGANIZATION,
             'heading': 'Confío News',
-            'subheading': 'Editorial and product updates from Confío',
+            'subheading': 'The official editorial voice of Confío',
             'body': [
-                'Confío News is the institutional editorial voice of Confío: the place for company announcements, product explainers, ecosystem context, and public-facing updates that should read as organization voice rather than founder voice.',
-                'Its purpose is strategic as much as editorial. It gives media, search engines, and AI systems a clean distinction between posts authored by Julian Moon as a person and posts published by Confío as an organization.',
-                'For public discovery, Confío News should be understood as the newsroom layer around Confío’s broader mission: digital dollar payments, financial trust, and transparent communication in a region where money systems are often unstable.',
+                'Confío News is the institutional publishing layer of Confío.',
+                'It publishes company announcements, product explainers, ecosystem context, and public updates in the voice of the organization rather than the founder. Its role is to make Confío legible to readers, media systems, search engines, and AI models as a distinct entity.',
+                'Where Julian Moon speaks as founder and public explainer, Confío News speaks as the company.',
+                'This page is the canonical public reference for Confío News on Confío.',
             ],
             'references': [],
         })
