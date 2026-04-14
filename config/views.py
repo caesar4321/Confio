@@ -41,6 +41,10 @@ CONFIO_ORGANIZATION = {
             'label': 'Algorand Foundation Q4 2025 Transparency Report',
             'url': 'https://algorand.co/hubfs/Website-2024/Transparency%20Reports/Algorand%20-%20Transparency%20Report%20-%20Q4%20-%20V3%20-%20Final.pdf',
         },
+        {
+            'label': 'Algorand Community xGov Proposal',
+            'url': 'https://forum.algorand.co/t/confio-web2-to-algorand-consumer-onboarding-infrastructure-latam/15198',
+        },
     ],
 }
 
@@ -95,6 +99,14 @@ JULIAN_MOON_PERSON = {
             'label': 'LinkedIn',
             'url': 'https://linkedin.com/in/julianmoonluna',
             'icon': '/images/LinkedIn.png',
+        },
+        {
+            'label': 'Threads',
+            'url': 'https://www.threads.com/@julianmoonluna',
+        },
+        {
+            'label': 'Linktree',
+            'url': 'https://linktr.ee/julianmoonluna',
         },
     ],
 }
@@ -360,6 +372,10 @@ def entity_page(request, entity_slug):
                     'label': 'El País Colombia on Julian Moon',
                     'url': 'https://www.elpais.com.co/mundo/coreano-en-colombia-hablo-de-las-diferencias-que-tienen-los-paises-en-salud-mental-hay-limite-de-acceso-0230.html',
                 },
+                {
+                    'label': 'Algorand community xGov proposal by Julian Moon (founder)',
+                    'url': 'https://forum.algorand.co/t/confio-web2-to-algorand-consumer-onboarding-infrastructure-latam/15198',
+                },
             ],
         })
 
@@ -388,6 +404,14 @@ def entity_page(request, entity_slug):
                 {
                     'label': 'Algorand Foundation Q4 2025 Transparency Report (Confío listed as 2025 Algorand Accelerator project)',
                     'url': 'https://algorand.co/hubfs/Website-2024/Transparency%20Reports/Algorand%20-%20Transparency%20Report%20-%20Q4%20-%20V3%20-%20Final.pdf',
+                },
+                {
+                    'label': 'Confío xGov proposal on the Algorand community forum',
+                    'url': 'https://forum.algorand.co/t/confio-web2-to-algorand-consumer-onboarding-infrastructure-latam/15198',
+                },
+                {
+                    'label': 'Confío open-source repository on GitHub',
+                    'url': 'https://github.com/caesar4321/Confio',
                 },
             ],
         })
