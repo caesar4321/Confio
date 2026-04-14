@@ -18,7 +18,7 @@ DEFAULT_DISCOVER_AUTHOR = {
 DEFAULT_DISCOVER_PUBLISHER = {
     'name': 'Confío',
     'url': 'https://confio.lat',
-    'logo_url': 'https://confio.lat/static/images/ConfioApp.jpeg',
+    'logo_url': 'https://confio.lat/images/$CONFIO.png',
 }
 
 

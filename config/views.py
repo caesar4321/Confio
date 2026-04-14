@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 CONFIO_ORGANIZATION = {
     'name': 'Confío',
     'url': 'https://confio.lat/',
-    'logo_url': 'https://confio.lat/static/images/ConfioApp.jpeg',
+    'logo_url': 'https://confio.lat/images/$CONFIO.png',
     'same_as': [
         {
             'label': 'Telegram',

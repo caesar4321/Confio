@@ -16,7 +16,7 @@
 {% if post.image_url %}
 <meta property="og:image" content="{{ post.image_url }}">
 {% else %}
-<meta property="og:image" content="https://confio.lat/static/images/ConfioApp.jpeg">
+<meta property="og:image" content="https://confio.lat/images/og_discover.png">
 {% endif %}
 {% if post.published_at %}
 <meta property="article:published_time" content="{{ post.published_at|date:'c' }}">
@@ -24,14 +24,12 @@
 <meta property="article:section" content="{{ post.tag }}">
 {% endblock %}
 
-{% block twitter_card_type %}{% if post.image_url %}summary_large_image{% else %}summary{% endif %}{% endblock %}
+{% block twitter_card_type %}summary_large_image{% endblock %}
+{% block twitter_image %}{% if post.image_url %}{{ post.image_url }}{% else %}https://confio.lat/images/og_discover.png{% endif %}{% endblock %}
 
 {% block twitter_tags %}
 <meta name="twitter:title" content="{{ post.title }}">
 <meta name="twitter:description" content="{{ post.body|truncatewords:30 }}">
-{% if post.image_url %}
-<meta name="twitter:image" content="{{ post.image_url }}">
-{% endif %}
 {% endblock %}
 
 {% block structured_data %}

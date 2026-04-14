@@ -21,12 +21,13 @@
     <meta property="og:description" content="Descubre noticias, guias y videos sobre dolares digitales, stablecoins y pagos en Latinoamerica.">
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://confio.lat/discover/">
-    <meta property="og:image" content="https://confio.lat/static/images/ConfioApp.jpeg">
+    <meta property="og:image" content="https://confio.lat/images/og_discover.png">
     {% endblock %}
 
     <!-- Twitter Card -->
-    <meta name="twitter:card" content="{% block twitter_card_type %}summary{% endblock %}">
+    <meta name="twitter:card" content="{% block twitter_card_type %}summary_large_image{% endblock %}">
     <meta name="twitter:site" content="@confio4world">
+    <meta name="twitter:image" content="{% block twitter_image %}https://confio.lat/images/og_discover.png{% endblock %}">
     {% block twitter_tags %}{% endblock %}
 
     <!-- Fonts -->
