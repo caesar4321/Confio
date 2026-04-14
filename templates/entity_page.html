@@ -446,17 +446,15 @@
                 <div class="entity-links-inner">
                     <h2 class="entity-links-title">Official links</h2>
                     <div class="entity-links-grid">
-                        {% for link in entity.same_as %}
+                        {% for link in entity.same_as %}{% if link.icon %}
                         <a href="{{ link.url }}" target="_blank" rel="noopener noreferrer" class="entity-link-chip">
                             <span class="entity-link-chip-left">
-                                {% if link.icon %}
                                 <img src="{{ link.icon }}" alt="{{ link.label }}" class="entity-link-icon">
-                                {% endif %}
                                 <span class="entity-link-label">{{ link.label }}</span>
                             </span>
                             <span>&rarr;</span>
                         </a>
-                        {% endfor %}
+                        {% endif %}{% endfor %}
                     </div>
                     <p class="entity-note">
                         This page is the canonical public reference for this entity on Confío.

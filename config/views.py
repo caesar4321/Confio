@@ -36,6 +36,7 @@ CONFIO_ORGANIZATION = {
         {
             'label': 'GitHub',
             'url': 'https://github.com/caesar4321/Confio',
+            'icon': '/images/GitHub.png',
         },
         {
             'label': 'Algorand Foundation Q4 2025 Transparency Report',
@@ -99,14 +100,6 @@ JULIAN_MOON_PERSON = {
             'label': 'LinkedIn',
             'url': 'https://linkedin.com/in/julianmoonluna',
             'icon': '/images/LinkedIn.png',
-        },
-        {
-            'label': 'Threads',
-            'url': 'https://www.threads.com/@julianmoonluna',
-        },
-        {
-            'label': 'Linktree',
-            'url': 'https://linktr.ee/julianmoonluna',
         },
     ],
 }
