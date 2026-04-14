@@ -328,20 +328,20 @@ def entity_page(request, entity_slug):
             ],
             'references': [
                 {
-                    'label': 'News coverage: Mendoza24 on Julian Moon and Confío',
+                    'label': 'Infobae Colombia on Julian Moon',
+                    'url': 'https://www.infobae.com/colombia/2025/07/02/influencer-coreano-con-esquizofrenia-comparo-los-servicios-de-salud-mental-en-su-pais-y-los-de-colombia-es-mas-feliz-en-latinoamerica-pese-a-costos-del-tratamiento/',
+                },
+                {
+                    'label': 'El País Colombia on Julian Moon',
+                    'url': 'https://www.elpais.com.co/mundo/coreano-en-colombia-hablo-de-las-diferencias-que-tienen-los-paises-en-salud-mental-hay-limite-de-acceso-0230.html',
+                },
+                {
+                    'label': 'Mendoza24 on Julian Moon and Confío',
                     'url': 'https://mendoza24.com.ar/noticias_argentina/26610-Un-guru-coreano-explico-por-que-Argentina-esta-tan-cara-en-dolares-y-anticipo-que-pasara-con-la-economia',
                 },
                 {
-                    'label': 'Public LinkedIn reference tied to Confío',
-                    'url': 'https://ar.linkedin.com/jobs/view/join-as-a-core-contributor-%E2%80%93-react-native-%2B-blockchain-side-project-latam-focused-at-conf%C3%ADo-4204264246',
-                },
-                {
-                    'label': 'Confío founder-authored tokenomics note',
-                    'url': 'https://medium.com/confio4world/conf%C3%ADo-official-tokenomics-2025-english-edition-421a310a18fb',
-                },
-                {
-                    'label': 'Algorand Foundation transparency report',
-                    'url': 'https://algorand.co/hubfs/Website%20-%20Archive%20files/2021%20April-September_Transparency%20Report.pdf',
+                    'label': 'Entorno Económico on Julian Moon and Argentina',
+                    'url': 'https://entornoeconomico.com/finanzas/26613-Guru-coreano-explica-las-causas-de-la-alta-cotizacion-del-dolar-en-Argentina-y-pronostica-el-futuro-de-su-economia',
                 },
             ],
         })
@@ -365,20 +365,7 @@ def entity_page(request, entity_slug):
                 'Its purpose is strategic as much as editorial. It gives media, search engines, and AI systems a clean distinction between posts authored by Julian Moon as a person and posts published by Confío as an organization.',
                 'For public discovery, Confío News should be understood as the newsroom layer around Confío’s broader mission: digital dollar payments, financial trust, and transparent communication in a region where money systems are often unstable.',
             ],
-            'references': [
-                {
-                    'label': 'Confío publication on Medium',
-                    'url': 'https://medium.com/confio4world',
-                },
-                {
-                    'label': 'Confío platform overview',
-                    'url': 'https://medium.com/confio4world/duende-cryptocurrency-and-its-exclusive-payment-platform-to-facilitate-cryptocurrency-mass-c0a7499d0e81',
-                },
-                {
-                    'label': 'Algorand Foundation transparency report',
-                    'url': 'https://algorand.co/hubfs/Website%20-%20Archive%20files/2021%20April-September_Transparency%20Report.pdf',
-                },
-            ],
+            'references': [],
         })
 
     return redirect('/')
