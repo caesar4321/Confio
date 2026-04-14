@@ -317,9 +317,9 @@ def index(request):
 	
 	title = titles.get(lang, titles['default'])
 	og_description = {
-		'es': 'Sé de los primeros 10,000 beta testers. Envía y recibe dólares digitales sin comisiones. Protege tu dinero de la inflación en Venezuela, Argentina y Bolivia.',
-		'en': 'Be among the first 10,000 beta testers. Send and receive digital dollars with no fees. Protect your money from inflation in Venezuela, Argentina and Bolivia.',
-		'ko': '첫 10,000명의 베타 테스터가 되세요. 수수료 없이 디지털 달러를 보내고 받으세요. 베네수엘라, 아르헨티나, 볼리비아의 인플레이션으로부터 돈을 보호하세요.',
+		'es': 'Envía y recibe dólares digitales sin comisiones. Protege tu dinero de la inflación en Venezuela, Argentina y Bolivia.',
+		'en': 'Send and receive digital dollars with no fees. Protect your money from inflation in Venezuela, Argentina and Bolivia.',
+		'ko': '수수료 없이 디지털 달러를 보내고 받으세요. 베네수엘라, 아르헨티나, 볼리비아의 인플레이션으로부터 돈을 보호하세요.',
 		'default': 'Confío: Digital payments for Latin America'
 	}
 	og_image = "https://confio.lat/images/ConfioApp.png"
