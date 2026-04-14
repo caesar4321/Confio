@@ -60,25 +60,6 @@ def _build_author_schema(item):
             'url': author_url or DEFAULT_DISCOVER_AUTHOR['url'],
         }
 
-    if item.author_user_id:
-        full_name = f'{item.author_user.first_name} {item.author_user.last_name}'.strip()
-        display_name = full_name or item.author_user.username or ''
-        if display_name:
-            if display_name.casefold() == 'julian moon' or item.channel.kind == 'FOUNDER':
-                return {
-                    'type': 'Person',
-                    'name': display_name,
-                    'url': 'https://confio.lat/',
-                    'job_title': 'Founder',
-                    'works_for_name': 'Confío',
-                    'works_for_url': 'https://confio.lat',
-                }
-            return {
-                'type': 'Person',
-                'name': display_name,
-                'url': author_url or 'https://confio.lat/',
-            }
-
     if item.channel.kind == 'FOUNDER':
         return {
             'type': 'Person',
@@ -88,6 +69,19 @@ def _build_author_schema(item):
             'works_for_name': 'Confío',
             'works_for_url': 'https://confio.lat',
         }
+
+    if item.channel.kind == 'NEWS':
+        return DEFAULT_DISCOVER_AUTHOR.copy()
+
+    if item.author_user_id:
+        full_name = f'{item.author_user.first_name} {item.author_user.last_name}'.strip()
+        display_name = full_name or item.author_user.username or ''
+        if display_name:
+            return {
+                'type': 'Person',
+                'name': display_name,
+                'url': author_url or 'https://confio.lat/',
+            }
 
     return DEFAULT_DISCOVER_AUTHOR.copy()
 
