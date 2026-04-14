@@ -46,6 +46,21 @@
     ]
 }
 </script>
+{% if entity.image_url %}
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "ImageObject",
+    "@id": "{{ entity.url }}#primaryimage",
+    "contentUrl": "{{ entity.image_url }}",
+    "url": "{{ entity.image_url }}",
+    "caption": "{{ entity.image_caption|default:entity.name|escapejs }}",
+    "creditText": "{{ entity.image_credit|default:organization.name|escapejs }}",
+    "copyrightNotice": "{{ entity.image_copyright|default:organization.name|escapejs }}",
+    "representativeOfPage": true
+}
+</script>
+{% endif %}
 <script type="application/ld+json">
 {
     "@context": "https://schema.org",
@@ -54,6 +69,29 @@
         { "@type": "ListItem", "position": 1, "name": "Confío", "item": "https://confio.lat/" },
         { "@type": "ListItem", "position": 2, "name": "{{ heading|escapejs }}", "item": "{{ entity.url }}" }
     ]
+}
+</script>
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "@id": "{{ entity.url }}#webpage",
+    "url": "{{ entity.url }}",
+    "name": "{{ title|escapejs }}",
+    "description": "{{ meta_description|escapejs }}",
+    "isPartOf": {
+        "@type": "WebSite",
+        "@id": "https://confio.lat/#website"
+    },
+    "primaryImageOfPage": {% if entity.image_url %}{ "@id": "{{ entity.url }}#primaryimage" }{% else %}null{% endif %},
+    "speakable": {
+        "@type": "SpeakableSpecification",
+        "cssSelector": [
+            "#entity-heading",
+            "#entity-subheading",
+            "#entity-story-copy"
+        ]
+    }
 }
 </script>
 {% if faqs %}
@@ -481,7 +519,7 @@
         <section class="entity-hero-card">
             <div class="entity-hero-media">
                 {% if entity.image_url %}
-                <img src="{{ entity.image_url }}" alt="{{ entity.name }}" class="entity-portrait">
+                <img src="{{ entity.image_url }}" alt="{{ entity.image_alt|default:entity.name }}" class="entity-portrait">
                 {% else %}
                 <div class="entity-placeholder">{{ entity.name|slice:":1" }}</div>
                 {% endif %}
@@ -494,8 +532,8 @@
                     Editorial Identity
                     {% endif %}
                 </div>
-                <h1>{{ heading }}</h1>
-                <p class="entity-subheading">{{ subheading }}</p>
+                <h1 id="entity-heading">{{ heading }}</h1>
+                <p class="entity-subheading" id="entity-subheading">{{ subheading }}</p>
                 <div class="entity-meta-row">
                     <span class="entity-pill">{{ entity_type }}</span>
                     {% if entity.job_title %}
@@ -510,7 +548,7 @@
             <section class="entity-story-card">
                 <div class="entity-story-inner">
                     <h2 class="entity-story-title">Public entity reference</h2>
-                    <div class="entity-story-copy">
+                    <div class="entity-story-copy" id="entity-story-copy">
                         {% for paragraph in body %}
                         <p>{{ paragraph }}</p>
                         {% endfor %}

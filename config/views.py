@@ -42,6 +42,10 @@ JULIAN_MOON_PERSON = {
     'job_title': 'Founder',
     'description': 'Korean founder of Confío, a non-custodial digital dollar wallet for Latin America, and a Spanish-speaking public explainer of inflation, dollarization, and everyday money systems across the region.',
     'image_url': 'https://confio.lat/static/media/JulianMoon_Founder.77611b65ceb3c7457238.jpeg',
+    'image_caption': 'Julian Moon, founder of Confío.',
+    'image_alt': 'Julian Moon, founder of Confío',
+    'image_credit': 'Confío',
+    'image_copyright': 'Confío',
     'nationality': 'Korean',
     'knows_about': [
         'Stablecoins',
@@ -96,6 +100,10 @@ CONFIO_NEWS_ORGANIZATION = {
     'url': 'https://confio.lat/about/confio-news/',
     'description': 'The official editorial voice of Confío: company announcements, product explainers, and ecosystem context published in the organization’s voice rather than the founder’s.',
     'image_url': 'https://confio.lat/images/$CONFIO.png',
+    'image_caption': 'Confío News logo.',
+    'image_alt': 'Confío News logo',
+    'image_credit': 'Confío',
+    'image_copyright': 'Confío',
 }
 
 
