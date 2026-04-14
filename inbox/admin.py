@@ -35,6 +35,11 @@ DISCOVER_TAG_COLOR_CHOICES = (
 
 
 class ContentItemAdminForm(forms.ModelForm):
+    SCHEMA_AUTHOR_TYPE_CHOICES = (
+        ('', 'Automatico'),
+        ('person', 'Person'),
+        ('organization', 'Organization'),
+    )
     tag_color = forms.ChoiceField(
         label='Color de etiqueta',
         choices=DISCOVER_TAG_COLOR_CHOICES,
@@ -56,6 +61,27 @@ class ContentItemAdminForm(forms.ModelForm):
         required=False,
         help_text='Solo para publicaciones de video.',
     )
+    schema_author_type = forms.ChoiceField(
+        label='Schema author type',
+        choices=SCHEMA_AUTHOR_TYPE_CHOICES,
+        required=False,
+        help_text='Override SEO author type for Discover JSON-LD.',
+    )
+    schema_author_name = forms.CharField(
+        label='Schema author name',
+        required=False,
+        help_text='Examples: Julian Moon, Confío News.',
+    )
+    schema_author_url = forms.URLField(
+        label='Schema author URL',
+        required=False,
+        help_text='Optional canonical URL for the author entity.',
+    )
+    schema_author_job_title = forms.CharField(
+        label='Schema author job title',
+        required=False,
+        help_text='Used for Person authors, e.g. Founder.',
+    )
 
     class Meta:
         model = ContentItem
@@ -69,6 +95,10 @@ class ContentItemAdminForm(forms.ModelForm):
         self.fields['tiktok_url'].initial = platform_links.get('TikTok', '')
         self.fields['instagram_url'].initial = platform_links.get('Instagram', '')
         self.fields['youtube_url'].initial = platform_links.get('YouTube', '')
+        self.fields['schema_author_type'].initial = metadata.get('schema_author_type', '')
+        self.fields['schema_author_name'].initial = metadata.get('schema_author_name', '')
+        self.fields['schema_author_url'].initial = metadata.get('schema_author_url', '')
+        self.fields['schema_author_job_title'].initial = metadata.get('schema_author_job_title', '')
 
     def clean(self):
         cleaned_data = super().clean()
@@ -94,6 +124,31 @@ class ContentItemAdminForm(forms.ModelForm):
         else:
             metadata.pop('platform_links', None)
             metadata.pop('platforms', None)
+
+        schema_author_type = cleaned_data.get('schema_author_type')
+        schema_author_name = cleaned_data.get('schema_author_name')
+        schema_author_url = cleaned_data.get('schema_author_url')
+        schema_author_job_title = cleaned_data.get('schema_author_job_title')
+
+        if schema_author_type:
+            metadata['schema_author_type'] = schema_author_type
+        else:
+            metadata.pop('schema_author_type', None)
+
+        if schema_author_name:
+            metadata['schema_author_name'] = schema_author_name.strip()
+        else:
+            metadata.pop('schema_author_name', None)
+
+        if schema_author_url:
+            metadata['schema_author_url'] = schema_author_url
+        else:
+            metadata.pop('schema_author_url', None)
+
+        if schema_author_job_title:
+            metadata['schema_author_job_title'] = schema_author_job_title.strip()
+        else:
+            metadata.pop('schema_author_job_title', None)
 
         cleaned_data['metadata'] = metadata
         return cleaned_data
@@ -270,6 +325,10 @@ class ContentItemAdmin(admin.ModelAdmin):
             {
                 'fields': (
                     'tag_color',
+                    'schema_author_type',
+                    'schema_author_name',
+                    'schema_author_url',
+                    'schema_author_job_title',
                     'tiktok_url',
                     'instagram_url',
                     'youtube_url',

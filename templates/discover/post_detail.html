@@ -43,16 +43,23 @@
     {% if post.image_url %}"image": "{{ post.image_url }}",{% endif %}
     {% if post.published_at %}"datePublished": "{{ post.published_at|date:'c' }}",{% endif %}
     "author": {
-        "@type": "Organization",
-        "name": "Confío"
+        "@type": "{{ post.author_schema.type }}",
+        "name": "{{ post.author_schema.name|escapejs }}"{% if post.author_schema.url %},
+        "url": "{{ post.author_schema.url }}"{% endif %}{% if post.author_schema.job_title %},
+        "jobTitle": "{{ post.author_schema.job_title|escapejs }}"{% endif %}{% if post.author_schema.works_for_name %},
+        "worksFor": {
+            "@type": "Organization",
+            "name": "{{ post.author_schema.works_for_name|escapejs }}",
+            "url": "{{ post.author_schema.works_for_url }}"
+        }{% endif %}
     },
     "publisher": {
         "@type": "Organization",
-        "name": "Confío",
-        "url": "https://confio.lat",
+        "name": "{{ publisher_schema.name|escapejs }}",
+        "url": "{{ publisher_schema.url }}",
         "logo": {
             "@type": "ImageObject",
-            "url": "https://confio.lat/static/images/ConfioApp.jpeg"
+            "url": "{{ publisher_schema.logo_url }}"
         }
     },
     "mainEntityOfPage": {

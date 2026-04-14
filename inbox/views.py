@@ -10,6 +10,16 @@ from django.utils.text import slugify
 from .models import ContentItem, ContentStatus, ContentSurfaceType
 
 TOP_REACTIONS_LIMIT = 3
+DEFAULT_DISCOVER_AUTHOR = {
+    'type': 'Organization',
+    'name': 'Confío News',
+    'url': 'https://confio.lat/discover/',
+}
+DEFAULT_DISCOVER_PUBLISHER = {
+    'name': 'Confío',
+    'url': 'https://confio.lat',
+    'logo_url': 'https://confio.lat/static/images/ConfioApp.jpeg',
+}
 
 
 def _render_markdown_links(text):
@@ -25,12 +35,68 @@ def _render_markdown_links(text):
     linked = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', _replace, escaped)
     return mark_safe(linked.replace('\n', '<br><br>'))
 
+
+def _build_author_schema(item):
+    metadata = item.metadata or {}
+    author_type = str(metadata.get('schema_author_type') or '').strip().lower()
+    author_name = str(metadata.get('schema_author_name') or '').strip()
+    author_url = str(metadata.get('schema_author_url') or '').strip()
+    author_job_title = str(metadata.get('schema_author_job_title') or '').strip()
+
+    if author_type == 'person' and author_name:
+        return {
+            'type': 'Person',
+            'name': author_name,
+            'url': author_url or 'https://confio.lat/',
+            'job_title': author_job_title or 'Founder',
+            'works_for_name': 'Confío',
+            'works_for_url': 'https://confio.lat',
+        }
+
+    if author_type == 'organization' and author_name:
+        return {
+            'type': 'Organization',
+            'name': author_name,
+            'url': author_url or DEFAULT_DISCOVER_AUTHOR['url'],
+        }
+
+    if item.author_user_id:
+        full_name = f'{item.author_user.first_name} {item.author_user.last_name}'.strip()
+        display_name = full_name or item.author_user.username or ''
+        if display_name:
+            if display_name.casefold() == 'julian moon' or item.channel.kind == 'FOUNDER':
+                return {
+                    'type': 'Person',
+                    'name': display_name,
+                    'url': 'https://confio.lat/',
+                    'job_title': 'Founder',
+                    'works_for_name': 'Confío',
+                    'works_for_url': 'https://confio.lat',
+                }
+            return {
+                'type': 'Person',
+                'name': display_name,
+                'url': author_url or 'https://confio.lat/',
+            }
+
+    if item.channel.kind == 'FOUNDER':
+        return {
+            'type': 'Person',
+            'name': 'Julian Moon',
+            'url': 'https://confio.lat/',
+            'job_title': 'Founder',
+            'works_for_name': 'Confío',
+            'works_for_url': 'https://confio.lat',
+        }
+
+    return DEFAULT_DISCOVER_AUTHOR.copy()
+
 FEED_PAGE_SIZE = 12
 
 
 def _get_discover_queryset():
     return (
-        ContentItem.objects.select_related('channel')
+        ContentItem.objects.select_related('channel', 'author_user')
         .prefetch_related('surfaces', 'reactions__reaction_type')
         .filter(
             status=ContentStatus.PUBLISHED,
@@ -91,6 +157,7 @@ def _build_post_card(item):
         'image_url': preview_image.get('url', '') if isinstance(preview_image, dict) else '',
         'slug': slugify(item.title or f'post-{item.id}'),
         'reaction_summary': _build_reaction_summary(item),
+        'author_schema': _build_author_schema(item),
     }
 
 
@@ -116,7 +183,7 @@ def discover_feed(request):
 def discover_post_detail(request, post_id, slug=None):
     try:
         item = (
-            ContentItem.objects.select_related('channel')
+            ContentItem.objects.select_related('channel', 'author_user')
             .prefetch_related('surfaces', 'reactions__reaction_type')
             .filter(
                 id=post_id,
@@ -195,5 +262,7 @@ def discover_post_detail(request, post_id, slug=None):
             'blocks': rendered_blocks,
             'platform_links': platform_links,
             'reaction_summary': _build_reaction_summary(item),
+            'author_schema': _build_author_schema(item),
         },
+        'publisher_schema': DEFAULT_DISCOVER_PUBLISHER,
     })
