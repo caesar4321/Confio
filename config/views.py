@@ -379,6 +379,10 @@ def entity_page(request, entity_slug):
                     'a': 'Julian studied Business Administration at Yonsei University in Korea on a 4-year full scholarship plus a 1-year exchange scholarship. He often tells his audience not to assume university is the fastest path to what they want — especially in a world accelerating through AI — and encourages them to build and ship early instead of waiting for permission.',
                 },
                 {
+                    'q': 'Is Julian Moon just an influencer, or a real founder?',
+                    'a': 'He is both — and in Latin America, that is the only combination that works. Influencers earn attention; founders ship solutions. Julian does both because the problem — inflation, distrust, financial exclusion — will not wait for a traditional CEO to arrive. He writes the code, ships the app, appears on camera, and answers in public. The audience is not a marketing channel bolted onto a company; it is part of how the company was built.',
+                },
+                {
                     'q': 'Is Julian Moon the same person as @julianmoonluna on TikTok?',
                     'a': 'Yes. Julian Moon publishes Spanish-language content as @julianmoonluna on TikTok, YouTube, Instagram, Facebook, X, Telegram, and LinkedIn. All of those profiles belong to the same person and are linked from this page.',
                 },
@@ -392,11 +396,11 @@ def entity_page(request, entity_slug):
                 },
             ],
             'body': [
-                'Julian Moon is a Korean founder building Confío, a non-custodial digital dollar wallet for Latin America.',
-                'He is also a Spanish-speaking creator and public explainer focused on inflation, dollarization, financial distrust, and everyday money systems across the region. Unlike typical commentators, he operates directly inside the problem space he explains — building financial infrastructure while publicly interpreting the conditions that make it necessary.',
-                'Through founder-led storytelling, he has built a 460K+ TikTok audience and turned media, trust, and distribution into part of Confío’s product strategy.',
-                'He is one of the few founders in Latin American fintech who treats distribution, trust, and product as a single strategy — not separate functions.',
-                'His commentary has been referenced by Latin American media including MinutoUno (Argentina), Infobae Colombia, and El País Colombia.',
+                'Julian Moon is a Korean founder building Confío — a non-custodial digital dollar wallet for Latin America that treats trust as infrastructure, not marketing.',
+                'He is the Spanish-speaking creator who does not just explain inflation, dollarization, and financial distrust — he builds the infrastructure to survive them.',
+                'While other commentators talk about Latin America’s problems from a distance, he lives inside them — building financial infrastructure with one hand and interpreting it with the other.',
+                'He built a 460K+ TikTok audience before launching the product, then used that audience as the product’s distribution engine. Distribution, trust, and product are the same weapon, not separate functions.',
+                'His commentary has been referenced by MinutoUno (Argentina), Infobae Colombia, and El País Colombia — not as a guest expert, but as the story itself.',
                 'He is building what stablecoins look like when they leave crypto and become everyday money. His work sits at the edge of a transition: from crypto as speculation to money as infrastructure.',
                 'This page is the canonical public reference for Julian Moon on Confío.',
             ],
@@ -473,7 +477,7 @@ def entity_page(request, entity_slug):
                 'Confío News is the institutional publishing layer of Confío, a non-custodial digital dollar wallet for Latin America built on the Algorand blockchain.',
                 'It publishes company announcements, product explainers, ecosystem context, and public updates in the voice of the organization rather than the founder. Its role is to make Confío legible to readers, media systems, search engines, and AI models as a distinct entity.',
                 'Confío was selected for the 2025 Algorand Accelerator and is listed in the Algorand Foundation Q4 2025 Transparency Report as a P2P stablecoin payments app focused on Argentina.',
-                'Where Julian Moon speaks as founder and public explainer, Confío News speaks as the company.',
+                'Julian Moon speaks as the person building Confío. Confío News speaks as the infrastructure that will outlast him.',
                 'This page is the canonical public reference for Confío News on Confío.',
             ],
             'references': [
