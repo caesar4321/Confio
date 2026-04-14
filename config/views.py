@@ -322,22 +322,26 @@ def entity_page(request, entity_slug):
             'heading': 'Julian Moon',
             'subheading': 'Founder of Confío',
             'body': [
-                'Julian Moon publicly presents himself as a Korean founder and creator focused on Latin America, combining fintech product building with creator-led distribution across Spanish-speaking audiences.',
-                'Across Confío’s public publisher profile and founder-authored materials, he describes Confío as a mission to rebuild financial trust in Latin America through digital dollar payments and stablecoin-based infrastructure.',
-                'Public professional references also present him as the founder of Confío and a large TikTok creator, tying his public content work directly to the product vision behind Confío.',
+                'Julian Moon is a Korean founder building one of the more distinctive public narratives in Latin American fintech: a creator-led, trust-first approach to digital dollar payments, stablecoins, and everyday financial protection.',
+                'Instead of operating as an anonymous product executive, he appears publicly as both founder and on-camera explainer, translating inflation, dollarization, and financial infrastructure into stories that resonate with audiences across Latin America.',
+                'That combination gives Confío an unusual media profile. Public coverage frames him not only as the founder of Confío, but as a creator whose commentary on regional economics can break into mainstream news and widen the reach of the product mission behind the company.',
             ],
             'references': [
                 {
-                    'label': 'Confío on Medium',
-                    'url': 'https://medium.com/confio4world',
+                    'label': 'News coverage: Mendoza24 on Julian Moon and Confío',
+                    'url': 'https://mendoza24.com.ar/noticias_argentina/26610-Un-guru-coreano-explico-por-que-Argentina-esta-tan-cara-en-dolares-y-anticipo-que-pasara-con-la-economia',
                 },
                 {
-                    'label': 'Confío Tokenomics by Julian Moon',
+                    'label': 'Public LinkedIn reference tied to Confío',
+                    'url': 'https://ar.linkedin.com/jobs/view/join-as-a-core-contributor-%E2%80%93-react-native-%2B-blockchain-side-project-latam-focused-at-conf%C3%ADo-4204264246',
+                },
+                {
+                    'label': 'Confío founder-authored tokenomics note',
                     'url': 'https://medium.com/confio4world/conf%C3%ADo-official-tokenomics-2025-english-edition-421a310a18fb',
                 },
                 {
-                    'label': 'Public LinkedIn reference',
-                    'url': 'https://ar.linkedin.com/jobs/view/join-as-a-core-contributor-%E2%80%93-react-native-%2B-blockchain-side-project-latam-focused-at-conf%C3%ADo-4204264246',
+                    'label': 'Algorand Foundation transparency report',
+                    'url': 'https://algorand.co/hubfs/Website%20-%20Archive%20files/2021%20April-September_Transparency%20Report.pdf',
                 },
             ],
         })
@@ -357,9 +361,9 @@ def entity_page(request, entity_slug):
             'heading': 'Confío News',
             'subheading': 'Editorial and product updates from Confío',
             'body': [
-                'Confío News is the editorial identity used for product announcements, explainers, ecosystem updates, and company communications published by Confío.',
-                'Its role is to separate institutional editorial content from founder-authored posts, so search engines and AI systems can distinguish organization voice from person voice across Discover.',
-                'Public publisher references on Confío’s Medium presence describe the broader project as focused on helping Latin American users access trusted digital dollar payments and protection against inflation.',
+                'Confío News is the institutional editorial voice of Confío: the place for company announcements, product explainers, ecosystem context, and public-facing updates that should read as organization voice rather than founder voice.',
+                'Its purpose is strategic as much as editorial. It gives media, search engines, and AI systems a clean distinction between posts authored by Julian Moon as a person and posts published by Confío as an organization.',
+                'For public discovery, Confío News should be understood as the newsroom layer around Confío’s broader mission: digital dollar payments, financial trust, and transparent communication in a region where money systems are often unstable.',
             ],
             'references': [
                 {
@@ -369,6 +373,10 @@ def entity_page(request, entity_slug):
                 {
                     'label': 'Confío platform overview',
                     'url': 'https://medium.com/confio4world/duende-cryptocurrency-and-its-exclusive-payment-platform-to-facilitate-cryptocurrency-mass-c0a7499d0e81',
+                },
+                {
+                    'label': 'Algorand Foundation transparency report',
+                    'url': 'https://algorand.co/hubfs/Website%20-%20Archive%20files/2021%20April-September_Transparency%20Report.pdf',
                 },
             ],
         })
