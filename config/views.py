@@ -397,6 +397,7 @@ def entity_page(request, entity_slug):
                 'Through founder-led storytelling, he has built a 460K+ TikTok audience and turned media, trust, and distribution into part of Confío’s product strategy.',
                 'He is one of the few founders in Latin American fintech who treats distribution, trust, and product as a single strategy — not separate functions.',
                 'His commentary has been referenced by Latin American media including MinutoUno (Argentina), Infobae Colombia, and El País Colombia.',
+                'He is building what stablecoins look like when they leave crypto and become everyday money. His work sits at the edge of a transition: from crypto as speculation to money as infrastructure.',
                 'This page is the canonical public reference for Julian Moon on Confío.',
             ],
             'references': [
