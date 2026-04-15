@@ -11,8 +11,8 @@
 
 import { Platform } from 'react-native';
 import appCheck from '@react-native-firebase/app-check';
-import DeviceInfo from 'react-native-device-info';
 import {
+    ALLOW_APP_CHECK_DEBUG,
     FIREBASE_APP_CHECK_DEBUG_TOKEN_ANDROID,
     FIREBASE_APP_CHECK_DEBUG_TOKEN_IOS,
 } from '@env';
@@ -28,25 +28,18 @@ class AppCheckService {
     private static readonly TOKEN_REUSE_MS = 5 * 60 * 1000;
     private static readonly FAILURE_BACKOFF_MS = 30 * 1000;
 
+    private isDebugAllowed(): boolean {
+        return String(ALLOW_APP_CHECK_DEBUG).toLowerCase() === 'true';
+    }
+
     private async shouldUseDebugProvider(): Promise<boolean> {
-        if (Platform.OS === 'ios') {
-            return Boolean(FIREBASE_APP_CHECK_DEBUG_TOKEN_IOS);
+        if (!this.isDebugAllowed()) {
+            return false;
         }
 
-        if (Platform.OS === 'android') {
-            if (!FIREBASE_APP_CHECK_DEBUG_TOKEN_ANDROID) {
-                return false;
-            }
-
-            try {
-                const installer = await DeviceInfo.getInstallerPackageName();                return installer !== 'com.android.vending';
-            } catch (error: any) {
-
-                return true;
-            }
-        }
-
-        return false;
+        return Platform.OS === 'android'
+            ? Boolean(FIREBASE_APP_CHECK_DEBUG_TOKEN_ANDROID)
+            : Boolean(FIREBASE_APP_CHECK_DEBUG_TOKEN_IOS);
     }
 
     /**
@@ -57,16 +50,9 @@ class AppCheckService {
         if (this.isInitialized) return;
 
         try {
-            const initStart = Date.now();
             // Use the new modular API for App Check initialization
             const rnfbProvider = appCheck().newReactNativeFirebaseAppCheckProvider();
-            const configuredDebugToken =
-                Platform.OS === 'android'
-                    ? FIREBASE_APP_CHECK_DEBUG_TOKEN_ANDROID
-                    : FIREBASE_APP_CHECK_DEBUG_TOKEN_IOS;
             const useDebugProvider = await this.shouldUseDebugProvider();
-
-            if (__DEV__ || useDebugProvider) {            }
 
             rnfbProvider.configure({
                 android: {
@@ -84,7 +70,8 @@ class AppCheckService {
                 isTokenAutoRefreshEnabled: true,
             });
 
-            this.isInitialized = true;        } catch (error: any) {
+            this.isInitialized = true;
+        } catch (error: any) {
             // Don't throw - allow app to continue in monitoring mode
         }
     }
@@ -104,10 +91,10 @@ class AppCheckService {
             if (token) {
                 this.lastToken = token;
                 this.lastTokenAt = Date.now();
-            }            return token;
+            } return token;
         } catch (error: any) {
 
-            this.lastFailureAt = Date.now();            return null;
+            this.lastFailureAt = Date.now(); return null;
         }
     }
 

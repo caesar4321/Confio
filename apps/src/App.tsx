@@ -145,7 +145,6 @@ const AppContent: React.FC = () => {
 };
 
 const App: React.FC = () => {
-  console.log('App render, apolloClient:', apolloClient);
   if (!apolloClient) {
     console.error('Apollo client is undefined');
     return null;

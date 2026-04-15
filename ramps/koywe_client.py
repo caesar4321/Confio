@@ -231,7 +231,7 @@ class KoyweClient:
         self.base_url = getattr(settings, 'KOYWE_API_URL', 'https://api.koywe.com').rstrip('/')
         self.client_id = getattr(settings, 'KOYWE_CLIENT_ID', '')
         self.secret = getattr(settings, 'KOYWE_SECRET', '')
-        self.crypto_symbol = getattr(settings, 'KOYWE_CRYPTO_SYMBOL', 'USDC Solana')
+        self.crypto_symbol = getattr(settings, 'KOYWE_CRYPTO_SYMBOL', 'USDC Algorand')
         self.timeout = getattr(settings, 'KOYWE_TIMEOUT_SECONDS', 20)
         self.session = requests.Session()
         self.session.headers.update({

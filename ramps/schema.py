@@ -1292,13 +1292,7 @@ def _get_saved_bank_info(*, current_account, bank_info_id):
 
 
 def _get_koywe_destination_address(*, current_account) -> str | None:
-    crypto_symbol = str(getattr(settings, 'KOYWE_CRYPTO_SYMBOL', '') or '').strip().lower()
-    if 'algorand' in crypto_symbol or crypto_symbol == 'usdc-a':
-        return getattr(current_account, 'algorand_address', None)
-
-    # Temporary sandbox bridge: while Koywe is routed through Polygon, use a valid EVM test address
-    # instead of the user's Algorand address. Replace this once Koywe supports Algorand directly.
-    return getattr(settings, 'KOYWE_TEST_DESTINATION_ADDRESS', None)
+    return getattr(current_account, 'algorand_address', None)
 
 
 def _get_koywe_test_account_override(*, user, country_code: str) -> dict[str, str] | None:

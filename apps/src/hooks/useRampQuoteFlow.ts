@@ -19,7 +19,7 @@ export const formatRampMoney = (value?: string | number | null, code?: string | 
   if (!Number.isFinite(parsed)) {
     return '--';
   }
-  const displayCode = ['USDC Polygon', 'USDC Solana', 'USDC-a'].includes(code || '') ? 'cUSD' : code;
+  const displayCode = ['USDC-a', 'USDC Algorand'].includes(code || '') ? 'cUSD' : code;
   return `${parsed.toLocaleString('es-AR', {
     minimumFractionDigits: parsed >= 100 ? 0 : 2,
     maximumFractionDigits: 2,

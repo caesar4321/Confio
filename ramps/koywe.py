@@ -8,12 +8,9 @@ from users.models import Country
 
 
 RAMP_USDC_ALGORAND_SYMBOL = "USDC-a"
-RAMP_USDC_ALGORAND_NOTE = (
-    "USDC-a todavía se enruta por USDC en Polygon. "
-    "Cámbialo a USDC en Algorand cuando Koywe soporte Algorand."
-)
-RAMP_NETWORK_SYMBOL = "USDC Polygon"
-RAMP_NETWORK_DISPLAY = "Polygon"
+RAMP_USDC_ALGORAND_NOTE = ""
+RAMP_NETWORK_SYMBOL = "USDC Algorand"
+RAMP_NETWORK_DISPLAY = "Algorand"
 
 
 COUNTRY_METHODS = {
@@ -74,20 +71,7 @@ COUNTRY_METHODS = {
         "on_ramp_max_amount": Decimal("56000"),
         "off_ramp_min_amount": Decimal("0"),
         "off_ramp_max_amount": Decimal("0"),
-        "methods": [
-            {
-                "code": "QRI-BO",
-                "display_name": "QR interoperable",
-                "provider_type": "fintech",
-                "icon": "smartphone",
-                "description": "Pago con QR boliviano.",
-                "requires_account_number": False,
-                "requires_phone": False,
-                "requires_email": False,
-                "supports_on_ramp": True,
-                "supports_off_ramp": False,
-            },
-        ],
+        "methods": [],
     },
     "BR": {
         "fiat_currency": "BRL",
