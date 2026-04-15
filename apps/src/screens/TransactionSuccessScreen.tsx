@@ -11,6 +11,7 @@ import { getSupportCopy } from '../utils/supportMessaging';
 import ViewShot from 'react-native-view-shot';
 import RNShare from 'react-native-share';
 import { colors } from '../config/theme';
+import { AnalyticsService } from '../services/analyticsService';
 
 type TransactionType = 'sent' | 'received' | 'payment';
 
@@ -153,6 +154,23 @@ export const TransactionSuccessScreen = () => {
   const supportCopy = getSupportCopy(userProfile?.phoneCountry);
 
   const handleShareInvitation = async () => {
+    // Fire-and-forget funnel event: the user tapped the WhatsApp share
+    // button. This is the first real signal that A will actually notify B
+    // about the invite — the critical `invite_submitted → share_tapped`
+    // step in the Invitar y Enviar funnel.
+    try {
+      const invitationId = (transactionData as any).invitationId
+        || (transactionData as any).invitation_id
+        || undefined;
+      const currencyForEvent = formatCurrency(transactionData.currency);
+      AnalyticsService.logFunnelEvent('whatsapp_share_tapped', {
+        invitation_id: invitationId,
+        currency: currencyForEvent,
+      });
+    } catch (_e) {
+      // never block the share path
+    }
+
     try {
       const phoneRaw = (transactionData as any).recipientPhone as string | undefined;
       const cleanPhone = phoneRaw ? String(phoneRaw).replace(/[^\d]/g, '') : '';

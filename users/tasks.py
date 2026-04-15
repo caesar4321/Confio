@@ -8,6 +8,7 @@ from django.core.management import call_command
 import logging
 from functools import wraps
 from django.db import connection
+from django.db.models import Count, Q
 
 logger = logging.getLogger(__name__)
 
@@ -241,4 +242,62 @@ def capture_country_metrics():
         
     except Exception as e:
         logger.error(f"Error capturing country metrics: {str(e)}", exc_info=True)
+        raise
+
+
+@shared_task(name='users.rollup_funnel_events')
+@ensure_db_connection_closed
+def rollup_funnel_events():
+    """
+    Roll up yesterday's raw FunnelEvent rows into FunnelDailyRollup and
+    delete raw rows older than 30 days.
+    """
+    from users.models_analytics import FunnelDailyRollup, FunnelEvent
+
+    try:
+        target_date = (timezone.now() - timedelta(days=1)).date()
+        retention_cutoff = timezone.now() - timedelta(days=30)
+
+        logger.info("Starting funnel rollup for %s", target_date)
+
+        day_events = FunnelEvent.objects.filter(created_at__date=target_date)
+        grouped = (
+            day_events.values('event_name', 'country', 'platform')
+            .annotate(
+                count=Count('id'),
+                unique_users=Count('user', distinct=True),
+                unique_sessions=Count('session_id', filter=~Q(session_id=''), distinct=True),
+            )
+        )
+
+        rollup_count = 0
+        for row in grouped:
+            FunnelDailyRollup.objects.update_or_create(
+                date=target_date,
+                event_name=row['event_name'] or '',
+                country=row['country'] or '',
+                platform=row['platform'] or '',
+                defaults={
+                    'count': row['count'] or 0,
+                    'unique_users': row['unique_users'] or 0,
+                    'unique_sessions': row['unique_sessions'] or 0,
+                },
+            )
+            rollup_count += 1
+
+        deleted_raw, _ = FunnelEvent.objects.filter(created_at__lt=retention_cutoff).delete()
+
+        logger.info(
+            "Funnel rollup complete for %s: segments=%s deleted_raw=%s",
+            target_date,
+            rollup_count,
+            deleted_raw,
+        )
+        return {
+            'date': str(target_date),
+            'segments': rollup_count,
+            'deleted_raw': deleted_raw,
+        }
+    except Exception as e:
+        logger.error("Error rolling up funnel events: %s", str(e), exc_info=True)
         raise

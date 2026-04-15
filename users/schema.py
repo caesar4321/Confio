@@ -5120,7 +5120,10 @@ class MarkWalletMigrated(graphene.Mutation):
 
 from notifications.schema import UpdateNotificationPreferences
 
-class Mutation(EmployeeMutations, graphene.ObjectType):
+from users.funnel_schema import FunnelMutations
+
+
+class Mutation(EmployeeMutations, FunnelMutations, graphene.ObjectType):
     report_backup_status = ReportBackupStatus.Field()
 
     update_phone_number = UpdatePhoneNumber.Field()

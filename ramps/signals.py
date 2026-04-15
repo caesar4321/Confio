@@ -11,6 +11,7 @@ from notifications.models import NotificationType as NotificationTypeChoices
 from notifications.utils import create_notification
 from ramps.models import RampTransaction
 from usdc_transactions.models import GuardarianTransaction, USDCDeposit, USDCWithdrawal
+from users.funnel import emit_event
 from users.models_unified import UnifiedTransactionTable
 from users.utils import touch_user_activity
 
@@ -307,7 +308,44 @@ def handle_guardarian_transaction_save(sender, instance, **kwargs):
 @receiver(post_save, sender=RampTransaction)
 def handle_ramp_transaction_save(sender, instance, created, **kwargs):
     sync_unified_transaction_from_ramp(instance)
-    _notify_ramp_status(instance, created=created, previous_status=getattr(instance, '_previous_status', None))
+    previous_status = getattr(instance, '_previous_status', None)
+    _notify_ramp_status(instance, created=created, previous_status=previous_status)
+
+    # Emit the first successful on-ramp completion for this user.
+    # This captures the `claim -> first_deposit` funnel milestone without
+    # coupling to a specific provider implementation path.
+    if (
+        instance.actor_user_id
+        and instance.direction == 'on_ramp'
+        and instance.status == 'COMPLETED'
+        and previous_status != 'COMPLETED'
+    ):
+        prior_completed_exists = RampTransaction.objects.filter(
+            actor_user_id=instance.actor_user_id,
+            direction='on_ramp',
+            status='COMPLETED',
+        ).exclude(pk=instance.pk).exists()
+
+        if not prior_completed_exists:
+            amount_value = (
+                instance.final_amount
+                or instance.crypto_amount_actual
+                or instance.crypto_amount_estimated
+            )
+            emit_event(
+                'first_deposit',
+                user=instance.actor_user,
+                country=instance.country_code or getattr(instance.actor_user, 'phone_country', '') or '',
+                platform='',
+                properties={
+                    'provider': instance.provider,
+                    'internal_id': str(instance.internal_id),
+                    'fiat_currency': instance.fiat_currency or '',
+                    'fiat_amount': str(instance.fiat_amount) if instance.fiat_amount is not None else '',
+                    'final_currency': instance.final_currency or '',
+                    'final_amount': str(amount_value) if amount_value is not None else '',
+                },
+            )
 
 
 @receiver(post_save, sender=USDCDeposit)

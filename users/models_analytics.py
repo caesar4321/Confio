@@ -221,3 +221,146 @@ class CountryMetrics(models.Model):
             'HN': '🇭🇳', 'SV': '🇸🇻', 'NI': '🇳🇮', 'CR': '🇨🇷', 'CU': '🇨🇺',
         }
         return flags.get(self.country_code, '🌐')
+
+
+# ---------------------------------------------------------------------------
+# Funnel tracking (Invitar y Enviar + referral loop)
+# ---------------------------------------------------------------------------
+#
+# Design notes:
+# - FunnelEvent is the raw per-event stream. One row per occurrence.
+# - We keep 30 days of raw rows and roll up nightly into FunnelDailyRollup.
+# - Emissions from mutations MUST be fire-and-forget via
+#   users.funnel.emit_event() to avoid coupling financial paths to analytics.
+# - `user` is nullable so we can capture pre-signup events (e.g. /invite link
+#   click from Cloudflare Worker where only an IP/session fingerprint exists).
+# - `session_id` lets us stitch pre-signup → signup → first_deposit without a
+#   user FK.
+# - `properties` is intentionally JSON for schema flexibility; structured
+#   fields that we filter on (country, platform, event_name) are columns.
+
+
+class FunnelEvent(models.Model):
+    """Raw per-event stream for funnel analysis.
+
+    Retention: 30 days. A nightly Celery job rolls up into FunnelDailyRollup
+    and deletes rows older than the retention window.
+    """
+
+    # Canonical event names. Kept as free-form CharField (not choices) so new
+    # events can be added without a migration, but document them here:
+    #   invite_submitted      — on-chain escrow created (SubmitInviteForPhone)
+    #   whatsapp_share_tapped — user tapped the WhatsApp share button
+    #   invite_link_clicked   — /invite/{USERNAME} hit on Cloudflare Worker
+    #   invite_claimed        — recipient claimed escrow (ClaimInviteForPhone)
+    #   first_send            — user's first outbound send of any kind
+    #   first_deposit         — user's first successful on-ramp (Koywe, etc.)
+
+    event_name = models.CharField(
+        max_length=64,
+        db_index=True,
+        help_text="Canonical event name, e.g. 'invite_submitted'",
+    )
+
+    user = models.ForeignKey(
+        'users.User',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='funnel_events',
+        help_text="Authenticated user, if any. NULL for pre-signup events.",
+    )
+
+    session_id = models.CharField(
+        max_length=64,
+        blank=True,
+        db_index=True,
+        help_text=(
+            "Opaque session/fingerprint id for stitching pre-signup events "
+            "to post-signup ones. Typically the Worker's IP-referral key or "
+            "a client-generated UUID."
+        ),
+    )
+
+    country = models.CharField(
+        max_length=2,
+        blank=True,
+        db_index=True,
+        help_text="ISO 3166-1 alpha-2; empty if unknown.",
+    )
+
+    platform = models.CharField(
+        max_length=16,
+        blank=True,
+        help_text="'ios', 'android', 'web', or empty.",
+    )
+
+    properties = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Event-specific payload. Keep small; not indexed.",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['event_name', 'created_at']),
+            models.Index(fields=['country', 'event_name', 'created_at']),
+            models.Index(fields=['user', 'event_name']),
+            models.Index(fields=['session_id', 'event_name']),
+        ]
+        verbose_name = "Funnel Event"
+        verbose_name_plural = "Funnel Events (raw, 30d)"
+
+    def __str__(self):
+        who = self.user_id or f"session:{self.session_id[:8]}" or 'anon'
+        return f"{self.event_name} · {self.country or '??'} · {who}"
+
+
+class FunnelDailyRollup(models.Model):
+    """Daily aggregate of FunnelEvent, segmented by country + platform.
+
+    One row per (date, event_name, country, platform). Built by nightly
+    Celery job from the raw stream before raw rows are purged.
+    """
+
+    date = models.DateField(db_index=True)
+    event_name = models.CharField(max_length=64, db_index=True)
+    country = models.CharField(max_length=2, blank=True)
+    platform = models.CharField(max_length=16, blank=True)
+
+    count = models.IntegerField(
+        validators=[MinValueValidator(0)],
+        help_text="Total events on this date/segment.",
+    )
+    unique_users = models.IntegerField(
+        validators=[MinValueValidator(0)],
+        help_text="Distinct authenticated users. Pre-signup events not counted here.",
+    )
+    unique_sessions = models.IntegerField(
+        validators=[MinValueValidator(0)],
+        default=0,
+        help_text="Distinct session_ids (includes pre-signup).",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['date', 'event_name', 'country', 'platform'],
+                name='unique_funnel_rollup',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['-date', 'event_name']),
+            models.Index(fields=['event_name', 'country', '-date']),
+        ]
+        verbose_name = "Funnel Daily Rollup"
+        verbose_name_plural = "Funnel Daily Rollups"
+
+    def __str__(self):
+        seg = f"{self.country or '??'}/{self.platform or '??'}"
+        return f"{self.date} · {self.event_name} · {seg} · {self.count}"

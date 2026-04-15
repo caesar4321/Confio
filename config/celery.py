@@ -24,6 +24,11 @@ try:
 except ImportError:
     pass  # Blockchain app not yet installed
 
+app.conf.beat_schedule.setdefault('users-rollup-funnel-events', {
+    'task': 'users.rollup_funnel_events',
+    'schedule': crontab(hour=3, minute=30),
+})
+
 # Ensure DB connections are properly managed around every Celery task
 try:
     from celery import signals

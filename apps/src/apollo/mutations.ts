@@ -968,3 +968,26 @@ export const SET_REFERRER = gql`
     }
   }
 `;
+
+// Client-emittable funnel event. Fire-and-forget: errors are swallowed by the
+// caller and must never block UX.
+export const TRACK_FUNNEL_EVENT = gql`
+  mutation TrackFunnelEvent(
+    $eventName: String!
+    $sessionId: String
+    $platform: String
+    $country: String
+    $properties: JSONString
+  ) {
+    trackFunnelEvent(
+      eventName: $eventName
+      sessionId: $sessionId
+      platform: $platform
+      country: $country
+      properties: $properties
+    ) {
+      success
+      recorded
+    }
+  }
+`;

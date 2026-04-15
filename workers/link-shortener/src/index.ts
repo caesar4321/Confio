@@ -7,6 +7,8 @@ export interface Env {
   APP_STORE_URL: string;
   PLAY_STORE_URL: string;
   LANDING_PAGE_URL: string;
+  FUNNEL_INGEST_URL?: string;
+  FUNNEL_INGEST_SECRET?: string;
   ADMIN_USERNAME: string;
   ADMIN_PASSWORD: string;
 }
@@ -27,6 +29,14 @@ interface AnalyticsEvent {
   platform: 'ios' | 'android' | 'desktop' | 'unknown';
   slug: string;
   referer?: string;
+}
+
+async function deriveInviteSessionId(clientIP: string): Promise<string> {
+  if (!clientIP || clientIP === 'unknown') return '';
+  const data = new TextEncoder().encode(`invite:${clientIP}`);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  const bytes = Array.from(new Uint8Array(digest)).slice(0, 16);
+  return bytes.map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 export default {
@@ -80,6 +90,33 @@ export default {
         // Detect OS to determine redirect
         const userAgent = request.headers.get('user-agent') || '';
         const platform = detectPlatform(userAgent);
+        const country = ((request.cf as any)?.country || '').toUpperCase();
+        const referer = request.headers.get('referer') || '';
+        const inviteSessionId = await deriveInviteSessionId(clientIP);
+
+        if (env.FUNNEL_INGEST_URL && env.FUNNEL_INGEST_SECRET) {
+          ctx.waitUntil(
+            fetch(env.FUNNEL_INGEST_URL, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Funnel-Secret': env.FUNNEL_INGEST_SECRET,
+              },
+              body: JSON.stringify({
+                event_name: 'invite_link_clicked',
+                session_id: inviteSessionId,
+                country,
+                platform: platform === 'desktop' ? 'web' : platform,
+                properties: {
+                  referral_code: referralCode,
+                  path: url.pathname,
+                  referer,
+                  user_agent: userAgent.slice(0, 255),
+                },
+              }),
+            }).catch(() => undefined)
+          );
+        }
 
         let redirectUrl = `${env.LANDING_PAGE_URL}?invite=${referralCode}`;
         if (platform === 'android') {

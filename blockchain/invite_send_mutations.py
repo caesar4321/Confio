@@ -540,6 +540,22 @@ class SubmitInviteForPhone(graphene.Mutation):
                     send_internal_id = stx.internal_id
             except Exception as e:
                 logger.warning(f'[InviteSend] Could not update SendTransaction invitation {invitation_id}: {e}')
+
+            # Funnel event: invite created on-chain successfully.
+            try:
+                from users.funnel import emit_event
+                emit_event(
+                    'invite_submitted',
+                    user=user,
+                    country=getattr(user, 'phone_country', '') or '',
+                    properties={
+                        'invitation_id': invitation_id,
+                        'txid': ref_txid,
+                    },
+                )
+            except Exception:  # noqa: BLE001 — never let analytics break callers
+                pass
+
             return cls(success=True, txid=ref_txid, internal_id=send_internal_id)
         except Exception as e:
             logger.error(f"Invite submit error: {e}")
@@ -928,6 +944,28 @@ class ClaimInviteForPhone(graphene.Mutation):
                             logger.exception('[InviteSend] Failed to create invitee notification')
             except Exception as e:
                 logger.warning(f'[InviteSend] Could not update PhoneInvite claim: {e}')
+
+            # Funnel event: invite claimed on-chain successfully.
+            try:
+                from users.funnel import emit_event
+                inviter_id = None
+                try:
+                    inviter_id = inv.inviter_user_id if 'inv' in locals() and inv else None
+                except Exception:
+                    inviter_id = None
+                emit_event(
+                    'invite_claimed',
+                    user=user,
+                    country=getattr(user, 'phone_country', '') or '',
+                    properties={
+                        'invitation_id': invitation_id,
+                        'txid': txid,
+                        'inviter_user_id': inviter_id,
+                    },
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
             return cls(success=True, txid=txid)
         except Exception as e:
             # Map common TEAL errors to friendlier messages
