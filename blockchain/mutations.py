@@ -3179,6 +3179,25 @@ class SubmitAutoSwapTransactionsMutation(graphene.Mutation):
             conv.save(update_fields=['status', 'to_transaction_hash', 'updated_at'])
             mark_pending_auto_swap_submitted(conv)
 
+            # --- KOYWE INTEGRATION: Associate TX Hash ---
+            # For Algorand off-ramps, Koywe requires us to manually push the TX ID 
+            # to their endpoint so they can link the USDC payment to the order.
+            try:
+                # Check for an associated RampTransaction (linked via OneToOne)
+                ramp_tx = getattr(conv, 'ramp_transaction', None)
+                if ramp_tx and ramp_tx.provider == 'koywe' and ramp_tx.provider_order_id:
+                    from ramps.koywe_client import KoyweClient
+                    koywe_client = KoyweClient()
+                    logger.info(f"Associating TX ID {txid} with Koywe order {ramp_tx.provider_order_id}")
+                    koywe_client.add_order_tx_hash(
+                        order_id=ramp_tx.provider_order_id,
+                        tx_hash=txid,
+                        email=user.email
+                    )
+            except Exception as koywe_exc:
+                # Log error but don't fail the mutation, as the TX is already on-chain
+                logger.warning(f"Failed to associate TX hash with Koywe order: {str(koywe_exc)}")
+
             # If this is a burn+send, also finalize the withdrawal record
             # and create a proper SendTransaction (post_save signal in users/signals.py
             # automatically creates the linked UnifiedTransactionTable row, and

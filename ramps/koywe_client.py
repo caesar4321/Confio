@@ -673,6 +673,14 @@ class KoyweClient:
             raw_response=order,
         )
 
+    def add_order_tx_hash(self, *, order_id: str, tx_hash: str, email: str | None = None) -> dict[str, Any]:
+        """
+        Associate a transaction hash with an order using POST /rest/orders/{orderId}/txHash.
+        Required by Koywe for Algorand off-ramp orders to confirm funding.
+        """
+        payload = {'txHash': tx_hash}
+        return self._request('POST', f'/rest/orders/{order_id}/txHash', email=email, json_payload=payload)
+
     def _normalize_contact_profile(self, *, contact_profile: dict[str, Any] | None, country_code: str) -> dict[str, Any]:
         if not contact_profile:
             return {}
