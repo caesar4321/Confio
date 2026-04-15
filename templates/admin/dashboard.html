@@ -591,6 +591,106 @@
     </p>
     {% endif %}
 
+    {% if invite_funnel_stats %}
+    <h2 class="section-title">🪜 Invite Funnel</h2>
+    <div class="metrics-grid" style="margin-top: 20px;">
+        <div class="metric-card">
+            <div class="metric-label">Invites Submitted (30d)</div>
+            <div class="metric-value">{{ invite_funnel_stats.invite_submitted_total|default:"0"|intcomma }}</div>
+            <div class="metric-change">7d: {{ invite_funnel_stats.invite_submitted_7d|default:"0"|intcomma }}</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">WhatsApp Share Taps</div>
+            <div class="metric-value">{{ invite_funnel_stats.share_tapped_total|default:"0"|intcomma }}</div>
+            <div class="metric-change">Invite → Share: {{ invite_funnel_stats.invite_to_share_pct|floatformat:1 }}%</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Invite Link Clicks</div>
+            <div class="metric-value">{{ invite_funnel_stats.link_clicked_total|default:"0"|intcomma }}</div>
+            <div class="metric-change">Share → Click: {{ invite_funnel_stats.share_to_click_pct|floatformat:1 }}%</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Invite Claims</div>
+            <div class="metric-value">{{ invite_funnel_stats.invite_claimed_total|default:"0"|intcomma }}</div>
+            <div class="metric-change">Click → Claim: {{ invite_funnel_stats.click_to_claim_pct|floatformat:1 }}%</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">First Deposits</div>
+            <div class="metric-value">{{ invite_funnel_stats.first_deposit_total|default:"0"|intcomma }}</div>
+            <div class="metric-change">Claim → Deposit: {{ invite_funnel_stats.claim_to_deposit_pct|floatformat:1 }}%</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Tracking Health</div>
+            <div class="metric-value">{{ invite_funnel_stats.raw_events_30d|default:"0"|intcomma }}</div>
+            <div class="metric-change">Rollup rows (30d): {{ invite_funnel_stats.rollup_rows_30d|default:"0"|intcomma }}</div>
+        </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1.2fr 1fr; gap: 20px; margin-bottom: 30px;">
+        <div class="data-table" style="margin-bottom: 0;">
+            <div style="padding: 12px 16px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-weight: 600; color: #4b5563;">
+                Recent Funnel Events
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Event</th>
+                        <th>Country</th>
+                        <th>Platform</th>
+                        <th>User</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in invite_funnel_recent %}
+                    <tr>
+                        <td>{{ row.created_at|date:"Y-m-d H:i" }}</td>
+                        <td style="font-weight: 500;">{{ row.event_name }}</td>
+                        <td>{{ row.country|default:"-" }}</td>
+                        <td>{{ row.platform|default:"-" }}</td>
+                        <td>{{ row.user__username|default:row.session_id|truncatechars:18 }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="5" style="padding: 16px; color: #6b7280;">No funnel events recorded yet.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="data-table" style="margin-bottom: 0;">
+            <div style="padding: 12px 16px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-weight: 600; color: #4b5563;">
+                Quick Links
+            </div>
+            <table>
+                <tbody>
+                    <tr>
+                        <td><a href="{{ invite_funnel_raw_url }}">Raw Funnel Events</a></td>
+                        <td style="text-align: right; color: #6b7280;">event-level detail</td>
+                    </tr>
+                    <tr>
+                        <td><a href="{{ invite_funnel_rollup_url }}">Daily Funnel Rollups</a></td>
+                        <td style="text-align: right; color: #6b7280;">nightly aggregates</td>
+                    </tr>
+                </tbody>
+            </table>
+            <div style="padding: 12px 16px; border-top: 1px solid #e5e7eb;">
+                <div style="font-weight: 600; color: #4b5563; margin-bottom: 8px;">Country Breakdown (30d)</div>
+                <div style="display: grid; gap: 6px;">
+                    {% for row in invite_funnel_country_breakdown %}
+                    <div style="display:flex; justify-content:space-between; font-size: 13px;">
+                        <span>{{ row.country|default:"--" }} · {{ row.event_name }}</span>
+                        <span style="color:#6b7280;">{{ row.count|intcomma }}</span>
+                    </div>
+                    {% empty %}
+                    <div style="font-size: 13px; color: #6b7280;">No country-segmented funnel data yet.</div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     <h2 class="section-title">📣 Content Engagement</h2>
     <div class="metrics-grid">
         <div class="metric-card">

@@ -14,7 +14,7 @@ from django.db.models.functions import Coalesce
 from datetime import timedelta
 from decimal import Decimal
 
-from .models_analytics import DailyMetrics, CountryMetrics
+from .models_analytics import DailyMetrics, CountryMetrics, FunnelEvent, FunnelDailyRollup
 from .models import User
 from .analytics import count_all_signups_for_date
 
@@ -392,3 +392,73 @@ class CountryMetricsAdmin(admin.ModelAdmin):
         extra_context = extra_context or {}
         extra_context['title'] = 'Country Metrics (Phone-Complete User Base)'
         return super().changelist_view(request, extra_context=extra_context)
+
+
+@admin.register(FunnelEvent)
+class FunnelEventAdmin(admin.ModelAdmin):
+    list_display = (
+        'created_at',
+        'event_name',
+        'country',
+        'platform',
+        'user',
+        'short_session_id',
+        'properties_preview',
+    )
+    list_filter = ('event_name', 'country', 'platform', 'created_at')
+    search_fields = ('event_name', 'session_id', 'user__username', 'user__phone_number')
+    date_hierarchy = 'created_at'
+    ordering = ('-created_at',)
+    readonly_fields = (
+        'created_at',
+        'event_name',
+        'user',
+        'session_id',
+        'country',
+        'platform',
+        'properties',
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def short_session_id(self, obj):
+        return (obj.session_id or '')[:12]
+    short_session_id.short_description = 'Session'
+
+    def properties_preview(self, obj):
+        value = obj.properties or {}
+        text = str(value)
+        return text if len(text) <= 120 else f"{text[:117]}..."
+    properties_preview.short_description = 'Properties'
+
+
+@admin.register(FunnelDailyRollup)
+class FunnelDailyRollupAdmin(admin.ModelAdmin):
+    list_display = (
+        'date',
+        'event_name',
+        'country',
+        'platform',
+        'count',
+        'unique_users',
+        'unique_sessions',
+    )
+    list_filter = ('event_name', 'country', 'platform', 'date')
+    search_fields = ('event_name', 'country', 'platform')
+    date_hierarchy = 'date'
+    ordering = ('-date', 'event_name', 'country', 'platform')
+    readonly_fields = (
+        'date',
+        'event_name',
+        'country',
+        'platform',
+        'count',
+        'unique_users',
+        'unique_sessions',
+        'created_at',
+        'updated_at',
+    )
+
+    def has_add_permission(self, request):
+        return False

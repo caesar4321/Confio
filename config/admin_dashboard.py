@@ -4,7 +4,7 @@ Provides a comprehensive overview of platform metrics and quick actions
 """
 from django.contrib import admin
 from two_factor.admin import AdminSiteOTPRequired
-from django.urls import path
+from django.urls import path, reverse
 from django.shortcuts import render, redirect
 from django.utils import timezone
 from django.db.models import Count, Sum, Q, F, Avg
@@ -121,7 +121,7 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         }
         
         # Historical metrics from snapshots
-        from users.models_analytics import DailyMetrics, CountryMetrics
+        from users.models_analytics import DailyMetrics, CountryMetrics, FunnelEvent, FunnelDailyRollup
         
         # Get latest snapshot for growth indicators
         latest_snapshot = DailyMetrics.objects.order_by('-date').first()
@@ -151,6 +151,76 @@ class ConfioAdminSite(AdminSiteOTPRequired):
                 .order_by('-mau')[:10]
                 .values('country_code', 'dau', 'wau', 'mau', 'total_users')
             )
+
+        # Invite/referral funnel metrics
+        funnel_event_names = [
+            'invite_submitted',
+            'whatsapp_share_tapped',
+            'invite_link_clicked',
+            'invite_claimed',
+            'first_deposit',
+        ]
+        funnel_last_30_start = now - timedelta(days=30)
+        funnel_last_7_start = now - timedelta(days=7)
+
+        funnel_raw_counts = {
+            row['event_name']: row['count']
+            for row in FunnelEvent.objects.filter(
+                event_name__in=funnel_event_names,
+                created_at__gte=funnel_last_30_start,
+            ).values('event_name').annotate(count=Count('id'))
+        }
+        funnel_7d_counts = {
+            row['event_name']: row['count']
+            for row in FunnelEvent.objects.filter(
+                event_name__in=funnel_event_names,
+                created_at__gte=funnel_last_7_start,
+            ).values('event_name').annotate(count=Count('id'))
+        }
+
+        invite_submitted_total = funnel_raw_counts.get('invite_submitted', 0)
+        share_tapped_total = funnel_raw_counts.get('whatsapp_share_tapped', 0)
+        link_clicked_total = funnel_raw_counts.get('invite_link_clicked', 0)
+        invite_claimed_total = funnel_raw_counts.get('invite_claimed', 0)
+        first_deposit_total = funnel_raw_counts.get('first_deposit', 0)
+
+        context['invite_funnel_stats'] = {
+            'invite_submitted_total': invite_submitted_total,
+            'share_tapped_total': share_tapped_total,
+            'link_clicked_total': link_clicked_total,
+            'invite_claimed_total': invite_claimed_total,
+            'first_deposit_total': first_deposit_total,
+            'invite_to_share_pct': (share_tapped_total / invite_submitted_total * 100) if invite_submitted_total else 0,
+            'share_to_click_pct': (link_clicked_total / share_tapped_total * 100) if share_tapped_total else 0,
+            'click_to_claim_pct': (invite_claimed_total / link_clicked_total * 100) if link_clicked_total else 0,
+            'claim_to_deposit_pct': (first_deposit_total / invite_claimed_total * 100) if invite_claimed_total else 0,
+            'invite_submitted_7d': funnel_7d_counts.get('invite_submitted', 0),
+            'share_tapped_7d': funnel_7d_counts.get('whatsapp_share_tapped', 0),
+            'link_clicked_7d': funnel_7d_counts.get('invite_link_clicked', 0),
+            'invite_claimed_7d': funnel_7d_counts.get('invite_claimed', 0),
+            'first_deposit_7d': funnel_7d_counts.get('first_deposit', 0),
+            'raw_events_30d': FunnelEvent.objects.filter(created_at__gte=funnel_last_30_start).count(),
+            'rollup_rows_30d': FunnelDailyRollup.objects.filter(date__gte=(now.date() - timedelta(days=30))).count(),
+        }
+        context['invite_funnel_recent'] = list(
+            FunnelEvent.objects.filter(
+                event_name__in=funnel_event_names,
+                created_at__gte=funnel_last_30_start,
+            )
+            .order_by('-created_at')
+            .values('created_at', 'event_name', 'country', 'platform', 'session_id', 'user__username')[:10]
+        )
+        context['invite_funnel_country_breakdown'] = list(
+            FunnelEvent.objects.filter(
+                event_name__in=funnel_event_names,
+                created_at__gte=funnel_last_30_start,
+            )
+            .values('country', 'event_name')
+            .annotate(count=Count('id'))
+            .order_by('country', 'event_name')
+        )
+        context['invite_funnel_raw_url'] = reverse('confio_admin:users_funnelevent_changelist')
+        context['invite_funnel_rollup_url'] = reverse('confio_admin:users_funneldailyrollup_changelist')
         
         # Account metrics
         context['total_accounts'] = Account.objects.count()
@@ -1166,10 +1236,12 @@ confio_admin_site.register(UnifiedTransactionTable, UnifiedTransactionAdmin)
 confio_admin_site.register(UnifiedUSDCTransactionTable, UnifiedUSDCTransactionAdmin)
 
 # Analytics models
-from users.models_analytics import DailyMetrics, CountryMetrics
-from users.admin_analytics import DailyMetricsAdmin, CountryMetricsAdmin
+from users.models_analytics import DailyMetrics, CountryMetrics, FunnelEvent, FunnelDailyRollup
+from users.admin_analytics import DailyMetricsAdmin, CountryMetricsAdmin, FunnelEventAdmin, FunnelDailyRollupAdmin
 confio_admin_site.register(DailyMetrics, DailyMetricsAdmin)
 confio_admin_site.register(CountryMetrics, CountryMetricsAdmin)
+confio_admin_site.register(FunnelEvent, FunnelEventAdmin)
+confio_admin_site.register(FunnelDailyRollup, FunnelDailyRollupAdmin)
 
 # P2P models
 from p2p_exchange.models import (
