@@ -18,7 +18,6 @@ from algosdk import encoding as algo_encoding
 from algosdk import transaction
 from blockchain.kms_manager import get_kms_signer_from_settings, KMSTransactionSigner
 import msgpack
-import json
 import base64 as _b64
 
 from .invite_send_transaction_builder import InviteSendTransactionBuilder
@@ -50,6 +49,11 @@ class InviteUserTxnType(graphene.ObjectType):
 class SponsorTxnType(graphene.ObjectType):
     txn = graphene.String()
     index = graphene.Int()
+
+
+class SponsorTxnInput(graphene.InputObjectType):
+    txn = graphene.String(required=True)
+    index = graphene.Int(required=True)
 
 
 class PrepareInviteForPhone(graphene.Mutation):
@@ -113,21 +117,17 @@ class PrepareInviteForPhone(graphene.Mutation):
         except Exception:
             # If balance lookup fails, continue; on-chain will enforce at submit
             pass
-        # Generate a unique invitation id by adding a short random suffix
-        try:
-            import secrets
-            base_id = builder.make_invitation_id(phone_key_canonical)
-            suffix = secrets.token_hex(4)  # 8 chars
-            # Ensure both invitation_id and receipt key "r:"+invitation_id fit in Algorand box key (<=64 bytes)
-            # => len(invitation_id) must be <= 62
-            max_inv_id_len = 62
-            trim_len = max_inv_id_len - (1 + len(suffix))
-            if trim_len < 1:
-                trim_len = 1
-            safe_base = base_id[:trim_len]
-            unique_id = f"{safe_base}:{suffix}"
-        except Exception:
-            unique_id = builder.make_invitation_id(phone_key_canonical)
+        # Deterministic invitation id derived from the canonical phone key.
+        # Intentionally NOT appending a random suffix: a random suffix would make
+        # repeated prepare calls produce different IDs, defeating the on-chain
+        # duplicate-box guard and allowing a user to be double-charged if the
+        # client re-prepares before submitting. If an active invitation already
+        # exists for this phone, the caller should surface it instead of
+        # creating a parallel one.
+        base_id = builder.make_invitation_id(phone_key_canonical)
+        # Ensure both invitation_id and receipt key "r:"+invitation_id fit in
+        # Algorand box key (<=64 bytes) => len(invitation_id) must be <= 62
+        unique_id = base_id[:62] if len(base_id) > 62 else base_id
 
         res = builder.build_create_invitation(
             inviter_address=acct.algorand_address,
@@ -258,7 +258,7 @@ class PrepareInviteForPhone(graphene.Mutation):
 class SubmitInviteForPhone(graphene.Mutation):
     class Arguments:
         signed_user_txn = graphene.String(required=True, description='Signed AXFER from inviter (base64 msgpack)')
-        sponsor_transactions = graphene.List(graphene.JSONString, required=True, description='List of sponsor txns as JSON strings with fields {txn, index}')
+        sponsor_transactions = graphene.List(SponsorTxnInput, required=True, description='List of sponsor txns with fields {txn, index}')
         invitation_id = graphene.String(required=True)
         message = graphene.String(required=False)
 
@@ -268,10 +268,57 @@ class SubmitInviteForPhone(graphene.Mutation):
     internal_id = graphene.String()
 
     @classmethod
-    def mutate(cls, root, info, signed_user_txn: str, sponsor_transactions: list[str], invitation_id: str, message: Optional[str] = ''):
+    def mutate(cls, root, info, signed_user_txn: str, sponsor_transactions: list[SponsorTxnInput], invitation_id: str, message: Optional[str] = ''):
         user = info.context.user
         if not user.is_authenticated:
             return cls(success=False, error='Not authenticated')
+
+        # Idempotency guard: if this invitation_id has already been submitted
+        # successfully, return the prior result instead of re-submitting. If a
+        # submission is currently in flight, reject to avoid a double-spend race.
+        # We use a DB-level UPDATE to atomically flip PENDING -> SUBMITTED so two
+        # concurrent submits cannot both proceed.
+        try:
+            existing = SendTransaction.objects.filter(idempotency_key=invitation_id).first()
+            if existing:
+                if existing.status == 'CONFIRMED':
+                    return cls(
+                        success=True,
+                        txid=existing.transaction_hash,
+                        internal_id=existing.internal_id,
+                    )
+                if existing.status in ('SUBMITTED', 'SIGNED', 'SPONSORING'):
+                    return cls(success=False, error='Invitation submission already in progress')
+                if existing.status == 'FAILED':
+                    # Allow retry of a previously failed submission by resetting to PENDING
+                    # so the atomic claim below can flip it to SUBMITTED.
+                    SendTransaction.objects.filter(pk=existing.pk, status='FAILED').update(status='PENDING')
+                # Atomically claim the PENDING row so parallel callers cannot both proceed.
+                claimed = SendTransaction.objects.filter(
+                    pk=existing.pk, status='PENDING'
+                ).update(status='SUBMITTED')
+                if not claimed:
+                    return cls(success=False, error='Invitation submission already in progress')
+        except Exception as e:
+            logger.warning(f'[SubmitInviteForPhone] Idempotency check failed, continuing: {e}')
+
+        def _revert_to_pending():
+            """Release the SUBMITTED claim so the user can retry after a pre-submit failure."""
+            try:
+                SendTransaction.objects.filter(
+                    idempotency_key=invitation_id, status='SUBMITTED'
+                ).update(status='PENDING')
+            except Exception as exc:
+                logger.warning(f'[SubmitInviteForPhone] Could not revert status to PENDING: {exc}')
+
+        def _mark_failed(msg: str):
+            """Terminal-mark the row FAILED once we've already touched the chain."""
+            try:
+                SendTransaction.objects.filter(
+                    idempotency_key=invitation_id, status='SUBMITTED'
+                ).update(status='FAILED', error_message=(msg or '')[:500])
+            except Exception as exc:
+                logger.warning(f'[SubmitInviteForPhone] Could not mark status FAILED: {exc}')
 
         algod_client = get_algod_client()
 
@@ -292,9 +339,11 @@ class SubmitInviteForPhone(graphene.Mutation):
             logger.info('[SubmitInviteForPhone] Decoded user_signed bytes len=%s', len(user_signed))
             user_dict = msgpack.unpackb(user_signed, raw=False)
             if not isinstance(user_dict, dict) or 'txn' not in user_dict:
+                _revert_to_pending()
                 return cls(success=False, error='Invalid signed user transaction payload')
             txn_d = user_dict['txn']
             if txn_d.get('type') != 'axfer':
+                _revert_to_pending()
                 return cls(success=False, error='Signed transaction is not an AXFER')
             inviter_snd = txn_d.get('snd')  # bytes
             asset_id = txn_d.get('xaid')
@@ -305,21 +354,28 @@ class SubmitInviteForPhone(graphene.Mutation):
             gen = txn_d.get('gen')
             grp = txn_d.get('grp')
             if not all([inviter_snd, asset_id, amount, fv, lv, gh, gen, grp]):
+                _revert_to_pending()
                 return cls(success=False, error='Signed AXFER missing required fields')
             inviter_addr = algo_encoding.encode_address(inviter_snd)
         except Exception as e:
+            _revert_to_pending()
             return cls(success=False, error=f'Invalid signed AXFER: {e}')
 
         # Sign sponsor transactions from pre-built payloads provided back by client (no rebuild)
         try:
-            # Parse sponsor transactions (list of JSON strings with txn/index)
+            # Parse sponsor transactions passed as typed GraphQL inputs.
             if not sponsor_transactions or len(sponsor_transactions) == 0:
+                _revert_to_pending()
                 return cls(success=False, error='Missing sponsor transactions')
             parsed = []
             for s in sponsor_transactions:
                 try:
-                    parsed.append(json.loads(s) if isinstance(s, str) else s)
+                    parsed.append({
+                        'txn': getattr(s, 'txn', None) if not isinstance(s, dict) else s.get('txn'),
+                        'index': getattr(s, 'index', None) if not isinstance(s, dict) else s.get('index'),
+                    })
                 except Exception:
+                    _revert_to_pending()
                     return cls(success=False, error='Invalid sponsor transaction payload format')
 
             # Build SignedTransaction objects in their original indices
@@ -382,27 +438,35 @@ class SubmitInviteForPhone(graphene.Mutation):
                 tx_type = tx_d.get('type')
                 if tx_type == 'pay':
                     if tx_d.get('snd') != algo_encoding.decode_address(expected_addr):
+                        _revert_to_pending()
                         return cls(success=False, error='Sponsor txn sender mismatch')
                     if tx_d.get('rcv') != algo_encoding.decode_address(expected_rcv):
+                        _revert_to_pending()
                         return cls(success=False, error='Sponsor txn receiver mismatch')
                     if tx_d.get('rekey'):
+                        _revert_to_pending()
                         return cls(success=False, error='Sponsor txn must not rekey')
                     if tx_d.get('close'):
+                        _revert_to_pending()
                         return cls(success=False, error='Sponsor txn must not close out')
                     amt = tx_d.get('amt')
                     sponsor_amounts.append(int(amt or 0))
                 elif tx_type == 'appl':
                     # App call must be from sponsor to our invite app
                     if tx_d.get('snd') != algo_encoding.decode_address(expected_addr):
+                        _revert_to_pending()
                         return cls(success=False, error='Sponsor app call sender mismatch')
                     if tx_d.get('apid') != builder.app_id:
+                        _revert_to_pending()
                         return cls(success=False, error='Sponsor app call targets wrong app')
                     if tx_d.get('rekey'):
+                        _revert_to_pending()
                         return cls(success=False, error='Sponsor app call must not rekey')
                     if tx_d.get('apat'):
                         # First account should be inviter (already enforced in contract); keep lightweight check only
                         pass
                 else:
+                    _revert_to_pending()
                     return cls(success=False, error='Unexpected sponsor txn type (only payment and app call allowed)')
 
                 tx = transaction.Transaction.undictify(tx_d)
@@ -411,6 +475,7 @@ class SubmitInviteForPhone(graphene.Mutation):
 
             # Expect exactly two sponsor payments: 0-fee bump and MBR funding
             if sorted(sponsor_amounts) != sorted([0, expected_mbr]):
+                _revert_to_pending()
                 return cls(success=False, error='Sponsor txn amounts do not match expected pattern (0 and MBR)')
 
             # Determine user txn index as the missing slot
@@ -418,6 +483,7 @@ class SubmitInviteForPhone(graphene.Mutation):
             # Our group has 4 txns total
             user_index = next(i for i in range(4) if i not in all_idx)
         except Exception as e:
+            _revert_to_pending()
             return cls(success=False, error=f'Failed to sign sponsor txns: {e}')
 
         # Submit group (concatenate raw signed bytes explicitly)
@@ -452,6 +518,7 @@ class SubmitInviteForPhone(graphene.Mutation):
                 logger.info('[SubmitInviteForPhone] send_transactions returned: %s', txid)
             except Exception as e:
                 logger.exception('[SubmitInviteForPhone] send_transactions failed: %r', e)
+                _mark_failed(str(e))
                 return cls(success=False, error=str(e))
 
             # Prefer the ApplicationCall txid for confirmation reference (index 3)
@@ -460,6 +527,7 @@ class SubmitInviteForPhone(graphene.Mutation):
                 transaction.wait_for_confirmation(algod_client, ref_txid, 8)
             except Exception as e:
                 logger.exception('[SubmitInviteForPhone] wait_for_confirmation failed for %s: %r', ref_txid, e)
+                _mark_failed(str(e))
                 return cls(success=False, error=str(e))
             # Update persisted SendTransaction record and get internal_id
             send_internal_id = None
@@ -1016,4 +1084,3 @@ def get_all_pending_invites_for_phone(user_phone: str, user_country: str | None)
         return results
     except Exception:
         return results
-

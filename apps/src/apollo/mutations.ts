@@ -430,7 +430,7 @@ export const REQUEST_PREMIUM_UPGRADE = gql`
 export const SUBMIT_INVITE_FOR_PHONE = gql`
   mutation SubmitInviteForPhone(
     $signedUserTxn: String!,
-    $sponsorTransactions: [JSONString!]!,
+    $sponsorTransactions: [SponsorTxnInput!]!,
     $invitationId: String!,
     $message: String
   ) {

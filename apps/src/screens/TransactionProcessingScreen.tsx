@@ -130,6 +130,12 @@ interface TransactionData {
   senderName?: string;
   sender?: string;
   recipientName?: string;
+  preparedInvite?: {
+    userTransaction: { txn: string; groupId?: string; first?: number; last?: number; gh?: string; gen?: string };
+    sponsorTransactions: Array<{ txn: string; index: number }>;
+    groupId?: string;
+    invitationId: string;
+  } | null;
 }
 
 export const TransactionProcessingScreen = () => {
@@ -526,7 +532,21 @@ export const TransactionProcessingScreen = () => {
         const phone = transactionData.recipientPhone as string;
         const message = transactionData.memo || undefined;
 
-        const res = await inviteSendService.createInviteForPhone(phone, undefined, amountNum, assetType, message);
+        const preparedInvite = transactionData.preparedInvite;
+        const res = preparedInvite
+          ? await inviteSendService.submitPreparedInvite(preparedInvite)
+          : await (async () => {
+              const prepared = await inviteSendService.prepareInvite(phone, undefined, amountNum, assetType, message);
+              if (!prepared.success || !prepared.prepared) {
+                return { success: false, error: prepared.error || 'No se pudo preparar la invitación' };
+              }
+              if (transactionData) {
+                (transactionData as any).preparedInvite = prepared.prepared;
+                (transactionData as any).idempotencyKey = prepared.prepared.invitationId;
+              }
+              return inviteSendService.submitPreparedInvite(prepared.prepared);
+            })();
+
         if (!res.success) {
           setTransactionError(res.error || 'No se pudo crear la invitación');
           setIsComplete(true);

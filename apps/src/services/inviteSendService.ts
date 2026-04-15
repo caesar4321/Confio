@@ -69,12 +69,13 @@ class InviteSendService {
       })
     } catch { }
 
-    // Echo sponsor transactions back exactly as provided by server (no mutation)
-    const sponsorTransactionsPayload = (prepared.sponsorTransactions || []).map(stx => JSON.stringify(stx))
-
     const { data } = await apolloClient.mutate({
       mutation: SUBMIT_INVITE_FOR_PHONE,
-      variables: { signedUserTxn: signedAxferB64Norm, sponsorTransactions: sponsorTransactionsPayload, invitationId: prepared.invitationId },
+      variables: {
+        signedUserTxn: signedAxferB64Norm,
+        sponsorTransactions: (prepared.sponsorTransactions || []).map(stx => ({ txn: stx.txn, index: stx.index })),
+        invitationId: prepared.invitationId,
+      },
     })
     const res = data?.submitInviteForPhone
     if (!res?.success) {

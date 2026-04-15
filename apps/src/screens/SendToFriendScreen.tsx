@@ -11,6 +11,7 @@ import { useNumberFormat } from '../utils/numberFormatting';
 import { useAuth } from '../contexts/AuthContext';
 import { getSupportCopy } from '../utils/supportMessaging';
 import { colors } from '../config/theme';
+import { inviteSendService } from '../services/inviteSendService';
 
 type TokenType = 'cusd' | 'confio';
 
@@ -156,24 +157,30 @@ export const SendToFriendScreen = () => {
 
     try {
 
-      // For idempotency key, we need a stable identifier
-      // For Confío users, use their user ID; for non-Confío, use phone number hash
-      let recipientIdentifier: string;
-      if (friend.isOnConfio && (friend.userId || friend.id)) {
-        recipientIdentifier = friend.userId || friend.id || 'unknown';
-      } else if (friend.phone) {
-        // For non-Confío users, create a hash of the phone number
-        const phoneHash = Array.from(friend.phone).reduce((hash, char) => ((hash << 5) - hash) + char.charCodeAt(0), 0);
-        recipientIdentifier = Math.abs(phoneHash).toString(16).padStart(8, '0');
+      // For invites, prepare up front and use the invitation_id as the stable
+      // retry key. That keeps repeated taps/navigation retries aligned with the
+      // server-side idempotency guard.
+      let invitePrepared: any | null = null;
+      let idempotencyKey: string;
+      if (friend.isOnConfio === false && friend.phone) {
+        const prep = await inviteSendService.prepareInvite(
+          friend.phone,
+          userProfile?.phoneCountry,
+          parseFloat(amount),
+          (tokenType.toUpperCase() === 'CUSD' ? 'CUSD' : 'CONFIO'),
+          '',
+        );
+        if (!prep.success || !prep.prepared) {
+          throw new Error(prep.error || 'No se pudo preparar la invitación');
+        }
+        invitePrepared = prep.prepared;
+        idempotencyKey = prep.prepared.invitationId;
       } else {
-        recipientIdentifier = 'unknown';
+        const recipientIdentifier = friend.userId || friend.id || 'unknown';
+        const timestamp = Date.now();
+        const amountStr = amount.replace('.', '');
+        idempotencyKey = `send_${recipientIdentifier}_${amountStr}_${config.name}_${timestamp}`;
       }
-
-      // Generate idempotency key to prevent double-spending
-      // Use full timestamp (not just minute) to allow multiple transactions
-      const timestamp = Date.now();
-      const amountStr = amount.replace('.', '');
-      const idempotencyKey = `send_${recipientIdentifier}_${amountStr}_${config.name}_${timestamp}`;
 
       // Navigate to processing screen with transaction data
       (navigation as any).replace('TransactionProcessing', {
@@ -189,13 +196,15 @@ export const SendToFriendScreen = () => {
           // recipientAddress removed - server will determine this
           memo: '', // Empty memo - user can add notes in a future feature
           idempotencyKey: idempotencyKey,
+          preparedInvite: invitePrepared,
           prepared: prepared,
           senderName: userProfile?.firstName ? `${userProfile.firstName} ${userProfile.lastName || ''}`.trim() : (userProfile?.username || 'Usuario'),
           sender: userProfile?.firstName || 'Usuario'
         }
       });
     } catch (error) {
-      setErrorMessage('Error al procesar la transacción. Inténtalo de nuevo.');
+      const message = error instanceof Error && error.message ? error.message : 'Error al procesar la transacción. Inténtalo de nuevo.';
+      setErrorMessage(message);
       setShowError(true);
     } finally {
       setTimeout(() => {
