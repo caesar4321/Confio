@@ -184,6 +184,56 @@ class User(AbstractUser, SoftDeleteModel):
         """
         return self.platform_os == 'android' and self.backup_verified_at is None
 
+    # ── Status tier (referral-count-gated) ──────────────────────────
+    # Tier thresholds: 1 → early_supporter, 3 → community_builder, 10 → embajador
+    # Tier is computed, not stored — always reflects live referral count.
+    # A referral "counts" when the referrer's reward becomes claimable (eligible)
+    # or has been claimed — i.e., the referred user signed up, completed KYC,
+    # and made their first qualifying deposit.
+
+    STATUS_TIER_THRESHOLDS = [
+        (10, 'embajador'),
+        (3, 'community_builder'),
+        (1, 'early_supporter'),
+    ]
+
+    @property
+    def referral_count(self) -> int:
+        """Count referrals where the referrer's reward is claimable or claimed."""
+        from achievements.models import UserReferral
+        return UserReferral.objects.filter(
+            referrer_user=self,
+            referrer_reward_status__in=('eligible', 'claimed'),
+            deleted_at__isnull=True,
+        ).count()
+
+    @property
+    def is_referral_verified(self) -> bool:
+        """Verified Badge: True when user has at least 1 referral whose reward
+        became claimable. This is the Instagram-style checkmark — earned by
+        bringing real people into Confio, not by passing KYC (which is a
+        prerequisite, not a reward)."""
+        return self.referral_count >= 1
+
+    @property
+    def status_tier(self) -> str:
+        """Compute tier from referral count. Returns tier slug or 'member'."""
+        count = self.referral_count
+        for threshold, tier in self.STATUS_TIER_THRESHOLDS:
+            if count >= threshold:
+                return tier
+        return 'member'
+
+    @property
+    def next_tier_info(self) -> dict:
+        """Return info about the next tier: name and referrals needed."""
+        count = self.referral_count
+        # Walk thresholds ascending
+        for threshold, tier in reversed(self.STATUS_TIER_THRESHOLDS):
+            if count < threshold:
+                return {'next_tier': tier, 'referrals_needed': threshold - count}
+        return {'next_tier': None, 'referrals_needed': 0}
+
 
 
     @property

@@ -12,6 +12,7 @@ import ViewShot from 'react-native-view-shot';
 import RNShare from 'react-native-share';
 import { colors } from '../config/theme';
 import { AnalyticsService } from '../services/analyticsService';
+import { StatusTierBadge } from '../components/StatusTierBadge';
 
 type TransactionType = 'sent' | 'received' | 'payment';
 
@@ -36,6 +37,11 @@ interface TransactionData {
   transactionId?: string;
   transactionHash?: string;
   status?: 'SUBMITTED' | 'CONFIRMED' | 'FAILED';
+  // Status tier & verified badge for the counterparty
+  recipientStatusTier?: string;
+  recipientIsReferralVerified?: boolean;
+  senderStatusTier?: string;
+  senderIsReferralVerified?: boolean;
 }
 
 export const TransactionSuccessScreen = () => {
@@ -360,13 +366,35 @@ export const TransactionSuccessScreen = () => {
                   </Text>
                 </View>
                 <View style={styles.participantInfo}>
-                  <Text style={styles.participantName}>
-                    {transactionData.type === 'sent'
-                      ? transactionData.recipient
-                      : transactionData.type === 'payment'
-                        ? transactionData.merchant
-                        : transactionData.sender}
-                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                    <Text style={styles.participantName}>
+                      {transactionData.type === 'sent'
+                        ? transactionData.recipient
+                        : transactionData.type === 'payment'
+                          ? transactionData.merchant
+                          : transactionData.sender}
+                    </Text>
+                    {(() => {
+                      const isVerified = transactionData.type === 'sent'
+                        ? transactionData.recipientIsReferralVerified
+                        : transactionData.senderIsReferralVerified;
+                      const tier = transactionData.type === 'sent'
+                        ? transactionData.recipientStatusTier
+                        : transactionData.senderStatusTier;
+                      return (
+                        <>
+                          {isVerified && (
+                            <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: '#3B82F6', justifyContent: 'center', alignItems: 'center' }}>
+                              <Icon name="check" size={10} color="#fff" />
+                            </View>
+                          )}
+                          {tier && tier !== 'member' && (
+                            <StatusTierBadge tier={tier} compact />
+                          )}
+                        </>
+                      );
+                    })()}
+                  </View>
                   {/* Show phone number for friend transactions, address for external wallets */}
                   {transactionData.recipientPhone && transactionData.recipientPhone.trim() !== '' ? (
                     <Text style={styles.participantDetails}>

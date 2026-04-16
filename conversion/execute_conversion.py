@@ -103,13 +103,13 @@ class ConversionExecutor:
                     'block': result.get('block')
                 }
             else:
-                # Mark conversion as failed
-                conversion.status = 'FAILED'
-                conversion.save()
+                # Mark conversion as failed with detail
+                error_msg = result.get('error', 'Transaction failed on blockchain') if result else 'Execution failed'
+                conversion.mark_failed(error_msg)
                 
                 return {
                     'success': False,
-                    'error': 'Transaction failed on blockchain'
+                    'error': error_msg
                 }
                 
         except Conversion.DoesNotExist:

@@ -361,11 +361,18 @@ class UserType(DjangoObjectType):
 	accounts = graphene.List(lambda: AccountType)
 	is_staff = graphene.Boolean()
 	requires_backup_completion = graphene.Boolean()
-	
+
+	# Status tier (referral-count-gated)
+	status_tier = graphene.String(description="Referral tier: member, early_supporter, community_builder, embajador")
+	referral_count = graphene.Int(description="Number of successful referrals")
+	next_tier_name = graphene.String(description="Name of the next tier to unlock (null if max)")
+	next_tier_referrals_needed = graphene.Int(description="Referrals still needed for next tier (0 if max)")
+	is_referral_verified = graphene.Boolean(description="Verified Badge: earned by having 1+ referral with claimable/claimed reward")
+
 	# Explicitly define sensitive fields to enforce security
 	phone_number = graphene.String()
 	email = graphene.String()
-	
+
 	class Meta:
 		model = User
 		# Include all fields, but our explicit definitions above take precedence
@@ -423,6 +430,36 @@ class UserType(DjangoObjectType):
 		is_verified = getattr(user, 'is_verified', None)
 		return bool(callable(is_verified) and is_verified())
 
+
+	def resolve_status_tier(self, info):
+		"""Only expose your own tier."""
+		user = info.context.user
+		if not user.is_authenticated or str(user.id) != str(self.id):
+			return None
+		return self.status_tier
+
+	def resolve_referral_count(self, info):
+		user = info.context.user
+		if not user.is_authenticated or str(user.id) != str(self.id):
+			return None
+		return self.referral_count
+
+	def resolve_next_tier_name(self, info):
+		user = info.context.user
+		if not user.is_authenticated or str(user.id) != str(self.id):
+			return None
+		return self.next_tier_info['next_tier']
+
+	def resolve_next_tier_referrals_needed(self, info):
+		user = info.context.user
+		if not user.is_authenticated or str(user.id) != str(self.id):
+			return None
+		return self.next_tier_info['referrals_needed']
+
+	def resolve_is_referral_verified(self, info):
+		"""Verified Badge — visible to everyone (not just self). This is a
+		public trust signal, like Instagram's checkmark."""
+		return self.is_referral_verified
 
 	def resolve_is_identity_verified(self, info):
 		return self.is_identity_verified
@@ -1073,6 +1110,8 @@ class UserByPhoneType(graphene.ObjectType):
 	is_on_confio = graphene.Boolean()
 	active_account_id = graphene.ID()
 	active_account_algorand_address = graphene.String()
+	status_tier = graphene.String(description="Referral status tier of this contact")
+	is_referral_verified = graphene.Boolean(description="Verified Badge for this contact")
 
 class VerifiedTransactionType(graphene.ObjectType):
 	is_valid = graphene.Boolean()
@@ -1972,7 +2011,9 @@ class Query(EmployeeQueries, graphene.ObjectType):
 					last_name=found_user.last_name,
 					is_on_confio=True,
 					active_account_id=active_account.id if active_account else None,
-					active_account_algorand_address=active_account.algorand_address if active_account else None
+					active_account_algorand_address=active_account.algorand_address if active_account else None,
+					status_tier=found_user.status_tier,
+					is_referral_verified=found_user.is_referral_verified,
 				))
 			else:
 				# User not found on Confío
@@ -1984,7 +2025,9 @@ class Query(EmployeeQueries, graphene.ObjectType):
 					last_name=None,
 					is_on_confio=False,
 					active_account_id=None,
-					active_account_algorand_address=None
+					active_account_algorand_address=None,
+					status_tier=None,
+					is_referral_verified=None,
 				))
 		
 		return results
@@ -2015,7 +2058,9 @@ class Query(EmployeeQueries, graphene.ObjectType):
 					last_name=None,
 					is_on_confio=False,
 					active_account_id=None,
-					active_account_algorand_address=None
+					active_account_algorand_address=None,
+					status_tier=None,
+					is_referral_verified=None,
 				))
 			return results
 
@@ -2055,7 +2100,9 @@ class Query(EmployeeQueries, graphene.ObjectType):
 					last_name=found_user.last_name,
 					is_on_confio=True,
 					active_account_id=active_account.id if active_account else None,
-					active_account_algorand_address=active_account.algorand_address if active_account else None
+					active_account_algorand_address=active_account.algorand_address if active_account else None,
+					status_tier=found_user.status_tier,
+					is_referral_verified=found_user.is_referral_verified,
 				))
 			else:
 				results.append(UserByPhoneType(
@@ -2066,7 +2113,9 @@ class Query(EmployeeQueries, graphene.ObjectType):
 					last_name=None,
 					is_on_confio=False,
 					active_account_id=None,
-					active_account_algorand_address=None
+					active_account_algorand_address=None,
+					status_tier=None,
+					is_referral_verified=None,
 				))
 		return results
 	

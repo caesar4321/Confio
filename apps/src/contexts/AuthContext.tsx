@@ -56,6 +56,8 @@ export function useAuthReady(): boolean {
   return ready;
 }
 
+export type StatusTier = 'member' | 'early_supporter' | 'community_builder' | 'embajador';
+
 interface UserProfile {
   id: string;
   username: string;
@@ -69,6 +71,11 @@ interface UserProfile {
   verificationStatus?: string;
   backupProvider?: string; // 'google_drive' | 'icloud' | null
   requiresBackupCompletion?: boolean;
+  statusTier?: StatusTier;
+  referralCount?: number;
+  nextTierName?: string;
+  nextTierReferralsNeeded?: number;
+  isReferralVerified?: boolean;
 }
 
 interface BusinessProfile {
@@ -651,23 +658,11 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     }
   };
 
-  // Shared post-auth steps after biometrics are satisfied
-  const completeAuthenticatedEntry = async (source: 'login' | 'phoneVerification' | 'resume') => {
-    setIsAuthenticated(true);
-    await refreshProfile('personal');
-
-    // Ensure FCM token is registered for the user
+  // Shared opt-in logic: ensures user has all required asset opt-ins.
+  // Called from both fresh login (completeAuthenticatedEntry) and cold start (checkAuthState)
+  // so that a silently-failed initial opt-in is retried on subsequent app opens.
+  const ensureAssetOptIns = async () => {
     try {
-      const { default: messagingService } = await import('../services/messagingService');
-      await messagingService.ensureTokenRegisteredForCurrentUser();
-    } catch (fcmError) {
-      console.error('[AuthContext] Failed to register FCM token:', fcmError);
-      // Don't block navigation if FCM registration fails
-    }
-
-    // Handle auto opt-in after successful auth
-    try {
-      // Check if user needs opt-ins
       const GENERATE_OPT_IN_TRANSACTIONS = gql`
         mutation GenerateOptInTransactions {
           generateOptInTransactions {
@@ -684,7 +679,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
 
       const mutationResult = data?.generateOptInTransactions;
       if (mutationResult?.success && mutationResult?.transactions) {
-        // Parse transactions payload defensively; GraphQL JSONString may already be an array in some environments
+        // Parse transactions payload defensively; GraphQL JSONString may already be an array
         let transactions: any = mutationResult.transactions;
         if (typeof transactions === 'string') {
           try {
@@ -700,18 +695,37 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           const optInSuccess = await algorandService.processSponsoredOptIn(transactions);
 
           if (optInSuccess) {
+            console.log('[AuthContext] Asset opt-in completed successfully');
           } else {
-            console.error('[AuthContext] Auto opt-in failed');
+            console.error('[AuthContext] Auto opt-in failed — will retry on next app open');
           }
         }
-      } else {
-        console.error('[AuthContext] Failed to generate opt-in transactions:', mutationResult?.error);
+        // else: no transactions needed (already opted in) — success
+      } else if (mutationResult?.error) {
+        console.error('[AuthContext] Failed to generate opt-in transactions:', mutationResult.error);
       }
-
     } catch (optInError) {
       console.error('[AuthContext] Error during auto opt-in:', optInError);
-      // Don't block login even if backend reports expired credentials; let user proceed
+      // Don't block login/startup even if opt-in fails; will retry on next app open
     }
+  };
+
+  // Shared post-auth steps after biometrics are satisfied
+  const completeAuthenticatedEntry = async (source: 'login' | 'phoneVerification' | 'resume') => {
+    setIsAuthenticated(true);
+    await refreshProfile('personal');
+
+    // Ensure FCM token is registered for the user
+    try {
+      const { default: messagingService } = await import('../services/messagingService');
+      await messagingService.ensureTokenRegisteredForCurrentUser();
+    } catch (fcmError) {
+      console.error('[AuthContext] Failed to register FCM token:', fcmError);
+      // Don't block navigation if FCM registration fails
+    }
+
+    // Handle auto opt-in after successful auth
+    await ensureAssetOptIns();
 
 
 
@@ -1032,6 +1046,9 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
             setIsAuthenticated(true);
             // Do NOT signal authReady here on cold resume; signal after token is aligned to stored context
             navigateToScreen('Main');
+
+            // Fire-and-forget: retry asset opt-ins in case they failed on initial login
+            ensureAssetOptIns().catch(() => {});
 
             // Fire-and-forget prefetch of accounts to warm ProfileMenu
             (async () => {

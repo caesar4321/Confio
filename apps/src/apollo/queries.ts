@@ -17,6 +17,11 @@ export const GET_ME = gql`
       verificationStatus
       backupProvider
       requiresBackupCompletion
+      statusTier
+      referralCount
+      nextTierName
+      nextTierReferralsNeeded
+      isReferralVerified
     }
   }
 `;
@@ -254,6 +259,8 @@ export const CHECK_USERS_BY_PHONES = gql`
       isOnConfio
       activeAccountId
       activeAccountAlgorandAddress
+      statusTier
+      isReferralVerified
     }
   }
 `;

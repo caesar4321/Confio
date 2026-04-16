@@ -17,6 +17,7 @@ import { GET_MY_REFERRALS } from '../apollo/queries';
 import { biometricAuthService } from '../services/biometricAuthService';
 import authService from '../services/authService';
 import { AnalyticsService } from '../services/analyticsService';
+import { StatusTierBadge, TierProgress, getTierMeta } from '../components/StatusTierBadge';
 import { colors } from '../config/theme';
 
 // Utility function to format phone number with country code
@@ -351,10 +352,10 @@ export const ProfileScreen = () => {
       const frameworkStatus = isReferrer ? ref.referrerRewardStatus : ref.refereeRewardStatus;
       const amount = isReferrer ? (ref.rewardReferrerConfio || 0) : (ref.rewardRefereeConfio || 0);
 
-      // 'pending' or 'locked' count as pending. 'ready' counts as claimable.
+      // 'pending' or 'locked' count as pending. 'eligible' counts as claimable.
       if (frameworkStatus === 'pending' || frameworkStatus === 'locked') {
         pending += amount;
-      } else if (frameworkStatus === 'ready') {
+      } else if (frameworkStatus === 'eligible') {
         claimable += amount;
       }
     });
@@ -369,7 +370,10 @@ export const ProfileScreen = () => {
         <View style={styles.header}>
           <View style={styles.profileInfo}>
             <TouchableOpacity
-              style={styles.avatarContainer}
+              style={[
+                styles.avatarContainer,
+                userProfile?.statusTier === 'embajador' && styles.avatarEmbajador,
+              ]}
               onPress={() => {
                 const isBusiness = activeAccount?.type.toLowerCase() === 'business';
                 if (isBusiness) {
@@ -386,7 +390,17 @@ export const ProfileScreen = () => {
                 <Icon name="edit-2" size={12} color="#fff" />
               </View>
             </TouchableOpacity>
-            <Text style={styles.name}>{displayInfo.name}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={styles.name}>{displayInfo.name}</Text>
+              {userProfile?.isReferralVerified && (
+                <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: '#3B82F6', justifyContent: 'center', alignItems: 'center' }}>
+                  <Icon name="check" size={12} color="#fff" />
+                </View>
+              )}
+            </View>
+            {userProfile?.statusTier && userProfile.statusTier !== 'member' && (
+              <StatusTierBadge tier={userProfile.statusTier} style={{ marginTop: 2, marginBottom: 4 }} />
+            )}
             {displayInfo.showAccountType && (
               <Text style={styles.accountType}>{displayInfo.accountType}</Text>
             )}
@@ -450,6 +464,17 @@ export const ProfileScreen = () => {
               <Icon name="chevron-right" size={16} color={referralStats.claimable > 0 ? '#047857' : '#10b981'} />
             </TouchableOpacity>
 
+            {/* Tier progress indicator */}
+            {activeAccount?.type.toLowerCase() === 'personal' && (
+              <View style={{ paddingHorizontal: 12, paddingTop: 8 }}>
+                <TierProgress
+                  referralCount={userProfile?.referralCount ?? 0}
+                  nextTierName={userProfile?.nextTierName}
+                  nextTierReferralsNeeded={userProfile?.nextTierReferralsNeeded}
+                />
+              </View>
+            )}
+
             {needsFriendlyUsername && (
               <TouchableOpacity style={styles.referralUpdateUsername} onPress={() => navigation.navigate('UpdateUsername')}>
                 <Icon name="edit-3" size={16} color="#047857" />
@@ -470,11 +495,50 @@ export const ProfileScreen = () => {
             )}
 
             <View style={styles.referralCriteria}>
-              <Text style={styles.referralCriteriaTitle}>¿Cómo funciona el desbloqueo?</Text>
-              <Text style={styles.referralCriteriaItem}>1. Compartí tu link.</Text>
-              <Text style={styles.referralCriteriaItem}>2. Tu amigo se crea la cuenta (recibe US$5 en $CONFIO que se activan luego).</Text>
-              <Text style={styles.referralCriteriaItem}>3. Carga 20 USDC, pásalos a cUSD y se activan los US$5 en $CONFIO para los dos.</Text>
+              <Text style={styles.referralCriteriaTitle}>¿Cómo funciona?</Text>
+              <Text style={styles.referralCriteriaItem}>1. Compartí tu link por WhatsApp.</Text>
+              <Text style={styles.referralCriteriaItem}>2. Tu amigo se crea la cuenta (recibe US$5 en $CONFIO).</Text>
+              <Text style={styles.referralCriteriaItem}>3. Carga 20 USDC, pásalos a cUSD y se activan los US$5 para los dos.</Text>
+            </View>
 
+            {/* Status tier explainer */}
+            <View style={styles.referralCriteria}>
+              <Text style={styles.referralCriteriaTitle}>🏅 Niveles y insignia verificado</Text>
+              <Text style={styles.referralCriteriaNote}>
+                Cuando tu amigo activa su cuenta, ganas la insignia ✓ de verificado. Cada amigo adicional te sube de nivel. Tus contactos lo ven cuando les envías dinero.
+              </Text>
+              <View style={{ gap: 6, marginTop: 8 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={{ width: 28, fontSize: 16 }}>✓</Text>
+                  <Text style={[styles.referralCriteriaItem, { flex: 1, marginBottom: 0 }]}>
+                    <Text style={{ fontWeight: '700', color: '#3B82F6' }}>Verificado</Text> — 1 invitación exitosa
+                  </Text>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={{ width: 28, fontSize: 16 }}>⭐</Text>
+                  <Text style={[styles.referralCriteriaItem, { flex: 1, marginBottom: 0 }]}>
+                    <Text style={{ fontWeight: '700', color: '#3B82F6' }}>Early Supporter</Text> — 1 invitación
+                  </Text>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={{ width: 28, fontSize: 16 }}>🔥</Text>
+                  <Text style={[styles.referralCriteriaItem, { flex: 1, marginBottom: 0 }]}>
+                    <Text style={{ fontWeight: '700', color: '#F59E0B' }}>Community Builder</Text> — 3 invitaciones + nombre dorado
+                  </Text>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={{ width: 28, fontSize: 16 }}>🏆</Text>
+                  <Text style={[styles.referralCriteriaItem, { flex: 1, marginBottom: 0 }]}>
+                    <Text style={{ fontWeight: '700', color: '#8B5CF6' }}>Embajador Confio</Text> — 10 invitaciones + anillo de perfil
+                  </Text>
+                </View>
+              </View>
+              <Text style={[styles.referralCriteriaNote, { marginTop: 8, fontStyle: 'italic' }]}>
+                Los niveles no se compran. Solo se ganan invitando amigos que se registren y activen su cuenta.
+              </Text>
+            </View>
+
+            <View style={styles.referralCriteria}>
               <TouchableOpacity onPress={() => navigation.navigate('Achievements')}>
                 <Text style={[styles.referralCriteriaItem, { color: '#3B82F6', marginTop: 4, fontWeight: '600' }]}>
                   Ver instrucciones completas
@@ -816,6 +880,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
     position: 'relative',
+  },
+  avatarEmbajador: {
+    borderWidth: 3,
+    borderColor: '#8B5CF6',
   },
   avatarText: {
     fontSize: 32,

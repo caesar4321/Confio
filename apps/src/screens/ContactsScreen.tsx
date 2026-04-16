@@ -17,6 +17,7 @@ import { useAccount } from '../contexts/AccountContext';
 import { INVITE_EMPLOYEE, GET_CURRENT_BUSINESS_EMPLOYEES, GET_CURRENT_BUSINESS_INVITATIONS, CANCEL_INVITATION, GET_PENDING_PAYROLL_ITEMS } from '../apollo/queries';
 import { getCountryByIso } from '../utils/countries';
 import { colors } from '../config/theme';
+import { getTierNameColor, StatusTierBadge } from '../components/StatusTierBadge';
 
 // Utility function to format phone number with country code
 const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string => {
@@ -150,7 +151,22 @@ const ContactCard = memo(({ contact, isOnConfio = false, onPress, onSendPress, o
     </View>
 
     <View style={styles.contactInfo}>
-      <Text style={styles.contactName}>{contact.name}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+        <Text style={[
+          styles.contactName,
+          isOnConfio && contact.statusTier && getTierNameColor(contact.statusTier)
+            ? { color: getTierNameColor(contact.statusTier) }
+            : undefined,
+        ]}>{contact.name}</Text>
+        {isOnConfio && contact.isReferralVerified && (
+          <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: '#3B82F6', justifyContent: 'center', alignItems: 'center' }}>
+            <Icon name="check" size={10} color="#fff" />
+          </View>
+        )}
+        {isOnConfio && contact.statusTier && contact.statusTier !== 'member' && (
+          <StatusTierBadge tier={contact.statusTier} compact />
+        )}
+      </View>
       <Text style={styles.contactPhone}>{contact.phone}</Text>
     </View>
 
@@ -440,7 +456,9 @@ export const ContactsScreen = () => {
       phone: contact.phoneNumbers && contact.phoneNumbers[0] ? contact.phoneNumbers[0] : '',
       isOnConfio: contact.isOnConfio || false,
       userId: contact.confioUserId || null,
-      algorandAddress: contact.confioAlgorandAddress || null
+      algorandAddress: contact.confioAlgorandAddress || null,
+      statusTier: (contact as any).statusTier || null,
+      isReferralVerified: (contact as any).isReferralVerified || false,
     }));
 
 

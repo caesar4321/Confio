@@ -15,6 +15,8 @@ interface StoredContact {
   confioUserId?: string;
   confioUsername?: string;
   confioSuiAddress?: string;
+  statusTier?: string | null;
+  isReferralVerified?: boolean;
 }
 
 interface ContactMap {
@@ -210,7 +212,9 @@ export class ContactService {
               confioUsersMap.set(userInfo.phoneNumber, {
                 userId: userInfo.userId,
                 username: userInfo.username,
-                algorandAddress: userInfo.activeAccountAlgorandAddress
+                algorandAddress: userInfo.activeAccountAlgorandAddress,
+                statusTier: userInfo.statusTier || null,
+                isReferralVerified: userInfo.isReferralVerified || false,
               });
             }
           });
@@ -325,6 +329,8 @@ export class ContactService {
               contact.confioUserId = userInfo.userId;
               contact.confioUsername = userInfo.username;
               contact.confioAlgorandAddress = userInfo.algorandAddress;
+              contact.statusTier = userInfo.statusTier || null;
+              contact.isReferralVerified = userInfo.isReferralVerified || false;
 
               // Keep the local contact name - don't replace with Confío user's profile name
               // Users should see the names they have saved in their contacts

@@ -199,7 +199,9 @@ export const SendToFriendScreen = () => {
           preparedInvite: invitePrepared,
           prepared: prepared,
           senderName: userProfile?.firstName ? `${userProfile.firstName} ${userProfile.lastName || ''}`.trim() : (userProfile?.username || 'Usuario'),
-          sender: userProfile?.firstName || 'Usuario'
+          sender: userProfile?.firstName || 'Usuario',
+          recipientStatusTier: (friend as any).statusTier || null,
+          recipientIsReferralVerified: (friend as any).isReferralVerified || false,
         }
       });
     } catch (error) {
