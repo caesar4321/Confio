@@ -1335,6 +1335,13 @@ class PresaleSettingsAdmin(admin.ModelAdmin):
                 'description': 'Master switches. Use the action below to finish presale and unlock claims safely.'
             }
         ),
+        (
+            'Telegram Group',
+            {
+                'fields': ('telegram_group_enabled', 'telegram_group_url'),
+                'description': 'Configure the private Telegram group invitation shown after presale purchases.'
+            }
+        ),
         ('Timestamps', {
             'fields': ('created_at', 'updated_at'),
             'classes': ('collapse',)

@@ -10,7 +10,8 @@ import { formatNumber } from '../utils/numberFormatting';
 import { useCountry } from '../contexts/CountryContext';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import { useQuery } from '@apollo/client';
-import { GET_ACTIVE_PRESALE, GET_MY_BALANCES } from '../apollo/queries';
+import { GET_ACTIVE_PRESALE, GET_MY_BALANCES, GET_PRESALE_TELEGRAM_GROUP } from '../apollo/queries';
+import { TelegramGroupModal } from '../components/TelegramGroupModal';
 import { PresaleWsSession } from '../services/presaleWs';
 import { LoadingOverlay } from '../components/LoadingOverlay';
 import algorandService from '../services/algorandService';
@@ -27,6 +28,7 @@ export const ConfioPresaleParticipateScreen = () => {
 
   const [amount, setAmount] = useState('');
   const [hasAcceptedTerms, setHasAcceptedTerms] = useState(false);
+  const [showTelegramModal, setShowTelegramModal] = useState(false);
 
   // Use the app's selected country for formatting
   const countryCode = selectedCountry?.[2] || 'VE';
@@ -38,6 +40,9 @@ export const ConfioPresaleParticipateScreen = () => {
     fetchPolicy: 'cache-and-network',
   });
   const { data: balancesData, loading: balancesLoading } = useQuery(GET_MY_BALANCES, {
+    fetchPolicy: 'cache-and-network',
+  });
+  const { data: telegramData } = useQuery(GET_PRESALE_TELEGRAM_GROUP, {
     fetchPolicy: 'cache-and-network',
   });
 
@@ -199,14 +204,21 @@ export const ConfioPresaleParticipateScreen = () => {
       }
 
       setBusy(false);
-      // Show success message (simplified)
-      Alert.alert(
-        'Compra exitosa',
-        'Tu compra fue exitosa.',
-        [{ text: 'Ok', onPress: () => navigation.navigate('BottomTabs', { screen: 'Home' }) }]
-      );
       setAmount('');
       refetch();
+
+      // Show Telegram group modal if enabled, otherwise plain success alert
+      const tgEnabled = telegramData?.presaleTelegramGroup?.enabled;
+      const tgUrl = telegramData?.presaleTelegramGroup?.url;
+      if (tgEnabled && tgUrl) {
+        setShowTelegramModal(true);
+      } else {
+        Alert.alert(
+          'Compra exitosa',
+          'Tu compra fue exitosa.',
+          [{ text: 'Ok', onPress: () => navigation.navigate('BottomTabs', { screen: 'Home' }) }]
+        );
+      }
     } catch (e: any) {
       setBusy(false);
       // For opt-in race, we handled silently above. Only show other errors.
@@ -554,6 +566,15 @@ export const ConfioPresaleParticipateScreen = () => {
 
         <View style={styles.bottomPadding} />
       </ScrollView>
+
+      <TelegramGroupModal
+        visible={showTelegramModal}
+        telegramUrl={telegramData?.presaleTelegramGroup?.url || ''}
+        onClose={() => {
+          setShowTelegramModal(false);
+          navigation.navigate('BottomTabs', { screen: 'Home' });
+        }}
+      />
     </SafeAreaView>
   );
 };

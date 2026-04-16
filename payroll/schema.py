@@ -684,25 +684,49 @@ class SubmitPayrollItemPayout(graphene.Mutation):
                 tx_hash = send_result if isinstance(send_result, str) else send_result.get('txId') if isinstance(send_result, dict) else None
         except Exception as e:
             msg = str(e)
-            print(f"[Payroll] Submit payroll item failed: {msg}")
-            try:
-                cls.logger.exception("[Payroll] submit_payout broadcast failed item=%s msg=%s", payroll_item_id, msg)
-            except Exception:
-                pass
-            friendly = None
-            if "logic eval error" in msg:
-                if "delegate_check" in msg or "allowlist" in msg or "authorized" in msg:
-                    friendly = "No estás autorizado para pagar esta nómina. Asegúrate de estar en la lista de delegados para este negocio."
-                elif "cap" in msg or "limit" in msg:
-                    friendly = "Se superó el límite o cap de nómina. Revisa el tope configurado."
-                elif "balance" in msg or "insufficient" in msg:
-                    friendly = "Saldo insuficiente en el escrow de nómina."
-                elif "opt in" in msg or "asset" in msg or "receiver" in msg:
-                    friendly = "El destinatario o fee_recipient no está optado al asset de nómina."
+            
+            # Already in pool recovery logic
+            if "already in pool" in msg.lower():
+                import re
+                txid_match = re.search(r'([A-Z2-7]{52})', msg)
+                if txid_match:
+                    recovered_txid = txid_match.group(1)
+                    cls.logger.info("[Payroll] Duplicate submission detected for item=%s. Recovered TxID: %s", payroll_item_id, recovered_txid)
+                    tx_hash = recovered_txid
                 else:
-                    friendly = "La transacción fue rechazada por el contrato. Verifica autorización y saldo."
-            detail = f"Algorand: {msg}"
-            return SubmitPayrollItemPayout(item=item, run=item.run, success=False, errors=[friendly or detail, detail])
+                    # If we can't find hash in error, try to derive it from stx_bytes
+                    try:
+                        txn_dict = msgpack.unpackb(stx_bytes, raw=False)
+                        tx_hash = algo_encoding.encode_txid(txn_dict.get('txn', txn_dict))
+                        cls.logger.info("[Payroll] Duplicate submission (no hash in err), derived TxID: %s", tx_hash)
+                    except Exception:
+                        tx_hash = None
+                
+                if tx_hash:
+                    # Proceed to update status below
+                    pass
+                else:
+                    return SubmitPayrollItemPayout(item=item, run=item.run, success=False, errors=[f"Duplicate submission, but could not recover TxID: {msg}"])
+            else:
+                print(f"[Payroll] Submit payroll item failed: {msg}")
+                try:
+                    cls.logger.exception("[Payroll] submit_payout broadcast failed item=%s msg=%s", payroll_item_id, msg)
+                except Exception:
+                    pass
+                friendly = None
+                if "logic eval error" in msg:
+                    if "delegate_check" in msg or "allowlist" in msg or "authorized" in msg:
+                        friendly = "No estás autorizado para pagar esta nómina. Asegúrate de estar en la lista de delegados para este negocio."
+                    elif "cap" in msg or "limit" in msg:
+                        friendly = "Se superó el límite o cap de nómina. Revisa el tope configurado."
+                    elif "balance" in msg or "insufficient" in msg:
+                        friendly = "Saldo insuficiente en el escrow de nómina."
+                    elif "opt in" in msg or "asset" in msg or "receiver" in msg:
+                        friendly = "El destinatario o fee_recipient no está optado al asset de nómina."
+                    else:
+                        friendly = "La transacción fue rechazada por el contrato. Verifica autorización y saldo."
+                detail = f"Algorand: {msg}"
+                return SubmitPayrollItemPayout(item=item, run=item.run, success=False, errors=[friendly or detail, detail])
 
         # Derive txid if needed
         if not tx_hash:
@@ -895,7 +919,19 @@ class SubmitPayrollVaultFunding(graphene.Mutation):
             algod_client = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS, headers={"User-Agent": "py-algorand-sdk"})
             combined = b"".join(decoded_bytes)
             combined_b64 = base64.b64encode(combined).decode("utf-8")
-            tx_id = algod_client.send_raw_transaction(combined_b64)
+            try:
+                tx_id = algod_client.send_raw_transaction(combined_b64)
+            except Exception as e:
+                err_str = str(e)
+                if "already in pool" in err_str.lower() or "already in ledger" in err_str.lower():
+                    import re
+                    txid_match = re.search(r'([A-Z2-7]{52})', err_str)
+                    tx_id = txid_match.group(1) if txid_match else None
+                    if not tx_id:
+                        # Fallback for payroll vault funding
+                        tx_id = "already-in-pool"
+                else:
+                    raise
             tx_hash = tx_id if isinstance(tx_id, str) else tx_id.get('txId') if isinstance(tx_id, dict) else None
             return SubmitPayrollVaultFunding(success=True, errors=None, transaction_hash=tx_hash)
         except Exception as e:
@@ -1000,7 +1036,16 @@ class SubmitPayrollVaultWithdrawal(graphene.Mutation):
 
         try:
             algod_client = AlgorandClient().algod
-            tx_id = algod_client.send_raw_transaction(base64.b64encode(stx_bytes).decode('utf-8'))
+            try:
+                tx_id = algod_client.send_raw_transaction(base64.b64encode(stx_bytes).decode('utf-8'))
+            except Exception as e:
+                err_str = str(e)
+                if "already in pool" in err_str.lower() or "already in ledger" in err_str.lower():
+                    import re
+                    txid_match = re.search(r'([A-Z2-7]{52})', err_str)
+                    tx_id = txid_match.group(1) if txid_match else "already-in-pool"
+                else:
+                    raise
             tx_hash = tx_id if isinstance(tx_id, str) else tx_id.get('txId') if isinstance(tx_id, dict) else None
             return SubmitPayrollVaultWithdrawal(success=True, errors=None, transaction_hash=tx_hash)
         except Exception as e:
@@ -1145,7 +1190,16 @@ class SetBusinessDelegates(graphene.Mutation):
                 except Exception:
                     pass
                 stx_b64 = base64.b64encode(stx_bytes).decode('utf-8')
-                tx_id = algod_client.send_raw_transaction(stx_b64)
+                try:
+                    tx_id = algod_client.send_raw_transaction(stx_b64)
+                except Exception as e:
+                    err_str = str(e)
+                    if "already in pool" in err_str.lower() or "already in ledger" in err_str.lower():
+                        import re
+                        txid_match = re.search(r'([A-Z2-7]{52})', err_str)
+                        tx_id = txid_match.group(1) if txid_match else "already-in-pool"
+                    else:
+                        raise
                 try:
                     cls.logger.info("[Payroll] set_business_delegates broadcast ok tx_id=%s biz=%s add=%s remove=%s", tx_id, business_account, add_set, remove)
                 except Exception:
@@ -1492,7 +1546,16 @@ class SetBusinessDelegatesByEmployee(graphene.Mutation):
                 # 5. Broadcast
                 algod_client = builder.algod_client
                 group_b64 = base64.b64encode(group_blob).decode('utf-8')
-                tx_id = algod_client.send_raw_transaction(group_b64)
+                try:
+                    tx_id = algod_client.send_raw_transaction(group_b64)
+                except Exception as e:
+                    err_str = str(e)
+                    if "already in pool" in err_str.lower() or "already in ledger" in err_str.lower():
+                        import re
+                        txid_match = re.search(r'([A-Z2-7]{52})', err_str)
+                        tx_id = txid_match.group(1) if txid_match else "already-in-pool"
+                    else:
+                        raise
                 
                 try:
                     cls.logger.info("[Payroll] set_business_delegates_by_employee atomic broadcast ok tx_id=%s biz=%s", tx_id, business_account)

@@ -530,6 +530,16 @@ class SubmitP2PCreateTrade(graphene.Mutation):
                 pass
             return cls(success=True, txid=ref_txid)
         except Exception as e:
+            err_str = str(e)
+            # Recovery logic: check if this was a duplicate submission (already in pool)
+            if "already in pool" in err_str.lower():
+                import re
+                txid_match = re.search(r'([A-Z2-7]{52})', err_str)
+                if txid_match:
+                    recovered_txid = txid_match.group(1)
+                    logger.info('[P2P Submit] Duplicate submission detected. Recovered TxID: %s', recovered_txid)
+                    return cls(success=True, txid=recovered_txid)
+            
             logger.exception('[P2P Submit] send_transactions failed: %r', e)
             # Idempotency: if the trade box exists on-chain after failure, treat as success
             try:
@@ -738,6 +748,15 @@ class AcceptP2PTrade(graphene.Mutation):
 
             return cls(success=True, txid=signed[-1].get_txid())
         except Exception as e:
+            err_str = str(e)
+            if "already in pool" in err_str.lower():
+                import re
+                txid_match = re.search(r'([A-Z2-7]{52})', err_str)
+                if txid_match:
+                    recovered_txid = txid_match.group(1)
+                    logger.info('[P2P Accept] Duplicate submission detected. Recovered TxID: %s', recovered_txid)
+                    return cls(success=True, txid=recovered_txid)
+            
             logger.exception('[P2P Accept] Exception sending sponsor group: trade_id=%s err=%r', trade_id, e)
             return cls(success=False, error=str(e))
 
@@ -799,7 +818,19 @@ class MarkP2PTradePaid(graphene.Mutation):
             # Do not wait; respond immediately. Celery will confirm and extend expiry/notify.
             ref_txid = user_stx.get_txid()
         except Exception as e:
-            return cls(success=False, error=str(e))
+            err_str = str(e)
+            if "already in pool" in err_str.lower():
+                import re
+                txid_match = re.search(r'([A-Z2-7]{52})', err_str)
+                if txid_match:
+                    recovered_txid = txid_match.group(1)
+                    logger.info('[P2P MarkPaid] Duplicate submission detected. Recovered TxID: %s', recovered_txid)
+                    # Use ref_txid if possible or recovered
+                    ref_txid = recovered_txid
+                else:
+                    return cls(success=False, error=str(e))
+            else:
+                return cls(success=False, error=str(e))
 
         # Reflect 10-minute extension locally if still within original window
         try:
@@ -1028,7 +1059,18 @@ class SubmitP2pAcceptTrade(graphene.Mutation):
             
             ref_txid = user_stx.get_txid()
         except Exception as e:
-            return cls(success=False, error=str(e))
+            err_str = str(e)
+            if "already in pool" in err_str.lower():
+                import re
+                txid_match = re.search(r'([A-Z2-7]{52})', err_str)
+                if txid_match:
+                    recovered_txid = txid_match.group(1)
+                    logger.info('[P2P SubmitAccept] Duplicate submission detected. Recovered TxID: %s', recovered_txid)
+                    ref_txid = recovered_txid
+                else:
+                    return cls(success=False, error=str(e))
+            else:
+                return cls(success=False, error=str(e))
 
         # Update trade status and expiry, broadcast with expires_at
         try:
@@ -1371,7 +1413,18 @@ class CancelP2PTrade(graphene.Mutation):
             # Return immediately; background scanner/celery will confirm and finalize
             ref_txid = user_stx.get_txid()
         except Exception as e:
-            return cls(success=False, error=str(e))
+            err_str = str(e)
+            if "already in pool" in err_str.lower():
+                import re
+                txid_match = re.search(r'([A-Z2-7]{52})', err_str)
+                if txid_match:
+                    recovered_txid = txid_match.group(1)
+                    logger.info('[P2P Cancel] Duplicate submission detected. Recovered TxID: %s', recovered_txid)
+                    ref_txid = recovered_txid
+                else:
+                    return cls(success=False, error=str(e))
+            else:
+                return cls(success=False, error=str(e))
 
         # Optimistic bookkeeping: record release tx hash and system message
         try:
@@ -1525,94 +1578,105 @@ class SubmitP2POpenDispute(graphene.Mutation):
             user_stx = transaction.SignedTransaction.undictify(user_dict)
             txid = algod_client.send_transactions([stx0, user_stx])
             ref_txid = user_stx.get_txid()
+        except Exception as e:
+            err_str = str(e)
+            if "already in pool" in err_str.lower():
+                import re
+                txid_match = re.search(r'([A-Z2-7]{52})', err_str)
+                if txid_match:
+                    recovered_txid = txid_match.group(1)
+                    logger.info('[P2P OpenDispute] Duplicate submission detected. Recovered TxID: %s', recovered_txid)
+                    ref_txid = recovered_txid
+                else:
+                    return cls(success=False, error=str(e))
+            else:
+                return cls(success=False, error=str(e))
 
-            # Enqueue background confirmation via Celery and return immediately
+        # Enqueue background confirmation via Celery and return immediately
+        try:
+            from blockchain.tasks import confirm_p2p_open_dispute
+            opener_user_id = getattr(user, 'id', None)
+            # Try to capture business context (if any)
+            opener_business_id = None
             try:
-                from blockchain.tasks import confirm_p2p_open_dispute
-                opener_user_id = getattr(user, 'id', None)
-                # Try to capture business context (if any)
-                opener_business_id = None
-                try:
-                    from users.jwt_context import get_jwt_business_context_with_validation
-                    jwt_ctx = get_jwt_business_context_with_validation(info, required_permission=None) or {}
-                    if jwt_ctx.get('account_type') == 'business':
-                        opener_business_id = jwt_ctx.get('business_id')
-                except Exception:
-                    opener_business_id = None
-                confirm_p2p_open_dispute.delay(
-                    trade_id=str(trade_id),
-                    txid=ref_txid,
-                    opener_user_id=opener_user_id,
-                    opener_business_id=opener_business_id,
-                    reason=(reason or ''),
-                )
+                from users.jwt_context import get_jwt_business_context_with_validation
+                jwt_ctx = get_jwt_business_context_with_validation(info, required_permission=None) or {}
+                if jwt_ctx.get('account_type') == 'business':
+                    opener_business_id = jwt_ctx.get('business_id')
             except Exception:
-                # If enqueue fails, we still return txid; scanner may pick it up later
-                pass
+                opener_business_id = None
+            confirm_p2p_open_dispute.delay(
+                trade_id=str(trade_id),
+                txid=ref_txid,
+                opener_user_id=opener_user_id,
+                opener_business_id=opener_business_id,
+                reason=(reason or ''),
+            )
+        except Exception:
+            # If enqueue fails, we still return txid; scanner may pick it up later
+            pass
 
-            # Optimistic local update so the UI reflects dispute immediately
-            try:
-                trade = P2PTrade.objects.filter(id=trade_id).select_related('buyer_user', 'seller_user', 'buyer_business', 'seller_business').first()
-                if trade and trade.status not in ('DISPUTED', 'CANCELLED', 'COMPLETED'):
-                    from django.utils import timezone as dj_tz
-                    trade.status = 'DISPUTED'
-                    trade.updated_at = dj_tz.now()
-                    trade.save(update_fields=['status', 'updated_at'])
+        # Optimistic local update so the UI reflects dispute immediately
+        try:
+            trade = P2PTrade.objects.filter(id=trade_id).select_related('buyer_user', 'seller_user', 'buyer_business', 'seller_business').first()
+            if trade and trade.status not in ('DISPUTED', 'CANCELLED', 'COMPLETED'):
+                from django.utils import timezone as dj_tz
+                trade.status = 'DISPUTED'
+                trade.updated_at = dj_tz.now()
+                trade.save(update_fields=['status', 'updated_at'])
 
-                # Ensure dispute record exists for evidence uploads
-                if trade:
-                    from p2p_exchange.models import P2PDispute
+            # Ensure dispute record exists for evidence uploads
+            if trade:
+                from p2p_exchange.models import P2PDispute
+                exists = False
+                try:
+                    _ = trade.dispute_details
+                    exists = True
+                except Exception:
                     exists = False
+                if not exists:
+                    from users.jwt_context import get_jwt_business_context_with_validation
+                    dispute_kwargs = {
+                        'trade': trade,
+                        'reason': (reason or 'Dispute opened').strip(),
+                        'priority': 2,
+                        'status': 'UNDER_REVIEW',
+                    }
                     try:
-                        _ = trade.dispute_details
-                        exists = True
-                    except Exception:
-                        exists = False
-                    if not exists:
-                        from users.jwt_context import get_jwt_business_context_with_validation
-                        dispute_kwargs = {
-                            'trade': trade,
-                            'reason': (reason or 'Dispute opened').strip(),
-                            'priority': 2,
-                            'status': 'UNDER_REVIEW',
-                        }
-                        try:
-                            jwt_context = get_jwt_business_context_with_validation(info, required_permission=None) or {}
-                            if jwt_context.get('account_type') == 'business' and jwt_context.get('business_id'):
-                                if trade.buyer_business_id == jwt_context.get('business_id'):
-                                    dispute_kwargs['initiator_business'] = trade.buyer_business
-                                elif trade.seller_business_id == jwt_context.get('business_id'):
-                                    dispute_kwargs['initiator_business'] = trade.seller_business
-                                else:
-                                    dispute_kwargs['initiator_user'] = user
+                        jwt_context = get_jwt_business_context_with_validation(info, required_permission=None) or {}
+                        if jwt_context.get('account_type') == 'business' and jwt_context.get('business_id'):
+                            if trade.buyer_business_id == jwt_context.get('business_id'):
+                                dispute_kwargs['initiator_business'] = trade.buyer_business
+                            elif trade.seller_business_id == jwt_context.get('business_id'):
+                                dispute_kwargs['initiator_business'] = trade.seller_business
                             else:
                                 dispute_kwargs['initiator_user'] = user
-                        except Exception:
+                        else:
                             dispute_kwargs['initiator_user'] = user
-                        try:
-                            P2PDispute.objects.create(**dispute_kwargs)
-                        except Exception:
-                            pass
+                    except Exception:
+                        dispute_kwargs['initiator_user'] = user
+                    try:
+                        P2PDispute.objects.create(**dispute_kwargs)
+                    except Exception:
+                        pass
 
-                # System message into chat
-                try:
-                    from p2p_exchange.models import P2PMessage
-                    if trade:
-                        P2PMessage.objects.create(
-                            trade=trade,
-                            message='🚩 Disputa enviada a cadena',
-                            sender_type='system',
-                            message_type='system',
-                        )
-                except Exception:
-                    pass
+            # System message into chat
+            try:
+                from p2p_exchange.models import P2PMessage
+                if trade:
+                    P2PMessage.objects.create(
+                        trade=trade,
+                        message='🚩 Disputa enviada a cadena',
+                        sender_type='system',
+                        message_type='system',
+                    )
             except Exception:
-                # Non-fatal if local DB bookkeeping fails
                 pass
+        except Exception:
+            # Non-fatal if local DB bookkeeping fails
+            pass
 
-            return cls(success=True, txid=ref_txid)
-        except Exception as e:
-            return cls(success=False, error=str(e))
+        return cls(success=True, txid=ref_txid)
 
 
 class PrepareP2PResolveDispute(graphene.Mutation):
@@ -1746,23 +1810,35 @@ class SubmitP2PResolveDispute(graphene.Mutation):
             user_stx = transaction.SignedTransaction.undictify(user_dict)
             txid = algod_client.send_transactions([stx0, user_stx])
             ref_txid = user_stx.get_txid()
-            # Do not wait for confirmation; record tx and return. Celery will confirm and update state/notifications.
-            try:
-                trade = P2PTrade.objects.filter(id=trade_id).select_related('escrow').first()
-                if trade and getattr(trade, 'escrow', None):
-                    escrow = trade.escrow
-                    escrow.release_transaction_hash = ref_txid
-                    if not escrow.release_type:
-                        escrow.release_type = 'DISPUTE_RELEASE'
-                    if not escrow.release_amount:
-                        escrow.release_amount = escrow.escrow_amount
-                    escrow.save(update_fields=['release_transaction_hash', 'release_type', 'release_amount', 'updated_at'])
-            except Exception:
-                pass
-
-            return cls(success=True, txid=ref_txid)
         except Exception as e:
-            return cls(success=False, error=str(e))
+            err_str = str(e)
+            if "already in pool" in err_str.lower():
+                import re
+                txid_match = re.search(r'([A-Z2-7]{52})', err_str)
+                if txid_match:
+                    recovered_txid = txid_match.group(1)
+                    logger.info('[P2P ResolveDispute] Duplicate submission detected. Recovered TxID: %s', recovered_txid)
+                    ref_txid = recovered_txid
+                else:
+                    return cls(success=False, error=str(e))
+            else:
+                return cls(success=False, error=str(e))
+
+        # Do not wait for confirmation; record tx and return. Celery will confirm and update state/notifications.
+        try:
+            trade = P2PTrade.objects.filter(id=trade_id).select_related('escrow').first()
+            if trade and getattr(trade, 'escrow', None):
+                escrow = trade.escrow
+                escrow.release_transaction_hash = ref_txid
+                if not escrow.release_type:
+                    escrow.release_type = 'DISPUTE_RELEASE'
+                if not escrow.release_amount:
+                    escrow.release_amount = escrow.escrow_amount
+                escrow.save(update_fields=['release_transaction_hash', 'release_type', 'release_amount', 'updated_at'])
+        except Exception:
+            pass
+
+        return cls(success=True, txid=ref_txid)
 
 
 # Backend-only: Admin resolves dispute on-chain (server signs both txns)

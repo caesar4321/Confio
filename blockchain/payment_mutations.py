@@ -1297,61 +1297,22 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                 t_send_end = time.time()
                 logger.info(f"Payment transaction sent: {tx_id} (send_time={t_send_end - t_send_start:.3f}s, prebuild={t_send_start - t_prebuild_start:.3f}s, parse={t_prebuild_start - t_parse_start:.3f}s, total={t_send_end - t0:.3f}s)")
             except Exception as e_send:
-                # Attempt a TEAL dryrun for detailed diagnostics in DEBUG mode
-                from django.conf import settings as dj_settings
                 err_text = str(e_send)
-                from algosdk.error import AlgodHTTPError
-                if isinstance(e_send, AlgodHTTPError) and 'logic eval error' in err_text and getattr(dj_settings, 'DEBUG', False):
-                    try:
-                        # Build a dryrun request body: list of base64-encoded signed txn msgpacks
-                        dr_b64 = [base64.b64encode(tx).decode('utf-8') if isinstance(tx, (bytes, bytearray)) else tx for tx in signed_txn_objects]
-                        dr_body = {"txns": dr_b64}
-                        dr_resp = None
-                        # Prefer a separate dryrun Algod if configured (e.g., localnet)
-                        from algosdk.v2client.algod import AlgodClient as _AlgodClient
-                        dr_addr = getattr(dj_settings, 'ALGORAND_DRYRUN_ALGOD_ADDRESS', None)
-                        dr_token = getattr(dj_settings, 'ALGORAND_DRYRUN_ALGOD_TOKEN', None)
-                        dryrun_client = None
-                        if dr_addr:
-                            dryrun_client = _AlgodClient(dr_token or '', dr_addr)
-                        else:
-                            # Use the same Algod client if no separate dryrun endpoint is configured
-                            dryrun_client = algod_client
-                        try:
-                            logger.error(f"[DRYRUN] Using algod at: {dr_addr or getattr(dj_settings, 'ALGORAND_ALGOD_ADDRESS', 'same-as-submit')}")
-                        except Exception:
-                            pass
-                        try:
-                            # Some SDKs accept dict directly
-                            dr_resp = dryrun_client.dryrun(dr_body)
-                        except Exception:
-                            # Fallback to raw JSON request
-                            import json as _json
-                            dr_bytes = _json.dumps(dr_body).encode('utf-8')
-                            try:
-                                dr_resp = dryrun_client.algod_request("POST", "/v2/teal/dryrun", data=dr_bytes)
-                            except Exception as dr404:
-                                # If dryrun endpoint is unavailable (404), attempt simulate as a fallback
-                                try:
-                                    sim_body = {
-                                        "txn-groups": [
-                                            {"txns": signed_txn_objects}
-                                        ]
-                                    }
-                                    sim_bytes = _json.dumps(sim_body).encode('utf-8')
-                                    sim_resp = dryrun_client.algod_request("POST", "/v2/transactions/simulate", data=sim_bytes)
-                                    logger.error(f"[SIMULATE] response (truncated): {_json.dumps(sim_resp, default=str)[:4000]}")
-                                except Exception as sim_e:
-                                    logger.error(f"[SIMULATE] Failed to execute simulate: {sim_e}")
-                                    raise dr404
-                        # Log a compact view of the dryrun trace
-                        import json as _json
-                        dr_json = _json.dumps(dr_resp, default=str)
-                        logger.error(f"[DRYRUN] logic eval error during submit. Dryrun response (truncated): {dr_json[:4000]}")
-                    except Exception as dre:
-                        logger.error(f"[DRYRUN] Failed to execute dryrun: {dre}")
-                # Re-raise so the outer handler updates DB and returns error to client
-                raise
+                # Recovery logic: check if this was a duplicate submission (already in pool)
+                # If so, we can extract the txid from the error message and proceed as SUBMITTED.
+                if 'already in pool' in err_text:
+                    import re
+                    # Example error: "transaction already in pool: 5W...ZP"
+                    match = re.search(r'already in pool: ([A-Z2-7]{52})', err_text)
+                    if match:
+                        tx_id_pool = match.group(1)
+                        logger.info(f"Duplicate submission detected. Recovered TxID from pool: {tx_id_pool}")
+                        # Skip re-raising and set tx_id so it continues to SUBMITTED block
+                        tx_id = tx_id_pool
+                    else:
+                        raise
+                else:
+                    raise
             
             # Async confirm: mark as submitted, enqueue Celery poller, and return immediately
             t_update_start = time.time()

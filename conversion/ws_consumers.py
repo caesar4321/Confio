@@ -227,14 +227,6 @@ class ConvertSessionConsumer(AsyncJsonWebsocketConsumer):
                      raw_txs_by_idx[idx] = base64.b64decode(txn_b64)
 
         # 2. Process User Signed Transactions (usually sequentially after sponsor)
-        # We need to know where to insert them.
-        # The frontend sends them in order. We fit them into empty slots?
-        # Or usually the user transactions start at index 1?
-        # Logic in previous code:
-        # "Fill ordered group by index positions"
-        # "if i in signed_by_idx: ... else: append(user_signed[u_ptr])"
-        
-        # Determine total size
         total_txs = len(raw_txs_by_idx) + len(signed_transactions)
         
         ordered_bytes = []
@@ -256,7 +248,7 @@ class ConvertSessionConsumer(AsyncJsonWebsocketConsumer):
                     return {"success": False, "error": "invalid_user_txn_encoding"}
 
         # Log composition for debugging
-        logger.info(f"Conversion {internal_id} submitting group of {len(ordered_bytes)} transactions (raw bytes)")
+        logger.info(f"Conversion {internal_id} submitting group of {len(ordered_bytes)} transactions")
 
         # Concatenate raw bytes
         combined_group = b''.join(ordered_bytes)
@@ -266,32 +258,34 @@ class ConvertSessionConsumer(AsyncJsonWebsocketConsumer):
 
         try:
             # Submit raw transaction group
-            # algod_client is the raw SDK client
             txid = algod_client.send_raw_transaction(combined_b64)
-            
-            # Since we have the ID, we can return success
-            # The reference ID is usually the last transaction's ID or the first? 
-            # In previous code: ref_txid = ordered[-1].get_txid()
-            # We can't easily get the ID of the last txn without decoding.
-            # However, the send_raw_transaction returns the ID of the FIRST transaction?
-            # Or the ID of the "transaction" submitted?
-            # For atomic groups, send_raw_transaction returns the ID of the FIRST transaction in the group?
-            # Actually, SDK documentation says it returns the transaction ID.
-            # If it's a group, checking any ID in the group works for confirmation.
-            # Let's trust the returned txid is sufficient for tracking.
-            # BUT wait, previously we stored ordered[-1].get_txid() as "to_transaction_hash".
-            # If we want to maintain behavior, we should perhaps decode just to get IDs?
-            # Or just use the returned txid?
-            # Let's decode minimally to get IDs if needed, but for now returned txid is safe.
-            
-            # To be safe and match previous behavior (store conversion hash), let's use the returned ID.
-            
-            conv.status = 'SUBMITTED'
-            conv.to_transaction_hash = txid
-            conv.save(update_fields=['status', 'to_transaction_hash', 'updated_at'])
-
-            return {"success": True, "txid": txid}
-            
         except Exception as e:
-            logger.error(f"Error submitting conversion {internal_id}: {e}")
-            return {"success": False, "error": str(e)}
+            err_str = str(e)
+            logger.info(f"Submission error for conversion {internal_id}: {err_str}")
+            
+            # Handle "already in pool" case for robustness (match mutations.py logic)
+            if "TransactionPool.Remember" in err_str or "already in pool" in err_str.lower():
+                import re
+                txid_match = re.search(r'([A-Z2-7]{52})', err_str)
+                txid = txid_match.group(1) if txid_match else ""
+                
+                if not txid:
+                    # Mark as SUBMITTED even without hash to prevent "FAILED" UI
+                    conv.status = 'SUBMITTED'
+                    conv.save(update_fields=['status', 'updated_at'])
+                    return {"success": True, "txid": ""} 
+                
+                logger.info(f"Transaction {txid} already in pool for conversion {internal_id}, recovering as SUBMITTED")
+            else:
+                logger.error(f"Error submitting conversion {internal_id}: {e}")
+                # We save the error in the model for admin visibility
+                conv.status = 'FAILED'
+                conv.error_message = err_str
+                conv.save(update_fields=['status', 'error_message', 'updated_at'])
+                return {"success": False, "error": err_str}
+
+        conv.status = 'SUBMITTED'
+        conv.to_transaction_hash = txid
+        conv.save(update_fields=['status', 'to_transaction_hash', 'updated_at'])
+
+        return {"success": True, "txid": txid}

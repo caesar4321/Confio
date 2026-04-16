@@ -304,16 +304,17 @@ class WithdrawSessionConsumer(AsyncJsonWebsocketConsumer):
         try:
             txid = algod_client.send_transactions(ordered)
         except Exception as e:
-            msg = str(e).lower()
-            if 'transaction already in ledger' in msg:
-                # Idempotency: treat as success
-                # Extract txid from the last transaction we attempted to send
-                txid = ordered[-1].get_txid()
-                # Log it
-                print(f"WS Submit: Transaction {txid} already in ledger, treating as success")
+            err_str = str(e)
+            if "already in pool" in err_str.lower() or "already in ledger" in err_str.lower():
+                import re
+                txid_match = re.search(r'([A-Z2-7]{52})', err_str)
+                txid = txid_match.group(1) if txid_match else ordered[-1].get_txid()
+                print(f"WS Submit: Transaction {txid} already in pool/ledger, recovering as success")
             else:
-                # Re-raise legitimate errors
-                raise
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"WS Submit Failed: {err_str}")
+                return {"success": False, "error": err_str}
         ref_txid = ordered[-1].get_txid()
 
         # Mark withdrawal as processing (submitted)

@@ -739,8 +739,20 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
         import base64 as _b64
         group_bytes = b''.join([b64_to_bytes(user_signed), b64_to_bytes(sponsor1)])
         combined_b64 = _b64.b64encode(group_bytes).decode('utf-8')
-        txid = algod_client.send_raw_transaction(combined_b64)
-        return {"success": True, "txid": txid}
+        try:
+            txid = algod_client.send_raw_transaction(combined_b64)
+            return {"success": True, "txid": txid}
+        except Exception as e:
+            err_str = str(e)
+            if "already in pool" in err_str.lower():
+                import re
+                txid_match = re.search(r'([A-Z2-7]{52})', err_str)
+                txid = txid_match.group(1) if txid_match else ""
+                if txid:
+                    return {"success": True, "txid": txid}
+                # Even if no hash, treating as success to avoid error UI
+                return {"success": True, "txid": ""}
+            return {"success": False, "error": err_str}
 
     @database_sync_to_async
     def _optin_submit(self, signed_transactions, sponsor_transactions):
@@ -790,13 +802,25 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
         import base64 as _b64
         group_bytes = b''.join([b64_to_bytes(sponsor0), b64_to_bytes(user_signed)])
         combined_b64 = _b64.b64encode(group_bytes).decode('utf-8')
-        txid = algod_client.send_raw_transaction(combined_b64)
         try:
-            _wfc(algod_client, txid, 4)
-        except Exception:
-            # Best effort: even if confirmation wait fails, proceed
-            pass
-        return {"success": True, "txid": txid}
+            txid = algod_client.send_raw_transaction(combined_b64)
+            try:
+                _wfc(algod_client, txid, 4)
+            except Exception:
+                # Best effort: even if confirmation wait fails, proceed
+                pass
+            return {"success": True, "txid": txid}
+        except Exception as e:
+            err_str = str(e)
+            if "already in pool" in err_str.lower():
+                import re
+                txid_match = re.search(r'([A-Z2-7]{52})', err_str)
+                txid = txid_match.group(1) if txid_match else ""
+                if txid:
+                    return {"success": True, "txid": txid}
+                # Even if no hash, treating as success to avoid error UI
+                return {"success": True, "txid": ""}
+            return {"success": False, "error": err_str}
 
     @database_sync_to_async
     def _submit(self, purchase_id, signed_transactions, sponsor_transactions):
@@ -1090,4 +1114,16 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
 
             return {"success": True, "txid": txid}
         except Exception as e:
-            return {"success": False, "error": str(e) or "submit_failed"}
+            err_str = str(e)
+            if "already in pool" in err_str.lower():
+                import re
+                txid_match = re.search(r'([A-Z2-7]{52})', err_str)
+                txid = txid_match.group(1) if txid_match else None
+                if txid:
+                    purchase.transaction_hash = txid
+                    purchase.save(update_fields=['transaction_hash'])
+                    return {"success": True, "txid": txid}
+                else:
+                    # Mark as processing/submitted even without hash if we know it's in pool
+                    return {"success": True, "txid": ""}
+            return {"success": False, "error": err_str or "submit_failed"}

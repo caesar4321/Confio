@@ -63,6 +63,11 @@ class PresaleOnchainInfo(graphene.ObjectType):
     locked = graphene.Boolean()
 
 
+class PresaleTelegramGroupType(graphene.ObjectType):
+    enabled = graphene.Boolean()
+    url = graphene.String()
+
+
 class PresaleQueries(graphene.ObjectType):
     """Queries for presale data"""
     
@@ -80,6 +85,7 @@ class PresaleQueries(graphene.ObjectType):
         phase_number=graphene.Int(required=True)
     )
     my_presale_onchain_info = graphene.Field(PresaleOnchainInfo)
+    presale_telegram_group = graphene.Field(PresaleTelegramGroupType)
     
     def resolve_is_presale_active(self, info):
         """Check if presale is globally enabled - no login required for this check"""
@@ -90,6 +96,15 @@ class PresaleQueries(graphene.ObjectType):
         """Check if presale claims are globally unlocked - no login required for this check"""
         settings = PresaleSettings.get_settings()
         return settings.is_presale_claims_unlocked
+
+    @login_required
+    def resolve_presale_telegram_group(self, info):
+        """Return Telegram group config for presale participants"""
+        settings = PresaleSettings.get_settings()
+        return PresaleTelegramGroupType(
+            enabled=settings.telegram_group_enabled,
+            url=settings.telegram_group_url if settings.telegram_group_enabled else ''
+        )
     
     @login_required
     def resolve_active_presale_phase(self, info):

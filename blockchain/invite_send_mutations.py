@@ -494,32 +494,39 @@ class SubmitInviteForPhone(graphene.Mutation):
                 return _b64.b64decode(b64)
 
             # Prefer SDK-managed submission with typed SignedTransaction list to avoid encoding mismatches
+            # Rebuild SignedTransaction from previously unpacked dict
+            user_stx = transaction.SignedTransaction.undictify(user_dict)
+            # Assemble ordered group by index
+            ordered: list[transaction.SignedTransaction] = []
+            # Log user AXFER summary
             try:
-                # Rebuild SignedTransaction from previously unpacked dict
-                user_stx = transaction.SignedTransaction.undictify(user_dict)
-                # Assemble ordered group by index
-                ordered: list[transaction.SignedTransaction] = []
-                # Log user AXFER summary
-                try:
-                    txd = user_dict.get('txn', {})
-                    from_addr = algo_encoding.encode_address(txd.get('snd')) if txd.get('snd') else 'na'
-                    recv = algo_encoding.encode_address(txd.get('arcv')) if txd.get('arcv') else 'na'
-                    amt = txd.get('aamt')
-                    xaid = txd.get('xaid')
-                    logger.info('[SubmitInviteForPhone] User AXFER from=%s to=%s asset=%s amt=%s', from_addr, recv, xaid, amt)
-                except Exception:
-                    pass
-                for i in range(4):
-                    if i == user_index:
-                        ordered.append(user_stx)
-                    else:
-                        ordered.append(signed_by_index[i])
+                txd = user_dict.get('txn', {})
+                from_addr = algo_encoding.encode_address(txd.get('snd')) if txd.get('snd') else 'na'
+                recv = algo_encoding.encode_address(txd.get('arcv')) if txd.get('arcv') else 'na'
+                amt = txd.get('aamt')
+                xaid = txd.get('xaid')
+                logger.info('[SubmitInviteForPhone] User AXFER from=%s to=%s asset=%s amt=%s', from_addr, recv, xaid, amt)
+            except Exception:
+                pass
+            for i in range(4):
+                if i == user_index:
+                    ordered.append(user_stx)
+                else:
+                    ordered.append(signed_by_index[i])
+            try:
                 txid = algod_client.send_transactions(ordered)
                 logger.info('[SubmitInviteForPhone] send_transactions returned: %s', txid)
             except Exception as e:
-                logger.exception('[SubmitInviteForPhone] send_transactions failed: %r', e)
-                _mark_failed(str(e))
-                return cls(success=False, error=str(e))
+                err_str = str(e)
+                if "already in pool" in err_str.lower():
+                    import re
+                    txid_match = re.search(r'([A-Z2-7]{52})', err_str)
+                    txid = txid_match.group(1) if txid_match else ""
+                    logger.info('[SubmitInviteForPhone] Recovered TxID from pool error: %s', txid)
+                else:
+                    logger.exception('[SubmitInviteForPhone] send_transactions failed: %r', e)
+                    _mark_failed(err_str)
+                    return cls(success=False, error=err_str)
 
             # Prefer the ApplicationCall txid for confirmation reference (index 3)
             ref_txid = ordered[3].get_txid()

@@ -3810,6 +3810,16 @@ export const PURCHASE_PRESALE_TOKENS = gql`
     }
   }
 `;
+
+export const GET_PRESALE_TELEGRAM_GROUP = gql`
+  query GetPresaleTelegramGroup {
+    presaleTelegramGroup {
+      enabled
+      url
+    }
+  }
+`;
+
 export const INVITE_RECEIPT_FOR_PHONE = gql`
   query InviteReceiptForPhone($phone: String!, $phoneCountry: String) {
     inviteReceiptForPhone(phone: $phone, phoneCountry: $phoneCountry) {

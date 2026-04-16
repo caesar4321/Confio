@@ -4504,6 +4504,21 @@ class SubmitReferralRewardClaim(graphene.Mutation):
 			tx_id = algod.send_transactions([sponsor_stx_obj, user_stx_obj])
 			algo_transaction.wait_for_confirmation(algod, tx_id, 6)
 		except Exception as exc:
+			err_str = str(exc)
+			if "already in pool" in err_str.lower():
+				import re
+				txid_match = re.search(r'([A-Z2-7]{52})', err_str)
+				tx_id = txid_match.group(1) if txid_match else tx_id
+				logger.info("[referral_claim] Duplicate submission detected for user=%s. Recovered TxID: %s", user.id, tx_id)
+				# Best effort: wait for confirmation if we recovered a hash
+				if tx_id:
+					try:
+						algo_transaction.wait_for_confirmation(algod, tx_id, 4)
+					except Exception:
+						pass
+				cache.delete(cache_key)
+				return SubmitReferralRewardClaim(success=True, error=None, tx_id=tx_id)
+
 			logger.exception("Failed to submit referral reward claim: %s", exc)
 			if isinstance(exc, algo_error.AlgodHTTPError):
 				if _sync_onchain_claim_if_needed(

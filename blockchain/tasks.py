@@ -1117,14 +1117,18 @@ def scan_outbound_confirmations(max_batch: int = 50):
             pe = info.get('pool-error') or info.get('pool_error') or ''
             return cr, pe
 
+        # Recovery window for reconciliation (check FAILED status from last 24h)
+        recovery_cutoff = timezone.now() - datetime.timedelta(hours=24)
+        
         # Payments
         # Use a cutoff to auto-fail stuck transactions
-        from django.utils import timezone
-        import datetime
         # Aggressive cutoff: 2 mins. If not in pool/rounds by then, it's gone.
         cutoff_time = timezone.now() - datetime.timedelta(minutes=2)
 
-        pay_qs = PaymentTransaction.objects.filter(status='SUBMITTED').exclude(transaction_hash__isnull=True).exclude(transaction_hash='')[:max_batch]
+        pay_qs = PaymentTransaction.objects.filter(
+            status__in=['SUBMITTED', 'FAILED'],
+            updated_at__gte=recovery_cutoff
+        ).exclude(transaction_hash__isnull=True).exclude(transaction_hash='')[:max_batch]
         for p in pay_qs:
             cr, pe = check_tx(p.transaction_hash)
             
@@ -1168,7 +1172,10 @@ def scan_outbound_confirmations(max_batch: int = 50):
 
 
         # Sends
-        send_qs = SendTransaction.objects.filter(status='SUBMITTED').exclude(transaction_hash__isnull=True).exclude(transaction_hash='')[:max_batch]
+        send_qs = SendTransaction.objects.filter(
+            status__in=['SUBMITTED', 'FAILED'],
+            updated_at__gte=recovery_cutoff
+        ).exclude(transaction_hash__isnull=True).exclude(transaction_hash='')[:max_batch]
         for s in send_qs:
             cr, pe = check_tx(s.transaction_hash or '')
             if pe:
@@ -1276,6 +1283,7 @@ def scan_outbound_confirmations(max_batch: int = 50):
         escrows = P2PEscrow.objects.filter(
             is_escrowed=False,
             escrow_transaction_hash__isnull=False,
+            updated_at__gte=recovery_cutoff
         ).exclude(escrow_transaction_hash='')[:max_batch]
         for e in escrows:
             cr, pe = check_tx(e.escrow_transaction_hash)
@@ -1297,7 +1305,10 @@ def scan_outbound_confirmations(max_batch: int = 50):
 
         # Payroll items
         from payroll.models import PayrollItem
-        payroll_qs = PayrollItem.objects.filter(status='SUBMITTED').exclude(transaction_hash__isnull=True).exclude(transaction_hash='')[:max_batch]
+        payroll_qs = PayrollItem.objects.filter(
+            status__in=['SUBMITTED', 'FAILED'],
+            updated_at__gte=recovery_cutoff
+        ).exclude(transaction_hash__isnull=True).exclude(transaction_hash='')[:max_batch]
         for pi in payroll_qs:
             cr, pe = check_tx(pi.transaction_hash)
             if pe:
@@ -1313,7 +1324,10 @@ def scan_outbound_confirmations(max_batch: int = 50):
                 processed += 1
 
         # Presale purchases
-        presale_qs = PresalePurchase.objects.filter(status='processing').exclude(transaction_hash__isnull=True).exclude(transaction_hash='')[:max_batch]
+        presale_qs = PresalePurchase.objects.filter(
+            status__in=['processing', 'failed'],
+            updated_at__gte=recovery_cutoff
+        ).exclude(transaction_hash__isnull=True).exclude(transaction_hash='')[:max_batch]
         for p in presale_qs:
             cr, pe = check_tx(p.transaction_hash)
             if pe:
@@ -1439,6 +1453,7 @@ def scan_outbound_confirmations(max_batch: int = 50):
         releases = P2PEscrow.objects.filter(
             is_released=False,
             release_transaction_hash__isnull=False,
+            updated_at__gte=recovery_cutoff
         ).exclude(release_transaction_hash='')[:max_batch]
         for e in releases:
             cr, pe = check_tx(e.release_transaction_hash)
@@ -1593,20 +1608,45 @@ def scan_outbound_confirmations(max_batch: int = 50):
                 processed += 1
 
         # Conversions (cUSD <> USDC)
-        conv_qs = Conversion.objects.filter(status='SUBMITTED').exclude(to_transaction_hash__isnull=True).exclude(to_transaction_hash='')[:max_batch]
+        # Recovery: Look at SUBMITTED, and also FAILED/PROCESSING from the last 24h, 
+        # to "recover" any that actually hit the chain but weren't recorded due to node errors or timeouts.
+        recovery_cutoff = timezone.now() - datetime.timedelta(hours=24)
+        conv_qs = Conversion.objects.filter(
+            status__in=['SUBMITTED', 'FAILED', 'PROCESSING'],
+            updated_at__gte=recovery_cutoff
+        ).exclude(to_transaction_hash__isnull=True).exclude(to_transaction_hash='')[:max_batch]
+
         for c in conv_qs:
             cr, pe = check_tx(c.to_transaction_hash or '')
+
+            # 1. Fatal pool error: mark as FAILED
             if pe:
                 c.status = 'FAILED'
                 c.error_message = str(pe)
                 c.save(update_fields=['status', 'error_message', 'updated_at'])
                 processed += 1
                 continue
+            
+            # 2. Timeout: if SUBMITTED and too old, mark as FAILED
+            if cr == 0 and c.status == 'SUBMITTED' and c.updated_at < cutoff_time:
+                c.status = 'FAILED'
+                c.error_message = "Transaction expired or lost from pool"
+                c.save(update_fields=['status', 'error_message', 'updated_at'])
+                logger.warning(f"Marking stuck conversion {c.internal_id} as FAILED (missing from pool)")
+                processed += 1
+                continue
+
+            # 3. Success: Mark as COMPLETED and trigger notifications
             if cr > 0:
                 from django.utils import timezone as dj_tz
                 c.status = 'COMPLETED'
                 c.completed_at = dj_tz.now()
                 c.save(update_fields=['status', 'completed_at', 'updated_at'])
+
+                # Trigger side effects (referral, etc.) manually as verify_conversion
+                # but let's stay consistent with the mutation flow's signals.
+                # Actually, conv.save() will trigger handle_conversion_save signal in users/signals.py
+                
                 # Notification: conversion completed (ensure a user for business accounts)
                 try:
                     from notifications.utils import create_transaction_notification
@@ -1684,10 +1724,11 @@ def scan_outbound_confirmations(max_batch: int = 50):
         try:
             from usdc_transactions.models_unified import UnifiedUSDCTransactionTable as UUT
             from usdc_transactions.models import USDCWithdrawal
-            # Check both SUBMITTED and PROCESSING to be resilient to signal updates
+            # Check both SUBMITTED, FAILED and PROCESSING to be resilient to signal updates
             w_qs = UUT.objects.filter(
                 transaction_type='withdrawal',
-                status__in=['SUBMITTED', 'PROCESSING']
+                status__in=['SUBMITTED', 'FAILED', 'PROCESSING'],
+                updated_at__gte=recovery_cutoff
             ).exclude(transaction_hash__isnull=True).exclude(transaction_hash='')[:max_batch]
             for u in w_qs:
                 txh = u.transaction_hash or ''

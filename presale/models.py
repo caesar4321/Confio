@@ -28,6 +28,16 @@ class PresaleSettings(models.Model):
         blank=True,
         help_text="Timestamp when claims were unlocked"
     )
+    telegram_group_enabled = models.BooleanField(
+        default=False,
+        help_text="If enabled, a modal will appear after presale purchase inviting user to join the private Telegram group"
+    )
+    telegram_group_url = models.URLField(
+        max_length=500,
+        blank=True,
+        default='',
+        help_text="Invite URL for the private Telegram group (e.g. https://t.me/+AbCdEfGhIjK)"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
