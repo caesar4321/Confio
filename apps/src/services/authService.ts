@@ -596,6 +596,12 @@ export class AuthService {
       // 6) Authenticate with backend using Web3Auth (derive wallet after JWT is stored)
       console.log('Authenticating with backend...');
       perfLog('Starting backend authentication');
+      onProgress?.('Verificando seguridad del dispositivo...');
+      const { appCheckService } = await import('./appCheckService');
+      const appCheckToken = await appCheckService.primeTokenForAuth();
+      if (!appCheckToken) {
+        throw new Error('No se pudo verificar el dispositivo en este intento. Revisa Google Play Services y vuelve a intentar.');
+      }
       const { WEB3AUTH_LOGIN } = await import('../apollo/mutations');
       const { data: { web3AuthLogin: authData } } = await apolloClient.mutate({
         mutation: WEB3AUTH_LOGIN,
@@ -914,6 +920,12 @@ export class AuthService {
 
       // Authenticate with backend using Web3Auth (no address yet)
       console.log('Authenticating with backend (Apple)...');
+      onProgress?.('Verificando seguridad del dispositivo...');
+      const { appCheckService } = await import('./appCheckService');
+      const appCheckToken = await appCheckService.primeTokenForAuth();
+      if (!appCheckToken) {
+        throw new Error('No se pudo verificar el dispositivo en este intento. Actualiza el sistema y vuelve a intentar.');
+      }
       const { WEB3AUTH_LOGIN } = await import('../apollo/mutations');
       const { data: { web3AuthLogin: authData } } = await apolloClient.mutate({
         mutation: WEB3AUTH_LOGIN,

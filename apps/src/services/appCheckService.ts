@@ -24,9 +24,12 @@ class AppCheckService {
     private lastToken: string | null = null;
     private lastTokenAt = 0;
     private lastFailureAt = 0;
+    private lastError: string | null = null;
+    private lastErrorAt = 0;
 
     private static readonly TOKEN_REUSE_MS = 5 * 60 * 1000;
     private static readonly FAILURE_BACKOFF_MS = 30 * 1000;
+    private static readonly ERROR_DEBUG_WINDOW_MS = 2 * 60 * 1000;
 
     private isDebugAllowed(): boolean {
         return String(ALLOW_APP_CHECK_DEBUG).toLowerCase() === 'true';
@@ -71,30 +74,62 @@ class AppCheckService {
             });
 
             this.isInitialized = true;
+            this.lastError = null;
+            this.lastErrorAt = 0;
         } catch (error: any) {
-            // Don't throw - allow app to continue in monitoring mode
+            this.recordFailure(`INIT_FAILED:${this.normalizeError(error)}`);
         }
+    }
+
+    private normalizeError(error: any): string {
+        if (!error) {
+            return 'UNKNOWN_ERROR';
+        }
+
+        const message = error?.message || error?.nativeErrorMessage || String(error);
+        return String(message).slice(0, 180);
+    }
+
+    private recordFailure(message: string) {
+        this.lastFailureAt = Date.now();
+        this.lastError = message;
+        this.lastErrorAt = this.lastFailureAt;
+    }
+
+    private clearFailure() {
+        this.lastError = null;
+        this.lastErrorAt = 0;
+    }
+
+    private async sleep(ms: number): Promise<void> {
+        await new Promise(resolve => setTimeout(resolve, ms));
     }
 
     /**
      * Get App Check token
      * Returns null if unavailable (which is logged but not blocked)
      */
-    private async fetchToken(): Promise<string | null> {
-        const startTime = Date.now();
+    private async fetchToken(forceRefresh = false): Promise<string | null> {
         try {
             if (!this.isInitialized) {
                 await this.initialize();
             }
 
-            const { token } = await appCheck().getToken();
+            const { token } = await appCheck().getToken(forceRefresh);
             if (token) {
                 this.lastToken = token;
                 this.lastTokenAt = Date.now();
-            } return token;
-        } catch (error: any) {
+                this.clearFailure();
+                return token;
+            }
 
-            this.lastFailureAt = Date.now(); return null;
+            this.recordFailure(forceRefresh ? 'EMPTY_TOKEN_FORCE_REFRESH' : 'EMPTY_TOKEN');
+            return null;
+        } catch (error: any) {
+            this.recordFailure(
+                `${forceRefresh ? 'FORCE_REFRESH_FAILED' : 'FETCH_FAILED'}:${this.normalizeError(error)}`
+            );
+            return null;
         }
     }
 
@@ -120,6 +155,41 @@ class AppCheckService {
         }
 
         return this.tokenPromise;
+    }
+
+    getLastErrorForDebug(): string | null {
+        if (!this.lastError || !this.lastErrorAt) {
+            return null;
+        }
+
+        if (Date.now() - this.lastErrorAt > AppCheckService.ERROR_DEBUG_WINDOW_MS) {
+            return null;
+        }
+
+        return this.lastError;
+    }
+
+    async primeTokenForAuth(): Promise<string | null> {
+        const immediateToken = await this.getTokenForHeader();
+        if (immediateToken) {
+            return immediateToken;
+        }
+
+        const retryPlan = [
+            { forceRefresh: true, delayMs: 350 },
+            { forceRefresh: true, delayMs: 1200 },
+        ];
+
+        for (const attempt of retryPlan) {
+            const token = await this.fetchToken(attempt.forceRefresh);
+            if (token) {
+                return token;
+            }
+
+            await this.sleep(attempt.delayMs);
+        }
+
+        return this.lastToken;
     }
 }
 

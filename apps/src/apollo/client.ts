@@ -191,6 +191,11 @@ const authLink = setContext(async (operation, previousContext) => {
     const appCheckToken = await appCheckService.getTokenForHeader();
     if (appCheckToken) {
       nextHeaders['X-Firebase-AppCheck'] = appCheckToken;
+    } else {
+      const appCheckDebugError = appCheckService.getLastErrorForDebug();
+      if (appCheckDebugError) {
+        nextHeaders['X-AppCheck-Debug-Error'] = appCheckDebugError;
+      }
     }
   } catch (acError: any) {
     // DEBUG: Send error to backend to see why it failed

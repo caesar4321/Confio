@@ -171,6 +171,9 @@ class Web3AuthLoginMutation(graphene.Mutation):
                     should_enforce=True
                 )
                 if not ac_result.get('success', True):
+                    app_check_error = ac_result.get('error') or ''
+                    if app_check_error == 'Missing App Check Token':
+                        return cls(success=False, error="No se pudo verificar el dispositivo en este intento. Revisa Google Play Services, conexión y vuelve a intentar.")
                     return cls(success=False, error="Dispositivo no verificado (App Check failed). Por favor, usa la app oficial.")
             except Exception as e:
                 logger.error(f"App Check verification failed: {e}")
