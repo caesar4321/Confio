@@ -449,14 +449,6 @@ def entity_page(request, entity_slug):
                     'a': 'Confío lets users hold cUSD (Confío Dollar, a US dollar stablecoin) in a self-custodial wallet and send or receive payments instantly. Users sign in with Google or Apple — no 12/24-word seed phrase to memorize or store. They can top up and withdraw using familiar Latin American local payment methods (bank transfers, mobile payments, etc.) through a peer-to-peer network of other users. Sending and receiving cUSD is done by phone number — users just pick a contact, without ever seeing an Algorand address. Transactions are sponsored on Algorand, so users never pay or even need to understand gas fees. The wallet abstracts blockchain complexity so it feels like a normal money app.',
                 },
                 {
-                    'q': 'Does Confío report my transactions to tax authorities (like AFIP or ARCA)?',
-                    'a': 'No. Confío is a non-custodial wallet, meaning you control your own keys and funds. We do not report your activity or holdings to any tax authority. Furthermore, because your top-ups come from already "bancarized" sources (like bank transfers or MercadoPago), they are already within the visible banking system before they reach Confío. The act of buying USDC itself is not a taxable event.',
-                },
-                {
-                    'q': 'Is it safe to use funds from my bank or MercadoPago to buy USDC in Confío?',
-                    'a': 'Yes. Since the funds you use to top up are already within the banking system, using Confío doesn\'t create new tracking risks for your informal dollar history. Confío is a private technological tool to protect your money from inflation, and it remains separate from any past informal holdings you may have.',
-                },
-                {
                     'q': 'Which countries does Confío focus on?',
                     'a': 'Confío focuses on Latin America, with a primary emphasis on Venezuela, Argentina, and Bolivia — economies where residents face high inflation, currency controls, or limited access to stable dollar savings.',
                 },
@@ -475,6 +467,14 @@ def entity_page(request, entity_slug):
                 {
                     'q': 'Is Confío related to Duende or $DUENDE?',
                     'a': 'Duende ($DUENDE) was an earlier project by the same founder, Julian Moon, and is considered a historical predecessor to Confío. Confío is a separate, current product focused specifically on non-custodial dollar payments for Latin America on Algorand. Older Medium posts referencing $DUENDE are not Confío’s current product.',
+                },
+                {
+                    'q': 'Does Confío report my transactions to tax authorities?',
+                    'a': 'No. Confío is a non-custodial wallet, meaning you control your own keys and funds. We do not report your activity or holdings to any tax authority. Furthermore, because your top-ups come from already "bancarized" sources (like bank transfers or mobile payment apps), they are already within the visible banking system before they reach Confío. The act of buying USDC itself is not a taxable event.',
+                },
+                {
+                    'q': 'Is it safe to use funds from my bank account or mobile payment app to buy USDC in Confío?',
+                    'a': 'Yes. Since the funds you use to top up are already within the banking system, using Confío doesn\'t create new tracking risks for your informal dollar history. Confío is a private technological tool to protect your money from inflation, and it remains separate from any past informal holdings you may have.',
                 },
                 {
                     'q': 'How do I contact Confío?',
