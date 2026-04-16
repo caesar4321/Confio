@@ -218,7 +218,17 @@ class PresaleTransactionBuilder:
             if not stx:
                 logger.error("Failed to sign sponsor opt-in txn; no signer available")
                 return
-            txid = self.algod.send_transaction(stx)
+            try:
+                txid = self.algod.send_transaction(stx)
+            except Exception as e:
+                err_str = str(e)
+                if "already in pool" in err_str.lower() or "already in ledger" in err_str.lower():
+                    import re
+                    txid_match = re.search(r'([A-Z2-7]{52})', err_str)
+                    txid = txid_match.group(1) if txid_match else "already-in-pool"
+                else:
+                    raise
+
             try:
                 from algosdk.transaction import wait_for_confirmation
                 wait_for_confirmation(self.algod, txid, 4)
@@ -267,7 +277,17 @@ class PresaleTransactionBuilder:
                 logger.error("[PRESALE] Failed to sign funding txn (no signer)")
                 return None
                 
-            txid = self.algod.send_transaction(stx)
+            try:
+                txid = self.algod.send_transaction(stx)
+            except Exception as e:
+                err_str = str(e)
+                if "already in pool" in err_str.lower() or "already in ledger" in err_str.lower():
+                    import re
+                    txid_match = re.search(r'([A-Z2-7]{52})', err_str)
+                    txid = txid_match.group(1) if txid_match else "already-in-pool"
+                else:
+                    raise
+
             logger.info(f"[PRESALE] Sent MBR funding to {target_address} amt={amount} txid={txid}")
             return txid
         except Exception as e:

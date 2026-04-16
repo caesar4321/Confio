@@ -17,7 +17,7 @@ import { useAccount } from '../contexts/AccountContext';
 import { INVITE_EMPLOYEE, GET_CURRENT_BUSINESS_EMPLOYEES, GET_CURRENT_BUSINESS_INVITATIONS, CANCEL_INVITATION, GET_PENDING_PAYROLL_ITEMS } from '../apollo/queries';
 import { getCountryByIso } from '../utils/countries';
 import { colors } from '../config/theme';
-import { getTierNameColor, StatusTierBadge } from '../components/StatusTierBadge';
+import { getTierNameColor, getTierMeta } from '../components/StatusTierBadge';
 
 // Utility function to format phone number with country code
 const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string => {
@@ -152,19 +152,22 @@ const ContactCard = memo(({ contact, isOnConfio = false, onPress, onSendPress, o
 
     <View style={styles.contactInfo}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-        <Text style={[
-          styles.contactName,
-          isOnConfio && contact.statusTier && getTierNameColor(contact.statusTier)
-            ? { color: getTierNameColor(contact.statusTier) }
-            : undefined,
-        ]}>{contact.name}</Text>
+        <Text
+          style={[
+            styles.contactName,
+            isOnConfio && contact.statusTier && getTierNameColor(contact.statusTier)
+              ? { color: getTierNameColor(contact.statusTier) }
+              : undefined,
+          ]}
+          numberOfLines={1}
+        >{contact.name}</Text>
         {isOnConfio && contact.isReferralVerified && (
           <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: '#3B82F6', justifyContent: 'center', alignItems: 'center' }}>
             <Icon name="check" size={10} color="#fff" />
           </View>
         )}
         {isOnConfio && contact.statusTier && contact.statusTier !== 'member' && (
-          <StatusTierBadge tier={contact.statusTier} compact />
+          <Text style={{ fontSize: 13 }}>{getTierMeta(contact.statusTier).emoji}</Text>
         )}
       </View>
       <Text style={styles.contactPhone}>{contact.phone}</Text>
@@ -666,7 +669,9 @@ export const ContactsScreen = () => {
       friendName: contact.name,
       friendAvatar: contact.avatar,
       friendPhone: contact.phone,
-      isOnConfio: contact.isOnConfio || false
+      isOnConfio: contact.isOnConfio || false,
+      friendStatusTier: contact.statusTier || null,
+      friendIsReferralVerified: contact.isReferralVerified || false,
     });
   };
 

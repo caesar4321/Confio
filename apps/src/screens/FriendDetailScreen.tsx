@@ -27,6 +27,7 @@ import { TransactionFilterModal, TransactionFilters } from '../components/Transa
 import moment from 'moment';
 import 'moment/locale/es';
 import { colors } from '../config/theme';
+import { StatusTierBadge } from '../components/StatusTierBadge';
 
 // Color palette
 type FriendDetailScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
@@ -76,7 +77,9 @@ export function FriendDetailScreen() {
     friendName = '',
     friendAvatar = '👤',
     friendPhone,
-    isOnConfio = false
+    isOnConfio = false,
+    friendStatusTier = null,
+    friendIsReferralVerified = false,
   } = params;
   
   // Construct friend object from route params
@@ -502,7 +505,19 @@ export function FriendDetailScreen() {
           <View style={styles.friendAvatarContainer}>
             <Text style={styles.friendAvatarText}>{friend.avatar}</Text>
           </View>
-          <Text style={styles.friendName}>{friend.name}</Text>
+          <View style={{ alignItems: 'center', gap: 4 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+              <Text style={styles.friendName}>{friend.name}</Text>
+              {friendIsReferralVerified && (
+                <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: '#3B82F6', alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name="check" size={12} color="#fff" />
+                </View>
+              )}
+            </View>
+            {friendStatusTier && friendStatusTier !== 'member' && (
+              <StatusTierBadge tier={friendStatusTier} variant="compact" />
+            )}
+          </View>
           {friend.phone && (
             <Text style={styles.friendPhone}>{friend.phone}</Text>
           )}
@@ -656,6 +671,10 @@ export function FriendDetailScreen() {
                           invitationClaimed: transaction.invitationClaimed || false,
                           invitationReverted: transaction.invitationReverted || false,
                           invitationExpiresAt: transaction.invitationExpiresAt,
+                          recipientStatusTier: friendStatusTier,
+                          recipientIsReferralVerified: friendIsReferralVerified,
+                          senderStatusTier: friendStatusTier,
+                          senderIsReferralVerified: friendIsReferralVerified,
                         }
                       };
                       // @ts-ignore - Navigation type mismatch, but works at runtime

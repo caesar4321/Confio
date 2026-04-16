@@ -130,7 +130,17 @@ class CUSDService:
                 base64.b64decode(signed_app_call)
             ]
             
-            tx_id = self.client.algod.send_raw_transaction(b''.join(raw_signed_txns))
+            try:
+                tx_id = self.client.algod.send_raw_transaction(b''.join(raw_signed_txns))
+            except Exception as e:
+                err_str = str(e)
+                if "already in pool" in err_str.lower() or "already in ledger" in err_str.lower():
+                    import re
+                    txid_match = re.search(r'([A-Z2-7]{52})', err_str)
+                    tx_id = txid_match.group(1) if txid_match else "already-in-pool"
+                else:
+                    raise
+
             
             # Wait for confirmation
             confirmed_txn = wait_for_confirmation(self.client.algod, tx_id, 10)
@@ -257,7 +267,17 @@ class CUSDService:
                 base64.b64decode(signed_app_call)
             ]
             
-            tx_id = self.client.algod.send_raw_transaction(b''.join(raw_signed_txns))
+            try:
+                tx_id = self.client.algod.send_raw_transaction(b''.join(raw_signed_txns))
+            except Exception as e:
+                err_str = str(e)
+                if "already in pool" in err_str.lower() or "already in ledger" in err_str.lower():
+                    import re
+                    txid_match = re.search(r'([A-Z2-7]{52})', err_str)
+                    tx_id = txid_match.group(1) if txid_match else "already-in-pool"
+                else:
+                    raise
+
             
             # Wait for confirmation
             confirmed_txn = wait_for_confirmation(self.client.algod, tx_id, 10)

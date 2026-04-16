@@ -34,6 +34,7 @@ import { SHARE_LINKS } from '../config/shareLinks';
 import { useAuth } from '../contexts/AuthContext';
 import { getSupportCopy } from '../utils/supportMessaging';
 import { colors } from '../config/theme';
+import { StatusTierBadge } from '../components/StatusTierBadge';
 
 type TransactionDetailScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 type TransactionDetailScreenRouteProp = RouteProp<MainStackParamList, 'TransactionDetail'>;
@@ -1271,6 +1272,16 @@ export const TransactionDetailScreen = () => {
       merchantDisplayName: tx.merchantDisplayName,
       senderBusiness: tx.senderBusiness,
       recipientBusiness: tx.recipientBusiness,
+      // Tier badge data from counterparty users
+      senderStatusTier: tx.senderUser?.statusTier || (transactionData as any)?.senderStatusTier,
+      senderIsReferralVerified: tx.senderUser?.isReferralVerified ?? (transactionData as any)?.senderIsReferralVerified,
+      recipientStatusTier: tx.recipientUser?.statusTier || (transactionData as any)?.recipientStatusTier,
+      recipientIsReferralVerified: tx.recipientUser?.isReferralVerified ?? (transactionData as any)?.recipientIsReferralVerified,
+      // Payment-specific
+      payerStatusTier: (tx as any).payerUser?.statusTier || (transactionData as any)?.payerStatusTier,
+      payerIsReferralVerified: (tx as any).payerUser?.isReferralVerified ?? (transactionData as any)?.payerIsReferralVerified,
+      merchantStatusTier: (tx as any).merchantAccountUser?.statusTier || (transactionData as any)?.merchantStatusTier,
+      merchantIsReferralVerified: (tx as any).merchantAccountUser?.isReferralVerified ?? (transactionData as any)?.merchantIsReferralVerified,
     };
     // If opened via an invite-received notification, force receiver perspective
     if (transactionData?.notification_type === 'INVITE_RECEIVED') {
@@ -1962,7 +1973,17 @@ export const TransactionDetailScreen = () => {
                     <Text style={styles.avatarText}>{currentTx.avatar}</Text>
                   </View>
                   <View style={styles.participantDetails}>
-                    <Text style={styles.participantName}>{displayFromName}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+                      <Text style={styles.participantName}>{displayFromName}</Text>
+                      {currentTx.senderIsReferralVerified && (
+                        <View style={{ width: 18, height: 18, borderRadius: 9, backgroundColor: '#3B82F6', alignItems: 'center', justifyContent: 'center' }}>
+                          <Icon name="check" size={11} color="#fff" />
+                        </View>
+                      )}
+                      {currentTx.senderStatusTier && currentTx.senderStatusTier !== 'member' && (
+                        <StatusTierBadge tier={currentTx.senderStatusTier} variant="compact" />
+                      )}
+                    </View>
                     <View style={styles.addressContainer}>
                       <Text style={styles.addressText}>
                         {getPreferredSecondaryLine({ phone: senderPhone, address: currentTx.fromAddress, isExternal: !!currentTx.is_external_address })}
@@ -1993,33 +2014,43 @@ export const TransactionDetailScreen = () => {
                     </Text>
                   </View>
                   <View style={styles.participantDetails}>
-                    <Text style={styles.participantName}>
-                      {(() => {
-                        return null;
-                      })()}
-                      {(() => {
-                        // If we have a display name from contacts or transaction data
-                        if (displayToName) return displayToName;
+                    <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+                      <Text style={styles.participantName}>
+                        {(() => {
+                          return null;
+                        })()}
+                        {(() => {
+                          // If we have a display name from contacts or transaction data
+                          if (displayToName) return displayToName;
 
-                        // For invited friends (non-Confío users)
-                        if (currentTx.is_invited_friend && currentTx.recipient_phone) {
-                          return `Invitación enviada${currentTx.recipient_display_name ? ` a ${currentTx.recipient_display_name}` : ''}`;
-                        }
+                          // For invited friends (non-Confío users)
+                          if (currentTx.is_invited_friend && currentTx.recipient_phone) {
+                            return `Invitación enviada${currentTx.recipient_display_name ? ` a ${currentTx.recipient_display_name}` : ''}`;
+                          }
 
-                        // For external addresses
-                        if (currentTx.is_external_address || (currentTx.toAddress && !currentTx.recipient_phone && !displayToName)) {
-                          return 'Billetera externa';
-                        }
+                          // For external addresses
+                          if (currentTx.is_external_address || (currentTx.toAddress && !currentTx.recipient_phone && !displayToName)) {
+                            return 'Billetera externa';
+                          }
 
-                        // Fallback - but don't use truncated addresses
-                        const fallbackName = currentTx.to || currentTx.recipient_name || 'Desconocido';
-                        // If the fallback looks like a truncated address, don't use it
-                        if (fallbackName.includes('...') && fallbackName.startsWith('0x')) {
-                          return 'Billetera externa';
-                        }
-                        return fallbackName || `DEBUG FALLBACK ${new Date().getTime()}`;
-                      })()}
-                    </Text>
+                          // Fallback - but don't use truncated addresses
+                          const fallbackName = currentTx.to || currentTx.recipient_name || 'Desconocido';
+                          // If the fallback looks like a truncated address, don't use it
+                          if (fallbackName.includes('...') && fallbackName.startsWith('0x')) {
+                            return 'Billetera externa';
+                          }
+                          return fallbackName || `DEBUG FALLBACK ${new Date().getTime()}`;
+                        })()}
+                      </Text>
+                      {currentTx.recipientIsReferralVerified && (
+                        <View style={{ width: 18, height: 18, borderRadius: 9, backgroundColor: '#3B82F6', alignItems: 'center', justifyContent: 'center' }}>
+                          <Icon name="check" size={11} color="#fff" />
+                        </View>
+                      )}
+                      {currentTx.recipientStatusTier && currentTx.recipientStatusTier !== 'member' && (
+                        <StatusTierBadge tier={currentTx.recipientStatusTier} variant="compact" />
+                      )}
+                    </View>
                     <View style={styles.addressContainer}>
                       <Text style={styles.addressText}>
                         {(() => {
@@ -2064,9 +2095,28 @@ export const TransactionDetailScreen = () => {
                     </Text>
                   </View>
                   <View style={styles.participantDetails}>
-                    <Text style={styles.participantName}>
-                      {currentTx.amount?.startsWith('+') ? displayFromName : displayToName}
-                    </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+                      <Text style={styles.participantName}>
+                        {currentTx.amount?.startsWith('+') ? displayFromName : displayToName}
+                      </Text>
+                      {(() => {
+                        const isIncoming = currentTx.amount?.startsWith('+');
+                        const verified = isIncoming ? currentTx.payerIsReferralVerified : currentTx.merchantIsReferralVerified;
+                        const tier = isIncoming ? currentTx.payerStatusTier : currentTx.merchantStatusTier;
+                        return (
+                          <>
+                            {verified && (
+                              <View style={{ width: 18, height: 18, borderRadius: 9, backgroundColor: '#3B82F6', alignItems: 'center', justifyContent: 'center' }}>
+                                <Icon name="check" size={11} color="#fff" />
+                              </View>
+                            )}
+                            {tier && tier !== 'member' && (
+                              <StatusTierBadge tier={tier} variant="compact" />
+                            )}
+                          </>
+                        );
+                      })()}
+                    </View>
                     <View style={styles.addressContainer}>
                       <Text style={styles.addressText}>
                         {/* Hide phone/address for payment transactions to preserve privacy */}

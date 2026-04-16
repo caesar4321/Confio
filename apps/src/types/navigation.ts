@@ -197,6 +197,8 @@ export type MainStackParamList = {
     friendAvatar: string;
     friendPhone?: string;
     isOnConfio: boolean;
+    friendStatusTier?: string | null;
+    friendIsReferralVerified?: boolean;
   };
   EmployeeDetail: {
     employeeId: string;

@@ -114,7 +114,16 @@ class AlgorandSponsorService:
             
             # Submit the transaction
             try:
-                tx_id = self.algod.send_raw_transaction(signed_txn)
+                try:
+                    tx_id = self.algod.send_raw_transaction(signed_txn)
+                except Exception as e:
+                    err_str = str(e)
+                    if "already in pool" in err_str.lower() or "already in ledger" in err_str.lower():
+                        import re
+                        txid_match = re.search(r'([A-Z2-7]{52})', err_str)
+                        tx_id = txid_match.group(1) if txid_match else "already-in-pool"
+                    else:
+                        raise
                 logger.info(f"Funding transaction submitted: {tx_id}")
                 
                 # Wait for confirmation (just a few rounds)
@@ -446,11 +455,24 @@ class AlgorandSponsorService:
             # Submit single transaction
             try:
                 # Send raw transaction bytes
-                tx_id = self.algod.send_raw_transaction(stxn)
+                try:
+                    tx_id = self.algod.send_raw_transaction(stxn)
+                except Exception as e:
+                    err_str = str(e)
+                    if "already in pool" in err_str.lower() or "already in ledger" in err_str.lower():
+                        import re
+                        txid_match = re.search(r'([A-Z2-7]{52})', err_str)
+                        tx_id = txid_match.group(1) if txid_match else "already-in-pool"
+                    else:
+                        raise
                 logger.info(f"Solo transaction submitted: {tx_id}")
                 
                 # Wait for confirmation
-                result = wait_for_confirmation(self.algod, tx_id, 4)
+                try:
+                    result = wait_for_confirmation(self.algod, tx_id, 4)
+                except Exception:
+                    # Best effort: even if confirmation wait fails, if it was submitted/in-pool, treat as success
+                    result = {'confirmed-round': 0}
                 
                 return {
                     'success': True,
@@ -543,7 +565,16 @@ class AlgorandSponsorService:
                 
                 import time
                 start_time = time.time()
-                tx_id = self.algod.send_raw_transaction(combined_b64)
+                try:
+                    tx_id = self.algod.send_raw_transaction(combined_b64)
+                except Exception as e:
+                    err_str = str(e)
+                    if "already in pool" in err_str.lower() or "already in ledger" in err_str.lower():
+                        import re
+                        txid_match = re.search(r'([A-Z2-7]{52})', err_str)
+                        tx_id = txid_match.group(1) if txid_match else "already-in-pool"
+                    else:
+                        raise
                 elapsed_time = time.time() - start_time
                 
                 logger.info(f"Successfully submitted atomic group, tx_id: {tx_id}, took {elapsed_time:.2f} seconds")
@@ -1292,7 +1323,16 @@ async def submit_sponsored_vault_funding(
             logger.info("Submitting sponsored vault funding group (2 txns)...")
             start_time = time.time()
             combined_b64 = base64.b64encode(user_stxn + app_call_stxn).decode('utf-8')
-            tx_id = algorand_sponsor_service.algod.send_raw_transaction(combined_b64)
+            try:
+                tx_id = algorand_sponsor_service.algod.send_raw_transaction(combined_b64)
+            except Exception as e:
+                err_str = str(e)
+                if "already in pool" in err_str.lower() or "already in ledger" in err_str.lower():
+                    import re
+                    txid_match = re.search(r'([A-Z2-7]{52})', err_str)
+                    tx_id = txid_match.group(1) if txid_match else "already-in-pool"
+                else:
+                    raise
             elapsed_time = time.time() - start_time
             logger.info(f"Successfully submitted vault funding group, tx_id: {tx_id}, took {elapsed_time:.2f} seconds")
         except Exception as e:

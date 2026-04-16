@@ -2838,12 +2838,16 @@ export const GET_SEND_TRANSACTION_BY_ID = gql`
         username
         firstName
         lastName
+        statusTier
+        isReferralVerified
       }
       recipientUser {
         id
         username
         firstName
         lastName
+        statusTier
+        isReferralVerified
       }
       senderBusiness {
         id
@@ -2882,12 +2886,16 @@ export const GET_PAYMENT_TRANSACTION_BY_ID = gql`
         username
         firstName
         lastName
+        statusTier
+        isReferralVerified
       }
       merchantAccountUser {
         id
         username
         firstName
         lastName
+        statusTier
+        isReferralVerified
       }
       payerBusiness {
         id

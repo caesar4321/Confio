@@ -483,7 +483,16 @@ class AlgorandClient:
         """
         try:
             # Send transaction
-            tx_id = self.algod.send_raw_transaction(signed_txn)
+            try:
+                tx_id = self.algod.send_raw_transaction(signed_txn)
+            except Exception as e:
+                err_str = str(e)
+                if "already in pool" in err_str.lower() or "already in ledger" in err_str.lower():
+                    import re
+                    txid_match = re.search(r'([A-Z2-7]{52})', err_str)
+                    tx_id = txid_match.group(1) if txid_match else "already-in-pool"
+                else:
+                    raise
             
             if wait_for_confirmation:
                 # Wait for confirmation
@@ -624,10 +633,23 @@ class AlgorandClient:
             signed_txn = txn.sign(private_key)
             
             # Send transaction
-            tx_id = self.algod.send_raw_transaction(signed_txn)
+            try:
+                tx_id = self.algod.send_raw_transaction(signed_txn)
+            except Exception as e:
+                err_str = str(e)
+                if "already in pool" in err_str.lower() or "already in ledger" in err_str.lower():
+                    import re
+                    txid_match = re.search(r'([A-Z2-7]{52})', err_str)
+                    tx_id = txid_match.group(1) if txid_match else "already-in-pool"
+                else:
+                    raise
             
             # Wait for confirmation
-            wait_for_confirmation(self.algod, tx_id, 4)
+            try:
+                wait_for_confirmation(self.algod, tx_id, 4)
+            except Exception:
+                # Best effort for opt-in confirmation
+                pass
             
             return tx_id
             

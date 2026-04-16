@@ -211,7 +211,16 @@ def execute_signed_conversion_sync(conversion_id: str, signed_transactions: str)
         
         # Submit the atomic group
         logger.info(f"Submitting atomic group of {len(user_bytes_list)} transactions")
-        tx_id = algod_client.algod.send_raw_transaction(combined_b64)
+        try:
+            tx_id = algod_client.algod.send_raw_transaction(combined_b64)
+        except Exception as e:
+            err_str = str(e)
+            if "already in pool" in err_str.lower() or "already in ledger" in err_str.lower():
+                import re
+                txid_match = re.search(r'([A-Z2-7]{52})', err_str)
+                tx_id = txid_match.group(1) if txid_match else "already-in-pool"
+            else:
+                raise
         
         # Wait for confirmation (synchronously)
         confirmed_txn = wait_for_confirmation(algod_client.algod, tx_id, 10)

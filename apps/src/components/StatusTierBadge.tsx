@@ -43,7 +43,7 @@ export const TIER_CONFIG: Record<StatusTier, TierMeta> = {
   },
   embajador: {
     slug: 'embajador',
-    label: 'Embajador Confio',
+    label: 'Embajador Confío',
     emoji: '🏆',
     color: '#8B5CF6',
     colorLight: '#EDE9FE',
@@ -118,11 +118,25 @@ export const TierProgress: React.FC<TierProgressProps> = React.memo(({
   nextTierReferralsNeeded,
   style,
 }) => {
-  // Already at max tier
+  // Already at max tier — show full bar with count
   if (!nextTierName || nextTierReferralsNeeded == null || nextTierReferralsNeeded <= 0) {
+    const maxMeta = getTierMeta('embajador');
     return (
       <View style={[styles.progressContainer, style]}>
-        <Text style={styles.progressText}>🏆 Nivel maximo alcanzado</Text>
+        <View style={styles.progressHeader}>
+          <Text style={styles.progressText}>🏆 Nivel máximo alcanzado</Text>
+          <Text style={styles.progressCount}>
+            {referralCount}/10
+          </Text>
+        </View>
+        <View style={styles.progressBarBg}>
+          <View
+            style={[
+              styles.progressBarFill,
+              { width: '100%', backgroundColor: maxMeta.color },
+            ]}
+          />
+        </View>
       </View>
     );
   }

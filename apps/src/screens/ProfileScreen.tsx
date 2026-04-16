@@ -501,41 +501,49 @@ export const ProfileScreen = () => {
               <Text style={styles.referralCriteriaItem}>3. Carga 20 USDC, pásalos a cUSD y se activan los US$5 para los dos.</Text>
             </View>
 
-            {/* Status tier explainer */}
+            {/* Status tier explainer — visual preview with user's own name */}
             <View style={styles.referralCriteria}>
-              <Text style={styles.referralCriteriaTitle}>🏅 Niveles y insignia verificado</Text>
+              <Text style={styles.referralCriteriaTitle}>🏅 Niveles y verificado</Text>
               <Text style={styles.referralCriteriaNote}>
-                Cuando tu amigo activa su cuenta, ganas la insignia ✓ de verificado. Cada amigo adicional te sube de nivel. Tus contactos lo ven cuando les envías dinero.
+                Tus contactos te ven así cuando les enviás dinero:
               </Text>
-              <View style={{ gap: 6, marginTop: 8 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <Text style={{ width: 28, fontSize: 16 }}>✓</Text>
-                  <Text style={[styles.referralCriteriaItem, { flex: 1, marginBottom: 0 }]}>
-                    <Text style={{ fontWeight: '700', color: '#3B82F6' }}>Verificado</Text> — 1 invitación exitosa
-                  </Text>
-                </View>
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <Text style={{ width: 28, fontSize: 16 }}>⭐</Text>
-                  <Text style={[styles.referralCriteriaItem, { flex: 1, marginBottom: 0 }]}>
-                    <Text style={{ fontWeight: '700', color: '#3B82F6' }}>Early Supporter</Text> — 1 invitación
-                  </Text>
-                </View>
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <Text style={{ width: 28, fontSize: 16 }}>🔥</Text>
-                  <Text style={[styles.referralCriteriaItem, { flex: 1, marginBottom: 0 }]}>
-                    <Text style={{ fontWeight: '700', color: '#F59E0B' }}>Community Builder</Text> — 3 invitaciones + nombre dorado
-                  </Text>
-                </View>
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <Text style={{ width: 28, fontSize: 16 }}>🏆</Text>
-                  <Text style={[styles.referralCriteriaItem, { flex: 1, marginBottom: 0 }]}>
-                    <Text style={{ fontWeight: '700', color: '#8B5CF6' }}>Embajador Confio</Text> — 10 invitaciones + anillo de perfil
-                  </Text>
-                </View>
+              <View style={{ gap: 8, marginTop: 10, backgroundColor: '#f9fafb', borderRadius: 10, padding: 12 }}>
+                {(() => {
+                  const name = userProfile?.firstName || 'Tu nombre';
+                  return (
+                    <>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                        <Text style={{ fontSize: 15, color: '#6B7280' }}>{name}</Text>
+                        <Text style={{ fontSize: 12, color: '#9CA3AF' }}>← ahora</Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                        <Text style={{ fontSize: 15, fontWeight: '600', color: '#3B82F6' }}>{name}</Text>
+                        <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: '#3B82F6', alignItems: 'center', justifyContent: 'center' }}>
+                          <Icon name="check" size={10} color="#fff" />
+                        </View>
+                        <Text style={{ fontSize: 14 }}>⭐</Text>
+                        <Text style={{ fontSize: 12, color: '#3B82F6' }}>← 1 amigo</Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                        <Text style={{ fontSize: 15, fontWeight: '600', color: '#F59E0B' }}>{name}</Text>
+                        <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: '#3B82F6', alignItems: 'center', justifyContent: 'center' }}>
+                          <Icon name="check" size={10} color="#fff" />
+                        </View>
+                        <Text style={{ fontSize: 14 }}>🔥</Text>
+                        <Text style={{ fontSize: 12, color: '#F59E0B' }}>← 3 amigos</Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                        <Text style={{ fontSize: 15, fontWeight: '600', color: '#8B5CF6' }}>{name}</Text>
+                        <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: '#3B82F6', alignItems: 'center', justifyContent: 'center' }}>
+                          <Icon name="check" size={10} color="#fff" />
+                        </View>
+                        <Text style={{ fontSize: 14 }}>🏆</Text>
+                        <Text style={{ fontSize: 12, color: '#8B5CF6' }}>← 10 amigos</Text>
+                      </View>
+                    </>
+                  );
+                })()}
               </View>
-              <Text style={[styles.referralCriteriaNote, { marginTop: 8, fontStyle: 'italic' }]}>
-                Los niveles no se compran. Solo se ganan invitando amigos que se registren y activen su cuenta.
-              </Text>
             </View>
 
             <View style={styles.referralCriteria}>
