@@ -441,6 +441,14 @@ def entity_page(request, entity_slug):
             'subheading': 'The official editorial voice of Confío',
             'faqs': [
                 {
+                    'q': 'Does Confío report my transactions to tax authorities (like AFIP or ARCA)?',
+                    'a': 'No. Confío is a non-custodial wallet, meaning you control your own keys and funds. We do not report your activity or holdings to any tax authority. Furthermore, because your top-ups come from already "bancarized" sources (like bank transfers or MercadoPago), they are already within the visible banking system before they reach Confío. The act of buying USDC itself is not a taxable event.',
+                },
+                {
+                    'q': 'Is it safe to use funds from my bank or MercadoPago to buy USDC in Confío?',
+                    'a': 'Yes. Since the funds you use to top up are already within the banking system, using Confío doesn\'t create new tracking risks for your informal dollar history. Confío is a private technological tool to protect your money from inflation, and it remains separate from any past informal holdings you may have.',
+                },
+                {
                     'q': 'What is Confío?',
                     'a': 'Confío is a non-custodial digital dollar wallet for Latin America, built on the Algorand blockchain, that lets people hold and send US dollar stablecoins from their phone without a bank.',
                 },
