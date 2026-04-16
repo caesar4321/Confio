@@ -392,13 +392,13 @@ export const ProfileScreen = () => {
             </TouchableOpacity>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               <Text style={styles.name}>{displayInfo.name}</Text>
-              {userProfile?.isReferralVerified && (
+              {activeAccount?.type.toLowerCase() !== 'business' && userProfile?.isReferralVerified && (
                 <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: '#3B82F6', justifyContent: 'center', alignItems: 'center' }}>
                   <Icon name="check" size={12} color="#fff" />
                 </View>
               )}
             </View>
-            {userProfile?.statusTier && userProfile.statusTier !== 'member' && (
+            {activeAccount?.type.toLowerCase() !== 'business' && userProfile?.statusTier && userProfile.statusTier !== 'member' && (
               <StatusTierBadge tier={userProfile.statusTier} style={{ marginTop: 2, marginBottom: 4 }} />
             )}
             {displayInfo.showAccountType && (
