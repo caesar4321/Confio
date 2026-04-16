@@ -523,7 +523,7 @@ export const ProfileScreen = () => {
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                         <Text style={{ fontSize: 15, color: '#6B7280', flexShrink: 1 }} numberOfLines={1}>{name}</Text>
                         <VerifiedBadge />
-                        <Text style={{ fontSize: 12, color: '#9CA3AF' }}>← Nivel actual</Text>
+                        <Text style={{ fontSize: 12, color: '#9CA3AF' }}>← Nivel inicial</Text>
                       </View>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                         <Text style={{ fontSize: 15, fontWeight: '600', color: '#3B82F6', flexShrink: 1 }} numberOfLines={1}>{name}</Text>
