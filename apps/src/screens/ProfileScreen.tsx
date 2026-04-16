@@ -505,40 +505,43 @@ export const ProfileScreen = () => {
             <View style={styles.referralCriteria}>
               <Text style={styles.referralCriteriaTitle}>🏅 Niveles y verificado</Text>
               <Text style={styles.referralCriteriaNote}>
-                Tus contactos te ven así cuando les enviás dinero:
+                Desbloqueá niveles invitando amigos que completen su primer depósito. La insignia de verificado (✓) la obtenés verificando tu cuenta.
               </Text>
               <View style={{ gap: 8, marginTop: 10, backgroundColor: '#f9fafb', borderRadius: 10, padding: 12 }}>
                 {(() => {
                   const name = userProfile?.firstName || 'Tu nombre';
+                  const isVerified = userProfile?.isReferralVerified;
+                  
+                  const VerifiedBadge = () => isVerified ? (
+                    <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: '#3B82F6', alignItems: 'center', justifyContent: 'center' }}>
+                      <Icon name="check" size={10} color="#fff" />
+                    </View>
+                  ) : null;
+
                   return (
                     <>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                         <Text style={{ fontSize: 15, color: '#6B7280' }}>{name}</Text>
-                        <Text style={{ fontSize: 12, color: '#9CA3AF' }}>← ahora</Text>
+                        <VerifiedBadge />
+                        <Text style={{ fontSize: 12, color: '#9CA3AF' }}>← Nivel actual</Text>
                       </View>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                         <Text style={{ fontSize: 15, fontWeight: '600', color: '#3B82F6' }}>{name}</Text>
-                        <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: '#3B82F6', alignItems: 'center', justifyContent: 'center' }}>
-                          <Icon name="check" size={10} color="#fff" />
-                        </View>
+                        <VerifiedBadge />
                         <Text style={{ fontSize: 14 }}>⭐</Text>
-                        <Text style={{ fontSize: 12, color: '#3B82F6' }}>← 1 amigo</Text>
+                        <Text style={{ fontSize: 12, color: '#3B82F6' }}>← 1 amigo con depósito</Text>
                       </View>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                         <Text style={{ fontSize: 15, fontWeight: '600', color: '#F59E0B' }}>{name}</Text>
-                        <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: '#3B82F6', alignItems: 'center', justifyContent: 'center' }}>
-                          <Icon name="check" size={10} color="#fff" />
-                        </View>
-                        <Text style={{ fontSize: 14 }}>🔥</Text>
-                        <Text style={{ fontSize: 12, color: '#F59E0B' }}>← 3 amigos</Text>
+                        <VerifiedBadge />
+                        <Text style={{ fontSize: 14 }}>💎</Text>
+                        <Text style={{ fontSize: 12, color: '#F59E0B' }}>← 3 amigos con depósito</Text>
                       </View>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                         <Text style={{ fontSize: 15, fontWeight: '600', color: '#8B5CF6' }}>{name}</Text>
-                        <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: '#3B82F6', alignItems: 'center', justifyContent: 'center' }}>
-                          <Icon name="check" size={10} color="#fff" />
-                        </View>
+                        <VerifiedBadge />
                         <Text style={{ fontSize: 14 }}>🏆</Text>
-                        <Text style={{ fontSize: 12, color: '#8B5CF6' }}>← 10 amigos</Text>
+                        <Text style={{ fontSize: 12, color: '#8B5CF6' }}>← 10 amigos con depósito</Text>
                       </View>
                     </>
                   );

@@ -36,7 +36,7 @@ export const TIER_CONFIG: Record<StatusTier, TierMeta> = {
   community_builder: {
     slug: 'community_builder',
     label: 'Community Builder',
-    emoji: '🔥',
+    emoji: '💎',
     color: '#F59E0B',
     colorLight: '#FEF3C7',
     threshold: 3,

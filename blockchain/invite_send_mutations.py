@@ -898,6 +898,51 @@ class ClaimInviteForPhone(graphene.Mutation):
                         # Create notifications for inviter and invitee
                         inviter = inv.inviter_user
                         display_amount = f"{inv.amount} {inv.token_type}"
+
+                        # Auto-create UserReferral if the claimer doesn't have one
+                        if inviter and inviter.id != user.id:
+                            try:
+                                from achievements.models import UserReferral
+                                from users.models import Account
+                                # Both must have personal accounts for the bonus
+                                inviter_personal = Account.objects.filter(user=inviter, account_type='personal', deleted_at__isnull=True).exists()
+                                user_personal = Account.objects.filter(user=user, account_type='personal', deleted_at__isnull=True).exists()
+                                if inviter_personal and user_personal and not UserReferral.objects.filter(referred_user=user, deleted_at__isnull=True).exists():
+                                    try:
+                                        from blockchain.rewards_service import ConfioRewardsService
+                                        from decimal import Decimal
+                                        service = ConfioRewardsService()
+                                        reward_per_person_cusd = Decimal('5')
+                                        confio_per_person = service.convert_cusd_to_confio(reward_per_person_cusd)
+                                        referee_confio = confio_per_person.quantize(Decimal('0.01'))
+                                        referrer_confio = confio_per_person.quantize(Decimal('0.01'))
+                                    except Exception:
+                                        from decimal import Decimal
+                                        referee_confio = Decimal('20')
+                                        referrer_confio = Decimal('20')
+                                        
+                                    referral = UserReferral.objects.create(
+                                        referred_user=user,
+                                        referrer_identifier=inviter.username or str(inviter.id),
+                                        referrer_user=inviter,
+                                        status='pending',
+                                        reward_referee_confio=referee_confio,
+                                        reward_referrer_confio=referrer_confio,
+                                        attribution_data={
+                                            'referral_type': 'friend',
+                                            'invite_send': True,
+                                            'invitation_id': invitation_id,
+                                            'registered_at': timezone.now().isoformat(),
+                                        }
+                                    )
+                                    try:
+                                        from achievements.services.referral_rewards import notify_referral_joined
+                                        notify_referral_joined(referral)
+                                    except Exception as e:
+                                        logger.warning(f'[InviteSend] Could not send referral joined notification: {e}')
+                            except Exception as e:
+                                logger.warning(f'[InviteSend] Could not auto-create UserReferral from invite: {e}')
+
                         # Notify inviter: their invite was claimed
                         if inviter:
                             try:
