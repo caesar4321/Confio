@@ -470,11 +470,11 @@ def entity_page(request, entity_slug):
                 },
                 {
                     'q': 'Does Confío report my transactions to tax authorities?',
-                    'a': 'No. Confío is a non-custodial wallet, meaning you control your own keys and funds. We do not report your activity or holdings to any tax authority. Furthermore, because your top-ups come from already "bancarized" sources (like bank transfers or mobile payment apps), they are already within the visible banking system before they reach Confío. The act of buying USDC itself is not a taxable event.',
+                    'a': 'Confío is a non-custodial wallet and does not have access to user funds or directly report user activity to tax authorities. When users add or withdraw funds, those transactions pass through regulated financial partners which operate under their own local compliance requirements. The act of buying USDC itself is generally not treated as a taxable event in most jurisdictions, as stablecoins typically behave as a digital representation of the dollar rather than a speculative asset.',
                 },
                 {
                     'q': 'Is it safe to use funds from my bank account or mobile payment app to buy USDC in Confío?',
-                    'a': 'Yes. Since the funds you use to top up are already within the banking system, using Confío doesn\'t create new tracking risks for your informal dollar history. Confío is a private technological tool to protect your money from inflation, and it remains separate from any past informal holdings you may have.',
+                    'a': 'Yes. Since the funds used to top up originate from existing accounts already within the banking system, using Confío generally does not create new tracking risks for a user\'s informal financial history. Confío is a private technological tool designed to protect savings from inflation, operating as a distinct layer from any past informal holdings.',
                 },
                 {
                     'q': 'How do I contact Confío?',
