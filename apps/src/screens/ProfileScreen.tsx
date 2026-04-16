@@ -521,24 +521,24 @@ export const ProfileScreen = () => {
                   return (
                     <>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                        <Text style={{ fontSize: 15, color: '#6B7280' }}>{name}</Text>
+                        <Text style={{ fontSize: 15, color: '#6B7280', flexShrink: 1 }} numberOfLines={1}>{name}</Text>
                         <VerifiedBadge />
                         <Text style={{ fontSize: 12, color: '#9CA3AF' }}>← Nivel actual</Text>
                       </View>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                        <Text style={{ fontSize: 15, fontWeight: '600', color: '#3B82F6' }}>{name}</Text>
+                        <Text style={{ fontSize: 15, fontWeight: '600', color: '#3B82F6', flexShrink: 1 }} numberOfLines={1}>{name}</Text>
                         <VerifiedBadge />
                         <Text style={{ fontSize: 14 }}>⭐</Text>
                         <Text style={{ fontSize: 12, color: '#3B82F6' }}>← 1 amigo con depósito</Text>
                       </View>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                        <Text style={{ fontSize: 15, fontWeight: '600', color: '#F59E0B' }}>{name}</Text>
+                        <Text style={{ fontSize: 15, fontWeight: '600', color: '#F59E0B', flexShrink: 1 }} numberOfLines={1}>{name}</Text>
                         <VerifiedBadge />
                         <Text style={{ fontSize: 14 }}>💎</Text>
                         <Text style={{ fontSize: 12, color: '#F59E0B' }}>← 3 amigos con depósito</Text>
                       </View>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                        <Text style={{ fontSize: 15, fontWeight: '600', color: '#8B5CF6' }}>{name}</Text>
+                        <Text style={{ fontSize: 15, fontWeight: '600', color: '#8B5CF6', flexShrink: 1 }} numberOfLines={1}>{name}</Text>
                         <VerifiedBadge />
                         <Text style={{ fontSize: 14 }}>🏆</Text>
                         <Text style={{ fontSize: 12, color: '#8B5CF6' }}>← 10 amigos con depósito</Text>
