@@ -37,7 +37,7 @@ const verificationLevels: VerificationLevel[] = [
     subtitle: 'Teléfono confirmado',
     features: [
       'Envíos a billeteras externas con límites reducidos.',
-      'Retiros grandes de recompensas quedan bloqueados.',
+      'Tus recompensas e invitaciones quedan pendientes hasta verificar tu identidad.',
       'Todavía puedes operar dentro de Confío.',
     ],
   },
@@ -46,9 +46,10 @@ const verificationLevels: VerificationLevel[] = [
     title: 'Identidad verificada',
     subtitle: 'Didit completado',
     features: [
-      'Desbloquea retiros grandes de recompensas.',
+      'Puedes reclamar y retirar $CONFIO ganado por recompensas o referidos.',
+      'Tu perfil muestra la insignia de verificado y acompaña tus niveles por invitaciones.',
+      'Ayuda a habilitar recargas y retiros en países compatibles.',
       'Tu verificación queda guardada en tu cuenta.',
-      'Tu información validada puede usarse para habilitar más servicios.',
     ],
   },
 ];
