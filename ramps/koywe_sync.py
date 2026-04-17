@@ -146,6 +146,300 @@ def _extract_order_status_payload(order_payload: dict[str, Any] | None) -> tuple
     return status, status_details
 
 
+_MAX_DISCOVERY_DEPTH = 6
+_SNAPSHOT_FIELD_ALIASES = {
+    'beneficiary_name': {'beneficiary', 'beneficiaryname', 'accountholder', 'account_holder', 'holdername', 'holder', 'titular', 'name'},
+    'bank_name': {'bank', 'bankname', 'institution', 'institutionname', 'entity', 'entidad', 'banco'},
+    'bank_code': {'bankcode', 'bank_code'},
+    'account_number': {'accountnumber', 'account_number', 'account', 'accountid', 'account_id'},
+    'account_type': {'accounttype', 'account_type'},
+    'alias': {'alias'},
+    'cbu': {'cbu'},
+    'cvu': {'cvu'},
+    'clabe': {'clabe'},
+    'cci': {'cci'},
+    'pix_key': {'pixkey', 'pix_key'},
+    'reference': {'reference', 'referencia', 'memo', 'concept', 'concepto', 'message', 'additionalreference', 'additional_reference', 'motivo'},
+    'email': {'email'},
+    'phone_number': {'phone', 'phonenumber', 'phone_number', 'telefono', 'celular'},
+    'document_number': {'documentnumber', 'document_number', 'cuit', 'cuil', 'ruc', 'rut', 'dni', 'documentid'},
+    'wallet_address': {'destinationaddress', 'walletaddress', 'wallet_address'},
+}
+
+
+def _normalize_key(value: str) -> str:
+    return ''.join(ch for ch in str(value or '').strip().lower() if ch.isalnum())
+
+
+def _normalize_json_scalar(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
+def _maybe_parse_nested_json(value: str) -> Any:
+    trimmed = value.strip()
+    if not trimmed or trimmed[0] not in '{[':
+        return None
+    try:
+        parsed = json.loads(trimmed)
+    except (TypeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, (dict, list)) else None
+
+
+def _collect_scalar_candidates(
+    value: Any,
+    *,
+    path: str = 'root',
+    depth: int = 0,
+    sink: list[dict[str, Any]] | None = None,
+    seen: set[int] | None = None,
+) -> list[dict[str, Any]]:
+    sink = sink or []
+    seen = seen or set()
+    if value is None or depth > _MAX_DISCOVERY_DEPTH:
+        return sink
+    if isinstance(value, (str, int, float, bool, Decimal)):
+        normalized_value = _normalize_json_scalar(value)
+        sink.append({'path': path, 'value': normalized_value})
+        if isinstance(normalized_value, str):
+            nested = _maybe_parse_nested_json(normalized_value)
+            if nested is not None:
+                _collect_scalar_candidates(nested, path=f'{path}.__parsed__', depth=depth + 1, sink=sink, seen=seen)
+        return sink
+    if not isinstance(value, (dict, list)):
+        return sink
+    object_id = id(value)
+    if object_id in seen:
+        return sink
+    seen.add(object_id)
+    if isinstance(value, list):
+        for index, entry in enumerate(value):
+            _collect_scalar_candidates(entry, path=f'{path}[{index}]', depth=depth + 1, sink=sink, seen=seen)
+        return sink
+    for key, entry in value.items():
+        _collect_scalar_candidates(entry, path=f'{path}.{key}', depth=depth + 1, sink=sink, seen=seen)
+    return sink
+
+
+def _is_image_like_value(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    trimmed = value.strip()
+    return (
+        trimmed.startswith('data:image/')
+        or trimmed.startswith('iVBORw0KGgo')
+        or trimmed.startswith('/9j/')
+        or trimmed.startswith('PHN2Zy')
+        or trimmed.startswith('<svg')
+    )
+
+
+def _to_image_data_uri(value: str) -> str | None:
+    trimmed = value.strip()
+    if trimmed.startswith('data:image/'):
+        return trimmed
+    if trimmed.startswith('iVBORw0KGgo'):
+        return f'data:image/png;base64,{trimmed}'
+    if trimmed.startswith('/9j/'):
+        return f'data:image/jpeg;base64,{trimmed}'
+    if trimmed.startswith('PHN2Zy'):
+        return f'data:image/svg+xml;base64,{trimmed}'
+    if trimmed.startswith('<svg'):
+        return f'data:image/svg+xml;utf8,{trimmed}'
+    return None
+
+
+def _score_url_candidate(path: str) -> int:
+    normalized = path.lower()
+    score = 0
+    if any(token in normalized for token in ('providedaction', 'redirect', 'action', 'url', 'link', 'deeplink')):
+        score += 5
+    if 'providerlinkurl' in normalized:
+        score += 3
+    if 'response.__parsed__' in normalized:
+        score += 1
+    return score
+
+
+def _score_image_candidate(path: str) -> int:
+    normalized = path.lower()
+    score = 0
+    if 'providerlinkurl' in normalized:
+        score += 8
+    if any(token in normalized for token in ('qr', 'image', 'png', 'jpg', 'jpeg', 'svg')):
+        score += 5
+    if 'response.__parsed__' in normalized:
+        score += 2
+    return score
+
+
+def _score_qr_candidate(path: str) -> int:
+    normalized = path.lower()
+    score = 0
+    if 'providedaction' in normalized:
+        score += 8
+    if any(token in normalized for token in ('qr', 'payload', 'content', 'code', 'providerlinkurl')):
+        score += 5
+    if 'response.__parsed__' in normalized:
+        score += 2
+    return score
+
+
+def _resolve_external_action_url(candidates: list[dict[str, Any]], next_action_url: str | None) -> str | None:
+    if next_action_url and str(next_action_url).strip().startswith('http'):
+        return str(next_action_url).strip()
+    prioritized = sorted(candidates, key=lambda item: _score_url_candidate(str(item.get('path') or '')), reverse=True)
+    for candidate in prioritized:
+        value = candidate.get('value')
+        if isinstance(value, str):
+            trimmed = value.strip()
+            if trimmed.startswith('http'):
+                return trimmed
+    return None
+
+
+def _resolve_qr_image_uri(candidates: list[dict[str, Any]]) -> str | None:
+    prioritized = sorted(
+        (candidate for candidate in candidates if _is_image_like_value(candidate.get('value'))),
+        key=lambda item: _score_image_candidate(str(item.get('path') or '')),
+        reverse=True,
+    )
+    for candidate in prioritized:
+        value = candidate.get('value')
+        if isinstance(value, str):
+            uri = _to_image_data_uri(value)
+            if uri:
+                return uri
+    return None
+
+
+def _resolve_qr_value(candidates: list[dict[str, Any]], qr_image_uri: str | None) -> str | None:
+    if qr_image_uri:
+        return None
+    prioritized = sorted(candidates, key=lambda item: _score_qr_candidate(str(item.get('path') or '')), reverse=True)
+    for candidate in prioritized:
+        value = candidate.get('value')
+        if not isinstance(value, str):
+            continue
+        trimmed = value.strip()
+        if not trimmed or trimmed.startswith('http') or _is_image_like_value(trimmed):
+            continue
+        if trimmed.startswith('{') or trimmed.startswith('[') or len(trimmed) > 3000:
+            continue
+        return trimmed
+    return None
+
+
+def _extract_labeled_rows(raw_address: str | None) -> list[dict[str, str]]:
+    if not raw_address:
+        return []
+    rows: list[dict[str, str]] = []
+    for index, line in enumerate(str(raw_address).splitlines()):
+        trimmed = line.strip()
+        if not trimmed or trimmed.lower() == 'undefined':
+            continue
+        match = trimmed.split(None, 1)
+        if len(match) == 2 and _normalize_key(match[0]) in {'alias', 'cbu', 'cvu', 'clabe', 'cci', 'banco', 'email', 'pix', 'bank', 'reference', 'referencia'}:
+            label = match[0].strip().rstrip(':')
+            rows.append({'label': label, 'value': match[1].strip()})
+            continue
+        rows.append({'label': f'Dato {index + 1}', 'value': trimmed})
+    return rows
+
+
+def _extract_instruction_fields(candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    fields: dict[str, Any] = {}
+    for candidate in candidates:
+        path = str(candidate.get('path') or '')
+        key = _normalize_key(path.rsplit('.', 1)[-1])
+        value = candidate.get('value')
+        if value in (None, ''):
+            continue
+        for field_name, aliases in _SNAPSHOT_FIELD_ALIASES.items():
+            if field_name in fields:
+                continue
+            if key in aliases:
+                fields[field_name] = _normalize_json_scalar(value)
+    return fields
+
+
+def build_koywe_instruction_snapshot(
+    *,
+    order_payload: dict[str, Any] | None,
+    next_action_url: str | None,
+) -> dict[str, Any]:
+    payload = order_payload or {}
+    candidates = _collect_scalar_candidates(payload)
+    if next_action_url:
+        candidates.insert(0, {'path': 'providedAction', 'value': next_action_url})
+
+    provided_address = payload.get('providedAddress') if isinstance(payload.get('providedAddress'), str) else None
+    provided_action = payload.get('providedAction') if isinstance(payload.get('providedAction'), str) else None
+    if provided_action:
+        candidates.insert(0, {'path': 'payload.providedAction', 'value': provided_action})
+
+    qr_image_uri = _resolve_qr_image_uri(candidates)
+    qr_value = _resolve_qr_value(candidates, qr_image_uri)
+    external_action_url = _resolve_external_action_url(candidates, next_action_url)
+
+    snapshot = {
+        'provider_status': str(payload.get('status') or '').strip(),
+        'provider_status_details': str(payload.get('statusDetails') or '').strip(),
+        'order_type': str(payload.get('orderType') or '').strip(),
+        'symbol_in': str(payload.get('symbolIn') or '').strip(),
+        'symbol_out': str(payload.get('symbolOut') or '').strip(),
+        'amount_in': _normalize_json_scalar(payload.get('amountIn')),
+        'amount_out': _normalize_json_scalar(payload.get('amountOut')),
+        'payment_method_id': str(payload.get('paymentMethodId') or '').strip(),
+        'next_action_url': next_action_url or '',
+        'external_action_url': external_action_url or '',
+        'provided_action': provided_action or '',
+        'provided_address': provided_address or '',
+        'qr_image_uri': qr_image_uri or '',
+        'qr_value': qr_value or '',
+        'fields': _extract_instruction_fields(candidates),
+        'address_rows': _extract_labeled_rows(provided_address),
+        'captured_at': timezone.now().isoformat(),
+    }
+    return snapshot
+
+
+def _merge_koywe_metadata(
+    *,
+    existing_metadata: dict[str, Any] | None,
+    payment_method_code: str | None,
+    payment_method_display: str | None,
+    next_action_url: str | None,
+    auth_email: str | None,
+    order_payload: dict[str, Any] | None,
+) -> dict[str, Any]:
+    metadata = dict(existing_metadata or {})
+    metadata.update({
+        'payment_method_code': payment_method_code or metadata.get('payment_method_code') or '',
+        'payment_method_display': payment_method_display or metadata.get('payment_method_display') or '',
+        'next_action_url': next_action_url or '',
+        'auth_email': auth_email or metadata.get('auth_email') or '',
+    })
+    if order_payload:
+        metadata['koywe_status'] = str(order_payload.get('status') or '').strip()
+        metadata['payment_details'] = order_payload
+        metadata['provider_payload_latest'] = order_payload
+        metadata.setdefault('provider_payload_created', order_payload)
+        snapshot = build_koywe_instruction_snapshot(
+            order_payload=order_payload,
+            next_action_url=next_action_url or metadata.get('next_action_url'),
+        )
+        metadata['instruction_snapshot_latest'] = snapshot
+        metadata.setdefault('instruction_snapshot_created', snapshot)
+    return metadata
+
+
 def _extract_metadata(
     *,
     payment_method_code: str | None,
@@ -154,16 +448,14 @@ def _extract_metadata(
     auth_email: str | None,
     order_payload: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    metadata = {
-        'payment_method_code': payment_method_code or '',
-        'payment_method_display': payment_method_display or '',
-        'next_action_url': next_action_url or '',
-        'auth_email': auth_email or '',
-    }
-    if order_payload:
-        metadata['koywe_status'] = str(order_payload.get('status') or '').strip()
-        metadata['payment_details'] = order_payload
-    return metadata
+    return _merge_koywe_metadata(
+        existing_metadata=None,
+        payment_method_code=payment_method_code,
+        payment_method_display=payment_method_display,
+        next_action_url=next_action_url,
+        auth_email=auth_email,
+        order_payload=order_payload,
+    )
 
 
 def upsert_koywe_ramp_transaction(
@@ -195,6 +487,11 @@ def upsert_koywe_ramp_transaction(
     completed_at = timezone.now() if ramp_status == 'COMPLETED' else None
     status_detail = normalized_detail if not status_details else f'{normalized_detail}: {status_details}'
 
+    existing = RampTransaction.objects.filter(
+        provider='koywe',
+        provider_order_id=order_id,
+    ).first()
+
     defaults = {
         'provider': 'koywe',
         'direction': normalized_direction,
@@ -215,7 +512,8 @@ def upsert_koywe_ramp_transaction(
         'final_currency': 'CUSD' if normalized_direction == 'on_ramp' else getattr(settings, 'KOYWE_CRYPTO_SYMBOL', 'USDC Polygon'),
         'final_amount': final_amount,
         'status_detail': status_detail,
-        'metadata': _extract_metadata(
+        'metadata': _merge_koywe_metadata(
+            existing_metadata=(existing.metadata if existing else None),
             payment_method_code=payment_method_code,
             payment_method_display=payment_method_display,
             next_action_url=next_action_url,
@@ -270,17 +568,15 @@ def sync_koywe_ramp_transaction_from_order(
         if ramp_status != 'FAILED':
             ramp_tx.completed_at = None
 
-    metadata = dict(ramp_tx.metadata or {})
-    metadata.update(
-        _extract_metadata(
-            payment_method_code=metadata.get('payment_method_code'),
-            payment_method_display=metadata.get('payment_method_display'),
-            next_action_url=next_action_url,
-            auth_email=metadata.get('auth_email'),
-            order_payload=order_payload,
-        )
+    existing_metadata = dict(ramp_tx.metadata or {})
+    ramp_tx.metadata = _merge_koywe_metadata(
+        existing_metadata=existing_metadata,
+        payment_method_code=existing_metadata.get('payment_method_code'),
+        payment_method_display=existing_metadata.get('payment_method_display'),
+        next_action_url=next_action_url,
+        auth_email=existing_metadata.get('auth_email'),
+        order_payload=order_payload,
     )
-    ramp_tx.metadata = metadata
     ramp_tx.save(
         update_fields=[
             'fiat_amount',

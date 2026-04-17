@@ -13,7 +13,7 @@ from security.didit import ISO2_TO_ISO3
 from security.models import IdentityVerification, normalize_document_number
 from users.models import Account, BankInfo, Country
 from ramps.models import KoyweBankInfo, RampPaymentMethod, RampTransaction, RampUserAddress
-from ramps.koywe_sync import sync_koywe_ramp_transaction_from_order, upsert_koywe_ramp_transaction
+from ramps.koywe_sync import build_koywe_instruction_snapshot, sync_koywe_ramp_transaction_from_order, upsert_koywe_ramp_transaction
 
 from ramps.koywe_client import KoyweClient, KoyweConfigurationError, KoyweError
 from ramps.koywe import (
@@ -431,6 +431,7 @@ class RampOrderType(graphene.ObjectType):
     next_step = graphene.String()
     next_action_url = graphene.String()
     payment_details = graphene.JSONString()
+    instruction_snapshot = graphene.JSONString()
 
     orderId = graphene.String()
     countryCode = graphene.String()
@@ -444,6 +445,7 @@ class RampOrderType(graphene.ObjectType):
     nextStep = graphene.String()
     nextActionUrl = graphene.String()
     paymentDetails = graphene.JSONString()
+    instructionSnapshot = graphene.JSONString()
 
     def resolve_orderId(self, info):
         return self.order_id
@@ -481,6 +483,9 @@ class RampOrderType(graphene.ObjectType):
     def resolve_paymentDetails(self, info):
         return self.payment_details
 
+    def resolve_instructionSnapshot(self, info):
+        return self.instruction_snapshot
+
 
 class RampOrderStatusType(graphene.ObjectType):
     success = graphene.Boolean()
@@ -490,11 +495,21 @@ class RampOrderStatusType(graphene.ObjectType):
     status_details = graphene.String()
     next_action_url = graphene.String()
     payment_details = graphene.JSONString()
+    instruction_snapshot = graphene.JSONString()
+    instruction_snapshot_created = graphene.JSONString()
+    instruction_snapshot_latest = graphene.JSONString()
+    provider_payload_created = graphene.JSONString()
+    provider_payload_latest = graphene.JSONString()
 
     orderId = graphene.String()
     statusDetails = graphene.String()
     nextActionUrl = graphene.String()
     paymentDetails = graphene.JSONString()
+    instructionSnapshot = graphene.JSONString()
+    instructionSnapshotCreated = graphene.JSONString()
+    instructionSnapshotLatest = graphene.JSONString()
+    providerPayloadCreated = graphene.JSONString()
+    providerPayloadLatest = graphene.JSONString()
 
     def resolve_orderId(self, info):
         return self.order_id
@@ -508,6 +523,21 @@ class RampOrderStatusType(graphene.ObjectType):
     def resolve_paymentDetails(self, info):
         return self.payment_details
 
+    def resolve_instructionSnapshot(self, info):
+        return self.instruction_snapshot
+
+    def resolve_instructionSnapshotCreated(self, info):
+        return self.instruction_snapshot_created
+
+    def resolve_instructionSnapshotLatest(self, info):
+        return self.instruction_snapshot_latest
+
+    def resolve_providerPayloadCreated(self, info):
+        return self.provider_payload_created
+
+    def resolve_providerPayloadLatest(self, info):
+        return self.provider_payload_latest
+
 
 class PendingRampTransactionType(graphene.ObjectType):
     internal_id = graphene.String()
@@ -518,12 +548,20 @@ class PendingRampTransactionType(graphene.ObjectType):
     external_id = graphene.String()
     country_code = graphene.String()
     created_at = graphene.DateTime()
+    instruction_snapshot_created = graphene.JSONString()
+    instruction_snapshot_latest = graphene.JSONString()
+    provider_payload_created = graphene.JSONString()
+    provider_payload_latest = graphene.JSONString()
 
     internalId = graphene.String()
     providerOrderId = graphene.String()
     externalId = graphene.String()
     countryCode = graphene.String()
     createdAt = graphene.DateTime()
+    instructionSnapshotCreated = graphene.JSONString()
+    instructionSnapshotLatest = graphene.JSONString()
+    providerPayloadCreated = graphene.JSONString()
+    providerPayloadLatest = graphene.JSONString()
 
     def resolve_internalId(self, info):
         return self.internal_id
@@ -539,6 +577,18 @@ class PendingRampTransactionType(graphene.ObjectType):
 
     def resolve_createdAt(self, info):
         return self.created_at
+
+    def resolve_instructionSnapshotCreated(self, info):
+        return self.instruction_snapshot_created
+
+    def resolve_instructionSnapshotLatest(self, info):
+        return self.instruction_snapshot_latest
+
+    def resolve_providerPayloadCreated(self, info):
+        return self.provider_payload_created
+
+    def resolve_providerPayloadLatest(self, info):
+        return self.provider_payload_latest
 
 
 class RampUserAddressType(graphene.ObjectType):
@@ -811,6 +861,10 @@ class CreateRampOrder(graphene.Mutation):
             next_step=result.next_step,
             next_action_url=result.next_action_url,
             payment_details=result.raw_response,
+            instruction_snapshot=build_koywe_instruction_snapshot(
+                order_payload=result.raw_response,
+                next_action_url=result.next_action_url,
+            ),
         )
 
 
@@ -890,6 +944,7 @@ class CreateMockRampOrder(graphene.Mutation):
             next_step=next_step,
             next_action_url=None,
             payment_details=None,
+            instruction_snapshot=None,
         )
 
 
@@ -1143,6 +1198,14 @@ class Query(graphene.ObjectType):
             status_details=result.status_details,
             next_action_url=result.next_action_url,
             payment_details=result.raw_response,
+            instruction_snapshot=build_koywe_instruction_snapshot(
+                order_payload=result.raw_response,
+                next_action_url=result.next_action_url,
+            ),
+            instruction_snapshot_created=(ramp_tx.metadata or {}).get('instruction_snapshot_created') if ramp_tx else None,
+            instruction_snapshot_latest=(ramp_tx.metadata or {}).get('instruction_snapshot_latest') if ramp_tx else None,
+            provider_payload_created=(ramp_tx.metadata or {}).get('provider_payload_created') if ramp_tx else None,
+            provider_payload_latest=(ramp_tx.metadata or {}).get('provider_payload_latest') if ramp_tx else None,
         )
 
     def resolve_pending_ramp_transaction(self, info, provider, direction=None):
@@ -1182,6 +1245,10 @@ class Query(graphene.ObjectType):
             external_id=ramp_tx.external_id,
             country_code=ramp_tx.country_code,
             created_at=ramp_tx.created_at,
+            instruction_snapshot_created=(ramp_tx.metadata or {}).get('instruction_snapshot_created'),
+            instruction_snapshot_latest=(ramp_tx.metadata or {}).get('instruction_snapshot_latest'),
+            provider_payload_created=(ramp_tx.metadata or {}).get('provider_payload_created'),
+            provider_payload_latest=(ramp_tx.metadata or {}).get('provider_payload_latest'),
         )
 
     def resolve_my_ramp_address(self, info):
