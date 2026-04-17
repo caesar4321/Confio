@@ -36,9 +36,9 @@ const verificationLevels: VerificationLevel[] = [
     title: 'Cuenta básica',
     subtitle: 'Teléfono confirmado',
     features: [
-      'Envíos a billeteras externas con límites reducidos.',
+      'Puedes depositar y retirar en la red Algorand sin límites dentro de tu billetera.',
       'Tus recompensas e invitaciones quedan pendientes hasta verificar tu identidad.',
-      'Todavía puedes operar dentro de Confío.',
+      'La verificación se exige para recargas, retiros y otras funciones reguladas según el país.',
     ],
   },
   {
