@@ -186,8 +186,8 @@ class ReferralWithdrawalPolicyTest(TestCase):
             ),
         )
 
-    def test_high_value_referral_withdrawal_requires_identity_verification(self):
-        """High-value referral withdrawals are blocked while identity remains unverified."""
+    def test_large_referral_funded_withdrawal_requires_identity_verification(self):
+        """Large referral-funded withdrawals are still blocked until the user is verified."""
 
         self.user.phone_number = '1234567890'
         self.user.save(update_fields=['phone_number'])

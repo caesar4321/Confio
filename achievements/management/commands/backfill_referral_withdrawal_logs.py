@@ -7,7 +7,6 @@ from django.db.models import Sum
 from django.db.models.functions import Coalesce
 
 from achievements.referral_security import get_referral_reward_transactions
-from blockchain.constants import REFERRAL_SINGLE_REVIEW_THRESHOLD
 from blockchain.mutations import _record_referral_withdrawal
 from send.models import SendTransaction
 
@@ -100,8 +99,6 @@ class Command(BaseCommand):
                 continue
 
             referral_portion = min(send.amount, available)
-            requires_review = referral_portion > REFERRAL_SINGLE_REVIEW_THRESHOLD
-
             self.stdout.write(
                 f"[match] send={send.id} user={send.sender_user_id} created_at={send.created_at.isoformat()} "
                 f"send_amount={send.amount} earned_before={earned_total} spent_before={spent_total} "
@@ -113,7 +110,7 @@ class Command(BaseCommand):
                     send.sender_user,
                     referral_portion,
                     reference_id=reference_id,
-                    requires_review=requires_review,
+                    requires_review=False,
                 )
                 created += 1
 

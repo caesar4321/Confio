@@ -19,7 +19,6 @@ from .algorand_account_manager import AlgorandAccountManager
 from .algorand_sponsor_service import algorand_sponsor_service
 from .constants import (
     REFERRAL_ACHIEVEMENT_SLUGS,
-    REFERRAL_SINGLE_REVIEW_THRESHOLD,
     REFERRAL_MAX_USERS_PER_IP,
 )
 
@@ -1279,17 +1278,13 @@ class SubmitSponsoredGroupMutation(graphene.Mutation):
                 if token_type == 'CONFIO':
                     referral_portion = _calculate_referral_portion(user, amount_dec)
                     if referral_portion > Decimal('0'):
-                        requires_review = referral_portion > REFERRAL_SINGLE_REVIEW_THRESHOLD
                         reference_id = str(stx.id) if stx else (result.get('tx_id') or '')
                         _record_referral_withdrawal(
                             user,
                             referral_portion,
                             reference_id=reference_id,
-                            requires_review=requires_review,
+                            requires_review=False,
                         )
-                        if requires_review and stx:
-                            stx.status = 'AML_REVIEW'
-                            stx.save(update_fields=['status'])
             except Exception as pe:
                 logger.warning(f"Failed to persist SendTransaction for tx {result.get('tx_id')}: {pe}")
                 stx = None

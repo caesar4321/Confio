@@ -39,7 +39,7 @@ Referral compensation must be limited to one real person per referee bonus, even
 ### Verified rewarded withdrawals
 
 - Reward or referral-funded `$CONFIO` requires verified personal KYC.
-- For verified users, reward-funded withdrawals above `500 CONFIO` are still flagged for review and routed to `AML_REVIEW`.
+- Once the user is verified and the reward is validly earned, rewarded `$CONFIO` is not escalated to manual review purely because the withdrawal is large.
 
 ## Duplicate Identity Policy
 
