@@ -1022,6 +1022,22 @@ class Query(graphene.ObjectType):
         if not config:
             return None
 
+        # Koywe temporarily disabled due to payment provider issues (ARS deposit detection failure)
+        return RampAvailabilityType(
+            country_code=resolved_country_code,
+            country_name=_get_country_name(resolved_country_code),
+            fiat_currency=config['fiat_currency'],
+            on_ramp_enabled=False,
+            off_ramp_enabled=False,
+            on_ramp_methods=[],
+            off_ramp_methods=[],
+            token_symbol=RAMP_USDC_ALGORAND_SYMBOL,
+            network_symbol=RAMP_NETWORK_SYMBOL,
+            network_display=RAMP_NETWORK_DISPLAY,
+            asset_note=RAMP_USDC_ALGORAND_NOTE,
+            quote_disclaimer='',
+        )
+
         koywe_client = KoyweClient()
         dynamic_limits = {}
         try:
