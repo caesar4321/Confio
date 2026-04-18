@@ -1118,12 +1118,12 @@ def scan_outbound_confirmations(max_batch: int = 50):
             return cr, pe
 
         # Recovery window for reconciliation (check FAILED status from last 24h)
-        recovery_cutoff = timezone.now() - datetime.timedelta(hours=24)
+        recovery_cutoff = timezone.now() - timedelta(hours=24)
         
         # Payments
         # Use a cutoff to auto-fail stuck transactions
         # Aggressive cutoff: 2 mins. If not in pool/rounds by then, it's gone.
-        cutoff_time = timezone.now() - datetime.timedelta(minutes=2)
+        cutoff_time = timezone.now() - timedelta(minutes=2)
 
         pay_qs = PaymentTransaction.objects.filter(
             status__in=['SUBMITTED', 'FAILED'],
@@ -1610,7 +1610,7 @@ def scan_outbound_confirmations(max_batch: int = 50):
         # Conversions (cUSD <> USDC)
         # Recovery: Look at SUBMITTED, and also FAILED/PROCESSING from the last 24h, 
         # to "recover" any that actually hit the chain but weren't recorded due to node errors or timeouts.
-        recovery_cutoff = timezone.now() - datetime.timedelta(hours=24)
+        recovery_cutoff = timezone.now() - timedelta(hours=24)
         conv_qs = Conversion.objects.filter(
             status__in=['SUBMITTED', 'FAILED', 'PROCESSING'],
             updated_at__gte=recovery_cutoff
