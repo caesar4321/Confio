@@ -237,7 +237,8 @@ class CountryMetrics(models.Model):
 # - `session_id` lets us stitch pre-signup → signup → first_deposit without a
 #   user FK.
 # - `properties` is intentionally JSON for schema flexibility; structured
-#   fields that we filter on (country, platform, event_name) are columns.
+#   fields that we filter on (country, platform, source_type, channel,
+#   event_name) are columns.
 
 
 class FunnelEvent(models.Model):
@@ -251,7 +252,8 @@ class FunnelEvent(models.Model):
     # events can be added without a migration, but document them here:
     #   invite_submitted      — on-chain escrow created (SubmitInviteForPhone)
     #   whatsapp_share_tapped — user tapped the WhatsApp share button
-    #   invite_link_clicked   — /invite/{USERNAME} hit on Cloudflare Worker
+    #   invite_link_clicked   — click attributable to a send-and-invite share
+    #   referral_link_clicked — generic /invite/{USERNAME} hit on Cloudflare Worker
     #   invite_claimed        — recipient claimed escrow (ClaimInviteForPhone)
     #   first_send            — user's first outbound send of any kind
     #   first_deposit         — user's first successful on-ramp (Koywe, etc.)
@@ -295,6 +297,20 @@ class FunnelEvent(models.Model):
         help_text="'ios', 'android', 'web', or empty.",
     )
 
+    source_type = models.CharField(
+        max_length=32,
+        blank=True,
+        db_index=True,
+        help_text="Attribution bucket such as 'send_invite', 'referral_link', or 'install_referrer'.",
+    )
+
+    channel = models.CharField(
+        max_length=32,
+        blank=True,
+        db_index=True,
+        help_text="Acquisition/share channel such as 'whatsapp', 'instagram', 'youtube', or 'tiktok'.",
+    )
+
     properties = models.JSONField(
         default=dict,
         blank=True,
@@ -307,6 +323,8 @@ class FunnelEvent(models.Model):
         indexes = [
             models.Index(fields=['event_name', 'created_at']),
             models.Index(fields=['country', 'event_name', 'created_at']),
+            models.Index(fields=['source_type', 'event_name', 'created_at']),
+            models.Index(fields=['channel', 'event_name', 'created_at']),
             models.Index(fields=['user', 'event_name']),
             models.Index(fields=['session_id', 'event_name']),
         ]
@@ -315,13 +333,13 @@ class FunnelEvent(models.Model):
 
     def __str__(self):
         who = self.user_id or f"session:{self.session_id[:8]}" or 'anon'
-        return f"{self.event_name} · {self.country or '??'} · {who}"
+        return f"{self.event_name} · {self.source_type or '??'}/{self.channel or '??'} · {self.country or '??'} · {who}"
 
 
 class FunnelDailyRollup(models.Model):
-    """Daily aggregate of FunnelEvent, segmented by country + platform.
+    """Daily aggregate of FunnelEvent, segmented by country + platform + attribution.
 
-    One row per (date, event_name, country, platform). Built by nightly
+    One row per (date, event_name, country, platform, source_type, channel). Built by nightly
     Celery job from the raw stream before raw rows are purged.
     """
 
@@ -329,6 +347,8 @@ class FunnelDailyRollup(models.Model):
     event_name = models.CharField(max_length=64, db_index=True)
     country = models.CharField(max_length=2, blank=True)
     platform = models.CharField(max_length=16, blank=True)
+    source_type = models.CharField(max_length=32, blank=True)
+    channel = models.CharField(max_length=32, blank=True)
 
     count = models.IntegerField(
         validators=[MinValueValidator(0)],
@@ -350,17 +370,18 @@ class FunnelDailyRollup(models.Model):
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=['date', 'event_name', 'country', 'platform'],
+                fields=['date', 'event_name', 'country', 'platform', 'source_type', 'channel'],
                 name='unique_funnel_rollup',
             ),
         ]
         indexes = [
             models.Index(fields=['-date', 'event_name']),
             models.Index(fields=['event_name', 'country', '-date']),
+            models.Index(fields=['event_name', 'source_type', 'channel', '-date']),
         ]
         verbose_name = "Funnel Daily Rollup"
         verbose_name_plural = "Funnel Daily Rollups"
 
     def __str__(self):
-        seg = f"{self.country or '??'}/{self.platform or '??'}"
+        seg = f"{self.country or '??'}/{self.platform or '??'}/{self.source_type or '??'}/{self.channel or '??'}"
         return f"{self.date} · {self.event_name} · {seg} · {self.count}"

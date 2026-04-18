@@ -399,14 +399,16 @@ class FunnelEventAdmin(admin.ModelAdmin):
     list_display = (
         'created_at',
         'event_name',
+        'source_type',
+        'channel',
         'country',
         'platform',
         'user',
         'short_session_id',
         'properties_preview',
     )
-    list_filter = ('event_name', 'country', 'platform', 'created_at')
-    search_fields = ('event_name', 'session_id', 'user__username', 'user__phone_number')
+    list_filter = ('event_name', 'source_type', 'channel', 'country', 'platform', 'created_at')
+    search_fields = ('event_name', 'source_type', 'channel', 'session_id', 'user__username', 'user__phone_number')
     date_hierarchy = 'created_at'
     ordering = ('-created_at',)
     readonly_fields = (
@@ -416,6 +418,8 @@ class FunnelEventAdmin(admin.ModelAdmin):
         'session_id',
         'country',
         'platform',
+        'source_type',
+        'channel',
         'properties',
     )
 
@@ -438,14 +442,16 @@ class FunnelDailyRollupAdmin(admin.ModelAdmin):
     list_display = (
         'date',
         'event_name',
+        'source_type',
+        'channel',
         'country',
         'platform',
         'count',
         'unique_users',
         'unique_sessions',
     )
-    list_filter = ('event_name', 'country', 'platform', 'date')
-    search_fields = ('event_name', 'country', 'platform')
+    list_filter = ('event_name', 'source_type', 'channel', 'country', 'platform', 'date')
+    search_fields = ('event_name', 'source_type', 'channel', 'country', 'platform')
     date_hierarchy = 'date'
     ordering = ('-date', 'event_name', 'country', 'platform')
     readonly_fields = (
@@ -453,6 +459,8 @@ class FunnelDailyRollupAdmin(admin.ModelAdmin):
         'event_name',
         'country',
         'platform',
+        'source_type',
+        'channel',
         'count',
         'unique_users',
         'unique_sessions',

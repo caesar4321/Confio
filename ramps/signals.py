@@ -14,6 +14,7 @@ from usdc_transactions.models import GuardarianTransaction, USDCDeposit, USDCWit
 from users.funnel import emit_event
 from users.models_unified import UnifiedTransactionTable
 from users.utils import touch_user_activity
+from send.models import PhoneInvite
 
 
 def _safe_related(instance, attr_name: str):
@@ -336,11 +337,17 @@ def handle_ramp_transaction_save(sender, instance, created, **kwargs):
                 or instance.crypto_amount_actual
                 or instance.crypto_amount_estimated
             )
+            has_claimed_phone_invite = PhoneInvite.objects.filter(
+                claimed_by_id=instance.actor_user_id,
+                status='claimed',
+            ).exists()
             emit_event(
                 'first_deposit',
                 user=instance.actor_user,
                 country=instance.country_code or getattr(instance.actor_user, 'phone_country', '') or '',
                 platform='',
+                source_type='send_invite' if has_claimed_phone_invite else 'organic',
+                channel='koywe' if instance.provider == 'KOYWE' else (instance.provider or '').lower(),
                 properties={
                     'provider': instance.provider,
                     'internal_id': str(instance.internal_id),

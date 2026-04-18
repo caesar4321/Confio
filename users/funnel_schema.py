@@ -38,6 +38,8 @@ class TrackFunnelEvent(graphene.Mutation):
         session_id = graphene.String(required=False)
         platform = graphene.String(required=False)
         country = graphene.String(required=False)
+        source_type = graphene.String(required=False)
+        channel = graphene.String(required=False)
         properties = graphene.JSONString(required=False)
 
     success = graphene.Boolean()
@@ -52,6 +54,8 @@ class TrackFunnelEvent(graphene.Mutation):
         session_id: str = '',
         platform: str = '',
         country: str = '',
+        source_type: str = '',
+        channel: str = '',
         properties=None,
     ):
         # Reject unknown events silently — success=True, recorded=False.
@@ -95,6 +99,8 @@ class TrackFunnelEvent(graphene.Mutation):
                 session_id=session_id or '',
                 country=country or '',
                 platform=platform or '',
+                source_type=source_type or '',
+                channel=channel or '',
                 properties=properties,
             )
         except Exception:

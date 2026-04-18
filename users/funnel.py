@@ -41,6 +41,8 @@ def emit_event(
     session_id: str = '',
     country: str = '',
     platform: str = '',
+    source_type: str = '',
+    channel: str = '',
     properties: Optional[dict] = None,
 ) -> None:
     """Emit a funnel event. Safe to call from any context.
@@ -57,6 +59,8 @@ def emit_event(
         'session_id': (session_id or '')[:64],
         'country': (country or '').upper()[:2],
         'platform': (platform or '').lower()[:16],
+        'source_type': (source_type or '').lower()[:32],
+        'channel': (channel or '').lower()[:32],
         'properties': properties or {},
     }
 

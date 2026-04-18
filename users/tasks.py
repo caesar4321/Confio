@@ -262,7 +262,7 @@ def rollup_funnel_events():
 
         day_events = FunnelEvent.objects.filter(created_at__date=target_date)
         grouped = (
-            day_events.values('event_name', 'country', 'platform')
+            day_events.values('event_name', 'country', 'platform', 'source_type', 'channel')
             .annotate(
                 count=Count('id'),
                 unique_users=Count('user', distinct=True),
@@ -277,6 +277,8 @@ def rollup_funnel_events():
                 event_name=row['event_name'] or '',
                 country=row['country'] or '',
                 platform=row['platform'] or '',
+                source_type=row['source_type'] or '',
+                channel=row['channel'] or '',
                 defaults={
                     'count': row['count'] or 0,
                     'unique_users': row['unique_users'] or 0,

@@ -31,6 +31,21 @@ interface AnalyticsEvent {
   referer?: string;
 }
 
+function inferReferralChannel(url: URL, referer: string): string {
+  const explicitSource = (url.searchParams.get('utm_source') || url.searchParams.get('source') || '').toLowerCase();
+  if (explicitSource) return explicitSource.slice(0, 32);
+
+  const ref = referer.toLowerCase();
+  if (ref.includes('instagram')) return 'instagram';
+  if (ref.includes('youtube') || ref.includes('youtu.be')) return 'youtube';
+  if (ref.includes('tiktok')) return 'tiktok';
+  if (ref.includes('whatsapp')) return 'whatsapp';
+  if (ref.includes('facebook')) return 'facebook';
+  if (ref.includes('twitter') || ref.includes('x.com')) return 'x';
+  if (ref.includes('google')) return 'google';
+  return 'direct';
+}
+
 async function deriveInviteSessionId(clientIP: string): Promise<string> {
   if (!clientIP || clientIP === 'unknown') return '';
   const data = new TextEncoder().encode(`invite:${clientIP}`);
@@ -93,6 +108,9 @@ export default {
         const country = ((request.cf as any)?.country || '').toUpperCase();
         const referer = request.headers.get('referer') || '';
         const inviteSessionId = await deriveInviteSessionId(clientIP);
+        const channel = inferReferralChannel(url, referer);
+        const invitationId = (url.searchParams.get('invitation_id') || '').slice(0, 64);
+        const hasInvitationId = Boolean(invitationId);
 
         if (env.FUNNEL_INGEST_URL && env.FUNNEL_INGEST_SECRET) {
           ctx.waitUntil(
@@ -103,12 +121,15 @@ export default {
                 'X-Funnel-Secret': env.FUNNEL_INGEST_SECRET,
               },
               body: JSON.stringify({
-                event_name: 'invite_link_clicked',
+                event_name: hasInvitationId ? 'invite_link_clicked' : 'referral_link_clicked',
                 session_id: inviteSessionId,
                 country,
                 platform: platform === 'desktop' ? 'web' : platform,
+                source_type: hasInvitationId ? 'send_invite' : 'referral_link',
+                channel,
                 properties: {
                   referral_code: referralCode,
+                  invitation_id: invitationId,
                   path: url.pathname,
                   referer,
                   user_agent: userAgent.slice(0, 255),

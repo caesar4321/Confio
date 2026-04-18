@@ -107,6 +107,7 @@ export const AnalyticsService = {
     logFunnelEvent: async (
         eventName: ClientFunnelEvent,
         params?: { [key: string]: any },
+        options?: { sourceType?: string; channel?: string },
     ) => {
         // Firebase side
         try {
@@ -125,6 +126,8 @@ export const AnalyticsService = {
                 variables: {
                     eventName,
                     platform: Platform.OS,
+                    sourceType: options?.sourceType,
+                    channel: options?.channel,
                     properties: params ? JSON.stringify(params) : undefined,
                 },
                 // We don't care about the result and we don't want this to

@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 # Events that trusted external sources (Worker) are allowed to emit.
 EXTERNAL_INGEST_EVENTS = frozenset({
+    'referral_link_clicked',
     'invite_link_clicked',
 })
 
@@ -55,6 +56,8 @@ def funnel_ingest(request):
     session_id = (payload.get('session_id') or '')[:64]
     country = (payload.get('country') or '').upper()[:2]
     platform = (payload.get('platform') or '').lower()[:16]
+    source_type = (payload.get('source_type') or '').lower()[:32]
+    channel = (payload.get('channel') or '').lower()[:32]
     properties = payload.get('properties') or {}
     if not isinstance(properties, dict):
         properties = {}
@@ -73,6 +76,8 @@ def funnel_ingest(request):
             session_id=session_id,
             country=country,
             platform=platform,
+            source_type=source_type,
+            channel=channel,
             properties=properties,
         )
     except Exception:

@@ -977,6 +977,8 @@ export const TRACK_FUNNEL_EVENT = gql`
     $sessionId: String
     $platform: String
     $country: String
+    $sourceType: String
+    $channel: String
     $properties: JSONString
   ) {
     trackFunnelEvent(
@@ -984,6 +986,8 @@ export const TRACK_FUNNEL_EVENT = gql`
       sessionId: $sessionId
       platform: $platform
       country: $country
+      sourceType: $sourceType
+      channel: $channel
       properties: $properties
     ) {
       success

@@ -172,6 +172,9 @@ export const TransactionSuccessScreen = () => {
       AnalyticsService.logFunnelEvent('whatsapp_share_tapped', {
         invitation_id: invitationId,
         currency: currencyForEvent,
+      }, {
+        sourceType: 'send_invite',
+        channel: 'whatsapp',
       });
     } catch (_e) {
       // never block the share path
@@ -186,7 +189,13 @@ export const TransactionSuccessScreen = () => {
       // Generate invite link with uppercase username
       const rawUsername = userProfile?.username || '';
       const cleanUsername = rawUsername.replace('@', '').toUpperCase();
-      const inviteLink = `https://confio.lat/invite/${cleanUsername}`;
+      const inviteParams = new URLSearchParams({
+        source: 'whatsapp',
+      });
+      if (invitationId) {
+        inviteParams.set('invitation_id', String(invitationId));
+      }
+      const inviteLink = `https://confio.lat/invite/${cleanUsername}?${inviteParams.toString()}`;
 
       const message = `¡Hola! Te envié ${amount} ${currency} por Confío. 🎉\n\nTienes 7 días para reclamarlo. Descarga la app y crea tu cuenta:\n\n📲 ${inviteLink}\n\n¡Es gratis y en segundos recibes tu dinero!`;
       const encodedMessage = encodeURIComponent(message);

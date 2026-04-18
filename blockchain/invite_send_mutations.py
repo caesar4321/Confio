@@ -555,6 +555,8 @@ class SubmitInviteForPhone(graphene.Mutation):
                     'invite_submitted',
                     user=user,
                     country=getattr(user, 'phone_country', '') or '',
+                    source_type='send_invite',
+                    channel='escrow',
                     properties={
                         'invitation_id': invitation_id,
                         'txid': ref_txid,
@@ -1009,6 +1011,8 @@ class ClaimInviteForPhone(graphene.Mutation):
                     'invite_claimed',
                     user=user,
                     country=getattr(user, 'phone_country', '') or '',
+                    source_type='send_invite',
+                    channel='claim',
                     properties={
                         'invitation_id': invitation_id,
                         'txid': txid,
