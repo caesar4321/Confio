@@ -1326,7 +1326,7 @@ def scan_outbound_confirmations(max_batch: int = 50):
         # Presale purchases
         presale_qs = PresalePurchase.objects.filter(
             status__in=['processing', 'failed'],
-            updated_at__gte=recovery_cutoff
+            created_at__gte=recovery_cutoff
         ).exclude(transaction_hash__isnull=True).exclude(transaction_hash='')[:max_batch]
         for p in presale_qs:
             cr, pe = check_tx(p.transaction_hash)
