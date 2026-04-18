@@ -191,6 +191,7 @@ export function MessageInboxContent({ onScreenStateChange, initialChannelId }: M
   const { activeAccount } = useAccount();
   const [screen, setScreen] = useState<ScreenState>('inbox');
   const [activeChannel, setActiveChannel] = useState<Channel | null>(null);
+  const [pendingInitialChannelId, setPendingInitialChannelId] = useState(initialChannelId);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [unreadCounts, setUnreadCounts] = useState<Record<Channel['id'], number>>({
     julian: 0,
@@ -262,6 +263,10 @@ export function MessageInboxContent({ onScreenStateChange, initialChannelId }: M
   }, [data]);
 
   useEffect(() => {
+    setPendingInitialChannelId(initialChannelId);
+  }, [initialChannelId]);
+
+  useEffect(() => {
     if (!activeChannel) {
       return;
     }
@@ -272,14 +277,15 @@ export function MessageInboxContent({ onScreenStateChange, initialChannelId }: M
   }, [channels, activeChannel]);
 
   useEffect(() => {
-    if (!initialChannelId || activeChannel || screen === 'channel' || channels.length === 0) {
+    if (!pendingInitialChannelId || activeChannel || screen === 'channel' || channels.length === 0) {
       return;
     }
-    const channel = channels.find((item) => item.id === initialChannelId);
+    const channel = channels.find((item) => item.id === pendingInitialChannelId);
     if (channel) {
       openChannel(channel);
+      setPendingInitialChannelId(undefined);
     }
-  }, [initialChannelId, channels, activeChannel, screen]);
+  }, [pendingInitialChannelId, channels, activeChannel, screen]);
 
   useEffect(() => {
     if (Platform.OS !== 'android' || screen !== 'channel') {
