@@ -1810,8 +1810,9 @@ export const TransactionDetailScreen = () => {
       case 'completed':
         return { text: '#10B981', bg: '#d1fae5' };
       case 'pending':
-      case 'processing':
         return { text: '#d97706', bg: '#fef3c7' };
+      case 'processing':
+        return { text: '#1d4ed8', bg: '#dbeafe' };
       case 'aml_review':
         return { text: '#92400e', bg: '#fde68a' };
       case 'failed':
@@ -1821,8 +1822,11 @@ export const TransactionDetailScreen = () => {
     }
   };
 
-  const statusColors = getStatusColor(currentTx.status);
-  const normalizedStatus = normalizeStatusForDisplay(currentTx.status);
+  const effectiveStatus = (currentTx.type || '').toLowerCase() === 'ramp' && currentTx.rampStatus
+    ? currentTx.rampStatus.toLowerCase()
+    : currentTx.status;
+  const statusColors = getStatusColor(effectiveStatus);
+  const normalizedStatus = normalizeStatusForDisplay(effectiveStatus);
 
   const headerPaddingTop = Math.max(insets.top, 12);
   const resolvedInternalId = resolveInternalId(currentTx, transactionData);
