@@ -2953,6 +2953,7 @@ export const GET_CURRENT_ACCOUNT_TRANSACTIONS = gql`
       rampProvider
       rampFiatAmount
       rampFiatCurrency
+      rampStatus
       
       # Original transaction data
       senderUser {

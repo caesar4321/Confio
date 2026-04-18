@@ -36,6 +36,7 @@ class UnifiedTransactionType(DjangoObjectType):
     ramp_provider = graphene.String(description="Ramp provider display name")
     ramp_fiat_amount = graphene.String(description="Ramp fiat-side amount")
     ramp_fiat_currency = graphene.String(description="Ramp fiat-side currency")
+    ramp_status = graphene.String(description="Ramp-specific status (PENDING, PROCESSING, COMPLETED, etc)")
     
     # Expose Payroll Item ID for QR code verification
     item_id = graphene.String(description="Payroll Item ID")
@@ -272,6 +273,11 @@ class UnifiedTransactionType(DjangoObjectType):
     def resolve_ramp_fiat_currency(self, info):
         if self.transaction_type == 'ramp' and getattr(self, 'ramp_transaction', None):
             return self.ramp_transaction.fiat_currency or None
+
+    def resolve_ramp_status(self, info):
+        if self.transaction_type == 'ramp' and getattr(self, 'ramp_transaction', None):
+            return self.ramp_transaction.status or None
+        return None
         return None
 
     def resolve_item_id(self, info):

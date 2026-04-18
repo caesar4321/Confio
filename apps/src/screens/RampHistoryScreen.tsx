@@ -252,7 +252,7 @@ export const RampHistoryScreen = () => {
 
     const item = row.data;
     const isOffRamp = (item.rampDirection || '').toLowerCase() === 'off_ramp';
-    const statusTone = getStatusTone(item.status);
+    const statusTone = getStatusTone(item.rampStatus || item.status);
     const providerLabel = item.rampProvider || item.displayCounterparty || 'Proveedor';
     const titleText = isOffRamp ? 'Retiro' : 'Recarga';
     const primaryAmount = formatPrimaryRampAmount(item, isOffRamp);
@@ -279,8 +279,8 @@ export const RampHistoryScreen = () => {
               formattedTitle: `${titleText} con ${providerLabel}`,
               from: isOffRamp ? 'Tu cuenta' : providerLabel,
               to: isOffRamp ? providerLabel : 'Tu cuenta',
-              status: getDetailStatus(item.status),
-              rampStatus: item.status,
+              status: getDetailStatus(item.rampStatus || item.status),
+              rampStatus: item.rampStatus || item.status,
               date: item.createdAt,
               time: moment.utc(item.createdAt).local().format('HH:mm'),
             },
@@ -312,7 +312,7 @@ export const RampHistoryScreen = () => {
           <Text style={styles.itemCurrency}>{primaryAmount.currency}</Text>
           <View style={[styles.statusPill, { backgroundColor: statusColors.bg }]}>
             <Text style={[styles.statusPillText, { color: statusColors.text }]}>
-              {getStatusLabel(item.status)}
+              {getStatusLabel(item.rampStatus || item.status)}
             </Text>
           </View>
         </View>
