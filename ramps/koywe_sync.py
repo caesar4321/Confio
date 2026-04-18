@@ -34,6 +34,8 @@ _KOYWE_PROCESSING_STATUSES = {
 }
 _KOYWE_PENDING_STATUSES = {'WAITING'}
 
+_STATUS_ORDER = {'PENDING': 0, 'PROCESSING': 1, 'AML_REVIEW': 1, 'COMPLETED': 2, 'FAILED': 2}
+
 
 def verify_koywe_webhook_signature(payload: dict[str, Any]) -> bool:
     secret = (getattr(settings, 'KOYWE_WEBHOOK_SECRET', '') or '').strip()
@@ -560,7 +562,9 @@ def sync_koywe_ramp_transaction_from_order(
         ramp_tx.final_currency = getattr(settings, 'KOYWE_CRYPTO_SYMBOL', 'USDC Polygon')
         ramp_tx.final_amount = amount_in or ramp_tx.final_amount
 
-    ramp_tx.status = ramp_status
+    # Never downgrade status (e.g. Koywe WAITING shouldn't revert a PROCESSING order)
+    if _STATUS_ORDER.get(ramp_status, 0) >= _STATUS_ORDER.get(ramp_tx.status, 0):
+        ramp_tx.status = ramp_status
     ramp_tx.status_detail = normalized_detail if not status_details else f'{normalized_detail}: {status_details}'
     if ramp_status == 'COMPLETED':
         ramp_tx.completed_at = ramp_tx.completed_at or timezone.now()
