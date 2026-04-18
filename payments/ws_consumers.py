@@ -294,6 +294,9 @@ class SendSessionConsumer(AsyncJsonWebsocketConsumer):
 
     KEEPALIVE_SEC = 25
     IDLE_TIMEOUT_SEC = 60
+    OFFICIAL_APP_REQUIRED_ERROR = (
+        "Actualiza la aplicación a la última versión o usa la app oficial para continuar."
+    )
 
     async def connect(self):
         user = self.scope.get("user")
@@ -306,6 +309,7 @@ class SendSessionConsumer(AsyncJsonWebsocketConsumer):
         params = parse_qs(query_string)
         self._raw_token = (params.get("token", [None])[0]) or ""
         self._sponsor_txn = None  # keep last prepared sponsor txn for submit
+        self._app_check_blocked = False
 
         # Firebase App Check
         app_check_token = (params.get("app_check_token", [None])[0]) or ""
@@ -319,12 +323,10 @@ class SendSessionConsumer(AsyncJsonWebsocketConsumer):
             )
             if not ac_result.get('success', True):
                 print(f"[ws/send_session] App Check rejected connection")
-                await self.close(code=4003)
-                return
+                self._app_check_blocked = True
         except Exception as e:
             print(f"[ws/send_session] App Check error: {e}")
-            await self.close(code=4003)
-            return
+            self._app_check_blocked = True
 
         print(f"[ws/send_session] connect user={getattr(user, 'id', None)}")
         await self.accept()
@@ -345,6 +347,14 @@ class SendSessionConsumer(AsyncJsonWebsocketConsumer):
         if msg_type == "ping":
             print("[ws/send_session] <- ping")
             await self.send_json({"type": "pong"})
+            return
+
+        if getattr(self, "_app_check_blocked", False):
+            await self.send_json({
+                "type": "error",
+                "message": self.OFFICIAL_APP_REQUIRED_ERROR,
+            })
+            await self.close(code=4003)
             return
 
         if msg_type == "prepare_request":
