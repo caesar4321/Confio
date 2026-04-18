@@ -82,7 +82,7 @@ COUNTRY_METHODS = {
                 "requires_phone": False,
                 "requires_email": False,
                 "supports_on_ramp": True,
-                "supports_off_ramp": False,
+                "supports_off_ramp": True,
             },
         ],
     },
