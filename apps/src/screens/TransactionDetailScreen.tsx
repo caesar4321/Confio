@@ -1499,10 +1499,6 @@ export const TransactionDetailScreen = () => {
   // Prefer server-fetched data when available; otherwise fall back to normalized notification payload
   const currentTx = txData || transactions[transactionType];
 
-  if (currentTx?.type === 'ramp') {
-    console.log('[TxDetail ramp]', JSON.stringify({ type: currentTx.type, status: currentTx.status, rampStatus: currentTx.rampStatus }));
-  }
-
   // Debug timezone conversion
   if (currentTx?.createdAt) {
     const deviceOffset = new Date().getTimezoneOffset();
