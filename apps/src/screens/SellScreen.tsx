@@ -158,6 +158,7 @@ export const SellScreen = () => {
   const fiatCurrency = availability?.fiatCurrency || 'USD';
   const countryFlag = derivedCountryTuple ? (derivedCountryTuple as readonly string[])[3] || '' : '';
   const isKoyweMapped = isKoyweCountry && !!availability?.offRampEnabled && methods.length > 0;
+  const isBoliviaOffRampUnavailable = isKoyweCountry && availability?.countryCode === 'BO' && !availabilityLoading && methods.length === 0;
   const selectedMethod = useMemo(
     () => methods.find((method) => method.code === selectedMethodCode) || methods[0] || null,
     [methods, selectedMethodCode],
@@ -392,6 +393,42 @@ export const SellScreen = () => {
 
   if (!isKoyweCountry) {
     return <LegacyGuardarianSellScreen />;
+  }
+
+  if (isBoliviaOffRampUnavailable) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="light-content" backgroundColor="#10b981" />
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <RampReveal delay={0}>
+            <RampHero
+              eyebrow="Retirar saldo"
+              title="Retiro en BOB no disponible"
+              subtitle="Por ahora en Bolivia solo está habilitada la Recarga. Cuando Koywe habilite retiros en BOB, aparecerán aquí."
+              onBack={() => navigation.goBack()}
+              compact={isCompact}
+              fromColor={colors.primaryDark}
+              toColor={colors.primary}
+            />
+          </RampReveal>
+
+          <RampReveal delay={80}>
+            <View style={styles.emptyStateCard}>
+              <View style={styles.emptyStateIconWrap}>
+                <Icon name="info" size={22} color={colors.primaryDark} />
+              </View>
+              <Text style={styles.emptyStateTitle}>{countryFlag ? `${countryFlag} ` : ''}Solo Recarga disponible</Text>
+              <Text style={styles.emptyStateText}>
+                Aún no puedes retirar a bolivianos desde Confío. Si quieres agregar saldo en Bolivia, usa Recarga con QR interoperable.
+              </Text>
+              <TouchableOpacity style={styles.primaryActionButton} onPress={() => navigation.replace('TopUp')}>
+                <Text style={styles.primaryActionButtonText}>Ir a Recarga</Text>
+              </TouchableOpacity>
+            </View>
+          </RampReveal>
+        </ScrollView>
+      </SafeAreaView>
+    );
   }
 
   return (
@@ -1081,6 +1118,58 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     textAlign: 'center',
     fontSize: 13,
+  },
+  emptyStateCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 22,
+    padding: 22,
+    marginHorizontal: 22,
+    marginTop: 4,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#d1fae5',
+    shadowColor: '#111827',
+    shadowOpacity: 0.06,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 3,
+  },
+  emptyStateIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  emptyStateTitle: {
+    fontWeight: '800',
+    color: colors.dark,
+    textAlign: 'center',
+    fontSize: 20,
+  },
+  emptyStateText: {
+    color: colors.textSecondary,
+    lineHeight: 22,
+    textAlign: 'center',
+    fontSize: 15,
+    marginTop: 10,
+  },
+  primaryActionButton: {
+    marginTop: 18,
+    minWidth: 180,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    borderRadius: 16,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  primaryActionButtonText: {
+    color: colors.surface,
+    fontWeight: '800',
+    fontSize: 15,
   },
 
   /* ── Saved method cards ── */

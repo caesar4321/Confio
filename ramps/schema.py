@@ -760,6 +760,9 @@ class CreateRampOrder(graphene.Mutation):
         if wallet_upgrade_blocker:
             return RampOrderType(success=False, error=wallet_upgrade_blocker)
 
+        if normalized_direction == 'OFF_RAMP' and resolved_country_code == 'BO':
+            return RampOrderType(success=False, error='Retiro en BOB no está disponible por ahora. En Bolivia solo está habilitada la recarga.')
+
         bank_info = None
         if normalized_direction == 'OFF_RAMP':
             if not bank_info_id:
@@ -901,6 +904,9 @@ class CreateMockRampOrder(graphene.Mutation):
         wallet_upgrade_blocker = _get_wallet_upgrade_blocker(user=user, account=current_account)
         if wallet_upgrade_blocker:
             return RampOrderType(success=False, error=wallet_upgrade_blocker)
+
+        if normalized_direction == "OFF_RAMP" and resolved_country_code == "BO":
+            return RampOrderType(success=False, error='Retiro en BOB no está disponible por ahora. En Bolivia solo está habilitada la recarga.')
 
         config = get_country_ramp_config(resolved_country_code)
         if not config:
