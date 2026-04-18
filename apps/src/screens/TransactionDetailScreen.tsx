@@ -2429,8 +2429,37 @@ export const TransactionDetailScreen = () => {
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>Estado</Text>
                 {(() => {
+                  if (currentTx.type === 'ramp') {
+                    const rs = ((currentTx.rampStatus || currentTx.status) || '').toString().toUpperCase();
+                    if (rs === 'PROCESSING' || rs === 'pending') {
+                      const isProcessing = rs === 'PROCESSING';
+                      return (
+                        <View style={styles.statusContainer}>
+                          <Icon name="loader" size={16} color={isProcessing ? '#3b82f6' : '#f59e0b'} style={styles.statusIcon} />
+                          <Text style={[styles.statusValue, { color: isProcessing ? '#3b82f6' : '#f59e0b' }]}>
+                            {isProcessing ? 'En proceso' : 'Pendiente'}
+                          </Text>
+                        </View>
+                      );
+                    }
+                    if (rs === 'COMPLETED' || rs === 'DELIVERED' || rs === 'completed') {
+                      return (
+                        <View style={styles.statusContainer}>
+                          <Icon name="check-circle" size={16} color="#10b981" style={styles.statusIcon} />
+                          <Text style={styles.statusValue}>Completado</Text>
+                        </View>
+                      );
+                    }
+                    if (rs === 'FAILED' || rs === 'REJECTED' || rs === 'failed') {
+                      return (
+                        <View style={styles.statusContainer}>
+                          <Icon name="x-circle" size={16} color="#ef4444" style={styles.statusIcon} />
+                          <Text style={[styles.statusValue, { color: '#ef4444' }]}>Fallido</Text>
+                        </View>
+                      );
+                    }
+                  }
                   const statusLc = (currentTx.status || '').toString().toLowerCase();
-                  const isConfirmed = statusLc === 'confirmed';
                   const isConfirming = statusLc === 'submitted' || statusLc === 'pending' || statusLc === 'pending_blockchain';
                   if (isConfirming) {
                     return (
@@ -2452,7 +2481,9 @@ export const TransactionDetailScreen = () => {
               {/* Processing Time */}
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>Tiempo de procesamiento</Text>
-                <Text style={styles.summaryValue}>Instantáneo</Text>
+                <Text style={styles.summaryValue}>
+                  {currentTx.type === 'ramp' ? 'Hasta 1 hora' : 'Instantáneo'}
+                </Text>
               </View>
             </View>
           </View>

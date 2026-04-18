@@ -280,6 +280,7 @@ export const RampHistoryScreen = () => {
               from: isOffRamp ? 'Tu cuenta' : providerLabel,
               to: isOffRamp ? providerLabel : 'Tu cuenta',
               status: getDetailStatus(item.status),
+              rampStatus: item.status,
               date: item.createdAt,
               time: moment.utc(item.createdAt).local().format('HH:mm'),
             },
