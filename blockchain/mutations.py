@@ -24,6 +24,10 @@ from .constants import (
 
 logger = logging.getLogger(__name__)
 
+OFFICIAL_APP_REQUIRED_ERROR = (
+    "Actualiza la aplicación a la última versión o usa la app oficial para continuar."
+)
+
 
 def _get_wallet_upgrade_blocker(*, user, account):
     if not user or not account:
@@ -832,6 +836,16 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
             user = info.context.user
             if not user.is_authenticated:
                 return cls(success=False, error='Not authenticated')
+
+            from security.integrity_service import app_check_service
+
+            ac_result = app_check_service.verify_request_header(
+                info.context,
+                action='transfer',
+                should_enforce=True,
+            )
+            if not ac_result.get('success', True):
+                return cls(success=False, error=OFFICIAL_APP_REQUIRED_ERROR)
             
             try:
                 amount_decimal = Decimal(str(amount))

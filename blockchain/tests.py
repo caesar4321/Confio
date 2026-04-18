@@ -10,7 +10,10 @@ from achievements.models import (
     ConfioRewardBalance,
     ConfioRewardTransaction,
 )
-from blockchain.mutations import AlgorandSponsoredSendMutation
+from blockchain.mutations import (
+    AlgorandSponsoredSendMutation,
+    OFFICIAL_APP_REQUIRED_ERROR,
+)
 from blockchain.algorand_account_manager import AlgorandAccountManager
 from users.models import User, Account
 
@@ -147,6 +150,24 @@ class ReferralWithdrawalPolicyTest(TestCase):
             reference_id=str(self.referral_achievement.id),
             description='Referral reward (test grant)',
         )
+
+    def test_missing_app_check_returns_official_app_message(self):
+        """Blocked App Check requests should return a client-safe transfer error."""
+
+        with patch(
+            'security.integrity_service.app_check_service.verify_request_header',
+            return_value={'success': False, 'passed': False, 'is_blocked': True},
+        ):
+            result = AlgorandSponsoredSendMutation.mutate(
+                root=None,
+                info=self.info,
+                recipient_address='B' * 58,
+                amount=15,
+                asset_type='CUSD',
+            )
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, OFFICIAL_APP_REQUIRED_ERROR)
 
     def test_unverified_users_cannot_withdraw_referral_rewards(self):
         """Unverified users should be blocked from withdrawing referral-funded CONFIO."""
