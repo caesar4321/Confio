@@ -36,6 +36,7 @@ class KoyweOrderResult:
     payment_method_display: str
     next_step: str
     next_action_url: str | None = None
+    payment_provider: dict[str, Any] | None = None
     raw_response: dict[str, Any] | None = None
 
 
@@ -392,7 +393,7 @@ class KoyweClient:
         }
         return self._request('POST', '/rest/quotes', auth=False, json_payload=payload)
 
-    def resolve_payment_provider(self, *, fiat_symbol: str, payment_method_code: str, email: str | None = None) -> tuple[str, str]:
+    def resolve_payment_provider(self, *, fiat_symbol: str, payment_method_code: str, email: str | None = None) -> tuple[str, str, dict[str, Any] | None]:
         providers = self.list_payment_providers(fiat_symbol=fiat_symbol, email=email)
         normalized = (payment_method_code or '').strip().upper()
         for provider in providers:
@@ -400,8 +401,8 @@ class KoyweClient:
             provider_id = str(provider.get('_id') or provider.get('id') or provider.get('paymentMethodId') or provider_code)
             display = provider.get('displayName') or provider.get('name') or provider_code
             if provider_code == normalized or provider_id.upper() == normalized:
-                return provider_id, display
-        return normalized, payment_method_code
+                return provider_id, display, provider
+        return normalized, payment_method_code, None
 
     def create_quote(self, *, direction: str, amount: Decimal, fiat_symbol: str, payment_method_id: str | None = None, email: str | None = None) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -426,7 +427,7 @@ class KoyweClient:
         normalized_direction = direction.upper()
         payment_method_id = None
         if normalized_direction == 'ON_RAMP' and payment_method_code:
-            payment_method_id, _ = self.resolve_payment_provider(
+            payment_method_id, _, _ = self.resolve_payment_provider(
                 fiat_symbol=fiat_symbol,
                 payment_method_code=payment_method_code,
                 email=email,
@@ -603,7 +604,7 @@ class KoyweClient:
         )
         if resolved_email:
             email = resolved_email
-        payment_method_id, payment_method_display = self.resolve_payment_provider(
+        payment_method_id, payment_method_display, payment_provider = self.resolve_payment_provider(
             fiat_symbol=fiat_symbol,
             payment_method_code=payment_method_code,
             email=email,
@@ -643,9 +644,13 @@ class KoyweClient:
             external_id=external_id,
             document_number=str(normalized_contact_profile.get('documentNumber') or '').strip() or None,
         )
+        enriched_order = self._merge_payment_provider_details(
+            order=order,
+            payment_provider=payment_provider,
+        )
 
-        order_id = str(order.get('_id') or order.get('id') or order.get('orderId') or quote_id)
-        next_action_url = self._extract_action_url(order)
+        order_id = str(enriched_order.get('_id') or enriched_order.get('id') or enriched_order.get('orderId') or quote_id)
+        next_action_url = self._extract_action_url(enriched_order)
         next_step = self._determine_next_step(direction=normalized_direction, next_action_url=next_action_url)
         return KoyweOrderResult(
             order_id=order_id,
@@ -656,7 +661,8 @@ class KoyweClient:
             payment_method_display=payment_method_display,
             next_step=next_step,
             next_action_url=next_action_url,
-            raw_response=order,
+            payment_provider=payment_provider,
+            raw_response=enriched_order,
         )
 
     def get_ramp_order_status(self, *, order_id: str, email: str | None = None) -> KoyweOrderStatusResult:
@@ -960,6 +966,32 @@ class KoyweClient:
                 if found:
                     return found
         return None
+
+    def _merge_payment_provider_details(self, *, order: dict[str, Any] | None, payment_provider: dict[str, Any] | None) -> dict[str, Any]:
+        enriched = dict(order or {})
+        provider = dict(payment_provider or {})
+        if not provider:
+            return enriched
+
+        enriched.setdefault('paymentProvider', provider)
+
+        provider_details = provider.get('details')
+        if isinstance(provider_details, str) and provider_details.strip() and not str(enriched.get('providedAddress') or '').strip():
+            enriched['providedAddress'] = provider_details.strip()
+
+        provider_image = provider.get('image')
+        if isinstance(provider_image, str) and provider_image.strip() and not str(enriched.get('providedAction') or '').strip():
+            enriched['providedAction'] = provider_image.strip()
+
+        provider_display = provider.get('displayName') or provider.get('name')
+        if provider_display and not enriched.get('paymentMethodDisplay'):
+            enriched['paymentMethodDisplay'] = provider_display
+
+        provider_id = provider.get('_id') or provider.get('id') or provider.get('paymentMethodId')
+        if provider_id and not enriched.get('paymentMethodId'):
+            enriched['paymentMethodId'] = provider_id
+
+        return enriched
 
     def _determine_next_step(self, *, direction: str, next_action_url: str | None) -> str:
         if next_action_url:

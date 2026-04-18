@@ -1,5 +1,6 @@
 from django.test import SimpleTestCase
 
+from ramps.koywe_client import KoyweClient
 from ramps.koywe_sync import build_koywe_instruction_snapshot, _merge_koywe_metadata
 
 
@@ -71,3 +72,26 @@ class KoyweInstructionSnapshotTests(SimpleTestCase):
             merged['provider_payload_latest']['providedAddress'],
             'Alias changed.koywe',
         )
+
+
+class KoyweClientProviderMergeTests(SimpleTestCase):
+    def test_merge_payment_provider_details_promotes_provider_instructions(self):
+        client = KoyweClient()
+        order = {
+            'orderId': 'abc',
+            'status': 'WAITING',
+        }
+        provider = {
+            '_id': 'provider-id',
+            'name': 'WIREAR',
+            'details': 'Alias 30718280229.KOYWE1\nCBU 0000053600000017871248',
+            'image': 'https://rampa.koywe.com/paymentProviders/wire-ar.png',
+        }
+
+        enriched = client._merge_payment_provider_details(order=order, payment_provider=provider)
+
+        self.assertEqual(enriched['providedAddress'], provider['details'])
+        self.assertEqual(enriched['providedAction'], provider['image'])
+        self.assertEqual(enriched['paymentMethodId'], 'provider-id')
+        self.assertEqual(enriched['paymentMethodDisplay'], 'WIREAR')
+        self.assertEqual(enriched['paymentProvider']['details'], provider['details'])
