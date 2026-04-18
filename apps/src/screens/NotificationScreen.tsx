@@ -92,6 +92,10 @@ const normalizeRampNotificationPayload = (data: any, notifType: string, createdA
     wallet_amount: walletAmount,
     wallet_currency: walletCurrency,
     status: data?.status || deriveStatusFromNotificationType(notifType),
+    rampStatus: notifType === 'RAMP_PROCESSING' ? 'PROCESSING'
+      : notifType === 'RAMP_COMPLETED' ? 'COMPLETED'
+      : notifType === 'RAMP_FAILED' ? 'FAILED'
+      : data?.status || 'PENDING',
   };
 };
 
