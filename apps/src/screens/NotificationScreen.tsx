@@ -988,7 +988,7 @@ export const NotificationScreen = () => {
       USDC_DEPOSIT_COMPLETED: { icon: 'download', color: '#06B6D4' },
       USDC_WITHDRAWAL_COMPLETED: { icon: 'upload', color: '#06B6D4' },
       RAMP_PENDING: { icon: 'repeat', color: '#F59E0B' },
-      RAMP_PROCESSING: { icon: 'repeat', color: '#3B82F6' },
+      RAMP_PROCESSING: { icon: 'download', color: '#3B82F6' },
       RAMP_COMPLETED: { icon: 'repeat', color: '#06B6D4' },
       RAMP_FAILED: { icon: 'x-circle', color: '#EF4444' },
 

@@ -2431,7 +2431,7 @@ export const TransactionDetailScreen = () => {
                 {(() => {
                   if (currentTx.type === 'ramp') {
                     const rs = ((currentTx.rampStatus || currentTx.status) || '').toString().toUpperCase();
-                    if (rs === 'PROCESSING' || rs === 'pending') {
+                    if (rs === 'PROCESSING' || rs === 'PENDING') {
                       const isProcessing = rs === 'PROCESSING';
                       return (
                         <View style={styles.statusContainer}>
