@@ -411,6 +411,12 @@ export function MessageChannelThread({
   const prependAdjustmentRef = React.useRef<{ previousContentHeight: number; previousOffset: number } | null>(null);
 
   React.useEffect(() => {
+    if (channel.id === 'soporte') {
+      shouldScrollToBottomRef.current = true;
+    }
+  }, [channel.id]);
+
+  React.useEffect(() => {
     const messageCount = channel.messages.length;
     const previousMessageCount = previousMessageCountRef.current;
     if (
