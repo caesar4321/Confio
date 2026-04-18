@@ -922,7 +922,10 @@ class CreateMockRampOrder(graphene.Mutation):
             fiat_currency=fiat_currency,
         )
         order_id = f"mock-{normalized_direction.lower()}-{resolved_country_code.lower()}-{timezone.now().strftime('%Y%m%d%H%M%S%f')}"
-        next_step = "SHOW_PAYMENT_INSTRUCTIONS" if normalized_direction == "ON_RAMP" else "WAIT_FOR_USDC_TRANSFER"
+        if normalized_direction == "ON_RAMP":
+            next_step = "SHOW_PAYMENT_INSTRUCTIONS"
+        else:
+            next_step = "MOCK_WAIT_FOR_USDC_TRANSFER"
 
         return RampOrderType(
             success=True,
