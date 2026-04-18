@@ -71,7 +71,20 @@ COUNTRY_METHODS = {
         "on_ramp_max_amount": Decimal("56000"),
         "off_ramp_min_amount": Decimal("0"),
         "off_ramp_max_amount": Decimal("0"),
-        "methods": [],
+        "methods": [
+            {
+                "code": "QRI-BO",
+                "display_name": "QR interoperable",
+                "provider_type": "fintech",
+                "icon": "smartphone",
+                "description": "Pago con QR boliviano.",
+                "requires_account_number": False,
+                "requires_phone": False,
+                "requires_email": False,
+                "supports_on_ramp": True,
+                "supports_off_ramp": False,
+            },
+        ],
     },
     "BR": {
         "fiat_currency": "BRL",
