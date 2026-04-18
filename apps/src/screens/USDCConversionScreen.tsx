@@ -29,6 +29,7 @@ import { secureDeterministicWallet } from '../services/secureDeterministicWallet
 import { oauthStorage } from '../services/oauthStorageService';
 import { cusdAppOptInService } from '../services/cusdAppOptInService';
 import { biometricAuthService } from '../services/biometricAuthService';
+import { migrationService } from '../services/migrationService';
 import { colors } from '../config/theme';
 
 // GraphQL mutation for USDC opt-in (reused from DepositScreen)
@@ -251,6 +252,21 @@ export const USDCConversionScreen = () => {
 
     if (!activeAccount?.algorandAddress) {
       Alert.alert('Cuenta no configurada', 'Tu cuenta necesita estar configurada con Algorand para realizar conversiones. Por favor, contacta soporte.', [{ text: 'Entendido' }]);
+      return;
+    }
+
+    setLoadingMessage('Verificando billetera...');
+    const migrationReady = await migrationService.ensureMigrationReady(
+      activeAccount?.index || 0,
+      activeAccount?.id?.startsWith('business_') ? (activeAccount.id.split('_')[1] || undefined) : undefined
+    );
+    if (!migrationReady) {
+      setLoadingMessage('');
+      Alert.alert(
+        'Actualización requerida',
+        'Primero debemos completar la actualización de seguridad de tu billetera antes de convertir.',
+        [{ text: 'Entendido' }]
+      );
       return;
     }
 

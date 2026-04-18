@@ -3,6 +3,7 @@ import { useMutation, gql } from '@apollo/client';
 import { useFocusEffect } from '@react-navigation/native';
 import algorandService from '../services/algorandService';
 import { cusdAppOptInService } from '../services/cusdAppOptInService';
+import { migrationService } from '../services/migrationService';
 
 const BUILD_AUTO_SWAP_TRANSACTIONS = gql`
   mutation BuildAutoSwapTransactions($inputAssetType: String!, $amount: String!) {
@@ -133,6 +134,14 @@ export const useAutoSwap = ({
 
                 if (!swapAssetType) return;
                 if (!Number.isFinite(Number(swapAmount)) || Number(swapAmount) <= 0) {
+                    return;
+                }
+
+                const migrationReady = await migrationService.ensureMigrationReady(
+                    activeAccount?.index || 0,
+                    activeAccount?.id?.startsWith('business_') ? (activeAccount.id.split('_')[1] || undefined) : undefined
+                );
+                if (!migrationReady) {
                     return;
                 }
 

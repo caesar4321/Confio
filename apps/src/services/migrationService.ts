@@ -3,6 +3,7 @@ import { Buffer } from 'buffer';
 import { apolloClient } from '../apollo/client';
 import { SUBMIT_SPONSORED_GROUP } from '../apollo/mutations';
 import { gql } from '@apollo/client';
+import { oauthStorage } from './oauthStorageService';
 
 const UPDATE_ACCOUNT_ALGORAND_ADDRESS = gql`
     mutation UpdateAccountAlgorandAddress($algorandAddress: String!) {
@@ -33,7 +34,7 @@ const PREPARE_ATOMIC_MIGRATION = gql`
 `;
 import { secureDeterministicWallet, retrieveClientSecret, getOrCreateMasterSecret, storeClientSecret, deriveWalletV2 } from './secureDeterministicWallet';
 import authService from './authService';
-import { API_URL, CONFIO_ASSET_ID, CUSD_ASSET_ID, USDC_ASSET_ID } from '../config/env';
+import { API_URL, CONFIO_ASSET_ID, CUSD_ASSET_ID, GOOGLE_CLIENT_IDS, USDC_ASSET_ID } from '../config/env';
 
 // Legacy CONFÍO asset ID from before token migration
 // Users who have this in V1 need it swept to V2
@@ -239,6 +240,50 @@ class WalletMigrationService {
             console.error('[MigrationService] Error checking status:', error);
             // Fail safe: False
             return { needsMigration: false };
+        }
+    }
+
+    async ensureMigrationReady(
+        accountIndex: number = 0,
+        businessId?: string
+    ): Promise<boolean> {
+        try {
+            const oauthData = await oauthStorage.getOAuthSubject();
+            if (!oauthData?.subject || !oauthData?.provider) {
+                console.warn('[MigrationService] Missing OAuth subject/provider; cannot enforce migration readiness.');
+                return false;
+            }
+
+            const provider = oauthData.provider;
+            const sub = oauthData.subject;
+            const googleClientIds = GOOGLE_CLIENT_IDS[__DEV__ ? 'development' : 'production'];
+            const iss = provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
+            const aud = provider === 'google' ? googleClientIds.web : 'com.confio.app';
+
+            const migrationState = await this.checkNeedsMigration(
+                iss,
+                sub,
+                aud,
+                provider,
+                accountIndex,
+                businessId
+            );
+
+            if (!migrationState.needsMigration) {
+                return true;
+            }
+
+            return this.performMigration(
+                iss,
+                sub,
+                aud,
+                provider,
+                accountIndex,
+                businessId
+            );
+        } catch (error) {
+            console.error('[MigrationService] Failed to ensure migration readiness:', error);
+            return false;
         }
     }
 
