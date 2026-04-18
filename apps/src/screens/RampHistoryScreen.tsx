@@ -35,7 +35,7 @@ type ListRow =
 
 /* ─── helpers ─── */
 
-const getStatusTone = (status?: string | null): 'success' | 'warning' | 'error' | 'neutral' => {
+const getStatusTone = (status?: string | null): 'success' | 'info' | 'warning' | 'error' | 'neutral' => {
   switch ((status || '').toUpperCase()) {
     case 'COMPLETED':
     case 'DELIVERED':
@@ -45,10 +45,11 @@ const getStatusTone = (status?: string | null): 'success' | 'warning' | 'error' 
     case 'REJECTED':
     case 'EXPIRED':
       return 'error';
-    case 'AML_REVIEW':
-    case 'PENDING':
     case 'PROCESSING':
     case 'SUBMITTED':
+      return 'info';
+    case 'AML_REVIEW':
+    case 'PENDING':
       return 'warning';
     default:
       return 'neutral';
@@ -258,6 +259,7 @@ export const RampHistoryScreen = () => {
 
     const statusColors = {
       success: { bg: colors.primaryLight, text: colors.primaryDark },
+      info: { bg: '#dbeafe', text: '#1d4ed8' },
       warning: { bg: colors.warningLight, text: colors.warning.text },
       error: { bg: colors.dangerLight, text: colors.danger },
       neutral: { bg: '#f3f4f6', text: colors.textSecondary },
