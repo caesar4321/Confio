@@ -1334,6 +1334,7 @@ export const TransactionDetailScreen = () => {
       // Map transaction_type to type for consistency
       type: type,
       rampDirection: transactionData.ramp_direction || transactionData.rampDirection || transactionData.direction,
+      rampStatus: transactionData.ramp_status || transactionData.rampStatus,
       rampFiatAmount: transactionData.ramp_fiat_amount || transactionData.rampFiatAmount,
       rampFiatCurrency: transactionData.ramp_fiat_currency || transactionData.rampFiatCurrency,
       walletAmount: transactionData.wallet_amount || transactionData.walletAmount,
