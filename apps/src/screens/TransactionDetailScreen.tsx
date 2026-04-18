@@ -1499,6 +1499,9 @@ export const TransactionDetailScreen = () => {
   // Prefer server-fetched data when available; otherwise fall back to normalized notification payload
   const currentTx = txData || transactions[transactionType];
 
+  if (currentTx?.type === 'ramp') {
+    console.log('[TxDetail ramp]', JSON.stringify({ type: currentTx.type, status: currentTx.status, rampStatus: currentTx.rampStatus }));
+  }
 
   // Debug timezone conversion
   if (currentTx?.createdAt) {
@@ -2430,7 +2433,7 @@ export const TransactionDetailScreen = () => {
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>Estado</Text>
                 {(() => {
-                  if (currentTx.type === 'ramp') {
+                  if ((currentTx.type || '').toLowerCase() === 'ramp') {
                     const rs = ((currentTx.rampStatus || currentTx.status) || '').toString().toUpperCase();
                     if (rs === 'PROCESSING' || rs === 'PENDING') {
                       const isProcessing = rs === 'PROCESSING';
@@ -2483,7 +2486,7 @@ export const TransactionDetailScreen = () => {
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>Tiempo de procesamiento</Text>
                 <Text style={styles.summaryValue}>
-                  {currentTx.type === 'ramp' ? 'Hasta 1 hora' : 'Instantáneo'}
+                  {(currentTx.type || '').toLowerCase() === 'ramp' ? 'Hasta 1 hora' : 'Instantáneo'}
                 </Text>
               </View>
             </View>
