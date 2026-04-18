@@ -600,6 +600,10 @@ export class AuthService {
       const { appCheckService } = await import('./appCheckService');
       const appCheckToken = await appCheckService.primeTokenForAuth();
       if (!appCheckToken) {
+        const appCheckError = appCheckService.getLastErrorForDebug()?.toLowerCase() || '';
+        if (appCheckError.includes('too many attempts')) {
+          throw new Error('La verificación del dispositivo está temporalmente limitada. Espera un par de minutos y vuelve a intentar.');
+        }
         throw new Error('No se pudo verificar el dispositivo en este intento. Revisa Google Play Services y vuelve a intentar.');
       }
       const { WEB3AUTH_LOGIN } = await import('../apollo/mutations');
@@ -924,6 +928,10 @@ export class AuthService {
       const { appCheckService } = await import('./appCheckService');
       const appCheckToken = await appCheckService.primeTokenForAuth();
       if (!appCheckToken) {
+        const appCheckError = appCheckService.getLastErrorForDebug()?.toLowerCase() || '';
+        if (appCheckError.includes('too many attempts')) {
+          throw new Error('La verificación del dispositivo está temporalmente limitada. Espera un par de minutos y vuelve a intentar.');
+        }
         throw new Error('No se pudo verificar el dispositivo en este intento. Actualiza el sistema y vuelve a intentar.');
       }
       const { WEB3AUTH_LOGIN } = await import('../apollo/mutations');

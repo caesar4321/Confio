@@ -49,6 +49,7 @@ class NotificationType(models.TextChoices):
 
     # Ramp aggregate notifications
     RAMP_PENDING = 'RAMP_PENDING', 'Ramp Pending'
+    RAMP_PROCESSING = 'RAMP_PROCESSING', 'Ramp Processing'
     RAMP_COMPLETED = 'RAMP_COMPLETED', 'Ramp Completed'
     RAMP_FAILED = 'RAMP_FAILED', 'Ramp Failed'
     

@@ -1,5 +1,8 @@
 /* Lightweight WS client for send flow (prepare + submit) */
-import appCheck from '@react-native-firebase/app-check';
+import appCheckService from './appCheckService';
+
+const OFFICIAL_APP_REQUIRED_ERROR =
+  'Actualiza la aplicación a la última versión o usa la app oficial para continuar.';
 
 type PrepareArgs = {
   amount: number;
@@ -59,12 +62,12 @@ export class SendWsSession {
         const token = await getJwtToken();
         if (!token) throw new Error('no_token');
 
-        // Fetch App Check token for connection security
-        let appCheckToken = '';
-        try {
-          const { token } = await appCheck().getToken();
-          if (token) appCheckToken = token;
-        } catch (e) { }
+        // Fetch App Check token using the shared service so WS send flow
+        // behaves like Apollo requests and fails with a user-safe message.
+        const appCheckToken = await appCheckService.getTokenForHeader();
+        if (!appCheckToken) {
+          throw new Error(OFFICIAL_APP_REQUIRED_ERROR);
+        }
 
         const wsUrl = `${getWsBase()}ws/send_session?token=${encodeURIComponent(token)}&app_check_token=${encodeURIComponent(appCheckToken)}`;        const ws = new WebSocket(wsUrl);
         this.ws = ws;
@@ -79,7 +82,9 @@ export class SendWsSession {
         ws.onopen = () => {          resolveOpen();
         };
         ws.onerror = (e) => {
-          clearTimeout(timeout);          if (!this.closeRequested) reject(e);
+          clearTimeout(timeout);          if (!this.closeRequested) {
+            reject(new Error(OFFICIAL_APP_REQUIRED_ERROR));
+          }
         };
         ws.onclose = (e) => {
           clearTimeout(timeout);          if (!this.closeRequested) {

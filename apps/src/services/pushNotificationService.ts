@@ -335,6 +335,7 @@ export class PushNotificationService {
             }
           } else if (
             notification_type === 'RAMP_PENDING' ||
+            notification_type === 'RAMP_PROCESSING' ||
             notification_type === 'RAMP_COMPLETED' ||
             notification_type === 'RAMP_FAILED'
           ) {

@@ -33,7 +33,7 @@ import CONFIOLogo from '../assets/png/CONFIO.png';
 import USDCLogo from '../assets/png/USDC.png';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useQuery, useMutation } from '@apollo/client';
-import { GET_UNIFIED_TRANSACTIONS, GET_CURRENT_ACCOUNT_TRANSACTIONS, GET_PRESALE_STATUS, GET_ACCOUNT_BALANCE, GET_MY_BALANCES } from '../apollo/queries';
+import { GET_UNIFIED_TRANSACTIONS, GET_CURRENT_ACCOUNT_TRANSACTIONS, GET_PRESALE_STATUS, GET_ACCOUNT_BALANCE, GET_MY_BALANCES, CHECK_USERS_BY_PHONES } from '../apollo/queries';
 import { REFRESH_ACCOUNT_BALANCE, SET_REFERRER } from '../apollo/mutations';
 // import { CONVERT_USDC_TO_CUSD, CONVERT_CUSD_TO_USDC } from '../apollo/mutations'; // Removed - handled in USDCConversion screen
 import { TransactionItemSkeleton } from '../components/SkeletonLoader';
@@ -48,6 +48,7 @@ import { deepLinkHandler } from '../utils/deepLinkHandler';
 import { useAutoSwap } from '../hooks/useAutoSwap';
 import AutoSwapModal from '../components/AutoSwapModal';
 import { colors } from '../config/theme';
+import { getTierMeta } from '../components/StatusTierBadge';
 
 // Color palette
 // Keychain constants for storing balance visibility
@@ -86,6 +87,14 @@ interface Transaction {
   counterpartyDisplayName?: string;
   senderUser?: any;
   recipientUser?: any;
+  senderStatusTier?: string | null;
+  senderIsReferralVerified?: boolean;
+  recipientStatusTier?: string | null;
+  recipientIsReferralVerified?: boolean;
+  payerStatusTier?: string | null;
+  payerIsReferralVerified?: boolean;
+  merchantStatusTier?: string | null;
+  merchantIsReferralVerified?: boolean;
   internalId?: string;
   senderName?: string;
   recipientName?: string;
@@ -108,6 +117,15 @@ interface TransactionSection {
   title: string;
   data: Transaction[];
 }
+
+const normalizePhoneLookupKey = (value?: string | null): string => {
+  if (!value) return '';
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  const hasPlus = trimmed.startsWith('+');
+  const digits = trimmed.replace(/\D/g, '');
+  return hasPlus ? `+${digits}` : digits;
+};
 
 export const AccountDetailScreen = () => {
   const navigation = useNavigation<AccountDetailScreenNavigationProp>();
@@ -916,6 +934,33 @@ export const AccountDetailScreen = () => {
   // Use unified transactions if available, fallback to legacy format
   const transactions = formatUnifiedTransactions();
 
+  const badgeLookupPhones = useMemo(() => {
+    const phones = transactions.flatMap((transaction) => [transaction.fromPhone, transaction.toPhone])
+      .filter((phone): phone is string => typeof phone === 'string' && phone.trim().length > 0);
+    return Array.from(new Set(phones));
+  }, [transactions]);
+
+  const { data: badgeLookupData } = useQuery(CHECK_USERS_BY_PHONES, {
+    variables: { phoneNumbers: badgeLookupPhones },
+    skip: badgeLookupPhones.length === 0,
+    fetchPolicy: 'cache-first',
+  });
+
+  const badgeByPhone = useMemo(() => {
+    const map = new Map<string, { statusTier?: string | null; isReferralVerified?: boolean }>();
+    (badgeLookupData?.checkUsersByPhones || []).forEach((userInfo: any) => {
+      const rawPhone = typeof userInfo?.phoneNumber === 'string' ? userInfo.phoneNumber.trim() : '';
+      const normalizedPhone = normalizePhoneLookupKey(rawPhone);
+      const badgeInfo = {
+        statusTier: userInfo.statusTier || null,
+        isReferralVerified: userInfo.isReferralVerified || false,
+      };
+      if (rawPhone) map.set(rawPhone, badgeInfo);
+      if (normalizedPhone) map.set(normalizedPhone, badgeInfo);
+    });
+    return map;
+  }, [badgeLookupData]);
+
   // Debug which data source is being used
 
   // Debug the actual transaction object
@@ -1160,6 +1205,32 @@ export const AccountDetailScreen = () => {
     };
 
     const navigation = useNavigation();
+    const senderBadgeInfo =
+      badgeByPhone.get(transaction.fromPhone || '') ||
+      badgeByPhone.get(normalizePhoneLookupKey(transaction.fromPhone));
+    const recipientBadgeInfo =
+      badgeByPhone.get(transaction.toPhone || '') ||
+      badgeByPhone.get(normalizePhoneLookupKey(transaction.toPhone));
+    const senderStatusTier =
+      (transaction as any).senderStatusTier ??
+      transaction.senderUser?.statusTier ??
+      senderBadgeInfo?.statusTier ??
+      null;
+    const senderIsReferralVerified =
+      (transaction as any).senderIsReferralVerified ??
+      transaction.senderUser?.isReferralVerified ??
+      senderBadgeInfo?.isReferralVerified ??
+      false;
+    const recipientStatusTier =
+      (transaction as any).recipientStatusTier ??
+      transaction.recipientUser?.statusTier ??
+      recipientBadgeInfo?.statusTier ??
+      null;
+    const recipientIsReferralVerified =
+      (transaction as any).recipientIsReferralVerified ??
+      transaction.recipientUser?.isReferralVerified ??
+      recipientBadgeInfo?.isReferralVerified ??
+      false;
 
     const handlePress = () => {
       const params = {
@@ -1215,8 +1286,16 @@ export const AccountDetailScreen = () => {
           recipientDisplayName: transaction.counterpartyDisplayName,
           senderBusiness: (transaction as any).senderBusiness,
           recipientBusiness: (transaction as any).recipientBusiness,
+          senderStatusTier,
+          senderIsReferralVerified,
+          recipientStatusTier,
+          recipientIsReferralVerified,
           payerBusiness: (transaction as any).senderBusiness, // Alias for payment logic
           merchantBusiness: (transaction as any).recipientBusiness, // Alias for payment logic
+          payerStatusTier: (transaction as any).payerStatusTier ?? senderStatusTier,
+          payerIsReferralVerified: (transaction as any).payerIsReferralVerified ?? senderIsReferralVerified,
+          merchantStatusTier: (transaction as any).merchantStatusTier ?? recipientStatusTier,
+          merchantIsReferralVerified: (transaction as any).merchantIsReferralVerified ?? recipientIsReferralVerified,
         }
       };
       // Navigate to different screens based on transaction type
@@ -1282,6 +1361,12 @@ export const AccountDetailScreen = () => {
     };
 
     const transactionAccessibilityLabel = `${getEnhancedTransactionTitle()}. ${formatTransactionAmount(transaction.amount)} ${transaction.currency}. ${formattedDate} ${formattedTime}.`;
+    const isCounterpartyTheSender =
+      transaction.type === 'received' ||
+      (transaction.type === 'payment' && transaction.amount.startsWith('+')) ||
+      (transaction.type === 'payroll' && transaction.amount.startsWith('+'));
+    const titleStatusTier = isCounterpartyTheSender ? senderStatusTier : recipientStatusTier;
+    const titleIsReferralVerified = isCounterpartyTheSender ? senderIsReferralVerified : recipientIsReferralVerified;
 
     return (
       <TouchableOpacity
@@ -1295,7 +1380,35 @@ export const AccountDetailScreen = () => {
           {getTransactionIcon(transaction)}
         </View>
         <View style={styles.transactionInfo}>
-          <Text style={styles.transactionTitle}>{getEnhancedTransactionTitle()}</Text>
+          <View style={styles.transactionTitleRow}>
+            {(() => {
+              const title = getEnhancedTransactionTitle().trim();
+              const hasBadge = titleIsReferralVerified || (titleStatusTier && titleStatusTier !== 'member');
+              if (!hasBadge) {
+                return <Text style={styles.transactionTitle}>{title}</Text>;
+              }
+              const words = title.split(' ').filter(Boolean);
+              return words.map((word, i) => {
+                const isLast = i === words.length - 1;
+                if (!isLast) {
+                  return <Text key={i} style={styles.transactionTitle}>{word}{' '}</Text>;
+                }
+                return (
+                  <View key={i} style={styles.lastWordBadgeGroup}>
+                    <Text style={styles.transactionTitle}>{word}</Text>
+                    {titleIsReferralVerified && (
+                      <View style={styles.inlineVerifiedBadge}>
+                        <Icon name="check" size={10} color="#fff" />
+                      </View>
+                    )}
+                    {titleStatusTier && titleStatusTier !== 'member' && (
+                      <Text style={styles.inlineTierEmoji}>{getTierMeta(titleStatusTier).emoji}</Text>
+                    )}
+                  </View>
+                );
+              });
+            })()}
+          </View>
           <View style={styles.transactionSubtitleContainer}>
             <Text style={styles.transactionDate}>{formattedDate} • {formattedTime}</Text>
             {contactInfo.isFromContacts && contactInfo.originalName && (
@@ -2686,10 +2799,32 @@ const styles = StyleSheet.create({
   transactionInfo: {
     flex: 1,
   },
+  transactionTitleRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+  },
   transactionTitle: {
     fontSize: 14,
+    lineHeight: 20,
     fontWeight: '500',
     color: '#1f2937',
+  },
+  lastWordBadgeGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  inlineVerifiedBadge: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#3B82F6',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  inlineTierEmoji: {
+    fontSize: 11,
   },
   transactionDate: {
     fontSize: 12,

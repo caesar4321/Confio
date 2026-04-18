@@ -36,9 +36,8 @@ const verificationLevels: VerificationLevel[] = [
     title: 'Cuenta básica',
     subtitle: 'Teléfono confirmado',
     features: [
-      'Puedes depositar y retirar en la red Algorand sin límites dentro de tu billetera.',
-      'Tus recompensas e invitaciones quedan pendientes hasta verificar tu identidad.',
-      'La verificación se exige para recargas, retiros y otras funciones reguladas según el país.',
+      'Tu dinero es tuyo. Puedes moverlo libremente dentro de tu billetera.',
+      'Verifica tu identidad para reclamar recompensas, invitaciones y habilitar recargas y retiros a tu banco.',
     ],
   },
   {
@@ -47,9 +46,8 @@ const verificationLevels: VerificationLevel[] = [
     subtitle: 'Didit completado',
     features: [
       'Puedes reclamar y retirar $CONFIO ganado por recompensas o referidos.',
-      'Tu perfil muestra la insignia de verificado y acompaña tus niveles por invitaciones.',
-      'Ayuda a habilitar recargas y retiros en países compatibles.',
-      'Tu verificación queda guardada en tu cuenta.',
+      'Recargas y retiros a tu banco habilitados en países compatibles.',
+      'Tu perfil muestra la insignia de verificado y tus niveles por invitaciones.',
     ],
   },
 ];

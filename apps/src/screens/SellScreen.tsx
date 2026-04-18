@@ -704,6 +704,10 @@ export const SellScreen = () => {
                   <Text style={styles.reviewLabel}>Recibirías</Text>
                   <Text style={styles.reviewValueHighlight}>{quoteHeadline}</Text>
                 </View>
+                <View style={styles.settlementNotice}>
+                  <Icon name="clock" size={13} color={colors.textSecondary} />
+                  <Text style={styles.settlementNoticeText}>El acreditado puede tardar hasta 1 hora según el medio de pago.</Text>
+                </View>
                 <RampActionBar
                   primaryLabel="Confirmar retiro"
                   onPrimaryPress={handleConfirm}
@@ -1323,6 +1327,18 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 6 },
     elevation: 4,
+  },
+  settlementNotice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+    marginBottom: 12,
+  },
+  settlementNoticeText: {
+    flex: 1,
+    fontSize: 12,
+    color: colors.textSecondary,
+    lineHeight: 17,
   },
   reviewTitle: {
     fontSize: 18,

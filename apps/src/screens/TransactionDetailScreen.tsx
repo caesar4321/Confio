@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -27,7 +27,7 @@ import moment from 'moment';
 import 'moment/locale/es';
 import { useQuery } from '@apollo/client';
 import { contactService } from '../services/contactService';
-import { GET_SEND_TRANSACTION_BY_ID, GET_PAYMENT_TRANSACTION_BY_ID } from '../apollo/queries';
+import { GET_SEND_TRANSACTION_BY_ID, GET_PAYMENT_TRANSACTION_BY_ID, CHECK_USERS_BY_PHONES } from '../apollo/queries';
 import { useContactNameSync } from '../hooks/useContactName';
 import { getPreferredDisplayName, getPreferredSecondaryLine } from '../utils/contactDisplay';
 import { SHARE_LINKS } from '../config/shareLinks';
@@ -69,6 +69,15 @@ const addNegativeSign = (value: unknown): string | undefined => {
   if (normalized.startsWith('-')) return normalized;
   if (normalized.startsWith('+')) return `-${normalized.slice(1)}`;
   return `-${normalized}`;
+};
+
+const normalizePhoneLookupKey = (value?: string | null): string => {
+  if (!value) return '';
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  const hasPlus = trimmed.startsWith('+');
+  const digits = trimmed.replace(/\D/g, '');
+  return hasPlus ? `+${digits}` : digits;
 };
 
 const normalizeRampDirection = (value: unknown, amount?: unknown, title?: unknown): 'on_ramp' | 'off_ramp' | '' => {
@@ -180,6 +189,7 @@ const deriveStatusFromNotificationType = (notificationType: string | undefined):
     case 'RAMP_FAILED':
       return 'failed';
     case 'RAMP_PENDING':
+    case 'RAMP_PROCESSING':
       return 'pending';
     case 'RAMP_COMPLETED':
       return 'completed';
@@ -661,7 +671,25 @@ export const TransactionDetailScreen = () => {
       fontSize: 16,
       fontWeight: '600',
       color: colors.dark,
+    },
+    participantNameRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'center',
       marginBottom: 4,
+    },
+    participantLastWordBadgeGroup: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
+    participantInlineVerifiedBadge: {
+      width: 16,
+      height: 16,
+      borderRadius: 8,
+      backgroundColor: '#3B82F6',
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     transactionTitle: {
       fontSize: 16,
@@ -1346,6 +1374,14 @@ export const TransactionDetailScreen = () => {
       merchantDisplayName: transactionData.merchantDisplayName,
       senderBusiness: transactionData.senderBusiness,
       recipientBusiness: transactionData.recipientBusiness,
+      senderStatusTier: transactionData.senderStatusTier ?? transactionData.senderUser?.statusTier ?? null,
+      senderIsReferralVerified: transactionData.senderIsReferralVerified ?? transactionData.senderUser?.isReferralVerified ?? false,
+      recipientStatusTier: transactionData.recipientStatusTier ?? transactionData.recipientUser?.statusTier ?? null,
+      recipientIsReferralVerified: transactionData.recipientIsReferralVerified ?? transactionData.recipientUser?.isReferralVerified ?? false,
+      payerStatusTier: transactionData.payerStatusTier ?? transactionData.senderStatusTier ?? transactionData.senderUser?.statusTier ?? null,
+      payerIsReferralVerified: transactionData.payerIsReferralVerified ?? transactionData.senderIsReferralVerified ?? transactionData.senderUser?.isReferralVerified ?? false,
+      merchantStatusTier: transactionData.merchantStatusTier ?? transactionData.recipientStatusTier ?? transactionData.recipientUser?.statusTier ?? null,
+      merchantIsReferralVerified: transactionData.merchantIsReferralVerified ?? transactionData.recipientIsReferralVerified ?? transactionData.recipientUser?.isReferralVerified ?? false,
       // For conversions: cUSD -> USDC should be negative (money out), USDC -> cUSD should be positive (money in)
       // For withdrawals: always negative (money out)
       amount: transactionData.conversion_type === 'cusd_to_usdc'
@@ -1473,7 +1509,6 @@ export const TransactionDetailScreen = () => {
   const senderPhone = currentTx?.sender_phone || currentTx?.senderPhone || currentTx?.fromPhone || (transactionData as any)?.sender_phone || (transactionData as any)?.fromPhone;
   const recipientPhone = currentTx?.recipient_phone || currentTx?.recipientPhone || currentTx?.toPhone || (transactionData as any)?.recipient_phone || (transactionData as any)?.toPhone || (transactionData as any)?.counterpartyPhone;
 
-
   // Detect external wallet counterparties to label them as "Billetera externa"
   const isExternalSender = ((currentTx?.type === 'received' || currentTx?.type === 'deposit') && (
     currentTx?.is_external_address || currentTx?.sourceAddress || (currentTx?.fromAddress && !senderPhone)
@@ -1518,6 +1553,44 @@ export const TransactionDetailScreen = () => {
   const resolvedRecipientPhone = (recipientPhone && recipientPhone.trim() !== '')
     ? recipientPhone
     : (derivedRecipientPhoneFromAddress || derivedRecipientPhoneFromName || undefined);
+
+  const badgeLookupPhones = useMemo(() => {
+    const phones = [senderPhone, resolvedRecipientPhone]
+      .filter((phone): phone is string => typeof phone === 'string' && phone.trim().length > 0);
+    return Array.from(new Set(phones));
+  }, [senderPhone, resolvedRecipientPhone]);
+
+  const { data: badgeLookupData } = useQuery(CHECK_USERS_BY_PHONES, {
+    variables: { phoneNumbers: badgeLookupPhones },
+    skip: badgeLookupPhones.length === 0,
+    fetchPolicy: 'cache-first',
+  });
+
+  const badgeByPhone = useMemo(() => {
+    const map = new Map<string, { statusTier?: string | null; isReferralVerified?: boolean }>();
+    (badgeLookupData?.checkUsersByPhones || []).forEach((userInfo: any) => {
+      const rawPhone = typeof userInfo?.phoneNumber === 'string' ? userInfo.phoneNumber.trim() : '';
+      const normalizedPhone = normalizePhoneLookupKey(rawPhone);
+      const badgeInfo = {
+        statusTier: userInfo.statusTier || null,
+        isReferralVerified: userInfo.isReferralVerified || false,
+      };
+      if (rawPhone) map.set(rawPhone, badgeInfo);
+      if (normalizedPhone) map.set(normalizedPhone, badgeInfo);
+    });
+    return map;
+  }, [badgeLookupData]);
+
+  const senderBadgeInfo = badgeByPhone.get(senderPhone || '') || badgeByPhone.get(normalizePhoneLookupKey(senderPhone));
+  const recipientBadgeInfo = badgeByPhone.get(resolvedRecipientPhone || '') || badgeByPhone.get(normalizePhoneLookupKey(resolvedRecipientPhone));
+  const resolvedSenderStatusTier = currentTx?.senderStatusTier ?? senderBadgeInfo?.statusTier ?? null;
+  const resolvedSenderIsReferralVerified = currentTx?.senderIsReferralVerified ?? senderBadgeInfo?.isReferralVerified ?? false;
+  const resolvedRecipientStatusTier = currentTx?.recipientStatusTier ?? recipientBadgeInfo?.statusTier ?? null;
+  const resolvedRecipientIsReferralVerified = currentTx?.recipientIsReferralVerified ?? recipientBadgeInfo?.isReferralVerified ?? false;
+  const resolvedPayerStatusTier = currentTx?.payerStatusTier ?? resolvedSenderStatusTier;
+  const resolvedPayerIsReferralVerified = currentTx?.payerIsReferralVerified ?? resolvedSenderIsReferralVerified;
+  const resolvedMerchantStatusTier = currentTx?.merchantStatusTier ?? resolvedRecipientStatusTier;
+  const resolvedMerchantIsReferralVerified = currentTx?.merchantIsReferralVerified ?? resolvedRecipientIsReferralVerified;
 
   // Always call hook unconditionally to respect Rules of Hooks
   const recipientContactResult = useContactNameSync(resolvedRecipientPhone, recipientFallbackName);
@@ -1973,17 +2046,32 @@ export const TransactionDetailScreen = () => {
                     <Text style={styles.avatarText}>{currentTx.avatar}</Text>
                   </View>
                   <View style={styles.participantDetails}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
-                      <Text style={styles.participantName}>{displayFromName}</Text>
-                      {currentTx.senderIsReferralVerified && (
-                        <View style={{ width: 18, height: 18, borderRadius: 9, backgroundColor: '#3B82F6', alignItems: 'center', justifyContent: 'center' }}>
-                          <Icon name="check" size={11} color="#fff" />
-                        </View>
-                      )}
-                      {currentTx.senderStatusTier && currentTx.senderStatusTier !== 'member' && (
-                        <StatusTierBadge tier={currentTx.senderStatusTier} variant="compact" />
-                      )}
+                    <View style={styles.participantNameRow}>
+                      {(() => {
+                        const name = displayFromName;
+                        if (!resolvedSenderIsReferralVerified) {
+                          return <Text style={styles.participantName}>{name}</Text>;
+                        }
+                        const words = name.trim().split(' ').filter(Boolean);
+                        return words.map((word, i) => {
+                          const isLast = i === words.length - 1;
+                          if (!isLast) {
+                            return <Text key={i} style={styles.participantName}>{word}{' '}</Text>;
+                          }
+                          return (
+                            <View key={i} style={styles.participantLastWordBadgeGroup}>
+                              <Text style={styles.participantName}>{word}</Text>
+                              <View style={styles.participantInlineVerifiedBadge}>
+                                <Icon name="check" size={11} color="#fff" />
+                              </View>
+                            </View>
+                          );
+                        });
+                      })()}
                     </View>
+                    {resolvedSenderStatusTier && resolvedSenderStatusTier !== 'member' && (
+                      <StatusTierBadge tier={resolvedSenderStatusTier} variant="compact" style={{ marginTop: 4, alignSelf: 'flex-start' }} />
+                    )}
                     <View style={styles.addressContainer}>
                       <Text style={styles.addressText}>
                         {getPreferredSecondaryLine({ phone: senderPhone, address: currentTx.fromAddress, isExternal: !!currentTx.is_external_address })}
@@ -2014,43 +2102,45 @@ export const TransactionDetailScreen = () => {
                     </Text>
                   </View>
                   <View style={styles.participantDetails}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
-                      <Text style={styles.participantName}>
-                        {(() => {
-                          return null;
-                        })()}
-                        {(() => {
-                          // If we have a display name from contacts or transaction data
+                    <View style={styles.participantNameRow}>
+                      {(() => {
+                        const name = (() => {
                           if (displayToName) return displayToName;
-
-                          // For invited friends (non-Confío users)
                           if (currentTx.is_invited_friend && currentTx.recipient_phone) {
                             return `Invitación enviada${currentTx.recipient_display_name ? ` a ${currentTx.recipient_display_name}` : ''}`;
                           }
-
-                          // For external addresses
                           if (currentTx.is_external_address || (currentTx.toAddress && !currentTx.recipient_phone && !displayToName)) {
                             return 'Billetera externa';
                           }
-
-                          // Fallback - but don't use truncated addresses
                           const fallbackName = currentTx.to || currentTx.recipient_name || 'Desconocido';
-                          // If the fallback looks like a truncated address, don't use it
                           if (fallbackName.includes('...') && fallbackName.startsWith('0x')) {
                             return 'Billetera externa';
                           }
-                          return fallbackName || `DEBUG FALLBACK ${new Date().getTime()}`;
-                        })()}
-                      </Text>
-                      {currentTx.recipientIsReferralVerified && (
-                        <View style={{ width: 18, height: 18, borderRadius: 9, backgroundColor: '#3B82F6', alignItems: 'center', justifyContent: 'center' }}>
-                          <Icon name="check" size={11} color="#fff" />
-                        </View>
-                      )}
-                      {currentTx.recipientStatusTier && currentTx.recipientStatusTier !== 'member' && (
-                        <StatusTierBadge tier={currentTx.recipientStatusTier} variant="compact" />
-                      )}
+                          return fallbackName || 'Desconocido';
+                        })();
+                        if (!resolvedRecipientIsReferralVerified) {
+                          return <Text style={styles.participantName}>{name}</Text>;
+                        }
+                        const words = name.trim().split(' ').filter(Boolean);
+                        return words.map((word, i) => {
+                          const isLast = i === words.length - 1;
+                          if (!isLast) {
+                            return <Text key={i} style={styles.participantName}>{word}{' '}</Text>;
+                          }
+                          return (
+                            <View key={i} style={styles.participantLastWordBadgeGroup}>
+                              <Text style={styles.participantName}>{word}</Text>
+                              <View style={styles.participantInlineVerifiedBadge}>
+                                <Icon name="check" size={11} color="#fff" />
+                              </View>
+                            </View>
+                          );
+                        });
+                      })()}
                     </View>
+                    {resolvedRecipientStatusTier && resolvedRecipientStatusTier !== 'member' && (
+                      <StatusTierBadge tier={resolvedRecipientStatusTier} variant="compact" style={{ marginTop: 4, alignSelf: 'flex-start' }} />
+                    )}
                     <View style={styles.addressContainer}>
                       <Text style={styles.addressText}>
                         {(() => {
@@ -2095,28 +2185,38 @@ export const TransactionDetailScreen = () => {
                     </Text>
                   </View>
                   <View style={styles.participantDetails}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
-                      <Text style={styles.participantName}>
-                        {currentTx.amount?.startsWith('+') ? displayFromName : displayToName}
-                      </Text>
+                    <View style={styles.participantNameRow}>
                       {(() => {
                         const isIncoming = currentTx.amount?.startsWith('+');
-                        const verified = isIncoming ? currentTx.payerIsReferralVerified : currentTx.merchantIsReferralVerified;
-                        const tier = isIncoming ? currentTx.payerStatusTier : currentTx.merchantStatusTier;
-                        return (
-                          <>
-                            {verified && (
-                              <View style={{ width: 18, height: 18, borderRadius: 9, backgroundColor: '#3B82F6', alignItems: 'center', justifyContent: 'center' }}>
+                        const name = isIncoming ? displayFromName : displayToName;
+                        const verified = isIncoming ? resolvedPayerIsReferralVerified : resolvedMerchantIsReferralVerified;
+                        if (!verified) {
+                          return <Text style={styles.participantName}>{name}</Text>;
+                        }
+                        const words = name.trim().split(' ').filter(Boolean);
+                        return words.map((word, i) => {
+                          const isLast = i === words.length - 1;
+                          if (!isLast) {
+                            return <Text key={i} style={styles.participantName}>{word}{' '}</Text>;
+                          }
+                          return (
+                            <View key={i} style={styles.participantLastWordBadgeGroup}>
+                              <Text style={styles.participantName}>{word}</Text>
+                              <View style={styles.participantInlineVerifiedBadge}>
                                 <Icon name="check" size={11} color="#fff" />
                               </View>
-                            )}
-                            {tier && tier !== 'member' && (
-                              <StatusTierBadge tier={tier} variant="compact" />
-                            )}
-                          </>
-                        );
+                            </View>
+                          );
+                        });
                       })()}
                     </View>
+                    {(() => {
+                      const isIncoming = currentTx.amount?.startsWith('+');
+                      const tier = isIncoming ? resolvedPayerStatusTier : resolvedMerchantStatusTier;
+                      return tier && tier !== 'member' ? (
+                        <StatusTierBadge tier={tier} variant="compact" style={{ marginTop: 4, alignSelf: 'flex-start' }} />
+                      ) : null;
+                    })()}
                     <View style={styles.addressContainer}>
                       <Text style={styles.addressText}>
                         {/* Hide phone/address for payment transactions to preserve privacy */}

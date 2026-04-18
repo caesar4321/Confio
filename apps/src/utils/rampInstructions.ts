@@ -68,21 +68,24 @@ const prettifyRowLabel = (raw: string) => {
 };
 
 const parseAddressRows = (rawAddress?: string | null): RampInstructionRow[] => {
-  return splitAddressLines(rawAddress).map((line, index) => {
+  return splitAddressLines(rawAddress).flatMap((line, index) => {
+    if (/^deposita\s+ac[aá]\s+/i.test(line)) {
+      return [];
+    }
     if (/^0x[a-f0-9]{40}$/i.test(line)) {
-      return { label: 'Dirección del proveedor', value: line };
+      return [{ label: 'Dirección del proveedor', value: line }];
     }
     if (line.includes('@') && !line.includes(' ')) {
-      return { label: 'Email', value: line };
+      return [{ label: 'Email', value: line }];
     }
     const match = line.match(/^([A-Za-z]+)\s+(.*)$/);
     if (!match) {
-      return { label: `Dato ${index + 1}`, value: line };
+      return [{ label: `Dato ${index + 1}`, value: line }];
     }
-    return {
+    return [{
       label: prettifyRowLabel(match[1]),
       value: match[2].trim(),
-    };
+    }];
   });
 };
 

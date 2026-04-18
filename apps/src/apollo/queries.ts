@@ -2539,7 +2539,7 @@ export const GET_UNIFIED_TRANSACTIONS = gql`
       senderDisplayName
       senderPhone
       senderAddress
-      
+
       counterpartyUser {
         id
         username
@@ -2971,7 +2971,7 @@ export const GET_CURRENT_ACCOUNT_TRANSACTIONS = gql`
       senderDisplayName
       senderPhone
       senderAddress
-      
+
       counterpartyUser {
         id
         username
@@ -3066,7 +3066,7 @@ export const GET_UNIFIED_TRANSACTIONS_WITH_FRIEND = gql`
       senderDisplayName
       senderPhone
       senderAddress
-      
+
       counterpartyUser {
         id
         username

@@ -26,10 +26,12 @@ class AppCheckService {
     private lastFailureAt = 0;
     private lastError: string | null = null;
     private lastErrorAt = 0;
+    private rateLimitedUntil = 0;
 
     private static readonly TOKEN_REUSE_MS = 5 * 60 * 1000;
     private static readonly FAILURE_BACKOFF_MS = 30 * 1000;
     private static readonly ERROR_DEBUG_WINDOW_MS = 2 * 60 * 1000;
+    private static readonly RATE_LIMIT_BACKOFF_MS = 2 * 60 * 1000;
 
     private isDebugAllowed(): boolean {
         return String(ALLOW_APP_CHECK_DEBUG).toLowerCase() === 'true';
@@ -94,11 +96,23 @@ class AppCheckService {
         this.lastFailureAt = Date.now();
         this.lastError = message;
         this.lastErrorAt = this.lastFailureAt;
+        if (this.isRateLimitedMessage(message)) {
+            this.rateLimitedUntil = this.lastFailureAt + AppCheckService.RATE_LIMIT_BACKOFF_MS;
+        }
     }
 
     private clearFailure() {
         this.lastError = null;
         this.lastErrorAt = 0;
+        this.rateLimitedUntil = 0;
+    }
+
+    private isRateLimitedMessage(message: string): boolean {
+        return message.toLowerCase().includes('too many attempts');
+    }
+
+    private isRateLimitedNow(): boolean {
+        return this.rateLimitedUntil > Date.now();
     }
 
     private async sleep(ms: number): Promise<void> {
@@ -144,6 +158,10 @@ class AppCheckService {
             return this.lastToken;
         }
 
+        if (this.isRateLimitedNow()) {
+            return this.lastToken;
+        }
+
         if (this.lastFailureAt && now - this.lastFailureAt < AppCheckService.FAILURE_BACKOFF_MS) {
             return this.lastToken;
         }
@@ -175,15 +193,20 @@ class AppCheckService {
             return immediateToken;
         }
 
-        const retryPlan = [
-            { forceRefresh: true, delayMs: 350 },
-            { forceRefresh: true, delayMs: 1200 },
-        ];
+        if (this.isRateLimitedNow()) {
+            return this.lastToken;
+        }
+
+        const retryPlan = [{ forceRefresh: false, delayMs: 1200 }];
 
         for (const attempt of retryPlan) {
             const token = await this.fetchToken(attempt.forceRefresh);
             if (token) {
                 return token;
+            }
+
+            if (this.isRateLimitedNow()) {
+                break;
             }
 
             await this.sleep(attempt.delayMs);

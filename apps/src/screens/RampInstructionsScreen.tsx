@@ -67,9 +67,18 @@ const getStatusMeta = (
         icon: 'clock' as const,
       };
     case 'PENDING':
-      return { label: 'Pendiente', detailLabel: 'Pendiente', tone: 'neutral' as const, icon: 'clock' as const };
+    case 'PAYMENT_CREATED':
+    case 'PAYMENT_RECEIVED':
+      return {
+        label: direction === 'ON_RAMP' ? 'Procesando tu compra' : 'Procesando tu retiro',
+        detailLabel: 'En proceso',
+        tone: 'info' as const,
+        icon: 'loader' as const,
+      };
     case 'EXECUTING':
     case 'IN_PROGRESS':
+    case 'CRYPTO_TX_SENT':
+    case 'FIAT_SENT':
       return {
         label: direction === 'ON_RAMP' ? 'Procesando tu compra' : 'Procesando tu retiro',
         detailLabel: 'En proceso',
@@ -308,6 +317,12 @@ export const RampInstructionsScreen = () => {
             <View style={styles.row}>
               <Text style={styles.label}>Detalle</Text>
               <Text style={styles.value}>{statusDetails}</Text>
+            </View>
+          ) : null}
+          {!isTerminalSuccess && !isTerminalError ? (
+            <View style={styles.settlementNotice}>
+              <Icon name="clock" size={13} color={colors.textSecondary} />
+              <Text style={styles.settlementNoticeText}>El acreditado puede tardar hasta 1 hora según el medio de pago.</Text>
             </View>
           ) : null}
           <View style={styles.row}>
@@ -570,6 +585,18 @@ const styles = StyleSheet.create({
   variantCard_generic: {
     backgroundColor: colors.surface,
     borderColor: colors.border,
+  },
+  settlementNotice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+    paddingVertical: 6,
+  },
+  settlementNoticeText: {
+    flex: 1,
+    fontSize: 12,
+    color: colors.textSecondary,
+    lineHeight: 17,
   },
   row: {
     flexDirection: 'row',

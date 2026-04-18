@@ -42,6 +42,8 @@ const deriveStatusFromNotificationType = (notificationType: string): string | un
       return 'failed';
     case 'RAMP_PENDING':
       return 'pending';
+    case 'RAMP_PROCESSING':
+      return 'pending';
     case 'RAMP_COMPLETED':
       return 'completed';
     case 'USDC_DEPOSIT_PENDING':
@@ -351,7 +353,7 @@ export const NotificationScreen = () => {
     if (notifType === 'CONVERSION_COMPLETED') baseTxnType = 'conversion';
     if (notifType === 'USDC_DEPOSIT_COMPLETED' || notifType === 'USDC_DEPOSIT_PENDING') baseTxnType = 'deposit';
     if (notifType === 'USDC_WITHDRAWAL_COMPLETED') baseTxnType = 'withdrawal';
-    if (notifType === 'RAMP_PENDING' || notifType === 'RAMP_COMPLETED' || notifType === 'RAMP_FAILED') baseTxnType = 'ramp';
+    if (notifType === 'RAMP_PENDING' || notifType === 'RAMP_PROCESSING' || notifType === 'RAMP_COMPLETED' || notifType === 'RAMP_FAILED') baseTxnType = 'ramp';
 
     // Parse data blob once
     let parsedData: any = notification.data;
@@ -986,6 +988,7 @@ export const NotificationScreen = () => {
       USDC_DEPOSIT_COMPLETED: { icon: 'download', color: '#06B6D4' },
       USDC_WITHDRAWAL_COMPLETED: { icon: 'upload', color: '#06B6D4' },
       RAMP_PENDING: { icon: 'repeat', color: '#F59E0B' },
+      RAMP_PROCESSING: { icon: 'repeat', color: '#3B82F6' },
       RAMP_COMPLETED: { icon: 'repeat', color: '#06B6D4' },
       RAMP_FAILED: { icon: 'x-circle', color: '#EF4444' },
 

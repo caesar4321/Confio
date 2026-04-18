@@ -17,7 +17,7 @@ import { GET_MY_REFERRALS } from '../apollo/queries';
 import { biometricAuthService } from '../services/biometricAuthService';
 import authService from '../services/authService';
 import { AnalyticsService } from '../services/analyticsService';
-import { StatusTierBadge, TierProgress, getTierMeta } from '../components/StatusTierBadge';
+import { StatusTierBadge, TierProgress } from '../components/StatusTierBadge';
 import { colors } from '../config/theme';
 
 // Utility function to format phone number with country code
@@ -390,13 +390,30 @@ export const ProfileScreen = () => {
                 <Icon name="edit-2" size={12} color="#fff" />
               </View>
             </TouchableOpacity>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={styles.name}>{displayInfo.name}</Text>
-              {activeAccount?.type.toLowerCase() !== 'business' && userProfile?.isReferralVerified && (
-                <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: '#3B82F6', justifyContent: 'center', alignItems: 'center' }}>
-                  <Icon name="check" size={12} color="#fff" />
-                </View>
-              )}
+            <View style={styles.profileNameRow}>
+              {(() => {
+                const name = displayInfo.name;
+                const isPersonal = activeAccount?.type.toLowerCase() !== 'business';
+                const verified = isPersonal && userProfile?.isReferralVerified;
+                if (!verified) {
+                  return <Text style={styles.name}>{name}</Text>;
+                }
+                const words = name.trim().split(' ').filter(Boolean);
+                return words.map((word, i) => {
+                  const isLast = i === words.length - 1;
+                  if (!isLast) {
+                    return <Text key={i} style={styles.name}>{word}{' '}</Text>;
+                  }
+                  return (
+                    <View key={i} style={styles.profileLastWordBadgeGroup}>
+                      <Text style={styles.name}>{word}</Text>
+                      <View style={styles.profileInlineVerifiedBadge}>
+                        <Icon name="check" size={12} color="#fff" />
+                      </View>
+                    </View>
+                  );
+                });
+              })()}
             </View>
             {activeAccount?.type.toLowerCase() !== 'business' && userProfile?.statusTier && userProfile.statusTier !== 'member' && (
               <StatusTierBadge tier={userProfile.statusTier} style={{ marginTop: 2, marginBottom: 4 }} />
@@ -923,7 +940,25 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: 'bold',
     color: '#fff',
+  },
+  profileNameRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
     marginBottom: 4,
+  },
+  profileLastWordBadgeGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  profileInlineVerifiedBadge: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#3B82F6',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   accountType: {
     fontSize: 14,
