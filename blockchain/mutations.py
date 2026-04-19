@@ -3256,11 +3256,18 @@ class SubmitAutoSwapTransactionsMutation(graphene.Mutation):
                 if ramp_tx and ramp_tx.provider == 'koywe' and ramp_tx.provider_order_id:
                     from ramps.koywe_client import KoyweClient
                     koywe_client = KoyweClient()
-                    logger.info(f"Associating TX ID {txid} with Koywe order {ramp_tx.provider_order_id}")
+                    ramp_metadata = ramp_tx.metadata or {}
+                    koywe_auth_email = str(ramp_metadata.get('auth_email') or '').strip() or user.email
+                    logger.info(
+                        "Associating TX ID %s with Koywe order %s using email %s",
+                        txid,
+                        ramp_tx.provider_order_id,
+                        koywe_auth_email,
+                    )
                     koywe_client.add_order_tx_hash(
                         order_id=ramp_tx.provider_order_id,
                         tx_hash=txid,
-                        email=user.email
+                        email=koywe_auth_email,
                     )
             except Exception as koywe_exc:
                 # Log error but don't fail the mutation, as the TX is already on-chain
