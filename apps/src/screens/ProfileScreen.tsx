@@ -19,6 +19,7 @@ import authService from '../services/authService';
 import { AnalyticsService } from '../services/analyticsService';
 import { StatusTierBadge, TierProgress } from '../components/StatusTierBadge';
 import { colors } from '../config/theme';
+import { buildInviteLink, normalizeInviteUsername } from '../utils/inviteLinks';
 
 // Utility function to format phone number with country code
 const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string => {
@@ -75,9 +76,11 @@ export const ProfileScreen = () => {
 
   const referralShareMessage = React.useMemo(() => {
     // Generate clean, uppercase username for the link
-    const rawName = (userProfile?.username || '').replace('@', '');
-    const cleanUsername = rawName.toUpperCase();
-    const inviteLink = `https://confio.lat/invite/${cleanUsername}`;
+    const cleanUsername = normalizeInviteUsername(userProfile?.username);
+    const inviteLink = buildInviteLink({
+      username: userProfile?.username,
+      source: 'whatsapp',
+    });
 
     return [
       'Te envié un regalo de US$5 en $CONFIO 🎁',
@@ -95,6 +98,18 @@ export const ProfileScreen = () => {
   }, [userProfile?.username]);
 
   const handleShareReferral = React.useCallback(async () => {
+    try {
+      AnalyticsService.logFunnelEvent('referral_whatsapp_share_tapped', {
+        surface: 'profile',
+        referral_code: normalizeInviteUsername(userProfile?.username),
+      }, {
+        sourceType: 'referral_link',
+        channel: 'whatsapp',
+      });
+    } catch (_e) {
+      // never block sharing
+    }
+
     const encodedMessage = encodeURIComponent(referralShareMessage);
     const whatsappSchemeUrl = `whatsapp://send?text=${encodedMessage}`;
     const whatsappWebUrl = `https://wa.me/?text=${encodedMessage}`;

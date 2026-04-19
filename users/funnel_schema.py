@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 # Client-emittable events. Keep this tight.
 CLIENT_EMITTABLE_EVENTS = frozenset({
     'whatsapp_share_tapped',
+    'referral_whatsapp_share_tapped',
     'invite_share_dismissed',
     'claim_entry_viewed',
 })

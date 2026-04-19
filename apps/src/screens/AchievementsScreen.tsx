@@ -18,6 +18,8 @@ import { NavigationProp } from '@react-navigation/native';
 import { MainStackParamList } from '../types/navigation';
 import { useAuth } from '../contexts/AuthContext';
 import { ReferralInputModal } from '../components/ReferralInputModal';
+import { buildInviteLink, normalizeInviteUsername } from '../utils/inviteLinks';
+import { AnalyticsService } from '../services/analyticsService';
 import { colors } from '../config/theme';
 
 type Step = {
@@ -40,9 +42,11 @@ export const AchievementsScreen: React.FC = () => {
 
   const shareMessage = useMemo(() => {
     // Generate clean, uppercase username for the link
-    const rawName = (username || 'tuUsuario').replace('@', '');
-    const cleanUsername = rawName.toUpperCase();
-    const inviteLink = `https://confio.lat/invite/${cleanUsername}`;
+    const cleanUsername = normalizeInviteUsername(username || 'tuUsuario');
+    const inviteLink = buildInviteLink({
+      username: username || 'tuUsuario',
+      source: 'whatsapp',
+    });
 
     return [
       'Te envié un regalo de US$5 en $CONFIO 🎁',
@@ -83,6 +87,18 @@ export const AchievementsScreen: React.FC = () => {
   );
 
   const handleShare = async () => {
+    try {
+      AnalyticsService.logFunnelEvent('referral_whatsapp_share_tapped', {
+        surface: 'achievements',
+        referral_code: normalizeInviteUsername(username || 'tuUsuario'),
+      }, {
+        sourceType: 'referral_link',
+        channel: 'whatsapp',
+      });
+    } catch (_e) {
+      // never block sharing
+    }
+
     const encodedMessage = encodeURIComponent(shareMessage);
     const whatsappSchemeUrl = `whatsapp://send?text=${encodedMessage}`;
     const whatsappWebUrl = `https://wa.me/?text=${encodedMessage}`;

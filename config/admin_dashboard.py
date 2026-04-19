@@ -218,8 +218,14 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             created_at__gte=funnel_last_7_start,
         )
         context['referral_funnel_stats'] = {
+            'share_tapped_total': referral_30d.filter(event_name='referral_whatsapp_share_tapped').count(),
+            'share_tapped_7d': referral_7d.filter(event_name='referral_whatsapp_share_tapped').count(),
             'link_clicked_total': referral_30d.filter(event_name='referral_link_clicked').count(),
             'link_clicked_7d': referral_7d.filter(event_name='referral_link_clicked').count(),
+            'share_to_click_pct': (
+                referral_30d.filter(event_name='referral_link_clicked').count()
+                / referral_30d.filter(event_name='referral_whatsapp_share_tapped').count() * 100
+            ) if referral_30d.filter(event_name='referral_whatsapp_share_tapped').count() else 0,
             'raw_events_30d': referral_30d.count(),
         }
         context['referral_recent'] = list(

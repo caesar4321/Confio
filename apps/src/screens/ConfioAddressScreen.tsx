@@ -16,6 +16,8 @@ import { MainStackParamList, RootStackParamList } from '../types/navigation';
 import { useAuth } from '../contexts/AuthContext';
 import { Header } from '../navigation/Header';
 import { ReferralInputModal } from '../components/ReferralInputModal';
+import { buildInviteLink, normalizeInviteUsername } from '../utils/inviteLinks';
+import { AnalyticsService } from '../services/analyticsService';
 import WhatsAppLogo from '../assets/svg/WhatsApp.svg';
 import { colors } from '../config/theme';
 
@@ -35,9 +37,11 @@ export const ConfioAddressScreen: React.FC = () => {
 
   const shareMessage = React.useMemo(() => {
     // Generate clean, uppercase username for the link
-    const rawName = (username || 'tuUsuario').replace('@', '');
-    const cleanUsername = rawName.toUpperCase();
-    const inviteLink = `https://confio.lat/invite/${cleanUsername}`;
+    const cleanUsername = normalizeInviteUsername(username || 'tuUsuario');
+    const inviteLink = buildInviteLink({
+      username: username || 'tuUsuario',
+      source: 'whatsapp',
+    });
 
     return [
       'Únete a Confío y gana US$5 en $CONFIO conmigo.',
@@ -60,6 +64,18 @@ export const ConfioAddressScreen: React.FC = () => {
   }, [username]);
 
   const handleShare = React.useCallback(async () => {
+    try {
+      AnalyticsService.logFunnelEvent('referral_whatsapp_share_tapped', {
+        surface: 'confio_address',
+        referral_code: normalizeInviteUsername(username || 'tuUsuario'),
+      }, {
+        sourceType: 'referral_link',
+        channel: 'whatsapp',
+      });
+    } catch (_e) {
+      // never block sharing
+    }
+
     const encodedMessage = encodeURIComponent(shareMessage);
     const whatsappSchemeUrl = `whatsapp://send?text=${encodedMessage}`;
     const whatsappWebUrl = `https://wa.me/?text=${encodedMessage}`;

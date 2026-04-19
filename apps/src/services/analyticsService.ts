@@ -14,6 +14,7 @@ import { TRACK_FUNNEL_EVENT } from '../apollo/mutations';
 // whitelist in users/funnel_schema.py (CLIENT_EMITTABLE_EVENTS).
 export type ClientFunnelEvent =
     | 'whatsapp_share_tapped'
+    | 'referral_whatsapp_share_tapped'
     | 'invite_share_dismissed'
     | 'claim_entry_viewed';
 

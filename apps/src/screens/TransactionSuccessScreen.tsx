@@ -13,6 +13,7 @@ import RNShare from 'react-native-share';
 import { colors } from '../config/theme';
 import { AnalyticsService } from '../services/analyticsService';
 import { StatusTierBadge } from '../components/StatusTierBadge';
+import { buildInviteLink } from '../utils/inviteLinks';
 
 type TransactionType = 'sent' | 'received' | 'payment';
 
@@ -160,14 +161,15 @@ export const TransactionSuccessScreen = () => {
   const supportCopy = getSupportCopy(userProfile?.phoneCountry);
 
   const handleShareInvitation = async () => {
+    const invitationId = (transactionData as any).invitationId
+      || (transactionData as any).invitation_id
+      || undefined;
+
     // Fire-and-forget funnel event: the user tapped the WhatsApp share
     // button. This is the first real signal that A will actually notify B
     // about the invite — the critical `invite_submitted → share_tapped`
     // step in the Invitar y Enviar funnel.
     try {
-      const invitationId = (transactionData as any).invitationId
-        || (transactionData as any).invitation_id
-        || undefined;
       const currencyForEvent = formatCurrency(transactionData.currency);
       AnalyticsService.logFunnelEvent('whatsapp_share_tapped', {
         invitation_id: invitationId,
@@ -187,15 +189,11 @@ export const TransactionSuccessScreen = () => {
       const currency = formatCurrency(transactionData.currency);
 
       // Generate invite link with uppercase username
-      const rawUsername = userProfile?.username || '';
-      const cleanUsername = rawUsername.replace('@', '').toUpperCase();
-      const inviteParams = new URLSearchParams({
+      const inviteLink = buildInviteLink({
+        username: userProfile?.username,
         source: 'whatsapp',
+        invitationId,
       });
-      if (invitationId) {
-        inviteParams.set('invitation_id', String(invitationId));
-      }
-      const inviteLink = `https://confio.lat/invite/${cleanUsername}?${inviteParams.toString()}`;
 
       const message = `¡Hola! Te envié ${amount} ${currency} por Confío. 🎉\n\nTienes 7 días para reclamarlo. Descarga la app y crea tu cuenta:\n\n📲 ${inviteLink}\n\n¡Es gratis y en segundos recibes tu dinero!`;
       const encodedMessage = encodeURIComponent(message);
@@ -260,10 +258,11 @@ export const TransactionSuccessScreen = () => {
       }
     } catch (error) {
       try {
-        // Use the same format as line 176 for consistency
-        const rawUsername = userProfile?.username || '';
-        const cleanUsername = rawUsername.replace('@', '').toUpperCase();
-        const inviteLink = `https://confio.lat/invite/${cleanUsername}`;
+        const inviteLink = buildInviteLink({
+          username: userProfile?.username,
+          source: 'whatsapp',
+          invitationId,
+        });
         const fallbackMessage = [
           'Te envié dinero por Confío 💰',
           '',

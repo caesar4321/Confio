@@ -35,6 +35,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { getSupportCopy } from '../utils/supportMessaging';
 import { colors } from '../config/theme';
 import { StatusTierBadge } from '../components/StatusTierBadge';
+import { buildInviteLink } from '../utils/inviteLinks';
 
 type TransactionDetailScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 type TransactionDetailScreenRouteProp = RouteProp<MainStackParamList, 'TransactionDetail'>;
@@ -2525,11 +2526,17 @@ export const TransactionDetailScreen = () => {
                     const cleanPhone = phoneRaw ? String(phoneRaw).replace(/[^\d]/g, '') : '';
                     const amount = formatAmount(currentTx.amount);
                     const currency = currentTx.currency || 'cUSD';
+                    const invitationId = (currentTx as any).invitationId
+                      || (currentTx as any).invitation_id
+                      || (transactionData as any)?.invitationId
+                      || (transactionData as any)?.invitation_id
+                      || '';
 
-                    // Generate invite link with uppercase username
-                    const rawUsername = userProfile?.username || '';
-                    const cleanUsername = rawUsername.replace('@', '').toUpperCase();
-                    const inviteLink = `https://confio.lat/invite/${cleanUsername}`;
+                    const inviteLink = buildInviteLink({
+                      username: userProfile?.username,
+                      source: 'whatsapp',
+                      invitationId,
+                    });
 
                     const message = `¡Hola! Te envié ${amount} ${currency} por Confío. 🎉\n\nTienes 7 días para reclamarlo. Descarga la app y crea tu cuenta:\n\n📲 ${inviteLink}\n\n¡Es gratis y en segundos recibes tu dinero!`;
                     const encodedMessage = encodeURIComponent(message);
@@ -2603,10 +2610,16 @@ export const TransactionDetailScreen = () => {
                     }
                   } catch (error) {
                     try {
-                      // Use the same format as line 2397 for consistency
-                      const rawUsername = userProfile?.username || '';
-                      const cleanUsername = rawUsername.replace('@', '').toUpperCase();
-                      const inviteLink = `https://confio.lat/invite/${cleanUsername}`;
+                      const invitationId = (currentTx as any).invitationId
+                        || (currentTx as any).invitation_id
+                        || (transactionData as any)?.invitationId
+                        || (transactionData as any)?.invitation_id
+                        || '';
+                      const inviteLink = buildInviteLink({
+                        username: userProfile?.username,
+                        source: 'whatsapp',
+                        invitationId,
+                      });
                       const fallbackMessage = [
                         'Te envié dinero por Confío 💰',
                         '',
