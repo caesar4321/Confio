@@ -11,6 +11,7 @@ from notifications.models import NotificationType as NotificationTypeChoices
 from notifications.utils import create_notification
 from ramps.models import RampTransaction
 from usdc_transactions.models import GuardarianTransaction, USDCDeposit, USDCWithdrawal
+from achievements.models import UserReferral
 from users.funnel import emit_event
 from users.models_unified import UnifiedTransactionTable
 from users.utils import touch_user_activity
@@ -121,6 +122,24 @@ def _derive_final_amount(ramp_tx: RampTransaction) -> tuple[Decimal | None, str]
     if ramp_tx.crypto_amount_estimated is not None:
         return ramp_tx.crypto_amount_estimated, 'CUSD'
     return None, ramp_tx.final_currency or 'CUSD'
+
+
+def _classify_first_deposit_source(user_id: int | None) -> str:
+    if not user_id:
+        return 'organic'
+
+    if PhoneInvite.objects.filter(
+        claimed_by_id=user_id,
+        status='claimed',
+    ).exists():
+        return 'send_invite'
+
+    if UserReferral.objects.filter(
+        referred_user_id=user_id,
+    ).exclude(status='inactive').exists():
+        return 'referral_link'
+
+    return 'organic'
 
 
 def sync_ramp_transaction_from_guardarian(guardarian_tx: GuardarianTransaction) -> RampTransaction:
@@ -337,16 +356,13 @@ def handle_ramp_transaction_save(sender, instance, created, **kwargs):
                 or instance.crypto_amount_actual
                 or instance.crypto_amount_estimated
             )
-            has_claimed_phone_invite = PhoneInvite.objects.filter(
-                claimed_by_id=instance.actor_user_id,
-                status='claimed',
-            ).exists()
+            source_type = _classify_first_deposit_source(instance.actor_user_id)
             emit_event(
                 'first_deposit',
                 user=instance.actor_user,
                 country=instance.country_code or getattr(instance.actor_user, 'phone_country', '') or '',
                 platform='',
-                source_type='send_invite' if has_claimed_phone_invite else 'organic',
+                source_type=source_type,
                 channel='koywe' if instance.provider == 'KOYWE' else (instance.provider or '').lower(),
                 properties={
                     'provider': instance.provider,

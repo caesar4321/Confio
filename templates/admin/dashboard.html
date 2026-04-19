@@ -701,9 +701,14 @@
             <div class="metric-change">Share → Click: {{ referral_funnel_stats.share_to_click_pct|floatformat:1 }}%</div>
         </div>
         <div class="metric-card">
+            <div class="metric-label">Referral First Deposits (30d)</div>
+            <div class="metric-value">{{ referral_funnel_stats.first_deposit_total|default:"0"|intcomma }}</div>
+            <div class="metric-change">Click → Deposit: {{ referral_funnel_stats.click_to_deposit_pct|floatformat:1 }}%</div>
+        </div>
+        <div class="metric-card">
             <div class="metric-label">Referral Raw Events</div>
             <div class="metric-value">{{ referral_funnel_stats.raw_events_30d|default:"0"|intcomma }}</div>
-            <div class="metric-change">Link clicks 7d: {{ referral_funnel_stats.link_clicked_7d|default:"0"|intcomma }}</div>
+            <div class="metric-change">Deposits 7d: {{ referral_funnel_stats.first_deposit_7d|default:"0"|intcomma }}</div>
         </div>
     </div>
 

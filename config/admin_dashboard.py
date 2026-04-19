@@ -222,10 +222,16 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             'share_tapped_7d': referral_7d.filter(event_name='referral_whatsapp_share_tapped').count(),
             'link_clicked_total': referral_30d.filter(event_name='referral_link_clicked').count(),
             'link_clicked_7d': referral_7d.filter(event_name='referral_link_clicked').count(),
+            'first_deposit_total': referral_30d.filter(event_name='first_deposit').count(),
+            'first_deposit_7d': referral_7d.filter(event_name='first_deposit').count(),
             'share_to_click_pct': (
                 referral_30d.filter(event_name='referral_link_clicked').count()
                 / referral_30d.filter(event_name='referral_whatsapp_share_tapped').count() * 100
             ) if referral_30d.filter(event_name='referral_whatsapp_share_tapped').count() else 0,
+            'click_to_deposit_pct': (
+                referral_30d.filter(event_name='first_deposit').count()
+                / referral_30d.filter(event_name='referral_link_clicked').count() * 100
+            ) if referral_30d.filter(event_name='referral_link_clicked').count() else 0,
             'raw_events_30d': referral_30d.count(),
         }
         context['referral_recent'] = list(
