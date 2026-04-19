@@ -194,6 +194,9 @@ export const RampInstructionsScreen = () => {
   const qrPayloadByteLength = useMemo(() => (qrPayload ? getQrPayloadByteLength(qrPayload) : 0), [qrPayload]);
   const canRenderQr = Boolean(qrPayload) && qrPayloadByteLength <= QR_RENDER_MAX_BYTES;
   const hasQrAsset = Boolean(instructionView.qrImageUri) || canRenderQr;
+  const sameHolderNotice = direction === 'ON_RAMP'
+    ? 'Haz el pago desde una cuenta o billetera a tu mismo nombre. Transferencias de terceros pueden no acreditarse.'
+    : 'La cuenta o billetera de destino debe estar a tu mismo nombre para que el retiro pueda procesarse correctamente.';
   const hasInstructionDetails =
     instructionView.rows.length > 0
     || Boolean(instructionView.qrImageUri)
@@ -371,6 +374,11 @@ export const RampInstructionsScreen = () => {
         {hasInstructionDetails ? (
           <RampReveal delay={170}>
           <RampCard style={styles.card}>
+            <View style={styles.identityNotice}>
+              <Icon name="user-check" size={15} color={colors.primaryDark} />
+              <Text style={styles.identityNoticeText}>{sameHolderNotice}</Text>
+            </View>
+
             {instructionView.rows.length > 0 ? (
               <>
                 {instructionView.rows.map((item, index) => (
@@ -892,6 +900,24 @@ const styles = StyleSheet.create({
     lineHeight: 19,
     color: colors.textSecondary,
     fontStyle: 'italic',
+  },
+  identityNotice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: '#ecfdf5',
+    borderWidth: 1,
+    borderColor: '#a7f3d0',
+    marginBottom: 6,
+  },
+  identityNoticeText: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 19,
+    color: colors.primaryDark,
+    fontWeight: '600',
   },
   copyPill: {
     flexDirection: 'row',
