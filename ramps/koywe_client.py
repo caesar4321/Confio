@@ -994,20 +994,11 @@ class KoyweClient:
         return enriched
 
     def _determine_next_step(self, *, direction: str, next_action_url: str | None, order: dict | None = None) -> str:
-        # Algorand off-ramps always require the client to burn+send cUSD→USDC.
-        # Koywe may return a providedAction tracing URL even for these orders, but
-        # that URL is just a status page — the actual payment must come from us.
-        # Detect this case by checking for an Algorand destination address.
-        if direction == 'OFF_RAMP' and order:
-            import re as _re
-            provided_address = str(order.get('providedAddress') or order.get('destinationAddress') or '')
-            if _re.match(r'^[A-Z2-7]{58}$', provided_address):
-                return 'WAIT_FOR_USDC_TRANSFER'
+        if direction == 'OFF_RAMP':
+            return 'WAIT_FOR_USDC_TRANSFER'
         if next_action_url:
             return 'OPEN_PROVIDER_FLOW'
-        if direction == 'ON_RAMP':
-            return 'SHOW_PAYMENT_INSTRUCTIONS'
-        return 'WAIT_FOR_USDC_TRANSFER'
+        return 'SHOW_PAYMENT_INSTRUCTIONS'
 
     def _split_name(self, full_name: str) -> tuple[str, str]:
         parts = [part for part in (full_name or '').strip().split() if part]
