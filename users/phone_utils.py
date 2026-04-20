@@ -23,6 +23,40 @@ def _get_iso_to_cc() -> dict[str, str]:
     return _ISO_TO_CC
 
 
+def _resolve_calling_code(country: Optional[str]) -> str:
+    cc_raw = (country or '').strip()
+    if not cc_raw:
+        return ''
+    if cc_raw.startswith('+') or cc_raw.isdigit():
+        return cc_raw.replace('+', '')
+    cc = _get_iso_to_cc().get(cc_raw.upper(), '')
+    return cc.replace('+', '') if cc else ''
+
+
+def canonicalize_phone_digits(phone_number: str, country: Optional[str]) -> str:
+    """Return canonical local digits for storage and duplicate checks.
+
+    Rules:
+    - Strip non-digits.
+    - If the input includes the country calling code, remove it.
+    - For Argentina (+54), collapse the optional mobile `9` variant after country
+      code so `+54 9 223...` and `+54 223...` map to the same canonical digits.
+    - Also tolerate a leading national trunk `0` for Argentina.
+    """
+    digits = ''.join(ch for ch in (phone_number or '') if ch.isdigit())
+    calling_code = _resolve_calling_code(country)
+    if calling_code and digits.startswith(calling_code) and len(digits) > len(calling_code) + 4:
+        digits = digits[len(calling_code):]
+
+    if calling_code == '54':
+        if digits.startswith('0') and len(digits) >= 11:
+            digits = digits[1:]
+        if digits.startswith('9') and len(digits) >= 11:
+            digits = digits[1:]
+
+    return digits
+
+
 def normalize_phone(phone_number: str, country: Optional[str]) -> str:
     """Normalize to canonical key "callingcode:localdigits".
 
@@ -35,19 +69,9 @@ def normalize_phone(phone_number: str, country: Optional[str]) -> str:
       strip that prefix so the key is stable even if caller included the code.
     - Return e.g., "1:9293993619". If country cannot be resolved, return just digits.
     """
-    digits = ''.join(ch for ch in (phone_number or '') if ch.isdigit())
-    cc_raw = (country or '').strip()
-    calling_code = ''
-    if cc_raw:
-        if cc_raw.startswith('+') or cc_raw.isdigit():
-            calling_code = cc_raw.replace('+', '')
-        else:
-            cc = _get_iso_to_cc().get(cc_raw.upper(), '')
-            calling_code = cc.replace('+', '') if cc else ''
+    digits = canonicalize_phone_digits(phone_number, country)
+    calling_code = _resolve_calling_code(country)
     if calling_code:
-        # If input already included the country calling code, strip it
-        if digits.startswith(calling_code) and len(digits) > len(calling_code) + 4:
-            digits = digits[len(calling_code):]
         return f"{calling_code}:{digits}"
     return digits
 

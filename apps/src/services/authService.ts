@@ -44,6 +44,11 @@ type CustomJwtPayload = {
   [key: string]: any;
 };
 
+type LegacyMigrationInspection = {
+  legacyAddress: string | null;
+  inspectionSucceeded: boolean;
+};
+
 
 export class AccountDeactivatedError extends Error {
   constructor(message: string) {
@@ -76,8 +81,10 @@ export class AuthService {
     aud: string,
     provider: 'google' | 'apple',
     accountContext: AccountContext
-  ): Promise<string | null> {
-    if (accountContext.type !== 'personal') return null;
+  ): Promise<LegacyMigrationInspection> {
+    if (accountContext.type !== 'personal') {
+      return { legacyAddress: null, inspectionSucceeded: true };
+    }
 
     try {
       const { SecureDeterministicWalletService } = await import('./secureDeterministicWallet');
@@ -99,7 +106,7 @@ export class AuthService {
       try {
         info = await algod.accountInformation(legacyWallet.address).do();
       } catch {
-        return null;
+        return { legacyAddress: null, inspectionSucceeded: true };
       }
 
       const relevantAssets = (info.assets || []).filter((asset: any) => {
@@ -120,13 +127,14 @@ export class AuthService {
           relevantAssetIds: relevantAssets.map((asset: any) => asset['asset-id']),
           spendableAlgo,
         });
-        return legacyWallet.address;
+        return { legacyAddress: legacyWallet.address, inspectionSucceeded: true };
       }
-    } catch (error) {
-      console.warn('[AuthService] Failed to inspect legacy migration state; falling back to default derivation:', error);
-    }
 
-    return null;
+      return { legacyAddress: null, inspectionSucceeded: true };
+    } catch (error) {
+      console.warn('[AuthService] Failed to inspect legacy migration state; blocking direct V2 derivation until migration state is verified:', error);
+      return { legacyAddress: null, inspectionSucceeded: false };
+    }
   }
 
   public static getInstance(): AuthService {
@@ -711,13 +719,18 @@ export class AuthService {
       const googleContext: AccountContext = { type: 'personal', index: 0 };
       const googleIss = 'https://accounts.google.com';
       const googleAud = GOOGLE_CLIENT_IDS.production.web;
-      const legacyAddress = await this.getLegacyAddressIfMigrationPending(
+      const legacyInspection = await this.getLegacyAddressIfMigrationPending(
         googleIss,
         googleSubject,
         googleAud,
         'google',
         googleContext
       );
+      const legacyAddress = legacyInspection.legacyAddress;
+
+      if (!legacyInspection.inspectionSucceeded && !authData.isKeylessMigrated) {
+        throw new Error('No pudimos verificar el estado de migración de tu billetera anterior. Vuelve a intentar para evitar usar una dirección nueva antes de completar la migración.');
+      }
 
       const algorandService = (await import('./algorandService')).default;
       const algorandAddress = legacyAddress
@@ -981,13 +994,18 @@ export class AuthService {
       const appleContext: AccountContext = { type: 'personal', index: 0 };
       const appleIss = 'https://appleid.apple.com';
       const appleAud = 'com.confio.app';
-      const legacyAddress = await this.getLegacyAddressIfMigrationPending(
+      const legacyInspection = await this.getLegacyAddressIfMigrationPending(
         appleIss,
         appleSub,
         appleAud,
         'apple',
         appleContext
       );
+      const legacyAddress = legacyInspection.legacyAddress;
+
+      if (!legacyInspection.inspectionSucceeded && !authData.isKeylessMigrated) {
+        throw new Error('No pudimos verificar el estado de migración de tu billetera anterior. Vuelve a intentar para evitar usar una dirección nueva antes de completar la migración.');
+      }
 
       // Now derive Algorand wallet (pepper fetch requires JWT)
       let algorandAddress: string;

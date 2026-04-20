@@ -2398,6 +2398,7 @@ class UpdatePhoneNumber(graphene.Mutation):
 
 		# Update user's phone number and canonical phone key
 		try:
+			canonical_phone = normalize_phone(phone_number, country_code).split(':', 1)[-1]
 			phone_key = normalize_phone(phone_number, country_code)
 			allow_duplicates = is_review_test_phone_key(phone_key)
 			if not allow_duplicates:
@@ -2409,7 +2410,7 @@ class UpdatePhoneNumber(graphene.Mutation):
 					return UpdatePhoneNumber(success=False, error="Este número ya está registrado en Confío. Inicia sesión o recupera tu cuenta.")
 
 			user.phone_country = iso_country_code  # Store ISO code
-			user.phone_number = phone_number
+			user.phone_number = canonical_phone
 			user.phone_key = phone_key
 			user.save()
 			return UpdatePhoneNumber(success=True, error=None)

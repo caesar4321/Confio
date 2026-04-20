@@ -7,11 +7,16 @@ from django.db import IntegrityError
 import hmac
 import hashlib
 import logging
-import re
 
 from security.request_utils import extract_client_ip_from_meta, extract_device_id
 from .models import SMSVerification
-from .twilio_verify import send_verification_sms, check_verification, TwilioVerifyError
+from .twilio_verify import (
+    send_verification_sms,
+    check_verification,
+    canonicalize_phone_via_lookup,
+    lookup_phone_with_line_type,
+    TwilioVerifyError,
+)
 from users.country_codes import COUNTRY_CODES
 from users.phone_utils import normalize_phone
 from users.models import Account
@@ -29,28 +34,11 @@ def _validate_country_iso(iso_code: str) -> bool:
     return any(row[2] == iso_code for row in COUNTRY_CODES)
 
 
-def _numeric_code_for_iso(iso_code: str) -> str:
-    for row in COUNTRY_CODES:
-        if row[2] == iso_code:
-            return row[1].replace('+', '')
-    return ''
-
-
-def _format_e164(local_phone: str, iso_code: str) -> str:
-    """Format input into E.164.
-
-    - If `local_phone` already starts with '+', treat it as E.164 and just strip
-      non-digits after the '+' to avoid duplicating the calling code.
-    - Otherwise, prepend the calling code derived from `iso_code`.
-    """
-    s = (local_phone or '').strip()
-    if s.startswith('+'):
-        # Already E.164-like; normalize by removing non-digits after '+'
-        digits = re.sub(r"\D", "", s)
-        return f"+{digits}"
-    digits = re.sub(r"\D", "", s)
-    cc = _numeric_code_for_iso(iso_code)
-    return f"+{cc}{digits}"
+def _lookup_e164(local_phone: str, iso_code: str) -> str:
+    valid, phone_e164, _resolved_iso = canonicalize_phone_via_lookup(local_phone, country_code=iso_code)
+    if not valid or not phone_e164:
+        raise TwilioVerifyError("Invalid phone number")
+    return phone_e164
 
 
 def _hmac_code(phone_e164: str, code: str) -> str:
@@ -108,19 +96,24 @@ class InitiateSMSVerification(graphene.Mutation):
         if not _validate_country_iso(country_code):
             return InitiateSMSVerification(success=False, error="Invalid country code")
 
-        # Fuzzy match review number override (handles wrong country selection)
-        review_override = find_matching_review_number(phone_number)
-        if review_override:
-            phone_e164 = review_override
-        else:
-            phone_e164 = _format_e164(phone_number, country_code)
         ttl_sec = getattr(settings, 'SMS_CODE_TTL_SECONDS', 600)
 
         try:
+            # Fuzzy match review number override (handles wrong country selection)
+            review_override = find_matching_review_number(phone_number)
+            if review_override:
+                phone_e164 = review_override
+                lookup_line_type = None
+            else:
+                phone_e164 = None
+                lookup_line_type = None
+
             # Store review test number bypass (no external SMS)
             try:
-                for p, c in review_test_pairs():
-                    if phone_e164 == p:
+                if phone_e164:
+                    for p, c in review_test_pairs():
+                        if phone_e164 != p:
+                            continue
                         # Clean old unverified
                         SMSVerification.objects.filter(user=user, phone_number=phone_e164, is_verified=False).delete()
                         code_hash = _hmac_code(phone_e164, c)
@@ -219,17 +212,20 @@ class InitiateSMSVerification(graphene.Mutation):
                     return InitiateSMSVerification(success=False, error="Límites de seguridad de dispositivo excedidos. Intenta más tarde.")
 
             # --- End Rate Limiting ---
-            
-            # --- Carrier Lookup Check (VoIP/Landline Blocking) ---
-            # Perform this check AFTER rate limiting to save costs on Lookup API calls
-            from .twilio_verify import check_phone_line_type
-            
-            line_type = check_phone_line_type(phone_e164)
-            logger.info(f"Carrier Lookup for {phone_e164}: {line_type}")
+
+            if not phone_e164:
+                valid, phone_e164, _resolved_iso, lookup_line_type = lookup_phone_with_line_type(
+                    phone_number,
+                    country_code=country_code,
+                )
+                if not valid or not phone_e164:
+                    return InitiateSMSVerification(success=False, error="Número inválido. Verifica el número e inténtalo nuevamente.")
+
+            logger.info(f"Carrier Lookup for {phone_e164}: {lookup_line_type}")
             
             # Block known non-mobile types
-            if line_type in ['landline', 'voip', 'nonFixedVoip']:
-                 logger.warning(f"Blocked SMS to non-mobile line type: {line_type} for {phone_e164}")
+            if lookup_line_type in ['landline', 'voip', 'nonFixedVoip']:
+                 logger.warning(f"Blocked SMS to non-mobile line type: {lookup_line_type} for {phone_e164}")
                  return InitiateSMSVerification(success=False, error="Solo se permiten números móviles. No se admiten líneas fijas o VoIP.")
             
             # Allow: 'mobile', 'fixedVoip' (sometimes legitimate mobile in some countries), or None (failed lookup)
@@ -280,7 +276,7 @@ class VerifySMSCode(graphene.Mutation):
         if review_override:
             phone_e164 = review_override
         else:
-            phone_e164 = _format_e164(phone_number, country_code)
+            phone_e164 = _lookup_e164(phone_number, country_code)
         ver = SMSVerification.objects.filter(
             user=user,
             phone_number=phone_e164,
@@ -310,7 +306,7 @@ class VerifySMSCode(graphene.Mutation):
                             if duplicate_exists:
                                 return VerifySMSCode(success=False, error="Este número ya está registrado en Confío. Inicia sesión o recupera tu cuenta.")
 
-                        user.phone_number = phone_number
+                        user.phone_number = phone_key.split(':', 1)[-1]
                         user.phone_country = country_code
                         user.save()
 
@@ -386,7 +382,7 @@ class VerifySMSCode(graphene.Mutation):
                 if duplicate_exists:
                     return VerifySMSCode(success=False, error="Este número ya está registrado en Confío. Inicia sesión o recupera tu cuenta.")
 
-            user.phone_number = phone_number  # store without calling code
+            user.phone_number = phone_key.split(':', 1)[-1]
             user.phone_country = country_code
             user.save()
 

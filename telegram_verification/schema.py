@@ -8,12 +8,12 @@ from django.core.cache import cache
 from .models import TelegramVerification
 from users.country_codes import COUNTRY_CODES
 import logging
-import re
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError
 from users.phone_utils import normalize_phone
 from users.models import Account
 from blockchain.invite_send_mutations import ClaimInviteForPhone
+from sms_verification.twilio_verify import canonicalize_phone_via_lookup, TwilioVerifyError
 from users.review_numbers import (
     get_review_test_code_for_phone,
     is_review_test_phone_key,
@@ -28,30 +28,11 @@ def validate_country_code(iso_code: str) -> bool:
     """Validate if the given ISO code exists in our country codes list."""
     return any(country[2] == iso_code for country in COUNTRY_CODES)
 
-def get_country_code(iso_code: str) -> str:
-    """Get the numeric country code for a given ISO code."""
-    for country in COUNTRY_CODES:
-        if country[2] == iso_code:
-            return country[1].replace('+', '')  # Remove the + prefix
-    return ''
-
-def format_phone_number(phone_number):
-    """Format phone number to E.164 format."""
-    # Remove any non-digit characters
-    digits = re.sub(r'\D', '', phone_number)
-    
-    # If number is 7 digits, assume it's a US number and add country code
-    if len(digits) == 7:
-        return f"+1646{digits}"  # Adding US country code (1) and area code (646)
-    # If number is 10 digits, assume it's a US number without country code
-    elif len(digits) == 10:
-        return f"+1{digits}"
-    # If number starts with 1 and has 11 digits, it's already a US number
-    elif len(digits) == 11 and digits.startswith('1'):
-        return f"+{digits}"
-    # For other cases, just add + prefix
-    else:
-        return f"+{digits}"
+def lookup_phone_number(phone_number: str, country_code: str) -> str:
+    valid, formatted_phone, _resolved_iso = canonicalize_phone_via_lookup(phone_number, country_code=country_code)
+    if not valid or not formatted_phone:
+        raise TwilioVerifyError("Invalid phone number")
+    return formatted_phone
 
 class TelegramVerificationType(DjangoObjectType):
     class Meta:
@@ -83,14 +64,11 @@ class InitiateTelegramVerification(graphene.Mutation):
         if review_override:
             formatted_phone = review_override
         else:
-            # Get numeric country code for formatting
-            numeric_code = get_country_code(country_code)
-            if not numeric_code:
-                logger.error('Could not find numeric code for ISO: %s', country_code)
-                return InitiateTelegramVerification(success=False, error="Código de país inválido. Por favor selecciona un país válido.")
-            
-            # Format phone number to E.164
-            formatted_phone = f"+{numeric_code}{phone_number}"
+            try:
+                formatted_phone = lookup_phone_number(phone_number, country_code)
+            except TwilioVerifyError:
+                logger.error('Twilio Lookup rejected phone for ISO: %s', country_code)
+                return InitiateTelegramVerification(success=False, error="Número inválido. Verifica el número e inténtalo nuevamente.")
         logger.info('Formatted phone number: %s', formatted_phone)
         
         logger.info('Request headers: %s', dict(getattr(info.context, 'headers', {})))
@@ -262,13 +240,7 @@ class VerifyTelegramCode(graphene.Mutation):
             if review_override:
                 formatted_phone = review_override
             else:
-                # Get numeric country code
-                numeric_code = get_country_code(country_code)
-                if not numeric_code:
-                    return VerifyTelegramCode(success=False, error="Código de país inválido. Por favor selecciona un país válido.")
-                
-                # Format phone number to E.164
-                formatted_phone = f"+{numeric_code}{phone_number}"
+                formatted_phone = lookup_phone_number(phone_number, country_code)
             
             # Get the most recent unverified verification record
             verification = TelegramVerification.objects.filter(
@@ -290,7 +262,7 @@ class VerifyTelegramCode(graphene.Mutation):
 
             def finalize_success():
                 try:
-                    user.phone_number = phone_number  # Store without country code
+                    user.phone_number = normalize_phone(phone_number, country_code).split(':', 1)[-1]
                     user.phone_country = country_code  # Store ISO country code
                     user.save()
                     verification.is_verified = True
@@ -488,13 +460,10 @@ class CheckTelegramDeliveryStatus(graphene.Mutation):
         if review_override:
             formatted_phone = review_override
         else:
-            # Get numeric country code for formatting
-            numeric_code = get_country_code(country_code)
-            if not numeric_code:
-                return CheckTelegramDeliveryStatus(success=False, error="Código de país inválido. Por favor selecciona un país válido.")
-            
-            # Format phone number to E.164
-            formatted_phone = f"+{numeric_code}{phone_number}"
+            try:
+                formatted_phone = lookup_phone_number(phone_number, country_code)
+            except TwilioVerifyError:
+                return CheckTelegramDeliveryStatus(success=False, error="Número inválido. Verifica el número e inténtalo nuevamente.")
         
         try:
             # Find the most recent verification request for this user and phone

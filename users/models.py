@@ -10,7 +10,7 @@ from django.core.exceptions import ValidationError
 from datetime import timedelta
 import logging
 import uuid
-from .phone_utils import normalize_phone
+from .phone_utils import normalize_phone, canonicalize_phone_digits
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +142,7 @@ class User(AbstractUser, SoftDeleteModel):
         # Auto-maintain canonical phone key for uniqueness
         try:
             if self.phone_number:
+                self.phone_number = canonicalize_phone_digits(self.phone_number or '', self.phone_country or '')
                 # Accept either ISO or calling code; we have ISO here
                 # If admin passes a calling code into phone_country by mistake, still tolerant
                 self.phone_key = normalize_phone(self.phone_number or '', self.phone_country or '')
