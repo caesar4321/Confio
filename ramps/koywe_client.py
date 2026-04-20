@@ -651,7 +651,7 @@ class KoyweClient:
 
         order_id = str(enriched_order.get('_id') or enriched_order.get('id') or enriched_order.get('orderId') or quote_id)
         next_action_url = self._extract_action_url(enriched_order)
-        next_step = self._determine_next_step(direction=normalized_direction, next_action_url=next_action_url)
+        next_step = self._determine_next_step(direction=normalized_direction, next_action_url=next_action_url, order=enriched_order)
         return KoyweOrderResult(
             order_id=order_id,
             amount_in=str(quote.get('amountIn') or amount),
@@ -993,7 +993,16 @@ class KoyweClient:
 
         return enriched
 
-    def _determine_next_step(self, *, direction: str, next_action_url: str | None) -> str:
+    def _determine_next_step(self, *, direction: str, next_action_url: str | None, order: dict | None = None) -> str:
+        # Algorand off-ramps always require the client to burn+send cUSD→USDC.
+        # Koywe may return a providedAction tracing URL even for these orders, but
+        # that URL is just a status page — the actual payment must come from us.
+        # Detect this case by checking for an Algorand destination address.
+        if direction == 'OFF_RAMP' and order:
+            import re as _re
+            provided_address = str(order.get('providedAddress') or order.get('destinationAddress') or '')
+            if _re.match(r'^[A-Z2-7]{58}$', provided_address):
+                return 'WAIT_FOR_USDC_TRANSFER'
         if next_action_url:
             return 'OPEN_PROVIDER_FLOW'
         if direction == 'ON_RAMP':
