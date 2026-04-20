@@ -6,13 +6,13 @@
 {% block meta_author %}{{ post.author_schema.name }}{% endblock %}
 {% block meta_publisher %}{{ publisher_schema.name }}{% endblock %}
 
-{% block canonical %}https://confio.lat/discover/{{ post.id }}/{{ post.slug }}/{% endblock %}
+{% block canonical %}https://confio.lat/discover/{{ post.id }}/{{ post.slug }}{% endblock %}
 
 {% block og_tags %}
 <meta property="og:title" content="{{ post.title }}">
 <meta property="og:description" content="{{ post.body|truncatewords:30 }}">
 <meta property="og:type" content="article">
-<meta property="og:url" content="https://confio.lat/discover/{{ post.id }}/{{ post.slug }}/">
+<meta property="og:url" content="https://confio.lat/discover/{{ post.id }}/{{ post.slug }}">
 {% if post.image_url %}
 <meta property="og:image" content="{{ post.image_url }}">
 {% else %}
@@ -39,7 +39,7 @@
     "@type": "{{ post.schema_type|default:'Article' }}",
     "headline": "{{ post.title|escapejs }}",
     "description": "{{ post.body|truncatewords:30|escapejs }}",
-    "url": "https://confio.lat/discover/{{ post.id }}/{{ post.slug }}/",
+    "url": "https://confio.lat/discover/{{ post.id }}/{{ post.slug }}",
     {% if post.image_url %}"image": "{{ post.image_url }}",{% endif %}
     {% if post.published_at %}"datePublished": "{{ post.published_at|date:'c' }}",{% endif %}
     {% if post.updated_at %}"dateModified": "{{ post.updated_at|date:'c' }}",{% endif %}
@@ -65,7 +65,7 @@
     },
     "mainEntityOfPage": {
         "@type": "WebPage",
-        "@id": "https://confio.lat/discover/{{ post.id }}/{{ post.slug }}/"
+        "@id": "https://confio.lat/discover/{{ post.id }}/{{ post.slug }}"
     }
 }
 </script>
@@ -78,13 +78,13 @@
             "@type": "ListItem",
             "position": 1,
             "name": "Descubrir",
-            "item": "https://confio.lat/discover/"
+            "item": "https://confio.lat/discover"
         },
         {
             "@type": "ListItem",
             "position": 2,
             "name": "{{ post.title|escapejs }}",
-            "item": "https://confio.lat/discover/{{ post.id }}/{{ post.slug }}/"
+            "item": "https://confio.lat/discover/{{ post.id }}/{{ post.slug }}"
         }
     ]
 }
@@ -94,7 +94,7 @@
 {% block breadcrumb %}
 <nav class="breadcrumb-bar" aria-label="Breadcrumb">
     <div class="breadcrumb-inner">
-        <a href="/discover/">&larr; Descubrir</a>
+        <a href="/discover">&larr; Descubrir</a>
         {% if post.tag %}
         <span class="breadcrumb-sep">/</span>
         <span class="breadcrumb-current">{{ post.tag }}</span>
@@ -175,7 +175,7 @@
         <button
             class="share-button"
             type="button"
-            data-share-url="https://confio.lat/discover/{{ post.id }}/{{ post.slug }}/"
+            data-share-url="https://confio.lat/discover/{{ post.id }}/{{ post.slug }}"
             data-share-title="{{ post.title }}"
             onclick="shareDiscoverPost(this)"
         >
@@ -185,7 +185,7 @@
 </article>
 
 <div class="post-bottom-nav">
-    <a href="/discover/" class="back-to-discover">&larr; Volver a Descubrir</a>
+    <a href="/discover" class="back-to-discover">&larr; Volver a Descubrir</a>
 </div>
 
 <div class="app-cta">

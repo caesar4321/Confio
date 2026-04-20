@@ -25,4 +25,4 @@ class DiscoverSitemap(Sitemap):
 
     def location(self, obj):
         slug = slugify(obj.title or f'post-{obj.id}')
-        return f'/discover/{obj.id}/{slug}/'
+        return f'/discover/{obj.id}/{slug}'

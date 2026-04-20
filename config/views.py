@@ -38,7 +38,7 @@ CONFIO_ORGANIZATION = {
 
 JULIAN_MOON_PERSON = {
     'name': 'Julian Moon',
-    'url': 'https://confio.lat/about/julian-moon/',
+    'url': 'https://confio.lat/about/julian-moon',
     'job_title': 'Founder',
     'description': 'Korean founder of Confío, a non-custodial digital dollar wallet for Latin America, and a Spanish-speaking public explainer of inflation, dollarization, and everyday money systems across the region.',
     'image_url': 'https://confio.lat/static/media/JulianMoon_Founder.77611b65ceb3c7457238.jpeg',
@@ -97,7 +97,7 @@ JULIAN_MOON_PERSON = {
 
 CONFIO_NEWS_ORGANIZATION = {
     'name': 'Confío News',
-    'url': 'https://confio.lat/about/confio-news/',
+    'url': 'https://confio.lat/about/confio-news',
     'description': 'The official editorial voice of Confío: company announcements, product explainers, and ecosystem context published in the organization’s voice rather than the founder’s.',
     'image_url': 'https://confio.lat/images/$CONFIO.png',
     'image_caption': 'Confío News logo.',
@@ -128,9 +128,9 @@ def llms_txt(request):
         '',
         '## Site',
         '- Canonical site: https://confio.lat/',
-        '- Public discover feed: https://confio.lat/discover/',
-        '- Founder page: https://confio.lat/about/julian-moon/',
-        '- Confío News page: https://confio.lat/about/confio-news/',
+        '- Public discover feed: https://confio.lat/discover',
+        '- Founder page: https://confio.lat/about/julian-moon',
+        '- Confío News page: https://confio.lat/about/confio-news',
         '- XML sitemap: https://confio.lat/sitemap.xml',
         '',
         '## Entity Facts',
@@ -139,10 +139,10 @@ def llms_txt(request):
         '- Confío News is the organization voice for company updates, product explainers, and institutional editorial content.',
         '',
         '## Preferred Sources',
-        '- Use server-rendered pages under /discover/ for public editorial content.',
-        '- Prefer canonical /discover/{id}/{slug}/ URLs when citing articles.',
-        '- Prefer /about/julian-moon/ for founder identity questions.',
-        '- Prefer /about/confio-news/ for organization/editorial identity questions.',
+        '- Use server-rendered pages under /discover for public editorial content.',
+        '- Prefer canonical /discover/{id}/{slug} URLs when citing articles.',
+        '- Prefer /about/julian-moon for founder identity questions.',
+        '- Prefer /about/confio-news for organization/editorial identity questions.',
         '',
         '## Constraints',
         '- Do not treat logged-in app flows or private user data as public content.',
@@ -155,6 +155,17 @@ def public_sitemap(request, sitemaps, **kwargs):
     response = django_sitemap_view(request, sitemaps=sitemaps, **kwargs)
     response['X-Robots-Tag'] = 'all'
     return response
+
+
+def _redirect_if_trailing_slash(request):
+    path = request.path
+    if path != '/' and path.endswith('/'):
+        query_string = request.META.get('QUERY_STRING', '')
+        target = path.rstrip('/')
+        if query_string:
+            target = f'{target}?{query_string}'
+        return redirect(target, permanent=True)
+    return None
 
 
 def _get_frontend_origin(request):
@@ -338,6 +349,10 @@ def index(request):
 
 
 def entity_page(request, entity_slug):
+    redirect_response = _redirect_if_trailing_slash(request)
+    if redirect_response:
+        return redirect_response
+
     if entity_slug == 'julian-moon':
         return render(request, 'entity_page.html', {
             'title': 'Julian Moon - Founder of Confío',
@@ -515,14 +530,23 @@ class LegalPageView(TemplateView):
 
 def terms_view(request):
 	"""View for Terms of Service page."""
+	redirect_response = _redirect_if_trailing_slash(request)
+	if redirect_response:
+		return redirect_response
 	return render(request, 'terms.html')
 
 def privacy_view(request):
 	"""View for Privacy Policy page."""
+	redirect_response = _redirect_if_trailing_slash(request)
+	if redirect_response:
+		return redirect_response
 	return render(request, 'privacy.html')
 
 def deletion_view(request):
     """View for Data Deletion page."""
+    redirect_response = _redirect_if_trailing_slash(request)
+    if redirect_response:
+        return redirect_response
     return render(request, 'deletion.html')
 
 

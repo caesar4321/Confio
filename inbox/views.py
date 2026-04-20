@@ -2,7 +2,7 @@ import re
 
 from django.core.paginator import Paginator
 from django.http import Http404
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 from django.utils.html import escape
 from django.utils.safestring import mark_safe
 from django.utils.text import slugify
@@ -13,7 +13,7 @@ TOP_REACTIONS_LIMIT = 3
 DEFAULT_DISCOVER_AUTHOR = {
     'type': 'Organization',
     'name': 'Confío News',
-    'url': 'https://confio.lat/about/confio-news/',
+    'url': 'https://confio.lat/about/confio-news',
 }
 DEFAULT_DISCOVER_PUBLISHER = {
     'name': 'Confío',
@@ -43,16 +43,16 @@ def _build_author_schema(item):
     author_url = str(metadata.get('schema_author_url') or '').strip()
     author_job_title = str(metadata.get('schema_author_job_title') or '').strip()
 
-    if author_name == 'Confío News' and author_url in {'', 'https://confio.lat/discover/'}:
+    if author_name == 'Confío News' and author_url in {'', 'https://confio.lat/discover', 'https://confio.lat/discover/'}:
         author_url = DEFAULT_DISCOVER_AUTHOR['url']
     elif author_name == 'Julian Moon' and author_url in {'', 'https://confio.lat/'}:
-        author_url = 'https://confio.lat/about/julian-moon/'
+        author_url = 'https://confio.lat/about/julian-moon'
 
     if author_type == 'person' and author_name:
         return {
             'type': 'Person',
             'name': author_name,
-            'url': author_url or 'https://confio.lat/about/julian-moon/',
+            'url': author_url or 'https://confio.lat/about/julian-moon',
             'job_title': author_job_title or 'Founder',
             'works_for_name': 'Confío',
             'works_for_url': 'https://confio.lat',
@@ -69,7 +69,7 @@ def _build_author_schema(item):
         return {
             'type': 'Person',
             'name': 'Julian Moon',
-            'url': 'https://confio.lat/about/julian-moon/',
+            'url': 'https://confio.lat/about/julian-moon',
             'job_title': 'Founder',
             'works_for_name': 'Confío',
             'works_for_url': 'https://confio.lat',
@@ -85,7 +85,7 @@ def _build_author_schema(item):
             return {
                 'type': 'Person',
                 'name': display_name,
-                'url': author_url or 'https://confio.lat/about/julian-moon/',
+                'url': author_url or 'https://confio.lat/about/julian-moon',
             }
 
     return DEFAULT_DISCOVER_AUTHOR.copy()
@@ -161,6 +161,13 @@ def _build_post_card(item):
 
 
 def discover_feed(request):
+    if request.path.endswith('/'):
+        query_string = request.META.get('QUERY_STRING', '')
+        target = '/discover'
+        if query_string:
+            target = f'{target}?{query_string}'
+        return redirect(target, permanent=True)
+
     queryset = _get_discover_queryset()
     paginator = Paginator(queryset, FEED_PAGE_SIZE)
 
@@ -237,6 +244,13 @@ def discover_post_detail(request, post_id, slug=None):
                 })
 
     canonical_slug = slugify(item.title or f'post-{item.id}')
+    canonical_path = f'/discover/{item.id}/{canonical_slug}'
+    if request.path.endswith('/') or slug != canonical_slug:
+        query_string = request.META.get('QUERY_STRING', '')
+        target = canonical_path
+        if query_string:
+            target = f'{target}?{query_string}'
+        return redirect(target, permanent=True)
     tag = item.tag or item.channel.title or ''
     tag_color = str(
         metadata.get('tag_color')

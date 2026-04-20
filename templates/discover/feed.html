@@ -10,7 +10,7 @@
     "@type": "CollectionPage",
     "name": "Confío - Descubrir",
     "description": "Noticias, guias y videos sobre dolares digitales, stablecoins y pagos en Latinoamerica.",
-    "url": "https://confio.lat/discover/",
+    "url": "https://confio.lat/discover",
     "publisher": {
         "@type": "Organization",
         "name": "Confío",
@@ -27,7 +27,7 @@
             {
                 "@type": "ListItem",
                 "position": {{ forloop.counter }},
-                "url": "https://confio.lat/discover/{{ post.id }}/{{ post.slug }}/"
+                "url": "https://confio.lat/discover/{{ post.id }}/{{ post.slug }}"
             }{% if not forloop.last %},{% endif %}
             {% endfor %}
         ]
@@ -48,7 +48,7 @@
     <div class="feed-grid">
     {% for post in posts %}
         <article class="post-card">
-            <a href="/discover/{{ post.id }}/{{ post.slug }}/">
+            <a href="/discover/{{ post.id }}/{{ post.slug }}">
                 {% if post.image_url %}
                 <div class="post-card-image-wrap">
                     {% if post.item_type == 'VIDEO' %}
@@ -97,7 +97,7 @@
                 <button
                     class="share-button"
                     type="button"
-                    data-share-url="https://confio.lat/discover/{{ post.id }}/{{ post.slug }}/"
+                    data-share-url="https://confio.lat/discover/{{ post.id }}/{{ post.slug }}"
                     data-share-title="{{ post.title }}"
                     onclick="shareDiscoverPost(this)"
                 >

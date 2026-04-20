@@ -10,7 +10,7 @@ from .models import ContentItem, ContentStatus, ContentSurfaceType
 class DiscoverFeed(Feed):
     feed_type = Rss201rev2Feed
     title = 'Confío Descubrir'
-    link = '/discover/'
+    link = '/discover'
     description = 'Noticias, guias y videos sobre dolares digitales, stablecoins y pagos en Latinoamerica.'
     feed_url = '/discover/feed.xml'
 
@@ -33,7 +33,7 @@ class DiscoverFeed(Feed):
 
     def item_link(self, item):
         slug = slugify(item.title or f'post-{item.id}')
-        return f'/discover/{item.id}/{slug}/'
+        return f'/discover/{item.id}/{slug}'
 
     def item_pubdate(self, item):
         return item.published_at or item.created_at

@@ -11,12 +11,12 @@ class StaticPageSitemap(Sitemap):
         today = date.today()
         return [
             {'location': '/', 'lastmod': today},
-            {'location': '/discover/', 'lastmod': today},
-            {'location': '/about/julian-moon/', 'lastmod': today},
-            {'location': '/about/confio-news/', 'lastmod': today},
-            {'location': '/terms/', 'lastmod': today},
-            {'location': '/privacy/', 'lastmod': today},
-            {'location': '/deletion/', 'lastmod': today},
+            {'location': '/discover', 'lastmod': today},
+            {'location': '/about/julian-moon', 'lastmod': today},
+            {'location': '/about/confio-news', 'lastmod': today},
+            {'location': '/terms', 'lastmod': today},
+            {'location': '/privacy', 'lastmod': today},
+            {'location': '/deletion', 'lastmod': today},
         ]
 
     def location(self, item):
