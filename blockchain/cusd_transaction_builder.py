@@ -601,21 +601,22 @@ class CUSDTransactionBuilder:
                     'message': 'User needs to opt into the cUSD application first.'
                 }
 
-            # Check recipient has opted into USDC
+            # Verify recipient has opted into USDC — log a warning if not, but don't block.
+            # Algorand will reject the atomic group on-chain if the opt-in is truly missing,
+            # so a pre-check false-negative (e.g. stale node, hot-wallet rotation) must not
+            # prevent the burn+send from being built and submitted.
             try:
                 recipient_info = algod_client.account_info(recipient_address)
                 recipient_assets = recipient_info.get('assets', [])
                 has_usdc = any(a['asset-id'] == self.usdc_asset_id for a in recipient_assets)
                 if not has_usdc:
-                    return {
-                        'success': False,
-                        'error': f'Recipient must optin to USDC (asset {self.usdc_asset_id})'
-                    }
+                    logger.warning(
+                        "[BurnAndSend] Recipient %s does not appear opted into USDC asset %s — "
+                        "proceeding anyway; chain will reject if truly not opted in.",
+                        recipient_address, self.usdc_asset_id
+                    )
             except Exception as e:
-                return {
-                    'success': False,
-                    'error': f'Cannot verify recipient: {str(e)}'
-                }
+                logger.warning("[BurnAndSend] Could not verify recipient USDC opt-in: %s — proceeding.", e)
 
             # Convert amount to microunits
             cusd_microunits = int(cusd_amount * 1_000_000)

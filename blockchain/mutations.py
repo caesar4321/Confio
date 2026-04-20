@@ -3466,11 +3466,25 @@ class BuildBurnAndSendMutation(graphene.Mutation):
             if not tx_result.get('success'):
                 if tx_result.get('requires_app_optin'):
                     return cls(success=False, error='requires_app_optin', transactions=None)
+                err_msg = tx_result.get('error', 'Failed to build transactions')
                 conversion.status = 'FAILED'
                 conversion.save()
                 withdrawal.status = 'FAILED'
                 withdrawal.save()
-                return cls(success=False, error=tx_result.get('error', 'Failed to build transactions'))
+                # Record the failure on the ramp so it doesn't stay silently in WAITING
+                if ramp_provider and provider_order_id:
+                    try:
+                        from ramps.models import RampTransaction
+                        RampTransaction.objects.filter(
+                            provider=str(ramp_provider).strip().lower(),
+                            provider_order_id=str(provider_order_id).strip(),
+                        ).exclude(status__in=['COMPLETED', 'FAILED']).update(
+                            status='FAILED',
+                            error_message=f'build_burn_and_send_failed: {err_msg}'[:500],
+                        )
+                    except Exception as ramp_err:
+                        logger.warning("Could not mark ramp as failed after build error: %s", ramp_err)
+                return cls(success=False, error=err_msg)
 
             # Normalize for the client
             sponsors_norm = []

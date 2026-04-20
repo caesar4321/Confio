@@ -46,6 +46,31 @@ function inferReferralChannel(url: URL, referer: string): string {
   return 'direct';
 }
 
+function isPreviewBotUserAgent(userAgent: string): boolean {
+  const ua = userAgent.toLowerCase();
+  if (!ua) return false;
+
+  const botSignals = [
+    'facebookexternalhit',
+    'facebot',
+    'whatsapp',
+    'telegrambot',
+    'slackbot',
+    'discordbot',
+    'linkedinbot',
+    'twitterbot',
+    'skypeuripreview',
+    'googleinspectiontool',
+    'applebot',
+    'bot',
+    'crawler',
+    'spider',
+    'preview',
+  ];
+
+  return botSignals.some((signal) => ua.includes(signal));
+}
+
 async function deriveInviteSessionId(clientIP: string): Promise<string> {
   if (!clientIP || clientIP === 'unknown') return '';
   const data = new TextEncoder().encode(`invite:${clientIP}`);
@@ -94,16 +119,18 @@ export default {
     if (url.pathname.startsWith('/invite/')) {
       const referralCode = url.pathname.split('/')[2];
       if (referralCode) {
+        const userAgent = request.headers.get('user-agent') || '';
+        const isPreviewBot = isPreviewBotUserAgent(userAgent);
+
         // Store IP fingerprint for iOS deferred deep linking
         // We reuse the LINKS KV with a prefix 'ip_ref:' to avoid slug collision
         const clientIP = request.headers.get('cf-connecting-ip') || 'unknown';
-        if (clientIP !== 'unknown') {
+        if (!isPreviewBot && clientIP !== 'unknown') {
           // Store with 1 hour TTL
           await env.LINKS.put(`ip_ref:${clientIP}`, referralCode, { expirationTtl: 3600 });
         }
 
         // Detect OS to determine redirect
-        const userAgent = request.headers.get('user-agent') || '';
         const platform = detectPlatform(userAgent);
         const country = ((request.cf as any)?.country || '').toUpperCase();
         const referer = request.headers.get('referer') || '';
@@ -112,7 +139,7 @@ export default {
         const invitationId = (url.searchParams.get('invitation_id') || '').slice(0, 64);
         const hasInvitationId = Boolean(invitationId);
 
-        if (env.FUNNEL_INGEST_URL && env.FUNNEL_INGEST_SECRET) {
+        if (!isPreviewBot && env.FUNNEL_INGEST_URL && env.FUNNEL_INGEST_SECRET) {
           ctx.waitUntil(
             fetch(env.FUNNEL_INGEST_URL, {
               method: 'POST',

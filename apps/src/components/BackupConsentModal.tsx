@@ -1,8 +1,9 @@
 
 import React from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity, Image, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView, useWindowDimensions } from 'react-native';
 // Use MaterialCommunityIcons for cloud-lock icon (now linked in iOS Info.plist)
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface BackupConsentModalProps {
     visible: boolean;
@@ -11,21 +12,35 @@ interface BackupConsentModalProps {
 }
 
 export const BackupConsentModal: React.FC<BackupConsentModalProps> = ({ visible, onContinue, onCancel }) => {
+    const insets = useSafeAreaInsets();
+    const { height } = useWindowDimensions();
+    const modalMaxHeight = Math.max(360, height - insets.top - insets.bottom - 32);
+
     return (
         <Modal
             animationType="fade"
             transparent={true}
             visible={visible}
+            statusBarTranslucent
             // By passing an empty function, Android back button will not dismiss this mandatory modal
             onRequestClose={() => { }}
         >
-            <View style={styles.centeredView}>
-                <View style={styles.modalView}>
+            <View
+                style={[
+                    styles.centeredView,
+                    {
+                        paddingTop: Math.max(insets.top, 16),
+                        paddingBottom: Math.max(insets.bottom, 16),
+                    },
+                ]}
+            >
+                <View style={[styles.modalView, { maxHeight: modalMaxHeight }]}>
                     <ScrollView
                         style={styles.scrollView}
                         contentContainerStyle={styles.modalContent}
                         bounces={false}
                         showsVerticalScrollIndicator
+                        nestedScrollEnabled
                     >
                         <View style={styles.iconContainer}>
                             <Icon name="cloud-lock-outline" size={64} color="#4F46E5" />
@@ -58,16 +73,16 @@ export const BackupConsentModal: React.FC<BackupConsentModalProps> = ({ visible,
                                 Verás una solicitud de permiso para acceder a "configuración de la aplicación". Es 100% privado.
                             </Text>
                         </View>
-
-                        <View style={styles.footerInside}>
-                            <TouchableOpacity
-                                style={[styles.button, styles.buttonContinue]}
-                                onPress={onContinue}
-                            >
-                                <Text style={styles.textStyle}>Continuar y Proteger</Text>
-                            </TouchableOpacity>
-                        </View>
                     </ScrollView>
+
+                    <View style={styles.footer}>
+                        <TouchableOpacity
+                            style={[styles.button, styles.buttonContinue]}
+                            onPress={onContinue}
+                        >
+                            <Text style={styles.textStyle}>Proteger y Continuar</Text>
+                        </TouchableOpacity>
+                    </View>
                 </View>
             </View>
         </Modal>
@@ -85,7 +100,6 @@ const styles = StyleSheet.create({
     modalView: {
         width: '100%',
         maxWidth: 360,
-        maxHeight: '85%',
         backgroundColor: 'white',
         borderRadius: 24,
         shadowColor: '#000',
@@ -104,7 +118,7 @@ const styles = StyleSheet.create({
     modalContent: {
         padding: 24,
         alignItems: 'center',
-        paddingBottom: 12,
+        paddingBottom: 16,
     },
     iconContainer: {
         marginBottom: 16,
@@ -184,10 +198,14 @@ const styles = StyleSheet.create({
         backgroundColor: '#4F46E5', // Indigo-600
         elevation: 2,
     },
-    footerInside: {
+    footer: {
         width: '100%',
-        marginTop: 8,
-        paddingBottom: 12,
+        paddingHorizontal: 24,
+        paddingTop: 12,
+        paddingBottom: 20,
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: '#E5E7EB',
+        backgroundColor: '#FFFFFF',
     },
     textStyle: {
         color: 'white',
