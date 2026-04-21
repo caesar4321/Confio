@@ -247,6 +247,24 @@ _COUNTRY_DOCUMENT_TYPE_MAP = {
 }
 
 
+def _normalize_koywe_document_number(*, country_code: str, document_type: str | None, document_number: str | None) -> str:
+    normalized_country = (country_code or '').strip().upper()
+    normalized_type = str(document_type or '').strip().upper()
+    raw_number = str(document_number or '').strip().upper()
+    if not raw_number:
+        return ''
+
+    if normalized_country == 'CL' and normalized_type == 'RUT':
+        cleaned = re.sub(r'[^A-Z0-9]', '', raw_number)
+        if cleaned.startswith('RUT'):
+            cleaned = cleaned[3:]
+        if len(cleaned) >= 2:
+            return f'{cleaned[:-1]}-{cleaned[-1]}'
+        return cleaned
+
+    return raw_number
+
+
 def _normalize_account_type(value: str | None) -> str | None:
     raw_value = str(value or '').strip()
     if not raw_value:
@@ -752,6 +770,11 @@ class KoyweClient:
                 document_type=document_type,
             )
             normalized['documentType'] = resolved_document_type
+            normalized['documentNumber'] = _normalize_koywe_document_number(
+                country_code=country_code,
+                document_type=resolved_document_type,
+                document_number=document_number,
+            )
         return {key: value for key, value in normalized.items() if value}
 
     def _resolve_document_type(self, *, country_code: str, document_type: str | None) -> str:
