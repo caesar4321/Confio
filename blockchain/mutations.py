@@ -127,7 +127,7 @@ def _link_external_withdrawal_to_ramp(
     try:
         from ramps.models import RampTransaction
 
-        ramp_tx = RampTransaction.objects.select_for_update().filter(
+        ramp_tx = RampTransaction.objects.filter(
             provider=provider,
             provider_order_id=order_id,
         ).first()
