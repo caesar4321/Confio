@@ -24,6 +24,12 @@ _MINIMUM_AMOUNT_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+_MAXIMUM_AMOUNT_PATTERN = re.compile(
+    r'(?:greater|more|bigger|higher) than the (?:maximun|maximum) available(?:\s+for\s+(?P<currency>[A-Z]{3}))?\.?\s*'
+    r'(?P<actual>[\d.,]+)\s*>\s*(?P<maximum>[\d.,]+)',
+    re.IGNORECASE,
+)
+
 
 class KoyweError(Exception):
     pass
@@ -39,6 +45,14 @@ class KoyweMinimumAmountError(KoyweError):
         self.currency = currency
         self.actual = actual
         self.minimum = minimum
+
+
+class KoyweMaximumAmountError(KoyweError):
+    def __init__(self, message: str, *, currency: str | None = None, actual: str | None = None, maximum: str | None = None):
+        super().__init__(message)
+        self.currency = currency
+        self.actual = actual
+        self.maximum = maximum
 
 
 @dataclass
@@ -391,13 +405,22 @@ class KoyweClient:
             return data
 
         message = data.get('message') or data.get('error') or default_message
-        match = _MINIMUM_AMOUNT_PATTERN.search(str(message))
+        text = str(message)
+        match = _MINIMUM_AMOUNT_PATTERN.search(text)
         if match:
             raise KoyweMinimumAmountError(
                 message,
                 currency=match.group('currency'),
                 actual=match.group('actual'),
                 minimum=match.group('minimum'),
+            )
+        match = _MAXIMUM_AMOUNT_PATTERN.search(text)
+        if match:
+            raise KoyweMaximumAmountError(
+                message,
+                currency=match.group('currency'),
+                actual=match.group('actual'),
+                maximum=match.group('maximum'),
             )
         raise KoyweError(message)
 

@@ -15,7 +15,13 @@ from users.models import Account, BankInfo, Country
 from ramps.models import KoyweBankInfo, RampPaymentMethod, RampTransaction, RampUserAddress
 from ramps.koywe_sync import build_koywe_instruction_snapshot, sync_koywe_ramp_transaction_from_order, upsert_koywe_ramp_transaction
 
-from ramps.koywe_client import KoyweClient, KoyweConfigurationError, KoyweError, KoyweMinimumAmountError
+from ramps.koywe_client import (
+    KoyweClient,
+    KoyweConfigurationError,
+    KoyweError,
+    KoyweMaximumAmountError,
+    KoyweMinimumAmountError,
+)
 from ramps.koywe import (
     COUNTRY_METHODS,
     RAMP_NETWORK_DISPLAY,
@@ -104,6 +110,26 @@ def _format_minimum_amount_error(exc: 'KoyweMinimumAmountError', direction: str)
     return (
         f'El monto es menor al mínimo permitido para {action}. '
         f'Aumenta el monto e inténtalo nuevamente.'
+    )
+
+
+def _format_maximum_amount_error(exc: 'KoyweMaximumAmountError', direction: str) -> str:
+    action = 'recargar' if (direction or '').upper() == 'ON_RAMP' else 'retirar'
+    maximum = (exc.maximum or '').strip()
+    currency = (exc.currency or '').strip().upper()
+    if maximum and currency:
+        return (
+            f'El monto supera el máximo permitido para {action}. '
+            f'Ingresa como máximo {maximum} {currency} para continuar.'
+        )
+    if maximum:
+        return (
+            f'El monto supera el máximo permitido para {action}. '
+            f'Ingresa como máximo {maximum} para continuar.'
+        )
+    return (
+        f'El monto supera el máximo permitido para {action}. '
+        f'Reduce el monto e inténtalo nuevamente.'
     )
 
 
@@ -857,6 +883,12 @@ class CreateRampOrder(graphene.Mutation):
                 success=False,
                 error=_format_minimum_amount_error(exc, normalized_direction),
             )
+        except KoyweMaximumAmountError as exc:
+            logger.info('Koywe ramp order above maximum: %s', exc)
+            return RampOrderType(
+                success=False,
+                error=_format_maximum_amount_error(exc, normalized_direction),
+            )
         except KoyweError as exc:
             logger.warning('Koywe ramp order failed: %s', exc)
             return RampOrderType(success=False, error=str(exc))
@@ -1175,6 +1207,14 @@ class Query(graphene.ObjectType):
                 exc,
             )
             raise ValidationError(_format_minimum_amount_error(exc, normalized_direction))
+        except KoyweMaximumAmountError as exc:
+            logger.info(
+                "Koywe ramp quote above maximum for %s %s: %s",
+                normalized_direction,
+                resolved_country_code,
+                exc,
+            )
+            raise ValidationError(_format_maximum_amount_error(exc, normalized_direction))
         except KoyweError as exc:
             logger.warning(
                 "Koywe ramp quote failed for %s %s: %s",
