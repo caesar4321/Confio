@@ -103,92 +103,6 @@ _ACCOUNT_TYPE_MAP = {
     'interbanking': 'interbanking',
 }
 
-_BANK_CODE_ALIASES = {
-    'BRA': {
-        'BANCO_DO_BRASIL': 'BANCO_DO_BRASIL',
-        'BANCO DO BRASIL': 'BANCO_DO_BRASIL',
-        'BRADESCO': 'BANCO_BRADESCO',
-        'BANCO_BRADESCO': 'BANCO_BRADESCO',
-        'ITAU': 'BANCO_ITAU',
-        'ITAU UNIBANCO': 'BANCO_ITAU',
-        'ITAÚ': 'BANCO_ITAU',
-        'ITAÚ UNIBANCO': 'BANCO_ITAU',
-        'BANCO_ITAU': 'BANCO_ITAU',
-        'NUBANK': 'NUBANK',
-        'NU PAGAMENTOS': 'NUBANK',
-        'NU PAGAMENTOS (NUBANK)': 'NUBANK',
-        'BANCO_INTER': 'BANCO_INTER',
-        'BANCO INTER': 'BANCO_INTER',
-        'INTER': 'BANCO_INTER',
-        'SANTANDER': 'SANTANDER',
-        'BANCO SANTANDER BRASIL': 'SANTANDER',
-        'CAIXA': 'CAIXA_ECONOMICA_FEDERAL',
-        'CAIXA ECONOMICA FEDERAL': 'CAIXA_ECONOMICA_FEDERAL',
-        'CAIXA ECONÔMICA FEDERAL': 'CAIXA_ECONOMICA_FEDERAL',
-        'BANESTES': 'BANESTES',
-        'BTG_PACTUAL': 'BANCO_BTG_PACTUAL',
-        'BTG PACTUAL': 'BANCO_BTG_PACTUAL',
-        'BANCO_BTG_PACTUAL': 'BANCO_BTG_PACTUAL',
-        'BANCO BTG PACTUAL': 'BANCO_BTG_PACTUAL',
-        'BANCO SAFRA': 'BANCO_SAFRA',
-        'SAFRA': 'BANCO_SAFRA',
-        'CITIBANK': 'CITIBANK',
-        'BANCO ORIGINAL': 'BANCO_ORIGINAL',
-        'ORIGINAL': 'BANCO_ORIGINAL',
-        'SICREDI': 'BANCO_COOPERATIVO_SICREDI',
-        'BANCO COOPERATIVO SICREDI': 'BANCO_COOPERATIVO_SICREDI',
-        'MERCANTIL': 'BANCO_MERCANTIL_BRASIL',
-        'BANCO MERCANTIL DO BRASIL': 'BANCO_MERCANTIL_BRASIL',
-    },
-    'CHL': {
-        'BCI': 'BCI',
-        'BANCO_BCI': 'BCI',
-        'BANCO_CHILE': 'BANCO_CHILE',
-        'BANCO DE CHILE': 'BANCO_CHILE',
-        'BANCO_ESTADO': 'BANCO_ESTADO',
-        'BANCOESTADO': 'BANCO_ESTADO',
-        'SANTANDER_CHILE': 'SANTANDER',
-        'SCOTIABANK_CHILE': 'SCOTIABANKCHILE',
-        'BANCO_FALABELLA': 'BANCO_FALABELLA',
-        'BANCO_CONSORCIO': 'BANCO_CONSORCIO',
-        'ITAU_CHILE': 'BANCO_ITAU',
-        'ITAU': 'BANCO_ITAU',
-    },
-    'COL': {
-        'NEQUI': 'co_nequi',
-        'CO_NEQUI': 'co_nequi',
-        'BANCOLOMBIA': 'co_bancolombia',
-        'CO_BANCOLOMBIA': 'co_bancolombia',
-        'DAVIPLATA': 'co_daviplata',
-        'CO_DAVIPLATA': 'co_daviplata',
-    },
-    'PER': {
-        'BCP': 'CREDITO',
-        'BCP_PERU': 'CREDITO',
-        'BCP': 'CREDITO',
-        'BANCO DE CREDITO DEL PERU': 'CREDITO',
-        'BANCO DE CRÉDITO DEL PERÚ': 'CREDITO',
-        'CREDITO': 'CREDITO',
-        'BBVA_PERU': 'BBVA',
-        'BBVA': 'BBVA',
-        'BBVA PERU': 'BBVA',
-        'BBVA PERÚ': 'BBVA',
-        'SCOTIABANK_PERU': 'SCOTIA',
-        'SCOTIABANK': 'SCOTIA',
-        'SCOTIABANK PERU': 'SCOTIA',
-        'SCOTIABANK PERÚ': 'SCOTIA',
-        'INTERBANK_PERU': 'INTERBANK',
-        'INTERBANK': 'INTERBANK',
-        'BANCO_NACION_PERU': 'NACION',
-        'BANCO DE LA NACION': 'NACION',
-        'BANCO DE LA NACIÓN': 'NACION',
-        'NACION': 'NACION',
-        'CITIBANK_PERU': 'CITIBANK',
-        'CITIBANK': 'CITIBANK',
-        'LIGO': 'LIGO',
-    },
-}
-
 _DOCUMENT_TYPE_MAP = {
     'AR': 'DNI',
     'BO': 'CI',
@@ -607,25 +521,19 @@ class KoyweClient:
             raw_bank_code = str(provider_metadata['bankCode']).strip()
             resolved_bank_code = self._resolve_bank_code(
                 country_code=alpha3,
-                bank_name=raw_bank_code,
-            ) or raw_bank_code
-            if not (alpha3 == 'BRA' and raw_bank_code.upper() in {'PIX_QR', 'SULPAYMENTS'} and resolved_bank_code == raw_bank_code):
-                payload['bankCode'] = resolved_bank_code
-        elif provider_metadata.get('bankName'):
-            resolved_bank_code = self._resolve_bank_code(
-                country_code=alpha3,
-                bank_name=str(provider_metadata['bankName']),
             )
-            if resolved_bank_code:
-                payload['bankCode'] = resolved_bank_code
+            if not resolved_bank_code:
+                raise KoyweError(f'"bankCode" is invalid or not active in the current Koywe catalog for {alpha3}: {raw_bank_code}')
+            payload['bankCode'] = resolved_bank_code
         elif getattr(bank_info, 'bank', None) and getattr(bank_info.bank, 'code', None):
             raw_bank_code = str(bank_info.bank.code).strip().upper()
             resolved_bank_code = self._resolve_bank_code(
                 country_code=alpha3,
-                bank_name=raw_bank_code,
-            ) or raw_bank_code
-            if not (alpha3 == 'BRA' and raw_bank_code in {'PIX_QR', 'SULPAYMENTS'} and resolved_bank_code == raw_bank_code):
-                payload['bankCode'] = resolved_bank_code
+                bank_code=raw_bank_code,
+            )
+            if not resolved_bank_code:
+                raise KoyweError(f'"bankCode" is invalid or not active in the current Koywe catalog for {alpha3}: {raw_bank_code}')
+            payload['bankCode'] = resolved_bank_code
         elif alpha3 == 'COL' and payment_method_code == 'NEQUI':
             payload['bankCode'] = 'co_nequi'
         elif alpha3 == 'COL' and payment_method_code == 'BANCOLOMBIA':
@@ -653,12 +561,22 @@ class KoyweClient:
             payload['accountType'] = 'interbanking'
         return self._request('POST', '/rest/bank-accounts', email=email, json_payload=payload)
 
-    def _resolve_bank_code(self, *, country_code: str, bank_name: str) -> str | None:
+    def _resolve_bank_code(self, *, country_code: str, bank_code: str) -> str | None:
         normalized_country = (country_code or '').strip().upper()
-        normalized_name = (bank_name or '').strip().upper().replace('-', '_')
-        if not normalized_name:
+        normalized_code = (bank_code or '').strip()
+        if not normalized_code:
             return None
-        return _BANK_CODE_ALIASES.get(normalized_country, {}).get(normalized_name)
+        from ramps.models import KoyweBankInfo
+
+        return (
+            KoyweBankInfo.objects.filter(
+                country_code=normalized_country,
+                is_active=True,
+                bank_code__iexact=normalized_code,
+            )
+            .values_list('bank_code', flat=True)
+            .first()
+        )
 
     def create_ramp_order(self, *, direction: str, amount: Decimal, fiat_symbol: str, payment_method_code: str, email: str | None, wallet_address: str | None, country_code: str, bank_info: Any = None, external_id: str | None = None, contact_profile: dict[str, Any] | None = None, previous_emails: list[str] | None = None) -> KoyweOrderResult:
         normalized_direction = direction.upper()

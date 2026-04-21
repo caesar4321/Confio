@@ -44,24 +44,6 @@ const SAVABLE_PAYMENT_METHOD_CODES = new Set([
   'RECAUDO-PE',
 ]);
 
-const PERU_BANK_CODE_ALIASES: Record<string, string> = {
-  BCP: 'CREDITO',
-  'BANCO DE CREDITO DEL PERU': 'CREDITO',
-  'BANCO DE CRÉDITO DEL PERÚ': 'CREDITO',
-  CREDITO: 'CREDITO',
-  BBVA: 'BBVA',
-  'BBVA PERU': 'BBVA',
-  'BBVA PERÚ': 'BBVA',
-  SCOTIABANK: 'SCOTIA',
-  'SCOTIABANK PERU': 'SCOTIA',
-  'SCOTIABANK PERÚ': 'SCOTIA',
-  INTERBANK: 'INTERBANK',
-  'BANCO DE LA NACION': 'NACION',
-  'BANCO DE LA NACIÓN': 'NACION',
-  NACION: 'NACION',
-  LIGO: 'LIGO',
-};
-
 const COUNTRY_ALPHA2_TO_ALPHA3: Record<string, string> = {
   AR: 'ARG', BO: 'BOL', BR: 'BRA', CL: 'CHL', CO: 'COL', MX: 'MEX', PE: 'PER',
 };
@@ -886,18 +868,6 @@ export const AddPayoutMethodModal = ({
     setIsSubmitting(true);
     try {
       const enrichedProviderMetadata = { ...formData.providerMetadata };
-      if (countryCode === 'PE') {
-        const normalizedBankName = (enrichedProviderMetadata.bankName || '').trim().toUpperCase();
-        if (!enrichedProviderMetadata.bankCode && normalizedBankName && PERU_BANK_CODE_ALIASES[normalizedBankName]) {
-          enrichedProviderMetadata.bankCode = PERU_BANK_CODE_ALIASES[normalizedBankName];
-        }
-        if (methodCode === 'QRI-PE' && !enrichedProviderMetadata.bankCode) {
-          enrichedProviderMetadata.bankCode = 'LIGO';
-        }
-        if (methodCode === 'RECAUDO-PE' && !enrichedProviderMetadata.bankCode) {
-          enrichedProviderMetadata.bankCode = 'CREDITO';
-        }
-      }
       if (countryCode === 'MX' && methodCode === 'STP' && !enrichedProviderMetadata.bankCode) {
         enrichedProviderMetadata.bankCode = 'STP';
       }
@@ -1437,16 +1407,11 @@ export const AddPayoutMethodModal = ({
                             <Icon name="chevron-down" size={16} color={colors.text.light} />
                           </TouchableOpacity>
                         ) : (
-                          <TextInput
-                            style={[styles.textInput, focusedField === field.key && styles.textInputFocused]}
-                            value={formData.providerMetadata[field.key] || ''}
-                            onChangeText={(value) => setFormData(prev => ({ ...prev, providerMetadata: { ...prev.providerMetadata, [field.key]: value } }))}
-                            placeholder={field.placeholder}
-                            placeholderTextColor={colors.text.light}
-                            autoCapitalize="words"
-                            onFocus={() => setFocusedField(field.key)}
-                            onBlur={() => setFocusedField(null)}
-                          />
+                          <View style={[styles.textInput, styles.textInputDisabled]}>
+                            <Text style={styles.disabledInputText}>
+                              No pudimos cargar el catálogo de bancos de Koywe. Intenta de nuevo en unos segundos.
+                            </Text>
+                          </View>
                         )}
                         {field.helpText ? <Text style={styles.helpText}>{field.helpText}</Text> : null}
                       </View>
@@ -1677,6 +1642,14 @@ const styles = StyleSheet.create({
   textInputFocused: {
     borderColor: colors.primary,
     borderWidth: 1.5,
+  },
+  textInputDisabled: {
+    backgroundColor: colors.primaryLight,
+  },
+  disabledInputText: {
+    fontSize: 14,
+    color: colors.text.light,
+    lineHeight: 18,
   },
   helpText: {
     fontSize: 12,
