@@ -562,14 +562,17 @@ def sync_koywe_ramp_transaction_from_order(
         ramp_tx.final_currency = getattr(settings, 'KOYWE_CRYPTO_SYMBOL', 'USDC Polygon')
         ramp_tx.final_amount = amount_in or ramp_tx.final_amount
 
-    # Never downgrade status (e.g. Koywe WAITING shouldn't revert a PROCESSING order)
-    if _STATUS_ORDER.get(ramp_status, 0) >= _STATUS_ORDER.get(ramp_tx.status, 0):
+    # Never downgrade status (e.g. Koywe WAITING shouldn't revert a PROCESSING order).
+    # When we block a downgrade, also leave status_detail and completed_at alone so
+    # they stay consistent with the current (higher) status rather than drifting.
+    incoming_rank = _STATUS_ORDER.get(ramp_status, 0)
+    current_rank = _STATUS_ORDER.get(ramp_tx.status, 0)
+    if incoming_rank >= current_rank:
         ramp_tx.status = ramp_status
-    ramp_tx.status_detail = normalized_detail if not status_details else f'{normalized_detail}: {status_details}'
-    if ramp_status == 'COMPLETED':
-        ramp_tx.completed_at = ramp_tx.completed_at or timezone.now()
-    elif ramp_status in {'FAILED', 'AML_REVIEW', 'PROCESSING', 'PENDING'}:
-        if ramp_status != 'FAILED':
+        ramp_tx.status_detail = normalized_detail if not status_details else f'{normalized_detail}: {status_details}'
+        if ramp_status == 'COMPLETED':
+            ramp_tx.completed_at = ramp_tx.completed_at or timezone.now()
+        elif ramp_status in {'AML_REVIEW', 'PROCESSING', 'PENDING'}:
             ramp_tx.completed_at = None
 
     existing_metadata = dict(ramp_tx.metadata or {})
