@@ -494,7 +494,16 @@ def build_ramp_field_schema(*, country_code: str, method: dict) -> dict:
         "providerFields": [],
     }
 
-    if country_code == "BR" and code in {"SULPAYMENTS", "PIX_QR"}:
+    if country_code == "AR" and code == "WIREAR":
+        schema["accountField"] = {
+            **account_field,
+            "label": "CBU o CVU",
+            "placeholder": "Ingresa tu CBU o CVU",
+            "keyboardType": "number-pad",
+            "minLength": 22,
+            "maxLength": 22,
+        }
+    elif country_code == "BR" and code in {"SULPAYMENTS", "PIX_QR"}:
         schema["providerFields"] = [
             {
                 "key": "bankName",
