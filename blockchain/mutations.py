@@ -3325,6 +3325,8 @@ class SubmitAutoSwapTransactionsMutation(graphene.Mutation):
                         pass
 
                     # Create the SendTransaction — post_save signal creates UnifiedTransactionTable
+                    outbound_txid = usdc_transfer_txid or txid
+
                     SendTransaction.objects.create(
                         sender_user=w.actor_user,
                         sender_business=w.actor_business,
@@ -3338,7 +3340,7 @@ class SubmitAutoSwapTransactionsMutation(graphene.Mutation):
                         amount=w.amount,
                         token_type='USDC',
                         status='SUBMITTED',
-                        transaction_hash=txid,
+                        transaction_hash=outbound_txid,
                     )
 
                     # Keep the USDC withdrawal unified row in sync with the
