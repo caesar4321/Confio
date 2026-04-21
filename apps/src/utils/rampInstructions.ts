@@ -607,7 +607,9 @@ export const buildRampInstructionView = ({
       note:
         direction === 'ON_RAMP'
           ? 'Envía el monto indicado y conserva el comprobante hasta que veas la acreditación.'
-          : 'La acreditación puede tardar según el banco y la validación del proveedor.',
+          : normalizedCode === 'WIREPE'
+            ? 'La acreditación del retiro puede tardar hasta 1 día hábil, según el banco y la validación del proveedor.'
+            : 'La acreditación puede tardar según el banco y la validación del proveedor.',
       allowExternalAction: false,
       rows:
         direction === 'ON_RAMP'
