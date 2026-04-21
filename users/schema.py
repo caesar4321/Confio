@@ -1367,7 +1367,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 
 			return BalancesType(
 				algo=f"{all_balances['algo']['amount']:.6f}",
-				cusd=f"{all_balances['cusd']['amount']:.2f}",
+				cusd=f"{all_balances['cusd']['amount']:.6f}",
 				confio=f"{all_balances['confio']['amount']:.2f}",
 				confioPresaleLocked=f"{all_balances.get('confio_presale', {}).get('amount', 0):.2f}",
 				confioLocked=f"{confio_lock_val:.2f}",
@@ -1386,7 +1386,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 					cached = BalanceService.get_all_balances(fallback_account, force_refresh=False)
 					return BalancesType(
 						algo=f"{cached['algo']['amount']:.6f}",
-						cusd=f"{cached['cusd']['amount']:.2f}",
+						cusd=f"{cached['cusd']['amount']:.6f}",
 						confio=f"{cached['confio']['amount']:.2f}",
 						confioPresaleLocked=f"{cached.get('confio_presale', {}).get('amount', 0):.2f}",
 						confioLocked=f"{cached.get('confio_presale', {}).get('amount', 0):.2f}",
@@ -1396,7 +1396,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			except Exception:
 				pass
 			# Last resort: zeros
-			return BalancesType(algo="0.000000", cusd="0.00", confio="0.00", confioPresaleLocked="0.00", confioLocked="0.00", pendingReferralReward="0.00", usdc="0.00")
+			return BalancesType(algo="0.000000", cusd="0.000000", confio="0.00", confioPresaleLocked="0.00", confioLocked="0.00", pendingReferralReward="0.00", usdc="0.00")
 
 	def resolve_stats_summary(self, info):
 		"""Compute small set of aggregates with a short cache TTL."""
@@ -3913,7 +3913,7 @@ class RefreshAccountBalance(graphene.Mutation):
 			
 			# Format balances for response
 			balances = BalancesType(
-				cusd=f"{all_balances['cusd']['amount']:.2f}",
+				cusd=f"{all_balances['cusd']['amount']:.6f}",
 				confio=f"{all_balances['confio']['amount']:.2f}",
 				confioPresaleLocked=f"{all_balances.get('confio_presale', {}).get('amount', 0):.2f}",
 				usdc=f"{all_balances['usdc']['amount']:.2f}"

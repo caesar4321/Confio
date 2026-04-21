@@ -250,6 +250,13 @@ export const SellScreen = () => {
     }
   }, [selectedMethod?.paymentMethodId]);
 
+  const formatExactTokenAmount = (value: number) => {
+    if (!Number.isFinite(value) || value <= 0) {
+      return '0';
+    }
+    return value.toFixed(6).replace(/\.?0+$/, '');
+  };
+
   const promptVerification = () => {
     Alert.alert(
       'Verificación requerida',
@@ -333,10 +340,11 @@ export const SellScreen = () => {
 
     setIsSubmittingOrder(true);
     try {
+      const exactRequestedAmount = Math.min(parsedAmount, availableCusdBalance || parsedAmount);
       const { data } = await createRampOrder({
         variables: {
           direction: 'OFF_RAMP',
-          amount: String(parsedAmount),
+          amount: formatExactTokenAmount(exactRequestedAmount),
           countryCode: availability?.countryCode,
           fiatCurrency,
           paymentMethodCode: selectedMethod.code,
@@ -353,7 +361,7 @@ export const SellScreen = () => {
       let autoFundingWarning: string | null = null;
       if (String(result.nextStep || '').toUpperCase() === 'WAIT_FOR_USDC_TRANSFER') {
         const fundingResult = await tryFundKoyweOffRampInBackground({
-          amount: parsedAmount,
+          amount: exactRequestedAmount,
           paymentDetails: result.paymentDetails,
           providerOrderId: result.orderId,
           activeAccount,
@@ -513,7 +521,7 @@ export const SellScreen = () => {
                     style={[styles.maxPill, (!effectiveSellMax || balancesLoading) && styles.maxPillDisabled]}
                     onPress={() => {
                       if (effectiveSellMax > 0) {
-                        setAmount(String(Number(effectiveSellMax.toFixed(2))));
+                        setAmount(formatExactTokenAmount(effectiveSellMax));
                         setStep('form');
                       }
                     }}
