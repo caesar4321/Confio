@@ -1,4 +1,5 @@
 import logging
+import re
 import unicodedata
 from dataclasses import dataclass
 from decimal import Decimal
@@ -17,6 +18,12 @@ _TOKEN_CURRENCIES_CACHE_TTL = 60 * 15
 _RAMP_LIMITS_CACHE_TTL = 60 * 10
 _ACCOUNT_PROFILE_SYNC_CACHE_TTL = 60 * 60 * 24
 
+_MINIMUM_AMOUNT_PATTERN = re.compile(
+    r'less than the (?:minimun|minimum) available(?:\s+for\s+(?P<currency>[A-Z]{3}))?\.?\s*'
+    r'(?P<actual>[\d.,]+)\s*<\s*(?P<minimum>[\d.,]+)',
+    re.IGNORECASE,
+)
+
 
 class KoyweError(Exception):
     pass
@@ -24,6 +31,14 @@ class KoyweError(Exception):
 
 class KoyweConfigurationError(KoyweError):
     pass
+
+
+class KoyweMinimumAmountError(KoyweError):
+    def __init__(self, message: str, *, currency: str | None = None, actual: str | None = None, minimum: str | None = None):
+        super().__init__(message)
+        self.currency = currency
+        self.actual = actual
+        self.minimum = minimum
 
 
 @dataclass
@@ -376,6 +391,14 @@ class KoyweClient:
             return data
 
         message = data.get('message') or data.get('error') or default_message
+        match = _MINIMUM_AMOUNT_PATTERN.search(str(message))
+        if match:
+            raise KoyweMinimumAmountError(
+                message,
+                currency=match.group('currency'),
+                actual=match.group('actual'),
+                minimum=match.group('minimum'),
+            )
         raise KoyweError(message)
 
     def list_payment_providers(self, *, fiat_symbol: str, email: str | None = None) -> list[dict[str, Any]]:
@@ -1103,6 +1126,8 @@ class KoyweClient:
     def _safe_preview_quote(self, *, symbol_in: str, symbol_out: str, amount: Decimal) -> dict[str, Any] | None:
         try:
             return self.create_preview_quote(symbol_in=symbol_in, symbol_out=symbol_out, amount=amount)
+        except KoyweMinimumAmountError:
+            return None
         except KoyweError as exc:
             message = str(exc).lower()
             if 'less than the minimun available' in message or 'less than the minimum available' in message:

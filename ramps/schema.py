@@ -15,7 +15,7 @@ from users.models import Account, BankInfo, Country
 from ramps.models import KoyweBankInfo, RampPaymentMethod, RampTransaction, RampUserAddress
 from ramps.koywe_sync import build_koywe_instruction_snapshot, sync_koywe_ramp_transaction_from_order, upsert_koywe_ramp_transaction
 
-from ramps.koywe_client import KoyweClient, KoyweConfigurationError, KoyweError
+from ramps.koywe_client import KoyweClient, KoyweConfigurationError, KoyweError, KoyweMinimumAmountError
 from ramps.koywe import (
     COUNTRY_METHODS,
     RAMP_NETWORK_DISPLAY,
@@ -85,6 +85,26 @@ _KOYWE_TEST_ACCOUNT_OVERRIDES = {
         'lastName': 'Peru',
     },
 }
+
+
+def _format_minimum_amount_error(exc: 'KoyweMinimumAmountError', direction: str) -> str:
+    action = 'recargar' if (direction or '').upper() == 'ON_RAMP' else 'retirar'
+    minimum = (exc.minimum or '').strip()
+    currency = (exc.currency or '').strip().upper()
+    if minimum and currency:
+        return (
+            f'El monto es menor al mínimo permitido para {action}. '
+            f'Ingresa al menos {minimum} {currency} para continuar.'
+        )
+    if minimum:
+        return (
+            f'El monto es menor al mínimo permitido para {action}. '
+            f'Ingresa al menos {minimum} para continuar.'
+        )
+    return (
+        f'El monto es menor al mínimo permitido para {action}. '
+        f'Aumenta el monto e inténtalo nuevamente.'
+    )
 
 
 def _get_wallet_upgrade_blocker(*, user, account):
@@ -831,6 +851,12 @@ class CreateRampOrder(graphene.Mutation):
             )
         except KoyweConfigurationError as exc:
             return RampOrderType(success=False, error=str(exc))
+        except KoyweMinimumAmountError as exc:
+            logger.info('Koywe ramp order below minimum: %s', exc)
+            return RampOrderType(
+                success=False,
+                error=_format_minimum_amount_error(exc, normalized_direction),
+            )
         except KoyweError as exc:
             logger.warning('Koywe ramp order failed: %s', exc)
             return RampOrderType(success=False, error=str(exc))
@@ -1141,6 +1167,14 @@ class Query(graphene.ObjectType):
                 payment_method_code=payment_method_code,
                 email=koywe_email,
             )
+        except KoyweMinimumAmountError as exc:
+            logger.info(
+                "Koywe ramp quote below minimum for %s %s: %s",
+                normalized_direction,
+                resolved_country_code,
+                exc,
+            )
+            raise ValidationError(_format_minimum_amount_error(exc, normalized_direction))
         except KoyweError as exc:
             logger.warning(
                 "Koywe ramp quote failed for %s %s: %s",
