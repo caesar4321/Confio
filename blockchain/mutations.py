@@ -3271,12 +3271,15 @@ class SubmitAutoSwapTransactionsMutation(graphene.Mutation):
                 tx_summaries,
             )
 
+            ordered_txids = [summary.get('txid') for summary in tx_summaries]
+
             try:
                 txid = algod_client.send_raw_transaction(combined_b64)
                 logger.info(
-                    "[BurnAndSend Submit] send_raw_transaction returned txid=%s conv=%s usdc_txid=%s usdc_visible=%s usdc_snapshot=%s",
+                    "[BurnAndSend Submit] send_raw_transaction returned txid=%s conv=%s ordered_txids=%s usdc_txid=%s usdc_visible=%s usdc_snapshot=%s",
                     txid,
                     conv.internal_id,
+                    ordered_txids,
                     usdc_transfer_txid,
                     _tx_visible_in_algod(usdc_transfer_txid),
                     _tx_pending_snapshot(usdc_transfer_txid),
@@ -3325,10 +3328,12 @@ class SubmitAutoSwapTransactionsMutation(graphene.Mutation):
                         return cls(success=False, error='off_ramp_missing_usdc_transfer_txid_after_already_in_pool')
                     
                     logger.info(
-                        "[BurnAndSend Submit] already in pool conv=%s group_txid=%s usdc_txid=%s group_snapshot=%s usdc_snapshot=%s",
+                        "[BurnAndSend Submit] already in pool conv=%s extracted_txid=%s ordered_txids=%s usdc_txid=%s raw_error=%s group_snapshot=%s usdc_snapshot=%s",
                         conv.internal_id,
                         txid,
+                        ordered_txids,
                         usdc_transfer_txid,
+                        err_str,
                         _tx_pending_snapshot(txid),
                         _tx_pending_snapshot(usdc_transfer_txid),
                     )
