@@ -567,14 +567,6 @@ class KoyweClient:
             or bank_info.email
             or bank_info.username
         )
-        if alpha3 == 'PER' and payment_method_code in {'WIREPE', 'RECAUDO-PE'}:
-            account_number = (
-                bank_info.account_number
-                or provider_metadata.get('cci')
-                or bank_info.phone_number
-                or bank_info.email
-                or bank_info.username
-            )
         payload: dict[str, Any] = {
             'countryCode': alpha3,
             'currencySymbol': fiat_symbol,
