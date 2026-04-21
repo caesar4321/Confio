@@ -3199,13 +3199,28 @@ class SubmitAutoSwapTransactionsMutation(graphene.Mutation):
             # but Koywe needs the actual USDC transfer transaction id.
             is_koywe_off_ramp = False
             usdc_transfer_txid = None
+            tx_summaries = []
             try:
                 import algosdk.transaction as _algo_txn
                 import msgpack as _msgpack
-                usdc_stxn = _algo_txn.SignedTransaction.undictify(
-                    _msgpack.unpackb(ordered_bytes[4], raw=False)
-                )
-                usdc_transfer_txid = usdc_stxn.transaction.get_txid()
+                for idx, raw_bytes in enumerate(ordered_bytes):
+                    stxn = _algo_txn.SignedTransaction.undictify(_msgpack.unpackb(raw_bytes, raw=False))
+                    txn = stxn.transaction
+                    tx_summary = {
+                        'index': idx,
+                        'txid': txn.get_txid(),
+                        'type': getattr(txn, 'type', None),
+                        'sender': str(getattr(txn, 'sender', '') or ''),
+                        'receiver': str(getattr(txn, 'receiver', '') or ''),
+                        'asset_id': getattr(txn, 'index', None),
+                        'amount': getattr(txn, 'amt', None),
+                        'first_valid': getattr(txn, 'first_valid_round', None),
+                        'last_valid': getattr(txn, 'last_valid_round', None),
+                        'fee': getattr(txn, 'fee', None),
+                    }
+                    tx_summaries.append(tx_summary)
+                    if idx == 4:
+                        usdc_transfer_txid = tx_summary['txid']
             except Exception as _e:
                 logger.warning("Could not derive USDC transfer txid: %s", _e)
 
@@ -3222,22 +3237,50 @@ class SubmitAutoSwapTransactionsMutation(graphene.Mutation):
 
             algod_client = get_algod_client()
 
-            def _tx_visible_in_algod(candidate_txid: str | None) -> bool:
+            def _tx_pending_snapshot(candidate_txid: str | None):
                 if not candidate_txid:
-                    return False
+                    return None
                 try:
                     info = algod_client.pending_transaction_info(candidate_txid)
                 except Exception as lookup_exc:
                     logger.warning("pending_transaction_info lookup failed for %s: %s", candidate_txid, lookup_exc)
+                    return None
+                if not isinstance(info, dict) or not info:
+                    return None
+                return {
+                    'confirmed-round': info.get('confirmed-round'),
+                    'pool-error': info.get('pool-error'),
+                    'sender-rewards': info.get('sender-rewards'),
+                    'txn-type': ((info.get('txn') or {}).get('txn') or {}).get('type'),
+                }
+
+            def _tx_visible_in_algod(candidate_txid: str | None) -> bool:
+                if not candidate_txid:
                     return False
-                if not isinstance(info, dict):
-                    return False
+                info = _tx_pending_snapshot(candidate_txid)
                 # Presence in pending_transaction_info is enough to treat the tx as
                 # observable by the node, whether it is still pending or already confirmed.
                 return bool(info)
 
+            logger.info(
+                "[BurnAndSend Submit] conv=%s withdrawal_id=%s koywe_off_ramp=%s tx_count=%s txs=%s",
+                conv.internal_id,
+                withdrawal_id,
+                is_koywe_off_ramp,
+                len(tx_summaries),
+                tx_summaries,
+            )
+
             try:
                 txid = algod_client.send_raw_transaction(combined_b64)
+                logger.info(
+                    "[BurnAndSend Submit] send_raw_transaction returned txid=%s conv=%s usdc_txid=%s usdc_visible=%s usdc_snapshot=%s",
+                    txid,
+                    conv.internal_id,
+                    usdc_transfer_txid,
+                    _tx_visible_in_algod(usdc_transfer_txid),
+                    _tx_pending_snapshot(usdc_transfer_txid),
+                )
             except Exception as e:
                 err_str = str(e)
                 # If the transaction is already in the pool, it means it was successfully submitted
@@ -3281,7 +3324,14 @@ class SubmitAutoSwapTransactionsMutation(graphene.Mutation):
                         conv.save(update_fields=['status', 'error_message', 'updated_at'])
                         return cls(success=False, error='off_ramp_missing_usdc_transfer_txid_after_already_in_pool')
                     
-                    logger.info(f"Transaction {txid} already in pool for conversion {conv.internal_id}, checking visibility")
+                    logger.info(
+                        "[BurnAndSend Submit] already in pool conv=%s group_txid=%s usdc_txid=%s group_snapshot=%s usdc_snapshot=%s",
+                        conv.internal_id,
+                        txid,
+                        usdc_transfer_txid,
+                        _tx_pending_snapshot(txid),
+                        _tx_pending_snapshot(usdc_transfer_txid),
+                    )
                 else:
                     conv.status = 'FAILED'
                     conv.error_message = err_str
@@ -3289,6 +3339,14 @@ class SubmitAutoSwapTransactionsMutation(graphene.Mutation):
                     raise e
 
             if is_koywe_off_ramp and not _tx_visible_in_algod(usdc_transfer_txid):
+                logger.warning(
+                    "[BurnAndSend Submit] USDC tx not visible after submission conv=%s group_txid=%s usdc_txid=%s group_snapshot=%s usdc_snapshot=%s",
+                    conv.internal_id,
+                    txid,
+                    usdc_transfer_txid,
+                    _tx_pending_snapshot(txid),
+                    _tx_pending_snapshot(usdc_transfer_txid),
+                )
                 conv.status = 'FAILED'
                 conv.error_message = 'off_ramp_usdc_transfer_not_visible_after_submission'
                 conv.save(update_fields=['status', 'error_message', 'updated_at'])
