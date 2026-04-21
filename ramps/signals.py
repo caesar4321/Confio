@@ -421,6 +421,39 @@ def handle_ramp_conversion_link(sender, instance, **kwargs):
     ramp_tx.conversion = instance
     ramp_tx.actor_address = instance.actor_address or ramp_tx.actor_address
     ramp_tx.final_amount, ramp_tx.final_currency = _derive_final_amount(ramp_tx)
+    if ramp_tx.provider == 'koywe':
+        try:
+            from ramps.koywe_sync import _extract_order_status_payload, map_koywe_status
+
+            provider_payload = (
+                (ramp_tx.metadata or {}).get('provider_payload_latest')
+                or (ramp_tx.metadata or {}).get('payment_details')
+                or {}
+            )
+            status_raw, status_details = _extract_order_status_payload(provider_payload)
+            provider_status, normalized_detail = map_koywe_status(status_raw)
+            ramp_tx.status = provider_status
+            ramp_tx.status_detail = normalized_detail if not status_details else f'{normalized_detail}: {status_details}'
+            if provider_status == 'COMPLETED':
+                if not ramp_tx.completed_at:
+                    ramp_tx.completed_at = timezone.now()
+            else:
+                ramp_tx.completed_at = None
+            ramp_tx.save(
+                update_fields=[
+                    'conversion',
+                    'actor_address',
+                    'final_amount',
+                    'final_currency',
+                    'status',
+                    'status_detail',
+                    'completed_at',
+                    'updated_at',
+                ]
+            )
+            return
+        except Exception:
+            pass
     if instance.status == 'COMPLETED':
         ramp_tx.status = 'COMPLETED'
         ramp_tx.status_detail = 'conversion_completed'
