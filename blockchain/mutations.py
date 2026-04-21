@@ -3197,16 +3197,28 @@ class SubmitAutoSwapTransactionsMutation(graphene.Mutation):
             # Derive the USDC transfer txid (index 4) to send to Koywe.
             # send_raw_transaction returns the first txid in the group (the sponsor payment),
             # but Koywe needs the actual USDC transfer transaction id.
+            is_koywe_off_ramp = False
             usdc_transfer_txid = None
             try:
-                import algosdk.encoding as _algo_enc
                 import algosdk.transaction as _algo_txn
+                import msgpack as _msgpack
                 usdc_stxn = _algo_txn.SignedTransaction.undictify(
-                    _algo_enc.msgpack_decode(ordered_bytes[4])
+                    _msgpack.unpackb(ordered_bytes[4], raw=False)
                 )
                 usdc_transfer_txid = usdc_stxn.transaction.get_txid()
             except Exception as _e:
                 logger.warning("Could not derive USDC transfer txid: %s", _e)
+
+            try:
+                ramp_tx = getattr(conv, 'ramp_transaction', None)
+                is_koywe_off_ramp = bool(
+                    ramp_tx
+                    and ramp_tx.provider == 'koywe'
+                    and ramp_tx.direction == 'off_ramp'
+                    and ramp_tx.provider_order_id
+                )
+            except Exception:
+                is_koywe_off_ramp = False
 
             algod_client = get_algod_client()
             try:
@@ -3247,6 +3259,12 @@ class SubmitAutoSwapTransactionsMutation(graphene.Mutation):
                          conv.status = 'SUBMITTED'
                          conv.save(update_fields=['status', 'updated_at'])
                          return cls(success=True) # Return success as it is indeed in flight
+
+                    if is_koywe_off_ramp and not usdc_transfer_txid:
+                        conv.status = 'FAILED'
+                        conv.error_message = 'off_ramp_missing_usdc_transfer_txid_after_already_in_pool'
+                        conv.save(update_fields=['status', 'error_message', 'updated_at'])
+                        return cls(success=False, error='off_ramp_missing_usdc_transfer_txid_after_already_in_pool')
                     
                     logger.info(f"Transaction {txid} already in pool for conversion {conv.internal_id}, marking as SUBMITTED")
                 else:
