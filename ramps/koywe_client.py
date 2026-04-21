@@ -19,13 +19,15 @@ _RAMP_LIMITS_CACHE_TTL = 60 * 10
 _ACCOUNT_PROFILE_SYNC_CACHE_TTL = 60 * 60 * 24
 
 _MINIMUM_AMOUNT_PATTERN = re.compile(
-    r'less than the (?:minimun|minimum) available(?:\s+for\s+(?P<currency>[A-Z]{3}))?\.?\s*'
+    r'(?:less than|below|under|is below|is less than|does not reach)\s+the\s+(?:minimun|minimum)'
+    r'(?:\s+available)?(?:\s+for\s+(?P<currency>[A-Z]{3}))?[\.\s:-]*'
     r'(?P<actual>[\d.,]+)\s*<\s*(?P<minimum>[\d.,]+)',
     re.IGNORECASE,
 )
 
 _MAXIMUM_AMOUNT_PATTERN = re.compile(
-    r'(?:greater|more|bigger|higher) than the (?:maximun|maximum) available(?:\s+for\s+(?P<currency>[A-Z]{3}))?\.?\s*'
+    r'(?:exceeds|exceed|greater than|more than|bigger than|higher than|above|over|surpasses)'
+    r'\s+the\s+(?:maximun|maximum)(?:\s+available)?(?:\s+for\s+(?P<currency>[A-Z]{3}))?[\.\s:-]*'
     r'(?P<actual>[\d.,]+)\s*>\s*(?P<maximum>[\d.,]+)',
     re.IGNORECASE,
 )
