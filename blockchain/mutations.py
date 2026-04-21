@@ -3194,6 +3194,20 @@ class SubmitAutoSwapTransactionsMutation(graphene.Mutation):
             combined_group = b''.join(ordered_bytes)
             combined_b64 = base64.b64encode(combined_group).decode('utf-8')
 
+            # Derive the USDC transfer txid (index 4) to send to Koywe.
+            # send_raw_transaction returns the first txid in the group (the sponsor payment),
+            # but Koywe needs the actual USDC transfer transaction id.
+            usdc_transfer_txid = None
+            try:
+                import algosdk.encoding as _algo_enc
+                import algosdk.transaction as _algo_txn
+                usdc_stxn = _algo_txn.SignedTransaction.undictify(
+                    _algo_enc.msgpack_decode(ordered_bytes[4])
+                )
+                usdc_transfer_txid = usdc_stxn.transaction.get_txid()
+            except Exception as _e:
+                logger.warning("Could not derive USDC transfer txid: %s", _e)
+
             algod_client = get_algod_client()
             try:
                 txid = algod_client.send_raw_transaction(combined_b64)
@@ -3258,15 +3272,16 @@ class SubmitAutoSwapTransactionsMutation(graphene.Mutation):
                     koywe_client = KoyweClient()
                     ramp_metadata = ramp_tx.metadata or {}
                     koywe_auth_email = str(ramp_metadata.get('auth_email') or '').strip() or user.email
+                    koywe_txid = usdc_transfer_txid or txid
                     logger.info(
                         "Associating TX ID %s with Koywe order %s using email %s",
-                        txid,
+                        koywe_txid,
                         ramp_tx.provider_order_id,
                         koywe_auth_email,
                     )
                     koywe_client.add_order_tx_hash(
                         order_id=ramp_tx.provider_order_id,
-                        tx_hash=txid,
+                        tx_hash=koywe_txid,
                         email=koywe_auth_email,
                     )
             except Exception as koywe_exc:
