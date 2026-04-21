@@ -930,6 +930,34 @@ class BankInfo(SoftDeleteModel):
         elif self.bank:
             return self.bank.name
         return "Payment Method"
+
+    @property
+    def account_number_label(self):
+        """Localized label for the saved account identifier."""
+        payment_method = getattr(self, 'payment_method', None)
+        ramp_payment_method = getattr(self, 'ramp_payment_method', None)
+        payment_method_bank = getattr(payment_method, 'bank', None)
+        payment_method_country = getattr(payment_method_bank, 'country', None)
+        legacy_country = getattr(self, 'country', None)
+        method_code = str(
+            getattr(ramp_payment_method, 'code', '')
+            or getattr(payment_method, 'name', '')
+            or ''
+        ).strip().upper()
+        country_code = str(
+            getattr(legacy_country, 'code', '')
+            or getattr(payment_method_country, 'code', '')
+            or getattr(ramp_payment_method, 'country_code', '')
+            or ''
+        ).strip().upper()
+
+        if country_code == 'AR' and method_code == 'WIREAR':
+            return 'CBU o CVU'
+        if country_code == 'MX' and method_code in {'WIREMX', 'STP'}:
+            return 'CLABE'
+        if country_code == 'PE' and method_code in {'WIREPE', 'QRI-PE', 'RECAUDO-PE', 'WIREUSDPE', 'WIREUSDPE-INTERBANK'}:
+            return 'CCI'
+        return 'Número de cuenta'
     
     @property
     def summary_text(self):
@@ -937,7 +965,11 @@ class BankInfo(SoftDeleteModel):
         if self.payment_method:
             # Handle different payment method types
             if self.payment_method.provider_type == 'BANK' and self.account_number:
-                return f"{self.payment_method.display_name} - {self.get_account_type_display()} - {self.get_masked_account_number()}"
+                parts = [self.payment_method.display_name]
+                if self.account_type:
+                    parts.append(self.get_account_type_display())
+                parts.append(f"{self.account_number_label} {self.get_masked_account_number()}")
+                return " - ".join(parts)
             elif self.payment_method.requires_phone and self.phone_number:
                 return f"{self.payment_method.display_name} - {self.phone_number}"
             elif self.payment_method.requires_email and self.email:
@@ -948,7 +980,12 @@ class BankInfo(SoftDeleteModel):
                 return f"{self.payment_method.display_name} - {self.account_holder_name}"
         elif self.bank:
             # Legacy support
-            return f"{self.bank.name} - {self.get_account_type_display()} - {self.get_masked_account_number()}"
+            parts = [self.bank.name]
+            if self.account_type:
+                parts.append(self.get_account_type_display())
+            if self.account_number:
+                parts.append(f"{self.account_number_label} {self.get_masked_account_number()}")
+            return " - ".join(parts)
         return "Payment Method"
     
     @property
@@ -987,6 +1024,7 @@ class BankInfo(SoftDeleteModel):
                     details['country'] = self.payment_method.bank.country.name
                 if self.account_number:
                     details['account_number'] = self.account_number
+                    details['account_number_label'] = self.account_number_label
                 if self.account_type:
                     details['account_type'] = self.get_account_type_display()
             
@@ -1003,6 +1041,7 @@ class BankInfo(SoftDeleteModel):
         elif self.bank:
             details['bank_name'] = self.bank.name
             details['account_number'] = self.account_number
+            details['account_number_label'] = self.account_number_label
             details['account_type'] = self.get_account_type_display()
             if self.country:
                 details['country'] = self.country.name
