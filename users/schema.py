@@ -23,7 +23,7 @@ from achievements.referral_security import (
 InfluencerReferral = UserReferral
 from django.db import transaction as db_transaction
 from django.db.models import Sum, Q, F
-from decimal import Decimal
+from decimal import Decimal, ROUND_DOWN
 from .country_codes import COUNTRY_CODES
 from .phone_utils import normalize_any_phone
 from .phone_utils import normalize_phone
@@ -1365,9 +1365,10 @@ class Query(EmployeeQueries, graphene.ObjectType):
 				if pending_referral_amount > 0:
 					confio_lock_val += pending_referral_amount
 
+			cusd_amount = Decimal(all_balances['cusd']['amount']).quantize(Decimal('0.01'), rounding=ROUND_DOWN)
 			return BalancesType(
 				algo=f"{all_balances['algo']['amount']:.6f}",
-				cusd=f"{all_balances['cusd']['amount']:.6f}",
+				cusd=f"{cusd_amount:.2f}",
 				confio=f"{all_balances['confio']['amount']:.2f}",
 				confioPresaleLocked=f"{all_balances.get('confio_presale', {}).get('amount', 0):.2f}",
 				confioLocked=f"{confio_lock_val:.2f}",
@@ -1384,9 +1385,10 @@ class Query(EmployeeQueries, graphene.ObjectType):
 				fallback_account = locals().get('account')
 				if fallback_account:
 					cached = BalanceService.get_all_balances(fallback_account, force_refresh=False)
+					cusd_amount = Decimal(cached['cusd']['amount']).quantize(Decimal('0.01'), rounding=ROUND_DOWN)
 					return BalancesType(
 						algo=f"{cached['algo']['amount']:.6f}",
-						cusd=f"{cached['cusd']['amount']:.6f}",
+						cusd=f"{cusd_amount:.2f}",
 						confio=f"{cached['confio']['amount']:.2f}",
 						confioPresaleLocked=f"{cached.get('confio_presale', {}).get('amount', 0):.2f}",
 						confioLocked=f"{cached.get('confio_presale', {}).get('amount', 0):.2f}",
@@ -1396,7 +1398,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			except Exception:
 				pass
 			# Last resort: zeros
-			return BalancesType(algo="0.000000", cusd="0.000000", confio="0.00", confioPresaleLocked="0.00", confioLocked="0.00", pendingReferralReward="0.00", usdc="0.00")
+			return BalancesType(algo="0.000000", cusd="0.00", confio="0.00", confioPresaleLocked="0.00", confioLocked="0.00", pendingReferralReward="0.00", usdc="0.00")
 
 	def resolve_stats_summary(self, info):
 		"""Compute small set of aggregates with a short cache TTL."""
@@ -3912,8 +3914,9 @@ class RefreshAccountBalance(graphene.Mutation):
 				)
 			
 			# Format balances for response
+			cusd_amount = Decimal(all_balances['cusd']['amount']).quantize(Decimal('0.01'), rounding=ROUND_DOWN)
 			balances = BalancesType(
-				cusd=f"{all_balances['cusd']['amount']:.6f}",
+				cusd=f"{cusd_amount:.2f}",
 				confio=f"{all_balances['confio']['amount']:.2f}",
 				confioPresaleLocked=f"{all_balances.get('confio_presale', {}).get('amount', 0):.2f}",
 				usdc=f"{all_balances['usdc']['amount']:.2f}"
