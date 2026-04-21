@@ -330,6 +330,7 @@ def _extract_verification_payload(response_payload: dict[str, Any]) -> dict[str,
         response_payload.get('issuing_state'),
         response_payload.get('issuing_country'),
     )
+    issuing_country_iso3 = _normalize_iso3(issuing_country)
     document_type = _first_non_empty(
         id_verification.get('document_type'),
         response_payload.get('document_type'),
@@ -341,6 +342,18 @@ def _extract_verification_payload(response_payload: dict[str, Any]) -> dict[str,
         parsed_address.get('neighborhood'),
     ]
     address_line = ' '.join(str(part).strip() for part in line_parts if part)
+
+    document_number = _first_non_empty(
+        id_verification.get('document_number'),
+        response_payload.get('document_number'),
+        response_payload.get('personal_number'),
+    )
+    if issuing_country_iso3 == 'CHL':
+        document_number = _first_non_empty(
+            id_verification.get('personal_number'),
+            response_payload.get('personal_number'),
+            document_number,
+        )
 
     return {
         'verified_first_name': _first_non_empty(
@@ -367,12 +380,8 @@ def _extract_verification_payload(response_payload: dict[str, Any]) -> dict[str,
         ),
         'verified_postal_code': _first_non_empty(parsed_address.get('postal_code'), response_payload.get('postal_code')),
         'document_type': DOCUMENT_TYPE_MAP.get(str(document_type or '').strip().lower(), 'national_id'),
-        'document_number': _first_non_empty(
-            id_verification.get('document_number'),
-            response_payload.get('document_number'),
-            response_payload.get('personal_number'),
-        ),
-        'document_issuing_country': _normalize_iso3(issuing_country),
+        'document_number': document_number,
+        'document_issuing_country': issuing_country_iso3,
         'document_expiry_date': _parse_date(
             _first_non_empty(id_verification.get('expiration_date'), response_payload.get('expiration_date'))
         ),
