@@ -181,12 +181,13 @@ def _link_external_withdrawal_to_ramp(
         if actor_address and ramp_tx.actor_address != actor_address:
             ramp_tx.actor_address = actor_address
             update_fields.append('actor_address')
-        if ramp_tx.status != 'PROCESSING':
-            ramp_tx.status = 'PROCESSING'
-            update_fields.append('status')
-        if ramp_tx.status_detail != 'withdrawal_submitted_provider_pending':
-            ramp_tx.status_detail = 'withdrawal_submitted_provider_pending'
-            update_fields.append('status_detail')
+        if provider != 'koywe':
+            if ramp_tx.status != 'PROCESSING':
+                ramp_tx.status = 'PROCESSING'
+                update_fields.append('status')
+            if ramp_tx.status_detail != 'withdrawal_submitted_provider_pending':
+                ramp_tx.status_detail = 'withdrawal_submitted_provider_pending'
+                update_fields.append('status_detail')
 
         if update_fields:
             update_fields.append('updated_at')
