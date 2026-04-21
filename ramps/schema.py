@@ -785,6 +785,22 @@ class CreateRampOrder(graphene.Mutation):
             return RampOrderType(success=False, error='Koywe credentials are not configured on the server')
 
         try:
+            if normalized_direction == 'OFF_RAMP':
+                wallet_address = _get_koywe_destination_address(current_account=current_account)
+                available_cusd = _get_algorand_asset_balance(
+                    wallet_address,
+                    getattr(settings, 'ALGORAND_CUSD_ASSET_ID', None),
+                )
+                if available_cusd < decimal_amount:
+                    return RampOrderType(
+                        success=False,
+                        error=(
+                            f'No tienes suficiente cUSD para este retiro. '
+                            f'Disponible: {available_cusd:.6f} cUSD. '
+                            f'Requerido: {decimal_amount:.6f} cUSD.'
+                        ),
+                    )
+
             koywe_email = _get_koywe_auth_email(
                 user=user,
                 country_code=resolved_country_code,
@@ -1365,6 +1381,22 @@ def _get_saved_bank_info(*, current_account, bank_info_id):
 
 def _get_koywe_destination_address(*, current_account) -> str | None:
     return getattr(current_account, 'algorand_address', None)
+
+
+def _get_algorand_asset_balance(address: str | None, asset_id: int | None) -> Decimal:
+    normalized_address = str(address or '').strip()
+    if not normalized_address or not asset_id:
+        return Decimal('0')
+
+    from blockchain.algorand_client import get_algod_client
+
+    algod_client = get_algod_client()
+    account_info = algod_client.account_info(normalized_address)
+    for asset in account_info.get('assets', []) or []:
+        if int(asset.get('asset-id') or 0) == int(asset_id):
+            amount = int(asset.get('amount') or 0)
+            return (Decimal(amount) / Decimal('1000000')).quantize(Decimal('0.000001'))
+    return Decimal('0')
 
 
 def _get_koywe_test_account_override(*, user, country_code: str) -> dict[str, str] | None:
