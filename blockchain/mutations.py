@@ -3255,8 +3255,11 @@ class SubmitAutoSwapTransactionsMutation(graphene.Mutation):
                     conv.save(update_fields=['status', 'error_message', 'updated_at'])
                     raise e
 
+            # For burn+send groups, persist the actual USDC payment txid when we can
+            # derive it. This keeps local tracking aligned with the tx hash Koywe
+            # expects and still falls back to the group-leading txid if needed.
             conv.status = 'SUBMITTED'
-            conv.to_transaction_hash = txid
+            conv.to_transaction_hash = usdc_transfer_txid or txid
             conv.save(update_fields=['status', 'to_transaction_hash', 'updated_at'])
             mark_pending_auto_swap_submitted(conv)
 
