@@ -579,6 +579,11 @@ class KoyweClient:
             payload['documentNumber'] = document_number
         if account_number is not None:
             payload['accountNumber'] = str(account_number)
+        if alpha3 == 'ARG' and payment_method_code == 'WIREAR':
+            normalized_account_number = ''.join(ch for ch in str(payload.get('accountNumber') or '') if ch.isdigit())
+            if len(normalized_account_number) != 22:
+                raise KoyweError('El CBU o CVU debe tener exactamente 22 dígitos.')
+            payload['accountNumber'] = normalized_account_number
         if provider_metadata.get('bankCode'):
             raw_bank_code = str(provider_metadata['bankCode']).strip()
             resolved_bank_code = self._resolve_bank_code(

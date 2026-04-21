@@ -599,7 +599,16 @@ export const AddPayoutMethodModal = ({
 
     if (countryCode === 'AR' && methodCode === 'WIREAR') {
       return {
-        account: { ...defaultAccount, label: 'CBU o CVU', placeholder: 'Ingresa tu CBU o CVU', show: true, required: true, keyboardType: 'number-pad' as const },
+        account: {
+          ...defaultAccount,
+          label: 'CBU o CVU',
+          placeholder: 'Ingresa tu CBU o CVU',
+          show: true,
+          required: true,
+          keyboardType: 'number-pad' as const,
+          minLength: 22,
+          maxLength: 22,
+        },
         phone: defaultPhone,
         email: defaultEmail,
         holderLabel: 'Titular de la cuenta',
@@ -821,12 +830,19 @@ export const AddPayoutMethodModal = ({
 
     // Validate required fields based on payment method
     if (fieldCopy.account.required && !formData.accountNumber.trim()) {
-      Alert.alert('Error', 'Por favor ingresa el número de cuenta', [{ text: 'Entendido' }]);
+      Alert.alert('Error', `Por favor ingresa ${fieldCopy.account.label.toLowerCase()}`, [{ text: 'Entendido' }]);
       return false;
     }
 
     const accountNumberValue = String(formData.accountNumber || '').trim();
     if (fieldCopy.account.show && accountNumberValue) {
+      if (countryCode === 'AR' && methodCode === 'WIREAR') {
+        const digitsOnly = accountNumberValue.replace(/\D/g, '');
+        if (digitsOnly.length !== 22) {
+          Alert.alert('Error', 'El CBU o CVU debe tener exactamente 22 dígitos.', [{ text: 'Entendido' }]);
+          return false;
+        }
+      }
       if (fieldCopy.account.minLength && accountNumberValue.length < fieldCopy.account.minLength) {
         Alert.alert('Error', `${fieldCopy.account.label} debe tener al menos ${fieldCopy.account.minLength} dígitos`, [{ text: 'Entendido' }]);
         return false;
