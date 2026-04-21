@@ -3221,6 +3221,21 @@ class SubmitAutoSwapTransactionsMutation(graphene.Mutation):
                 is_koywe_off_ramp = False
 
             algod_client = get_algod_client()
+
+            def _tx_visible_in_algod(candidate_txid: str | None) -> bool:
+                if not candidate_txid:
+                    return False
+                try:
+                    info = algod_client.pending_transaction_info(candidate_txid)
+                except Exception as lookup_exc:
+                    logger.warning("pending_transaction_info lookup failed for %s: %s", candidate_txid, lookup_exc)
+                    return False
+                if not isinstance(info, dict):
+                    return False
+                # Presence in pending_transaction_info is enough to treat the tx as
+                # observable by the node, whether it is still pending or already confirmed.
+                return bool(info)
+
             try:
                 txid = algod_client.send_raw_transaction(combined_b64)
             except Exception as e:
@@ -3266,12 +3281,18 @@ class SubmitAutoSwapTransactionsMutation(graphene.Mutation):
                         conv.save(update_fields=['status', 'error_message', 'updated_at'])
                         return cls(success=False, error='off_ramp_missing_usdc_transfer_txid_after_already_in_pool')
                     
-                    logger.info(f"Transaction {txid} already in pool for conversion {conv.internal_id}, marking as SUBMITTED")
+                    logger.info(f"Transaction {txid} already in pool for conversion {conv.internal_id}, checking visibility")
                 else:
                     conv.status = 'FAILED'
                     conv.error_message = err_str
                     conv.save(update_fields=['status', 'error_message', 'updated_at'])
                     raise e
+
+            if is_koywe_off_ramp and not _tx_visible_in_algod(usdc_transfer_txid):
+                conv.status = 'FAILED'
+                conv.error_message = 'off_ramp_usdc_transfer_not_visible_after_submission'
+                conv.save(update_fields=['status', 'error_message', 'updated_at'])
+                return cls(success=False, error='off_ramp_usdc_transfer_not_visible_after_submission')
 
             # For burn+send groups, persist the actual USDC payment txid when we can
             # derive it. This keeps local tracking aligned with the tx hash Koywe
