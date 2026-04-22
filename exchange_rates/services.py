@@ -1,7 +1,7 @@
 import requests
 import logging
 from decimal import Decimal
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Iterable
 from django.utils import timezone
 from django.conf import settings
 from .models import ExchangeRate, RateFetchLog
@@ -30,7 +30,10 @@ class ExchangeRateService:
         
         # Try ExchangeRate-API as general fallback
         results['exchangerate_api'] = self.fetch_exchangerate_api_rates()
-        
+
+        # Try Binance P2P as a parallel-market proxy for supported fiat markets
+        results['binance_p2p'] = self.fetch_binance_p2p_parallel_rates()
+
         # Try CurrencyLayer for additional VES rates
         results['currencylayer'] = self.fetch_currencylayer_rates()
         
@@ -216,6 +219,207 @@ class ExchangeRateService:
             )
             logger.error(f"ExchangeRate-API unexpected error: {e}")
             return False
+
+    def _extract_first_decimal(self, payload: Any, candidate_paths: Iterable[Iterable[Any]]) -> Optional[Decimal]:
+        """
+        Extract the first decimal-like value found in a set of nested paths.
+        """
+        for path in candidate_paths:
+            current = payload
+            try:
+                for part in path:
+                    current = current[part]
+            except (KeyError, IndexError, TypeError):
+                continue
+
+            if current in (None, ''):
+                continue
+
+            try:
+                return Decimal(str(current))
+            except Exception:
+                continue
+
+        return None
+
+    def _get_binance_p2p_quote_price(self, fiat_currency: str, trade_type: str) -> tuple[Optional[Decimal], Dict[str, Any]]:
+        """
+        Get a USDT/<fiat> quote from Binance's public C2C agent API.
+        """
+        url = "https://www.binance.com/bapi/c2c/v1/public/c2c/agent/quote-price"
+        response = self.session.get(
+            url,
+            params={
+                'fiat': fiat_currency,
+                'asset': 'USDT',
+                'tradeType': trade_type,
+            },
+            timeout=10,
+        )
+        response.raise_for_status()
+
+        data = response.json()
+        price = self._extract_first_decimal(
+            data,
+            (
+                ('data', 'price'),
+                ('data', 'quotePrice'),
+                ('data', 0, 'price'),
+                ('data', 0, 'adv', 'price'),
+                ('price',),
+            ),
+        )
+        return price, data
+
+    def _get_binance_p2p_ad_price(self, fiat_currency: str, trade_type: str) -> tuple[Optional[Decimal], Dict[str, Any]]:
+        """
+        Fallback parser for Binance ad-list responses when quote-price is unavailable.
+        """
+        url = "https://www.binance.com/bapi/c2c/v1/public/c2c/agent/ad-list"
+        response = self.session.get(
+            url,
+            params={
+                'fiat': fiat_currency,
+                'asset': 'USDT',
+                'tradeType': trade_type,
+                'limit': 1,
+            },
+            timeout=10,
+        )
+        response.raise_for_status()
+
+        data = response.json()
+        price = self._extract_first_decimal(
+            data,
+            (
+                ('data', 0, 'price'),
+                ('data', 0, 'adv', 'price'),
+                ('data', 'items', 0, 'price'),
+                ('data', 'items', 0, 'adv', 'price'),
+            ),
+        )
+        return price, data
+
+    def _fetch_binance_p2p_parallel_rate(self, fiat_currency: str) -> Dict[str, Any]:
+        """
+        Fetch a parallel-market proxy for a fiat currency from Binance P2P USDT quotes.
+
+        We store the midpoint of BUY and SELL sides as fiat per USD, using USDT as
+        a practical market proxy for USD in the local P2P market.
+        """
+        buy_price = sell_price = None
+        buy_raw: Dict[str, Any] = {}
+        sell_raw: Dict[str, Any] = {}
+
+        try:
+            try:
+                buy_price, buy_raw = self._get_binance_p2p_quote_price(fiat_currency, 'BUY')
+                sell_price, sell_raw = self._get_binance_p2p_quote_price(fiat_currency, 'SELL')
+            except requests.exceptions.RequestException:
+                # Fall back to the ad list endpoint if quote-price is unavailable.
+                buy_price, buy_raw = self._get_binance_p2p_ad_price(fiat_currency, 'BUY')
+                sell_price, sell_raw = self._get_binance_p2p_ad_price(fiat_currency, 'SELL')
+
+            if not buy_price and not sell_price:
+                raise ValueError(f"Binance P2P did not return a usable {fiat_currency}/USDT price")
+
+            reference_price = (
+                (buy_price + sell_price) / Decimal('2')
+                if buy_price and sell_price
+                else buy_price or sell_price
+            )
+
+            return {
+                'success': True,
+                'currency': fiat_currency,
+                'price': reference_price,
+                'buy_price': buy_price,
+                'sell_price': sell_price,
+                'buy_quote': buy_raw,
+                'sell_quote': sell_raw,
+                'pricing_method': 'midpoint' if buy_price and sell_price else 'single_side',
+            }
+        except Exception as e:
+            return {
+                'success': False,
+                'currency': fiat_currency,
+                'error': str(e),
+            }
+
+    def fetch_binance_p2p_parallel_rates(self) -> bool:
+        """
+        Fetch Binance P2P parallel-market proxies for VES, ARS, and BOB.
+        """
+        start_time = timezone.now()
+
+        try:
+            fiat_currencies = ('VES', 'ARS', 'BOB')
+            fetched_results = [self._fetch_binance_p2p_parallel_rate(currency) for currency in fiat_currencies]
+            successful_results = [result for result in fetched_results if result['success']]
+
+            for result in successful_results:
+                ExchangeRate.objects.create(
+                    source_currency=result['currency'],
+                    target_currency='USD',
+                    rate=result['price'],
+                    rate_type='parallel',
+                    source='binance_p2p',
+                    fetched_at=timezone.now(),
+                    raw_data={
+                        'proxy_asset': 'USDT',
+                        'market': result['currency'],
+                        'pricing_method': result['pricing_method'],
+                        'buy_price': str(result['buy_price']) if result['buy_price'] else None,
+                        'sell_price': str(result['sell_price']) if result['sell_price'] else None,
+                        'buy_quote': result['buy_quote'],
+                        'sell_quote': result['sell_quote'],
+                    }
+                )
+
+            response_time = int((timezone.now() - start_time).total_seconds() * 1000)
+            RateFetchLog.objects.create(
+                source='binance_p2p',
+                status='success' if successful_results else 'failed',
+                rates_fetched=len(successful_results),
+                error_message=None if successful_results else '; '.join(
+                    result['error'] for result in fetched_results if not result['success']
+                ),
+                response_time_ms=response_time
+            )
+
+            logger.info(
+                "Binance P2P: Successfully fetched %s parallel proxy rate(s)",
+                len(successful_results)
+            )
+            return bool(successful_results)
+
+        except requests.exceptions.RequestException as e:
+            response_time = int((timezone.now() - start_time).total_seconds() * 1000)
+            RateFetchLog.objects.create(
+                source='binance_p2p',
+                status='failed',
+                rates_fetched=0,
+                error_message=str(e),
+                response_time_ms=response_time
+            )
+            logger.error(f"Binance P2P API error: {e}")
+            return False
+
+        except Exception as e:
+            RateFetchLog.objects.create(
+                source='binance_p2p',
+                status='failed',
+                rates_fetched=0,
+                error_message=str(e)
+            )
+            logger.error(f"Binance P2P unexpected error: {e}")
+            return False
+
+    def fetch_binance_p2p_bob_rates(self) -> bool:
+        """
+        Backward-compatible wrapper for the management command name previously added.
+        """
+        return self.fetch_binance_p2p_parallel_rates()
     
     def fetch_currencylayer_rates(self) -> bool:
         """

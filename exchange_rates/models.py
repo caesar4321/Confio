@@ -19,6 +19,7 @@ class ExchangeRate(models.Model):
         ('yadio', 'Yadio.io'),
         ('exchangerate_api', 'ExchangeRate-API'),
         ('currencylayer', 'CurrencyLayer'),
+        ('binance_p2p', 'Binance P2P'),
         ('bluelytics', 'Bluelytics (Argentina)'),
         ('dolarapi', 'DolarAPI (Argentina)'),
         ('bcv', 'Banco Central de Venezuela'),

@@ -9,7 +9,7 @@ class Command(BaseCommand):
         parser.add_argument(
             '--source',
             type=str,
-            help='Fetch from specific source only (dolartoday, yadio, exchangerate_api)',
+            help='Fetch from specific source only (dolartoday, yadio, exchangerate_api, binance_p2p)',
         )
 
     def handle(self, *args, **options):
@@ -24,6 +24,8 @@ class Command(BaseCommand):
                 success = exchange_rate_service.fetch_yadio_rates()
             elif source == 'exchangerate_api':
                 success = exchange_rate_service.fetch_exchangerate_api_rates()
+            elif source == 'binance_p2p':
+                success = exchange_rate_service.fetch_binance_p2p_bob_rates()
             else:
                 self.stdout.write(
                     self.style.ERROR(f'Unknown source: {source}')
