@@ -4,9 +4,33 @@ from decimal import Decimal
 from typing import Optional, Dict, Any, Iterable
 from django.utils import timezone
 from django.conf import settings
+from django.db.models import Case, When, Value, IntegerField
 from .models import ExchangeRate, RateFetchLog
 
 logger = logging.getLogger(__name__)
+
+
+RATE_SOURCE_PRIORITY = {
+    'parallel': [
+        'binance_p2p',
+        'yadio',
+        'dolarapi',
+        'bluelytics',
+        'manual',
+    ],
+    'average': [
+        'dolarapi',
+        'manual',
+    ],
+    'official': [
+        'exchangerate_api',
+        'currencylayer',
+        'bluelytics',
+        'dolarapi',
+        'bcv',
+        'manual',
+    ],
+}
 
 
 class ExchangeRateService:
@@ -656,7 +680,29 @@ class ExchangeRateService:
         """
         Get the current exchange rate
         """
-        return ExchangeRate.get_rate_value(source_currency, target_currency, rate_type)
+        source_priority = RATE_SOURCE_PRIORITY.get(rate_type, [])
+        queryset = ExchangeRate.objects.filter(
+            source_currency=source_currency,
+            target_currency=target_currency,
+            rate_type=rate_type,
+            is_active=True
+        )
+
+        if source_priority:
+            priority_order = Case(
+                *[
+                    When(source=source, then=Value(index))
+                    for index, source in enumerate(source_priority)
+                ],
+                default=Value(len(source_priority)),
+                output_field=IntegerField(),
+            )
+            queryset = queryset.annotate(source_priority=priority_order).order_by('source_priority', '-fetched_at')
+        else:
+            queryset = queryset.order_by('-fetched_at')
+
+        rate_obj = queryset.first()
+        return rate_obj.rate if rate_obj else None
     
     def get_rate_with_fallback(self, 
                               source_currency: str = 'VES', 
