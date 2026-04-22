@@ -2,6 +2,9 @@ import { useState, useEffect } from 'react';
 import { useQuery } from '@apollo/client';
 import { GET_EXCHANGE_RATE_WITH_FALLBACK, GET_CURRENT_EXCHANGE_RATE } from '../apollo/queries';
 import { useCountry } from '../contexts/CountryContext';
+import { useAuth } from '../contexts/AuthContext';
+import { getCurrencyForCountry } from '../utils/currencyMapping';
+import { getCountryByIso } from '../utils/countries';
 
 interface ExchangeRateResult {
   rate: number | null;
@@ -85,29 +88,11 @@ export const useSpecificExchangeRate = (
  * Shows what the current market rate is so users can set competitive P2P rates
  */
 export const useSelectedCountryRate = () => {
-  const { selectedCountry } = useCountry();
-  
-  // Import currency mapping
-  const getCurrencyForCountry = (country: any) => {
-    if (!country) return 'VES'; // Default to VES for Venezuela-focused app
-    
-    const countryCode = country[2]; // ISO code is at index 2
-    const currencyMap: { [key: string]: string } = {
-      'VE': 'VES', 'AR': 'ARS', 'CO': 'COP', 'PE': 'PEN', 'CL': 'CLP',
-      'BO': 'BOB', 'UY': 'UYU', 'PY': 'PYG', 'BR': 'BRL', 'MX': 'MXN',
-      'DO': 'DOP',
-      'US': 'USD', 'CA': 'CAD', 'GB': 'GBP', 'JP': 'JPY', 'CN': 'CNY',
-      'KR': 'KRW', 'IN': 'INR', 'SG': 'SGD', 'AU': 'AUD', 'TH': 'THB',
-      'PH': 'PHP', 'MY': 'MYR', 'ID': 'IDR', 'VN': 'VND',
-      // European countries use EUR
-      'DE': 'EUR', 'FR': 'EUR', 'ES': 'EUR', 'IT': 'EUR', 'PT': 'EUR',
-      'NL': 'EUR', 'BE': 'EUR', 'AT': 'EUR', 'IE': 'EUR', 'FI': 'EUR', 'GR': 'EUR',
-    };
-    
-    return currencyMap[countryCode] || 'USD';
-  };
-  
-  const sourceCurrency = getCurrencyForCountry(selectedCountry);
+  const { selectedCountry, userCountry } = useCountry();
+  const { userProfile } = useAuth() as any;
+  const profileCountry = userProfile?.phoneCountry ? getCountryByIso(userProfile.phoneCountry) : null;
+  const countryToUse = selectedCountry || userCountry || profileCountry;
+  const sourceCurrency = countryToUse ? getCurrencyForCountry(countryToUse as any) : 'USD';
   
   return useExchangeRate(sourceCurrency, 'USD');
 };

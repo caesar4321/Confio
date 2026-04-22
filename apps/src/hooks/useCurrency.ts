@@ -1,5 +1,7 @@
 import { useMemo } from 'react';
 import { useCountry } from '../contexts/CountryContext';
+import { useAuth } from '../contexts/AuthContext';
+import { getCountryByIso } from '../utils/countries';
 import { 
   getCurrencyByCountry, 
   formatCurrencyAmount, 
@@ -15,18 +17,20 @@ import {
  */
 export const useCurrency = () => {
   const { selectedCountry, userCountry } = useCountry();
+  const { userProfile } = useAuth() as any;
   
   // Get currency for selected country or fallback to user's country
   const currency = useMemo(() => {
-    const countryToUse = selectedCountry || userCountry;
+    const profileCountry = userProfile?.phoneCountry ? getCountryByIso(userProfile.phoneCountry) : null;
+    const countryToUse = selectedCountry || userCountry || profileCountry;
     if (!countryToUse) {
-      // Default to Venezuelan Bolívar for Venezuela-focused app
-      return currencies.VES;
+      // Avoid showing a misleading local currency before the user's country is known.
+      return currencies.USD;
     }
     
     const countryCurrency = getCurrencyByCountry(countryToUse[2]); // Use ISO code
-    return countryCurrency || currencies.VES; // Fallback to VES
-  }, [selectedCountry, userCountry]);
+    return countryCurrency || currencies.USD;
+  }, [selectedCountry, userCountry, userProfile?.phoneCountry]);
   
   // Currency formatting functions
   const formatAmount = useMemo(() => ({
