@@ -137,6 +137,16 @@ export const currencies: { [key: string]: Currency } = {
     decimalSeparator: ',',
     minorUnit: 100,
   },
+  PYG: {
+    code: 'PYG',
+    name: 'Guaraní Paraguayo',
+    symbol: '₲',
+    symbolPosition: 'before',
+    decimals: 0,
+    thousandsSeparator: '.',
+    decimalSeparator: ',',
+    minorUnit: 1,
+  },
   DOP: {
     code: 'DOP',
     name: 'Peso Dominicano',
@@ -179,6 +189,16 @@ export const currencies: { [key: string]: Currency } = {
     decimalSeparator: '.',
     minorUnit: 1,
   },
+  SGD: {
+    code: 'SGD',
+    name: 'Dólar de Singapur',
+    symbol: 'S$',
+    symbolPosition: 'before',
+    decimals: 2,
+    thousandsSeparator: ',',
+    decimalSeparator: '.',
+    minorUnit: 100,
+  },
   INR: {
     code: 'INR',
     name: 'Rupia India',
@@ -203,6 +223,26 @@ export const currencies: { [key: string]: Currency } = {
     code: 'THB',
     name: 'Baht Tailandés',
     symbol: '฿',
+    symbolPosition: 'before',
+    decimals: 2,
+    thousandsSeparator: ',',
+    decimalSeparator: '.',
+    minorUnit: 100,
+  },
+  PHP: {
+    code: 'PHP',
+    name: 'Peso Filipino',
+    symbol: '₱',
+    symbolPosition: 'before',
+    decimals: 2,
+    thousandsSeparator: ',',
+    decimalSeparator: '.',
+    minorUnit: 100,
+  },
+  MYR: {
+    code: 'MYR',
+    name: 'Ringgit Malayo',
+    symbol: 'RM',
     symbolPosition: 'before',
     decimals: 2,
     thousandsSeparator: ',',
@@ -376,6 +416,7 @@ export const countryToCurrency: { [countryIso: string]: string } = {
   'CO': 'COP',
   'PE': 'PEN',
   'UY': 'UYU',
+  'PY': 'PYG',
   'DO': 'DOP',
   
   // Asia
@@ -523,9 +564,9 @@ export const convertCurrency = (
  */
 export const getCurrenciesByRegion = (region: 'americas' | 'europe' | 'asia' | 'africa' | 'oceania'): Currency[] => {
   const regionMappings = {
-    americas: ['USD', 'CAD', 'MXN', 'VES', 'ARS', 'BOB', 'BRL', 'CLP', 'COP', 'PEN', 'UYU'],
+    americas: ['USD', 'CAD', 'MXN', 'VES', 'ARS', 'BOB', 'BRL', 'CLP', 'COP', 'PEN', 'UYU', 'PYG'],
     europe: ['EUR', 'GBP', 'CHF', 'RUB', 'PLN', 'CZK'],
-    asia: ['CNY', 'JPY', 'KRW', 'INR', 'IDR', 'THB', 'VND'],
+    asia: ['CNY', 'JPY', 'KRW', 'SGD', 'INR', 'IDR', 'THB', 'PHP', 'MYR', 'VND'],
     africa: ['NGN', 'ZAR', 'EGP'],
     oceania: ['AUD'],
   };
