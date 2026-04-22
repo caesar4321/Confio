@@ -67,6 +67,16 @@ export const currencies: { [key: string]: Currency } = {
     decimalSeparator: ',',
     minorUnit: 100,
   },
+  BOB: {
+    code: 'BOB',
+    name: 'Boliviano',
+    symbol: 'Bs.',
+    symbolPosition: 'after',
+    decimals: 2,
+    thousandsSeparator: '.',
+    decimalSeparator: ',',
+    minorUnit: 100,
+  },
   BRL: {
     code: 'BRL',
     name: 'Real Brasileño',
@@ -360,6 +370,7 @@ export const countryToCurrency: { [countryIso: string]: string } = {
   // Latin America
   'VE': 'VES',
   'AR': 'ARS',
+  'BO': 'BOB',
   'BR': 'BRL',
   'CL': 'CLP',
   'CO': 'COP',
@@ -512,7 +523,7 @@ export const convertCurrency = (
  */
 export const getCurrenciesByRegion = (region: 'americas' | 'europe' | 'asia' | 'africa' | 'oceania'): Currency[] => {
   const regionMappings = {
-    americas: ['USD', 'CAD', 'MXN', 'VES', 'ARS', 'BRL', 'CLP', 'COP', 'PEN', 'UYU'],
+    americas: ['USD', 'CAD', 'MXN', 'VES', 'ARS', 'BOB', 'BRL', 'CLP', 'COP', 'PEN', 'UYU'],
     europe: ['EUR', 'GBP', 'CHF', 'RUB', 'PLN', 'CZK'],
     asia: ['CNY', 'JPY', 'KRW', 'INR', 'IDR', 'THB', 'VND'],
     africa: ['NGN', 'ZAR', 'EGP'],
