@@ -3,7 +3,7 @@ Celery tasks for user achievements and scheduled checks
 """
 from celery import shared_task
 from django.utils import timezone
-from datetime import timedelta
+from datetime import datetime, timedelta
 from django.core.management import call_command
 import logging
 from functools import wraps
@@ -246,21 +246,57 @@ def capture_country_metrics():
 
 @shared_task(name='users.rollup_funnel_events')
 @ensure_db_connection_closed
-def rollup_funnel_events():
+def rollup_funnel_events(target_date_str=None):
     """
     Roll up yesterday's raw FunnelEvent rows into FunnelDailyRollup and
-    delete raw rows older than 30 days.
+    delete raw rows older than 90 days.
     """
     from users.models_analytics import FunnelDailyRollup, FunnelEvent
-    from users.funnel import derive_rollup_cohort
+    from users.funnel import CREATOR_REFERRAL_CODE, derive_rollup_cohort
+    from achievements.models import UserReferral
 
     try:
-        target_date = (timezone.now() - timedelta(days=1)).date()
-        retention_cutoff = timezone.now() - timedelta(days=30)
+        target_date = (
+            datetime.strptime(target_date_str, '%Y-%m-%d').date()
+            if target_date_str
+            else (timezone.now() - timedelta(days=1)).date()
+        )
+        retention_cutoff = timezone.now() - timedelta(days=90)
 
         logger.info("Starting funnel rollup for %s", target_date)
 
         day_events = FunnelEvent.objects.filter(created_at__date=target_date)
+        if target_date_str and not day_events.exists():
+            logger.info("Skipping funnel rollup for %s: no raw events to rebuild", target_date)
+            return {
+                'date': str(target_date),
+                'segments': 0,
+                'deleted_raw': 0,
+                'skipped': True,
+            }
+
+        first_deposit_user_ids = set(
+            day_events.filter(
+                source_type='referral_link',
+                event_name='first_deposit',
+                user_id__isnull=False,
+            ).values_list('user_id', flat=True)
+        )
+        referral_deposit_cohorts = {}
+        if first_deposit_user_ids:
+            for referral in UserReferral.objects.filter(
+                referred_user_id__in=first_deposit_user_ids,
+            ).exclude(status='inactive').values('referred_user_id', 'referrer_identifier'):
+                referrer_identifier = (referral['referrer_identifier'] or '').strip().upper()
+                cohort = (
+                    'creator_julianmoonluna'
+                    if referrer_identifier == CREATOR_REFERRAL_CODE
+                    else 'user_driven'
+                )
+                # Prefer creator attribution if inconsistent historical rows exist.
+                if referral['referred_user_id'] not in referral_deposit_cohorts or cohort == 'creator_julianmoonluna':
+                    referral_deposit_cohorts[referral['referred_user_id']] = cohort
+
         grouped = {}
         for event in day_events.values(
             'event_name',
@@ -272,11 +308,17 @@ def rollup_funnel_events():
             'user_id',
             'session_id',
         ):
-            cohort = derive_rollup_cohort(
-                event.get('event_name') or '',
-                event.get('source_type') or '',
-                event.get('properties') or {},
-            )
+            if (
+                event.get('source_type') == 'referral_link'
+                and event.get('event_name') == 'first_deposit'
+            ):
+                cohort = referral_deposit_cohorts.get(event.get('user_id'), 'unknown')
+            else:
+                cohort = derive_rollup_cohort(
+                    event.get('event_name') or '',
+                    event.get('source_type') or '',
+                    event.get('properties') or {},
+                )
             key = (
                 event.get('event_name') or '',
                 event.get('country') or '',

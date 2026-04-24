@@ -229,7 +229,7 @@ class CountryMetrics(models.Model):
 #
 # Design notes:
 # - FunnelEvent is the raw per-event stream. One row per occurrence.
-# - We keep 30 days of raw rows and roll up nightly into FunnelDailyRollup.
+# - We keep 90 days of raw rows and roll up nightly into FunnelDailyRollup.
 # - Emissions from mutations MUST be fire-and-forget via
 #   users.funnel.emit_event() to avoid coupling financial paths to analytics.
 # - `user` is nullable so we can capture pre-signup events (e.g. /invite link
@@ -244,7 +244,7 @@ class CountryMetrics(models.Model):
 class FunnelEvent(models.Model):
     """Raw per-event stream for funnel analysis.
 
-    Retention: 30 days. A nightly Celery job rolls up into FunnelDailyRollup
+    Retention: 90 days. A nightly Celery job rolls up into FunnelDailyRollup
     and deletes rows older than the retention window.
     """
 
@@ -329,7 +329,7 @@ class FunnelEvent(models.Model):
             models.Index(fields=['session_id', 'event_name']),
         ]
         verbose_name = "Funnel Event"
-        verbose_name_plural = "Funnel Events (raw, 30d)"
+        verbose_name_plural = "Funnel Events (raw, 90d)"
 
     def __str__(self):
         who = self.user_id or f"session:{self.session_id[:8]}" or 'anon'
