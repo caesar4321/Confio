@@ -300,6 +300,7 @@ def rollup_funnel_events():
                 bucket['unique_sessions'].add(event['session_id'])
 
         rollup_count = 0
+        FunnelDailyRollup.objects.filter(date=target_date).delete()
         for key, row in grouped.items():
             event_name, country, platform, source_type, channel, cohort = key
             FunnelDailyRollup.objects.update_or_create(
