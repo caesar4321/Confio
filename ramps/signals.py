@@ -357,11 +357,31 @@ def handle_ramp_transaction_save(sender, instance, created, **kwargs):
                 or instance.crypto_amount_estimated
             )
             source_type = _classify_first_deposit_source(instance.actor_user_id)
+            # Platform is not stored on RampTransaction (server-issued provider record);
+            # derive it from the user's most recent funnel event that carried a known
+            # platform value (signup_completed, referral_attached, etc.). This keeps the
+            # F4 first_deposit event segmentable by iOS/Android without a schema migration.
+            derived_platform = ''
+            try:
+                from users.models_analytics import FunnelEvent
+                last_known = (
+                    FunnelEvent.objects
+                    .filter(user_id=instance.actor_user_id)
+                    .exclude(platform='')
+                    .order_by('-created_at')
+                    .values_list('platform', flat=True)
+                    .first()
+                )
+                if last_known:
+                    derived_platform = last_known
+            except Exception:
+                # Instrumentation must never break the deposit path.
+                derived_platform = ''
             emit_event(
                 'first_deposit',
                 user=instance.actor_user,
                 country=instance.country_code or getattr(instance.actor_user, 'phone_country', '') or '',
-                platform='',
+                platform=derived_platform,
                 source_type=source_type,
                 channel='koywe' if instance.provider == 'KOYWE' else (instance.provider or '').lower(),
                 properties={

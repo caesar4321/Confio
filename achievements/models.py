@@ -348,6 +348,17 @@ class UserReferral(SoftDeleteModel):
         blank=True,
         help_text="Additional attribution data"
     )
+    cohort = models.CharField(
+        max_length=32,
+        blank=True,
+        db_index=True,
+        help_text=(
+            "Canonical referral cohort for F5 queries. Values map to the "
+            "three-cohort taxonomy: 'creator_julianmoonluna' (T1), 'user_driven' "
+            "(T3), 'send_invite' (T4), 'organic' (T5), or '' if unclassified. "
+            "Populated from attribution_data on save."
+        ),
+    )
     reward_status = models.CharField(
         max_length=20,
         choices=REWARD_STATUS_CHOICES,
@@ -412,7 +423,51 @@ class UserReferral(SoftDeleteModel):
         default='pending',
         help_text="Estado on-chain específico para el referidor",
     )
-    
+
+    def _derive_cohort(self) -> str:
+        """Map attribution_data onto the canonical three-cohort taxonomy for F5.
+
+        Values: 'creator_julianmoonluna' (T1), 'user_driven' (T3),
+        'send_invite' (T4), 'organic' (T5), or '' if unclassified.
+        Kept in sync with users.funnel.derive_rollup_cohort.
+        """
+        try:
+            from users.funnel import derive_rollup_cohort, CREATOR_REFERRAL_CODE
+        except Exception:
+            return ''
+        data = self.attribution_data or {}
+        source_type = str(data.get('source_type') or '').lower()
+        # attribution_data may carry referral_code at top level or under 'properties'
+        referral_code = (
+            str(data.get('referral_code') or '').strip().upper()
+            or str((data.get('properties') or {}).get('referral_code') or '').strip().upper()
+        )
+        if not source_type:
+            # Infer from referrer_identifier if attribution_data is sparse
+            ident = (self.referrer_identifier or '').strip().upper()
+            if ident == CREATOR_REFERRAL_CODE:
+                return 'creator_julianmoonluna'
+            if ident:
+                return 'user_driven'
+            return 'organic'
+        return derive_rollup_cohort(
+            event_name='referral_attached',
+            source_type=source_type,
+            properties={'referral_code': referral_code} if referral_code else None,
+        )
+
+    def save(self, *args, **kwargs):
+        # Populate indexed cohort from attribution_data/referrer_identifier on every save
+        # so F5 queries can filter by cohort without a JSON parse.
+        try:
+            derived = self._derive_cohort()
+            if derived and derived != self.cohort:
+                self.cohort = derived[:32]
+        except Exception:
+            # Never fail a write because of derivation.
+            pass
+        super().save(*args, **kwargs)
+
     class Meta:
         unique_together = [('referred_user', 'deleted_at')]
         ordering = ['-created_at']
