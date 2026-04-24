@@ -25,9 +25,17 @@ class Command(BaseCommand):
             action="store_true",
             help="Rebuild FunnelDailyRollup rows for dates touched by the backfill.",
         )
+        parser.add_argument(
+            "--include-historical-referrals",
+            action="store_true",
+            help=(
+                "Also synthesize referral_link signup/attach rows from UserReferral. "
+                "Do not use for click-to-signup funnels unless historical clicks were "
+                "also tracked for the same window."
+            ),
+        )
 
     def handle(self, *args, **options):
-        from achievements.models import UserReferral
         from send.models import PhoneInvite
         from users.models_analytics import FunnelEvent
         from users.tasks import rollup_funnel_events
@@ -35,6 +43,7 @@ class Command(BaseCommand):
         days = int(options["days"])
         dry_run = bool(options["dry_run"])
         reroll = bool(options["reroll"])
+        include_historical_referrals = bool(options["include_historical_referrals"])
         cutoff = timezone.now() - timedelta(days=days)
         touched_dates = set()
 
@@ -73,48 +82,51 @@ class Command(BaseCommand):
         send_invite_attached_created = 0
 
         with transaction.atomic():
-            referrals = (
-                UserReferral.objects
-                .select_related("referred_user")
-                .filter(created_at__gte=cutoff, referred_user__isnull=False)
-                .exclude(status="inactive")
-                .order_by("created_at", "id")
-            )
-            for referral in referrals.iterator(chunk_size=500):
-                user = referral.referred_user
-                identifier = (referral.referrer_identifier or "").lstrip("@").strip().upper()
-                if not identifier:
-                    continue
-                base_props = {
-                    "referral_code": identifier,
-                    "referral_type": "friend",
-                    "attach_method": "backfill_user_referral",
-                    "referral_id": referral.id,
-                }
-                if create_event(
-                    "signup_completed",
-                    user=user,
-                    source_type="referral_link",
-                    channel="backfill",
-                    properties={
-                        **base_props,
-                        "dedupe_key": f"signup_completed:referral_link:{identifier}",
-                    },
-                    event_time=referral.created_at,
-                ):
-                    referral_signup_created += 1
-                if create_event(
-                    "referral_attached",
-                    user=user,
-                    source_type="referral_link",
-                    channel="backfill",
-                    properties={
-                        **base_props,
-                        "dedupe_key": f"referral_attached:referral_link:{identifier}",
-                    },
-                    event_time=referral.created_at,
-                ):
-                    referral_attached_created += 1
+            if include_historical_referrals:
+                from achievements.models import UserReferral
+
+                referrals = (
+                    UserReferral.objects
+                    .select_related("referred_user")
+                    .filter(created_at__gte=cutoff, referred_user__isnull=False)
+                    .exclude(status="inactive")
+                    .order_by("created_at", "id")
+                )
+                for referral in referrals.iterator(chunk_size=500):
+                    user = referral.referred_user
+                    identifier = (referral.referrer_identifier or "").lstrip("@").strip().upper()
+                    if not identifier:
+                        continue
+                    base_props = {
+                        "referral_code": identifier,
+                        "referral_type": "friend",
+                        "attach_method": "backfill_user_referral",
+                        "referral_id": referral.id,
+                    }
+                    if create_event(
+                        "signup_completed",
+                        user=user,
+                        source_type="referral_link",
+                        channel="backfill",
+                        properties={
+                            **base_props,
+                            "dedupe_key": f"signup_completed:referral_link:{identifier}",
+                        },
+                        event_time=referral.created_at,
+                    ):
+                        referral_signup_created += 1
+                    if create_event(
+                        "referral_attached",
+                        user=user,
+                        source_type="referral_link",
+                        channel="backfill",
+                        properties={
+                            **base_props,
+                            "dedupe_key": f"referral_attached:referral_link:{identifier}",
+                        },
+                        event_time=referral.created_at,
+                    ):
+                        referral_attached_created += 1
 
             phone_invites = (
                 PhoneInvite.objects
@@ -173,5 +185,6 @@ class Command(BaseCommand):
             f"referral attached={referral_attached_created}, "
             f"send_invite signup={send_invite_signup_created}, "
             f"send_invite attached={send_invite_attached_created}, "
-            f"dates={len(touched_dates)}, dry_run={dry_run}, reroll={reroll}"
+            f"dates={len(touched_dates)}, dry_run={dry_run}, reroll={reroll}, "
+            f"include_historical_referrals={include_historical_referrals}"
         ))
