@@ -595,33 +595,33 @@
     <h2 class="section-title">🪜 Send-and-Invite Funnel</h2>
     <div class="metrics-grid" style="margin-top: 20px;">
         <div class="metric-card">
-            <div class="metric-label">Invites Submitted (30d)</div>
+            <div class="metric-label">Invites Submitted (90d)</div>
             <div class="metric-value">{{ send_invite_funnel_stats.invite_submitted_total|default:"0"|intcomma }}</div>
             <div class="metric-change">7d: {{ send_invite_funnel_stats.invite_submitted_7d|default:"0"|intcomma }}</div>
         </div>
         <div class="metric-card">
-            <div class="metric-label">WhatsApp Share Taps</div>
+            <div class="metric-label">WhatsApp Share Taps (90d)</div>
             <div class="metric-value">{{ send_invite_funnel_stats.share_tapped_total|default:"0"|intcomma }}</div>
             <div class="metric-change">Invite → Share: {{ send_invite_funnel_stats.invite_to_share_pct|floatformat:1 }}%</div>
         </div>
         <div class="metric-card">
-            <div class="metric-label">Attributed Invite Clicks</div>
+            <div class="metric-label">Attributed Invite Clicks (90d)</div>
             <div class="metric-value">{{ send_invite_funnel_stats.link_clicked_total|default:"0"|intcomma }}</div>
             <div class="metric-change">Share → Click: {{ send_invite_funnel_stats.share_to_click_pct|floatformat:1 }}%</div>
         </div>
         <div class="metric-card">
-            <div class="metric-label">Invite Claims</div>
+            <div class="metric-label">Invite Claims (90d)</div>
             <div class="metric-value">{{ send_invite_funnel_stats.invite_claimed_total|default:"0"|intcomma }}</div>
             <div class="metric-change">Click → Claim: {{ send_invite_funnel_stats.click_to_claim_pct|floatformat:1 }}%</div>
         </div>
         <div class="metric-card">
-            <div class="metric-label">Claimed User First Deposits</div>
+            <div class="metric-label">Claimed User First Deposits (90d)</div>
             <div class="metric-value">{{ send_invite_funnel_stats.first_deposit_total|default:"0"|intcomma }}</div>
             <div class="metric-change">Claim → Deposit: {{ send_invite_funnel_stats.claim_to_deposit_pct|floatformat:1 }}%</div>
         </div>
         <div class="metric-card">
             <div class="metric-label">Pipeline Health</div>
-            <div class="metric-value">{{ tracking_health.raw_events_30d|default:"0"|intcomma }}</div>
+            <div class="metric-value">{{ tracking_health.raw_events_90d|default:"0"|intcomma }}</div>
             <div class="metric-change">Rollup rows (90d): {{ tracking_health.rollup_rows_90d|default:"0"|intcomma }}</div>
         </div>
     </div>
@@ -729,30 +729,30 @@
     <h2 class="section-title">👥 Referral Funnel</h2>
     <div class="metrics-grid" style="margin-top: 20px;">
         <div class="metric-card">
-            <div class="metric-label">Referral WhatsApp Share Taps (30d)</div>
+            <div class="metric-label">Referral WhatsApp Share Taps (90d)</div>
             <div class="metric-value">{{ referral_funnel_stats.share_tapped_total|default:"0"|intcomma }}</div>
             <div class="metric-change">7d: {{ referral_funnel_stats.share_tapped_7d|default:"0"|intcomma }}</div>
         </div>
         <div class="metric-card">
-            <div class="metric-label">Referral Link Clicks (30d)</div>
+            <div class="metric-label">Referral Link Clicks (90d)</div>
             <div class="metric-value">{{ referral_funnel_stats.link_clicked_total|default:"0"|intcomma }}</div>
             <div class="metric-change">Share → Click: {{ referral_funnel_stats.share_to_click_pct|floatformat:1 }}%</div>
         </div>
         <div class="metric-card">
-            <div class="metric-label">Referral First Deposits (30d)</div>
+            <div class="metric-label">Referral First Deposits (90d)</div>
             <div class="metric-value">{{ referral_funnel_stats.first_deposit_total|default:"0"|intcomma }}</div>
             <div class="metric-change">Click → Deposit: {{ referral_funnel_stats.click_to_deposit_pct|floatformat:1 }}%</div>
         </div>
         <div class="metric-card">
             <div class="metric-label">Referral Raw Events</div>
-            <div class="metric-value">{{ referral_funnel_stats.raw_events_30d|default:"0"|intcomma }}</div>
+            <div class="metric-value">{{ referral_funnel_stats.raw_events_90d|default:"0"|intcomma }}</div>
             <div class="metric-change">90d raw: {{ tracking_health.raw_events_90d|default:"0"|intcomma }}</div>
         </div>
     </div>
 
     <div class="data-table" style="margin-bottom: 30px;">
         <div style="padding: 12px 16px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-weight: 600; color: #4b5563;">
-            Referral Cohort Split (30d)
+            Referral Cohort Split (90d)
         </div>
         <table>
             <thead>
@@ -859,7 +859,7 @@
         </div>
         <div class="data-table" style="margin-bottom: 0;">
             <div style="padding: 12px 16px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-weight: 600; color: #4b5563;">
-                Referral Acquisition Breakdown (30d)
+                Referral Acquisition Breakdown (90d)
             </div>
             <table>
                 <tbody>
@@ -877,7 +877,7 @@
                 </tbody>
             </table>
             <div style="padding: 12px 16px; border-top: 1px solid #e5e7eb; font-weight: 600; color: #4b5563;">
-                Referral Conversion Breakdown (30d)
+                Referral Conversion Breakdown (90d)
             </div>
             <table>
                 <tbody>

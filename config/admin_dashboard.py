@@ -155,9 +155,8 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         # Invite/referral funnel metrics
         today = now.date()
         funnel_last_90_date = today - timedelta(days=89)
-        funnel_last_30_date = today - timedelta(days=29)
         funnel_last_7_date = today - timedelta(days=6)
-        funnel_last_30_start = now - timedelta(days=30)
+        funnel_last_90_start = now - timedelta(days=90)
         creator_referral_code = 'JULIANMOONLUNA'
         creator_cohort = 'creator_julianmoonluna'
         other_referral_cohorts = ['user_driven', 'unknown']
@@ -252,10 +251,10 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             'invite_claimed',
             'first_deposit',
         ]
-        send_invite_30d = _rollup_event_counts(
+        send_invite_90d = _rollup_event_counts(
             source_type='send_invite',
             event_names=send_invite_event_names,
-            start_date=funnel_last_30_date,
+            start_date=funnel_last_90_date,
             cohort='send_invite',
         )
         send_invite_7d = _rollup_event_counts(
@@ -265,11 +264,11 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             cohort='send_invite',
         )
 
-        invite_submitted_total = send_invite_30d.get('invite_submitted', 0)
-        share_tapped_total = send_invite_30d.get('whatsapp_share_tapped', 0)
-        link_clicked_total = send_invite_30d.get('invite_link_clicked', 0)
-        invite_claimed_total = send_invite_30d.get('invite_claimed', 0)
-        first_deposit_total = send_invite_30d.get('first_deposit', 0)
+        invite_submitted_total = send_invite_90d.get('invite_submitted', 0)
+        share_tapped_total = send_invite_90d.get('whatsapp_share_tapped', 0)
+        link_clicked_total = send_invite_90d.get('invite_link_clicked', 0)
+        invite_claimed_total = send_invite_90d.get('invite_claimed', 0)
+        first_deposit_total = send_invite_90d.get('first_deposit', 0)
 
         context['send_invite_funnel_stats'] = {
             'invite_submitted_total': invite_submitted_total,
@@ -291,7 +290,7 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             FunnelEvent.objects.filter(
                 source_type='send_invite',
                 event_name__in=send_invite_event_names,
-                created_at__gte=funnel_last_30_start,
+                created_at__gte=funnel_last_90_start,
             )
             .order_by('-created_at')
             .values('created_at', 'event_name', 'country', 'platform', 'channel', 'session_id', 'user__username')[:10]
@@ -307,28 +306,28 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             row['claim_to_deposit_pct'] = _pct(row['first_deposit'], row['invite_claimed'])
         context['send_invite_daily_trend'] = send_invite_trend
 
-        referral_30d = FunnelEvent.objects.filter(
+        referral_90d = FunnelEvent.objects.filter(
             source_type='referral_link',
-            created_at__gte=funnel_last_30_start,
+            created_at__gte=funnel_last_90_start,
         )
         referral_event_names = [
             'referral_whatsapp_share_tapped',
             'referral_link_clicked',
             'first_deposit',
         ]
-        referral_30d_counts = _rollup_event_counts(
+        referral_90d_counts = _rollup_event_counts(
             source_type='referral_link',
             event_names=referral_event_names,
-            start_date=funnel_last_30_date,
+            start_date=funnel_last_90_date,
         )
         referral_7d_counts = _rollup_event_counts(
             source_type='referral_link',
             event_names=referral_event_names,
             start_date=funnel_last_7_date,
         )
-        referral_share_tapped_total = referral_30d_counts.get('referral_whatsapp_share_tapped', 0)
-        referral_link_clicked_total = referral_30d_counts.get('referral_link_clicked', 0)
-        referral_first_deposit_total = referral_30d_counts.get('first_deposit', 0)
+        referral_share_tapped_total = referral_90d_counts.get('referral_whatsapp_share_tapped', 0)
+        referral_link_clicked_total = referral_90d_counts.get('referral_link_clicked', 0)
+        referral_first_deposit_total = referral_90d_counts.get('first_deposit', 0)
         context['referral_funnel_stats'] = {
             'share_tapped_total': referral_share_tapped_total,
             'share_tapped_7d': referral_7d_counts.get('referral_whatsapp_share_tapped', 0),
@@ -338,16 +337,16 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             'first_deposit_7d': referral_7d_counts.get('first_deposit', 0),
             'share_to_click_pct': _pct(referral_link_clicked_total, referral_share_tapped_total),
             'click_to_deposit_pct': _pct(referral_first_deposit_total, referral_link_clicked_total),
-            'raw_events_30d': referral_30d.count(),
+            'raw_events_90d': referral_90d.count(),
         }
         context['referral_recent'] = list(
-            referral_30d.order_by('-created_at')
+            referral_90d.order_by('-created_at')
             .values('created_at', 'event_name', 'country', 'platform', 'channel', 'session_id')[:10]
         )
-        referral_acquisition_30d = referral_30d.filter(
+        referral_acquisition_90d = referral_90d.filter(
             event_name__in=['referral_whatsapp_share_tapped', 'referral_link_clicked'],
         )
-        referral_conversion_30d = referral_30d.filter(
+        referral_conversion_90d = referral_90d.filter(
             event_name='first_deposit',
         )
         creator_event_filter = Q(properties__referral_code__iexact=creator_referral_code)
@@ -357,14 +356,14 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             cohort_counts = _rollup_event_counts(
                 source_type='referral_link',
                 event_names=referral_event_names,
-                start_date=funnel_last_30_date,
+                start_date=funnel_last_90_date,
                 cohort=cohort,
             )
             cohort_shares = cohort_counts.get('referral_whatsapp_share_tapped', 0)
             cohort_clicks = cohort_counts.get('referral_link_clicked', 0)
             cohort_deposits = cohort_counts.get('first_deposit', 0)
             if not cohort_deposits:
-                cohort_deposits = referral_conversion_30d.filter(deposit_filter).distinct().count()
+                cohort_deposits = referral_conversion_90d.filter(deposit_filter).distinct().count()
             return {
                 'label': label,
                 'share_taps': cohort_shares,
@@ -416,20 +415,19 @@ class ConfioAdminSite(AdminSiteOTPRequired):
                 'user_click_to_deposit_pct': _pct(user_deposits, user_clicks),
             })
         context['referral_acquisition_breakdown'] = list(
-            referral_acquisition_30d
+            referral_acquisition_90d
             .values('event_name', 'channel')
             .annotate(count=Count('id'))
             .order_by('event_name', '-count', 'channel')
         )
         context['referral_conversion_breakdown'] = list(
-            referral_conversion_30d
+            referral_conversion_90d
             .values('channel')
             .annotate(count=Count('id'))
             .order_by('-count', 'channel')
         )
         context['tracking_health'] = {
-            'raw_events_30d': FunnelEvent.objects.filter(created_at__gte=funnel_last_30_start).count(),
-            'raw_events_90d': FunnelEvent.objects.filter(created_at__gte=now - timedelta(days=90)).count(),
+            'raw_events_90d': FunnelEvent.objects.filter(created_at__gte=funnel_last_90_start).count(),
             'rollup_rows_90d': FunnelDailyRollup.objects.filter(date__gte=funnel_last_90_date).count(),
         }
         context['invite_funnel_raw_url'] = reverse('confio_admin:users_funnelevent_changelist')
