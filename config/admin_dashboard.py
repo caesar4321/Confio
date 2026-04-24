@@ -238,8 +238,20 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             referral_30d.order_by('-created_at')
             .values('created_at', 'event_name', 'country', 'platform', 'channel', 'session_id')[:10]
         )
-        context['referral_channel_breakdown'] = list(
-            referral_30d
+        referral_acquisition_30d = referral_30d.filter(
+            event_name__in=['referral_whatsapp_share_tapped', 'referral_link_clicked'],
+        )
+        referral_conversion_30d = referral_30d.filter(
+            event_name='first_deposit',
+        )
+        context['referral_acquisition_breakdown'] = list(
+            referral_acquisition_30d
+            .values('event_name', 'channel')
+            .annotate(count=Count('id'))
+            .order_by('event_name', '-count', 'channel')
+        )
+        context['referral_conversion_breakdown'] = list(
+            referral_conversion_30d
             .values('channel')
             .annotate(count=Count('id'))
             .order_by('-count', 'channel')

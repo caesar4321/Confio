@@ -746,18 +746,36 @@
         </div>
         <div class="data-table" style="margin-bottom: 0;">
             <div style="padding: 12px 16px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-weight: 600; color: #4b5563;">
-                Referral Funnel Breakdown (30d)
+                Referral Acquisition Breakdown (30d)
             </div>
             <table>
                 <tbody>
-                    {% for row in referral_channel_breakdown %}
+                    {% for row in referral_acquisition_breakdown %}
                     <tr>
-                        <td>{{ row.channel|default:"direct" }}</td>
+                        <td>{{ row.event_name }}</td>
+                        <td>{{ row.channel|default:"unknown" }}</td>
                         <td style="text-align: right; color:#6b7280;">{{ row.count|intcomma }}</td>
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="2" style="padding: 16px; color: #6b7280;">No referral traffic segmented yet.</td>
+                        <td colspan="3" style="padding: 16px; color: #6b7280;">No referral acquisition traffic segmented yet.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            <div style="padding: 12px 16px; border-top: 1px solid #e5e7eb; font-weight: 600; color: #4b5563;">
+                Referral Conversion Breakdown (30d)
+            </div>
+            <table>
+                <tbody>
+                    {% for row in referral_conversion_breakdown %}
+                    <tr>
+                        <td>{{ row.channel|default:"unknown" }}</td>
+                        <td style="text-align: right; color:#6b7280;">{{ row.count|intcomma }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="2" style="padding: 16px; color: #6b7280;">No referral conversions segmented yet.</td>
                     </tr>
                     {% endfor %}
                 </tbody>
