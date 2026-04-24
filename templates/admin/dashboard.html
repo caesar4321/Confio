@@ -780,6 +780,7 @@
                     <th style="text-align: right;">Signups</th>
                     <th style="text-align: right;">Attached</th>
                     <th style="text-align: right;">Deposits</th>
+                    <th style="text-align: right;">Shares → Clicks</th>
                     <th style="text-align: right;">Click → Signup</th>
                     <th style="text-align: right;">Attach → Deposit</th>
                 </tr>
@@ -793,12 +794,13 @@
                     <td style="text-align: right;">{{ row.signup_completed|intcomma }}</td>
                     <td style="text-align: right;">{{ row.referral_attached|intcomma }}</td>
                     <td style="text-align: right;">{{ row.first_deposits|intcomma }}</td>
+                    <td style="text-align: right; color:#6b7280;">{{ row.share_to_click_pct|floatformat:1 }}%</td>
                     <td style="text-align: right; color:#6b7280;">{{ row.click_to_signup_pct|floatformat:1 }}%</td>
                     <td style="text-align: right; color:#6b7280;">{{ row.attach_to_deposit_pct|floatformat:1 }}%</td>
                 </tr>
                 {% empty %}
                 <tr>
-                    <td colspan="8" style="padding: 16px; color: #6b7280;">No referral cohort data recorded yet.</td>
+                    <td colspan="9" style="padding: 16px; color: #6b7280;">No referral cohort data recorded yet.</td>
                 </tr>
                 {% endfor %}
             </tbody>
