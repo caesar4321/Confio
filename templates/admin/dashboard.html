@@ -610,14 +610,14 @@
             <div class="metric-change">Share → Click: {{ send_invite_funnel_stats.share_to_click_pct|floatformat:1 }}%</div>
         </div>
         <div class="metric-card">
-            <div class="metric-label">Invite Claims (90d)</div>
-            <div class="metric-value">{{ send_invite_funnel_stats.invite_claimed_total|default:"0"|intcomma }}</div>
-            <div class="metric-change">Signup → Claim: {{ send_invite_funnel_stats.signup_to_claim_pct|floatformat:1 }}%</div>
-        </div>
-        <div class="metric-card">
             <div class="metric-label">Invite Signups (90d)</div>
             <div class="metric-value">{{ send_invite_funnel_stats.signup_completed_total|default:"0"|intcomma }}</div>
             <div class="metric-change">Click → Signup: {{ send_invite_funnel_stats.click_to_signup_pct|floatformat:1 }}%</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Invite Claims (90d)</div>
+            <div class="metric-value">{{ send_invite_funnel_stats.invite_claimed_total|default:"0"|intcomma }}</div>
+            <div class="metric-change">Signup → Claim: {{ send_invite_funnel_stats.signup_to_claim_pct|floatformat:1 }}%</div>
         </div>
         <div class="metric-card">
             <div class="metric-label">Claimed User First Deposits (90d)</div>
