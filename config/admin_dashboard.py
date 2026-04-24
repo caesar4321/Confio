@@ -244,6 +244,41 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         referral_conversion_30d = referral_30d.filter(
             event_name='first_deposit',
         )
+        creator_referral_code = 'JULIANMOONLUNA'
+        creator_event_filter = Q(properties__referral_code__iexact=creator_referral_code)
+        creator_deposit_filter = Q(user__referrals_as_referred__referrer_identifier__iexact=creator_referral_code)
+
+        def _referral_cohort_row(label, acquisition_filter, deposit_filter):
+            cohort_shares = referral_acquisition_30d.filter(
+                acquisition_filter,
+                event_name='referral_whatsapp_share_tapped',
+            ).count()
+            cohort_clicks = referral_acquisition_30d.filter(
+                acquisition_filter,
+                event_name='referral_link_clicked',
+            ).count()
+            cohort_deposits = referral_conversion_30d.filter(deposit_filter).distinct().count()
+            return {
+                'label': label,
+                'share_taps': cohort_shares,
+                'link_clicks': cohort_clicks,
+                'first_deposits': cohort_deposits,
+                'share_to_click_pct': (cohort_clicks / cohort_shares * 100) if cohort_shares else 0,
+                'click_to_deposit_pct': (cohort_deposits / cohort_clicks * 100) if cohort_clicks else 0,
+            }
+
+        context['referral_cohort_breakdown'] = [
+            _referral_cohort_row(
+                f'Creator @{creator_referral_code}',
+                creator_event_filter,
+                creator_deposit_filter,
+            ),
+            _referral_cohort_row(
+                'User-driven / other referrals',
+                ~creator_event_filter,
+                ~creator_deposit_filter,
+            ),
+        ]
         context['referral_acquisition_breakdown'] = list(
             referral_acquisition_30d
             .values('event_name', 'channel')
