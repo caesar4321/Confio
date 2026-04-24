@@ -8,7 +8,6 @@ from django.core.management import call_command
 import logging
 from functools import wraps
 from django.db import connection
-from django.db.models import Count, Q
 
 logger = logging.getLogger(__name__)
 
@@ -253,6 +252,7 @@ def rollup_funnel_events():
     delete raw rows older than 30 days.
     """
     from users.models_analytics import FunnelDailyRollup, FunnelEvent
+    from users.funnel import derive_rollup_cohort
 
     try:
         target_date = (timezone.now() - timedelta(days=1)).date()
@@ -261,28 +261,59 @@ def rollup_funnel_events():
         logger.info("Starting funnel rollup for %s", target_date)
 
         day_events = FunnelEvent.objects.filter(created_at__date=target_date)
-        grouped = (
-            day_events.values('event_name', 'country', 'platform', 'source_type', 'channel')
-            .annotate(
-                count=Count('id'),
-                unique_users=Count('user', distinct=True),
-                unique_sessions=Count('session_id', filter=~Q(session_id=''), distinct=True),
+        grouped = {}
+        for event in day_events.values(
+            'event_name',
+            'country',
+            'platform',
+            'source_type',
+            'channel',
+            'properties',
+            'user_id',
+            'session_id',
+        ):
+            cohort = derive_rollup_cohort(
+                event.get('event_name') or '',
+                event.get('source_type') or '',
+                event.get('properties') or {},
             )
-        )
+            key = (
+                event.get('event_name') or '',
+                event.get('country') or '',
+                event.get('platform') or '',
+                event.get('source_type') or '',
+                event.get('channel') or '',
+                cohort,
+            )
+            bucket = grouped.setdefault(
+                key,
+                {
+                    'count': 0,
+                    'unique_users': set(),
+                    'unique_sessions': set(),
+                },
+            )
+            bucket['count'] += 1
+            if event.get('user_id'):
+                bucket['unique_users'].add(event['user_id'])
+            if event.get('session_id'):
+                bucket['unique_sessions'].add(event['session_id'])
 
         rollup_count = 0
-        for row in grouped:
+        for key, row in grouped.items():
+            event_name, country, platform, source_type, channel, cohort = key
             FunnelDailyRollup.objects.update_or_create(
                 date=target_date,
-                event_name=row['event_name'] or '',
-                country=row['country'] or '',
-                platform=row['platform'] or '',
-                source_type=row['source_type'] or '',
-                channel=row['channel'] or '',
+                event_name=event_name,
+                country=country,
+                platform=platform,
+                source_type=source_type,
+                channel=channel,
+                cohort=cohort,
                 defaults={
                     'count': row['count'] or 0,
-                    'unique_users': row['unique_users'] or 0,
-                    'unique_sessions': row['unique_sessions'] or 0,
+                    'unique_users': len(row['unique_users']),
+                    'unique_sessions': len(row['unique_sessions']),
                 },
             )
             rollup_count += 1

@@ -444,14 +444,15 @@ class FunnelDailyRollupAdmin(admin.ModelAdmin):
         'event_name',
         'source_type',
         'channel',
+        'cohort',
         'country',
         'platform',
         'count',
         'unique_users',
         'unique_sessions',
     )
-    list_filter = ('event_name', 'source_type', 'channel', 'country', 'platform', 'date')
-    search_fields = ('event_name', 'source_type', 'channel', 'country', 'platform')
+    list_filter = ('event_name', 'source_type', 'channel', 'cohort', 'country', 'platform', 'date')
+    search_fields = ('event_name', 'source_type', 'channel', 'cohort', 'country', 'platform')
     date_hierarchy = 'date'
     ordering = ('-date', 'event_name', 'country', 'platform')
     readonly_fields = (
@@ -461,6 +462,7 @@ class FunnelDailyRollupAdmin(admin.ModelAdmin):
         'platform',
         'source_type',
         'channel',
+        'cohort',
         'count',
         'unique_users',
         'unique_sessions',

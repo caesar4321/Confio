@@ -34,6 +34,31 @@ from django.db import transaction
 logger = logging.getLogger(__name__)
 
 
+CREATOR_REFERRAL_CODE = 'JULIANMOONLUNA'
+
+
+def derive_rollup_cohort(event_name: str, source_type: str, properties: Optional[dict] = None) -> str:
+    """Return the durable low-cardinality cohort for funnel rollups."""
+    source = (source_type or '').lower()
+    props = properties or {}
+
+    if source == 'send_invite':
+        return 'send_invite'
+
+    if source == 'referral_link':
+        referral_code = str(props.get('referral_code') or '').strip().upper()
+        if referral_code == CREATOR_REFERRAL_CODE:
+            return 'creator_julianmoonluna'
+        if referral_code:
+            return 'user_driven'
+        return 'unknown'
+
+    if source:
+        return source[:32]
+
+    return 'unknown'
+
+
 def emit_event(
     event_name: str,
     *,

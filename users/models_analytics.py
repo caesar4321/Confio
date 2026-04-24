@@ -339,8 +339,8 @@ class FunnelEvent(models.Model):
 class FunnelDailyRollup(models.Model):
     """Daily aggregate of FunnelEvent, segmented by country + platform + attribution.
 
-    One row per (date, event_name, country, platform, source_type, channel). Built by nightly
-    Celery job from the raw stream before raw rows are purged.
+    One row per (date, event_name, country, platform, source_type, channel, cohort).
+    Built by nightly Celery job from the raw stream before raw rows are purged.
     """
 
     date = models.DateField(db_index=True)
@@ -349,6 +349,15 @@ class FunnelDailyRollup(models.Model):
     platform = models.CharField(max_length=16, blank=True)
     source_type = models.CharField(max_length=32, blank=True)
     channel = models.CharField(max_length=32, blank=True)
+    cohort = models.CharField(
+        max_length=32,
+        blank=True,
+        db_index=True,
+        help_text=(
+            "Low-cardinality funnel cohort, e.g. 'creator_julianmoonluna', "
+            "'user_driven', 'send_invite', or 'unknown'."
+        ),
+    )
 
     count = models.IntegerField(
         validators=[MinValueValidator(0)],
@@ -370,7 +379,7 @@ class FunnelDailyRollup(models.Model):
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=['date', 'event_name', 'country', 'platform', 'source_type', 'channel'],
+                fields=['date', 'event_name', 'country', 'platform', 'source_type', 'channel', 'cohort'],
                 name='unique_funnel_rollup',
             ),
         ]
@@ -378,10 +387,17 @@ class FunnelDailyRollup(models.Model):
             models.Index(fields=['-date', 'event_name']),
             models.Index(fields=['event_name', 'country', '-date']),
             models.Index(fields=['event_name', 'source_type', 'channel', '-date']),
+            models.Index(
+                fields=['event_name', 'source_type', 'cohort', '-date'],
+                name='users_funne_ev_so_co_5c6_idx',
+            ),
         ]
         verbose_name = "Funnel Daily Rollup"
         verbose_name_plural = "Funnel Daily Rollups"
 
     def __str__(self):
-        seg = f"{self.country or '??'}/{self.platform or '??'}/{self.source_type or '??'}/{self.channel or '??'}"
+        seg = (
+            f"{self.country or '??'}/{self.platform or '??'}/"
+            f"{self.source_type or '??'}/{self.channel or '??'}/{self.cohort or '??'}"
+        )
         return f"{self.date} · {self.event_name} · {seg} · {self.count}"
