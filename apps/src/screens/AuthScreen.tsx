@@ -41,16 +41,22 @@ export const AuthScreen = () => {
 
   // Rotation animation for loading spinner
   useEffect(() => {
+    let animation: Animated.CompositeAnimation | null = null;
     if (isLoading) {
-      Animated.loop(
+      animation = Animated.loop(
         Animated.timing(rotateAnim, {
           toValue: 1,
           duration: 1500,
           easing: Easing.linear,
           useNativeDriver: true,
         })
-      ).start();
+      );
+      animation.start();
     }
+    return () => {
+      animation?.stop();
+      rotateAnim.stopAnimation();
+    };
   }, [isLoading]);
 
   // Google Sign-In Flow

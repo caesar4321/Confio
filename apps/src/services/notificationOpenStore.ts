@@ -1,4 +1,8 @@
 import * as Keychain from 'react-native-keychain';
+import {
+  hasUsableInternetCredentials,
+  softClearInternetCredentials,
+} from '../utils/keychainInternetCredentials';
 
 const PENDING_NOTIFICATION_OPEN_SERVICE = 'confio_pending_notification_open';
 
@@ -25,7 +29,7 @@ export async function savePendingNotificationOpen(
 export async function loadPendingNotificationOpen(): Promise<PendingNotificationOpen | null> {
   try {
     const credentials = await Keychain.getInternetCredentials(PENDING_NOTIFICATION_OPEN_SERVICE);
-    if (!credentials || !('password' in credentials) || !credentials.password) {
+    if (!hasUsableInternetCredentials(credentials)) {
       return null;
     }
 
@@ -38,7 +42,7 @@ export async function loadPendingNotificationOpen(): Promise<PendingNotification
 
 export async function clearPendingNotificationOpen(): Promise<void> {
   try {
-    await Keychain.resetInternetCredentials({ server: PENDING_NOTIFICATION_OPEN_SERVICE });
+    await softClearInternetCredentials(PENDING_NOTIFICATION_OPEN_SERVICE);
   } catch (error) {
     console.error('[NotificationOpenStore] Failed to clear pending notification open:', error);
   }

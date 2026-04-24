@@ -2,6 +2,10 @@ import Contacts from 'react-native-contacts';
 import * as Keychain from 'react-native-keychain';
 import { PermissionsAndroid, Platform } from 'react-native';
 import { parsePhoneNumber } from 'libphonenumber-js';
+import {
+  hasUsableInternetCredentials,
+  softClearInternetCredentials,
+} from '../utils/keychainInternetCredentials';
 
 interface StoredContact {
   id: string;
@@ -59,7 +63,7 @@ export class ContactService {
       // Try to load from array format (fastest)
       const keychainStart = Date.now();
       const arrayCredentials = await Keychain.getInternetCredentials(CONTACTS_KEYCHAIN_SERVICE + '_array');
-      if (arrayCredentials && arrayCredentials.username === CONTACTS_KEYCHAIN_KEY) {
+      if (hasUsableInternetCredentials(arrayCredentials) && arrayCredentials.username === CONTACTS_KEYCHAIN_KEY) {
         const parseStart = Date.now();
         const contactsArray = JSON.parse(arrayCredentials.password);
         if (Array.isArray(contactsArray)) {
@@ -142,7 +146,7 @@ export class ContactService {
   async getStoredPermissionStatus(): Promise<'granted' | 'denied' | 'pending' | null> {
     try {
       const credentials = await Keychain.getInternetCredentials(CONTACTS_PRIVACY_SERVICE);
-      if (credentials && credentials.username === CONTACT_PERMISSION_STATUS_KEY) {
+      if (hasUsableInternetCredentials(credentials) && credentials.username === CONTACT_PERMISSION_STATUS_KEY) {
         return credentials.password as 'granted' | 'denied' | 'pending';
       }
       return null;
@@ -170,7 +174,7 @@ export class ContactService {
   async hasUploadConsent(): Promise<boolean> {
     try {
       const credentials = await Keychain.getInternetCredentials(CONTACTS_CONSENT_SERVICE);
-      if (credentials && credentials.username === CONTACTS_UPLOAD_CONSENT_KEY) {
+      if (hasUsableInternetCredentials(credentials) && credentials.username === CONTACTS_UPLOAD_CONSENT_KEY) {
         return credentials.password === 'true';
       }
       return false;
@@ -384,7 +388,7 @@ export class ContactService {
   async loadContactsFromKeychain(): Promise<ContactMap | null> {
     try {
       const credentials = await Keychain.getInternetCredentials(CONTACTS_KEYCHAIN_SERVICE);
-      if (credentials && credentials.username === CONTACTS_KEYCHAIN_KEY) {
+      if (hasUsableInternetCredentials(credentials) && credentials.username === CONTACTS_KEYCHAIN_KEY) {
         const contactMap = JSON.parse(credentials.password) as ContactMap;
         this.contactsCache = contactMap;
         return contactMap;
@@ -424,7 +428,7 @@ export class ContactService {
       // Try to load from array format first (faster)
       try {
         const arrayCredentials = await Keychain.getInternetCredentials(CONTACTS_KEYCHAIN_SERVICE + '_array');
-        if (arrayCredentials && arrayCredentials.username === CONTACTS_KEYCHAIN_KEY) {
+        if (hasUsableInternetCredentials(arrayCredentials) && arrayCredentials.username === CONTACTS_KEYCHAIN_KEY) {
           const contactsArray = JSON.parse(arrayCredentials.password);
           if (Array.isArray(contactsArray)) {
             this.contactsArray = contactsArray;
@@ -437,7 +441,7 @@ export class ContactService {
 
       // Fallback to old format
       const credentials = await Keychain.getInternetCredentials(CONTACTS_KEYCHAIN_SERVICE);
-      if (!credentials || credentials.username !== CONTACTS_KEYCHAIN_KEY) {
+      if (!hasUsableInternetCredentials(credentials) || credentials.username !== CONTACTS_KEYCHAIN_KEY) {
         this.contactsArray = [];
         return;
       }
@@ -796,8 +800,10 @@ export class ContactService {
    */
   async clearContacts(): Promise<void> {
     try {
-      await Keychain.resetInternetCredentials({ server: CONTACTS_KEYCHAIN_SERVICE });
+      await softClearInternetCredentials(CONTACTS_KEYCHAIN_SERVICE);
+      await softClearInternetCredentials(CONTACTS_KEYCHAIN_SERVICE + '_array');
       this.contactsCache = null;
+      this.contactsArray = [];
     } catch (error) {
       console.error('Error clearing contacts:', error);
     }

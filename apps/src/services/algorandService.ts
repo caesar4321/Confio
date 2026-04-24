@@ -2,6 +2,10 @@ import * as Keychain from 'react-native-keychain';
 import { secureDeterministicWallet } from './secureDeterministicWallet';
 import { jwtDecode } from 'jwt-decode';
 import { Buffer } from 'buffer'; // RN polyfill for base64
+import {
+  hasUsableInternetCredentials,
+  softClearInternetCredentials,
+} from '../utils/keychainInternetCredentials';
 
 // Type for account info
 type AccountLite = { addr: string; sk: null };
@@ -275,8 +279,7 @@ class AlgorandService {
       // Clear each entry using resetInternetCredentials
       for (const key of keychainEntriesToClear) {
         try {
-          // resetInternetCredentials in v10 expects an options object
-          await Keychain.resetInternetCredentials({ server: key });
+          await softClearInternetCredentials(key);
         } catch (error: any) {
           // Entry might not exist, which is fine
         }
@@ -292,7 +295,7 @@ class AlgorandService {
     try {
       const credentials = await Keychain.getInternetCredentials('algorand.confio.app');
 
-      if (credentials) {
+      if (hasUsableInternetCredentials(credentials)) {
         const walletData = JSON.parse(credentials.password);
         return walletData.address;
       }
@@ -307,7 +310,7 @@ class AlgorandService {
     try {
       const credentials = await Keychain.getInternetCredentials('algorand.confio.app');
 
-      if (credentials) {
+      if (hasUsableInternetCredentials(credentials)) {
         const walletData = JSON.parse(credentials.password);
         // Only restore the address, not the private key (which is now encrypted or in memory)
         this.currentAccount = {

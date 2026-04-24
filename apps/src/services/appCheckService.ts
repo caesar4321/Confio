@@ -20,10 +20,12 @@ import {
 
 class AppCheckService {
     private isInitialized = false;
+    private initPromise: Promise<void> | null = null;
     private tokenPromise: Promise<string | null> | null = null;
     private lastToken: string | null = null;
     private lastTokenAt = 0;
     private lastFailureAt = 0;
+    private lastFetchAttemptAt = 0;
     private lastError: string | null = null;
     private lastErrorAt = 0;
     private rateLimitedUntil = 0;
@@ -31,7 +33,8 @@ class AppCheckService {
     private static readonly TOKEN_REUSE_MS = 5 * 60 * 1000;
     private static readonly FAILURE_BACKOFF_MS = 30 * 1000;
     private static readonly ERROR_DEBUG_WINDOW_MS = 2 * 60 * 1000;
-    private static readonly RATE_LIMIT_BACKOFF_MS = 2 * 60 * 1000;
+    private static readonly RATE_LIMIT_BACKOFF_MS = 10 * 60 * 1000;
+    private static readonly FETCH_ATTEMPT_COOLDOWN_MS = 10 * 1000;
 
     private isDebugAllowed(): boolean {
         return String(ALLOW_APP_CHECK_DEBUG).toLowerCase() === 'true';
@@ -53,34 +56,41 @@ class AppCheckService {
      */
     async initialize(): Promise<void> {
         if (this.isInitialized) return;
+        if (this.initPromise) return this.initPromise;
 
-        try {
-            // Use the new modular API for App Check initialization
-            const rnfbProvider = appCheck().newReactNativeFirebaseAppCheckProvider();
-            const useDebugProvider = await this.shouldUseDebugProvider();
+        this.initPromise = (async () => {
+            try {
+                // Use the new modular API for App Check initialization
+                const rnfbProvider = appCheck().newReactNativeFirebaseAppCheckProvider();
+                const useDebugProvider = await this.shouldUseDebugProvider();
 
-            rnfbProvider.configure({
-                android: {
-                    provider: useDebugProvider ? 'debug' : 'playIntegrity',
-                    debugToken: useDebugProvider ? FIREBASE_APP_CHECK_DEBUG_TOKEN_ANDROID : undefined,
-                },
-                apple: {
-                    provider: useDebugProvider ? 'debug' : 'appAttest',
-                    debugToken: useDebugProvider ? FIREBASE_APP_CHECK_DEBUG_TOKEN_IOS : undefined,
-                },
-            });
+                rnfbProvider.configure({
+                    android: {
+                        provider: useDebugProvider ? 'debug' : 'playIntegrity',
+                        debugToken: useDebugProvider ? FIREBASE_APP_CHECK_DEBUG_TOKEN_ANDROID : undefined,
+                    },
+                    apple: {
+                        provider: useDebugProvider ? 'debug' : 'appAttest',
+                        debugToken: useDebugProvider ? FIREBASE_APP_CHECK_DEBUG_TOKEN_IOS : undefined,
+                    },
+                });
 
-            await appCheck().initializeAppCheck({
-                provider: rnfbProvider,
-                isTokenAutoRefreshEnabled: true,
-            });
+                await appCheck().initializeAppCheck({
+                    provider: rnfbProvider,
+                    isTokenAutoRefreshEnabled: false,
+                });
 
-            this.isInitialized = true;
-            this.lastError = null;
-            this.lastErrorAt = 0;
-        } catch (error: any) {
-            this.recordFailure(`INIT_FAILED:${this.normalizeError(error)}`);
-        }
+                this.isInitialized = true;
+                this.lastError = null;
+                this.lastErrorAt = 0;
+            } catch (error: any) {
+                this.recordFailure(`INIT_FAILED:${this.normalizeError(error)}`);
+            } finally {
+                this.initPromise = null;
+            }
+        })();
+
+        return this.initPromise;
     }
 
     private normalizeError(error: any): string {
@@ -115,8 +125,8 @@ class AppCheckService {
         return this.rateLimitedUntil > Date.now();
     }
 
-    private async sleep(ms: number): Promise<void> {
-        await new Promise(resolve => setTimeout(resolve, ms));
+    private isFetchCoolingDown(now = Date.now()): boolean {
+        return Boolean(this.lastFetchAttemptAt && now - this.lastFetchAttemptAt < AppCheckService.FETCH_ATTEMPT_COOLDOWN_MS);
     }
 
     /**
@@ -125,10 +135,16 @@ class AppCheckService {
      */
     private async fetchToken(forceRefresh = false): Promise<string | null> {
         try {
+            const now = Date.now();
+            if (this.isRateLimitedNow() || this.isFetchCoolingDown(now)) {
+                return this.lastToken;
+            }
+
             if (!this.isInitialized) {
                 await this.initialize();
             }
 
+            this.lastFetchAttemptAt = Date.now();
             const { token } = await appCheck().getToken(forceRefresh);
             if (token) {
                 this.lastToken = token;
@@ -158,7 +174,7 @@ class AppCheckService {
             return this.lastToken;
         }
 
-        if (this.isRateLimitedNow()) {
+        if (this.isRateLimitedNow() || this.isFetchCoolingDown(now)) {
             return this.lastToken;
         }
 
@@ -188,31 +204,7 @@ class AppCheckService {
     }
 
     async primeTokenForAuth(): Promise<string | null> {
-        const immediateToken = await this.getTokenForHeader();
-        if (immediateToken) {
-            return immediateToken;
-        }
-
-        if (this.isRateLimitedNow()) {
-            return this.lastToken;
-        }
-
-        const retryPlan = [{ forceRefresh: false, delayMs: 1200 }];
-
-        for (const attempt of retryPlan) {
-            const token = await this.fetchToken(attempt.forceRefresh);
-            if (token) {
-                return token;
-            }
-
-            if (this.isRateLimitedNow()) {
-                break;
-            }
-
-            await this.sleep(attempt.delayMs);
-        }
-
-        return this.lastToken;
+        return this.getTokenForHeader();
     }
 }
 

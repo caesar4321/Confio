@@ -104,14 +104,20 @@ interface SavedPayoutMethod {
 
 const SkeletonCard = () => {
   const shimmer = useRef(new Animated.Value(0)).current;
+  const shimmerLoopRef = useRef<Animated.CompositeAnimation | null>(null);
 
   useEffect(() => {
-    Animated.loop(
+    shimmerLoopRef.current = Animated.loop(
       Animated.sequence([
         Animated.timing(shimmer, { toValue: 1, duration: 900, useNativeDriver: true }),
         Animated.timing(shimmer, { toValue: 0, duration: 900, useNativeDriver: true }),
       ])
-    ).start();
+    );
+    shimmerLoopRef.current.start();
+    return () => {
+      shimmerLoopRef.current?.stop();
+      shimmer.stopAnimation();
+    };
   }, [shimmer]);
 
   const opacity = shimmer.interpolate({ inputRange: [0, 1], outputRange: [0.4, 0.85] });

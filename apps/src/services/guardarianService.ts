@@ -1,6 +1,7 @@
 import * as Keychain from 'react-native-keychain';
 import { getApiUrl } from '../config/env';
 import { AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME } from '../apollo/client';
+import appCheckService from './appCheckService';
 
 export interface GuardarianTransactionParams {
   amount: number;
@@ -46,8 +47,6 @@ const buildRedirects = () => ({
   failed: 'https://confio.lat/checkout/failed',
 });
 
-import appCheck from '@react-native-firebase/app-check';
-
 async function getAuthHeaders(): Promise<Record<string, string>> {
   const headers: Record<string, string> = {};
 
@@ -64,13 +63,9 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
       }
     }
 
-    // 2. Firebase App Check
-    try {
-      const tokenResult = await appCheck().getToken();
-      if (tokenResult?.token) {
-        headers['X-Firebase-AppCheck'] = tokenResult.token;
-      }
-    } catch (acErr) {
+    const appCheckToken = await appCheckService.getTokenForHeader();
+    if (appCheckToken) {
+      headers['X-Firebase-AppCheck'] = appCheckToken;
     }
 
     return headers;

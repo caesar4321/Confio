@@ -166,6 +166,8 @@ export const TransactionProcessingScreen = () => {
     new Animated.Value(0),
     new Animated.Value(0)
   ]);
+  const pulseLoopRef = useRef<Animated.CompositeAnimation | null>(null);
+  const bounceLoopRefs = useRef<Animated.CompositeAnimation[]>([]);
 
   // GraphQL mutations
   const [payInvoice] = useMutation(PAY_INVOICE);
@@ -751,8 +753,9 @@ export const TransactionProcessingScreen = () => {
 
   // Pulse animation for current step
   useEffect(() => {
+    pulseLoopRef.current?.stop();
     if (!isComplete) {
-      Animated.loop(
+      pulseLoopRef.current = Animated.loop(
         Animated.sequence([
           Animated.timing(pulseAnim, {
             toValue: 1.2,
@@ -765,15 +768,22 @@ export const TransactionProcessingScreen = () => {
             useNativeDriver: true,
           }),
         ])
-      ).start();
+      );
+      pulseLoopRef.current.start();
     }
+    return () => {
+      pulseLoopRef.current?.stop();
+      pulseAnim.stopAnimation();
+    };
   }, [currentStep, isComplete]);
 
   // Bounce animation for dots
   useEffect(() => {
+    bounceLoopRefs.current.forEach((animation) => animation.stop());
+    bounceLoopRefs.current = [];
     if (!isComplete) {
       bounceAnims.forEach((anim, index) => {
-        Animated.loop(
+        const loop = Animated.loop(
           Animated.sequence([
             Animated.timing(anim, {
               toValue: 1,
@@ -787,9 +797,16 @@ export const TransactionProcessingScreen = () => {
               useNativeDriver: true,
             }),
           ])
-        ).start();
+        );
+        bounceLoopRefs.current.push(loop);
+        loop.start();
       });
     }
+    return () => {
+      bounceLoopRefs.current.forEach((animation) => animation.stop());
+      bounceLoopRefs.current = [];
+      bounceAnims.forEach((anim) => anim.stopAnimation());
+    };
   }, [currentStep, isComplete]);
 
   return (

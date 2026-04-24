@@ -16,15 +16,21 @@ export const SkeletonLoader: React.FC<SkeletonLoaderProps> = ({
   style,
 }) => {
   const shimmerValue = useRef(new Animated.Value(0)).current;
+  const shimmerLoopRef = useRef<Animated.CompositeAnimation | null>(null);
 
   useEffect(() => {
-    Animated.loop(
+    shimmerLoopRef.current = Animated.loop(
       Animated.timing(shimmerValue, {
         toValue: 1,
         duration: 1500,
         useNativeDriver: true,
       })
-    ).start();
+    );
+    shimmerLoopRef.current.start();
+    return () => {
+      shimmerLoopRef.current?.stop();
+      shimmerValue.stopAnimation();
+    };
   }, [shimmerValue]);
 
   const translateX = shimmerValue.interpolate({

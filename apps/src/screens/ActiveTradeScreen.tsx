@@ -241,7 +241,10 @@ export const ActiveTradeScreen: React.FC = () => {
         })
       );
       spin.start();
-      return () => spin.stop();
+      return () => {
+        spin.stop();
+        spinAnim.stopAnimation();
+      };
     }
   }, [activeTradeStep, spinAnim]);
 

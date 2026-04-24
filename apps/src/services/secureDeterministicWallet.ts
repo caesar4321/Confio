@@ -26,6 +26,7 @@ import { randomBytes } from '@noble/hashes/utils';
 import { CONFIO_DERIVATION_SPEC } from './derivationSpec';
 import { base64ToBytes, bytesToBase64, stringToUtf8Bytes } from '../utils/encoding';
 import { AnalyticsService } from './analyticsService';
+import { softClearInternetCredentials } from '../utils/keychainInternetCredentials';
 
 const decodeUtf8 = (bytes: Uint8Array): string => {
   if (typeof TextDecoder !== 'undefined') {
@@ -1998,7 +1999,7 @@ export class SecureDeterministicWalletService {
       // Since all wallets for this app use the same server 'wallet.confio.app',
       // calling resetInternetCredentials will clear ALL wallet entries at once
       try {
-        await Keychain.resetInternetCredentials({ server: 'wallet.confio.app' });
+        await softClearInternetCredentials('wallet.confio.app');
         console.log('Cleared ALL wallet entries from keychain for server: wallet.confio.app');
       } catch (err: any) {
         // Server might not have any entries, which is fine

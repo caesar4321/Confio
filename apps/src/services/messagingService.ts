@@ -7,6 +7,10 @@ import { apolloClient } from '../apollo/client';
 import { REGISTER_FCM_TOKEN, UNREGISTER_FCM_TOKEN } from '../graphql/mutations/notifications';
 import { navigationRef } from '../navigation/RootNavigation';
 import notificationDedup from './notificationDeduplication';
+import {
+  hasUsableInternetCredentials,
+  softClearInternetCredentials,
+} from '../utils/keychainInternetCredentials';
 
 const FCM_TOKEN_SERVICE = 'confio_fcm_token';
 const DEVICE_ID_SERVICE = 'confio_device_id';
@@ -188,7 +192,7 @@ class MessagingService {
       // Try to get stored device ID from keychain
       const credentials = await Keychain.getInternetCredentials(DEVICE_ID_SERVICE);
 
-      if (credentials && credentials.password) {
+      if (hasUsableInternetCredentials(credentials)) {
         return credentials.password;
       }
 
@@ -220,7 +224,7 @@ class MessagingService {
       let storedToken: string | null = null;
       try {
         const credentials = await Keychain.getInternetCredentials(FCM_TOKEN_SERVICE);
-        if (credentials && credentials.password) {
+        if (hasUsableInternetCredentials(credentials)) {
           storedToken = credentials.password;
         }
       } catch (e) {
@@ -301,7 +305,7 @@ class MessagingService {
         },
       });
 
-      await Keychain.resetInternetCredentials({ server: FCM_TOKEN_SERVICE });
+      await softClearInternetCredentials(FCM_TOKEN_SERVICE);
       this.fcmToken = null;
 
       console.log('FCM token unregistered successfully');

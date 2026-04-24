@@ -99,22 +99,30 @@ const TopUpScreen = () => {
 
   // Animation for loading spinner
   const spinValue = useRef(new Animated.Value(0)).current;
+  const spinLoopRef = useRef<Animated.CompositeAnimation | null>(null);
 
   useEffect(() => {
     if (loadingMessage) {
       // Start spinning animation when loading
-      Animated.loop(
+      spinLoopRef.current?.stop();
+      spinLoopRef.current = Animated.loop(
         Animated.timing(spinValue, {
           toValue: 1,
           duration: 2000,
           easing: Easing.linear,
           useNativeDriver: true,
         })
-      ).start();
+      );
+      spinLoopRef.current.start();
     } else {
       // Reset animation when not loading
+      spinLoopRef.current?.stop();
       spinValue.setValue(0);
     }
+    return () => {
+      spinLoopRef.current?.stop();
+      spinValue.stopAnimation();
+    };
   }, [loadingMessage]);
 
   const spin = spinValue.interpolate({

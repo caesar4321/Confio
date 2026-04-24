@@ -861,6 +861,13 @@ export const ExchangeScreen = () => {
       refreshRotation.stopAnimation();
       refreshRotation.setValue(0);
     }
+    return () => {
+      if (currentAnimation.current) {
+        currentAnimation.current.stop();
+        currentAnimation.current = null;
+      }
+      refreshRotation.stopAnimation();
+    };
   }, [offersLoading]);
 
   // Cleanup animation on unmount

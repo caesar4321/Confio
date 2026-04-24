@@ -1,4 +1,10 @@
-import { GoogleSignin, User } from '@react-native-google-signin/google-signin';
+import {
+  GoogleSignin,
+  isCancelledResponse,
+  isErrorWithCode,
+  isSuccessResponse,
+  statusCodes,
+} from '@react-native-google-signin/google-signin';
 import { jwtDecode } from 'jwt-decode';
 import * as Keychain from 'react-native-keychain';
 import { GOOGLE_CLIENT_IDS, API_URL, CONFIO_ASSET_ID, CUSD_ASSET_ID, USDC_ASSET_ID } from '../config/env';
@@ -66,6 +72,27 @@ export class AuthService {
   private token: string | null = null;
 
   private constructor() {
+  }
+
+  private getGoogleSignInErrorMessage(error: unknown): string {
+    if (isErrorWithCode(error)) {
+      switch (error.code) {
+        case statusCodes.SIGN_IN_CANCELLED:
+          return 'Cancelaste el inicio de sesión con Google.';
+        case statusCodes.IN_PROGRESS:
+          return 'Ya hay un inicio de sesión de Google en progreso.';
+        case statusCodes.PLAY_SERVICES_NOT_AVAILABLE:
+          return 'Google Play Services no está disponible o necesita actualización.';
+        case statusCodes.SIGN_IN_REQUIRED:
+          return 'Google no completó el inicio de sesión. Intenta nuevamente.';
+        default:
+          break;
+      }
+    }
+
+    return error instanceof Error && error.message
+      ? error.message
+      : 'No se pudo completar el inicio de sesión con Google.';
   }
 
   private getPublicAlgodServer(): string {
@@ -258,7 +285,16 @@ export class AuthService {
       await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
 
       // Sign in with Google to get Drive access (this doesn't affect Firebase/backend auth)
-      await GoogleSignin.signIn();
+      const signInResponse = await GoogleSignin.signIn();
+      if (!isSuccessResponse(signInResponse)) {
+        if (isCancelledResponse(signInResponse)) {
+          console.log('[AuthService] Drive access sign-in cancelled by user');
+          return null;
+        }
+
+        console.warn('[AuthService] Drive access sign-in returned a non-success response:', signInResponse.type);
+        return null;
+      }
 
       // Get the access token for Drive
       const { accessToken } = await GoogleSignin.getTokens();
@@ -275,6 +311,9 @@ export class AuthService {
 
       return accessToken || null;
     } catch (error) {
+      if (isErrorWithCode(error)) {
+        console.error('[AuthService] Failed to get Drive access token:', error.code, error.message);
+      }
       console.error('[AuthService] Failed to get Drive access token:', error);
       return null;
     }
@@ -491,21 +530,41 @@ export class AuthService {
       perfLog('After GoogleSignin.signIn()');
       console.log('Google Sign-In response received');
 
-      if (!userInfo) {
-        throw new Error('No user info returned from Google Sign-In');
+      if (!isSuccessResponse(userInfo)) {
+        if (isCancelledResponse(userInfo)) {
+          throw new Error('Cancelaste el inicio de sesión con Google.');
+        }
+
+        throw new Error('No se pudo completar el inicio de sesión con Google.');
       }
 
-      // 2) Get the ID token after successful sign-in
+      // 2) Use the ID token directly from the successful sign-in payload.
+      // `getTokens()` is less reliable on some Android devices even after a
+      // successful sign-in, so we only call it when we actually need Drive access.
       perfLog('Google Sign-In complete');
       // NOW show loading - Google modal is closed
       onProgress?.('Verificando tu cuenta...');
-      console.log('Getting Google ID/Access tokens...');
-      const { idToken, accessToken } = await GoogleSignin.getTokens();
-      console.log('Got tokens:', {
-        hasIdToken: !!idToken,
-        hasAccessToken: !!accessToken
-      });
-      perfLog('Got Google ID/Access token');
+      const idToken = userInfo.data.idToken;
+      let accessToken: string | undefined;
+
+      if (enableDrive) {
+        try {
+          console.log('Getting Google access token for Drive...');
+          const tokenResponse = await GoogleSignin.getTokens();
+          accessToken = tokenResponse.accessToken;
+          console.log('Got Drive access token:', {
+            hasAccessToken: !!accessToken,
+          });
+        } catch (tokenError) {
+          if (isErrorWithCode(tokenError)) {
+            console.warn('[AuthService] Could not get Google Drive token:', tokenError.code, tokenError.message);
+          } else {
+            console.warn('[AuthService] Could not get Google Drive token:', tokenError);
+          }
+          accessToken = undefined;
+        }
+      }
+      perfLog('Resolved Google sign-in tokens');
 
       // Use the accessToken for Drive sync if user chose "Accept"
       const driveAccessToken = enableDrive ? accessToken : undefined;
@@ -580,12 +639,8 @@ export class AuthService {
         await getOrCreateMasterSecret(googleSubject, tokenForDrive || undefined);
         console.log('Master Secret synced/verified successfully.');
         driveSyncSucceeded = true;
-
-        // Report backup status if Drive was used (after backend auth completes below)
       } catch (walletErr) {
         console.error('Failed to sync Master Secret:', walletErr);
-        // We do NOT block login here, but wallet creation might fail later.
-        // Ideally we should block if critical, but for now log.
         driveSyncSucceeded = false;
       }
       perfLog('End Master Secret Sync');
@@ -819,9 +874,11 @@ export class AuthService {
       console.log('Phone verification status from backend:', isPhoneVerified);
 
       // 10) Return user info with Algorand address
-      let requiresBackupCompletion = false;
+      let requiresBackupCompletion = Platform.OS === 'android';
 
-      // Report backup status only if Drive was enabled AND sync actually succeeded
+      // Report backup status only if Drive was enabled AND sync actually succeeded.
+      // Backup is mandatory, so Android stays blocked in BackupCompletion until the
+      // server confirms the backup requirement has been cleared.
       if (enableDrive && driveSyncSucceeded) {
         try {
           const { reportBackupStatus } = await import('./secureDeterministicWallet');
@@ -842,10 +899,11 @@ export class AuthService {
         console.log('[AuthService] Post-login backup checkpoint:', {
           requiresBackupCompletion,
           backupProvider: data?.me?.backupProvider,
+          driveRequested: enableDrive,
+          driveSyncSucceeded,
         });
       } catch (checkpointErr) {
         console.warn('[AuthService] Failed to fetch backup checkpoint after Google sign-in:', checkpointErr);
-        requiresBackupCompletion = Platform.OS === 'android';
       }
 
       const result = {
@@ -866,8 +924,12 @@ export class AuthService {
 
       return result;
     } catch (error) {
-      console.error('Error signing in with Google:', error);
-      throw error;
+      if (isErrorWithCode(error)) {
+        console.error('Error signing in with Google:', error.code, error.message);
+      } else {
+        console.error('Error signing in with Google:', error);
+      }
+      throw new Error(this.getGoogleSignInErrorMessage(error));
     }
   }
 

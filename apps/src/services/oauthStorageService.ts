@@ -14,6 +14,10 @@
 import * as Keychain from 'react-native-keychain';
 import CryptoJS from 'crypto-js';
 import DeviceInfo from 'react-native-device-info';
+import {
+  hasUsableInternetCredentials,
+  softClearInternetCredentials,
+} from '../utils/keychainInternetCredentials';
 
 const OAUTH_KEYCHAIN_SERVICE = 'oauth.confio.app';
 const OAUTH_SUBJECT_KEY = 'oauth_subject';
@@ -92,7 +96,7 @@ class OAuthStorageService {
         OAUTH_KEYCHAIN_SERVICE
       );
 
-      if (!credentials || !credentials.password) {
+      if (!hasUsableInternetCredentials(credentials)) {
         return null;
       }
 
@@ -124,7 +128,8 @@ class OAuthStorageService {
    */
   async clearOAuthSubject(): Promise<void> {
     try {
-      await Keychain.resetInternetCredentials({ server: OAUTH_KEYCHAIN_SERVICE });    } catch (error) {
+      await softClearInternetCredentials(OAUTH_KEYCHAIN_SERVICE);
+    } catch (error) {
       console.error('OAuthStorage - Error clearing OAuth subject:', error);
       // Don't throw - this is part of cleanup
     }

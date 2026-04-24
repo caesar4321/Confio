@@ -1,5 +1,5 @@
 /* Lightweight WS client for USDC withdrawals (prepare + submit) */
-import appCheck from '@react-native-firebase/app-check';
+import appCheckService from './appCheckService';
 
 type PrepareArgs = {
   amount: string | number;
@@ -57,12 +57,7 @@ export class WithdrawWsSession {
         const token = await getJwtToken();
         if (!token) throw new Error('no_token');
 
-        // Fetch App Check token for connection security
-        let appCheckToken = '';
-        try {
-          const { token } = await appCheck().getToken();
-          if (token) appCheckToken = token;
-        } catch (e) { }
+        const appCheckToken = await appCheckService.getTokenForHeader() || '';
 
         const wsUrl = `${getWsBase()}ws/withdraw_session?token=${encodeURIComponent(token)}&app_check_token=${encodeURIComponent(appCheckToken)}`;        const ws = new WebSocket(wsUrl);
         this.ws = ws;

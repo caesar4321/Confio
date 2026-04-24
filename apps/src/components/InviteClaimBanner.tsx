@@ -36,18 +36,29 @@ export const InviteClaimBanner: React.FC<Props> = ({ amountMicros, assetId, onPr
   const slide = useRef(new Animated.Value(30)).current;
   const fade = useRef(new Animated.Value(0)).current;
   const confetti = useRef(new Animated.Value(0)).current;
+  const entranceAnimRef = useRef<Animated.CompositeAnimation | null>(null);
+  const confettiAnimRef = useRef<Animated.CompositeAnimation | null>(null);
 
   useEffect(() => {
-    Animated.parallel([
+    entranceAnimRef.current = Animated.parallel([
       Animated.spring(slide, { toValue: 0, useNativeDriver: true, friction: 10, tension: 60 }),
       Animated.timing(fade, { toValue: 1, duration: 250, useNativeDriver: true }),
-    ]).start(() => {
+    ]);
+    entranceAnimRef.current.start(() => {
       // brief confetti pop
-      Animated.sequence([
+      confettiAnimRef.current = Animated.sequence([
         Animated.timing(confetti, { toValue: 1, duration: 220, useNativeDriver: true }),
         Animated.timing(confetti, { toValue: 0, duration: 600, useNativeDriver: true }),
-      ]).start();
+      ]);
+      confettiAnimRef.current.start();
     });
+    return () => {
+      entranceAnimRef.current?.stop();
+      confettiAnimRef.current?.stop();
+      slide.stopAnimation();
+      fade.stopAnimation();
+      confetti.stopAnimation();
+    };
   }, [slide, fade, confetti]);
 
   return (

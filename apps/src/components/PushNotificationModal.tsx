@@ -31,11 +31,21 @@ export const PushNotificationModal: React.FC<PushNotificationModalProps> = ({
 }) => {
   const slideAnim = useRef(new Animated.Value(height)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
+  const animationRef = useRef<Animated.CompositeAnimation | null>(null);
+  const isClosingRef = useRef(false);
+  const [isMounted, setIsMounted] = React.useState(visible);
 
   useEffect(() => {
+    animationRef.current?.stop();
+
     if (visible) {
+      isClosingRef.current = false;
+      setIsMounted(true);
+      slideAnim.setValue(height);
+      fadeAnim.setValue(0);
+
       // Animate modal sliding up
-      Animated.parallel([
+      animationRef.current = Animated.parallel([
         Animated.timing(slideAnim, {
           toValue: 0,
           duration: 300,
@@ -46,10 +56,12 @@ export const PushNotificationModal: React.FC<PushNotificationModalProps> = ({
           duration: 300,
           useNativeDriver: true,
         }),
-      ]).start();
-    } else {
+      ]);
+      animationRef.current.start();
+    } else if (isMounted) {
+      isClosingRef.current = true;
       // Animate modal sliding down
-      Animated.parallel([
+      animationRef.current = Animated.parallel([
         Animated.timing(slideAnim, {
           toValue: height,
           duration: 300,
@@ -60,14 +72,35 @@ export const PushNotificationModal: React.FC<PushNotificationModalProps> = ({
           duration: 300,
           useNativeDriver: true,
         }),
-      ]).start();
+      ]);
+      animationRef.current.start(({ finished }) => {
+        if (finished && isClosingRef.current) {
+          setIsMounted(false);
+        }
+      });
     }
-  }, [visible, slideAnim, fadeAnim]);
+    return () => {
+      animationRef.current?.stop();
+    };
+  }, [visible, isMounted, slideAnim, fadeAnim]);
+
+  useEffect(() => {
+    return () => {
+      isClosingRef.current = false;
+      animationRef.current?.stop();
+      slideAnim.stopAnimation();
+      fadeAnim.stopAnimation();
+    };
+  }, [slideAnim, fadeAnim]);
+
+  if (!isMounted) {
+    return null;
+  }
 
   return (
     <Modal
       transparent
-      visible={visible}
+      visible={isMounted}
       animationType="none"
       statusBarTranslucent
     >
