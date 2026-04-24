@@ -13,7 +13,16 @@ export interface DeepLinkData {
   type: 'referral' | 'influencer' | 'achievement' | 'deeplink';
   payload: string;
   timestamp: number;
+  metadata?: {
+    invitationId?: string;
+    sourceType?: string;
+  };
 }
+
+type ReferralStrategyResult = {
+  code: string;
+  metadata?: DeepLinkData['metadata'];
+};
 
 export class DeepLinkHandler {
   private navigation: NavigationContainerRef<any> | null = null;
@@ -47,12 +56,13 @@ export class DeepLinkHandler {
         // Only if we don't already have one stored
         const existingDeferred = await this.getDeferredLink();
         if (!existingDeferred) {
-          const referralCode = await this.checkReferralStrategies();
-          if (referralCode) {
+          const referral = await this.checkReferralStrategies();
+          if (referral) {
             const linkData: DeepLinkData = {
               type: 'referral',
-              payload: referralCode,
-              timestamp: Date.now()
+              payload: referral.code,
+              timestamp: Date.now(),
+              metadata: referral.metadata,
             };
             // Always store referral links as deferred so HomeScreen can handle the mutation
             await this.storeDeferredLink(linkData);
@@ -72,7 +82,7 @@ export class DeepLinkHandler {
 
 
 
-  private async checkReferralStrategies(): Promise<string | null> {
+  private async checkReferralStrategies(): Promise<ReferralStrategyResult | null> {
     /* MOCK FOR TESTING - UNCOMMENT TO USE
     await new Promise(resolve => setTimeout(resolve, 1000));
     return 'JULIANMOONLUNA';
@@ -101,6 +111,7 @@ export class DeepLinkHandler {
           // 2. If it contains utm_, look for 'utm_content' or 'utm_campaign' which might hold our code.
 
           let potentialCode = ref;
+          let metadata: DeepLinkData['metadata'] | undefined;
 
           // Attempt to handle double-encoded strings
           if (ref.includes('%')) {
@@ -115,13 +126,22 @@ export class DeepLinkHandler {
             }
           }
 
-          if (ref.includes('utm_')) {
+          if (ref.includes('utm_') || ref.includes('invitation_id=')) {
             // Parse query string style 'key=value&key2=value2'
             // We use new URLSearchParams which handles = and & automatically
             const params = new URLSearchParams(ref);
             const content = params.get('utm_content');
             const campaign = params.get('utm_campaign');
             const source = params.get('utm_source');
+            const invitationId = params.get('invitation_id');
+            const sourceType = params.get('source_type');
+
+            if (invitationId || sourceType) {
+              metadata = {
+                invitationId: invitationId || undefined,
+                sourceType: sourceType || undefined,
+              };
+            }
 
             if (content && !content.includes('google')) {
               potentialCode = content;
@@ -139,7 +159,7 @@ export class DeepLinkHandler {
           // If the code is simple (alphanumeric), we take it.
           // We fail if it STILL looks like a url param string (contains =) or is one of the restricted keywords
           if (!potentialCode.includes('utm_source') && !potentialCode.includes('gclid') && !potentialCode.includes('=')) {
-            return potentialCode;
+            return { code: potentialCode, metadata };
           }
         }
       } catch {
@@ -160,7 +180,7 @@ export class DeepLinkHandler {
       if (response.ok) {
         const data = await response.json();
         if (data.code) {
-          return data.code;
+          return { code: data.code };
         }
       }
     } catch {
@@ -200,7 +220,11 @@ export class DeepLinkHandler {
         const linkData: DeepLinkData = {
           type,
           payload,
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          metadata: {
+            invitationId: parsedUrl.searchParams.get('invitation_id') || undefined,
+            sourceType: parsedUrl.searchParams.get('source_type') || undefined,
+          },
         };
 
         // For referral links, always store as deferred so HomeScreen can handle the mutation
@@ -224,7 +248,11 @@ export class DeepLinkHandler {
         const linkData: DeepLinkData = {
           type: 'referral',
           payload: referrer,
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          metadata: {
+            invitationId: parsedUrl.searchParams.get('invitation_id') || undefined,
+            sourceType: parsedUrl.searchParams.get('source_type') || undefined,
+          },
         };
 
         // Always store referral links as deferred so HomeScreen can handle the mutation

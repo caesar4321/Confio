@@ -904,6 +904,22 @@ class ClaimInviteForPhone(graphene.Mutation):
                         # Auto-create UserReferral if the claimer doesn't have one
                         if inviter and inviter.id != user.id:
                             try:
+                                from users.funnel import emit_once
+                                emit_once(
+                                    'signup_completed',
+                                    user=user,
+                                    country=getattr(user, 'phone_country', '') or '',
+                                    source_type='send_invite',
+                                    channel='claim',
+                                    properties={
+                                        'invitation_id': invitation_id,
+                                        'inviter_user_id': inviter.id,
+                                    },
+                                    dedupe_key=f'signup_completed:send_invite:{invitation_id}',
+                                )
+                            except Exception:
+                                pass
+                            try:
                                 from achievements.models import UserReferral
                                 from users.models import Account
                                 # Both must have personal accounts for the bonus
@@ -937,6 +953,23 @@ class ClaimInviteForPhone(graphene.Mutation):
                                             'registered_at': timezone.now().isoformat(),
                                         }
                                     )
+                                    try:
+                                        from users.funnel import emit_once
+                                        emit_once(
+                                            'referral_attached',
+                                            user=user,
+                                            country=getattr(user, 'phone_country', '') or '',
+                                            source_type='send_invite',
+                                            channel='claim',
+                                            properties={
+                                                'invitation_id': invitation_id,
+                                                'inviter_user_id': inviter.id,
+                                                'referral_id': referral.id,
+                                            },
+                                            dedupe_key=f'referral_attached:send_invite:{invitation_id}',
+                                        )
+                                    except Exception:
+                                        pass
                                     try:
                                         from achievements.services.referral_rewards import notify_referral_joined
                                         notify_referral_joined(referral)

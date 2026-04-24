@@ -22,6 +22,7 @@ CLIENT_EMITTABLE_EVENTS = frozenset({
     'referral_whatsapp_share_tapped',
     'invite_share_dismissed',
     'claim_entry_viewed',
+    'signup_completed',
 })
 
 
@@ -93,17 +94,31 @@ class TrackFunnelEvent(graphene.Mutation):
             country = getattr(user, 'phone_country', '') or ''
 
         try:
-            from users.funnel import emit_event
-            emit_event(
-                event_name,
-                user=user,
-                session_id=session_id or '',
-                country=country or '',
-                platform=platform or '',
-                source_type=source_type or '',
-                channel=channel or '',
-                properties=properties,
-            )
+            from users.funnel import emit_event, emit_once
+            dedupe_key = str(properties.get('dedupe_key') or '') if isinstance(properties, dict) else ''
+            if dedupe_key:
+                emit_once(
+                    event_name,
+                    user=user,
+                    session_id=session_id or '',
+                    country=country or '',
+                    platform=platform or '',
+                    source_type=source_type or '',
+                    channel=channel or '',
+                    properties=properties,
+                    dedupe_key=dedupe_key,
+                )
+            else:
+                emit_event(
+                    event_name,
+                    user=user,
+                    session_id=session_id or '',
+                    country=country or '',
+                    platform=platform or '',
+                    source_type=source_type or '',
+                    channel=channel or '',
+                    properties=properties,
+                )
         except Exception:
             logger.exception('[funnel] TrackFunnelEvent dispatch failed')
             return cls(success=True, recorded=False)

@@ -612,7 +612,12 @@
         <div class="metric-card">
             <div class="metric-label">Invite Claims (90d)</div>
             <div class="metric-value">{{ send_invite_funnel_stats.invite_claimed_total|default:"0"|intcomma }}</div>
-            <div class="metric-change">Click → Claim: {{ send_invite_funnel_stats.click_to_claim_pct|floatformat:1 }}%</div>
+            <div class="metric-change">Signup → Claim: {{ send_invite_funnel_stats.signup_to_claim_pct|floatformat:1 }}%</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Invite Signups (90d)</div>
+            <div class="metric-value">{{ send_invite_funnel_stats.signup_completed_total|default:"0"|intcomma }}</div>
+            <div class="metric-change">Click → Signup: {{ send_invite_funnel_stats.click_to_signup_pct|floatformat:1 }}%</div>
         </div>
         <div class="metric-card">
             <div class="metric-label">Claimed User First Deposits (90d)</div>
@@ -637,9 +642,10 @@
                     <th style="text-align: right;">Submitted</th>
                     <th style="text-align: right;">Shares</th>
                     <th style="text-align: right;">Clicks</th>
+                    <th style="text-align: right;">Signups</th>
                     <th style="text-align: right;">Claims</th>
                     <th style="text-align: right;">Deposits</th>
-                    <th style="text-align: right;">Invite → Share</th>
+                    <th style="text-align: right;">Click → Signup</th>
                     <th style="text-align: right;">Claim → Deposit</th>
                 </tr>
             </thead>
@@ -650,14 +656,15 @@
                     <td style="text-align: right;">{{ row.invite_submitted|intcomma }}</td>
                     <td style="text-align: right;">{{ row.whatsapp_share_tapped|intcomma }}</td>
                     <td style="text-align: right;">{{ row.invite_link_clicked|intcomma }}</td>
+                    <td style="text-align: right;">{{ row.signup_completed|intcomma }}</td>
                     <td style="text-align: right;">{{ row.invite_claimed|intcomma }}</td>
                     <td style="text-align: right;">{{ row.first_deposit|intcomma }}</td>
-                    <td style="text-align: right; color:#6b7280;">{{ row.invite_to_share_pct|floatformat:1 }}%</td>
+                    <td style="text-align: right; color:#6b7280;">{{ row.click_to_signup_pct|floatformat:1 }}%</td>
                     <td style="text-align: right; color:#6b7280;">{{ row.claim_to_deposit_pct|floatformat:1 }}%</td>
                 </tr>
                 {% empty %}
                 <tr>
-                    <td colspan="8" style="padding: 16px; color: #6b7280;">No send-and-invite trend data yet.</td>
+                    <td colspan="9" style="padding: 16px; color: #6b7280;">No send-and-invite trend data yet.</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -739,9 +746,19 @@
             <div class="metric-change">Share → Click: {{ referral_funnel_stats.share_to_click_pct|floatformat:1 }}%</div>
         </div>
         <div class="metric-card">
+            <div class="metric-label">Referral Signups (90d)</div>
+            <div class="metric-value">{{ referral_funnel_stats.signup_completed_total|default:"0"|intcomma }}</div>
+            <div class="metric-change">Click → Signup: {{ referral_funnel_stats.click_to_signup_pct|floatformat:1 }}%</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Referral Attached (90d)</div>
+            <div class="metric-value">{{ referral_funnel_stats.referral_attached_total|default:"0"|intcomma }}</div>
+            <div class="metric-change">Signup → Attach: {{ referral_funnel_stats.signup_to_attach_pct|floatformat:1 }}%</div>
+        </div>
+        <div class="metric-card">
             <div class="metric-label">Referral First Deposits (90d)</div>
             <div class="metric-value">{{ referral_funnel_stats.first_deposit_total|default:"0"|intcomma }}</div>
-            <div class="metric-change">Click → Deposit: {{ referral_funnel_stats.click_to_deposit_pct|floatformat:1 }}%</div>
+            <div class="metric-change">Attach → Deposit: {{ referral_funnel_stats.attach_to_deposit_pct|floatformat:1 }}%</div>
         </div>
         <div class="metric-card">
             <div class="metric-label">Referral Raw Events</div>
@@ -760,9 +777,11 @@
                     <th>Cohort</th>
                     <th style="text-align: right;">Shares</th>
                     <th style="text-align: right;">Clicks</th>
+                    <th style="text-align: right;">Signups</th>
+                    <th style="text-align: right;">Attached</th>
                     <th style="text-align: right;">Deposits</th>
-                    <th style="text-align: right;">Share → Click</th>
-                    <th style="text-align: right;">Click → Deposit</th>
+                    <th style="text-align: right;">Click → Signup</th>
+                    <th style="text-align: right;">Attach → Deposit</th>
                 </tr>
             </thead>
             <tbody>
@@ -771,13 +790,15 @@
                     <td style="font-weight: 500;">{{ row.label }}</td>
                     <td style="text-align: right;">{{ row.share_taps|intcomma }}</td>
                     <td style="text-align: right;">{{ row.link_clicks|intcomma }}</td>
+                    <td style="text-align: right;">{{ row.signup_completed|intcomma }}</td>
+                    <td style="text-align: right;">{{ row.referral_attached|intcomma }}</td>
                     <td style="text-align: right;">{{ row.first_deposits|intcomma }}</td>
-                    <td style="text-align: right; color:#6b7280;">{{ row.share_to_click_pct|floatformat:1 }}%</td>
-                    <td style="text-align: right; color:#6b7280;">{{ row.click_to_deposit_pct|floatformat:1 }}%</td>
+                    <td style="text-align: right; color:#6b7280;">{{ row.click_to_signup_pct|floatformat:1 }}%</td>
+                    <td style="text-align: right; color:#6b7280;">{{ row.attach_to_deposit_pct|floatformat:1 }}%</td>
                 </tr>
                 {% empty %}
                 <tr>
-                    <td colspan="6" style="padding: 16px; color: #6b7280;">No referral cohort data recorded yet.</td>
+                    <td colspan="8" style="padding: 16px; color: #6b7280;">No referral cohort data recorded yet.</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -796,12 +817,16 @@
                 <tr>
                     <th>Date</th>
                     <th style="text-align: right;">Creator Clicks</th>
+                    <th style="text-align: right;">Creator Signups</th>
+                    <th style="text-align: right;">Creator Attached</th>
                     <th style="text-align: right;">Creator Deposits</th>
                     <th style="text-align: right;">User Shares</th>
                     <th style="text-align: right;">User Clicks</th>
+                    <th style="text-align: right;">User Signups</th>
+                    <th style="text-align: right;">User Attached</th>
                     <th style="text-align: right;">User Deposits</th>
-                    <th style="text-align: right;">User Share → Click</th>
-                    <th style="text-align: right;">User Click → Deposit</th>
+                    <th style="text-align: right;">User Click → Signup</th>
+                    <th style="text-align: right;">User Attach → Deposit</th>
                 </tr>
             </thead>
             <tbody>
@@ -809,16 +834,20 @@
                 <tr>
                     <td>{{ row.date|date:"Y-m-d" }}</td>
                     <td style="text-align: right;">{{ row.creator_clicks|intcomma }}</td>
+                    <td style="text-align: right;">{{ row.creator_signups|intcomma }}</td>
+                    <td style="text-align: right;">{{ row.creator_attached|intcomma }}</td>
                     <td style="text-align: right;">{{ row.creator_deposits|intcomma }}</td>
                     <td style="text-align: right;">{{ row.user_shares|intcomma }}</td>
                     <td style="text-align: right;">{{ row.user_clicks|intcomma }}</td>
+                    <td style="text-align: right;">{{ row.user_signups|intcomma }}</td>
+                    <td style="text-align: right;">{{ row.user_attached|intcomma }}</td>
                     <td style="text-align: right;">{{ row.user_deposits|intcomma }}</td>
-                    <td style="text-align: right; color:#6b7280;">{{ row.user_share_to_click_pct|floatformat:1 }}%</td>
-                    <td style="text-align: right; color:#6b7280;">{{ row.user_click_to_deposit_pct|floatformat:1 }}%</td>
+                    <td style="text-align: right; color:#6b7280;">{{ row.user_click_to_signup_pct|floatformat:1 }}%</td>
+                    <td style="text-align: right; color:#6b7280;">{{ row.user_attach_to_deposit_pct|floatformat:1 }}%</td>
                 </tr>
                 {% empty %}
                 <tr>
-                    <td colspan="8" style="padding: 16px; color: #6b7280;">No referral trend data yet.</td>
+                    <td colspan="12" style="padding: 16px; color: #6b7280;">No referral trend data yet.</td>
                 </tr>
                 {% endfor %}
             </tbody>

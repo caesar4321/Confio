@@ -248,6 +248,8 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             'invite_submitted',
             'whatsapp_share_tapped',
             'invite_link_clicked',
+            'signup_completed',
+            'referral_attached',
             'invite_claimed',
             'first_deposit',
         ]
@@ -267,6 +269,8 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         invite_submitted_total = send_invite_90d.get('invite_submitted', 0)
         share_tapped_total = send_invite_90d.get('whatsapp_share_tapped', 0)
         link_clicked_total = send_invite_90d.get('invite_link_clicked', 0)
+        signup_completed_total = send_invite_90d.get('signup_completed', 0)
+        referral_attached_total = send_invite_90d.get('referral_attached', 0)
         invite_claimed_total = send_invite_90d.get('invite_claimed', 0)
         first_deposit_total = send_invite_90d.get('first_deposit', 0)
 
@@ -274,15 +278,20 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             'invite_submitted_total': invite_submitted_total,
             'share_tapped_total': share_tapped_total,
             'link_clicked_total': link_clicked_total,
+            'signup_completed_total': signup_completed_total,
+            'referral_attached_total': referral_attached_total,
             'invite_claimed_total': invite_claimed_total,
             'first_deposit_total': first_deposit_total,
             'invite_to_share_pct': _pct(share_tapped_total, invite_submitted_total),
             'share_to_click_pct': _pct(link_clicked_total, share_tapped_total),
-            'click_to_claim_pct': _pct(invite_claimed_total, link_clicked_total),
+            'click_to_signup_pct': _pct(signup_completed_total, link_clicked_total),
+            'signup_to_claim_pct': _pct(invite_claimed_total, signup_completed_total),
             'claim_to_deposit_pct': _pct(first_deposit_total, invite_claimed_total),
             'invite_submitted_7d': send_invite_7d.get('invite_submitted', 0),
             'share_tapped_7d': send_invite_7d.get('whatsapp_share_tapped', 0),
             'link_clicked_7d': send_invite_7d.get('invite_link_clicked', 0),
+            'signup_completed_7d': send_invite_7d.get('signup_completed', 0),
+            'referral_attached_7d': send_invite_7d.get('referral_attached', 0),
             'invite_claimed_7d': send_invite_7d.get('invite_claimed', 0),
             'first_deposit_7d': send_invite_7d.get('first_deposit', 0),
         }
@@ -303,6 +312,8 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         )
         for row in send_invite_trend:
             row['invite_to_share_pct'] = _pct(row['whatsapp_share_tapped'], row['invite_submitted'])
+            row['click_to_signup_pct'] = _pct(row['signup_completed'], row['invite_link_clicked'])
+            row['signup_to_claim_pct'] = _pct(row['invite_claimed'], row['signup_completed'])
             row['claim_to_deposit_pct'] = _pct(row['first_deposit'], row['invite_claimed'])
         context['send_invite_daily_trend'] = send_invite_trend
 
@@ -313,6 +324,8 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         referral_event_names = [
             'referral_whatsapp_share_tapped',
             'referral_link_clicked',
+            'signup_completed',
+            'referral_attached',
             'first_deposit',
         ]
         referral_90d_counts = _rollup_event_counts(
@@ -327,16 +340,24 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         )
         referral_share_tapped_total = referral_90d_counts.get('referral_whatsapp_share_tapped', 0)
         referral_link_clicked_total = referral_90d_counts.get('referral_link_clicked', 0)
+        referral_signup_completed_total = referral_90d_counts.get('signup_completed', 0)
+        referral_attached_total = referral_90d_counts.get('referral_attached', 0)
         referral_first_deposit_total = referral_90d_counts.get('first_deposit', 0)
         context['referral_funnel_stats'] = {
             'share_tapped_total': referral_share_tapped_total,
             'share_tapped_7d': referral_7d_counts.get('referral_whatsapp_share_tapped', 0),
             'link_clicked_total': referral_link_clicked_total,
             'link_clicked_7d': referral_7d_counts.get('referral_link_clicked', 0),
+            'signup_completed_total': referral_signup_completed_total,
+            'signup_completed_7d': referral_7d_counts.get('signup_completed', 0),
+            'referral_attached_total': referral_attached_total,
+            'referral_attached_7d': referral_7d_counts.get('referral_attached', 0),
             'first_deposit_total': referral_first_deposit_total,
             'first_deposit_7d': referral_7d_counts.get('first_deposit', 0),
             'share_to_click_pct': _pct(referral_link_clicked_total, referral_share_tapped_total),
-            'click_to_deposit_pct': _pct(referral_first_deposit_total, referral_link_clicked_total),
+            'click_to_signup_pct': _pct(referral_signup_completed_total, referral_link_clicked_total),
+            'signup_to_attach_pct': _pct(referral_attached_total, referral_signup_completed_total),
+            'attach_to_deposit_pct': _pct(referral_first_deposit_total, referral_attached_total),
             'raw_events_90d': referral_90d.count(),
         }
         context['referral_recent'] = list(
@@ -344,7 +365,7 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             .values('created_at', 'event_name', 'country', 'platform', 'channel', 'session_id')[:10]
         )
         referral_acquisition_90d = referral_90d.filter(
-            event_name__in=['referral_whatsapp_share_tapped', 'referral_link_clicked'],
+            event_name__in=['referral_whatsapp_share_tapped', 'referral_link_clicked', 'signup_completed', 'referral_attached'],
         )
         referral_conversion_90d = referral_90d.filter(
             event_name='first_deposit',
@@ -361,6 +382,8 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             )
             cohort_shares = cohort_counts.get('referral_whatsapp_share_tapped', 0)
             cohort_clicks = cohort_counts.get('referral_link_clicked', 0)
+            cohort_signups = cohort_counts.get('signup_completed', 0)
+            cohort_attached = cohort_counts.get('referral_attached', 0)
             cohort_deposits = cohort_counts.get('first_deposit', 0)
             if not cohort_deposits:
                 cohort_deposits = referral_conversion_90d.filter(deposit_filter).distinct().count()
@@ -368,9 +391,13 @@ class ConfioAdminSite(AdminSiteOTPRequired):
                 'label': label,
                 'share_taps': cohort_shares,
                 'link_clicks': cohort_clicks,
+                'signup_completed': cohort_signups,
+                'referral_attached': cohort_attached,
                 'first_deposits': cohort_deposits,
                 'share_to_click_pct': _pct(cohort_clicks, cohort_shares),
-                'click_to_deposit_pct': _pct(cohort_deposits, cohort_clicks),
+                'click_to_signup_pct': _pct(cohort_signups, cohort_clicks),
+                'signup_to_attach_pct': _pct(cohort_attached, cohort_signups),
+                'attach_to_deposit_pct': _pct(cohort_deposits, cohort_attached),
             }
 
         context['referral_cohort_breakdown'] = [
@@ -403,16 +430,24 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         for creator_row, other_row in zip(creator_trend, other_trend):
             user_shares = other_row['referral_whatsapp_share_tapped']
             user_clicks = other_row['referral_link_clicked']
+            user_signups = other_row['signup_completed']
+            user_attached = other_row['referral_attached']
             user_deposits = other_row['first_deposit']
             context['referral_daily_trend'].append({
                 'date': creator_row['date'],
                 'creator_clicks': creator_row['referral_link_clicked'],
+                'creator_signups': creator_row['signup_completed'],
+                'creator_attached': creator_row['referral_attached'],
                 'creator_deposits': creator_row['first_deposit'],
                 'user_shares': user_shares,
                 'user_clicks': user_clicks,
+                'user_signups': user_signups,
+                'user_attached': user_attached,
                 'user_deposits': user_deposits,
                 'user_share_to_click_pct': _pct(user_clicks, user_shares),
-                'user_click_to_deposit_pct': _pct(user_deposits, user_clicks),
+                'user_click_to_signup_pct': _pct(user_signups, user_clicks),
+                'user_signup_to_attach_pct': _pct(user_attached, user_signups),
+                'user_attach_to_deposit_pct': _pct(user_deposits, user_attached),
             })
         context['referral_acquisition_breakdown'] = list(
             referral_acquisition_90d

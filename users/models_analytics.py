@@ -254,6 +254,8 @@ class FunnelEvent(models.Model):
     #   whatsapp_share_tapped — user tapped the WhatsApp share button
     #   invite_link_clicked   — click attributable to a send-and-invite share
     #   referral_link_clicked — generic /invite/{USERNAME} hit on Cloudflare Worker
+    #   signup_completed      — authenticated user reached referral attach step
+    #   referral_attached     — referral relationship was persisted
     #   invite_claimed        — recipient claimed escrow (ClaimInviteForPhone)
     #   first_send            — user's first outbound send of any kind
     #   first_deposit         — user's first successful on-ramp (Koywe, etc.)

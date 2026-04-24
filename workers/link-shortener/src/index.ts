@@ -168,7 +168,14 @@ export default {
 
         let redirectUrl = `${env.LANDING_PAGE_URL}?invite=${referralCode}`;
         if (platform === 'android') {
-          redirectUrl = `${env.PLAY_STORE_URL}&referrer=${referralCode}`;
+          const playReferrer = hasInvitationId
+            ? new URLSearchParams({
+                utm_content: referralCode,
+                source_type: 'send_invite',
+                invitation_id: invitationId,
+              }).toString()
+            : referralCode;
+          redirectUrl = `${env.PLAY_STORE_URL}&referrer=${encodeURIComponent(playReferrer)}`;
         } else if (platform === 'ios') {
           redirectUrl = env.APP_STORE_URL;
         }

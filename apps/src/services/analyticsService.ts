@@ -16,7 +16,8 @@ export type ClientFunnelEvent =
     | 'whatsapp_share_tapped'
     | 'referral_whatsapp_share_tapped'
     | 'invite_share_dismissed'
-    | 'claim_entry_viewed';
+    | 'claim_entry_viewed'
+    | 'signup_completed';
 
 export const AnalyticsService = {
     /**

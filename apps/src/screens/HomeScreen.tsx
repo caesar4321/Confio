@@ -16,6 +16,7 @@ import {
 import ConvertModal from '../components/ConvertModal';
 import { Gradient } from '../components/common/Gradient';
 import { AuthService } from '../services/authService';
+import { AnalyticsService } from '../services/analyticsService';
 import { useNavigation, useFocusEffect, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuth, useAuthReady } from '../contexts/AuthContext';
@@ -249,6 +250,17 @@ export const HomeScreen = () => {
       try {
         const link = await deepLinkHandler.getDeferredLink();
         if (link && link.type === 'referral') {
+          const invitationId = link.metadata?.invitationId;
+          if (invitationId) {
+            AnalyticsService.logFunnelEvent('signup_completed', {
+              invitation_id: invitationId,
+              referral_code: link.payload,
+              dedupe_key: `signup_completed:send_invite:${invitationId}`,
+            }, {
+              sourceType: 'send_invite',
+              channel: 'app',
+            });
+          }
 
           // Submit to backend
           const { data, errors } = await setReferrerMutation({

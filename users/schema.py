@@ -4593,6 +4593,21 @@ class CreateInfluencerReferral(graphene.Mutation):
 					success=False,
 					error="Nombre de usuario de TikTok es requerido"
 				)
+			try:
+				from users.funnel import emit_referral_signup_step
+				emit_referral_signup_step(
+					'signup_completed',
+					user=user,
+					referrer_identifier=clean_username,
+					source_type='referral_link',
+					channel='app',
+					properties={
+						'referral_type': 'influencer',
+						'attach_method': 'create_influencer_referral',
+					},
+				)
+			except Exception:
+				pass
 			
 			# Check if user already has a referral record
 			existing_referral = InfluencerReferral.objects.filter(referred_user=user).first()
@@ -4609,6 +4624,22 @@ class CreateInfluencerReferral(graphene.Mutation):
 				status='pending',
 				attribution_data=attribution_data or {}
 			)
+			try:
+				from users.funnel import emit_referral_signup_step
+				emit_referral_signup_step(
+					'referral_attached',
+					user=user,
+					referrer_identifier=clean_username,
+					source_type='referral_link',
+					channel='app',
+					properties={
+						'referral_type': 'influencer',
+						'attach_method': 'create_influencer_referral',
+						'referral_id': referral.id,
+					},
+				)
+			except Exception:
+				pass
 			
 			# Award initial signup reward to referred user (1$ worth of CONFIO)
 			referral.referee_confio_awarded = 100  # 100 CONFIO = $1 at presale price

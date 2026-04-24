@@ -60,6 +60,21 @@ class SetReferrer(graphene.Mutation):
             # Always remove @ if present and normalize spaces
             identifier = identifier.lstrip('@').strip()
             referral_type = 'friend'
+            try:
+                from users.funnel import emit_referral_signup_step
+                emit_referral_signup_step(
+                    'signup_completed',
+                    user=user,
+                    referrer_identifier=identifier,
+                    source_type='referral_link',
+                    channel='app',
+                    properties={
+                        'referral_type': 'friend',
+                        'attach_method': 'set_referrer',
+                    },
+                )
+            except Exception:
+                pass
 
             # Determine whether identifier is phone or username
             is_phone = re.fullmatch(r'^\+?\d{10,15}$', identifier.replace(' ', '')) is not None
@@ -137,6 +152,22 @@ class SetReferrer(graphene.Mutation):
                         'registered_at': timezone.now().isoformat(),
                     }
                 )
+                try:
+                    from users.funnel import emit_referral_signup_step
+                    emit_referral_signup_step(
+                        'referral_attached',
+                        user=user,
+                        referrer_identifier=referrer_identifier,
+                        source_type='referral_link',
+                        channel='app',
+                        properties={
+                            'referral_type': 'friend',
+                            'attach_method': 'set_referrer',
+                            'referral_id': referral.id,
+                        },
+                    )
+                except Exception:
+                    pass
 
                 # Note: Rewards will be synced to on-chain vault when first qualifying event occurs
                 # This is handled by sync_referral_reward_for_event() via signals

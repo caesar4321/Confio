@@ -59,6 +59,101 @@ def derive_rollup_cohort(event_name: str, source_type: str, properties: Optional
     return 'unknown'
 
 
+def emit_once(
+    event_name: str,
+    *,
+    user: Optional[Any] = None,
+    session_id: str = '',
+    country: str = '',
+    platform: str = '',
+    source_type: str = '',
+    channel: str = '',
+    properties: Optional[dict] = None,
+    dedupe_key: str = '',
+) -> None:
+    """Emit an analytics event once per dedupe key.
+
+    Used for server-side funnel milestones that can be retried by the app
+    after signup, such as referral attachment.
+    """
+    props = properties or {}
+    key = (dedupe_key or '').strip()
+    if not key:
+        emit_event(
+            event_name,
+            user=user,
+            session_id=session_id,
+            country=country,
+            platform=platform,
+            source_type=source_type,
+            channel=channel,
+            properties=props,
+        )
+        return
+
+    user_id = getattr(user, 'id', None) if user is not None else None
+
+    def _insert_once():
+        try:
+            from users.models_analytics import FunnelEvent
+            exists = FunnelEvent.objects.filter(
+                event_name=(event_name or '')[:64],
+                user_id=user_id,
+                source_type=(source_type or '').lower()[:32],
+                properties__dedupe_key=key[:128],
+            ).exists()
+            if exists:
+                return
+            FunnelEvent.objects.create(
+                event_name=(event_name or '')[:64],
+                user_id=user_id,
+                session_id=(session_id or '')[:64],
+                country=(country or '').upper()[:2],
+                platform=(platform or '').lower()[:16],
+                source_type=(source_type or '').lower()[:32],
+                channel=(channel or '').lower()[:32],
+                properties={**props, 'dedupe_key': key[:128]},
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('[funnel] emit_once(%s) failed: %s', event_name, exc)
+
+    try:
+        conn = transaction.get_connection()
+        if conn.in_atomic_block:
+            transaction.on_commit(_insert_once)
+        else:
+            _insert_once()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning('[funnel] emit_once(%s) dispatch failed: %s', event_name, exc)
+
+
+def emit_referral_signup_step(
+    event_name: str,
+    *,
+    user: Any,
+    referrer_identifier: str,
+    source_type: str = 'referral_link',
+    channel: str = 'app',
+    properties: Optional[dict] = None,
+) -> None:
+    """Emit an idempotent referral signup/attach milestone."""
+    identifier = (referrer_identifier or '').lstrip('@').strip().upper()
+    if not identifier:
+        return
+    emit_once(
+        event_name,
+        user=user,
+        country=getattr(user, 'phone_country', '') or '',
+        source_type=source_type,
+        channel=channel,
+        properties={
+            **(properties or {}),
+            'referral_code': identifier,
+        },
+        dedupe_key=f'{event_name}:{source_type}:{identifier}',
+    )
+
+
 def emit_event(
     event_name: str,
     *,
