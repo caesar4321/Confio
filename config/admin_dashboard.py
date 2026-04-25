@@ -87,7 +87,14 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             fcm_tokens__is_active=True,
             fcm_tokens__last_used__gte=now - timedelta(days=30)
         ).distinct().count()
-        context['verified_users'] = IdentityVerification.objects.filter(status='verified').count()
+        context['users_with_verification'] = IdentityVerification.objects.values('user').distinct().count()
+        context['verified_users'] = IdentityVerification.objects.filter(
+            status='verified'
+        ).values('user').distinct().count()
+        context['verification_completion_rate'] = (
+            context['verified_users'] / context['users_with_verification'] * 100
+            if context['users_with_verification'] else 0
+        )
         
         # V2 Migration & Backup Security Metrics
         # Uses Account model for migration status (per-account tracking)
