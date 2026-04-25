@@ -123,7 +123,7 @@
         <div class="metric-card">
             <div class="metric-label">Verified Users</div>
             <div class="metric-value">{{ users_verified|intcomma }}</div>
-            <div class="metric-change">Fully verified</div>
+            <div class="metric-change">{{ verification_completion_rate|floatformat:1 }}% of started verifications</div>
         </div>
     </div>
     

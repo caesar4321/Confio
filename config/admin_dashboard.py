@@ -1113,6 +1113,10 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         context['users_verified'] = IdentityVerification.objects.filter(
             status='verified'
         ).values('user').distinct().count()
+        context['verification_completion_rate'] = (
+            context['users_verified'] / context['users_with_verification'] * 100
+            if context['users_with_verification'] else 0
+        )
         
         # Account type distribution
         account_types = Account.objects.values(
