@@ -303,6 +303,12 @@
         </div>
 
         <div class="metric-card">
+            <div class="metric-label">Verified Users</div>
+            <div class="metric-value">{{ verified_users|intcomma }}</div>
+            <div class="metric-change">Fully verified</div>
+        </div>
+
+        <div class="metric-card">
             <div class="metric-label">Active (24h)</div>
             <div class="metric-value">{{ active_users_today|intcomma }}</div>
             <div class="metric-change">{{ active_users_month|intcomma }} MAU</div>
