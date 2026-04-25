@@ -13,8 +13,9 @@ from django.db.models import DecimalField
 from django.contrib.admin.views.decorators import staff_member_required
 from django.utils.html import format_html
 from django.contrib import messages
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from users.models import User, Account, Business, Country, Bank, BankInfo, WalletPepper, WalletDerivationPepper
 from security.models import IdentityVerification, DeviceFingerprint
@@ -1076,16 +1077,15 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         
         # User growth by day
         from django.db.models.functions import TruncDate
-        import pytz
 
         # User growth by day (Argentina Time)
-        tz = pytz.timezone('America/Argentina/Buenos_Aires')
+        tz = ZoneInfo('America/Argentina/Buenos_Aires')
         days = int(request.GET.get('days', 30))
         
         # Calculate start date in Argentina time (midnight 30 days ago)
         now_arg = timezone.now().astimezone(tz)
         start_date_arg = (now_arg - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
-        start_date_utc = start_date_arg.astimezone(pytz.UTC)
+        start_date_utc = start_date_arg.astimezone(dt_timezone.utc)
         
         daily_signups = User.objects.filter(
             phone_number__isnull=False,
