@@ -282,6 +282,14 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             'referral_attached_total': referral_attached_total,
             'invite_claimed_total': invite_claimed_total,
             'first_deposit_total': first_deposit_total,
+            'raw_events_90d': FunnelEvent.objects.filter(
+                source_type='send_invite',
+                created_at__gte=funnel_last_90_start,
+            ).count(),
+            'rollup_rows_90d': FunnelDailyRollup.objects.filter(
+                source_type='send_invite',
+                date__gte=funnel_last_90_date,
+            ).count(),
             'invite_to_share_pct': _pct(share_tapped_total, invite_submitted_total),
             'share_to_click_pct': _pct(link_clicked_total, share_tapped_total),
             'click_to_signup_pct': _pct(signup_completed_total, link_clicked_total),
@@ -359,6 +367,10 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             'signup_to_attach_pct': _pct(referral_attached_total, referral_signup_completed_total),
             'attach_to_deposit_pct': _pct(referral_first_deposit_total, referral_attached_total),
             'raw_events_90d': referral_90d.count(),
+            'rollup_rows_90d': FunnelDailyRollup.objects.filter(
+                source_type='referral_link',
+                date__gte=funnel_last_90_date,
+            ).count(),
         }
         context['referral_recent'] = list(
             referral_90d.order_by('-created_at')

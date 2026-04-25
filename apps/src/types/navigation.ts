@@ -423,7 +423,7 @@ export type MainStackParamList = {
   PayrollSetupWizard: undefined;
   PayrollRecipientsManage: undefined;
   PayrollDelegatesManage: undefined;
-  // NotificationSettings: undefined; // Hidden: Notifications mandatory
+  // NotificationSettings: undefined;
 };
 
 // Root Stack - Top level navigation

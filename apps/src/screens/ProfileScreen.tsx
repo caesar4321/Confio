@@ -661,7 +661,7 @@ export const ProfileScreen = () => {
                 </TouchableOpacity>
               )}
 
-            {/* Hidden: Notifications are mandatory for financial apps
+            {/* Notification settings entry is currently hidden.
           <TouchableOpacity 
             style={styles.cardOption}
             onPress={() => navigation.navigate('NotificationSettings')}

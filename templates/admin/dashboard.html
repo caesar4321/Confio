@@ -625,9 +625,9 @@
             <div class="metric-change">Claim → Deposit: {{ send_invite_funnel_stats.claim_to_deposit_pct|floatformat:1 }}%</div>
         </div>
         <div class="metric-card">
-            <div class="metric-label">Pipeline Health</div>
-            <div class="metric-value">{{ tracking_health.raw_events_90d|default:"0"|intcomma }}</div>
-            <div class="metric-change">Rollup rows (90d): {{ tracking_health.rollup_rows_90d|default:"0"|intcomma }}</div>
+            <div class="metric-label">Send-Invite Raw Events</div>
+            <div class="metric-value">{{ send_invite_funnel_stats.raw_events_90d|default:"0"|intcomma }}</div>
+            <div class="metric-change">Rollup rows (90d): {{ send_invite_funnel_stats.rollup_rows_90d|default:"0"|intcomma }}</div>
         </div>
     </div>
 
@@ -763,7 +763,7 @@
         <div class="metric-card">
             <div class="metric-label">Referral Raw Events</div>
             <div class="metric-value">{{ referral_funnel_stats.raw_events_90d|default:"0"|intcomma }}</div>
-            <div class="metric-change">90d raw: {{ tracking_health.raw_events_90d|default:"0"|intcomma }}</div>
+            <div class="metric-change">Rollup rows (90d): {{ referral_funnel_stats.rollup_rows_90d|default:"0"|intcomma }}</div>
         </div>
     </div>
 

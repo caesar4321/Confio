@@ -60,21 +60,6 @@ class SetReferrer(graphene.Mutation):
             # Always remove @ if present and normalize spaces
             identifier = identifier.lstrip('@').strip()
             referral_type = 'friend'
-            try:
-                from users.funnel import emit_referral_signup_step
-                emit_referral_signup_step(
-                    'signup_completed',
-                    user=user,
-                    referrer_identifier=identifier,
-                    source_type='referral_link',
-                    channel='app',
-                    properties={
-                        'referral_type': 'friend',
-                        'attach_method': 'set_referrer',
-                    },
-                )
-            except Exception:
-                pass
 
             # Determine whether identifier is phone or username
             is_phone = re.fullmatch(r'^\+?\d{10,15}$', identifier.replace(' ', '')) is not None
@@ -137,6 +122,21 @@ class SetReferrer(graphene.Mutation):
 
             # Create the referral record
             with db_transaction.atomic():
+                try:
+                    from users.funnel import emit_referral_signup_step
+                    emit_referral_signup_step(
+                        'signup_completed',
+                        user=user,
+                        referrer_identifier=referrer_identifier,
+                        source_type='referral_link',
+                        channel='app',
+                        properties={
+                            'referral_type': 'friend',
+                            'attach_method': 'set_referrer',
+                        },
+                    )
+                except Exception:
+                    pass
                 referral = UserReferral.objects.create(
                     referred_user=user,
                     referrer_identifier=referrer_identifier,

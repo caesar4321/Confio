@@ -69,7 +69,7 @@ import PayrollRecipientsManageScreen from '../screens/PayrollRecipientsManageScr
 import PayrollDelegatesManageScreen from '../screens/PayrollDelegatesManageScreen';
 import MessageScreen from '../screens/MessageScreen';
 import DiscoverPostDetailScreen from '../screens/DiscoverPostDetailScreen';
-// import NotificationSettingsScreen from '../screens/NotificationSettingsScreen'; // Hidden: Notifications mandatory
+// import NotificationSettingsScreen from '../screens/NotificationSettingsScreen';
 
 import { MigrationModal } from '../components/MigrationModal';
 import messagingService from '../services/messagingService';
@@ -500,7 +500,7 @@ export const MainNavigator = () => {
           component={PayrollDelegatesManageScreen}
           options={{ headerShown: false }}
         />
-        {/* Hidden: Notifications are mandatory for financial apps
+        {/* Notification settings screen is currently hidden from profile navigation.
       <Stack.Screen
         name="NotificationSettings"
         component={NotificationSettingsScreen}

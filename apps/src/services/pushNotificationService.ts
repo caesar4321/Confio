@@ -737,19 +737,11 @@ export class PushNotificationService {
         return false;
       }
       
-      // On iOS, check if we've already asked for permission
-      // iOS only allows asking once, after that user must go to settings
       if (Platform.OS === 'ios' && permissionStatus === 'denied') {
-        const authStatus = await messaging().hasPermission();
-        if (authStatus === messaging.AuthorizationStatus.DENIED) {
-          console.log('[PushNotificationService] iOS permission permanently denied, cannot show system prompt');
-          // Still show our custom prompt to guide user to settings
-          return true;
-        }
+        console.log('[PushNotificationService] iOS notification prompt already declined, not showing prompt');
+        return false;
       }
 
-      // For a finance app, we show the prompt until permission is granted
-      // Push notifications are critical for transaction alerts and security
       console.log('[PushNotificationService] Should show prompt: true');
       return true;
     } catch (error) {
@@ -759,12 +751,10 @@ export class PushNotificationService {
   }
 
   /**
-   * Mark that the permission prompt was shown (deprecated - we no longer track this)
+   * Mark that the permission prompt was shown (deprecated)
    * Keeping method for backward compatibility but it does nothing
    */
   async markPromptAsShown(): Promise<void> {
-    // We no longer mark the prompt as shown since we want to keep asking
-    // until the user grants permission for this critical finance app feature
     console.log('[PushNotificationService] markPromptAsShown called (no-op)');
   }
 

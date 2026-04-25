@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Platform, Linking } from 'react-native';
 import { pushNotificationService } from '../services/pushNotificationService';
 
@@ -24,7 +24,7 @@ export function usePushNotificationPrompt(): UsePushNotificationPromptReturn {
   }, [hasInitialized]);
 
   // Function to check and show prompt
-  const checkAndShowPrompt = async () => {
+  const checkAndShowPrompt = useCallback(async () => {
     try {
       // First check if we already have permission
       const hasPermission = await pushNotificationService.hasPermission();
@@ -59,9 +59,9 @@ export function usePushNotificationPrompt(): UsePushNotificationPromptReturn {
     } catch (error) {
       console.error('[PushNotification] Error checking prompt status:', error);
     }
-  };
+  }, []);
 
-  const handleAllow = async () => {
+  const handleAllow = useCallback(async () => {
     try {
       // If iOS needs settings, open settings instead
       if (needsSettings && Platform.OS === 'ios') {
@@ -87,14 +87,10 @@ export function usePushNotificationPrompt(): UsePushNotificationPromptReturn {
       setShowModal(false);
       setNeedsSettings(false);
     }
-  };
+  }, [needsSettings]);
 
-  const handleDeny = async () => {
+  const handleDeny = useCallback(async () => {
     try {
-      // Just close the modal - we'll ask again next time
-      // For a finance app, push notifications are too important to give up
-      // Only save denied status if this was the first time asking
-      // This prevents iOS from being permanently blocked
       const storedStatus = await pushNotificationService.getStoredPermissionStatus();
       if (!storedStatus || storedStatus === 'not_asked') {
         await pushNotificationService.savePermissionStatus('denied');
@@ -105,7 +101,7 @@ export function usePushNotificationPrompt(): UsePushNotificationPromptReturn {
       setShowModal(false);
       setNeedsSettings(false);
     }
-  };
+  }, []);
 
   return {
     showModal,
