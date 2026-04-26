@@ -8,7 +8,7 @@ from django.urls import path, reverse
 from django.shortcuts import render, redirect
 from django.utils import timezone
 from django.db.models import Count, Sum, Q, F, Avg
-from django.db.models.functions import Cast
+from django.db.models.functions import Cast, TruncDate
 from django.db.models import DecimalField
 from django.contrib.admin.views.decorators import staff_member_required
 from django.utils.html import format_html
@@ -60,9 +60,14 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             title="Dashboard Overview",
         )
         
-        # Time ranges
+        # Time ranges. Dashboard analytics use Argentina calendar days, matching
+        # the nightly analytics snapshots and operational reporting.
+        from users.analytics import ARG_TZ, get_argentina_day_bounds
+
         now = timezone.now()
-        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        now_arg = now.astimezone(ARG_TZ)
+        today_arg = now_arg.date()
+        today_start, _ = get_argentina_day_bounds(today_arg)
         last_24h = now - timedelta(hours=24)
         week_start = today_start - timedelta(days=today_start.weekday())
         last_7_start = now - timedelta(days=7)
@@ -161,10 +166,10 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             )
 
         # Invite/referral funnel metrics
-        today = now.date()
+        today = today_arg
         funnel_last_90_date = today - timedelta(days=89)
         funnel_last_7_date = today - timedelta(days=6)
-        funnel_last_90_start = now - timedelta(days=90)
+        funnel_last_90_start, _ = get_argentina_day_bounds(funnel_last_90_date)
         creator_referral_code = 'JULIANMOONLUNA'
         creator_cohort = 'creator_julianmoonluna'
         other_referral_cohorts = ['user_driven', 'unknown']
@@ -207,24 +212,35 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             return queryset
 
         def _rollup_event_counts(source_type, event_names, start_date, cohort=None):
-            rollups = FunnelDailyRollup.objects.filter(
+            rollup_base = FunnelDailyRollup.objects.filter(
                 source_type=source_type,
                 event_name__in=event_names,
                 date__gte=start_date,
                 date__lt=today,
             )
+            rolled_dates = set(rollup_base.values_list('date', flat=True).distinct())
+            rollups = rollup_base
             rollups = _cohort_filter(rollups, cohort)
             counts = {
                 row['event_name']: row['count'] or 0
                 for row in rollups.values('event_name').annotate(count=Sum('count'))
             }
-            raw_today = FunnelEvent.objects.filter(
+            # Celery rolls up yesterday asynchronously. Include raw rows for
+            # dates that do not have rollups yet, plus today's raw rows.
+            raw_dates = [
+                day for day in _date_rows(start_date, today)
+                if day == today or day not in rolled_dates
+            ]
+            raw_unrolled = FunnelEvent.objects.annotate(
+                day=TruncDate('created_at', tzinfo=ARG_TZ)
+            ).filter(
                 source_type=source_type,
                 event_name__in=event_names,
-                created_at__gte=today_start,
+                day__in=raw_dates,
+                created_at__gte=funnel_last_90_start,
             )
-            raw_today = _raw_cohort_filter(raw_today, cohort)
-            for row in raw_today.values('event_name').annotate(count=Count('id')):
+            raw_unrolled = _raw_cohort_filter(raw_unrolled, cohort)
+            for row in raw_unrolled.values('event_name').annotate(count=Count('id')):
                 counts[row['event_name']] = counts.get(row['event_name'], 0) + (row['count'] or 0)
             return counts
 
@@ -233,23 +249,38 @@ class ConfioAdminSite(AdminSiteOTPRequired):
                 day: {'date': day, **{event_name: 0 for event_name in event_names}}
                 for day in _date_rows(start_date, today)
             }
-            rollups = FunnelDailyRollup.objects.filter(
+            rollup_base = FunnelDailyRollup.objects.filter(
                 source_type=source_type,
                 event_name__in=event_names,
                 date__gte=start_date,
                 date__lt=today,
             )
+            rolled_dates = set(rollup_base.values_list('date', flat=True).distinct())
+            rollups = rollup_base
             rollups = _cohort_filter(rollups, cohort)
             for row in rollups.values('date', 'event_name').annotate(count=Sum('count')):
                 rows[row['date']][row['event_name']] = row['count'] or 0
-            raw_today = FunnelEvent.objects.filter(
+            raw_dates = [
+                day for day in _date_rows(start_date, today)
+                if day == today or day not in rolled_dates
+            ]
+            raw_unrolled = FunnelEvent.objects.annotate(
+                day=TruncDate('created_at', tzinfo=ARG_TZ)
+            ).filter(
                 source_type=source_type,
                 event_name__in=event_names,
-                created_at__gte=today_start,
+                day__in=raw_dates,
+                created_at__gte=funnel_last_90_start,
             )
-            raw_today = _raw_cohort_filter(raw_today, cohort)
-            for row in raw_today.values('event_name').annotate(count=Count('id')):
-                rows[today][row['event_name']] = rows[today].get(row['event_name'], 0) + (row['count'] or 0)
+            raw_unrolled = _raw_cohort_filter(raw_unrolled, cohort)
+            for row in (
+                raw_unrolled
+                .values('day', 'event_name')
+                .annotate(count=Count('id'))
+            ):
+                day = row['day']
+                if day in rows:
+                    rows[day][row['event_name']] = rows[day].get(row['event_name'], 0) + (row['count'] or 0)
             return [rows[day] for day in sorted(rows.keys(), reverse=True)]
 
         send_invite_event_names = [
