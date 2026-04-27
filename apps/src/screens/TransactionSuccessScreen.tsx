@@ -163,6 +163,7 @@ export const TransactionSuccessScreen = () => {
   const handleShareInvitation = async () => {
     const invitationId = (transactionData as any).invitationId
       || (transactionData as any).invitation_id
+      || (transactionData as any).idempotencyKey
       || undefined;
 
     // Fire-and-forget funnel event: the user tapped the WhatsApp share

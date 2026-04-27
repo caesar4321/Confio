@@ -2528,8 +2528,10 @@ export const TransactionDetailScreen = () => {
                     const currency = currentTx.currency || 'cUSD';
                     const invitationId = (currentTx as any).invitationId
                       || (currentTx as any).invitation_id
+                      || (currentTx as any).idempotencyKey
                       || (transactionData as any)?.invitationId
                       || (transactionData as any)?.invitation_id
+                      || (transactionData as any)?.idempotencyKey
                       || '';
 
                     const inviteLink = buildInviteLink({
@@ -2612,8 +2614,10 @@ export const TransactionDetailScreen = () => {
                     try {
                       const invitationId = (currentTx as any).invitationId
                         || (currentTx as any).invitation_id
+                        || (currentTx as any).idempotencyKey
                         || (transactionData as any)?.invitationId
                         || (transactionData as any)?.invitation_id
+                        || (transactionData as any)?.idempotencyKey
                         || '';
                       const inviteLink = buildInviteLink({
                         username: userProfile?.username,

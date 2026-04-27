@@ -563,6 +563,15 @@ export const TransactionProcessingScreen = () => {
         if (res.internalId) {
           (transactionData as any).internalId = res.internalId;
         }
+        const invitationId =
+          res.invitationId ||
+          preparedInvite?.invitationId ||
+          (transactionData as any).preparedInvite?.invitationId ||
+          (transactionData as any).idempotencyKey;
+        if (invitationId) {
+          (transactionData as any).invitationId = invitationId;
+          (transactionData as any).idempotencyKey = invitationId;
+        }
         // Mark as submitted so Success screen shows "Confirmando…" until Celery confirms
         (transactionData as any).status = 'SUBMITTED';
         setTransactionSuccess(true);
