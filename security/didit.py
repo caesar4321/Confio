@@ -348,7 +348,7 @@ def _extract_verification_payload(response_payload: dict[str, Any]) -> dict[str,
         response_payload.get('document_number'),
         response_payload.get('personal_number'),
     )
-    if issuing_country_iso3 == 'CHL':
+    if issuing_country_iso3 in {'CHL', 'MEX'}:
         document_number = _first_non_empty(
             id_verification.get('personal_number'),
             response_payload.get('personal_number'),

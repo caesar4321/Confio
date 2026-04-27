@@ -149,7 +149,7 @@ _COUNTRY_DOCUMENT_TYPE_MAP = {
         'nit': 'NIT',
     },
     'MX': {
-        'national_id': 'RFC',
+        'national_id': 'CURP',
         'rfc': 'RFC',
         'curp': 'CURP',
     },
