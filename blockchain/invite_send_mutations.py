@@ -1103,6 +1103,13 @@ def get_invite_receipt_for_phone(user_phone: str, user_country: str | None):
         canonical = _norm(user_phone or '', user_country or '')
         if canonical:
             phone_keys.append(canonical)
+            try:
+                cc, local = canonical.split(':', 1)
+                legacy_sender_country_key = f"1:{cc}{local}"
+                if cc != '1' and legacy_sender_country_key not in phone_keys:
+                    phone_keys.append(legacy_sender_country_key)
+            except Exception:
+                pass
         digits_only = ''.join(ch for ch in (user_phone or '') if ch.isdigit())
         if digits_only and digits_only not in phone_keys:
             phone_keys.append(digits_only)
@@ -1175,6 +1182,13 @@ def get_all_pending_invites_for_phone(user_phone: str, user_country: str | None)
         canonical = _norm(user_phone or '', user_country or '')
         if canonical:
             phone_keys.append(canonical)
+            try:
+                cc, local = canonical.split(':', 1)
+                legacy_sender_country_key = f"1:{cc}{local}"
+                if cc != '1' and legacy_sender_country_key not in phone_keys:
+                    phone_keys.append(legacy_sender_country_key)
+            except Exception:
+                pass
         digits_only = ''.join(ch for ch in (user_phone or '') if ch.isdigit())
         if digits_only and digits_only not in phone_keys:
             phone_keys.append(digits_only)

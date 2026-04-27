@@ -120,6 +120,7 @@ export const HomeScreen = () => {
   const [claimInviteMessage, setClaimInviteMessage] = useState<string | null>(null);
   const [claimInviteError, setClaimInviteError] = useState<string | null>(null);
   const [inviteReceiptId, setInviteReceiptId] = useState<string | undefined>(undefined);
+  const autoClaimedInviteIds = useRef<Set<string>>(new Set());
 
   const [showReferralInput, setShowReferralInput] = useState(false);
 
@@ -854,6 +855,11 @@ export const HomeScreen = () => {
           setShowInviteClaimCard(hasPendingInvites);
           // Store the first invitation ID for backwards compatibility (if needed elsewhere)
           setInviteReceiptId(hasPendingInvites ? pendingInvites[0].invitationId : undefined);
+          const untriedInvites = pendingInvites.filter(invite => !autoClaimedInviteIds.current.has(invite.invitationId));
+          if (untriedInvites.length > 0 && !claimingInvite) {
+            untriedInvites.forEach(invite => autoClaimedInviteIds.current.add(invite.invitationId));
+            void handleClaimInvite();
+          }
         }
       } catch (e) {
         if (!cancelled) {
@@ -866,7 +872,7 @@ export const HomeScreen = () => {
     return () => {
       cancelled = true;
     };
-  }, [userProfile?.phoneNumber, userProfile?.phoneCountry]);
+  }, [userProfile?.phoneNumber, userProfile?.phoneCountry, claimingInvite, handleClaimInvite]);
 
 
 

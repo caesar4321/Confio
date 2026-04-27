@@ -452,17 +452,21 @@ export const ContactsScreen = () => {
     const formatStart = Date.now();
 
     // Format contacts using the cached Confío status
-    const formattedContacts = allContacts.map((contact, index) => ({
-      id: contact.isOnConfio && contact.confioUserId ? contact.confioUserId : `contact_${index}`,
-      name: contact.name || 'Sin nombre',
-      avatar: contact.name ? contact.name.charAt(0).toUpperCase() : '?',
-      phone: contact.phoneNumbers && contact.phoneNumbers[0] ? contact.phoneNumbers[0] : '',
-      isOnConfio: contact.isOnConfio || false,
-      userId: contact.confioUserId || null,
-      algorandAddress: contact.confioAlgorandAddress || null,
-      statusTier: (contact as any).statusTier || null,
-      isReferralVerified: (contact as any).isReferralVerified || false,
-    }));
+    const formattedContacts = allContacts.map((contact, index) => {
+      const e164Phone = contact.normalizedPhones?.find((phone: string) => phone.startsWith('+'));
+      return {
+        id: contact.isOnConfio && contact.confioUserId ? contact.confioUserId : `contact_${index}`,
+        name: contact.name || 'Sin nombre',
+        avatar: contact.name ? contact.name.charAt(0).toUpperCase() : '?',
+        phone: e164Phone || (contact.phoneNumbers && contact.phoneNumbers[0] ? contact.phoneNumbers[0] : ''),
+        normalizedPhones: contact.normalizedPhones || [],
+        isOnConfio: contact.isOnConfio || false,
+        userId: contact.confioUserId || null,
+        algorandAddress: contact.confioAlgorandAddress || null,
+        statusTier: (contact as any).statusTier || null,
+        isReferralVerified: (contact as any).isReferralVerified || false,
+      };
+    });
 
 
     // Split into Confío users and non-Confío users

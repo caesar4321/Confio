@@ -43,6 +43,7 @@ type Friend = {
   avatar: string;
   isOnConfio: boolean;
   phone: string;
+  normalizedPhones?: string[];
   algorandAddress?: string;
   userId?: string;
   id?: string; // Some screens pass 'id' instead of 'userId'
@@ -163,9 +164,10 @@ export const SendToFriendScreen = () => {
       let invitePrepared: any | null = null;
       let idempotencyKey: string;
       if (friend.isOnConfio === false && friend.phone) {
+        const invitePhone = friend.normalizedPhones?.find(phone => phone.startsWith('+')) || friend.phone;
         const prep = await inviteSendService.prepareInvite(
-          friend.phone,
-          userProfile?.phoneCountry,
+          invitePhone,
+          undefined,
           parseFloat(amount),
           (tokenType.toUpperCase() === 'CUSD' ? 'CUSD' : 'CONFIO'),
           '',
@@ -189,7 +191,7 @@ export const SendToFriendScreen = () => {
           amount: amount,
           currency: config.name,
           recipient: friend.name,
-          recipientPhone: friend.phone,
+          recipientPhone: friend.normalizedPhones?.find(phone => phone.startsWith('+')) || friend.phone,
           recipientUserId: friend.userId || friend.id, // Pass user ID if available
           action: 'Enviando',
           isOnConfio: friend.isOnConfio,

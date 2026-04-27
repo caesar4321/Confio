@@ -102,11 +102,10 @@ class InviteSendTransactionBuilder:
           valid calling code, derive "cc:digits" via `normalize_any_phone`.
         - Otherwise, return an empty string to signal inability to canonicalize.
         """
-        # Attempt ISO/calling-code driven normalization first
-        key = _normalize_phone(phone_number, country)
-        if key and ':' in key:
-            return key
-        # Next, allow E.164 parsing from the phone string itself
+        # Prefer E.164 parsing from the phone string itself. The send flow may
+        # not know the recipient's ISO country, and using the sender's country
+        # here would create unclaimable keys such as "1:57..." for Colombian
+        # recipients.
         if (phone_number or '').strip().startswith('+'):
             try:
                 alt = _normalize_any_phone(phone_number)
@@ -114,6 +113,11 @@ class InviteSendTransactionBuilder:
                     return alt
             except Exception:
                 pass
+        # Fall back to ISO/calling-code driven normalization when the phone is
+        # local and the caller explicitly provides the recipient country.
+        key = _normalize_phone(phone_number, country)
+        if key and ':' in key:
+            return key
         # Could not canonicalize to cc:digits
         return ''
 
