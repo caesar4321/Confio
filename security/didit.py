@@ -47,13 +47,20 @@ DOCUMENT_TYPE_MAP = {
     'passport': 'passport',
     'id': 'national_id',
     'identity_card': 'national_id',
+    'identity card': 'national_id',
     'national_id': 'national_id',
     'driving_license': 'drivers_license',
+    'driving license': 'drivers_license',
     'driver_license': 'drivers_license',
+    'driver license': 'drivers_license',
     'residence_permit': 'foreign_id',
+    'residence permit': 'foreign_id',
     'residence_card': 'foreign_id',
+    'residence card': 'foreign_id',
     'foreigner_id': 'foreign_id',
+    'foreigner id': 'foreign_id',
     'foreign_id': 'foreign_id',
+    'foreign id': 'foreign_id',
 }
 
 
@@ -348,7 +355,7 @@ def _extract_verification_payload(response_payload: dict[str, Any]) -> dict[str,
         response_payload.get('document_number'),
         response_payload.get('personal_number'),
     )
-    if issuing_country_iso3 in {'CHL', 'MEX'}:
+    if issuing_country_iso3 in {'CHL', 'COL', 'MEX'}:
         document_number = _first_non_empty(
             id_verification.get('personal_number'),
             response_payload.get('personal_number'),
