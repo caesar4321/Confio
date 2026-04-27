@@ -521,6 +521,7 @@ class KoyweClient:
             raw_bank_code = str(provider_metadata['bankCode']).strip()
             resolved_bank_code = self._resolve_bank_code(
                 country_code=alpha3,
+                bank_code=raw_bank_code,
             )
             if not resolved_bank_code:
                 raise KoyweError(f'"bankCode" is invalid or not active in the current Koywe catalog for {alpha3}: {raw_bank_code}')
