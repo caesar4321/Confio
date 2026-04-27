@@ -633,8 +633,15 @@ class ClaimInviteForPhone(graphene.Mutation):
         # Use KMS signer for admin/sponsor actions
         operator_addr = SPONSOR_SIGNER.address
         operator_label = 'kms_admin'
-        if onchain_admin_addr and operator_addr != onchain_admin_addr:
-            return cls(success=False, error=f'Configured KMS signer {operator_addr} does not match on-chain admin {onchain_admin_addr}')
+        allowed_operator_addrs = {addr for addr in (onchain_admin_addr, onchain_sponsor_addr) if addr}
+        if allowed_operator_addrs and operator_addr not in allowed_operator_addrs:
+            return cls(
+                success=False,
+                error=(
+                    f'Configured KMS signer {operator_addr} does not match '
+                    f'on-chain admin/sponsor {sorted(allowed_operator_addrs)}'
+                )
+            )
 
         # Determine the invitation id to claim
         if not invitation_id:
