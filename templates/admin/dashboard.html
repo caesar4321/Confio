@@ -785,8 +785,7 @@
                     <th style="text-align: right;">Clicks</th>
                     <th style="text-align: right;">Signups</th>
                     <th style="text-align: right;">Attached</th>
-                    <th style="text-align: right;">Funnel Deposits</th>
-                    <th style="text-align: right;">Existing Deposits</th>
+                    <th style="text-align: right;">Deposits</th>
                     <th style="text-align: right;">Shares → Clicks</th>
                     <th style="text-align: right;">Click → Signup</th>
                     <th style="text-align: right;">Attach → Deposit</th>
@@ -801,20 +800,19 @@
                     <td style="text-align: right;">{{ row.signup_completed|intcomma }}</td>
                     <td style="text-align: right;">{{ row.referral_attached|intcomma }}</td>
                     <td style="text-align: right;">{{ row.first_deposits|intcomma }}</td>
-                    <td style="text-align: right;">{{ row.existing_first_deposits|intcomma }}</td>
                     <td style="text-align: right; color:#6b7280;">{{ row.share_to_click_pct|floatformat:1 }}%</td>
                     <td style="text-align: right; color:#6b7280;">{{ row.click_to_signup_pct|floatformat:1 }}%</td>
                     <td style="text-align: right; color:#6b7280;">{{ row.attach_to_deposit_pct|floatformat:1 }}%</td>
                 </tr>
                 {% empty %}
                 <tr>
-                    <td colspan="10" style="padding: 16px; color: #6b7280;">No referral cohort data recorded yet.</td>
+                    <td colspan="9" style="padding: 16px; color: #6b7280;">No referral cohort data recorded yet.</td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
         <div style="padding: 12px 16px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 13px;">
-            Creator traffic separates @JULIANMOONLUNA distribution from peer-to-peer referrals. Funnel Deposits require a same-window attach event; Existing Deposits are older referred users who deposited during the 90d window.
+            Creator traffic separates @JULIANMOONLUNA distribution from peer-to-peer referrals so TikTok/Play Store acquisition does not inflate the WhatsApp loop.
         </div>
     </div>
 
@@ -829,14 +827,12 @@
                     <th style="text-align: right;">Creator Clicks</th>
                     <th style="text-align: right;">Creator Signups</th>
                     <th style="text-align: right;">Creator Attached</th>
-                    <th style="text-align: right;">Creator Funnel Deposits</th>
-                    <th style="text-align: right;">Creator Existing Deposits</th>
+                    <th style="text-align: right;">Creator Deposits</th>
                     <th style="text-align: right;">User Shares</th>
                     <th style="text-align: right;">User Clicks</th>
                     <th style="text-align: right;">User Signups</th>
                     <th style="text-align: right;">User Attached</th>
-                    <th style="text-align: right;">User Funnel Deposits</th>
-                    <th style="text-align: right;">User Existing Deposits</th>
+                    <th style="text-align: right;">User Deposits</th>
                     <th style="text-align: right;">User Click → Signup</th>
                     <th style="text-align: right;">User Attach → Deposit</th>
                 </tr>
@@ -849,19 +845,17 @@
                     <td style="text-align: right;">{{ row.creator_signups|intcomma }}</td>
                     <td style="text-align: right;">{{ row.creator_attached|intcomma }}</td>
                     <td style="text-align: right;">{{ row.creator_deposits|intcomma }}</td>
-                    <td style="text-align: right;">{{ row.creator_existing_deposits|intcomma }}</td>
                     <td style="text-align: right;">{{ row.user_shares|intcomma }}</td>
                     <td style="text-align: right;">{{ row.user_clicks|intcomma }}</td>
                     <td style="text-align: right;">{{ row.user_signups|intcomma }}</td>
                     <td style="text-align: right;">{{ row.user_attached|intcomma }}</td>
                     <td style="text-align: right;">{{ row.user_deposits|intcomma }}</td>
-                    <td style="text-align: right;">{{ row.user_existing_deposits|intcomma }}</td>
                     <td style="text-align: right; color:#6b7280;">{{ row.user_click_to_signup_pct|floatformat:1 }}%</td>
                     <td style="text-align: right; color:#6b7280;">{{ row.user_attach_to_deposit_pct|floatformat:1 }}%</td>
                 </tr>
                 {% empty %}
                 <tr>
-                    <td colspan="14" style="padding: 16px; color: #6b7280;">No referral trend data yet.</td>
+                    <td colspan="12" style="padding: 16px; color: #6b7280;">No referral trend data yet.</td>
                 </tr>
                 {% endfor %}
             </tbody>

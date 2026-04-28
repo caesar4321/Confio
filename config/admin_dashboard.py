@@ -424,41 +424,6 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         creator_event_filter = Q(properties__referral_code__iexact=creator_referral_code)
         creator_deposit_filter = Q(user__referrals_as_referred__referrer_identifier__iexact=creator_referral_code)
 
-        def _attached_user_ids_for_cohort(cohort):
-            return list(
-                _raw_cohort_filter(
-                    referral_90d.filter(
-                        event_name='referral_attached',
-                        user_id__isnull=False,
-                    ),
-                    cohort,
-                )
-                .values_list('user_id', flat=True)
-                .distinct()
-            )
-
-        def _deposit_counts_by_day(deposit_filter, attached_user_ids):
-            attached_ids = set(attached_user_ids)
-            all_by_day = {}
-            funnel_by_day = {}
-            rows = (
-                referral_conversion_90d
-                .filter(deposit_filter)
-                .annotate(day=TruncDate('created_at', tzinfo=ARG_TZ))
-                .values('day', 'user_id')
-                .distinct()
-            )
-            for row in rows:
-                day = row['day']
-                all_by_day[day] = all_by_day.get(day, 0) + 1
-                if row['user_id'] in attached_ids:
-                    funnel_by_day[day] = funnel_by_day.get(day, 0) + 1
-            existing_by_day = {
-                day: max(count - funnel_by_day.get(day, 0), 0)
-                for day, count in all_by_day.items()
-            }
-            return funnel_by_day, existing_by_day
-
         def _referral_cohort_row(label, cohort, acquisition_filter, deposit_filter):
             cohort_counts = _rollup_event_counts(
                 source_type='referral_link',
@@ -470,15 +435,9 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             cohort_clicks = cohort_counts.get('referral_link_clicked', 0)
             cohort_signups = cohort_counts.get('signup_completed', 0)
             cohort_attached = cohort_counts.get('referral_attached', 0)
-            attached_user_ids = _attached_user_ids_for_cohort(cohort)
-            all_deposits = referral_conversion_90d.filter(deposit_filter).distinct().count()
-            cohort_deposits = (
-                referral_conversion_90d
-                .filter(deposit_filter, user_id__in=attached_user_ids)
-                .distinct()
-                .count()
-            )
-            existing_deposits = max(all_deposits - cohort_deposits, 0)
+            cohort_deposits = cohort_counts.get('first_deposit', 0)
+            if not cohort_deposits:
+                cohort_deposits = referral_conversion_90d.filter(deposit_filter).distinct().count()
             return {
                 'label': label,
                 'share_taps': cohort_shares,
@@ -486,7 +445,6 @@ class ConfioAdminSite(AdminSiteOTPRequired):
                 'signup_completed': cohort_signups,
                 'referral_attached': cohort_attached,
                 'first_deposits': cohort_deposits,
-                'existing_first_deposits': existing_deposits,
                 'share_to_click_pct': _pct(cohort_clicks, cohort_shares),
                 'click_to_signup_pct': _pct(cohort_signups, cohort_clicks),
                 'signup_to_attach_pct': _pct(cohort_attached, cohort_signups),
@@ -519,40 +477,24 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             start_date=funnel_last_90_date,
             cohort=other_referral_cohorts,
         )
-        creator_attached_user_ids = _attached_user_ids_for_cohort(creator_cohort)
-        other_attached_user_ids = _attached_user_ids_for_cohort(other_referral_cohorts)
-        creator_funnel_deposits_by_day, creator_existing_deposits_by_day = _deposit_counts_by_day(
-            creator_deposit_filter,
-            creator_attached_user_ids,
-        )
-        other_funnel_deposits_by_day, other_existing_deposits_by_day = _deposit_counts_by_day(
-            ~creator_deposit_filter,
-            other_attached_user_ids,
-        )
         context['referral_daily_trend'] = []
         for creator_row, other_row in zip(creator_trend, other_trend):
-            day = creator_row['date']
-            creator_deposits = creator_funnel_deposits_by_day.get(day, 0)
-            creator_existing_deposits = creator_existing_deposits_by_day.get(day, 0)
             user_shares = other_row['referral_whatsapp_share_tapped']
             user_clicks = other_row['referral_link_clicked']
             user_signups = other_row['signup_completed']
             user_attached = other_row['referral_attached']
-            user_deposits = other_funnel_deposits_by_day.get(day, 0)
-            user_existing_deposits = other_existing_deposits_by_day.get(day, 0)
+            user_deposits = other_row['first_deposit']
             context['referral_daily_trend'].append({
                 'date': creator_row['date'],
                 'creator_clicks': creator_row['referral_link_clicked'],
                 'creator_signups': creator_row['signup_completed'],
                 'creator_attached': creator_row['referral_attached'],
-                'creator_deposits': creator_deposits,
-                'creator_existing_deposits': creator_existing_deposits,
+                'creator_deposits': creator_row['first_deposit'],
                 'user_shares': user_shares,
                 'user_clicks': user_clicks,
                 'user_signups': user_signups,
                 'user_attached': user_attached,
                 'user_deposits': user_deposits,
-                'user_existing_deposits': user_existing_deposits,
                 'user_share_to_click_pct': _pct(user_clicks, user_shares),
                 'user_click_to_signup_pct': _pct(user_signups, user_clicks),
                 'user_signup_to_attach_pct': _pct(user_attached, user_signups),
