@@ -34,6 +34,14 @@ class Command(BaseCommand):
                 "also tracked for the same window."
             ),
         )
+        parser.add_argument(
+            "--referrer-identifier",
+            default="",
+            help=(
+                "When backfilling historical referrals, limit to one referrer code "
+                "(case-insensitive), e.g. JULIANMOONLUNA."
+            ),
+        )
 
     def handle(self, *args, **options):
         from send.models import PhoneInvite
@@ -44,6 +52,7 @@ class Command(BaseCommand):
         dry_run = bool(options["dry_run"])
         reroll = bool(options["reroll"])
         include_historical_referrals = bool(options["include_historical_referrals"])
+        referrer_identifier_filter = (options["referrer_identifier"] or "").lstrip("@").strip()
         cutoff = timezone.now() - timedelta(days=days)
         touched_dates = set()
 
@@ -92,6 +101,8 @@ class Command(BaseCommand):
                     .exclude(status="inactive")
                     .order_by("created_at", "id")
                 )
+                if referrer_identifier_filter:
+                    referrals = referrals.filter(referrer_identifier__iexact=referrer_identifier_filter)
                 for referral in referrals.iterator(chunk_size=500):
                     user = referral.referred_user
                     identifier = (referral.referrer_identifier or "").lstrip("@").strip().upper()
@@ -103,18 +114,22 @@ class Command(BaseCommand):
                         "attach_method": "backfill_user_referral",
                         "referral_id": referral.id,
                     }
-                    if create_event(
-                        "signup_completed",
-                        user=user,
-                        source_type="referral_link",
-                        channel="backfill",
-                        properties={
-                            **base_props,
-                            "dedupe_key": f"signup_completed:referral_link:{identifier}",
-                        },
-                        event_time=referral.created_at,
-                    ):
-                        referral_signup_created += 1
+                    user_joined_at = getattr(user, "date_joined", None)
+                    signup_delta = referral.created_at - user_joined_at if user_joined_at else None
+                    if signup_delta is not None and timedelta(0) <= signup_delta <= timedelta(hours=48):
+                        if create_event(
+                            "signup_completed",
+                            user=user,
+                            source_type="referral_link",
+                            channel="backfill",
+                            properties={
+                                **base_props,
+                                "signup_window_hours": 48,
+                                "dedupe_key": f"signup_completed:referral_link:{identifier}",
+                            },
+                            event_time=user_joined_at,
+                        ):
+                            referral_signup_created += 1
                     if create_event(
                         "referral_attached",
                         user=user,

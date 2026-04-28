@@ -6,6 +6,7 @@ from django.conf import settings
 from django.utils import timezone
 from django.core.exceptions import ValidationError
 from django.db.models import F, Q, Sum
+from datetime import timedelta
 from decimal import Decimal
 from users.models import SoftDeleteModel
 import uuid
@@ -457,6 +458,7 @@ class UserReferral(SoftDeleteModel):
         )
 
     def save(self, *args, **kwargs):
+        is_create = self._state.adding
         # Populate indexed cohort from attribution_data/referrer_identifier on every save
         # so F5 queries can filter by cohort without a JSON parse.
         try:
@@ -467,6 +469,59 @@ class UserReferral(SoftDeleteModel):
             # Never fail a write because of derivation.
             pass
         super().save(*args, **kwargs)
+        if is_create:
+            self._emit_funnel_events()
+
+    def _emit_funnel_events(self):
+        """Emit referral funnel milestones from the durable referral row.
+
+        Mutations also emit these events, but the model-level hook is the
+        safety net: every persisted UserReferral should produce an attach
+        milestone, regardless of which code path created it.
+        """
+        try:
+            if self.status == 'inactive' or not self.referred_user_id:
+                return
+            from users.funnel import emit_referral_signup_step
+
+            identifier = (self.referrer_identifier or '').lstrip('@').strip().upper()
+            if not identifier:
+                return
+
+            properties = {
+                'referral_type': (self.attribution_data or {}).get('referral_type') or 'friend',
+                'attach_method': 'user_referral_save',
+                'referral_id': self.id,
+            }
+            emit_referral_signup_step(
+                'referral_attached',
+                user=self.referred_user,
+                referrer_identifier=identifier,
+                source_type='referral_link',
+                channel='server',
+                properties=properties,
+            )
+
+            joined_at = getattr(self.referred_user, 'date_joined', None)
+            if joined_at and self.created_at:
+                signup_delta = self.created_at - joined_at
+            else:
+                signup_delta = None
+            if signup_delta is not None and timedelta(0) <= signup_delta <= timedelta(hours=48):
+                emit_referral_signup_step(
+                    'signup_completed',
+                    user=self.referred_user,
+                    referrer_identifier=identifier,
+                    source_type='referral_link',
+                    channel='server',
+                    properties={
+                        **properties,
+                        'signup_window_hours': 48,
+                    },
+                )
+        except Exception:
+            # Referral creation is business-critical; analytics is not.
+            pass
 
     class Meta:
         unique_together = [('referred_user', 'deleted_at')]
