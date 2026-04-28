@@ -15,8 +15,8 @@ const UPDATE_ACCOUNT_ALGORAND_ADDRESS = gql`
 `;
 
 const MARK_WALLET_MIGRATED = gql`
-    mutation MarkWalletMigrated {
-        markWalletMigrated {
+    mutation MarkWalletMigrated($migratedFromAddress: String) {
+        markWalletMigrated(migratedFromAddress: $migratedFromAddress) {
             success
             error
         }
@@ -70,7 +70,7 @@ class WalletMigrationService {
         this.algodClient = new algosdk.Algodv2('', server, '');
     }
 
-    private async finalizeSelfHealedV2Address(v2Address: string, accountIndex: number, businessId?: string): Promise<void> {
+    private async finalizeSelfHealedV2Address(v2Address: string, accountIndex: number, businessId?: string, migratedFromAddress?: string): Promise<void> {
         // Keep backend, local storage, and migration status aligned once V1 is proven empty.
         await apolloClient.mutate({
             mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS,
@@ -82,6 +82,9 @@ class WalletMigrationService {
         try {
             const markRes = await apolloClient.mutate({
                 mutation: MARK_WALLET_MIGRATED,
+                variables: {
+                    migratedFromAddress,
+                }
             });
             const markPayload = markRes?.data?.markWalletMigrated;
             if (!markPayload?.success) {
@@ -101,7 +104,14 @@ class WalletMigrationService {
     }
 
     private async hasMaterialBalanceAtRisk(address: string): Promise<boolean> {
-        const info = await this.algodClient.accountInformation(address).do();
+        let info;
+        try {
+            info = await this.algodClient.accountInformation(address).do();
+        } catch (error) {
+            console.log('[MigrationService] Address no longer found on chain; treating as no migration risk:', address);
+            return false;
+        }
+
         const relevantAssets = (info.assets || []).filter((a: any) => {
             const aid = String(a['asset-id']);
             const amount = Number(a['amount'] || 0);
@@ -180,13 +190,15 @@ class WalletMigrationService {
             });
 
             const hasRelevantAssets = relevantAssets.length > 0;
+            const spendableAlgo = Math.max(0, Number(v1Info.amount || 0) - Number(v1Info['min-balance'] || 0));
+            const hasMaterialAlgo = spendableAlgo >= MATERIAL_SPENDABLE_ALGO_MICROS;
+            const hasMaterialV1Value = hasRelevantAssets || hasMaterialAlgo;
 
-            // V1 is considered empty if it has NO relevant asset opt-ins.
-            // We completely ignore ALGO balance - only asset opt-ins matter.
-            // If V1 has no relevant opt-ins, there's nothing to migrate.
-            // Any leftover ALGO or junk assets will be abandoned (user's choice to recover manually).
-            if (!hasRelevantAssets) {
-                console.log('[MigrationService] V1 has no relevant asset opt-ins. Checking if we need to self-heal (Zombie State).');
+            // V1 is considered empty only if it has no relevant asset opt-ins and
+            // no spendable ALGO worth sweeping. ALGO-only V1 wallets still need V2
+            // migration because backend guards block active personal V1 addresses.
+            if (!hasMaterialV1Value) {
+                console.log('[MigrationService] V1 has no relevant asset opt-ins or spendable ALGO. Checking if we need to self-heal (Zombie State).');
 
                 // If a V2 secret exists and V1 is empty, it is safe to align the backend
                 // to the derived V2 address and mark the account as migrated. This covers:
@@ -199,7 +211,7 @@ class WalletMigrationService {
                             iss, sub, aud, accountType: 'personal', accountIndex, businessId
                         });
                         const v2Address = v2Wallet.address;
-                        await this.finalizeSelfHealedV2Address(v2Address, accountIndex, businessId);
+                        await this.finalizeSelfHealedV2Address(v2Address, accountIndex, businessId, v1Address);
                         console.log('[MigrationService] Self-healing complete. Switched to V2 and marked migrated.');
                         return { needsMigration: false, v2Address };
                     } catch (e) {
@@ -207,11 +219,11 @@ class WalletMigrationService {
                     }
                 }
 
-                console.log('[MigrationService] V1 empty (no opt-ins) and no active V2 found. Marking as done/new.');
+                console.log('[MigrationService] V1 empty (no opt-ins/spendable ALGO) and no active V2 found. Marking as done/new.');
                 return { needsMigration: false, v1Address, v1Balance: 0 };
             }
 
-            // V1 has contents.
+            // V1 has assets or spendable ALGO to sweep.
 
             if (v2Secret) {
                 // V2 exists but V1 still has funds -> Resume Migration
@@ -471,7 +483,12 @@ class WalletMigrationService {
                 let markedSuccess = false;
                 for (let attempt = 1; attempt <= 3; attempt++) {
                     try {
-                        await apolloClient.mutate({ mutation: MARK_WALLET_MIGRATED });
+                        await apolloClient.mutate({
+                            mutation: MARK_WALLET_MIGRATED,
+                            variables: {
+                                migratedFromAddress: v1Address,
+                            }
+                        });
                         markedSuccess = true;
                         console.log(`[MigrationService] Marked as V2 migrated on backend.`);
                         break;

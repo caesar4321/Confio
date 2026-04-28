@@ -1070,12 +1070,13 @@ class MarkWalletMigratedMutation(graphene.Mutation):
     """
     class Arguments:
         new_address = graphene.String(required=False)  # The new V2 address
+        migrated_from_address = graphene.String(required=False)
         
     success = graphene.Boolean()
     error = graphene.String()
     
     @classmethod
-    def mutate(cls, root, info, new_address=None):
+    def mutate(cls, root, info, new_address=None, migrated_from_address=None):
         try:
             user = info.context.user
             if not user.is_authenticated:
@@ -1116,15 +1117,16 @@ class MarkWalletMigratedMutation(graphene.Mutation):
             if not account:
                 return cls(success=False, error='Account not found')
 
-            if account.algorand_address:
+            address_to_verify = migrated_from_address or account.algorand_address
+            if address_to_verify:
                 from blockchain.algorand_client import get_algod_client
 
-                risk = inspect_address_migration_risk(get_algod_client(), account.algorand_address)
+                risk = inspect_address_migration_risk(get_algod_client(), address_to_verify)
                 if risk['has_material_risk']:
                     logger.warning(
                         "Refusing to mark account %s as migrated while %s still holds value: assets=%s spendable_algo=%s",
                         account.id,
-                        account.algorand_address,
+                        address_to_verify,
                         risk['relevant_assets'],
                         risk['spendable_algo'],
                     )

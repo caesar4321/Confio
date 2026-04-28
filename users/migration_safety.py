@@ -30,7 +30,16 @@ def inspect_address_migration_risk(algod_client, address):
             'spendable_algo': 0,
         }
 
-    account_info = algod_client.account_info(address)
+    try:
+        account_info = algod_client.account_info(address)
+    except Exception as exc:
+        logger.info("Treating missing address %s as no migration risk: %s", address, exc)
+        return {
+            'has_material_risk': False,
+            'relevant_assets': {},
+            'spendable_algo': 0,
+        }
+
     relevant_ids = _relevant_asset_ids()
 
     relevant_assets = {}

@@ -5169,8 +5169,11 @@ class MarkWalletMigrated(graphene.Mutation):
     success = graphene.Boolean()
     error = graphene.String()
 
+    class Arguments:
+        migrated_from_address = graphene.String(required=False)
+
     @login_required
-    def mutate(self, info):
+    def mutate(self, info, migrated_from_address=None):
         user = info.context.user
         try:
             # Get the active account from JWT context
@@ -5190,13 +5193,14 @@ class MarkWalletMigrated(graphene.Mutation):
                 logger.error("No account found for user %s with type=%s, index=%s", user.id, account_type, account_index)
                 return MarkWalletMigrated(success=False, error="Account not found")
 
-            if account.algorand_address:
-                risk = inspect_address_migration_risk(get_algod_client(), account.algorand_address)
+            address_to_verify = migrated_from_address or account.algorand_address
+            if address_to_verify:
+                risk = inspect_address_migration_risk(get_algod_client(), address_to_verify)
                 if risk['has_material_risk']:
                     logger.warning(
                         "Refusing to mark account %s as migrated while %s still holds value: assets=%s spendable_algo=%s",
                         account.id,
-                        account.algorand_address,
+                        address_to_verify,
                         risk['relevant_assets'],
                         risk['spendable_algo'],
                     )
