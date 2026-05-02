@@ -77,6 +77,12 @@ function isPreviewBotUserAgent(userAgent: string): boolean {
     'crawler',
     'spider',
     'preview',
+    'scrapy',
+    'security-polaris',
+    'python-requests',
+    'curl/',
+    'wget/',
+    'headlesschrome',
   ];
 
   return botSignals.some((signal) => ua.includes(signal));
@@ -85,6 +91,13 @@ function isPreviewBotUserAgent(userAgent: string): boolean {
 async function deriveInviteSessionId(clientIP: string): Promise<string> {
   if (!clientIP || clientIP === 'unknown') return '';
   const data = new TextEncoder().encode(`invite:${clientIP}`);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  const bytes = Array.from(new Uint8Array(digest)).slice(0, 16);
+  return bytes.map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function deriveClickDedupeKey(parts: Array<string | undefined>): Promise<string> {
+  const data = new TextEncoder().encode(parts.map((part) => part || '').join('|'));
   const digest = await crypto.subtle.digest('SHA-256', data);
   const bytes = Array.from(new Uint8Array(digest)).slice(0, 16);
   return bytes.map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -152,31 +165,50 @@ export default {
         const hasInvitationId = Boolean(invitationId);
 
         if (!isPreviewBot && env.FUNNEL_INGEST_URL && env.FUNNEL_INGEST_SECRET) {
-          ctx.waitUntil(
-            fetch(env.FUNNEL_INGEST_URL, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'X-Funnel-Secret': env.FUNNEL_INGEST_SECRET,
-              },
-              body: JSON.stringify({
-                event_name: hasInvitationId ? 'invite_link_clicked' : 'referral_link_clicked',
-                session_id: inviteSessionId,
-                country,
-                platform: platform === 'desktop' ? 'web' : platform,
-                source_type: hasInvitationId ? 'send_invite' : 'referral_link',
-                channel,
-                properties: {
-                  referral_code: referralCode,
-                  invitation_id: invitationId,
-                  path: url.pathname,
-                  ...utmParams,
-                  referer,
-                  user_agent: userAgent.slice(0, 255),
+          const dedupeKey = await deriveClickDedupeKey([
+            clientIP,
+            userAgent,
+            referralCode,
+            channel,
+            platform,
+            hasInvitationId ? 'send_invite' : 'referral_link',
+            invitationId,
+          ]);
+          const dedupeKvKey = `click_dedupe:${dedupeKey}`;
+          const alreadyTracked = await env.ANALYTICS.get(dedupeKvKey);
+          if (!alreadyTracked) {
+            await env.ANALYTICS.put(dedupeKvKey, '1', { expirationTtl: 600 });
+            ctx.waitUntil(
+              fetch(env.FUNNEL_INGEST_URL, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'X-Funnel-Secret': env.FUNNEL_INGEST_SECRET,
                 },
-              }),
-            }).catch(() => undefined)
-          );
+                body: JSON.stringify({
+                  event_name: hasInvitationId ? 'invite_link_clicked' : 'referral_link_clicked',
+                  session_id: inviteSessionId,
+                  country,
+                  platform: platform === 'desktop' ? 'web' : platform,
+                  source_type: hasInvitationId ? 'send_invite' : 'referral_link',
+                  channel,
+                  properties: {
+                    referral_code: referralCode,
+                    invitation_id: invitationId,
+                    path: url.pathname,
+                    ...utmParams,
+                    referer,
+                    click_dedupe_key: dedupeKey,
+                    user_agent: userAgent.slice(0, 255),
+                  },
+                }),
+              }).catch(() => {
+                // Allow retry if the async ingest failed before reaching Django.
+                ctx.waitUntil(env.ANALYTICS.delete(dedupeKvKey).catch(() => undefined));
+                return undefined;
+              })
+            );
+          }
         }
 
         let redirectUrl = `${env.LANDING_PAGE_URL}?invite=${referralCode}`;
