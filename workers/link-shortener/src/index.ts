@@ -46,6 +46,17 @@ function inferReferralChannel(url: URL, referer: string): string {
   return 'direct';
 }
 
+function collectUtmParams(url: URL): Record<string, string> {
+  const utm: Record<string, string> = {};
+  for (const key of ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term']) {
+    const value = (url.searchParams.get(key) || '').trim();
+    if (value) {
+      utm[key] = value.slice(0, 128);
+    }
+  }
+  return utm;
+}
+
 function isPreviewBotUserAgent(userAgent: string): boolean {
   const ua = userAgent.toLowerCase();
   if (!ua) return false;
@@ -136,6 +147,7 @@ export default {
         const referer = request.headers.get('referer') || '';
         const inviteSessionId = await deriveInviteSessionId(clientIP);
         const channel = inferReferralChannel(url, referer);
+        const utmParams = collectUtmParams(url);
         const invitationId = (url.searchParams.get('invitation_id') || '').slice(0, 64);
         const hasInvitationId = Boolean(invitationId);
 
@@ -158,6 +170,7 @@ export default {
                   referral_code: referralCode,
                   invitation_id: invitationId,
                   path: url.pathname,
+                  ...utmParams,
                   referer,
                   user_agent: userAgent.slice(0, 255),
                 },
