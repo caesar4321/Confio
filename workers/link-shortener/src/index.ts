@@ -151,7 +151,10 @@ export default {
         const clientIP = request.headers.get('cf-connecting-ip') || 'unknown';
         if (!isPreviewBot && clientIP !== 'unknown') {
           // Store with 1 hour TTL
-          await env.LINKS.put(`ip_ref:${clientIP}`, referralCode, { expirationTtl: 3600 });
+          ctx.waitUntil(
+            env.LINKS.put(`ip_ref:${clientIP}`, referralCode, { expirationTtl: 3600 })
+              .catch(() => undefined)
+          );
         }
 
         // Detect OS to determine redirect
@@ -175,9 +178,19 @@ export default {
             invitationId,
           ]);
           const dedupeKvKey = `click_dedupe:${dedupeKey}`;
-          const alreadyTracked = await env.ANALYTICS.get(dedupeKvKey);
-          if (!alreadyTracked) {
-            await env.ANALYTICS.put(dedupeKvKey, '1', { expirationTtl: 600 });
+          let shouldTrackClick = true;
+          try {
+            const alreadyTracked = await env.ANALYTICS.get(dedupeKvKey);
+            shouldTrackClick = !alreadyTracked;
+            if (shouldTrackClick) {
+              await env.ANALYTICS.put(dedupeKvKey, '1', { expirationTtl: 600 });
+            }
+          } catch {
+            // KV quotas must never break redirects. If dedupe storage is
+            // unavailable, keep counting rather than returning Worker 1101.
+            shouldTrackClick = true;
+          }
+          if (shouldTrackClick) {
             ctx.waitUntil(
               fetch(env.FUNNEL_INGEST_URL, {
                 method: 'POST',
