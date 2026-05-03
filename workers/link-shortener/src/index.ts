@@ -146,18 +146,7 @@ export default {
         const userAgent = request.headers.get('user-agent') || '';
         const isPreviewBot = isPreviewBotUserAgent(userAgent);
 
-        // Store IP fingerprint for iOS deferred deep linking
-        // We reuse the LINKS KV with a prefix 'ip_ref:' to avoid slug collision
         const clientIP = request.headers.get('cf-connecting-ip') || 'unknown';
-        if (!isPreviewBot && clientIP !== 'unknown') {
-          // Store with 1 hour TTL
-          ctx.waitUntil(
-            env.LINKS.put(`ip_ref:${clientIP}`, referralCode, { expirationTtl: 3600 })
-              .catch(() => undefined)
-          );
-        }
-
-        // Detect OS to determine redirect
         const platform = detectPlatform(userAgent);
         const country = ((request.cf as any)?.country || '').toUpperCase();
         const referer = request.headers.get('referer') || '';
@@ -166,6 +155,13 @@ export default {
         const utmParams = collectUtmParams(url);
         const invitationId = (url.searchParams.get('invitation_id') || '').slice(0, 64);
         const hasInvitationId = Boolean(invitationId);
+
+        // Store IP fingerprint for mobile deferred attribution. iOS depends on
+        // it; Android still uses it as a fallback when Play Install Referrer is
+        // unavailable, delayed, or stripped.
+        if (!isPreviewBot && clientIP !== 'unknown' && (platform === 'ios' || platform === 'android')) {
+          await env.LINKS.put(`ip_ref:${clientIP}`, referralCode, { expirationTtl: 3600 });
+        }
 
         if (!isPreviewBot && env.FUNNEL_INGEST_URL && env.FUNNEL_INGEST_SECRET) {
           const dedupeKey = await deriveClickDedupeKey([
@@ -178,17 +174,10 @@ export default {
             invitationId,
           ]);
           const dedupeKvKey = `click_dedupe:${dedupeKey}`;
-          let shouldTrackClick = true;
-          try {
-            const alreadyTracked = await env.ANALYTICS.get(dedupeKvKey);
-            shouldTrackClick = !alreadyTracked;
-            if (shouldTrackClick) {
-              await env.ANALYTICS.put(dedupeKvKey, '1', { expirationTtl: 600 });
-            }
-          } catch {
-            // KV quotas must never break redirects. If dedupe storage is
-            // unavailable, keep counting rather than returning Worker 1101.
-            shouldTrackClick = true;
+          const alreadyTracked = await env.ANALYTICS.get(dedupeKvKey);
+          const shouldTrackClick = !alreadyTracked;
+          if (shouldTrackClick) {
+            await env.ANALYTICS.put(dedupeKvKey, '1', { expirationTtl: 600 });
           }
           if (shouldTrackClick) {
             ctx.waitUntil(
