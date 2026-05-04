@@ -199,6 +199,7 @@ export default {
                     invitation_id: invitationId,
                     path: url.pathname,
                     ...utmParams,
+                    client_ip_address: clientIP === 'unknown' ? '' : clientIP,
                     referer,
                     click_dedupe_key: dedupeKey,
                     user_agent: userAgent.slice(0, 255),
