@@ -9,6 +9,7 @@ from django.utils import timezone
 from conversion.models import Conversion
 from notifications.models import NotificationType as NotificationTypeChoices
 from notifications.utils import create_notification
+from ramps.deposit_linking import link_koywe_deposit_to_ramp
 from ramps.models import RampTransaction
 from usdc_transactions.models import GuardarianTransaction, USDCDeposit, USDCWithdrawal
 from achievements.models import UserReferral
@@ -451,19 +452,21 @@ def handle_ramp_transaction_save(sender, instance, created, **kwargs):
 @receiver(post_save, sender=USDCDeposit)
 def handle_ramp_deposit_link(sender, instance, **kwargs):
     guardarian_tx = _safe_related(instance, 'guardarian_source')
-    if not guardarian_tx:
+    if guardarian_tx:
+        ramp_tx = sync_ramp_transaction_from_guardarian(guardarian_tx)
+        if (
+            ramp_tx.usdc_deposit_id != instance.id
+            or ramp_tx.actor_address != (instance.actor_address or '')
+            or ramp_tx.status_detail != 'deposit_confirmed_conversion_pending'
+        ):
+            ramp_tx.usdc_deposit = instance
+            ramp_tx.actor_address = instance.actor_address or ramp_tx.actor_address
+            ramp_tx.status = 'PROCESSING'
+            ramp_tx.status_detail = 'deposit_confirmed_conversion_pending'
+            ramp_tx.save(update_fields=['usdc_deposit', 'actor_address', 'status', 'status_detail', 'updated_at'])
         return
-    ramp_tx = sync_ramp_transaction_from_guardarian(guardarian_tx)
-    if (
-        ramp_tx.usdc_deposit_id != instance.id
-        or ramp_tx.actor_address != (instance.actor_address or '')
-        or ramp_tx.status_detail != 'deposit_confirmed_conversion_pending'
-    ):
-        ramp_tx.usdc_deposit = instance
-        ramp_tx.actor_address = instance.actor_address or ramp_tx.actor_address
-        ramp_tx.status = 'PROCESSING'
-        ramp_tx.status_detail = 'deposit_confirmed_conversion_pending'
-        ramp_tx.save(update_fields=['usdc_deposit', 'actor_address', 'status', 'status_detail', 'updated_at'])
+
+    link_koywe_deposit_to_ramp(instance)
 
 
 @receiver(post_save, sender=USDCWithdrawal)

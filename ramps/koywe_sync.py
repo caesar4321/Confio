@@ -598,6 +598,11 @@ def sync_koywe_ramp_transaction_from_order(
             'updated_at',
         ]
     )
+
+    if not ramp_tx.usdc_deposit_id and ramp_tx.direction == 'on_ramp':
+        from ramps.deposit_linking import link_koywe_ramp_to_deposit
+        link_koywe_ramp_to_deposit(ramp_tx)
+
     return ramp_tx
 
 

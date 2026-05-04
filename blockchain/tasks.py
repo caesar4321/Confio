@@ -530,6 +530,7 @@ def scan_inbound_deposits():
                         source_address=sender or '',
                         network='ALGORAND',
                         status='COMPLETED',
+                        completed_at=timezone.now(),
                         **kwargs,
                     )
 
