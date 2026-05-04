@@ -190,55 +190,57 @@ export default {
           ...clickParams,
         };
 
-        // Store IP fingerprint for mobile deferred attribution. iOS depends on
-        // it; Android still uses it as a fallback when Play Install Referrer is
-        // unavailable, delayed, or stripped.
-        if (!isPreviewBot && clientIP !== 'unknown' && (platform === 'ios' || platform === 'android')) {
-          await env.LINKS.put(`ip_ref:${clientIP}`, JSON.stringify(attributionPayload), { expirationTtl: 3600 });
-        }
+        const dedupeKvKey = `click_dedupe:${dedupeKey}`;
+        const funnelIngestUrl = env.FUNNEL_INGEST_URL || '';
+        const funnelIngestSecret = env.FUNNEL_INGEST_SECRET || '';
+        const shouldConsiderTracking = !isPreviewBot && Boolean(funnelIngestUrl && funnelIngestSecret);
+        const alreadyTracked = shouldConsiderTracking
+          ? await env.ANALYTICS.get(dedupeKvKey)
+          : null;
+        const shouldTrackClick = shouldConsiderTracking && !alreadyTracked;
 
-        if (!isPreviewBot && env.FUNNEL_INGEST_URL && env.FUNNEL_INGEST_SECRET) {
-          const dedupeKvKey = `click_dedupe:${dedupeKey}`;
-          const alreadyTracked = await env.ANALYTICS.get(dedupeKvKey);
-          const shouldTrackClick = !alreadyTracked;
-          if (shouldTrackClick) {
-            await env.ANALYTICS.put(dedupeKvKey, '1', { expirationTtl: 600 });
+        if (shouldTrackClick) {
+          // Store IP fingerprint for mobile deferred attribution only for first-seen
+          // clicks. Duplicate previews/refreshes inside the dedupe window should not
+          // burn another LINK write.
+          if (clientIP !== 'unknown' && (platform === 'ios' || platform === 'android')) {
+            await env.LINKS.put(`ip_ref:${clientIP}`, JSON.stringify(attributionPayload), { expirationTtl: 3600 });
           }
-          if (shouldTrackClick) {
-            ctx.waitUntil(
-              fetch(env.FUNNEL_INGEST_URL, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'X-Funnel-Secret': env.FUNNEL_INGEST_SECRET,
+
+          await env.ANALYTICS.put(dedupeKvKey, '1', { expirationTtl: 600 });
+          ctx.waitUntil(
+            fetch(funnelIngestUrl, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Funnel-Secret': funnelIngestSecret,
+              },
+              body: JSON.stringify({
+                event_name: hasInvitationId ? 'invite_link_clicked' : 'referral_link_clicked',
+                session_id: inviteSessionId,
+                country,
+                platform: platform === 'desktop' ? 'web' : platform,
+                source_type: hasInvitationId ? 'send_invite' : 'referral_link',
+                channel,
+                properties: {
+                  referral_code: referralCode,
+                  invitation_id: invitationId,
+                  path: url.pathname,
+                  ...utmParams,
+                  ...clickParams,
+                  client_ip_address: clientIP === 'unknown' ? '' : clientIP,
+                  referer,
+                  click_id: dedupeKey,
+                  click_dedupe_key: dedupeKey,
+                  user_agent: userAgent.slice(0, 255),
                 },
-                body: JSON.stringify({
-                  event_name: hasInvitationId ? 'invite_link_clicked' : 'referral_link_clicked',
-                  session_id: inviteSessionId,
-                  country,
-                  platform: platform === 'desktop' ? 'web' : platform,
-                  source_type: hasInvitationId ? 'send_invite' : 'referral_link',
-                  channel,
-                  properties: {
-                    referral_code: referralCode,
-                    invitation_id: invitationId,
-                    path: url.pathname,
-                    ...utmParams,
-                    ...clickParams,
-                    client_ip_address: clientIP === 'unknown' ? '' : clientIP,
-                    referer,
-                    click_id: dedupeKey,
-                    click_dedupe_key: dedupeKey,
-                    user_agent: userAgent.slice(0, 255),
-                  },
-                }),
-              }).catch(() => {
-                // Allow retry if the async ingest failed before reaching Django.
-                ctx.waitUntil(env.ANALYTICS.delete(dedupeKvKey).catch(() => undefined));
-                return undefined;
-              })
-            );
-          }
+              }),
+            }).catch(() => {
+              // Allow retry if the async ingest failed before reaching Django.
+              ctx.waitUntil(env.ANALYTICS.delete(dedupeKvKey).catch(() => undefined));
+              return undefined;
+            })
+          );
         }
 
         let redirectUrl = `${env.LANDING_PAGE_URL}?invite=${referralCode}`;
