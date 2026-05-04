@@ -16,6 +16,19 @@ export interface DeepLinkData {
   metadata?: {
     invitationId?: string;
     sourceType?: string;
+    clickId?: string;
+    sessionId?: string;
+    channel?: string;
+    platform?: string;
+    country?: string;
+    utmSource?: string;
+    utmMedium?: string;
+    utmCampaign?: string;
+    utmContent?: string;
+    utmTerm?: string;
+    ttclid?: string;
+    fbclid?: string;
+    gclid?: string;
   };
 }
 
@@ -130,20 +143,51 @@ export class DeepLinkHandler {
             // Parse query string style 'key=value&key2=value2'
             // We use new URLSearchParams which handles = and & automatically
             const params = new URLSearchParams(ref);
+            const referralCode = params.get('referral_code');
             const content = params.get('utm_content');
             const campaign = params.get('utm_campaign');
             const source = params.get('utm_source');
             const invitationId = params.get('invitation_id');
             const sourceType = params.get('source_type');
+            const clickId = params.get('click_id');
+            const sessionId = params.get('session_id');
+            const channel = params.get('channel');
+            const clickPlatform = params.get('platform');
+            const country = params.get('country');
+            const adUtmContent = params.get('ad_utm_content');
+            const utmMedium = params.get('utm_medium');
+            const utmTerm = params.get('utm_term');
+            const ttclid = params.get('ttclid');
+            const fbclid = params.get('fbclid');
+            const gclid = params.get('gclid');
 
-            if (invitationId || sourceType) {
+            if (
+              invitationId || sourceType || clickId || sessionId || channel ||
+              clickPlatform || country || source || utmMedium || campaign || adUtmContent || utmTerm ||
+              ttclid || fbclid || gclid
+            ) {
               metadata = {
                 invitationId: invitationId || undefined,
                 sourceType: sourceType || undefined,
+                clickId: clickId || undefined,
+                sessionId: sessionId || undefined,
+                channel: channel || undefined,
+                platform: clickPlatform || undefined,
+                country: country || undefined,
+                utmSource: source || undefined,
+                utmMedium: utmMedium || undefined,
+                utmCampaign: campaign || undefined,
+                utmContent: adUtmContent || undefined,
+                utmTerm: utmTerm || undefined,
+                ttclid: ttclid || undefined,
+                fbclid: fbclid || undefined,
+                gclid: gclid || undefined,
               };
             }
 
-            if (content && !content.includes('google')) {
+            if (referralCode) {
+              potentialCode = referralCode;
+            } else if (content && !content.includes('google')) {
               potentialCode = content;
             } else if (campaign && !campaign.includes('google-play')) {
               potentialCode = campaign;
@@ -180,7 +224,27 @@ export class DeepLinkHandler {
       if (response.ok) {
         const data = await response.json();
         if (data.code) {
-          return { code: data.code };
+          const attribution = data.attribution || {};
+          return {
+            code: data.code,
+            metadata: {
+              invitationId: attribution.invitation_id || undefined,
+              sourceType: attribution.source_type || undefined,
+              clickId: attribution.click_id || undefined,
+              sessionId: attribution.session_id || undefined,
+              channel: attribution.channel || undefined,
+              platform: attribution.platform || undefined,
+              country: attribution.country || undefined,
+              utmSource: attribution.utm_source || undefined,
+              utmMedium: attribution.utm_medium || undefined,
+              utmCampaign: attribution.utm_campaign || undefined,
+              utmContent: attribution.utm_content || undefined,
+              utmTerm: attribution.utm_term || undefined,
+              ttclid: attribution.ttclid || undefined,
+              fbclid: attribution.fbclid || undefined,
+              gclid: attribution.gclid || undefined,
+            },
+          };
         }
       }
     } catch {
@@ -224,6 +288,19 @@ export class DeepLinkHandler {
           metadata: {
             invitationId: parsedUrl.searchParams.get('invitation_id') || undefined,
             sourceType: parsedUrl.searchParams.get('source_type') || undefined,
+            clickId: parsedUrl.searchParams.get('click_id') || undefined,
+            sessionId: parsedUrl.searchParams.get('session_id') || undefined,
+            channel: parsedUrl.searchParams.get('channel') || undefined,
+            platform: parsedUrl.searchParams.get('platform') || undefined,
+            country: parsedUrl.searchParams.get('country') || undefined,
+            utmSource: parsedUrl.searchParams.get('utm_source') || undefined,
+            utmMedium: parsedUrl.searchParams.get('utm_medium') || undefined,
+            utmCampaign: parsedUrl.searchParams.get('utm_campaign') || undefined,
+            utmContent: parsedUrl.searchParams.get('utm_content') || undefined,
+            utmTerm: parsedUrl.searchParams.get('utm_term') || undefined,
+            ttclid: parsedUrl.searchParams.get('ttclid') || undefined,
+            fbclid: parsedUrl.searchParams.get('fbclid') || undefined,
+            gclid: parsedUrl.searchParams.get('gclid') || undefined,
           },
         };
 
@@ -252,6 +329,19 @@ export class DeepLinkHandler {
           metadata: {
             invitationId: parsedUrl.searchParams.get('invitation_id') || undefined,
             sourceType: parsedUrl.searchParams.get('source_type') || undefined,
+            clickId: parsedUrl.searchParams.get('click_id') || undefined,
+            sessionId: parsedUrl.searchParams.get('session_id') || undefined,
+            channel: parsedUrl.searchParams.get('channel') || undefined,
+            platform: parsedUrl.searchParams.get('platform') || undefined,
+            country: parsedUrl.searchParams.get('country') || undefined,
+            utmSource: parsedUrl.searchParams.get('utm_source') || undefined,
+            utmMedium: parsedUrl.searchParams.get('utm_medium') || undefined,
+            utmCampaign: parsedUrl.searchParams.get('utm_campaign') || undefined,
+            utmContent: parsedUrl.searchParams.get('utm_content') || undefined,
+            utmTerm: parsedUrl.searchParams.get('utm_term') || undefined,
+            ttclid: parsedUrl.searchParams.get('ttclid') || undefined,
+            fbclid: parsedUrl.searchParams.get('fbclid') || undefined,
+            gclid: parsedUrl.searchParams.get('gclid') || undefined,
           },
         };
 

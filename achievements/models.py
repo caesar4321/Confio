@@ -488,8 +488,36 @@ class UserReferral(SoftDeleteModel):
             if not identifier:
                 return
 
+            attribution = self.attribution_data or {}
+            click_keys = {
+                'click_id',
+                'session_id',
+                'click_channel',
+                'click_platform',
+                'click_country',
+                'source_type',
+                'invitation_id',
+                'utm_source',
+                'utm_medium',
+                'utm_campaign',
+                'utm_content',
+                'utm_term',
+                'ttclid',
+                'fbclid',
+                'gclid',
+                'signup_ip_address',
+                'signup_user_agent',
+            }
+            click_properties = {
+                key: str(value)[:255]
+                for key, value in attribution.items()
+                if key in click_keys and value not in (None, '')
+            }
+            session_id = str(attribution.get('session_id') or '')[:64]
+
             properties = {
-                'referral_type': (self.attribution_data or {}).get('referral_type') or 'friend',
+                **click_properties,
+                'referral_type': attribution.get('referral_type') or 'friend',
                 'attach_method': 'user_referral_save',
                 'referral_id': self.id,
             }
@@ -499,6 +527,7 @@ class UserReferral(SoftDeleteModel):
                 referrer_identifier=identifier,
                 source_type='referral_link',
                 channel='server',
+                session_id=session_id,
                 properties=properties,
             )
 
@@ -514,6 +543,7 @@ class UserReferral(SoftDeleteModel):
                     referrer_identifier=identifier,
                     source_type='referral_link',
                     channel='server',
+                    session_id=session_id,
                     properties={
                         **properties,
                         'signup_window_hours': 48,

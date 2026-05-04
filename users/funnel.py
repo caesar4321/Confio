@@ -134,6 +134,7 @@ def emit_referral_signup_step(
     referrer_identifier: str,
     source_type: str = 'referral_link',
     channel: str = 'app',
+    session_id: str = '',
     properties: Optional[dict] = None,
 ) -> None:
     """Emit an idempotent referral signup/attach milestone."""
@@ -143,6 +144,7 @@ def emit_referral_signup_step(
     emit_once(
         event_name,
         user=user,
+        session_id=session_id,
         country=getattr(user, 'phone_country', '') or '',
         source_type=source_type,
         channel=channel,

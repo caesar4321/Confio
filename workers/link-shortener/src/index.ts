@@ -57,6 +57,17 @@ function collectUtmParams(url: URL): Record<string, string> {
   return utm;
 }
 
+function collectClickParams(url: URL): Record<string, string> {
+  const params: Record<string, string> = {};
+  for (const key of ['ttclid', 'fbclid', 'gclid']) {
+    const value = (url.searchParams.get(key) || '').trim();
+    if (value) {
+      params[key] = value.slice(0, 256);
+    }
+  }
+  return params;
+}
+
 function isPreviewBotUserAgent(userAgent: string): boolean {
   const ua = userAgent.toLowerCase();
   if (!ua) return false;
@@ -153,26 +164,40 @@ export default {
         const inviteSessionId = await deriveInviteSessionId(clientIP);
         const channel = inferReferralChannel(url, referer);
         const utmParams = collectUtmParams(url);
+        const clickParams = collectClickParams(url);
         const invitationId = (url.searchParams.get('invitation_id') || '').slice(0, 64);
         const hasInvitationId = Boolean(invitationId);
+        const dedupeKey = await deriveClickDedupeKey([
+          clientIP,
+          userAgent,
+          referralCode,
+          channel,
+          platform,
+          hasInvitationId ? 'send_invite' : 'referral_link',
+          invitationId,
+        ]);
+        const attributionPayload = {
+          code: referralCode,
+          click_id: dedupeKey,
+          session_id: inviteSessionId,
+          source_type: hasInvitationId ? 'send_invite' : 'referral_link',
+          channel,
+          platform: platform === 'desktop' ? 'web' : platform,
+          country,
+          path: url.pathname,
+          invitation_id: invitationId,
+          ...utmParams,
+          ...clickParams,
+        };
 
         // Store IP fingerprint for mobile deferred attribution. iOS depends on
         // it; Android still uses it as a fallback when Play Install Referrer is
         // unavailable, delayed, or stripped.
         if (!isPreviewBot && clientIP !== 'unknown' && (platform === 'ios' || platform === 'android')) {
-          await env.LINKS.put(`ip_ref:${clientIP}`, referralCode, { expirationTtl: 3600 });
+          await env.LINKS.put(`ip_ref:${clientIP}`, JSON.stringify(attributionPayload), { expirationTtl: 3600 });
         }
 
         if (!isPreviewBot && env.FUNNEL_INGEST_URL && env.FUNNEL_INGEST_SECRET) {
-          const dedupeKey = await deriveClickDedupeKey([
-            clientIP,
-            userAgent,
-            referralCode,
-            channel,
-            platform,
-            hasInvitationId ? 'send_invite' : 'referral_link',
-            invitationId,
-          ]);
           const dedupeKvKey = `click_dedupe:${dedupeKey}`;
           const alreadyTracked = await env.ANALYTICS.get(dedupeKvKey);
           const shouldTrackClick = !alreadyTracked;
@@ -199,8 +224,10 @@ export default {
                     invitation_id: invitationId,
                     path: url.pathname,
                     ...utmParams,
+                    ...clickParams,
                     client_ip_address: clientIP === 'unknown' ? '' : clientIP,
                     referer,
+                    click_id: dedupeKey,
                     click_dedupe_key: dedupeKey,
                     user_agent: userAgent.slice(0, 255),
                   },
@@ -216,13 +243,31 @@ export default {
 
         let redirectUrl = `${env.LANDING_PAGE_URL}?invite=${referralCode}`;
         if (platform === 'android') {
-          const playReferrer = hasInvitationId
-            ? new URLSearchParams({
-                utm_content: referralCode,
-                source_type: 'send_invite',
-                invitation_id: invitationId,
-              }).toString()
-            : referralCode;
+          const playReferrerParams: Record<string, string> = {
+            referral_code: referralCode,
+            // Legacy app builds read utm_content as the referral code.
+            utm_content: referralCode,
+            click_id: dedupeKey,
+            session_id: inviteSessionId,
+            source_type: hasInvitationId ? 'send_invite' : 'referral_link',
+            channel,
+            platform,
+            country,
+          };
+          for (const [key, value] of Object.entries(utmParams)) {
+            if (key === 'utm_content') {
+              playReferrerParams.ad_utm_content = value;
+            } else {
+              playReferrerParams[key] = value;
+            }
+          }
+          for (const [key, value] of Object.entries(clickParams)) {
+            playReferrerParams[key] = value;
+          }
+          if (invitationId) {
+            playReferrerParams.invitation_id = invitationId;
+          }
+          const playReferrer = new URLSearchParams(playReferrerParams).toString();
           redirectUrl = `${env.PLAY_STORE_URL}&referrer=${encodeURIComponent(playReferrer)}`;
         } else if (platform === 'ios') {
           redirectUrl = env.APP_STORE_URL;
@@ -265,11 +310,25 @@ export default {
     // [NEW] API endpoint to check referral by IP (for iOS deferred deep linking)
     if (url.pathname === '/api/check-referral') {
       const clientIP = request.headers.get('cf-connecting-ip') || 'unknown';
-      const code = await env.LINKS.get(`ip_ref:${clientIP}`);
+      const raw = await env.LINKS.get(`ip_ref:${clientIP}`);
+      let code: string | null = raw || null;
+      let attribution: Record<string, any> | null = null;
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === 'object') {
+            attribution = parsed;
+            code = typeof parsed.code === 'string' ? parsed.code : null;
+          }
+        } catch {
+          code = raw;
+        }
+      }
 
       return new Response(JSON.stringify({
         code: code || null,
-        type: 'fingerprint'
+        type: 'fingerprint',
+        attribution,
       }), {
         headers: {
           'Content-Type': 'application/json',

@@ -1,4 +1,5 @@
 """Unified referral system mutations for Confío usernames or phone numbers."""
+import json
 import logging
 import graphene
 from decimal import Decimal
@@ -19,6 +20,7 @@ class SetReferrer(graphene.Mutation):
     class Arguments:
         referrer_identifier = graphene.String(required=True)
         referral_type = graphene.String()  # kept for backward compatibility
+        attribution_data = graphene.JSONString()
     
     success = graphene.Boolean()
     error = graphene.String()
@@ -28,7 +30,7 @@ class SetReferrer(graphene.Mutation):
     @classmethod
     @rate_limit('referral_submit')
     @check_suspicious_activity('referral_submit')
-    def mutate(cls, root, info, referrer_identifier, referral_type=None):
+    def mutate(cls, root, info, referrer_identifier, referral_type=None, attribution_data=None):
         user = getattr(info.context, 'user', None)
         if not (user and getattr(user, 'is_authenticated', False)):
             return SetReferrer(success=False, error="Authentication required")
@@ -120,6 +122,9 @@ class SetReferrer(graphene.Mutation):
                 referee_confio = Decimal('20')  # $5 at $0.25/CONFIO
                 referrer_confio = Decimal('20')  # $5 at $0.25/CONFIO
 
+            click_attribution = _normalize_attribution_data(attribution_data, info)
+            click_session_id = (click_attribution.get('session_id') or '')[:64]
+
             # Create the referral record
             with db_transaction.atomic():
                 try:
@@ -130,9 +135,11 @@ class SetReferrer(graphene.Mutation):
                         referrer_identifier=referrer_identifier,
                         source_type='referral_link',
                         channel='app',
+                        session_id=click_session_id,
                         properties={
                             'referral_type': 'friend',
                             'attach_method': 'set_referrer',
+                            **click_attribution,
                         },
                     )
                 except Exception:
@@ -149,7 +156,9 @@ class SetReferrer(graphene.Mutation):
                     attribution_data={
                         'referral_type': 'friend',
                         'identifier_used': referrer_identifier,
+                        'referral_code': referrer_identifier,
                         'registered_at': timezone.now().isoformat(),
+                        **click_attribution,
                     }
                 )
                 try:
@@ -160,10 +169,12 @@ class SetReferrer(graphene.Mutation):
                         referrer_identifier=referrer_identifier,
                         source_type='referral_link',
                         channel='app',
+                        session_id=click_session_id,
                         properties={
                             'referral_type': 'friend',
                             'attach_method': 'set_referrer',
                             'referral_id': referral.id,
+                            **click_attribution,
                         },
                     )
                 except Exception:
@@ -206,7 +217,58 @@ class CheckReferralStatus(graphene.Mutation):
                 existing_referrer=existing.referrer_identifier
             )
         return CheckReferralStatus(can_set_referrer=True)
+
+
 def _has_personal_account(user: User) -> bool:
     return Account.objects.filter(
         user=user, account_type='personal', deleted_at__isnull=True
     ).exists()
+
+
+def _normalize_attribution_data(attribution_data, info) -> dict:
+    """Bound and normalize app-provided click attribution metadata."""
+    if not attribution_data:
+        raw = {}
+    elif isinstance(attribution_data, str):
+        try:
+            raw = json.loads(attribution_data)
+        except Exception:
+            raw = {}
+    elif isinstance(attribution_data, dict):
+        raw = attribution_data
+    else:
+        raw = {}
+
+    def pick(*keys, max_len=128):
+        for key in keys:
+            value = raw.get(key)
+            if value is not None:
+                value = str(value).strip()
+                if value:
+                    return value[:max_len]
+        return ''
+
+    meta = {
+        'click_id': pick('click_id', 'clickId', max_len=64),
+        'session_id': pick('session_id', 'sessionId', max_len=64),
+        'click_channel': pick('channel', max_len=32),
+        'click_platform': pick('platform', max_len=16),
+        'click_country': pick('country', max_len=2).upper(),
+        'source_type': pick('source_type', 'sourceType', max_len=32),
+        'invitation_id': pick('invitation_id', 'invitationId', max_len=64),
+        'utm_source': pick('utm_source', 'utmSource', max_len=128),
+        'utm_medium': pick('utm_medium', 'utmMedium', max_len=128),
+        'utm_campaign': pick('utm_campaign', 'utmCampaign', max_len=128),
+        'utm_content': pick('utm_content', 'utmContent', max_len=128),
+        'utm_term': pick('utm_term', 'utmTerm', max_len=128),
+        'ttclid': pick('ttclid', max_len=256),
+        'fbclid': pick('fbclid', max_len=256),
+        'gclid': pick('gclid', max_len=256),
+        'attach_method': pick('attach_method', 'attachMethod', max_len=64),
+    }
+
+    request = getattr(info, 'context', None)
+    meta['signup_ip_address'] = (getattr(request, 'META', {}) or {}).get('REMOTE_ADDR', '')[:64]
+    meta['signup_user_agent'] = (getattr(request, 'META', {}) or {}).get('HTTP_USER_AGENT', '')[:255]
+
+    return {key: value for key, value in meta.items() if value}

@@ -959,8 +959,8 @@ export const JOIN_PRESALE_WAITLIST = gql`
 `;
 
 export const SET_REFERRER = gql`
-  mutation SetReferrer($referrerIdentifier: String!) {
-    setReferrer(referrerIdentifier: $referrerIdentifier) {
+  mutation SetReferrer($referrerIdentifier: String!, $attributionData: JSONString) {
+    setReferrer(referrerIdentifier: $referrerIdentifier, attributionData: $attributionData) {
       success
       error
       referralType

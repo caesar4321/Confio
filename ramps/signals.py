@@ -142,6 +142,53 @@ def _classify_first_deposit_source(user_id: int | None) -> str:
     return 'organic'
 
 
+def _first_deposit_referral_attribution(user_id: int | None) -> tuple[dict, str]:
+    """Return bounded referral click metadata for first-deposit analytics."""
+    if not user_id:
+        return {}, ''
+
+    referral = (
+        UserReferral.objects
+        .filter(referred_user_id=user_id)
+        .exclude(status='inactive')
+        .order_by('-created_at')
+        .first()
+    )
+    if not referral or not referral.attribution_data:
+        return {}, ''
+
+    attribution = referral.attribution_data or {}
+    allowed_keys = {
+        'click_id',
+        'session_id',
+        'click_channel',
+        'click_platform',
+        'click_country',
+        'source_type',
+        'invitation_id',
+        'utm_source',
+        'utm_medium',
+        'utm_campaign',
+        'utm_content',
+        'utm_term',
+        'ttclid',
+        'fbclid',
+        'gclid',
+        'signup_ip_address',
+        'signup_user_agent',
+    }
+    properties = {
+        key: str(value)[:255]
+        for key, value in attribution.items()
+        if key in allowed_keys and value not in (None, '')
+    }
+    identifier = (referral.referrer_identifier or '').lstrip('@').strip().upper()
+    if identifier:
+        properties['referral_code'] = identifier[:255]
+    session_id = str(attribution.get('session_id') or '')[:64]
+    return properties, session_id
+
+
 def sync_ramp_transaction_from_guardarian(guardarian_tx: GuardarianTransaction) -> RampTransaction:
     actor_type, actor_display_name, actor_user, actor_business = _get_guardarian_actor(guardarian_tx)
     direction = 'off_ramp' if guardarian_tx.transaction_type == 'sell' else 'on_ramp'
@@ -357,23 +404,27 @@ def handle_ramp_transaction_save(sender, instance, created, **kwargs):
                 or instance.crypto_amount_estimated
             )
             source_type = _classify_first_deposit_source(instance.actor_user_id)
+            referral_attribution, attribution_session_id = _first_deposit_referral_attribution(
+                instance.actor_user_id
+            )
             # Platform is not stored on RampTransaction (server-issued provider record);
             # derive it from the user's most recent funnel event that carried a known
             # platform value (signup_completed, referral_attached, etc.). This keeps the
             # F4 first_deposit event segmentable by iOS/Android without a schema migration.
-            derived_platform = ''
+            derived_platform = referral_attribution.get('click_platform') or ''
             try:
-                from users.models_analytics import FunnelEvent
-                last_known = (
-                    FunnelEvent.objects
-                    .filter(user_id=instance.actor_user_id)
-                    .exclude(platform='')
-                    .order_by('-created_at')
-                    .values_list('platform', flat=True)
-                    .first()
-                )
-                if last_known:
-                    derived_platform = last_known
+                if not derived_platform:
+                    from users.models_analytics import FunnelEvent
+                    last_known = (
+                        FunnelEvent.objects
+                        .filter(user_id=instance.actor_user_id)
+                        .exclude(platform='')
+                        .order_by('-created_at')
+                        .values_list('platform', flat=True)
+                        .first()
+                    )
+                    if last_known:
+                        derived_platform = last_known
             except Exception:
                 # Instrumentation must never break the deposit path.
                 derived_platform = ''
@@ -384,7 +435,9 @@ def handle_ramp_transaction_save(sender, instance, created, **kwargs):
                 platform=derived_platform,
                 source_type=source_type,
                 channel='koywe' if instance.provider == 'KOYWE' else (instance.provider or '').lower(),
+                session_id=attribution_session_id,
                 properties={
+                    **referral_attribution,
                     'provider': instance.provider,
                     'internal_id': str(instance.internal_id),
                     'fiat_currency': instance.fiat_currency or '',

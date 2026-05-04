@@ -264,8 +264,16 @@ export const HomeScreen = () => {
           }
 
           // Submit to backend
+          const attributionData = link.metadata ? {
+            ...link.metadata,
+            referral_code: link.payload,
+            attach_method: 'deferred_link',
+          } : undefined;
           const { data, errors } = await setReferrerMutation({
-            variables: { referrerIdentifier: link.payload }
+            variables: {
+              referrerIdentifier: link.payload,
+              attributionData: attributionData ? JSON.stringify(attributionData) : undefined,
+            }
           });
 
 
