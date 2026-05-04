@@ -217,16 +217,14 @@ class ConfioAdminSite(AdminSiteOTPRequired):
                 )
             )
             if cohort == creator_cohort:
-                return queryset.filter(
-                    (
-                        Q(properties__referral_code__iexact=creator_referral_code)
-                        | Q(
-                            event_name='first_deposit',
-                            user__referrals_as_referred__referrer_identifier__iexact=creator_referral_code,
-                        )
+                creator_event_filter = (
+                    Q(properties__referral_code__iexact=creator_referral_code)
+                    | Q(
+                        event_name='first_deposit',
+                        user__referrals_as_referred__referrer_identifier__iexact=creator_referral_code,
                     )
-                    & ~paid_event_filter
                 )
+                return queryset.filter(creator_event_filter).exclude(paid_event_filter)
             if cohort == paid_ads_cohort:
                 return queryset.filter(paid_event_filter)
             if cohort == other_referral_cohorts:
