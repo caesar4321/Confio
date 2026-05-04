@@ -172,6 +172,7 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         funnel_last_90_start, _ = get_argentina_day_bounds(funnel_last_90_date)
         creator_referral_code = 'JULIANMOONLUNA'
         creator_cohort = 'creator_julianmoonluna'
+        paid_ads_cohort = 'paid_ads'
         other_referral_cohorts = ['user_driven', 'unknown']
 
         def _pct(numerator, denominator):
@@ -191,14 +192,43 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         def _raw_cohort_filter(queryset, cohort):
             if cohort is None:
                 return queryset
+            paid_event_filter = (
+                Q(properties__utm_medium__iexact='paid')
+                | Q(properties__utm_medium__iexact='cpc')
+                | Q(properties__utm_medium__iexact='ppc')
+                | Q(properties__utm_medium__iexact='paid_social')
+                | Q(properties__utm_source__iexact='tiktok_ads')
+                | Q(properties__utm_source__iexact='instagram_ads')
+                | Q(properties__utm_source__iexact='facebook_ads')
+                | Q(properties__utm_source__iexact='meta_ads')
+                | Q(channel__in=['tiktok_ads', 'instagram_ads', 'facebook_ads', 'meta_ads'])
+                | Q(
+                    event_name='first_deposit',
+                    user__referrals_as_referred__attribution_data__utm_medium__iexact='paid',
+                )
+                | Q(
+                    event_name='first_deposit',
+                    user__referrals_as_referred__attribution_data__utm_source__in=[
+                        'tiktok_ads',
+                        'instagram_ads',
+                        'facebook_ads',
+                        'meta_ads',
+                    ],
+                )
+            )
             if cohort == creator_cohort:
                 return queryset.filter(
-                    Q(properties__referral_code__iexact=creator_referral_code)
-                    | Q(
-                        event_name='first_deposit',
-                        user__referrals_as_referred__referrer_identifier__iexact=creator_referral_code,
+                    (
+                        Q(properties__referral_code__iexact=creator_referral_code)
+                        | Q(
+                            event_name='first_deposit',
+                            user__referrals_as_referred__referrer_identifier__iexact=creator_referral_code,
+                        )
                     )
+                    & ~paid_event_filter
                 )
+            if cohort == paid_ads_cohort:
+                return queryset.filter(paid_event_filter)
             if cohort == other_referral_cohorts:
                 return queryset.exclude(
                     Q(properties__referral_code__iexact=creator_referral_code)
@@ -206,6 +236,7 @@ class ConfioAdminSite(AdminSiteOTPRequired):
                         event_name='first_deposit',
                         user__referrals_as_referred__referrer_identifier__iexact=creator_referral_code,
                     )
+                    | paid_event_filter
                 )
             if cohort == 'send_invite':
                 return queryset
@@ -423,6 +454,29 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         )
         creator_event_filter = Q(properties__referral_code__iexact=creator_referral_code)
         creator_deposit_filter = Q(user__referrals_as_referred__referrer_identifier__iexact=creator_referral_code)
+        paid_event_filter = (
+            Q(properties__utm_medium__iexact='paid')
+            | Q(properties__utm_medium__iexact='cpc')
+            | Q(properties__utm_medium__iexact='ppc')
+            | Q(properties__utm_medium__iexact='paid_social')
+            | Q(properties__utm_source__iexact='tiktok_ads')
+            | Q(properties__utm_source__iexact='instagram_ads')
+            | Q(properties__utm_source__iexact='facebook_ads')
+            | Q(properties__utm_source__iexact='meta_ads')
+            | Q(channel__in=['tiktok_ads', 'instagram_ads', 'facebook_ads', 'meta_ads'])
+        )
+        paid_deposit_filter = (
+            Q(user__referrals_as_referred__attribution_data__utm_medium__iexact='paid')
+            | Q(user__referrals_as_referred__attribution_data__utm_medium__iexact='cpc')
+            | Q(user__referrals_as_referred__attribution_data__utm_medium__iexact='ppc')
+            | Q(user__referrals_as_referred__attribution_data__utm_medium__iexact='paid_social')
+            | Q(user__referrals_as_referred__attribution_data__utm_source__in=[
+                'tiktok_ads',
+                'instagram_ads',
+                'facebook_ads',
+                'meta_ads',
+            ])
+        )
 
         def _referral_cohort_row(label, cohort, acquisition_filter, deposit_filter):
             cohort_counts = _rollup_event_counts(
@@ -453,18 +507,30 @@ class ConfioAdminSite(AdminSiteOTPRequired):
 
         context['referral_cohort_breakdown'] = [
             _referral_cohort_row(
-                f'Creator @{creator_referral_code}',
+                'Paid ads',
+                paid_ads_cohort,
+                paid_event_filter,
+                paid_deposit_filter,
+            ),
+            _referral_cohort_row(
+                f'Creator @{creator_referral_code} organic',
                 creator_cohort,
-                creator_event_filter,
-                creator_deposit_filter,
+                creator_event_filter & ~paid_event_filter,
+                creator_deposit_filter & ~paid_deposit_filter,
             ),
             _referral_cohort_row(
                 'User-driven / other referrals',
                 other_referral_cohorts,
-                ~creator_event_filter,
-                ~creator_deposit_filter,
+                ~creator_event_filter & ~paid_event_filter,
+                ~creator_deposit_filter & ~paid_deposit_filter,
             ),
         ]
+        paid_ads_trend = _rollup_trend_rows(
+            source_type='referral_link',
+            event_names=referral_event_names,
+            start_date=funnel_last_90_date,
+            cohort=paid_ads_cohort,
+        )
         creator_trend = _rollup_trend_rows(
             source_type='referral_link',
             event_names=referral_event_names,
@@ -478,7 +544,11 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             cohort=other_referral_cohorts,
         )
         context['referral_daily_trend'] = []
-        for creator_row, other_row in zip(creator_trend, other_trend):
+        for paid_row, creator_row, other_row in zip(paid_ads_trend, creator_trend, other_trend):
+            paid_clicks = paid_row['referral_link_clicked']
+            paid_signups = paid_row['signup_completed']
+            paid_attached = paid_row['referral_attached']
+            paid_deposits = paid_row['first_deposit']
             user_shares = other_row['referral_whatsapp_share_tapped']
             user_clicks = other_row['referral_link_clicked']
             user_signups = other_row['signup_completed']
@@ -486,6 +556,12 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             user_deposits = other_row['first_deposit']
             context['referral_daily_trend'].append({
                 'date': creator_row['date'],
+                'paid_clicks': paid_clicks,
+                'paid_signups': paid_signups,
+                'paid_attached': paid_attached,
+                'paid_deposits': paid_deposits,
+                'paid_click_to_signup_pct': _pct(paid_signups, paid_clicks),
+                'paid_attach_to_deposit_pct': _pct(paid_deposits, paid_attached),
                 'creator_clicks': creator_row['referral_link_clicked'],
                 'creator_signups': creator_row['signup_completed'],
                 'creator_attached': creator_row['referral_attached'],

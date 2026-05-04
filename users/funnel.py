@@ -37,6 +37,22 @@ logger = logging.getLogger(__name__)
 CREATOR_REFERRAL_CODE = 'JULIANMOONLUNA'
 
 
+def is_paid_referral_properties(properties: Optional[dict] = None) -> bool:
+    """Return True when referral metadata represents paid acquisition."""
+    props = properties or {}
+    utm_medium = str(props.get('utm_medium') or '').strip().lower()
+    utm_source = str(props.get('utm_source') or '').strip().lower()
+    channel = str(props.get('channel') or props.get('click_channel') or '').strip().lower()
+
+    if utm_medium in {'paid', 'cpc', 'ppc', 'paid_social'}:
+        return True
+    if utm_source in {'tiktok_ads', 'instagram_ads', 'facebook_ads', 'meta_ads'}:
+        return True
+    if channel in {'tiktok_ads', 'instagram_ads', 'facebook_ads', 'meta_ads'}:
+        return True
+    return False
+
+
 def derive_rollup_cohort(event_name: str, source_type: str, properties: Optional[dict] = None) -> str:
     """Return the durable low-cardinality cohort for funnel rollups."""
     source = (source_type or '').lower()
@@ -46,6 +62,8 @@ def derive_rollup_cohort(event_name: str, source_type: str, properties: Optional
         return 'send_invite'
 
     if source == 'referral_link':
+        if is_paid_referral_properties(props):
+            return 'paid_ads'
         referral_code = str(props.get('referral_code') or '').strip().upper()
         if referral_code == CREATOR_REFERRAL_CODE:
             return 'creator_julianmoonluna'

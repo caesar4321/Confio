@@ -444,6 +444,12 @@ class UserReferral(SoftDeleteModel):
             or str((data.get('properties') or {}).get('referral_code') or '').strip().upper()
         )
         if not source_type:
+            if derive_rollup_cohort(
+                event_name='referral_attached',
+                source_type='referral_link',
+                properties={**data, 'referral_code': referral_code} if referral_code else data,
+            ) == 'paid_ads':
+                return 'paid_ads'
             # Infer from referrer_identifier if attribution_data is sparse
             ident = (self.referrer_identifier or '').strip().upper()
             if ident == CREATOR_REFERRAL_CODE:
@@ -454,7 +460,7 @@ class UserReferral(SoftDeleteModel):
         return derive_rollup_cohort(
             event_name='referral_attached',
             source_type=source_type,
-            properties={'referral_code': referral_code} if referral_code else None,
+            properties={**data, 'referral_code': referral_code} if referral_code else data,
         )
 
     def save(self, *args, **kwargs):

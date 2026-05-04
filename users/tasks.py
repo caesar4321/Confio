@@ -286,15 +286,25 @@ def rollup_funnel_events(target_date_str=None):
         if first_deposit_user_ids:
             for referral in UserReferral.objects.filter(
                 referred_user_id__in=first_deposit_user_ids,
-            ).exclude(status='inactive').values('referred_user_id', 'referrer_identifier'):
+            ).exclude(status='inactive').values('referred_user_id', 'referrer_identifier', 'attribution_data'):
                 referrer_identifier = (referral['referrer_identifier'] or '').strip().upper()
-                cohort = (
-                    'creator_julianmoonluna'
-                    if referrer_identifier == CREATOR_REFERRAL_CODE
-                    else 'user_driven'
+                cohort = derive_rollup_cohort(
+                    event_name='first_deposit',
+                    source_type='referral_link',
+                    properties={
+                        **(referral.get('attribution_data') or {}),
+                        'referral_code': referrer_identifier,
+                    },
                 )
                 # Prefer creator attribution if inconsistent historical rows exist.
-                if referral['referred_user_id'] not in referral_deposit_cohorts or cohort == 'creator_julianmoonluna':
+                if (
+                    referral['referred_user_id'] not in referral_deposit_cohorts
+                    or cohort == 'paid_ads'
+                    or (
+                        cohort == 'creator_julianmoonluna'
+                        and referral_deposit_cohorts.get(referral['referred_user_id']) != 'paid_ads'
+                    )
+                ):
                     referral_deposit_cohorts[referral['referred_user_id']] = cohort
 
         grouped = {}
