@@ -24,23 +24,31 @@ import algorandService from './algorandService';
 const LEGACY_CONFIO_ASSET_ID = '3198568509';
 const MATERIAL_SPENDABLE_ALGO_MICROS = 100_000;
 const ga4SignUpServiceForUser = (userId: string) => `com.confio.analytics.sign_up.${userId}`;
+const pendingGa4SignUps = new Set<string>();
 
 async function emitNewUserSignupOnce(userId: unknown, method: 'google' | 'apple'): Promise<void> {
   if (!userId) return;
   const normalizedUserId = String(userId);
   const service = ga4SignUpServiceForUser(normalizedUserId);
+  if (pendingGa4SignUps.has(service)) return;
+  pendingGa4SignUps.add(service);
   try {
     const existing = await Keychain.getGenericPassword({ service });
     if (existing) return;
+
+    // Claim the user-level dedupe marker before emitting. The login flow can
+    // re-enter quickly; writing after Firebase allows duplicate sign_up events.
+    await Keychain.setGenericPassword('ga4_sign_up', new Date().toISOString(), { service });
 
     const { AnalyticsService } = await import('./analyticsService');
     void AnalyticsService.logEvent('sign_up', {
       method,
       user_id: normalizedUserId,
     });
-    await Keychain.setGenericPassword('ga4_sign_up', new Date().toISOString(), { service });
   } catch (_e) {
     // Analytics must not block authentication.
+  } finally {
+    pendingGa4SignUps.delete(service);
   }
 }
 
