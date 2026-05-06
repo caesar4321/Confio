@@ -1,7 +1,8 @@
 import React from 'react';
-import { View, Text, StyleSheet, Platform, TouchableOpacity, Linking } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Linking } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import QRCode from 'react-native-qrcode-svg';
+import { technicalFontFamily } from '../utils/fontFamily';
 
 export interface TransactionReceiptViewProps {
     type: 'payroll' | 'payment' | 'transfer';
@@ -338,7 +339,7 @@ const styles = StyleSheet.create({
         fontSize: 13,
         fontWeight: '500',
         color: '#10B981',
-        fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+        fontFamily: technicalFontFamily,
         flex: 1,
     },
     hashContainer: {

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -371,6 +371,14 @@ export const ExchangeScreen = () => {
   const [refreshing, setRefreshing] = useState(false);
   const scrollY = useRef(new Animated.Value(0)).current;
   const refreshRotation = useRef(new Animated.Value(0)).current;
+  const refreshSpin = useMemo(
+    () =>
+      refreshRotation.interpolate({
+        inputRange: [0, 1],
+        outputRange: ['0deg', '360deg']
+      }),
+    [refreshRotation]
+  );
 
   // Pagination state for trades
   const [tradesOffset, setTradesOffset] = useState(0);
@@ -2335,21 +2343,30 @@ export const ExchangeScreen = () => {
   // Header component - memoized to prevent re-renders
   const Header = React.memo(() => {
     // Prevent iOS bounce from affecting header position by clamping negative values
-    const scrollYClamped = Animated.diffClamp(
-      scrollY.interpolate({
-        inputRange: [-1000, 0, 1000],
-        outputRange: [0, 0, 1000],
-        extrapolate: 'clamp',
-      }),
-      0,
-      headerHeight
+    const normalizedScrollY = useMemo(
+      () =>
+        scrollY.interpolate({
+          inputRange: [-1000, 0, 1000],
+          outputRange: [0, 0, 1000],
+          extrapolate: 'clamp',
+        }),
+      [scrollY]
     );
 
-    const headerTranslateY = scrollYClamped.interpolate({
-      inputRange: [0, headerHeight],
-      outputRange: [0, -headerHeight],
-      extrapolate: 'clamp',
-    });
+    const scrollYClamped = useMemo(
+      () => Animated.diffClamp(normalizedScrollY, 0, headerHeight),
+      [normalizedScrollY]
+    );
+
+    const headerTranslateY = useMemo(
+      () =>
+        scrollYClamped.interpolate({
+          inputRange: [0, headerHeight],
+          outputRange: [0, -headerHeight],
+          extrapolate: 'clamp',
+        }),
+      [scrollYClamped]
+    );
 
     return (
       <Animated.View
@@ -2623,10 +2640,7 @@ export const ExchangeScreen = () => {
                   <Animated.View
                     style={{
                       transform: [{
-                        rotate: refreshRotation.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: ['0deg', '360deg']
-                        })
+                        rotate: refreshSpin
                       }]
                     }}
                   >

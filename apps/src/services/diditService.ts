@@ -7,6 +7,27 @@ type DiditSdkModule = {
 
 import { NativeModules, Platform } from 'react-native';
 
+function normalizeDiditSessionToken(sessionToken: unknown): string {
+  if (typeof sessionToken === 'string') {
+    const trimmed = sessionToken.trim();
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+
+  if (sessionToken && typeof sessionToken === 'object') {
+    const nestedToken = (sessionToken as Record<string, unknown>).sessionToken
+      ?? (sessionToken as Record<string, unknown>).token
+      ?? (sessionToken as Record<string, unknown>).value;
+
+    if (typeof nestedToken === 'string' && nestedToken.trim()) {
+      return nestedToken.trim();
+    }
+  }
+
+  throw new Error('Didit session token is missing or invalid.');
+}
+
 function resolveDiditStartFunction(): (sessionToken: string) => Promise<any> {
   if (Platform.OS === 'ios') {
     const nativeModule = NativeModules?.SdkReactNative;
@@ -37,13 +58,11 @@ function resolveDiditStartFunction(): (sessionToken: string) => Promise<any> {
   return (sessionToken: string) => startVerification(sessionToken, undefined);
 }
 
-export async function startDiditVerification(sessionToken: string): Promise<any> {
-  if (!sessionToken) {
-    throw new Error('Didit session token is required.')
-  }
+export async function startDiditVerification(sessionToken: unknown): Promise<any> {
+  const normalizedSessionToken = normalizeDiditSessionToken(sessionToken);
 
   const startVerification = resolveDiditStartFunction();
-  return startVerification(sessionToken);
+  return startVerification(normalizedSessionToken);
 }
 
 export function getDiditResultSessionId(result: any, fallbackSessionId?: string | null): string | null {

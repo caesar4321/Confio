@@ -14,6 +14,7 @@ import algorandService from '../services/algorandService';
 import businessOptInService from '../services/businessOptInService';
 import { cusdAppOptInService } from '../services/cusdAppOptInService';
 import { useBackupEnforcement } from '../hooks/useBackupEnforcement';
+import { technicalFontFamily } from '../utils/fontFamily';
 
 // GraphQL mutation for USDC opt-in specifically
 const OPT_IN_TO_USDC = gql`
@@ -436,7 +437,7 @@ const DepositScreen = () => {
       flex: 1,
       fontSize: 14,
       color: colors.text.primary,
-      fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+      fontFamily: technicalFontFamily,
     },
     copyButton: {
       padding: 8,

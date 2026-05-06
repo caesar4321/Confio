@@ -34,33 +34,53 @@ export const EnhancedContactCard: React.FC<EnhancedContactCardProps> = React.mem
 }) => {
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const checkmarkScale = useRef(new Animated.Value(0)).current;
+  const badgeAnimRef = useRef<Animated.CompositeAnimation | null>(null);
+  const pressAnimRef = useRef<Animated.CompositeAnimation | null>(null);
 
   useEffect(() => {
     if (contact.isOnConfio) {
       // Animate checkmark badge appearance
-      Animated.spring(checkmarkScale, {
+      badgeAnimRef.current?.stop();
+      badgeAnimRef.current = Animated.spring(checkmarkScale, {
         toValue: 1,
         tension: 50,
         friction: 7,
         useNativeDriver: true,
-      }).start();
+      });
+      badgeAnimRef.current.start();
     }
+    return () => {
+      badgeAnimRef.current?.stop();
+    };
   }, [contact.isOnConfio]);
 
+  useEffect(() => {
+    return () => {
+      badgeAnimRef.current?.stop();
+      pressAnimRef.current?.stop();
+      scaleAnim.stopAnimation();
+      checkmarkScale.stopAnimation();
+    };
+  }, [checkmarkScale, scaleAnim]);
+
   const handlePressIn = () => {
-    Animated.spring(scaleAnim, {
+    pressAnimRef.current?.stop();
+    pressAnimRef.current = Animated.spring(scaleAnim, {
       toValue: 0.95,
       useNativeDriver: true,
-    }).start();
+    });
+    pressAnimRef.current.start();
   };
 
   const handlePressOut = () => {
-    Animated.spring(scaleAnim, {
+    pressAnimRef.current?.stop();
+    pressAnimRef.current = Animated.spring(scaleAnim, {
       toValue: 1,
       friction: 3,
       tension: 40,
       useNativeDriver: true,
-    }).start();
+    });
+    pressAnimRef.current.start();
   };
 
   return (

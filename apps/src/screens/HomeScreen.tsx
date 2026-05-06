@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -174,6 +174,32 @@ export const HomeScreen = () => {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(1)).current; // Start at 1 to avoid scale-induced layout shift
   const balanceAnim = useRef(new Animated.Value(0)).current;
+  const entranceAnimRef = useRef<Animated.CompositeAnimation | null>(null);
+  const balanceTransitionRef = useRef<Animated.CompositeAnimation | null>(null);
+  const fadeTranslateY20 = useMemo(
+    () =>
+      fadeAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [20, 0],
+      }),
+    [fadeAnim]
+  );
+  const fadeTranslateY30 = useMemo(
+    () =>
+      fadeAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [30, 0],
+      }),
+    [fadeAnim]
+  );
+  const fadeTranslateY40 = useMemo(
+    () =>
+      fadeAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [40, 0],
+      }),
+    [fadeAnim]
+  );
 
   // Use account context
   const {
@@ -865,22 +891,42 @@ export const HomeScreen = () => {
   React.useEffect(() => {
     if (isInitialized) {
       // No delay needed — skeleton overlay handles the transition
-      Animated.timing(fadeAnim, {
+      entranceAnimRef.current?.stop();
+      entranceAnimRef.current = Animated.timing(fadeAnim, {
         toValue: 1,
         duration: 250,
         useNativeDriver: true,
-      }).start();
+      });
+      entranceAnimRef.current.start();
     }
+    return () => {
+      entranceAnimRef.current?.stop();
+    };
   }, [fadeAnim, isInitialized]);
 
   // Balance animation when value changes
   React.useEffect(() => {
-    Animated.timing(balanceAnim, {
+    balanceTransitionRef.current?.stop();
+    balanceTransitionRef.current = Animated.timing(balanceAnim, {
       toValue: showLocalCurrency ? 1 : 0,
       duration: 300,
       useNativeDriver: true,
-    }).start();
+    });
+    balanceTransitionRef.current.start();
+    return () => {
+      balanceTransitionRef.current?.stop();
+    };
   }, [showLocalCurrency, balanceAnim]);
+
+  React.useEffect(() => {
+    return () => {
+      entranceAnimRef.current?.stop();
+      balanceTransitionRef.current?.stop();
+      fadeAnim.stopAnimation();
+      balanceAnim.stopAnimation();
+      scaleAnim.stopAnimation();
+    };
+  }, [balanceAnim, fadeAnim, scaleAnim]);
 
   // Reset to USD if exchange rate is not available
   React.useEffect(() => {
@@ -1194,15 +1240,12 @@ export const HomeScreen = () => {
           </View>
 
           <Animated.View
-            style={[
-              styles.balanceContainer,
-              {
-                opacity: balanceAnim.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [1, 1],
-                }),
-              }
-            ]}
+          style={[
+            styles.balanceContainer,
+            {
+              opacity: 1,
+            }
+          ]}
           >
             <Text style={styles.currencySymbol}>
               {showLocalCurrency ? currency.symbol : '$'}
@@ -1270,10 +1313,7 @@ export const HomeScreen = () => {
                 opacity: fadeAnim,
                 transform: [
                   {
-                    translateY: fadeAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [20, 0],
-                    })
+                    translateY: fadeTranslateY20
                   }
                 ],
               }
@@ -1328,10 +1368,7 @@ export const HomeScreen = () => {
                 opacity: fadeAnim,
                 transform: [
                   {
-                    translateY: fadeAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [20, 0],
-                    })
+                    translateY: fadeTranslateY20
                   }
                 ],
               }
@@ -1375,10 +1412,7 @@ export const HomeScreen = () => {
               opacity: fadeAnim,
               transform: [
                 {
-                  translateY: fadeAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [30, 0],
-                  })
+                  translateY: fadeTranslateY30
                 }
               ],
             }
@@ -1444,10 +1478,7 @@ export const HomeScreen = () => {
                 opacity: fadeAnim,
                 transform: [
                   {
-                    translateY: fadeAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [40, 0],
-                    })
+                    translateY: fadeTranslateY40
                   }
                 ]
               }}

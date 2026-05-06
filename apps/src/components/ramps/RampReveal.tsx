@@ -10,9 +10,11 @@ type Props = {
 export const RampReveal = ({ children, delay = 0, style }: Props) => {
   const opacity = useRef(new Animated.Value(0)).current;
   const translateY = useRef(new Animated.Value(10)).current;
+  const revealAnimRef = useRef<Animated.CompositeAnimation | null>(null);
 
   useEffect(() => {
-    Animated.parallel([
+    revealAnimRef.current?.stop();
+    revealAnimRef.current = Animated.parallel([
       Animated.timing(opacity, {
         toValue: 1,
         duration: 260,
@@ -27,8 +29,20 @@ export const RampReveal = ({ children, delay = 0, style }: Props) => {
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }),
-    ]).start();
+    ]);
+    revealAnimRef.current.start();
+    return () => {
+      revealAnimRef.current?.stop();
+    };
   }, [delay, opacity, translateY]);
+
+  useEffect(() => {
+    return () => {
+      revealAnimRef.current?.stop();
+      opacity.stopAnimation();
+      translateY.stopAnimation();
+    };
+  }, [opacity, translateY]);
 
   return (
     <Animated.View style={[style, { opacity, transform: [{ translateY }] }]}>

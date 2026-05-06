@@ -29,11 +29,14 @@ export const FloatingActionButton: React.FC<FloatingActionButtonProps> = ({
   const translateYSend = useRef(new Animated.Value(0)).current;
   const translateYReceive = useRef(new Animated.Value(0)).current;
   const translateYScan = useRef(new Animated.Value(0)).current;
+  const fabAnimationRef = useRef<Animated.CompositeAnimation | null>(null);
+  const actionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    fabAnimationRef.current?.stop();
     if (isExpanded) {
       // Expand animations
-      Animated.parallel([
+      fabAnimationRef.current = Animated.parallel([
         Animated.spring(rotateAnim, {
           toValue: 1,
           useNativeDriver: true,
@@ -67,10 +70,11 @@ export const FloatingActionButton: React.FC<FloatingActionButtonProps> = ({
           delay: 100,
           useNativeDriver: true,
         }),
-      ]).start();
+      ]);
+      fabAnimationRef.current.start();
     } else {
       // Collapse animations
-      Animated.parallel([
+      fabAnimationRef.current = Animated.parallel([
         Animated.spring(rotateAnim, {
           toValue: 0,
           useNativeDriver: true,
@@ -102,9 +106,28 @@ export const FloatingActionButton: React.FC<FloatingActionButtonProps> = ({
           friction: 7,
           useNativeDriver: true,
         }),
-      ]).start();
+      ]);
+      fabAnimationRef.current.start();
     }
+    return () => {
+      fabAnimationRef.current?.stop();
+    };
   }, [isExpanded]);
+
+  useEffect(() => {
+    return () => {
+      fabAnimationRef.current?.stop();
+      if (actionTimeoutRef.current) {
+        clearTimeout(actionTimeoutRef.current);
+      }
+      rotateAnim.stopAnimation();
+      scaleAnim.stopAnimation();
+      fadeAnim.stopAnimation();
+      translateYSend.stopAnimation();
+      translateYReceive.stopAnimation();
+      translateYScan.stopAnimation();
+    };
+  }, [fadeAnim, rotateAnim, scaleAnim, translateYReceive, translateYScan, translateYSend]);
 
   const toggleExpanded = () => {
     setIsExpanded(!isExpanded);
@@ -112,7 +135,10 @@ export const FloatingActionButton: React.FC<FloatingActionButtonProps> = ({
 
   const handleAction = (action: () => void) => {
     setIsExpanded(false);
-    setTimeout(action, 200);
+    if (actionTimeoutRef.current) {
+      clearTimeout(actionTimeoutRef.current);
+    }
+    actionTimeoutRef.current = setTimeout(action, 200);
   };
 
   const rotation = rotateAnim.interpolate({

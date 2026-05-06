@@ -5,9 +5,10 @@ import os
 import sys
 import django
 import re
+from pathlib import Path
 
 # Setup Django
-sys.path.append('/opt/confio')
+sys.path.append(str(Path(__file__).resolve().parents[2]))
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
 django.setup()
 

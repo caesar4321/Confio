@@ -2,9 +2,10 @@ import os
 import django
 import sys
 import base64
+from pathlib import Path
 
 # Setup Django environment
-sys.path.append('/Users/julian/Confio')
+sys.path.append(str(Path(__file__).resolve().parents[2]))
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
 django.setup()
 

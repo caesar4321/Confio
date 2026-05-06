@@ -37,6 +37,7 @@ import { useAccount } from '../contexts/AccountContext';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
 import { biometricAuthService } from '../services/biometricAuthService';
+import { technicalFontFamily } from '../utils/fontFamily';
 
 type TradeChatRouteProp = RouteProp<MainStackParamList, 'TradeChat'>;
 type TradeChatNavigationProp = NativeStackNavigationProp<MainStackParamList, 'TradeChat'>;
@@ -2898,7 +2899,7 @@ const styles = StyleSheet.create({
   paymentInfoText: {
     fontSize: 14,
     color: '#1F2937',
-    fontFamily: 'monospace',
+    fontFamily: technicalFontFamily,
     lineHeight: 20,
   },
   paymentInfoTimestamp: {
@@ -3062,7 +3063,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     color: '#065F46',
-    fontFamily: 'monospace',
+    fontFamily: technicalFontFamily,
   },
   marketRate: {
     color: '#10B981',

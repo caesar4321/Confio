@@ -21,7 +21,21 @@ function setEnvValue(contents, key, value) {
 
 let resolvedDotenvContents = dotenvContents;
 
-if (process.env.ALLOW_APP_CHECK_DEBUG) {
+const gradleContextPath = path.resolve(__dirname, '.generated/appcheck-gradle-context');
+const gradleContext = fs.existsSync(gradleContextPath)
+  ? fs.readFileSync(gradleContextPath, 'utf8')
+  : '';
+const forceAppCheckDebugOff =
+  process.env.CONFIO_GRADLE_BUNDLE_RELEASE === 'true' ||
+  /^CONFIO_GRADLE_BUNDLE_RELEASE=true$/m.test(gradleContext);
+
+if (forceAppCheckDebugOff) {
+  resolvedDotenvContents = setEnvValue(
+    resolvedDotenvContents,
+    'ALLOW_APP_CHECK_DEBUG',
+    'false',
+  );
+} else if (process.env.ALLOW_APP_CHECK_DEBUG) {
   resolvedDotenvContents = setEnvValue(
     resolvedDotenvContents,
     'ALLOW_APP_CHECK_DEBUG',
@@ -36,7 +50,7 @@ fs.mkdirSync(generatedDir, { recursive: true });
 fs.writeFileSync(generatedDotenvPath, resolvedDotenvContents);
 
 console.log(
-  `[babel] Using ${path.basename(dotenvPath)} for react-native-dotenv (CONFIO_ENV=${envName}, ALLOW_APP_CHECK_DEBUG=${process.env.ALLOW_APP_CHECK_DEBUG ?? 'file'})`
+  `[babel] Using ${path.basename(dotenvPath)} for react-native-dotenv (CONFIO_ENV=${envName}, ALLOW_APP_CHECK_DEBUG=${forceAppCheckDebugOff ? 'forced-false-for-bundleRelease' : process.env.ALLOW_APP_CHECK_DEBUG ?? 'file'})`
 );
 
 module.exports = function babelConfig(api) {

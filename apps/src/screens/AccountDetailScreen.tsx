@@ -337,6 +337,16 @@ export const AccountDetailScreen = () => {
 
   // Pulse the convert CTA when USDC is available so users move it into cUSD
   const convertPulseAnim = useRef(new Animated.Value(1)).current;
+  const entranceAnimRef = useRef<Animated.CompositeAnimation | null>(null);
+  const searchAnimRef = useRef<Animated.CompositeAnimation | null>(null);
+  const searchTranslateY = useMemo(
+    () =>
+      searchAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [-10, 0],
+      }),
+    [searchAnim]
+  );
   const hasUsdcToConvert = shouldFetchUSDC && usdcBalance > 0.0001;
 
   useEffect(() => {
@@ -410,11 +420,16 @@ export const AccountDetailScreen = () => {
 
   // Animation entrance
   useEffect(() => {
-    Animated.timing(fadeAnim, {
+    entranceAnimRef.current?.stop();
+    entranceAnimRef.current = Animated.timing(fadeAnim, {
       toValue: 1,
       duration: 400,
       useNativeDriver: true,
-    }).start();
+    });
+    entranceAnimRef.current.start();
+    return () => {
+      entranceAnimRef.current?.stop();
+    };
   }, [fadeAnim]);
 
   // Load balance visibility preference on mount
@@ -461,12 +476,27 @@ export const AccountDetailScreen = () => {
 
   // Search animation
   useEffect(() => {
-    Animated.timing(searchAnim, {
+    searchAnimRef.current?.stop();
+    searchAnimRef.current = Animated.timing(searchAnim, {
       toValue: showSearch ? 1 : 0,
       duration: 300,
       useNativeDriver: true,
-    }).start();
+    });
+    searchAnimRef.current.start();
+    return () => {
+      searchAnimRef.current?.stop();
+    };
   }, [showSearch, searchAnim]);
+
+  useEffect(() => {
+    return () => {
+      entranceAnimRef.current?.stop();
+      searchAnimRef.current?.stop();
+      fadeAnim.stopAnimation();
+      searchAnim.stopAnimation();
+      convertPulseAnim.stopAnimation();
+    };
+  }, [convertPulseAnim, fadeAnim, searchAnim]);
 
 
 
@@ -2204,10 +2234,7 @@ export const AccountDetailScreen = () => {
                       opacity: searchAnim,
                       transform: [
                         {
-                          translateY: searchAnim.interpolate({
-                            inputRange: [0, 1],
-                            outputRange: [-10, 0],
-                          })
+                          translateY: searchTranslateY
                         }
                       ]
                     }

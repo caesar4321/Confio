@@ -63,6 +63,16 @@ class AppCheckService {
                 // Use the new modular API for App Check initialization
                 const rnfbProvider = appCheck().newReactNativeFirebaseAppCheckProvider();
                 const useDebugProvider = await this.shouldUseDebugProvider();
+                const providerName = useDebugProvider ? 'debug' : Platform.OS === 'android' ? 'playIntegrity' : 'appAttest';
+
+                console.log('[AppCheck] Initializing provider:', {
+                    platform: Platform.OS,
+                    provider: providerName,
+                    debugAllowed: this.isDebugAllowed(),
+                    hasDebugToken: Platform.OS === 'android'
+                        ? Boolean(FIREBASE_APP_CHECK_DEBUG_TOKEN_ANDROID)
+                        : Boolean(FIREBASE_APP_CHECK_DEBUG_TOKEN_IOS),
+                });
 
                 rnfbProvider.configure({
                     android: {
@@ -129,6 +139,16 @@ class AppCheckService {
         return Boolean(this.lastFetchAttemptAt && now - this.lastFetchAttemptAt < AppCheckService.FETCH_ATTEMPT_COOLDOWN_MS);
     }
 
+    private startTokenFetch(forceRefresh = false): Promise<string | null> {
+        if (!this.tokenPromise) {
+            this.tokenPromise = this.fetchToken(forceRefresh).finally(() => {
+                this.tokenPromise = null;
+            });
+        }
+
+        return this.tokenPromise;
+    }
+
     /**
      * Get App Check token
      * Returns null if unavailable (which is logged but not blocked)
@@ -156,9 +176,9 @@ class AppCheckService {
             this.recordFailure(forceRefresh ? 'EMPTY_TOKEN_FORCE_REFRESH' : 'EMPTY_TOKEN');
             return null;
         } catch (error: any) {
-            this.recordFailure(
-                `${forceRefresh ? 'FORCE_REFRESH_FAILED' : 'FETCH_FAILED'}:${this.normalizeError(error)}`
-            );
+            const normalizedError = this.normalizeError(error);
+            console.warn('[AppCheck] Token fetch failed:', normalizedError);
+            this.recordFailure(`${forceRefresh ? 'FORCE_REFRESH_FAILED' : 'FETCH_FAILED'}:${normalizedError}`);
             return null;
         }
     }
@@ -174,6 +194,10 @@ class AppCheckService {
             return this.lastToken;
         }
 
+        if (this.tokenPromise) {
+            return this.tokenPromise;
+        }
+
         if (this.isRateLimitedNow() || this.isFetchCoolingDown(now)) {
             return this.lastToken;
         }
@@ -182,13 +206,7 @@ class AppCheckService {
             return this.lastToken;
         }
 
-        if (!this.tokenPromise) {
-            this.tokenPromise = this.fetchToken().finally(() => {
-                this.tokenPromise = null;
-            });
-        }
-
-        return this.tokenPromise;
+        return this.startTokenFetch();
     }
 
     getLastErrorForDebug(): string | null {
@@ -204,6 +222,10 @@ class AppCheckService {
     }
 
     async primeTokenForAuth(): Promise<string | null> {
+        if (this.tokenPromise) {
+            return this.tokenPromise;
+        }
+
         return this.getTokenForHeader();
     }
 }

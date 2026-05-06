@@ -719,10 +719,14 @@ export const PaymentProcessingScreen = () => {
     };
   }, []);
 
-  const spin = spinValue.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0deg', '360deg'],
-  });
+  const spin = useMemo(
+    () =>
+      spinValue.interpolate({
+        inputRange: [0, 1],
+        outputRange: ['0deg', '360deg'],
+      }),
+    [spinValue]
+  );
 
   // Don't render anything if not valid
   if (!isValid) {

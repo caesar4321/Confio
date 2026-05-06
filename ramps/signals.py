@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from decimal import Decimal
 
 from django.db.models.signals import post_save, pre_save
@@ -17,6 +18,10 @@ from users.funnel import emit_event
 from users.models_unified import UnifiedTransactionTable
 from users.utils import touch_user_activity
 from send.models import PhoneInvite
+
+GUARDARIAN_CONVERSION_LINK_WINDOW = timedelta(days=14)
+GUARDARIAN_WAITING_FOR_AUTOSWAP = 'deposit_confirmed_waiting_for_user_autoswap'
+GUARDARIAN_AUTOSWAP_FAILED_RETRYABLE = 'deposit_confirmed_autoswap_failed_retryable'
 
 
 def _safe_related(instance, attr_name: str):
@@ -53,13 +58,13 @@ def _derive_guardarian_ramp_outcome(guardarian_tx: GuardarianTransaction) -> tup
 
     if direction == 'on_ramp':
         if conversion and conversion.status == 'FAILED':
-            return 'FAILED', 'deposit_confirmed_conversion_failed', None
+            return 'PROCESSING', GUARDARIAN_AUTOSWAP_FAILED_RETRYABLE, None
         if conversion and conversion.status == 'COMPLETED':
             return 'COMPLETED', 'conversion_completed', timezone.now()
         if deposit and deposit.status == 'COMPLETED':
             if provider_status == 'FAILED':
                 return 'FAILED', 'provider_failed_after_deposit', None
-            return 'PROCESSING', 'deposit_confirmed_conversion_pending', None
+            return 'PROCESSING', GUARDARIAN_WAITING_FOR_AUTOSWAP, None
         if provider_status == 'COMPLETED':
             return 'AML_REVIEW', 'provider_finished_missing_blockchain_match', None
     else:
@@ -123,6 +128,36 @@ def _derive_final_amount(ramp_tx: RampTransaction) -> tuple[Decimal | None, str]
     if ramp_tx.crypto_amount_estimated is not None:
         return ramp_tx.crypto_amount_estimated, 'CUSD'
     return None, ramp_tx.final_currency or 'CUSD'
+
+
+def _find_guardarian_ramp_for_conversion(conversion: Conversion) -> RampTransaction | None:
+    if conversion.status != 'COMPLETED':
+        return None
+    if conversion.conversion_type != 'usdc_to_cusd':
+        return None
+    if not conversion.actor_user_id or not conversion.actor_address:
+        return None
+    if conversion.from_amount is None:
+        return None
+
+    return (
+        RampTransaction.objects
+        .filter(
+            provider='guardarian',
+            direction='on_ramp',
+            actor_user_id=conversion.actor_user_id,
+            actor_address=conversion.actor_address,
+            conversion__isnull=True,
+            usdc_deposit__isnull=False,
+            status__in=['PENDING', 'PROCESSING', 'AML_REVIEW'],
+            created_at__gte=timezone.now() - GUARDARIAN_CONVERSION_LINK_WINDOW,
+        )
+        .filter(
+            usdc_deposit__amount=conversion.from_amount,
+        )
+        .order_by('-created_at')
+        .first()
+    )
 
 
 def _classify_first_deposit_source(user_id: int | None) -> str:
@@ -457,12 +492,12 @@ def handle_ramp_deposit_link(sender, instance, **kwargs):
         if (
             ramp_tx.usdc_deposit_id != instance.id
             or ramp_tx.actor_address != (instance.actor_address or '')
-            or ramp_tx.status_detail != 'deposit_confirmed_conversion_pending'
+            or ramp_tx.status_detail != GUARDARIAN_WAITING_FOR_AUTOSWAP
         ):
             ramp_tx.usdc_deposit = instance
             ramp_tx.actor_address = instance.actor_address or ramp_tx.actor_address
             ramp_tx.status = 'PROCESSING'
-            ramp_tx.status_detail = 'deposit_confirmed_conversion_pending'
+            ramp_tx.status_detail = GUARDARIAN_WAITING_FOR_AUTOSWAP
             ramp_tx.save(update_fields=['usdc_deposit', 'actor_address', 'status', 'status_detail', 'updated_at'])
         return
 
@@ -489,11 +524,11 @@ def handle_ramp_withdrawal_link(sender, instance, **kwargs):
 
 @receiver(post_save, sender=Conversion)
 def handle_ramp_conversion_link(sender, instance, **kwargs):
-    # Conversion auto-linking is intentionally conservative. Only attach if the conversion
-    # is already explicitly linked to a ramp transaction.
     ramp_tx = _safe_related(instance, 'ramp_transaction')
     if not ramp_tx:
-        return
+        ramp_tx = _find_guardarian_ramp_for_conversion(instance)
+        if not ramp_tx:
+            return
     ramp_tx.conversion = instance
     ramp_tx.actor_address = instance.actor_address or ramp_tx.actor_address
     ramp_tx.final_amount, ramp_tx.final_currency = _derive_final_amount(ramp_tx)
@@ -518,11 +553,11 @@ def handle_ramp_conversion_link(sender, instance, **kwargs):
         if not ramp_tx.completed_at:
             ramp_tx.completed_at = timezone.now()
     elif instance.status == 'FAILED':
-        ramp_tx.status = 'FAILED'
-        ramp_tx.status_detail = 'deposit_confirmed_conversion_failed'
+        ramp_tx.status = 'PROCESSING'
+        ramp_tx.status_detail = GUARDARIAN_AUTOSWAP_FAILED_RETRYABLE
         ramp_tx.completed_at = None
     else:
         ramp_tx.status = 'PROCESSING'
-        ramp_tx.status_detail = 'deposit_confirmed_conversion_pending'
+        ramp_tx.status_detail = GUARDARIAN_WAITING_FOR_AUTOSWAP
         ramp_tx.completed_at = None
     ramp_tx.save(update_fields=['conversion', 'actor_address', 'final_amount', 'final_currency', 'status', 'status_detail', 'completed_at', 'updated_at'])

@@ -42,6 +42,8 @@ export const RampAddressScreen: React.FC = () => {
   const [savedSuccess, setSavedSuccess] = useState(false);
 
   const successOpacity = useRef(new Animated.Value(0)).current;
+  const successBannerAnimRef = useRef<Animated.CompositeAnimation | null>(null);
+  const isMountedRef = useRef(true);
 
   const rampAddress = data?.myRampAddress;
   const phoneCountryIso = String(userProfile?.phoneCountry || '').toUpperCase();
@@ -77,13 +79,26 @@ export const RampAddressScreen: React.FC = () => {
     );
   }, [addressStreet, addressCity, addressState, addressZipCode, authEmail, rampAddress, shouldShowAuthEmailField]);
 
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      successBannerAnimRef.current?.stop();
+      successOpacity.stopAnimation();
+    };
+  }, [successOpacity]);
+
   const showSuccessBanner = () => {
     setSavedSuccess(true);
-    Animated.sequence([
+    successBannerAnimRef.current?.stop();
+    successBannerAnimRef.current = Animated.sequence([
       Animated.timing(successOpacity, { toValue: 1, duration: 250, useNativeDriver: true }),
       Animated.delay(2000),
       Animated.timing(successOpacity, { toValue: 0, duration: 400, useNativeDriver: true }),
-    ]).start(() => {
+    ]);
+    successBannerAnimRef.current.start(() => {
+      if (!isMountedRef.current) {
+        return;
+      }
       setSavedSuccess(false);
       navigation.goBack();
     });

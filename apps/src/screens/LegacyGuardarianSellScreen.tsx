@@ -33,6 +33,7 @@ import { getFlagForCurrency } from '../utils/currencyFlags';
 import USDCLogo from '../assets/png/USDC.png';
 import PreFlightModal from '../components/PreFlightModal';
 import GuardarianReturnModal from '../components/GuardarianReturnModal';
+import { technicalFontFamily } from '../utils/fontFamily';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'Sell'>;
 
@@ -759,7 +760,7 @@ const styles = StyleSheet.create({
         fontSize: 14,
         color: '#111827',
         flex: 1,
-        fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+        fontFamily: technicalFontFamily,
     },
     memoContainer: {
         marginTop: 16,

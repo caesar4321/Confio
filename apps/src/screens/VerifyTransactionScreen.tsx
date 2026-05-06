@@ -6,6 +6,7 @@ import { useQuery, gql } from '@apollo/client';
 import Icon from 'react-native-vector-icons/Feather';
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
+import { technicalFontFamily } from '../utils/fontFamily';
 
 type VerifyScreenRouteProp = RouteProp<MainStackParamList, 'VerifyTransaction'>;
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'VerifyTransaction'>;
@@ -341,7 +342,7 @@ const styles = StyleSheet.create({
         marginTop: 2,
     },
     monoText: {
-        fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+        fontFamily: technicalFontFamily,
         fontSize: 13,
     },
     hashBox: {
@@ -357,7 +358,7 @@ const styles = StyleSheet.create({
     },
     hashText: {
         fontSize: 13,
-        fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+        fontFamily: technicalFontFamily,
         color: colors.text,
     },
     hashRow: {

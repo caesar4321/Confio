@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useMemo } from 'react';
 import {
   View,
   Text,
@@ -56,12 +56,19 @@ export const ExchangeHeader = React.memo<ExchangeHeaderProps>(({
   const HEADER_HEIGHT = activeList === 'offers' ? 320 : 100;
   
   // Animated values
-  const scrollYClamped = Animated.diffClamp(scrollY, 0, HEADER_HEIGHT);
-  const headerTranslateY = scrollYClamped.interpolate({
-    inputRange: [0, HEADER_HEIGHT],
-    outputRange: [0, -HEADER_HEIGHT],
-    extrapolate: 'clamp',
-  });
+  const scrollYClamped = useMemo(
+    () => Animated.diffClamp(scrollY, 0, HEADER_HEIGHT),
+    [scrollY, HEADER_HEIGHT]
+  );
+  const headerTranslateY = useMemo(
+    () =>
+      scrollYClamped.interpolate({
+        inputRange: [0, HEADER_HEIGHT],
+        outputRange: [0, -HEADER_HEIGHT],
+        extrapolate: 'clamp',
+      }),
+    [scrollYClamped, HEADER_HEIGHT]
+  );
 
   return (
     <Animated.View

@@ -8,6 +8,11 @@ apply from: "../../node_modules/react-native-vector-icons/fonts.gradle"
 
 // 2) point at your JS root (where apps/node_modules & package.json live)
 def jsRoot = file("$projectDir/../..")
+def gradleTaskNames = gradle.startParameter.taskNames.collect { it.toLowerCase() }
+def isBundleReleaseTask = gradleTaskNames.any { it == "bundlerelease" || it.endsWith(":bundlerelease") }
+def appCheckGradleContextFile = file("$jsRoot/.generated/appcheck-gradle-context")
+appCheckGradleContextFile.parentFile.mkdirs()
+appCheckGradleContextFile.text = "CONFIO_GRADLE_BUNDLE_RELEASE=${isBundleReleaseTask}\n"
 
 // 3) configure the built-in `react { … }` block
 react {
@@ -22,6 +27,11 @@ react {
 // Disable autolinking tasks
 project.afterEvaluate {
     tasks.findByName('generateAutolinkingPackageList')?.enabled = false
+    tasks.matching { it.name == "createBundleReleaseJsAndAssets" }.configureEach {
+        inputs.file(appCheckGradleContextFile)
+        inputs.property("confioAllowAppCheckDebug", System.getenv("ALLOW_APP_CHECK_DEBUG") ?: "")
+        inputs.property("confioEnv", System.getenv("CONFIO_ENV") ?: "")
+    }
 }
 
 // 4) any other scripts (fonts, etc)
@@ -41,7 +51,6 @@ tasks.named("preBuild").configure { dependsOn("cleanVisionCameraCxx") }
 def enableProguardInReleaseBuilds = (findProperty('android.enableProguardInReleaseBuilds') ?: false).toBoolean()
 def releaseAbis = ["armeabi-v7a", "arm64-v8a"]
 def debugAbis = ["armeabi-v7a", "arm64-v8a", "x86", "x86_64"]
-def isReleaseBuild = gradle.startParameter.taskNames.any { it.toLowerCase().contains("release") }
 
 /**
  * The preferred build flavor of JavaScriptCore (JSC)
@@ -62,17 +71,15 @@ println "Looking for .env at: ${envFile.absolutePath}"
 println "Env file exists: ${envFile.exists()}"
 if (envFile.exists()) {
     envFile.eachLine { line ->
-        println "Reading line: $line"
         def matcher = (line =~ /^([^=]+)=(.*)$/)
         if (matcher.matches()) {
             def key = matcher.group(1).trim()
             def value = matcher.group(2).trim()
             envProperties[key] = value
-            println "Added property: $key = $value"
         }
     }
 }
-println "Final properties: $envProperties"
+println "Loaded ${envProperties.size()} Android env properties"
 
 android {
     ndkVersion "27.1.12297006"
@@ -85,10 +92,10 @@ android {
         applicationId "com.Confio.Confio"
         minSdkVersion 24
         targetSdkVersion 35
-        versionCode 97
-        versionName "4.2.8"
+        versionCode 106
+        versionName "4.3.4"
         ndk {
-            abiFilters(*debugAbis)
+            abiFilters(*releaseAbis)
         }
         buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", rootProject.ext.newArchEnabled.toString()
         if (rootProject.ext.newArchEnabled) {
@@ -148,6 +155,9 @@ android {
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
+            ndk {
+                abiFilters(*debugAbis)
+            }
         }
         release {
             signingConfig signingConfigs.release
@@ -161,9 +171,9 @@ android {
     }
     packagingOptions {
         jniLibs {
-            // Keep extraction only for release ARM builds. This avoids the arm64/x86_64
-            // lib-main mismatch while preserving the install-time workaround for RN libs.
-            useLegacyPackaging isReleaseBuild
+            // Extract RN native libraries so SoLoader's ApplicationSoSource can resolve
+            // libreactnative.so reliably on split APK/App Bundle installs.
+            useLegacyPackaging true
         }
         excludes = [
             // "**/libc++_shared.so" // Reverted to find conflict
@@ -248,10 +258,6 @@ dependencies {
 
     // Play Integrity API for device verification
     implementation 'com.google.android.play:integrity:1.3.0'
-    
-    // Firebase App Check with Play Integrity provider
-    implementation 'com.google.firebase:firebase-appcheck-playintegrity'
-    implementation 'com.google.firebase:firebase-appcheck-debug'
 
     implementation "com.facebook.react:react-native:+" // From node_modules
     implementation project(':react-native-vision-camera')

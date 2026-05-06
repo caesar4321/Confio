@@ -36,6 +36,7 @@ import { getSupportCopy } from '../utils/supportMessaging';
 import { colors } from '../config/theme';
 import { StatusTierBadge } from '../components/StatusTierBadge';
 import { buildInviteLink } from '../utils/inviteLinks';
+import { technicalFontFamily } from '../utils/fontFamily';
 
 type TransactionDetailScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 type TransactionDetailScreenRouteProp = RouteProp<MainStackParamList, 'TransactionDetail'>;
@@ -721,7 +722,7 @@ export const TransactionDetailScreen = () => {
     hashText: {
       fontSize: 12,
       color: '#6b7280',
-      fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+      fontFamily: technicalFontFamily,
       flex: 1,
     },
     technicalRow: {

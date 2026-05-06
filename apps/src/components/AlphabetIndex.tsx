@@ -21,6 +21,7 @@ export const AlphabetIndex: React.FC<AlphabetIndexProps> = ({
   const [selectedLetter, setSelectedLetter] = useState<string | null>(null);
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.8)).current;
+  const previewAnimRef = useRef<Animated.CompositeAnimation | null>(null);
 
   const panResponder = useRef(
     PanResponder.create({
@@ -29,7 +30,8 @@ export const AlphabetIndex: React.FC<AlphabetIndexProps> = ({
       
       onPanResponderGrant: (evt) => {
         // Show the index
-        Animated.parallel([
+        previewAnimRef.current?.stop();
+        previewAnimRef.current = Animated.parallel([
           Animated.timing(fadeAnim, {
             toValue: 1,
             duration: 200,
@@ -40,7 +42,8 @@ export const AlphabetIndex: React.FC<AlphabetIndexProps> = ({
             friction: 5,
             useNativeDriver: true,
           }),
-        ]).start();
+        ]);
+        previewAnimRef.current.start();
         
         handleTouch(evt.nativeEvent.locationY);
       },
@@ -51,7 +54,8 @@ export const AlphabetIndex: React.FC<AlphabetIndexProps> = ({
       
       onPanResponderRelease: () => {
         // Hide the index
-        Animated.parallel([
+        previewAnimRef.current?.stop();
+        previewAnimRef.current = Animated.parallel([
           Animated.timing(fadeAnim, {
             toValue: 0,
             duration: 200,
@@ -62,12 +66,21 @@ export const AlphabetIndex: React.FC<AlphabetIndexProps> = ({
             friction: 5,
             useNativeDriver: true,
           }),
-        ]).start();
+        ]);
+        previewAnimRef.current.start();
         
         setSelectedLetter(null);
       },
     })
   ).current;
+
+  React.useEffect(() => {
+    return () => {
+      previewAnimRef.current?.stop();
+      fadeAnim.stopAnimation();
+      scaleAnim.stopAnimation();
+    };
+  }, [fadeAnim, scaleAnim]);
 
   const handleTouch = (y: number) => {
     const letterHeight = 20; // Approximate height per letter
