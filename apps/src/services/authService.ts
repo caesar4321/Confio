@@ -23,6 +23,26 @@ import algorandService from './algorandService';
 
 const LEGACY_CONFIO_ASSET_ID = '3198568509';
 const MATERIAL_SPENDABLE_ALGO_MICROS = 100_000;
+const ga4SignUpServiceForUser = (userId: string) => `com.confio.analytics.sign_up.${userId}`;
+
+async function emitNewUserSignupOnce(userId: unknown, method: 'google' | 'apple'): Promise<void> {
+  if (!userId) return;
+  const normalizedUserId = String(userId);
+  const service = ga4SignUpServiceForUser(normalizedUserId);
+  try {
+    const existing = await Keychain.getGenericPassword({ service });
+    if (existing) return;
+
+    const { AnalyticsService } = await import('./analyticsService');
+    void AnalyticsService.logEvent('sign_up', {
+      method,
+      user_id: normalizedUserId,
+    });
+    await Keychain.setGenericPassword('ga4_sign_up', new Date().toISOString(), { service });
+  } catch (_e) {
+    // Analytics must not block authentication.
+  }
+}
 
 // Import OAuth storage - handle gracefully if module not found
 let oauthStorage: any = null;
@@ -690,6 +710,9 @@ export class AuthService {
         }
         throw new Error(backendError);
       }
+      if (authData.isNewUser) {
+        void emitNewUserSignupOnce(authData.user?.id, 'google');
+      }
 
       // ----------------------------------------------------------------------
       // NATIVE V2 CHECK:
@@ -1027,6 +1050,9 @@ export class AuthService {
           throw new AccountDeactivatedError(backendError);
         }
         throw new Error(backendError);
+      }
+      if (authData.isNewUser) {
+        void emitNewUserSignupOnce(authData.user?.id, 'apple');
       }
 
       // Store Django JWT tokens immediately so subsequent GraphQL is authenticated

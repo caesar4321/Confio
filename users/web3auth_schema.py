@@ -63,6 +63,7 @@ class Web3AuthLoginMutation(graphene.Mutation):
     needs_opt_in = graphene.List(graphene.String)  # Asset IDs that need opt-in (use String to avoid 32-bit Int limits)
     opt_in_transactions = graphene.JSONString()  # Unsigned transactions for opt-in
     is_keyless_migrated = graphene.Boolean()  # True if user is V2 Native (Random Secret)
+    is_new_user = graphene.Boolean()  # True only when this Web3Auth login created a new User row
     
     @classmethod
     def mutate(cls, root, info, firebase_id_token, algorand_address=None, device_fingerprint=None, platform_os=None):
@@ -513,7 +514,8 @@ class Web3AuthLoginMutation(graphene.Mutation):
                 user=user,
                 needs_opt_in=[str(a) for a in assets_to_opt_in],
                 opt_in_transactions=opt_in_transactions,
-                is_keyless_migrated=is_keyless_migrated_status
+                is_keyless_migrated=is_keyless_migrated_status,
+                is_new_user=created
             )
             
         except Exception as e:

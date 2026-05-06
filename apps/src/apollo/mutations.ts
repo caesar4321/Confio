@@ -93,6 +93,7 @@ export const WEB3AUTH_LOGIN = gql`
       needsOptIn
       optInTransactions
       isKeylessMigrated
+      isNewUser
       user {
         id
         email
