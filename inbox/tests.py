@@ -1,10 +1,107 @@
+from datetime import timedelta
+
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from users.models import User
+from users.models import Account, User
 
-from .models import Channel, ChannelKind, ContentItem, ContentStatus, ContentSurface, ContentSurfaceType
+from .models import (
+    Channel,
+    ChannelKind,
+    ContentItem,
+    ContentStatus,
+    ContentSurface,
+    ContentSurfaceType,
+    SupportConversation,
+    SupportConversationStatus,
+    SupportMessage,
+    SupportSenderType,
+)
+from .schema import Query
+
+
+class MockInfo:
+    class Context:
+        def __init__(self, user):
+            self.user = user
+
+    def __init__(self, user):
+        self.context = self.Context(user)
+
+
+class PortalSupportConversationSearchTests(TestCase):
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username='staff',
+            email='staff@example.com',
+            password='testpass123',
+            firebase_uid='firebase-staff',
+            is_staff=True,
+        )
+        self.staff.is_verified = lambda: True
+        self.query = Query()
+        self.info = MockInfo(self.staff)
+
+    def _create_conversation(self, index, *, first_name='User', last_name='', email=None, body='General question', minutes_ago=0):
+        user = User.objects.create_user(
+            username=f'user{index}',
+            email=email or f'user{index}@example.com',
+            password='testpass123',
+            firebase_uid=f'firebase-user-{index}',
+            first_name=first_name,
+            last_name=last_name,
+        )
+        account = Account.objects.create(user=user, account_type='personal', account_index=0)
+        conversation = SupportConversation.objects.create(
+            user=user,
+            account=account,
+            status=SupportConversationStatus.OPEN,
+            last_message_at=timezone.now() - timedelta(minutes=minutes_ago),
+        )
+        SupportMessage.objects.create(
+            conversation=conversation,
+            sender_type=SupportSenderType.USER,
+            sender_user=user,
+            body=body,
+            created_at=conversation.last_message_at,
+        )
+        return conversation
+
+    def test_search_matches_customer_outside_default_first_100(self):
+        target = self._create_conversation(
+            999,
+            first_name='Needle',
+            last_name='Customer',
+            minutes_ago=999,
+        )
+        for index in range(105):
+            self._create_conversation(index, minutes_ago=index)
+
+        results = self.query.resolve_portal_support_conversations(
+            self.info,
+            status=SupportConversationStatus.OPEN,
+            search='Needle',
+        )
+
+        self.assertEqual([result.id for result in results], [str(target.id)])
+
+    def test_search_matches_message_body_outside_default_first_100(self):
+        target = self._create_conversation(
+            1000,
+            body='My transfer has the unique reference AlphaNeedle42',
+            minutes_ago=999,
+        )
+        for index in range(105):
+            self._create_conversation(index, minutes_ago=index)
+
+        results = self.query.resolve_portal_support_conversations(
+            self.info,
+            status=SupportConversationStatus.OPEN,
+            search='AlphaNeedle42',
+        )
+
+        self.assertEqual([result.id for result in results], [str(target.id)])
 
 
 class DiscoverStructuredDataTests(TestCase):

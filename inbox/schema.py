@@ -751,6 +751,7 @@ class Query(graphene.ObjectType):
     portal_support_conversations = graphene.List(
         PortalSupportConversationType,
         status=graphene.String(required=False),
+        search=graphene.String(required=False),
     )
     portal_support_conversation = graphene.Field(
         PortalSupportConversationType,
@@ -828,13 +829,27 @@ class Query(graphene.ObjectType):
         )
 
     @login_required
-    def resolve_portal_support_conversations(self, info, status=None):
+    def resolve_portal_support_conversations(self, info, status=None, search=None):
         require_staff_user(info)
         queryset = SupportConversation.objects.select_related(
             'user', 'account', 'business', 'assigned_to'
         ).prefetch_related('messages__sender_user').order_by('-last_message_at', '-updated_at')
         if status:
             queryset = queryset.filter(status=status)
+        normalized_search = (search or '').strip()
+        if normalized_search:
+            queryset = queryset.filter(
+                Q(user__username__icontains=normalized_search)
+                | Q(user__email__icontains=normalized_search)
+                | Q(user__first_name__icontains=normalized_search)
+                | Q(user__last_name__icontains=normalized_search)
+                | Q(business__name__icontains=normalized_search)
+                | Q(assigned_to__username__icontains=normalized_search)
+                | Q(assigned_to__email__icontains=normalized_search)
+                | Q(assigned_to__first_name__icontains=normalized_search)
+                | Q(assigned_to__last_name__icontains=normalized_search)
+                | Q(messages__body__icontains=normalized_search)
+            ).distinct()
         payloads = [build_portal_support_conversation_payload(conversation) for conversation in queryset[:100]]
         # Awaiting staff reply (unread) first, then by most recent
         payloads.sort(key=lambda c: (-c.unread_count, c.last_message_at is None, -(c.last_message_at.timestamp() if c.last_message_at else 0)))

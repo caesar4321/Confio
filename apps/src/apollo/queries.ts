@@ -43,8 +43,8 @@ export const GET_MY_RAMP_ADDRESS = gql`
 `;
 
 export const GET_PORTAL_SUPPORT_CONVERSATIONS = gql`
-  query GetPortalSupportConversations($status: String) {
-    portalSupportConversations(status: $status) {
+  query GetPortalSupportConversations($status: String, $search: String) {
+    portalSupportConversations(status: $status, search: $search) {
       id
       customerName
       customerEmail

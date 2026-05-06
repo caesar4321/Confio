@@ -28,8 +28,8 @@ const GET_PORTAL_ME = gql`
 `;
 
 const GET_PORTAL_SUPPORT_CONVERSATIONS = gql`
-  query GetPortalSupportConversations($status: String) {
-    portalSupportConversations(status: $status) {
+  query GetPortalSupportConversations($status: String, $search: String) {
+    portalSupportConversations(status: $status, search: $search) {
       id
       customerName
       customerEmail
@@ -252,6 +252,17 @@ function createImageBlock(image) {
     type: 'image',
     image,
   };
+}
+
+function useDebouncedValue(value, delayMs) {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => setDebouncedValue(value), delayMs);
+    return () => window.clearTimeout(timeoutId);
+  }, [value, delayMs]);
+
+  return debouncedValue;
 }
 
 function normalizeBlocks(metadata, fallbackBody) {
@@ -580,6 +591,7 @@ export default function PortalConsole() {
   const supportThreadRef = useRef(null);
   const replyTextareaRef = useRef(null);
   const { toasts, addToast, dismissToast } = useToasts();
+  const debouncedSupportSearch = useDebouncedValue(supportSearch.trim(), 250);
 
   /* ─── Queries ─── */
 
@@ -593,7 +605,7 @@ export default function PortalConsole() {
     Boolean(meQuery.data?.me?.isStaff) &&
     isOtpVerified;
   const supportQuery = useQuery(GET_PORTAL_SUPPORT_CONVERSATIONS, {
-    variables: { status: supportStatus },
+    variables: { status: supportStatus, search: debouncedSupportSearch || null },
     skip: !meQuery.data?.me?.isStaff || !isOtpVerified,
     fetchPolicy: 'network-only',
     pollInterval: shouldPollSupport ? SUPPORT_POLL_INTERVAL_MS : 0,
@@ -617,7 +629,10 @@ export default function PortalConsole() {
 
   const [sendReply, sendReplyState] = useMutation(PORTAL_SEND_SUPPORT_REPLY, {
     refetchQueries: [
-      { query: GET_PORTAL_SUPPORT_CONVERSATIONS, variables: { status: supportStatus } },
+      {
+        query: GET_PORTAL_SUPPORT_CONVERSATIONS,
+        variables: { status: supportStatus, search: debouncedSupportSearch || null },
+      },
       ...(activeConversationId
         ? [{ query: GET_PORTAL_SUPPORT_CONVERSATION, variables: { conversationId: activeConversationId } }]
         : []),
@@ -625,7 +640,10 @@ export default function PortalConsole() {
   });
   const [setSupportStatusMutation] = useMutation(PORTAL_SET_SUPPORT_STATUS, {
     refetchQueries: [
-      { query: GET_PORTAL_SUPPORT_CONVERSATIONS, variables: { status: supportStatus } },
+      {
+        query: GET_PORTAL_SUPPORT_CONVERSATIONS,
+        variables: { status: supportStatus, search: debouncedSupportSearch || null },
+      },
       ...(activeConversationId
         ? [{ query: GET_PORTAL_SUPPORT_CONVERSATION, variables: { conversationId: activeConversationId } }]
         : []),
@@ -641,16 +659,8 @@ export default function PortalConsole() {
 
   const conversations = supportQuery.data?.portalSupportConversations || [];
   const filteredConversations = useMemo(() => {
-    if (!supportSearch.trim()) return conversations;
-    const q = supportSearch.toLowerCase();
-    return conversations.filter(
-      (c) =>
-        c.customerName?.toLowerCase().includes(q) ||
-        c.customerEmail?.toLowerCase().includes(q) ||
-        c.contextLabel?.toLowerCase().includes(q) ||
-        c.lastPreview?.toLowerCase().includes(q)
-    );
-  }, [conversations, supportSearch]);
+    return conversations;
+  }, [conversations]);
 
   const totalUnread = useMemo(
     () => conversations.reduce((sum, c) => sum + (c.unreadCount || 0), 0),
@@ -684,7 +694,13 @@ export default function PortalConsole() {
   /* ─── Effects ─── */
 
   useEffect(() => {
-    if (!activeConversationId && filteredConversations[0]?.id) {
+    if (filteredConversations.length === 0) {
+      if (activeConversationId) {
+        setActiveConversationId(null);
+      }
+      return;
+    }
+    if (!activeConversationId || !filteredConversations.some((conversation) => conversation.id === activeConversationId)) {
       setActiveConversationId(filteredConversations[0].id);
     }
   }, [activeConversationId, filteredConversations]);
