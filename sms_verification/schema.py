@@ -129,9 +129,6 @@ class InitiateSMSVerification(graphene.Mutation):
                 # Never fail the flow due to review bypass logic
                 pass
 
-            # Clean up previous unverified for this phone (housekeeping)
-            SMSVerification.objects.filter(user=user, phone_number=phone_e164, is_verified=False).delete()
-
             # --- Firebase App Check Enforcement ---
             from security.integrity_service import app_check_service
             
@@ -146,6 +143,17 @@ class InitiateSMSVerification(graphene.Mutation):
             if not verification.get('valid', False):
                 logger.warning(f"SMS requested with INVALID App Check token by user {user.id} to {phone_e164}")
                 return InitiateSMSVerification(success=False, error="Límites de seguridad excedidos. Intenta más tarde o actualiza tu app.")
+
+            if not phone_e164:
+                valid, phone_e164, _resolved_iso, lookup_line_type = lookup_phone_with_line_type(
+                    phone_number,
+                    country_code=country_code,
+                )
+                if not valid or not phone_e164:
+                    return InitiateSMSVerification(success=False, error="Número inválido. Verifica el número e inténtalo nuevamente.")
+
+            # Clean up previous unverified for this resolved phone (housekeeping)
+            SMSVerification.objects.filter(user=user, phone_number=phone_e164, is_verified=False).delete()
 
             # --- Rate Limiting Checks ---
             from django.core.cache import cache
@@ -212,14 +220,6 @@ class InitiateSMSVerification(graphene.Mutation):
                     return InitiateSMSVerification(success=False, error="Límites de seguridad de dispositivo excedidos. Intenta más tarde.")
 
             # --- End Rate Limiting ---
-
-            if not phone_e164:
-                valid, phone_e164, _resolved_iso, lookup_line_type = lookup_phone_with_line_type(
-                    phone_number,
-                    country_code=country_code,
-                )
-                if not valid or not phone_e164:
-                    return InitiateSMSVerification(success=False, error="Número inválido. Verifica el número e inténtalo nuevamente.")
 
             logger.info(f"Carrier Lookup for {phone_e164}: {lookup_line_type}")
             
