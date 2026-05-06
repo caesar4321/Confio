@@ -19,6 +19,7 @@ import { GET_BUSINESS_KYC_STATUS, GET_ME, GET_MY_KYC_STATUS, GET_MY_PERSONAL_KYC
 import { CREATE_DIDIT_VERIFICATION_SESSION, SYNC_DIDIT_VERIFICATION_SESSION } from '../apollo/mutations';
 import { useAccount } from '../contexts/AccountContext';
 import { getDiditResultSessionId, startDiditVerification } from '../services/diditService';
+import { AnalyticsService } from '../services/analyticsService';
 import { colors } from '../config/theme';
 
 type NormalizedStatus = 'unverified' | 'pending' | 'verified' | 'rejected';
@@ -93,7 +94,7 @@ function statusMeta(status: NormalizedStatus) {
       return {
         label: 'En revisión',
         description: 'Ya recibimos tu verificación. Ahora la estamos revisando.',
-        color: colors.warning,
+        color: colors.warning.icon,
         bg: colors.warningLight,
         icon: 'clock',
       };
@@ -197,6 +198,14 @@ const VerificationScreen = () => {
     const normalized = normalizeStatus(result.verificationStatus);
     const detail = result.statusDetail || result.verification?.statusDetail;
     if (normalized === 'verified') {
+      const analyticsParams = {
+        method: 'didit',
+        provider: 'didit',
+        verification_status: 'verified',
+        session_id: sessionId,
+      };
+      void AnalyticsService.logEvent('generate_lead', analyticsParams);
+      void AnalyticsService.logEvent('didit_verified', analyticsParams);
       Alert.alert('Verificación completa', detail || 'Tu identidad quedó verificada correctamente.');
     } else if (normalized === 'pending') {
       Alert.alert('Verificación enviada', detail || 'Didit recibió tu sesión. Te avisaremos cuando termine la revisión.');

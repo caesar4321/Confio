@@ -40,6 +40,7 @@ import { RampStepHeader } from '../components/ramps/RampStepHeader';
 import { CREATE_RAMP_ORDER } from '../apollo/mutations';
 import LegacyGuardarianTopUpScreen from './LegacyGuardarianTopUpScreen';
 import { useBackupEnforcement } from '../hooks/useBackupEnforcement';
+import { AnalyticsService } from '../services/analyticsService';
 import { colors } from '../config/theme';
 import { isKoyweRoutingEnabledForCountry } from '../config/env';
 
@@ -228,6 +229,14 @@ const TopUpScreen = () => {
           Alert.alert('No se pudo crear la orden', getFriendlyRampError(result?.error));
           return;
         }
+        void AnalyticsService.logEvent('add_payment_info', {
+          payment_type: selectedMethod.code,
+          provider: 'koywe',
+          direction: 'ON_RAMP',
+          value: Number(parsedAmount) || 0,
+          currency: fiatCurrency,
+          order_id: result.orderId,
+        });
         navigation.replace('RampInstructions', {
           direction: 'ON_RAMP',
           orderId: result.orderId,
@@ -304,6 +313,22 @@ const TopUpScreen = () => {
         );
         return;
       }
+      void AnalyticsService.logEvent('begin_checkout', {
+        provider: 'koywe',
+        direction: 'ON_RAMP',
+        payment_type: selectedMethod.code,
+        value: Number(parsedAmount) || 0,
+        currency: fiatCurrency,
+        items: [
+          {
+            item_id: 'koywe_on_ramp',
+            item_name: 'Koywe top-up quote',
+            item_category: 'top_up',
+            quantity: 1,
+            price: Number(parsedAmount) || 0,
+          },
+        ],
+      });
       setStep('review');
     })();
   };

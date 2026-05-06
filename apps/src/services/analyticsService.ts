@@ -111,12 +111,22 @@ export const AnalyticsService = {
         params?: { [key: string]: any },
         options?: { sourceType?: string; channel?: string },
     ) => {
+        const platformParams = {
+            ...(params || {}),
+            platform: Platform.OS,
+        };
+
         // Firebase side
         try {
-            await analytics().logEvent(eventName, {
-                ...(params || {}),
-                platform: Platform.OS,
-            });
+            await analytics().logEvent(eventName, platformParams);
+            if (eventName === 'referral_whatsapp_share_tapped' || eventName === 'whatsapp_share_tapped') {
+                await analytics().logEvent('share', {
+                    method: options?.channel || params?.channel || 'whatsapp',
+                    content_type: eventName === 'whatsapp_share_tapped' ? 'send_invite' : 'referral_link',
+                    item_id: params?.invitation_id || params?.referral_code || params?.surface || eventName,
+                    ...platformParams,
+                });
+            }
         } catch (_e) {
             // swallow
         }

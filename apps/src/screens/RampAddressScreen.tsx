@@ -18,6 +18,7 @@ import { useMutation, useQuery } from '@apollo/client';
 import { GET_MY_RAMP_ADDRESS, UPSERT_RAMP_USER_ADDRESS } from '../apollo/queries';
 import { MainStackParamList } from '../types/navigation';
 import { useAuth } from '../contexts/AuthContext';
+import { AnalyticsService } from '../services/analyticsService';
 import { getCountryByIso } from '../utils/countries';
 import { colors } from '../config/theme';
 
@@ -131,6 +132,12 @@ export const RampAddressScreen: React.FC = () => {
         return;
       }
 
+      void AnalyticsService.logEvent('add_payment_info', {
+        payment_type: 'ramp_address',
+        provider: 'koywe',
+        country: phoneCountryIso || '',
+        has_auth_email: shouldShowAuthEmailField && Boolean(authEmail.trim()),
+      });
       showSuccessBanner();
     } catch (mutationError) {
       setError('No se pudo guardar tu dirección. Inténtalo nuevamente.');

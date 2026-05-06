@@ -4,6 +4,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import algorandService from '../services/algorandService';
 import { cusdAppOptInService } from '../services/cusdAppOptInService';
 import { migrationService } from '../services/migrationService';
+import { AnalyticsService } from '../services/analyticsService';
 
 const BUILD_AUTO_SWAP_TRANSACTIONS = gql`
   mutation BuildAutoSwapTransactions($inputAssetType: String!, $amount: String!) {
@@ -60,6 +61,14 @@ const toMicroUnits = (value: string): number => {
     const micros = Number(wholePart) * 1_000_000 + Number(fractionalPart);
 
     return negative ? -micros : micros;
+};
+
+const microToUsdValue = (microAmount: string): number => {
+    const micros = Number(microAmount);
+    if (!Number.isFinite(micros) || micros <= 0) {
+        return 0;
+    }
+    return Number((micros / 1_000_000).toFixed(2));
 };
 
 const withTimeout = async <T,>(promise: Promise<T>, ms: number, label: string): Promise<T> =>
@@ -227,6 +236,29 @@ export const useAutoSwap = ({
                     } else {
                         // Keep a post-success cooldown so stale balances do not immediately retrigger the same swap.
                         lastAttemptTimestamps.current[swapKey] = Date.now();
+                        if (swapAssetType === 'USDC') {
+                            const value = microToUsdValue(swapAmount);
+                            const analyticsParams = {
+                                transaction_id: internalId,
+                                value,
+                                currency: 'USD',
+                                payment_type: 'USDC',
+                                asset_in: 'USDC',
+                                asset_out: 'CUSD',
+                                source: 'auto_swap',
+                                items: [
+                                    {
+                                        item_id: 'usdc_auto_swap',
+                                        item_name: 'USDC auto-swap to cUSD',
+                                        item_category: 'top_up',
+                                        quantity: 1,
+                                        price: value,
+                                    },
+                                ],
+                            };
+                            void AnalyticsService.logEvent('auto_swap_submitted', analyticsParams);
+                            void AnalyticsService.logEvent('purchase', analyticsParams);
+                        }
                         refreshAccountBalance();
                     }
                 } catch (e) {

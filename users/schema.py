@@ -376,7 +376,7 @@ class UserType(DjangoObjectType):
 	class Meta:
 		model = User
 		# Include all fields, but our explicit definitions above take precedence
-		fields = ('id', 'username', 'email', 'first_name', 'last_name', 'phone_country', 'phone_number', 'backup_provider')
+		fields = ('id', 'username', 'email', 'first_name', 'last_name', 'phone_country', 'phone_number', 'backup_provider', 'created_at')
 
 	def resolve_phone_number(self, info):
 		"""
