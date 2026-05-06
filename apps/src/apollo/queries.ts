@@ -6,7 +6,6 @@ export const GET_ME = gql`
     me {
       id
       username
-      createdAt
       isStaff
       email
       firstName

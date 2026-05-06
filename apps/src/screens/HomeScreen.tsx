@@ -16,7 +16,6 @@ import {
 import ConvertModal from '../components/ConvertModal';
 import { Gradient } from '../components/common/Gradient';
 import { AuthService } from '../services/authService';
-import { AnalyticsService } from '../services/analyticsService';
 import { useNavigation, useFocusEffect, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuth, useAuthReady } from '../contexts/AuthContext';
@@ -53,21 +52,6 @@ const PREFERENCES_KEYCHAIN_SERVICE = 'com.confio.preferences';
 const BALANCE_VISIBILITY_KEY = 'balance_visibility';
 const INVITE_TS_SERVICE = 'com.confio.preferences.invite';
 const INVITE_TS_KEY = 'invite_banner_last_ts';
-const GA4_SIGN_UP_RECENT_WINDOW_MS = 24 * 60 * 60 * 1000;
-
-const ga4SignUpServiceForUser = (userId: string) => `com.confio.analytics.sign_up.${userId}`;
-
-const isRecentSignup = (createdAt?: string): boolean => {
-  if (!createdAt) {
-    return false;
-  }
-  const createdAtMs = Date.parse(createdAt);
-  if (!Number.isFinite(createdAtMs)) {
-    return false;
-  }
-  const ageMs = Date.now() - createdAtMs;
-  return ageMs >= 0 && ageMs <= GA4_SIGN_UP_RECENT_WINDOW_MS;
-};
 
 const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string => {
   if (!phoneNumber) return '';
@@ -138,34 +122,6 @@ export const HomeScreen = () => {
   const autoClaimedInviteIds = useRef<Set<string>>(new Set());
 
   const [showReferralInput, setShowReferralInput] = useState(false);
-
-  useEffect(() => {
-    const emitRecentSignupOnce = async () => {
-      if (!isAuthenticated || !userProfile?.id || !isRecentSignup(userProfile?.createdAt)) {
-        return;
-      }
-
-      const userId = String(userProfile.id);
-      const service = ga4SignUpServiceForUser(userId);
-      try {
-        const existing = await Keychain.getGenericPassword({ service });
-        if (existing) {
-          return;
-        }
-
-        void AnalyticsService.logEvent('sign_up', {
-          method: 'phone',
-          user_id: userId,
-          country: userProfile?.phoneCountry || '',
-        });
-        await Keychain.setGenericPassword('ga4_sign_up', new Date().toISOString(), { service });
-      } catch (_e) {
-        // Analytics must not block Home rendering.
-      }
-    };
-
-    void emitRecentSignupOnce();
-  }, [isAuthenticated, userProfile?.createdAt, userProfile?.id, userProfile?.phoneCountry]);
 
 
   // New UX State
@@ -320,18 +276,6 @@ export const HomeScreen = () => {
       try {
         const link = await deepLinkHandler.getDeferredLink();
         if (link && link.type === 'referral') {
-          const invitationId = link.metadata?.invitationId;
-          if (invitationId) {
-            AnalyticsService.logFunnelEvent('signup_completed', {
-              invitation_id: invitationId,
-              referral_code: link.payload,
-              dedupe_key: `signup_completed:send_invite:${invitationId}`,
-            }, {
-              sourceType: 'send_invite',
-              channel: 'app',
-            });
-          }
-
           // Submit to backend
           const attributionData = link.metadata ? {
             ...link.metadata,

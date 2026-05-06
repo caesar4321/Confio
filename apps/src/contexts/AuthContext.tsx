@@ -61,7 +61,6 @@ export type StatusTier = 'member' | 'early_supporter' | 'community_builder' | 'e
 interface UserProfile {
   id: string;
   username: string;
-  createdAt?: string;
   email: string;
   firstName?: string;
   lastName?: string;
