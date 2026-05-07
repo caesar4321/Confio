@@ -42,7 +42,10 @@ def link_koywe_deposit_to_ramp(deposit: USDCDeposit) -> Optional[RampTransaction
     Returns the linked ramp on success, None when no match was found.
     Safe to call repeatedly; no-ops if the deposit is already linked.
     """
-    if deposit.ramp_transaction_id:
+    # `ramp_transaction` is the reverse OneToOne accessor (related_name on
+    # RampTransaction.usdc_deposit). Reverse one-to-one relations don't expose
+    # a `<name>_id` attribute, so query the table directly to detect a link.
+    if RampTransaction.objects.filter(usdc_deposit=deposit).exists():
         return None
     if not deposit.actor_user_id or not deposit.actor_address:
         return None
