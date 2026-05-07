@@ -15,8 +15,17 @@ class KoyweBankInfoAdmin(admin.ModelAdmin):
 
 @admin.register(RampUserAddress)
 class RampUserAddressAdmin(admin.ModelAdmin):
-    list_display = ('user', 'address_city', 'address_state', 'address_zip_code', 'updated_at')
-    search_fields = ('user__email', 'user__username', 'address_street', 'address_city', 'address_state', 'address_zip_code')
+    list_display = ('user', 'address_city', 'address_state', 'address_zip_code', 'address_neighborhood', 'updated_at')
+    search_fields = (
+        'user__email',
+        'user__username',
+        'address_street',
+        'address_neighborhood',
+        'address_city',
+        'address_state',
+        'address_zip_code',
+        'economic_activity',
+    )
     readonly_fields = ('created_at', 'updated_at')
 
 

@@ -62,6 +62,12 @@ class IdentityVerification(SoftDeleteModel):
     verified_address = models.TextField(
         help_text="Full address as verified from documents"
     )
+    verified_address_neighborhood = models.CharField(
+        max_length=120,
+        blank=True,
+        default='',
+        help_text="Neighborhood/colonia as verified from documents"
+    )
     verified_city = models.CharField(
         max_length=100,
         help_text="City as verified from documents"
@@ -417,6 +423,7 @@ def ensure_personal_verified_on_save(sender, instance: 'IdentityVerification', c
                         'verified_date_of_birth': instance.verified_date_of_birth,
                         'verified_nationality': instance.verified_nationality,
                         'verified_address': instance.verified_address,
+                        'verified_address_neighborhood': instance.verified_address_neighborhood,
                         'verified_city': instance.verified_city,
                         'verified_state': instance.verified_state,
                         'verified_country': instance.verified_country,

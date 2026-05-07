@@ -6,6 +6,8 @@ import {
   TextInput,
   TouchableOpacity,
   ScrollView,
+  Modal,
+  FlatList,
   ActivityIndicator,
   Animated,
   StatusBar,
@@ -23,6 +25,10 @@ import { getCountryByIso } from '../utils/countries';
 import { colors } from '../config/theme';
 
 type Navigation = NavigationProp<MainStackParamList>;
+type EconomicActivityOption = {
+  label: string;
+  value: string;
+};
 
 export const RampAddressScreen: React.FC = () => {
   const navigation = useNavigation<Navigation>();
@@ -33,9 +39,13 @@ export const RampAddressScreen: React.FC = () => {
   const [upsertRampAddress] = useMutation(UPSERT_RAMP_USER_ADDRESS);
 
   const [addressStreet, setAddressStreet] = useState('');
+  const [addressNeighborhood, setAddressNeighborhood] = useState('');
   const [addressCity, setAddressCity] = useState('');
   const [addressState, setAddressState] = useState('');
   const [addressZipCode, setAddressZipCode] = useState('');
+  const [economicActivity, setEconomicActivity] = useState('');
+  const [activitySearch, setActivitySearch] = useState('');
+  const [showActivityPicker, setShowActivityPicker] = useState(false);
   const [authEmail, setAuthEmail] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -54,30 +64,63 @@ export const RampAddressScreen: React.FC = () => {
   const accountEmail = String(userProfile?.email || '').trim().toLowerCase();
   const isAppleRelayEmail = /@privaterelay\.appleid\.com$/i.test(accountEmail);
   const shouldShowAuthEmailField = phoneCountryIso === 'CO' && isAppleRelayEmail;
+  const economicActivities: EconomicActivityOption[] = data?.economicActivities || [];
+  const shouldShowEconomicActivityField = economicActivities.length > 0;
+  const addressRequirements = data?.rampAddressRequirements;
+  const shouldShowAddressNeighborhoodField = Boolean(addressRequirements?.requiresAddressNeighborhood);
+  const addressNeighborhoodLabel = addressRequirements?.addressNeighborhoodLabel || 'Colonia o barrio';
+  const addressNeighborhoodPlaceholder = addressRequirements?.addressNeighborhoodPlaceholder || addressNeighborhoodLabel;
+  const filteredEconomicActivities = useMemo(() => {
+    const query = activitySearch.trim().toLowerCase();
+    if (!query) {
+      return economicActivities;
+    }
+    return economicActivities.filter(activity =>
+      activity.label.toLowerCase().includes(query) || activity.value.toLowerCase().includes(query),
+    );
+  }, [activitySearch, economicActivities]);
 
   useEffect(() => {
     setAddressStreet(rampAddress?.addressStreet || '');
+    setAddressNeighborhood(rampAddress?.addressNeighborhood || '');
     setAddressCity(rampAddress?.addressCity || '');
     setAddressState(rampAddress?.addressState || '');
     setAddressZipCode(rampAddress?.addressZipCode || '');
+    setEconomicActivity(rampAddress?.economicActivity || '');
     setAuthEmail(rampAddress?.authEmail || '');
   }, [
     rampAddress?.addressStreet,
+    rampAddress?.addressNeighborhood,
     rampAddress?.addressCity,
     rampAddress?.addressState,
     rampAddress?.addressZipCode,
+    rampAddress?.economicActivity,
     rampAddress?.authEmail,
   ]);
 
   const hasChanges = useMemo(() => {
     return (
       addressStreet.trim() !== (rampAddress?.addressStreet || '') ||
+      (shouldShowAddressNeighborhoodField && addressNeighborhood.trim() !== (rampAddress?.addressNeighborhood || '')) ||
       addressCity.trim() !== (rampAddress?.addressCity || '') ||
       addressState.trim() !== (rampAddress?.addressState || '') ||
       addressZipCode.trim() !== (rampAddress?.addressZipCode || '') ||
+      (shouldShowEconomicActivityField && economicActivity.trim() !== (rampAddress?.economicActivity || '')) ||
       (shouldShowAuthEmailField && authEmail.trim().toLowerCase() !== String(rampAddress?.authEmail || '').trim().toLowerCase())
     );
-  }, [addressStreet, addressCity, addressState, addressZipCode, authEmail, rampAddress, shouldShowAuthEmailField]);
+  }, [
+    addressStreet,
+    addressNeighborhood,
+    addressCity,
+    addressState,
+    addressZipCode,
+    economicActivity,
+    authEmail,
+    rampAddress,
+    shouldShowAuthEmailField,
+    shouldShowAddressNeighborhoodField,
+    shouldShowEconomicActivityField,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -106,9 +149,11 @@ export const RampAddressScreen: React.FC = () => {
 
   const validate = () => {
     if (!addressStreet.trim()) return 'Ingresa tu dirección.';
+    if (shouldShowAddressNeighborhoodField && !addressNeighborhood.trim()) return `Ingresa tu ${addressNeighborhoodLabel.toLowerCase()}.`;
     if (!addressCity.trim()) return 'Ingresa tu ciudad.';
     if (!addressState.trim()) return 'Ingresa tu provincia o estado.';
     if (!addressZipCode.trim()) return 'Ingresa tu código postal.';
+    if (shouldShowEconomicActivityField && !economicActivity.trim()) return 'Ingresa tu actividad económica.';
     if (shouldShowAuthEmailField) {
       const normalizedAuthEmail = authEmail.trim().toLowerCase();
       if (!normalizedAuthEmail) return 'Ingresa un email real para recibir códigos de PSE.';
@@ -132,9 +177,11 @@ export const RampAddressScreen: React.FC = () => {
       const { data: response } = await upsertRampAddress({
         variables: {
           addressStreet: addressStreet.trim(),
+          addressNeighborhood: shouldShowAddressNeighborhoodField ? addressNeighborhood.trim() : undefined,
           addressCity: addressCity.trim(),
           addressState: addressState.trim(),
           addressZipCode: addressZipCode.trim(),
+          economicActivity: shouldShowEconomicActivityField ? economicActivity.trim() : undefined,
           authEmail: shouldShowAuthEmailField ? authEmail.trim().toLowerCase() : undefined,
         },
         refetchQueries: [{ query: GET_MY_RAMP_ADDRESS }],
@@ -201,6 +248,11 @@ export const RampAddressScreen: React.FC = () => {
               Como tu cuenta usa Apple private relay, aquí puedes guardar el email real donde quieres recibir códigos de PSE en Colombia.
             </Text>
           ) : null}
+          {shouldShowEconomicActivityField ? (
+            <Text style={styles.infoHint}>
+              Koywe requiere tu actividad económica real para cumplir con requisitos regulatorios.
+            </Text>
+          ) : null}
         </View>
 
         <View style={styles.formCard}>
@@ -228,6 +280,23 @@ export const RampAddressScreen: React.FC = () => {
               autoCapitalize="words"
             />
           </View>
+
+          {shouldShowAddressNeighborhoodField ? (
+            <>
+              <Text style={styles.label}>{addressNeighborhoodLabel}</Text>
+              <View style={styles.inputWrapper}>
+                <Icon name="map-pin" size={15} color={colors.textSecondary} style={styles.inputIcon} />
+                <TextInput
+                  style={styles.inputWithIcon}
+                  value={addressNeighborhood}
+                  onChangeText={t => { setAddressNeighborhood(t); setError(null); }}
+                  placeholder={addressNeighborhoodPlaceholder}
+                  placeholderTextColor={colors.textSecondary}
+                  autoCapitalize="words"
+                />
+              </View>
+            </>
+          ) : null}
 
           <Text style={styles.label}>Ciudad</Text>
           <View style={styles.inputWrapper}>
@@ -268,6 +337,29 @@ export const RampAddressScreen: React.FC = () => {
             />
           </View>
 
+          {shouldShowEconomicActivityField ? (
+            <>
+              <Text style={styles.label}>Actividad económica</Text>
+              <TouchableOpacity
+                style={styles.inputWrapper}
+                activeOpacity={0.8}
+                onPress={() => {
+                  setActivitySearch('');
+                  setShowActivityPicker(true);
+                }}
+              >
+                <Icon name="briefcase" size={15} color={colors.textSecondary} style={styles.inputIcon} />
+                <Text
+                  numberOfLines={1}
+                  style={[styles.pickerValue, !economicActivity && styles.pickerPlaceholder]}
+                >
+                  {economicActivity || 'Selecciona una actividad'}
+                </Text>
+                <Icon name="chevron-down" size={16} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </>
+          ) : null}
+
           {shouldShowAuthEmailField ? (
             <>
               <Text style={styles.label}>Email para códigos de PSE</Text>
@@ -307,6 +399,62 @@ export const RampAddressScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
       </ScrollView>
+
+      <Modal
+        visible={showActivityPicker}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowActivityPicker(false)}
+      >
+        <SafeAreaView style={styles.modalSafeArea}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity onPress={() => setShowActivityPicker(false)}>
+              <Text style={styles.modalCancel}>Cancelar</Text>
+            </TouchableOpacity>
+            <Text style={styles.modalTitle}>Actividad económica</Text>
+            <View style={styles.modalHeaderSpacer} />
+          </View>
+          <View style={styles.modalSearchWrapper}>
+            <Icon name="search" size={16} color={colors.textSecondary} style={styles.inputIcon} />
+            <TextInput
+              style={styles.inputWithIcon}
+              value={activitySearch}
+              onChangeText={setActivitySearch}
+              placeholder="Buscar actividad"
+              placeholderTextColor={colors.textSecondary}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
+          <FlatList
+            data={filteredEconomicActivities}
+            keyExtractor={item => item.value}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={styles.activityListContent}
+            renderItem={({ item }) => {
+              const selected = item.value === economicActivity;
+              return (
+                <TouchableOpacity
+                  style={styles.activityItem}
+                  onPress={() => {
+                    setEconomicActivity(item.value);
+                    setError(null);
+                    setShowActivityPicker(false);
+                  }}
+                >
+                  <Text style={styles.activityItemText}>{item.label}</Text>
+                  {selected ? <Icon name="check" size={18} color={colors.primary} /> : null}
+                </TouchableOpacity>
+              );
+            }}
+            ListEmptyComponent={
+              <Text style={styles.activityEmptyText}>
+                No encontramos esa actividad. Elige la opción más cercana del catálogo.
+              </Text>
+            }
+          />
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -443,6 +591,76 @@ const styles = StyleSheet.create({
     height: 48,
     fontSize: 15,
     color: colors.textFlat,
+  },
+  pickerValue: {
+    flex: 1,
+    fontSize: 15,
+    color: colors.textFlat,
+  },
+  pickerPlaceholder: {
+    color: colors.textSecondary,
+  },
+  modalSafeArea: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  modalCancel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.primary,
+  },
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.textFlat,
+  },
+  modalHeaderSpacer: {
+    width: 68,
+  },
+  modalSearchWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    margin: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    paddingHorizontal: 12,
+  },
+  activityListContent: {
+    paddingBottom: 24,
+  },
+  activityItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  activityItemText: {
+    flex: 1,
+    fontSize: 15,
+    lineHeight: 20,
+    color: colors.textFlat,
+  },
+  activityEmptyText: {
+    padding: 20,
+    fontSize: 14,
+    lineHeight: 20,
+    color: colors.textSecondary,
+    textAlign: 'center',
   },
   errorBanner: {
     flexDirection: 'row',

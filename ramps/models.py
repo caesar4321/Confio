@@ -95,9 +95,11 @@ class RampUserAddress(models.Model):
         related_name='ramp_user_address',
     )
     address_street = models.TextField()
+    address_neighborhood = models.CharField(max_length=120, blank=True, default='')
     address_city = models.CharField(max_length=100)
     address_state = models.CharField(max_length=100)
     address_zip_code = models.CharField(max_length=30)
+    economic_activity = models.CharField(max_length=255, blank=True, default='')
     auth_email = models.EmailField(blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

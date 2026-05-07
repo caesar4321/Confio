@@ -30,14 +30,25 @@ export const GET_MY_RAMP_ADDRESS = gql`
   query GetMyRampAddress {
     myRampAddress {
       addressStreet
+      addressNeighborhood
       addressCity
       addressState
       addressZipCode
       addressCountry
       countryName
+      economicActivity
       authEmail
       isComplete
       updatedAt
+    }
+    economicActivities {
+      label
+      value
+    }
+    rampAddressRequirements {
+      requiresAddressNeighborhood
+      addressNeighborhoodLabel
+      addressNeighborhoodPlaceholder
     }
   }
 `;
@@ -464,27 +475,33 @@ export const UPDATE_USER_PROFILE = gql`
 export const UPSERT_RAMP_USER_ADDRESS = gql`
   mutation UpsertRampUserAddress(
     $addressStreet: String!
+    $addressNeighborhood: String
     $addressCity: String!
     $addressState: String!
     $addressZipCode: String!
+    $economicActivity: String
     $authEmail: String
   ) {
     upsertRampUserAddress(
       addressStreet: $addressStreet
+      addressNeighborhood: $addressNeighborhood
       addressCity: $addressCity
       addressState: $addressState
       addressZipCode: $addressZipCode
+      economicActivity: $economicActivity
       authEmail: $authEmail
     ) {
       success
       error
       rampAddress {
         addressStreet
+        addressNeighborhood
         addressCity
         addressState
         addressZipCode
         addressCountry
         countryName
+        economicActivity
         authEmail
         isComplete
         updatedAt

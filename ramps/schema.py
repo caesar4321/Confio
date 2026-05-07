@@ -14,6 +14,7 @@ from security.models import IdentityVerification, normalize_document_number
 from users.models import Account, BankInfo, Country
 from ramps.models import KoyweBankInfo, RampPaymentMethod, RampTransaction, RampUserAddress
 from ramps.koywe_sync import build_koywe_instruction_snapshot, sync_koywe_ramp_transaction_from_order, upsert_koywe_ramp_transaction
+from ramps.mexico_economic_activities import MEXICO_ECONOMIC_ACTIVITIES
 
 from ramps.koywe_client import (
     KoyweClient,
@@ -639,21 +640,25 @@ class PendingRampTransactionType(graphene.ObjectType):
 
 class RampUserAddressType(graphene.ObjectType):
     address_street = graphene.String()
+    address_neighborhood = graphene.String()
     address_city = graphene.String()
     address_state = graphene.String()
     address_zip_code = graphene.String()
     address_country = graphene.String()
     country_name = graphene.String()
+    economic_activity = graphene.String()
     auth_email = graphene.String()
     is_complete = graphene.Boolean()
     updated_at = graphene.DateTime()
 
     addressStreet = graphene.String()
+    addressNeighborhood = graphene.String()
     addressCity = graphene.String()
     addressState = graphene.String()
     addressZipCode = graphene.String()
     addressCountry = graphene.String()
     countryName = graphene.String()
+    economicActivity = graphene.String()
     authEmail = graphene.String()
     isComplete = graphene.Boolean()
     updatedAt = graphene.DateTime()
@@ -674,6 +679,9 @@ class RampUserAddressType(graphene.ObjectType):
     def resolve_addressStreet(self, info):
         return self.address_street
 
+    def resolve_addressNeighborhood(self, info):
+        return str(getattr(self, 'address_neighborhood', '') or '').strip()
+
     def resolve_addressCity(self, info):
         return self.address_city
 
@@ -690,6 +698,9 @@ class RampUserAddressType(graphene.ObjectType):
         user = getattr(self, 'user', None)
         return getattr(user, 'phone_country_name', None) or ''
 
+    def resolve_economicActivity(self, info):
+        return str(getattr(self, 'economic_activity', '') or '').strip()
+
     def resolve_authEmail(self, info):
         return str(getattr(self, 'auth_email', '') or '').strip()
 
@@ -700,12 +711,38 @@ class RampUserAddressType(graphene.ObjectType):
         return self.updated_at
 
 
+class EconomicActivityOptionType(graphene.ObjectType):
+    label = graphene.String()
+    value = graphene.String()
+
+
+class RampAddressRequirementType(graphene.ObjectType):
+    requires_address_neighborhood = graphene.Boolean()
+    address_neighborhood_label = graphene.String()
+    address_neighborhood_placeholder = graphene.String()
+
+    requiresAddressNeighborhood = graphene.Boolean()
+    addressNeighborhoodLabel = graphene.String()
+    addressNeighborhoodPlaceholder = graphene.String()
+
+    def resolve_requiresAddressNeighborhood(self, info):
+        return self.requires_address_neighborhood
+
+    def resolve_addressNeighborhoodLabel(self, info):
+        return self.address_neighborhood_label
+
+    def resolve_addressNeighborhoodPlaceholder(self, info):
+        return self.address_neighborhood_placeholder
+
+
 class UpsertRampUserAddress(graphene.Mutation):
     class Arguments:
         address_street = graphene.String(required=True)
+        address_neighborhood = graphene.String()
         address_city = graphene.String(required=True)
         address_state = graphene.String(required=True)
         address_zip_code = graphene.String(required=True)
+        economic_activity = graphene.String()
         auth_email = graphene.String()
 
     success = graphene.Boolean()
@@ -718,7 +755,18 @@ class UpsertRampUserAddress(graphene.Mutation):
         return self.ramp_address
 
     @classmethod
-    def mutate(cls, root, info, address_street, address_city, address_state, address_zip_code, auth_email=None):
+    def mutate(
+        cls,
+        root,
+        info,
+        address_street,
+        address_city,
+        address_state,
+        address_zip_code,
+        address_neighborhood=None,
+        economic_activity=None,
+        auth_email=None,
+    ):
         user = getattr(info.context, "user", None)
         if not (user and getattr(user, 'is_authenticated', False)):
             return cls(success=False, error='Authentication required', ramp_address=None)
@@ -743,11 +791,20 @@ class UpsertRampUserAddress(graphene.Mutation):
 
         values = {
             'address_street': str(address_street or '').strip(),
+            'address_neighborhood': str(address_neighborhood or '').strip(),
             'address_city': str(address_city or '').strip(),
             'address_state': str(address_state or '').strip(),
             'address_zip_code': str(address_zip_code or '').strip(),
+            'economic_activity': str(economic_activity or '').strip(),
             'auth_email': normalized_auth_email,
         }
+        if _get_user_phone_country_alpha3(user) == 'MEX' and values['economic_activity']:
+            if values['economic_activity'] not in MEXICO_ECONOMIC_ACTIVITIES:
+                return cls(
+                    success=False,
+                    error='Selecciona una actividad económica válida del catálogo.',
+                    ramp_address=None,
+                )
         missing = [label for label, value in (
             ('dirección', values['address_street']),
             ('ciudad', values['address_city']),
@@ -859,6 +916,15 @@ class CreateRampOrder(graphene.Mutation):
                 country_code=resolved_country_code,
                 email_override=koywe_email,
             )
+            if resolved_country_code == 'MX' and (
+                not contact_profile.get('addressNeighborhood')
+                or not contact_profile.get('activity')
+                or str(contact_profile.get('activity') or '').upper() == 'OTHER'
+            ):
+                return RampOrderType(
+                    success=False,
+                    error='Actualiza la app y completa Colonia y Actividad económica en tu dirección para usar Koywe en México.',
+                )
             result = client.create_ramp_order(
                 direction=normalized_direction,
                 amount=decimal_amount,
@@ -1061,6 +1127,37 @@ class Query(graphene.ObjectType):
         direction=graphene.String(),
     )
     my_ramp_address = graphene.Field(RampUserAddressType)
+    economic_activities = graphene.List(
+        EconomicActivityOptionType,
+        country_code=graphene.String(),
+    )
+    ramp_address_requirements = graphene.Field(
+        RampAddressRequirementType,
+        country_code=graphene.String(),
+    )
+
+    def resolve_ramp_address_requirements(self, info, country_code=None):
+        normalized_country = (country_code or _resolve_ramp_country_code(info)).strip().upper()
+        if normalized_country == 'MX':
+            return RampAddressRequirementType(
+                requires_address_neighborhood=True,
+                address_neighborhood_label='Colonia',
+                address_neighborhood_placeholder='Colonia',
+            )
+        return RampAddressRequirementType(
+            requires_address_neighborhood=False,
+            address_neighborhood_label='Colonia o barrio',
+            address_neighborhood_placeholder='Colonia o barrio',
+        )
+
+    def resolve_economic_activities(self, info, country_code=None):
+        normalized_country = (country_code or _resolve_ramp_country_code(info)).strip().upper()
+        if normalized_country != 'MX':
+            return []
+        return [
+            EconomicActivityOptionType(label=value, value=value)
+            for value in sorted(MEXICO_ECONOMIC_ACTIVITIES)
+        ]
 
     def resolve_koywe_bank_info(self, info, country_code):
         alpha3 = country_code.upper()
@@ -1609,6 +1706,13 @@ def _build_effective_ramp_address_snapshot(user):
         if ramp_address and ramp_address.address_city
         else (verification.verified_city or '').strip() if verification and verification.verified_city else ''
     )
+    address_neighborhood = (
+        (ramp_address.address_neighborhood or '').strip()
+        if ramp_address and getattr(ramp_address, 'address_neighborhood', None)
+        else (verification.verified_address_neighborhood or '').strip()
+        if verification and getattr(verification, 'verified_address_neighborhood', None)
+        else ''
+    )
     address_state = (
         (ramp_address.address_state or '').strip()
         if ramp_address and ramp_address.address_state
@@ -1622,9 +1726,11 @@ def _build_effective_ramp_address_snapshot(user):
     return SimpleNamespace(
         user=user,
         address_street=address_street,
+        address_neighborhood=address_neighborhood,
         address_city=address_city,
         address_state=address_state,
         address_zip_code=address_zip_code,
+        economic_activity=(ramp_address.economic_activity or '').strip() if ramp_address and getattr(ramp_address, 'economic_activity', None) else '',
         auth_email=(ramp_address.auth_email or '').strip() if ramp_address and getattr(ramp_address, 'auth_email', None) else '',
         address_country=address_country,
         updated_at=getattr(ramp_address, 'updated_at', None) or getattr(verification, 'updated_at', None),
@@ -1687,12 +1793,16 @@ def _get_koywe_contact_profile(*, user, country_code: str, email_override: str |
         profile['addressStreet'] = effective_address.address_street
     if effective_address.address_city:
         profile['addressCity'] = effective_address.address_city
+    if effective_address.address_neighborhood:
+        profile['addressNeighborhood'] = effective_address.address_neighborhood
     if effective_address.address_state:
         profile['addressState'] = effective_address.address_state
     if effective_address.address_zip_code:
         profile['addressZipCode'] = effective_address.address_zip_code
     if effective_address.address_country:
         profile['addressCountry'] = effective_address.address_country
+    if effective_address.economic_activity:
+        profile['activity'] = effective_address.economic_activity
     return {key: value for key, value in profile.items() if value}
 
 

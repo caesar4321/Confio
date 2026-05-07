@@ -285,6 +285,7 @@ def _placeholder_defaults(*, user, session_id: str, account_type: str, business_
         'verified_date_of_birth': date(1900, 1, 1),
         'verified_nationality': 'UNK',
         'verified_address': '',
+        'verified_address_neighborhood': '',
         'verified_city': '',
         'verified_state': '',
         'verified_country': '',
@@ -346,9 +347,13 @@ def _extract_verification_payload(response_payload: dict[str, Any]) -> dict[str,
     line_parts = [
         _first_non_empty(parsed_address.get('street'), parsed_address.get('address_line1')),
         parsed_address.get('street_number'),
-        parsed_address.get('neighborhood'),
     ]
     address_line = ' '.join(str(part).strip() for part in line_parts if part)
+    address_neighborhood = _first_non_empty(
+        parsed_address.get('neighborhood'),
+        parsed_address.get('sublocality'),
+        parsed_address.get('district'),
+    )
 
     document_number = _first_non_empty(
         id_verification.get('document_number'),
@@ -380,6 +385,7 @@ def _extract_verification_payload(response_payload: dict[str, Any]) -> dict[str,
             _first_non_empty(id_verification.get('nationality'), response_payload.get('nationality'))
         ),
         'verified_address': address_line or _first_non_empty(response_payload.get('full_address'), 'Verified by Didit'),
+        'verified_address_neighborhood': address_neighborhood,
         'verified_city': _first_non_empty(parsed_address.get('city'), response_payload.get('city'), 'Unknown City'),
         'verified_state': _first_non_empty(parsed_address.get('state'), response_payload.get('state'), 'Unknown State'),
         'verified_country': _normalize_iso3(
@@ -510,6 +516,7 @@ def sync_didit_session(*, session_id: str, expected_user=None) -> tuple[Identity
     verification.verified_date_of_birth = extracted['verified_date_of_birth']
     verification.verified_nationality = extracted['verified_nationality']
     verification.verified_address = extracted['verified_address']
+    verification.verified_address_neighborhood = extracted['verified_address_neighborhood']
     verification.verified_city = extracted['verified_city']
     verification.verified_state = extracted['verified_state']
     verification.verified_country = extracted['verified_country']

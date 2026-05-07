@@ -857,6 +857,7 @@ class KoyweClient:
             return None
 
         address_street = str(contact_profile.get('addressStreet') or contact_profile.get('address') or '').strip()
+        address_neighborhood = str(contact_profile.get('addressNeighborhood') or '').strip()
         address_city = str(contact_profile.get('addressCity') or '').strip()
         address_state = str(contact_profile.get('addressState') or '').strip()
         address_country = str(contact_profile.get('addressCountry') or '').strip()
@@ -886,6 +887,8 @@ class KoyweClient:
             'addressCity': address_city,
             'addressState': address_state,
         }
+        if address_neighborhood:
+            address_fields['addressNeighborhood'] = address_neighborhood
         missing_address_fields = [key for key, value in address_fields.items() if not value]
         if missing_address_fields:
             missing_display = ', '.join(missing_address_fields)

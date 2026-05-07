@@ -52,7 +52,7 @@ class IdentityVerificationAdmin(admin.ModelAdmin):
         }),
         ('Verified Address', {
             'fields': (
-                'verified_address', 'verified_city', 'verified_state',
+                'verified_address', 'verified_address_neighborhood', 'verified_city', 'verified_state',
                 'verified_country', 'verified_postal_code'
             )
         }),
@@ -252,6 +252,7 @@ class IdentityVerificationAdmin(admin.ModelAdmin):
                         verified_date_of_birth=iv.verified_date_of_birth,
                         verified_nationality=iv.verified_nationality,
                         verified_address=iv.verified_address,
+                        verified_address_neighborhood=iv.verified_address_neighborhood,
                         verified_city=iv.verified_city,
                         verified_state=iv.verified_state,
                         verified_country=iv.verified_country,
@@ -443,6 +444,7 @@ class IdentityVerificationAdmin(admin.ModelAdmin):
                         verified_date_of_birth=verification.verified_date_of_birth,
                         verified_nationality=verification.verified_nationality,
                         verified_address=verification.verified_address,
+                        verified_address_neighborhood=verification.verified_address_neighborhood,
                         verified_city=verification.verified_city,
                         verified_state=verification.verified_state,
                         verified_country=verification.verified_country,
