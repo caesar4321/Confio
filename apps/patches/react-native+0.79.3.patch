@@ -1,0 +1,224 @@
+diff --git a/node_modules/react-native/Libraries/BatchedBridge/NativeModules.js b/node_modules/react-native/Libraries/BatchedBridge/NativeModules.js
+index c0d7459..b975a33 100644
+--- a/node_modules/react-native/Libraries/BatchedBridge/NativeModules.js
++++ b/node_modules/react-native/Libraries/BatchedBridge/NativeModules.js
+@@ -25,6 +25,157 @@ export type ModuleConfig = [
+ 
+ export type MethodType = 'async' | 'promise' | 'sync';
+ 
++const NATIVE_STRING_ARG_POSITIONS: {[string]: {[string]: number[]}} = {
++  ImageLoader: {
++    getSize: [0],
++    getSizeWithHeaders: [0],
++    prefetchImage: [0],
++    prefetchImageWithMetadata: [0],
++  },
++  IntentAndroid: {
++    canOpenURL: [0],
++    openURL: [0],
++    sendIntent: [0],
++  },
++  LinkingManager: {
++    canOpenURL: [0],
++    openURL: [0],
++  },
++  RNCCameraRoll: {
++    getPhotoByInternalID: [0],
++    getPhotoThumbnail: [0],
++    saveToCameraRoll: [0],
++  },
++  RNCClipboard: {
++    setImage: [0],
++    setString: [0],
++  },
++  RNFBAnalyticsModule: {
++    logEvent: [0],
++    setUserId: [0],
++    setUserProperty: [0, 1],
++  },
++  RNFBAppCheckModule: {
++    addAppCheckListener: [0],
++    getLimitedUseToken: [0],
++    getToken: [0],
++    removeAppCheckListener: [0],
++    setTokenAutoRefreshEnabled: [0],
++  },
++  RNFBAppModule: {
++    preferencesSetString: [0, 1],
++  },
++  RNFBAuthModule: {
++    applyActionCode: [0, 1],
++    checkActionCode: [0, 1],
++    delete: [0],
++    fetchSignInMethodsForEmail: [0, 1],
++    getCustomAuthDomain: [0],
++    getIdToken: [0],
++    getIdTokenResult: [0],
++    getSession: [0],
++    isSignInWithEmailLink: [0, 1],
++    reload: [0],
++    revokeToken: [0, 1],
++    setLanguageCode: [0, 1],
++    setTenantId: [0, 1],
++    signOut: [0],
++    unlink: [0, 1],
++    updateEmail: [0, 1],
++    updatePassword: [0, 1],
++    useEmulator: [0, 1],
++    useDeviceLanguage: [0],
++    verifyPasswordResetCode: [0, 1],
++  },
++  RNFBCrashlyticsModule: {
++    log: [0],
++    logPromise: [0],
++    setAttribute: [0, 1],
++    setUserId: [0],
++  },
++  RNFBMessagingModule: {
++    deleteToken: [0, 1],
++    getToken: [0, 1],
++    subscribeToTopic: [0],
++    unsubscribeFromTopic: [0],
++  },
++  SdkReactNative: {
++    startVerification: [0],
++  },
++  WebSocketModule: {
++    connect: [0],
++  },
++};
++
++function stringifyNativeStringArg(value: mixed): string {
++  if (value == null) {
++    return '';
++  }
++  if (
++    typeof value === 'string' ||
++    typeof value === 'number' ||
++    typeof value === 'boolean'
++  ) {
++    return String(value);
++  }
++
++  if (typeof value === 'object') {
++    const objectValue = (value: $FlowFixMe);
++    const nestedValue =
++      objectValue.url ??
++      objectValue.uri ??
++      objectValue.href ??
++      objectValue.actionUrl ??
++      objectValue.action_url ??
++      objectValue.redirectUrl ??
++      objectValue.redirect_url ??
++      objectValue.value;
++
++    if (
++      typeof nestedValue === 'string' ||
++      typeof nestedValue === 'number' ||
++      typeof nestedValue === 'boolean'
++    ) {
++      return String(nestedValue);
++    }
++  }
++
++  try {
++    return JSON.stringify(value);
++  } catch {
++    return String(value);
++  }
++}
++
++function normalizeNativeStringArgs(
++  moduleName: string,
++  methodName: string,
++  args: Array<mixed>,
++): Array<mixed> {
++  const moduleConfig = NATIVE_STRING_ARG_POSITIONS[moduleName];
++  const positions = moduleConfig && moduleConfig[methodName];
++  if (!positions) {
++    return args;
++  }
++
++  let nextArgs = args;
++  for (let i = 0; i < positions.length; i++) {
++    const argIndex = positions[i];
++    const value = args[argIndex];
++    if (value != null && typeof value === 'object') {
++      if (nextArgs === args) {
++        nextArgs = args.slice();
++      }
++      nextArgs[argIndex] = stringifyNativeStringArg(value);
++    }
++  }
++
++  return nextArgs;
++}
++
+ function genModule(
+   config: ?ModuleConfig,
+   moduleID: number,
+@@ -62,7 +213,13 @@ function genModule(
+         'Cannot have a method that is both async and a sync hook',
+       );
+       const methodType = isPromise ? 'promise' : isSync ? 'sync' : 'async';
+-      module[methodName] = genMethod(moduleID, methodID, methodType);
++      module[methodName] = genMethod(
++        moduleID,
++        methodID,
++        methodType,
++        moduleName,
++        methodName,
++      );
+     });
+ 
+   Object.assign(module, constants);
+@@ -95,10 +252,21 @@ function loadModule(name: string, moduleID: number): ?{...} {
+   return info && info.module;
+ }
+ 
+-function genMethod(moduleID: number, methodID: number, type: MethodType) {
++function genMethod(
++  moduleID: number,
++  methodID: number,
++  type: MethodType,
++  moduleName: string,
++  methodName: string,
++) {
+   let fn = null;
+   if (type === 'promise') {
+     fn = function promiseMethodWrapper(...args: Array<mixed>) {
++      const normalizedArgs = normalizeNativeStringArgs(
++        moduleName,
++        methodName,
++        args,
++      );
+       // In case we reject, capture a useful stack trace here.
+       /* $FlowFixMe[class-object-subtyping] added when improving typing for
+        * this parameters */
+@@ -108,7 +276,7 @@ function genMethod(moduleID: number, methodID: number, type: MethodType) {
+         BatchedBridge.enqueueNativeCall(
+           moduleID,
+           methodID,
+-          args,
++          normalizedArgs,
+           data => resolve(data),
+           errorData =>
+             reject(
+@@ -142,7 +310,7 @@ function genMethod(moduleID: number, methodID: number, type: MethodType) {
+         return BatchedBridge.callNativeSyncHook(
+           moduleID,
+           methodID,
+-          newArgs,
++          normalizeNativeStringArgs(moduleName, methodName, newArgs),
+           onFail,
+           onSuccess,
+         );
+@@ -150,7 +318,7 @@ function genMethod(moduleID: number, methodID: number, type: MethodType) {
+         BatchedBridge.enqueueNativeCall(
+           moduleID,
+           methodID,
+-          newArgs,
++          normalizeNativeStringArgs(moduleName, methodName, newArgs),
+           onFail,
+           onSuccess,
+         );
