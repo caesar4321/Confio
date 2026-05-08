@@ -1738,13 +1738,27 @@ def _build_effective_ramp_address_snapshot(user):
 
 
 def _is_ramp_address_complete(value) -> bool:
-    return bool(
+    user = getattr(value, 'user', None)
+    country = _get_user_phone_country_alpha3(user)
+    base_complete = bool(
         getattr(value, 'address_street', None)
         and getattr(value, 'address_city', None)
         and getattr(value, 'address_state', None)
         and getattr(value, 'address_zip_code', None)
-        and _get_user_phone_country_alpha3(getattr(value, 'user', None))
+        and country
     )
+    if not base_complete:
+        return False
+
+    if country == 'MEX':
+        economic_activity = str(getattr(value, 'economic_activity', '') or '').strip()
+        return bool(
+            str(getattr(value, 'address_neighborhood', '') or '').strip()
+            and economic_activity
+            and economic_activity.upper() != 'OTHER'
+        )
+
+    return True
 
 
 def _get_koywe_contact_profile(*, user, country_code: str, email_override: str | None = None) -> dict[str, str]:
