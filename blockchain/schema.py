@@ -32,6 +32,8 @@ from .payment_mutations import (
 from .invite_send_mutations import (
     PrepareInviteForPhone,
     SubmitInviteForPhone,
+    PrepareReclaimInvite,
+    SubmitReclaimInvite,
     ClaimInviteForPhoneField,
     InviteReceiptType,
     PendingInviteType,
@@ -156,6 +158,8 @@ class Mutation(graphene.ObjectType):
     # Invite & Send contract mutations
     prepare_invite_for_phone = PrepareInviteForPhone.Field()
     submit_invite_for_phone = SubmitInviteForPhone.Field()
+    prepare_reclaim_invite = PrepareReclaimInvite.Field()
+    submit_reclaim_invite = SubmitReclaimInvite.Field()
     claim_invite_for_phone = ClaimInviteForPhoneField
 
     # P2P Trade: HTTP GraphQL mutations removed in favor of WebSocket session

@@ -576,6 +576,279 @@ class InviteSendMutations(graphene.ObjectType):
     submit_invite_for_phone = SubmitInviteForPhone.Field()
 
 
+class PrepareReclaimInvite(graphene.Mutation):
+    class Arguments:
+        invitation_id = graphene.String(required=True)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    user_transaction = graphene.Field(InviteUserTxnType)
+    sponsor_transactions = graphene.List(SponsorTxnType)
+    group_id = graphene.String()
+
+    @classmethod
+    def mutate(cls, root, info, invitation_id):
+        user = info.context.user
+        if not user.is_authenticated:
+            return cls(success=False, error='Not authenticated')
+
+        jwt_ctx = get_jwt_business_context_with_validation(info, required_permission=None)
+        if not jwt_ctx:
+            return cls(success=False, error='Invalid JWT context')
+
+        acct = Account.objects.filter(
+            user_id=jwt_ctx['user_id'],
+            account_type=jwt_ctx['account_type'],
+            account_index=jwt_ctx.get('account_index', 0),
+            deleted_at__isnull=True,
+        ).first()
+        if not acct or not acct.algorand_address:
+            return cls(success=False, error='User Algorand address not found')
+
+        builder = InviteSendTransactionBuilder()
+        algod_client = get_algod_client()
+
+        try:
+            box = algod_client.application_box_by_name(builder.app_id, invitation_id.encode())
+            import base64 as _b
+            raw = _b.b64decode(box['value']['bytes']) if isinstance(box.get('value'), dict) else _b.b64decode(box.get('value', ''))
+            if len(raw) < 66:
+                return cls(success=False, error='Invitación inválida o incompleta.')
+
+            inviter_addr = algo_encoding.encode_address(raw[0:32])
+            if inviter_addr != acct.algorand_address:
+                return cls(success=False, error='Solo quien envió la invitación puede recuperar estos fondos.')
+
+            amount = int.from_bytes(raw[32:40], 'big')
+            asset_id = int.from_bytes(raw[40:48], 'big')
+            expires_at = int.from_bytes(raw[56:64], 'big')
+            is_claimed = raw[64]
+            is_reclaimed = raw[65]
+
+            import time
+            if is_claimed:
+                return cls(success=False, error='La invitación ya fue reclamada.')
+            if is_reclaimed:
+                return cls(success=False, error='La invitación ya fue devuelta.')
+            if int(time.time()) <= expires_at:
+                return cls(success=False, error='La invitación aún no expiró.')
+            if asset_id not in (builder.cusd_asset_id, builder.confio_asset_id):
+                return cls(success=False, error='Activo de invitación no soportado.')
+            if amount <= 0:
+                return cls(success=False, error='Monto de invitación inválido.')
+        except Exception as e:
+            return cls(success=False, error=f'No se encontró una invitación activa para recuperar: {e}')
+
+        try:
+            params = algod_client.suggested_params()
+            min_fee = getattr(params, 'min_fee', 1000) or 1000
+            sponsor_addr = builder.sponsor_address
+            SPONSOR_SIGNER.assert_matches_address(sponsor_addr)
+
+            pay0 = transaction.PaymentTxn(
+                sender=sponsor_addr,
+                sp=transaction.SuggestedParams(
+                    fee=min_fee * 5,
+                    first=params.first,
+                    last=params.last,
+                    gh=params.gh,
+                    gen=params.gen,
+                    flat_fee=True,
+                ),
+                receiver=sponsor_addr,
+                amt=0,
+                note=b"Invite reclaim sponsor",
+            )
+
+            method = next((m for m in builder.contract.methods if m.name == 'reclaim_invitation'), None)
+            if method is None:
+                return cls(success=False, error='ABI method reclaim_invitation not found')
+
+            atc = AtomicTransactionComposer()
+            atc.add_transaction(TransactionWithSigner(pay0, AccountTransactionSigner('0' * 64)))
+            atc.add_method_call(
+                app_id=builder.app_id,
+                method=method,
+                sender=acct.algorand_address,
+                sp=transaction.SuggestedParams(
+                    fee=0,
+                    first=params.first,
+                    last=params.last,
+                    gh=params.gh,
+                    gen=params.gen,
+                    flat_fee=True,
+                ),
+                signer=AccountTransactionSigner('0' * 64),
+                method_args=[invitation_id],
+                foreign_assets=[asset_id],
+                boxes=[
+                    _txn.BoxReference(0, invitation_id.encode()),
+                    _txn.BoxReference(0, ('r:' + invitation_id).encode()),
+                ],
+            )
+
+            tws_list = atc.build_group()
+            gid = transaction.calculate_group_id([t.txn for t in tws_list])
+
+            user_txn = None
+            sponsor_txs = []
+            for idx, tws in enumerate(tws_list):
+                raw_bytes = msgpack.packb(tws.txn.dictify(), use_bin_type=True)
+                payload_b64 = base64.b64encode(raw_bytes).decode()
+                if tws.txn.sender == acct.algorand_address:
+                    user_txn = InviteUserTxnType(
+                        txn=payload_b64,
+                        group_id=base64.b64encode(gid).decode(),
+                        first=tws.txn.first,
+                        last=tws.txn.last,
+                        gh=base64.b64encode(tws.txn.gh).decode() if isinstance(tws.txn.gh, bytes) else str(tws.txn.gh),
+                        gen=tws.txn.gen,
+                    )
+                else:
+                    sponsor_txs.append(SponsorTxnType(txn=payload_b64, index=idx))
+
+            if not user_txn:
+                return cls(success=False, error='No se pudo preparar la transacción del remitente.')
+
+            return cls(
+                success=True,
+                user_transaction=user_txn,
+                sponsor_transactions=sponsor_txs,
+                group_id=base64.b64encode(gid).decode(),
+            )
+        except Exception as e:
+            return cls(success=False, error=f'No se pudo preparar la devolución: {e}')
+
+
+class SubmitReclaimInvite(graphene.Mutation):
+    class Arguments:
+        invitation_id = graphene.String(required=True)
+        signed_user_txn = graphene.String(required=True)
+        sponsor_transactions = graphene.List(SponsorTxnInput, required=True)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    txid = graphene.String()
+
+    @classmethod
+    def mutate(cls, root, info, invitation_id, signed_user_txn, sponsor_transactions):
+        user = info.context.user
+        if not user.is_authenticated:
+            return cls(success=False, error='Not authenticated')
+
+        builder = InviteSendTransactionBuilder()
+        algod_client = get_algod_client()
+
+        def _b64_to_bytes(s: str) -> bytes:
+            ss = (s or '').strip().replace('-', '+').replace('_', '/')
+            pad = (-len(ss)) % 4
+            if pad:
+                ss += '=' * pad
+            return _b64.b64decode(ss)
+
+        try:
+            user_signed = _b64_to_bytes(signed_user_txn)
+            user_dict = msgpack.unpackb(user_signed, raw=False)
+            if not isinstance(user_dict, dict) or 'txn' not in user_dict:
+                return cls(success=False, error='Invalid signed user transaction payload')
+            txn_d = user_dict['txn']
+            if txn_d.get('type') != 'appl' or txn_d.get('apid') != builder.app_id:
+                return cls(success=False, error='Signed transaction does not target invite app')
+            if txn_d.get('rekey'):
+                return cls(success=False, error='Signed transaction must not rekey')
+            app_args = txn_d.get('apaa') or []
+            method = next((m for m in builder.contract.methods if m.name == 'reclaim_invitation'), None)
+            if method is None:
+                return cls(success=False, error='ABI method reclaim_invitation not found')
+            expected_selector = method.get_selector()
+            if not app_args or app_args[0] != expected_selector:
+                return cls(success=False, error='Signed transaction is not a reclaim call')
+            if len(app_args) < 2:
+                return cls(success=False, error='Signed reclaim transaction missing invitation id')
+            from algosdk.abi import ABIType
+            signed_invitation_id = ABIType.from_string('string').decode(app_args[1])
+            if signed_invitation_id != invitation_id:
+                return cls(success=False, error='Signed transaction invitation mismatch')
+            sender_addr = algo_encoding.encode_address(txn_d.get('snd'))
+        except Exception as e:
+            return cls(success=False, error=f'Invalid signed reclaim transaction: {e}')
+
+        try:
+            jwt_ctx = get_jwt_business_context_with_validation(info, required_permission=None)
+            if not jwt_ctx:
+                return cls(success=False, error='Invalid JWT context')
+            acct = Account.objects.filter(
+                user_id=jwt_ctx['user_id'],
+                account_type=jwt_ctx['account_type'],
+                account_index=jwt_ctx.get('account_index', 0),
+                deleted_at__isnull=True,
+            ).first()
+            if not acct or acct.algorand_address != sender_addr:
+                return cls(success=False, error='La firma no corresponde a la cuenta activa.')
+        except Exception:
+            return cls(success=False, error='No se pudo validar la cuenta activa.')
+
+        try:
+            parsed = []
+            for s in sponsor_transactions or []:
+                parsed.append({
+                    'txn': getattr(s, 'txn', None) if not isinstance(s, dict) else s.get('txn'),
+                    'index': getattr(s, 'index', None) if not isinstance(s, dict) else s.get('index'),
+                })
+            if len(parsed) != 1:
+                return cls(success=False, error='Expected one sponsor transaction')
+
+            entry = parsed[0]
+            tx_d = msgpack.unpackb(_b64.b64decode(entry.get('txn')), raw=False)
+            if tx_d.get('type') != 'pay':
+                return cls(success=False, error='Sponsor transaction must be payment')
+            sponsor_addr = builder.sponsor_address
+            sponsor_bytes = algo_encoding.decode_address(sponsor_addr)
+            if tx_d.get('snd') != sponsor_bytes or tx_d.get('rcv') != sponsor_bytes:
+                return cls(success=False, error='Sponsor transaction address mismatch')
+            if tx_d.get('amt') != 0:
+                return cls(success=False, error='Sponsor transaction must be zero amount')
+            if int(tx_d.get('fee') or 0) > 10000:
+                return cls(success=False, error='Sponsor transaction fee is too high')
+            if tx_d.get('rekey') or tx_d.get('close'):
+                return cls(success=False, error='Sponsor transaction must not rekey or close')
+
+            sponsor_txn = transaction.Transaction.undictify(tx_d)
+            signed_sponsor = SPONSOR_SIGNER.sign_transaction(sponsor_txn)
+            user_index = 0 if int(entry.get('index')) == 1 else 1
+            user_stx = transaction.SignedTransaction.undictify(user_dict)
+            ordered = [None, None]
+            ordered[int(entry.get('index'))] = signed_sponsor
+            ordered[user_index] = user_stx
+            if any(tx is None for tx in ordered):
+                return cls(success=False, error='Invalid reclaim transaction group')
+
+            algod_client.send_transactions(ordered)
+            ref_txid = ordered[user_index].get_txid()
+            try:
+                transaction.wait_for_confirmation(algod_client, ref_txid, 8)
+            except Exception as e:
+                return cls(success=False, error=str(e))
+
+            try:
+                from send.models import PhoneInvite
+                inv = PhoneInvite.objects.filter(invitation_id=invitation_id).select_related('send_transaction').first()
+                if inv:
+                    inv.status = 'reclaimed'
+                    inv.save(update_fields=['status', 'updated_at'])
+                    if inv.send_transaction:
+                        stx = inv.send_transaction
+                        stx.invitation_reverted = True
+                        stx.save(update_fields=['invitation_reverted', 'updated_at'])
+            except Exception as e:
+                logger.warning(f'[InviteSend] Could not update invite reclaim status: {e}')
+
+            return cls(success=True, txid=ref_txid)
+        except Exception as e:
+            logger.exception('[SubmitReclaimInvite] failed: %s', e)
+            return cls(success=False, error=str(e))
+
+
 class ClaimInviteForPhone(graphene.Mutation):
     class Arguments:
         recipient_address = graphene.String(required=True)

@@ -37,6 +37,7 @@ import { colors } from '../config/theme';
 import { StatusTierBadge } from '../components/StatusTierBadge';
 import { buildInviteLink } from '../utils/inviteLinks';
 import { technicalFontFamily } from '../utils/fontFamily';
+import { inviteSendService } from '../services/inviteSendService';
 
 type TransactionDetailScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 type TransactionDetailScreenRouteProp = RouteProp<MainStackParamList, 'TransactionDetail'>;
@@ -224,6 +225,8 @@ export const TransactionDetailScreen = () => {
   const insets = useSafeAreaInsets();
   const [copied, setCopied] = useState('');
   const [showBlockchainDetails, setShowBlockchainDetails] = useState(false);
+  const [reclaimingInvite, setReclaimingInvite] = useState(false);
+  const [reclaimedInviteTxid, setReclaimedInviteTxid] = useState('');
   const { userProfile } = useAuth();
   const supportCopy = getSupportCopy(userProfile?.phoneCountry);
   const styles = StyleSheet.create({
@@ -851,6 +854,24 @@ export const TransactionDetailScreen = () => {
       fontSize: 16,
       fontWeight: '600',
     },
+    reclaimCard: {
+      backgroundColor: '#f0fdf4',
+      borderColor: colors.primary,
+      borderWidth: 1,
+    },
+    reclaimButton: {
+      backgroundColor: colors.primary,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 14,
+      paddingHorizontal: 20,
+      borderRadius: 12,
+      marginTop: 16,
+    },
+    reclaimButtonDisabled: {
+      opacity: 0.6,
+    },
     // Additional styles from duplicate block
     headerTop: {
       flexDirection: 'row',
@@ -1285,9 +1306,11 @@ export const TransactionDetailScreen = () => {
       note: tx.memo || '',
       avatar: (resolvedType === 'sent' ? tx.recipientDisplayName : tx.senderDisplayName)?.[0] || 'U',
       isInvitedFriend: isInvite,
+      invitationId: tx.idempotencyKey || (transactionData as any)?.invitationId || (transactionData as any)?.invitation_id,
+      idempotencyKey: tx.idempotencyKey,
       invitationExpiresAt: tx.invitationExpiresAt,
-      invitationClaimed: isInvite ? claimedFromRoute : false,
-      invitationReverted: isInvite ? revertedFromRoute : false,
+      invitationClaimed: isInvite ? (tx.invitationClaimed || claimedFromRoute) : false,
+      invitationReverted: isInvite ? (tx.invitationReverted || revertedFromRoute) : false,
       transaction_type: 'send',
       internalId: tx.internalId || (transactionData as any)?.internalId || (transactionData as any)?.internal_id,
       // Add phone keys from fetched data (prefer user.phoneKey over legacy fields)
@@ -1352,6 +1375,8 @@ export const TransactionDetailScreen = () => {
       is_external_address: transactionData.is_external_address,
       is_invited_friend: transactionData.is_invited_friend,
       isInvitedFriend: transactionData.is_invited_friend || transactionData.isInvitedFriend,
+      invitationId: (transactionData as any).invitationId || (transactionData as any).invitation_id || (transactionData as any).idempotencyKey,
+      idempotencyKey: (transactionData as any).idempotencyKey || (transactionData as any).idempotency_key,
       invitationClaimed: (transactionData as any).invitationClaimed || (transactionData as any).invitation_claimed,
       invitationReverted: (transactionData as any).invitationReverted || (transactionData as any).invitation_reverted,
       invitationExpiresAt: (transactionData as any).invitationExpiresAt || (transactionData as any).invitation_expires_at,
@@ -1624,15 +1649,49 @@ export const TransactionDetailScreen = () => {
   const isInvitedFriend = currentTx?.isInvitedFriend || currentTx?.is_invited_friend || false;
   const isExternalAddress = currentTx?.is_external_address || false;
   const invitationClaimed = currentTx?.invitationClaimed || currentTx?.invitation_claimed || false;
-  const invitationReverted = currentTx?.invitationReverted || currentTx?.invitation_reverted || false;
+  const invitationReverted = currentTx?.invitationReverted || currentTx?.invitation_reverted || Boolean(reclaimedInviteTxid);
   const invitationExpiresAt = currentTx?.invitationExpiresAt || currentTx?.invitation_expires_at;
   const isInvitationExpired = invitationExpiresAt ? moment(invitationExpiresAt).isBefore(moment()) : false;
+  const currentInvitationId = (currentTx as any).invitationId
+    || (currentTx as any).invitation_id
+    || (currentTx as any).idempotencyKey
+    || (currentTx as any).idempotency_key
+    || (transactionData as any)?.invitationId
+    || (transactionData as any)?.invitation_id
+    || (transactionData as any)?.idempotencyKey
+    || (transactionData as any)?.idempotency_key
+    || '';
   const showInvitationWarning = isInvitedFriend
     && !isExternalAddress
     && (currentTx?.type === 'send' || currentTx?.type === 'sent')
     && !invitationClaimed
     && !invitationReverted
     && !isInvitationExpired;
+  const showInvitationReclaim = isInvitedFriend
+    && !isExternalAddress
+    && (currentTx?.type === 'send' || currentTx?.type === 'sent')
+    && !invitationClaimed
+    && !invitationReverted
+    && isInvitationExpired
+    && Boolean(currentInvitationId);
+
+  const handleReclaimInvite = async () => {
+    if (!currentInvitationId || reclaimingInvite) return;
+    setReclaimingInvite(true);
+    try {
+      const result = await inviteSendService.reclaimInvite(currentInvitationId);
+      if (!result.success) {
+        Alert.alert('No se pudo devolver', result.error || 'Inténtalo nuevamente.');
+        return;
+      }
+      setReclaimedInviteTxid(result.txid || '');
+      Alert.alert('Fondos devueltos', 'La invitación expirada fue devuelta a tu balance.');
+    } catch (e: any) {
+      Alert.alert('No se pudo devolver', e?.message || 'Inténtalo nuevamente.');
+    } finally {
+      setReclaimingInvite(false);
+    }
+  };
 
   // Debug invitation status
 
@@ -2642,6 +2701,34 @@ export const TransactionDetailScreen = () => {
               >
                 <WhatsAppLogo width={20} height={20} style={{ marginRight: 8 }} />
                 <Text style={styles.shareButtonText}>Compartir invitación por WhatsApp</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {showInvitationReclaim && (
+            <View style={[styles.card, styles.reclaimCard]}>
+              <View style={styles.invitationHeader}>
+                <Icon name="rotate-ccw" size={24} color={colors.primary} />
+                <Text style={[styles.invitationCardTitle, { color: colors.primary }]}>Invitación expirada</Text>
+              </View>
+
+              <Text style={styles.invitationCardText}>
+                Tu amigo no reclamó estos fondos dentro de los 7 días. Puedes devolverlos a tu balance.
+              </Text>
+
+              <TouchableOpacity
+                style={[styles.reclaimButton, reclaimingInvite && styles.reclaimButtonDisabled]}
+                disabled={reclaimingInvite}
+                onPress={handleReclaimInvite}
+              >
+                {reclaimingInvite ? (
+                  <ActivityIndicator size="small" color="#fff" style={{ marginRight: 8 }} />
+                ) : (
+                  <Icon name="corner-down-left" size={18} color="#fff" style={{ marginRight: 8 }} />
+                )}
+                <Text style={styles.shareButtonText}>
+                  {reclaimingInvite ? 'Devolviendo...' : 'Devolver fondos'}
+                </Text>
               </TouchableOpacity>
             </View>
           )}

@@ -460,6 +460,36 @@ export const CLAIM_INVITE_FOR_PHONE = gql`
   }
 `;
 
+export const PREPARE_RECLAIM_INVITE = gql`
+  mutation PrepareReclaimInvite($invitationId: String!) {
+    prepareReclaimInvite(invitationId: $invitationId) {
+      success
+      error
+      userTransaction { txn groupId first last gh gen }
+      sponsorTransactions { txn index }
+      groupId
+    }
+  }
+`;
+
+export const SUBMIT_RECLAIM_INVITE = gql`
+  mutation SubmitReclaimInvite(
+    $invitationId: String!,
+    $signedUserTxn: String!,
+    $sponsorTransactions: [SponsorTxnInput!]!
+  ) {
+    submitReclaimInvite(
+      invitationId: $invitationId,
+      signedUserTxn: $signedUserTxn,
+      sponsorTransactions: $sponsorTransactions
+    ) {
+      success
+      error
+      txid
+    }
+  }
+`;
+
 // P2P Trade — prepare create (seller deposits escrow)
 export const PREPARE_P2P_CREATE_TRADE = gql`
   mutation PrepareP2PCreateTrade($tradeId: String!, $amount: Float!, $assetType: String) {

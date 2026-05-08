@@ -1,6 +1,6 @@
 import { Buffer } from 'buffer'
 import { apolloClient } from '../apollo/client'
-import { PREPARE_INVITE_FOR_PHONE, SUBMIT_INVITE_FOR_PHONE, CLAIM_INVITE_FOR_PHONE } from '../apollo/mutations'
+import { PREPARE_INVITE_FOR_PHONE, SUBMIT_INVITE_FOR_PHONE, CLAIM_INVITE_FOR_PHONE, PREPARE_RECLAIM_INVITE, SUBMIT_RECLAIM_INVITE } from '../apollo/mutations'
 import { INVITE_RECEIPT_FOR_PHONE, ALL_PENDING_INVITES_FOR_PHONE } from '../apollo/queries'
 import algorandService from './algorandService'
 
@@ -178,6 +178,42 @@ class InviteSendService {
     }
 
     return results
+  }
+
+  async reclaimInvite(invitationId: string): Promise<{ success: boolean; error?: string; txid?: string }> {
+    if (!invitationId) return { success: false, error: 'Falta el ID de la invitación' }
+
+    const prepResp = await apolloClient.mutate({
+      mutation: PREPARE_RECLAIM_INVITE,
+      variables: { invitationId },
+    })
+    const prep = prepResp.data?.prepareReclaimInvite
+    if (!prep?.success) {
+      return { success: false, error: prep?.error || 'No se pudo preparar la devolución' }
+    }
+
+    const userTxn = prep.userTransaction
+    if (!userTxn?.txn) return { success: false, error: 'Falta la transacción para firmar' }
+
+    const signedUserTxn = await algorandService.signTransactionBytes(Buffer.from(userTxn.txn, 'base64'))
+    let signedUserTxnB64 = Buffer.from(signedUserTxn).toString('base64')
+    const pad = (4 - (signedUserTxnB64.length % 4)) % 4
+    if (pad) signedUserTxnB64 += '='.repeat(pad)
+
+    const submitResp = await apolloClient.mutate({
+      mutation: SUBMIT_RECLAIM_INVITE,
+      variables: {
+        invitationId,
+        signedUserTxn: signedUserTxnB64,
+        sponsorTransactions: (prep.sponsorTransactions || []).map((stx: SponsorTxn) => ({ txn: stx.txn, index: stx.index })),
+      },
+    })
+    const submit = submitResp.data?.submitReclaimInvite
+    if (!submit?.success) {
+      return { success: false, error: submit?.error || 'No se pudo devolver la invitación' }
+    }
+
+    return { success: true, txid: submit.txid }
   }
 }
 
