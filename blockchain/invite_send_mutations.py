@@ -696,13 +696,16 @@ class PrepareReclaimInvite(graphene.Mutation):
                 raw_bytes = msgpack.packb(tws.txn.dictify(), use_bin_type=True)
                 payload_b64 = base64.b64encode(raw_bytes).decode()
                 if tws.txn.sender == acct.algorand_address:
+                    txn_d = tws.txn.dictify()
+                    gid_bytes = txn_d.get('grp')
+                    gh_bytes = txn_d.get('gh')
                     user_txn = InviteUserTxnType(
                         txn=payload_b64,
-                        group_id=base64.b64encode(gid).decode(),
-                        first=tws.txn.first,
-                        last=tws.txn.last,
-                        gh=base64.b64encode(tws.txn.gh).decode() if isinstance(tws.txn.gh, bytes) else str(tws.txn.gh),
-                        gen=tws.txn.gen,
+                        group_id=base64.b64encode(gid_bytes).decode() if gid_bytes else base64.b64encode(gid).decode(),
+                        first=txn_d.get('fv') or 0,
+                        last=txn_d.get('lv') or 0,
+                        gh=base64.b64encode(gh_bytes).decode() if isinstance(gh_bytes, bytes) else str(gh_bytes or ''),
+                        gen=txn_d.get('gen') or '',
                     )
                 else:
                     sponsor_txs.append(SponsorTxnType(txn=payload_b64, index=idx))
