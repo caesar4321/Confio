@@ -826,7 +826,14 @@ class SubmitReclaimInvite(graphene.Mutation):
             if any(tx is None for tx in ordered):
                 return cls(success=False, error='Invalid reclaim transaction group')
 
-            algod_client.send_transactions(ordered)
+            # Preserve the user's exact signed bytes. The mobile wallet signs
+            # raw msgpack to avoid app-call box re-encoding changes; decoding
+            # and re-encoding here can invalidate that signature.
+            signed_sponsor_bytes = _b64.b64decode(algo_encoding.msgpack_encode(signed_sponsor))
+            ordered_raw = [None, None]
+            ordered_raw[int(entry.get('index'))] = signed_sponsor_bytes
+            ordered_raw[user_index] = user_signed
+            algod_client.send_raw_transaction(_b64.b64encode(b''.join(ordered_raw)))
             ref_txid = ordered[user_index].get_txid()
             try:
                 transaction.wait_for_confirmation(algod_client, ref_txid, 8)
