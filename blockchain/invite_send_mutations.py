@@ -693,8 +693,7 @@ class PrepareReclaimInvite(graphene.Mutation):
             user_txn = None
             sponsor_txs = []
             for idx, tws in enumerate(tws_list):
-                raw_bytes = msgpack.packb(tws.txn.dictify(), use_bin_type=True)
-                payload_b64 = base64.b64encode(raw_bytes).decode()
+                payload_b64 = algo_encoding.msgpack_encode(tws.txn)
                 if tws.txn.sender == acct.algorand_address:
                     txn_d = tws.txn.dictify()
                     gid_bytes = txn_d.get('grp')
