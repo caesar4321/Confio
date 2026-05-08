@@ -749,6 +749,114 @@ class SubmitReclaimInvite(graphene.Mutation):
                 ss += '=' * pad
             return _b64.b64decode(ss)
 
+        def _skip_msgpack_obj(buf: bytes, pos: int) -> int:
+            b = buf[pos]
+            pos += 1
+            if b <= 0x7f or b >= 0xe0 or b in (0xc0, 0xc2, 0xc3):
+                return pos
+            if 0x80 <= b <= 0x8f:
+                for _ in range(b & 0x0f):
+                    pos = _skip_msgpack_obj(buf, pos)
+                    pos = _skip_msgpack_obj(buf, pos)
+                return pos
+            if 0x90 <= b <= 0x9f:
+                for _ in range(b & 0x0f):
+                    pos = _skip_msgpack_obj(buf, pos)
+                return pos
+            if 0xa0 <= b <= 0xbf:
+                return pos + (b & 0x1f)
+            if b == 0xc4:
+                ln = buf[pos]
+                return pos + 1 + ln
+            if b == 0xc5:
+                ln = int.from_bytes(buf[pos:pos + 2], 'big')
+                return pos + 2 + ln
+            if b == 0xc6:
+                ln = int.from_bytes(buf[pos:pos + 4], 'big')
+                return pos + 4 + ln
+            if b in (0xcc, 0xd0):
+                return pos + 1
+            if b in (0xcd, 0xd1):
+                return pos + 2
+            if b in (0xce, 0xd2, 0xca):
+                return pos + 4
+            if b in (0xcf, 0xd3, 0xcb):
+                return pos + 8
+            if b == 0xd9:
+                ln = buf[pos]
+                return pos + 1 + ln
+            if b == 0xda:
+                ln = int.from_bytes(buf[pos:pos + 2], 'big')
+                return pos + 2 + ln
+            if b == 0xdb:
+                ln = int.from_bytes(buf[pos:pos + 4], 'big')
+                return pos + 4 + ln
+            if b == 0xdc:
+                count = int.from_bytes(buf[pos:pos + 2], 'big')
+                pos += 2
+                for _ in range(count):
+                    pos = _skip_msgpack_obj(buf, pos)
+                return pos
+            if b == 0xdd:
+                count = int.from_bytes(buf[pos:pos + 4], 'big')
+                pos += 4
+                for _ in range(count):
+                    pos = _skip_msgpack_obj(buf, pos)
+                return pos
+            if b == 0xde:
+                count = int.from_bytes(buf[pos:pos + 2], 'big')
+                pos += 2
+                for _ in range(count):
+                    pos = _skip_msgpack_obj(buf, pos)
+                    pos = _skip_msgpack_obj(buf, pos)
+                return pos
+            if b == 0xdf:
+                count = int.from_bytes(buf[pos:pos + 4], 'big')
+                pos += 4
+                for _ in range(count):
+                    pos = _skip_msgpack_obj(buf, pos)
+                    pos = _skip_msgpack_obj(buf, pos)
+                return pos
+            raise ValueError(f'Unsupported msgpack marker 0x{b:02x}')
+
+        def _extract_signed_txn_parts(stx_bytes: bytes):
+            if not stx_bytes:
+                raise ValueError('empty signed transaction')
+            b = stx_bytes[0]
+            pos = 1
+            if 0x80 <= b <= 0x8f:
+                count = b & 0x0f
+            elif b == 0xde:
+                count = int.from_bytes(stx_bytes[pos:pos + 2], 'big')
+                pos += 2
+            elif b == 0xdf:
+                count = int.from_bytes(stx_bytes[pos:pos + 4], 'big')
+                pos += 4
+            else:
+                raise ValueError('signed transaction is not a msgpack map')
+
+            sig = None
+            txn_raw = None
+            for _ in range(count):
+                key_start = pos
+                pos = _skip_msgpack_obj(stx_bytes, pos)
+                key = msgpack.unpackb(stx_bytes[key_start:pos], raw=False)
+                val_start = pos
+                pos = _skip_msgpack_obj(stx_bytes, pos)
+                if key == 'sig':
+                    sig = msgpack.unpackb(stx_bytes[val_start:pos], raw=False)
+                elif key == 'txn':
+                    txn_raw = stx_bytes[val_start:pos]
+            if sig is None or txn_raw is None:
+                raise ValueError('signed transaction missing sig or txn')
+            return sig, txn_raw
+
+        def _verify_signed_txn(stx_bytes: bytes, sender_addr: str) -> bool:
+            from nacl.signing import VerifyKey
+            sig, txn_raw = _extract_signed_txn_parts(stx_bytes)
+            VerifyKey(algo_encoding.decode_address(sender_addr)).verify(b'TX' + txn_raw, sig)
+            return True
+
         try:
             user_signed = _b64_to_bytes(signed_user_txn)
             user_dict = msgpack.unpackb(user_signed, raw=False)
@@ -773,6 +881,12 @@ class SubmitReclaimInvite(graphene.Mutation):
             if signed_invitation_id != invitation_id:
                 return cls(success=False, error='Signed transaction invitation mismatch')
             sender_addr = algo_encoding.encode_address(txn_d.get('snd'))
+            try:
+                _verify_signed_txn(user_signed, sender_addr)
+                logger.info('[SubmitReclaimInvite] user signature verified sender=%s invitation=%s', sender_addr, invitation_id)
+            except Exception as verify_exc:
+                logger.warning('[SubmitReclaimInvite] user signature failed sender=%s invitation=%s error=%s', sender_addr, invitation_id, verify_exc)
+                return cls(success=False, error='La firma de la transacción de devolución no corresponde a tu cuenta activa. Cierra y vuelve a abrir la app, verifica la cuenta activa e inténtalo de nuevo.')
         except Exception as e:
             return cls(success=False, error=f'Invalid signed reclaim transaction: {e}')
 
@@ -818,6 +932,13 @@ class SubmitReclaimInvite(graphene.Mutation):
 
             sponsor_txn = transaction.Transaction.undictify(tx_d)
             signed_sponsor = SPONSOR_SIGNER.sign_transaction(sponsor_txn)
+            signed_sponsor_bytes = _b64.b64decode(algo_encoding.msgpack_encode(signed_sponsor))
+            try:
+                _verify_signed_txn(signed_sponsor_bytes, sponsor_addr)
+                logger.info('[SubmitReclaimInvite] sponsor signature verified sender=%s invitation=%s', sponsor_addr, invitation_id)
+            except Exception as verify_exc:
+                logger.warning('[SubmitReclaimInvite] sponsor signature failed sender=%s invitation=%s error=%s', sponsor_addr, invitation_id, verify_exc)
+                return cls(success=False, error='La firma del patrocinador no pasó verificación.')
             user_index = 0 if int(entry.get('index')) == 1 else 1
             user_stx = transaction.SignedTransaction.undictify(user_dict)
             ordered = [None, None]
@@ -829,7 +950,6 @@ class SubmitReclaimInvite(graphene.Mutation):
             # Preserve the user's exact signed bytes. The mobile wallet signs
             # raw msgpack to avoid app-call box re-encoding changes; decoding
             # and re-encoding here can invalidate that signature.
-            signed_sponsor_bytes = _b64.b64decode(algo_encoding.msgpack_encode(signed_sponsor))
             ordered_raw = [None, None]
             ordered_raw[int(entry.get('index'))] = signed_sponsor_bytes
             ordered_raw[user_index] = user_signed
