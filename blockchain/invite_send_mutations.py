@@ -809,7 +809,7 @@ class SubmitReclaimInvite(graphene.Mutation):
             sponsor_bytes = algo_encoding.decode_address(sponsor_addr)
             if tx_d.get('snd') != sponsor_bytes or tx_d.get('rcv') != sponsor_bytes:
                 return cls(success=False, error='Sponsor transaction address mismatch')
-            if tx_d.get('amt') != 0:
+            if int(tx_d.get('amt') or 0) != 0:
                 return cls(success=False, error='Sponsor transaction must be zero amount')
             if int(tx_d.get('fee') or 0) > 10000:
                 return cls(success=False, error='Sponsor transaction fee is too high')
