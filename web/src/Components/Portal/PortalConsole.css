@@ -90,6 +90,7 @@
 .portal-tabs button,
 .portal-primary-button,
 .portal-secondary-button,
+.portal-danger-button,
 .portal-list-row,
 .portal-gate button {
   transition: 120ms ease;
@@ -647,7 +648,8 @@
 }
 
 .portal-primary-button,
-.portal-secondary-button {
+.portal-secondary-button,
+.portal-danger-button {
   border: 0;
   border-radius: 999px;
   padding: 12px 18px;
@@ -668,8 +670,18 @@
   color: #344054;
 }
 
+.portal-danger-button {
+  background: #fef3f2;
+  color: #b42318;
+}
+
+.portal-danger-button:hover {
+  background: #fee4e2;
+}
+
 .portal-primary-button:disabled,
-.portal-secondary-button:disabled {
+.portal-secondary-button:disabled,
+.portal-danger-button:disabled {
   opacity: 0.55;
   cursor: default;
 }

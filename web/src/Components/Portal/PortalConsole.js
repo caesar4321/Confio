@@ -150,6 +150,15 @@ const PORTAL_SAVE_CONTENT_ITEM = gql`
   }
 `;
 
+const PORTAL_DELETE_CONTENT_ITEM = gql`
+  mutation PortalDeleteContentItem($contentItemId: ID!) {
+    portalDeleteContentItem(contentItemId: $contentItemId) {
+      success
+      deletedContentItemId
+    }
+  }
+`;
+
 const REQUEST_PUBLICATION_IMAGE_UPLOAD = gql`
   mutation RequestPublicationImageUpload($filename: String, $contentType: String) {
     requestPublicationImageUpload(filename: $filename, contentType: $contentType) {
@@ -652,6 +661,9 @@ export default function PortalConsole() {
   const [saveContentItem, saveContentState] = useMutation(PORTAL_SAVE_CONTENT_ITEM, {
     refetchQueries: [{ query: GET_PORTAL_CONTENT_ITEMS, variables: { channelSlug: contentChannelFilter || null, status: null } }],
   });
+  const [deleteContentItem, deleteContentState] = useMutation(PORTAL_DELETE_CONTENT_ITEM, {
+    refetchQueries: [{ query: GET_PORTAL_CONTENT_ITEMS, variables: { channelSlug: contentChannelFilter || null, status: null } }],
+  });
   const [requestPublicationImageUpload] = useMutation(REQUEST_PUBLICATION_IMAGE_UPLOAD);
   const [registerFCMTokenMutation] = useMutation(REGISTER_FCM_TOKEN);
 
@@ -996,6 +1008,29 @@ export default function PortalConsole() {
       addToast(`Conversación ${nextStatus === 'CLOSED' ? 'cerrada' : 'reabierta'}`, 'success');
     } catch (error) {
       addToast('Error cambiando estado', 'error');
+    }
+  };
+
+  const deleteCurrentPublication = async () => {
+    if (!draft.id) {
+      return;
+    }
+    const label = draft.title ? `"${draft.title}"` : 'esta publicación';
+    if (!window.confirm(`¿Eliminar ${label}? Esta acción no se puede deshacer.`)) {
+      return;
+    }
+
+    try {
+      await deleteContentItem({
+        variables: {
+          contentItemId: draft.id,
+        },
+      });
+      addToast('Publicación eliminada', 'success');
+      setDraft(createEmptyDraft());
+      setImageUploadError('');
+    } catch (error) {
+      addToast('Error eliminando publicación', 'error');
     }
   };
 
@@ -1462,7 +1497,19 @@ export default function PortalConsole() {
           <section className="portal-panel">
             <div className="portal-panel-header">
               <h2>{draft.id ? 'Editar publicación' : 'Nueva publicación'}</h2>
-              {isDraftDirty(draft) && <span className="portal-dirty-indicator">Sin guardar</span>}
+              <div className="portal-inline-actions">
+                {isDraftDirty(draft) && <span className="portal-dirty-indicator">Sin guardar</span>}
+                {draft.id ? (
+                  <button
+                    type="button"
+                    className="portal-danger-button"
+                    onClick={deleteCurrentPublication}
+                    disabled={deleteContentState.loading}
+                  >
+                    {deleteContentState.loading ? <><Spinner size={14} /> Eliminando...</> : 'Eliminar'}
+                  </button>
+                ) : null}
+              </div>
             </div>
             <form className="portal-form" onSubmit={submitContent}>
               <label>
