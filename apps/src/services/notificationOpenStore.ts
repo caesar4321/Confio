@@ -3,6 +3,7 @@ import {
   hasUsableInternetCredentials,
   softClearInternetCredentials,
 } from '../utils/keychainInternetCredentials';
+import { describeTypes, logBreadcrumb, recordCrashError } from './crashLog';
 
 const PENDING_NOTIFICATION_OPEN_SERVICE = 'confio_pending_notification_open';
 
@@ -15,14 +16,31 @@ export type PendingNotificationOpen = {
 export async function savePendingNotificationOpen(
   notification: PendingNotificationOpen
 ): Promise<void> {
+  // Defensive: coerce every Keychain.setInternetCredentials arg to a string.
+  // Some Android builds raise ReadableNativeMap→String during bridge arg
+  // extraction here; see Crashlytics issue ReadableNativeArray.getString.
+  const server = String(PENDING_NOTIFICATION_OPEN_SERVICE);
+  const username = 'pending_notification_open';
+  let password: string;
   try {
-    await Keychain.setInternetCredentials(
-      PENDING_NOTIFICATION_OPEN_SERVICE,
-      'pending_notification_open',
-      JSON.stringify(notification)
-    );
+    password = JSON.stringify(notification);
+  } catch (error) {
+    recordCrashError(error);
+    return;
+  }
+  if (typeof password !== 'string') {
+    password = String(password ?? '');
+  }
+
+  logBreadcrumb(
+    `savePendingNotificationOpen | ${describeTypes({ server, username, password })}`
+  );
+
+  try {
+    await Keychain.setInternetCredentials(server, username, password);
   } catch (error) {
     console.error('[NotificationOpenStore] Failed to save pending notification open:', error);
+    recordCrashError(error);
   }
 }
 
