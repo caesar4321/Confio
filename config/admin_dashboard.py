@@ -102,11 +102,10 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         )
         
         # V2 Migration & Backup Security Metrics
-        # Uses Account model for migration status (per-account tracking)
-        from users.models import Account
-        total_active_for_stats = context['active_users_today'] if context['active_users_today'] > 0 else 1
+        # Keep this user-level over the phone-completed user base. Migration is
+        # tracked per account, so collapse to distinct users for dashboard KPIs.
         drive_users = real_users.filter(backup_provider='google_drive').count()
-        migrated_accounts = Account.objects.filter(is_keyless_migrated=True).count()
+        migrated_users = real_users.filter(accounts__is_keyless_migrated=True).distinct().count()
         # For safe V2 users, count users with both backup verified AND at least one migrated account
         safe_v2_users = real_users.filter(
             backup_verified_at__isnull=False,
@@ -116,8 +115,8 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         context['security_stats'] = {
             'drive_count': drive_users,
             'drive_pct': (drive_users / context['total_users'] * 100) if context['total_users'] else 0,
-            'migrated_count': migrated_accounts,
-            'migrated_pct': (migrated_accounts / context['total_users'] * 100) if context['total_users'] else 0,
+            'migrated_count': migrated_users,
+            'migrated_pct': (migrated_users / context['total_users'] * 100) if context['total_users'] else 0,
             'safe_v2_count': safe_v2_users,
             'safe_v2_pct': (safe_v2_users / context['total_users'] * 100) if context['total_users'] else 0,
         }
