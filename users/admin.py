@@ -122,16 +122,16 @@ class UserAdmin(admin.ModelAdmin):
 
     def changelist_view(self, request, extra_context=None):
         try:
-            # Calculate KPIs for Dashboard
-            from users.models import Account
-            total_active = self.model.objects.filter(is_active=True).count() or 1
-            drive_users = self.model.objects.filter(is_active=True, backup_provider='google_drive').count()
-            migrated_accounts = Account.objects.filter(is_keyless_migrated=True).count()
+            # Calculate KPIs for Dashboard over the phone-completed user base.
+            phone_complete_users = self.model.objects.filter(is_active=True).exclude(phone_number__isnull=True).exclude(phone_number='')
+            total_active = phone_complete_users.count() or 1
+            drive_users = phone_complete_users.filter(backup_provider='google_drive').count()
+            migrated_users = phone_complete_users.filter(accounts__is_keyless_migrated=True).distinct().count()
             # Safety Score V2: Users who have at least one migrated account AND have a verified backup
-            safe_v2_users = self.model.objects.filter(is_active=True, backup_verified_at__isnull=False, accounts__is_keyless_migrated=True).distinct().count()
+            safe_v2_users = phone_complete_users.filter(backup_verified_at__isnull=False, accounts__is_keyless_migrated=True).distinct().count()
             
             drive_pct = (drive_users / total_active) * 100
-            migrated_pct = (migrated_accounts / total_active) * 100
+            migrated_pct = (migrated_users / total_active) * 100
             safety_v2_pct = (safe_v2_users / total_active) * 100
             
             msg = format_html(
