@@ -1098,9 +1098,27 @@ export const TransactionDetailScreen = () => {
     currentInternalId !== '#PENDING' &&
     currentInternalId.length >= 32 &&
     /[A-Fa-f-]/.test(currentInternalId);
+  const routeInvitationExpiresAt = (transactionData as any)?.invitationExpiresAt || (transactionData as any)?.invitation_expires_at;
+  const routeLooksLikeInvite = Boolean(
+    (transactionData as any)?.isInvitation ||
+    (transactionData as any)?.is_invitation ||
+    (transactionData as any)?.isInvitedFriend ||
+    (transactionData as any)?.is_invited_friend ||
+    routeInvitationExpiresAt
+  );
+  const routeHasInvitationId = Boolean(
+    (transactionData as any)?.invitationId ||
+    (transactionData as any)?.invitation_id ||
+    (transactionData as any)?.idempotencyKey ||
+    (transactionData as any)?.idempotency_key
+  );
+  const routeInviteNeedsId = routeLooksLikeInvite
+    && Boolean(routeInvitationExpiresAt)
+    && moment(routeInvitationExpiresAt).isBefore(moment())
+    && !routeHasInvitationId;
   const needsFetch = Boolean(
     (transactionData?.id || transactionData?.transaction_id) &&
-    (lacksPhonesForSend || !hasValidInternalId)
+    (lacksPhonesForSend || !hasValidInternalId || routeInviteNeedsId)
   );
   const transactionId = transactionData?.id || transactionData?.transaction_id;
 
@@ -1646,7 +1664,7 @@ export const TransactionDetailScreen = () => {
     );
   }
 
-  const isInvitedFriend = currentTx?.isInvitedFriend || currentTx?.is_invited_friend || false;
+  const isInvitedFriend = currentTx?.isInvitedFriend || currentTx?.is_invited_friend || currentTx?.isInvitation || currentTx?.is_invitation || false;
   const isExternalAddress = currentTx?.is_external_address || false;
   const invitationClaimed = currentTx?.invitationClaimed || currentTx?.invitation_claimed || false;
   const invitationReverted = currentTx?.invitationReverted || currentTx?.invitation_reverted || Boolean(reclaimedInviteTxid);

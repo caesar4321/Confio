@@ -1770,18 +1770,16 @@ def _get_koywe_contact_profile(*, user, country_code: str, email_override: str |
         not normalized_email_override or normalized_email_override == override_email
     )
 
-    first_name = str(
-        (override or {}).get('firstName') if use_override_identity else ''
-        or getattr(verification, 'verified_first_name', None)
-        or getattr(user, 'first_name', None)
-        or ''
-    ).strip()
-    last_name = str(
-        (override or {}).get('lastName') if use_override_identity else ''
-        or getattr(verification, 'verified_last_name', None)
-        or getattr(user, 'last_name', None)
-        or ''
-    ).strip()
+    if use_override_identity:
+        first_name = str((override or {}).get('firstName') or '').strip()
+        last_name = str((override or {}).get('lastName') or '').strip()
+    else:
+        if not verification:
+            raise KoyweError('Completa la verificación de identidad antes de usar recargas y retiros')
+        first_name = str(getattr(verification, 'verified_first_name', None) or '').strip()
+        last_name = str(getattr(verification, 'verified_last_name', None) or '').strip()
+        if not first_name or not last_name:
+            raise KoyweError('No pudimos preparar la operación porque falta el nombre legal verificado. Contacta soporte')
     email = str(email_override or (override or {}).get('email') or getattr(user, 'email', None) or '').strip()
     phone_country_code = getattr(user, 'phone_country_code', None) or ''
     phone_number = (getattr(user, 'phone_number', None) or '').strip()

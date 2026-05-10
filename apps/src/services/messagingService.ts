@@ -198,9 +198,16 @@ class MessagingService {
       }
 
       // Generate new device ID
-      const deviceId = await DeviceInfo.getUniqueId();
+      const rawDeviceId = await DeviceInfo.getUniqueId();
+      const deviceId = typeof rawDeviceId === 'string' ? rawDeviceId : String(rawDeviceId);
+      logBreadcrumb(
+        `getOrCreateDeviceId.set | ${describeTypes({
+          server: DEVICE_ID_SERVICE,
+          deviceId,
+        })}`
+      );
       await Keychain.setInternetCredentials(
-        DEVICE_ID_SERVICE,
+        String(DEVICE_ID_SERVICE),
         'device_id',
         deviceId
       );
@@ -208,13 +215,19 @@ class MessagingService {
       return deviceId;
     } catch (error) {
       console.error('Error getting device ID:', error);
+      recordCrashError(error);
       // Fallback to a random ID
       const randomId = `device_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      await Keychain.setInternetCredentials(
-        DEVICE_ID_SERVICE,
-        'device_id',
-        randomId
-      );
+      logBreadcrumb(`getOrCreateDeviceId.fallback | ${describeTypes({ randomId })}`);
+      try {
+        await Keychain.setInternetCredentials(
+          String(DEVICE_ID_SERVICE),
+          'device_id',
+          randomId
+        );
+      } catch (e) {
+        recordCrashError(e);
+      }
       return randomId;
     }
   }
@@ -468,13 +481,25 @@ class MessagingService {
     // Handle token refresh
     const unsubscribeOnTokenRefresh = messaging().onTokenRefresh(async token => {
       console.log('FCM token refreshed:', token);
-      await this.registerToken(token);
-      await Keychain.setInternetCredentials(
-        FCM_TOKEN_SERVICE,
-        'fcm_token',
-        token
+      const safeToken = typeof token === 'string' ? token : String(token ?? '');
+      logBreadcrumb(
+        `onTokenRefresh | ${describeTypes({
+          server: FCM_TOKEN_SERVICE,
+          token: safeToken,
+          rawTokenType: typeof token,
+        })}`
       );
-      this.fcmToken = token;
+      try {
+        await this.registerToken(safeToken);
+        await Keychain.setInternetCredentials(
+          String(FCM_TOKEN_SERVICE),
+          'fcm_token',
+          safeToken
+        );
+        this.fcmToken = safeToken;
+      } catch (error) {
+        recordCrashError(error);
+      }
     });
     this.unsubscribeHandlers.push(unsubscribeOnTokenRefresh);
 
