@@ -1034,7 +1034,7 @@ export async function getOrCreateMasterSecret(
           localSecret = addressBoundSecret;
           await credentialStorage.storeSecret(secretAlias, localSecret);
           console.log('[MasterSecret] Recovered V2 secret from address-bound alias.');
-        } else if (options.allowGenerate === false) {
+        } else if (options.allowGenerate === false && !accessToken) {
           throw new Error(
             'Esta cuenta ya fue vinculada a otra billetera. Necesitamos recuperar esa billetera desde Google Drive antes de continuar.'
           );
@@ -1085,7 +1085,18 @@ export async function getOrCreateMasterSecret(
       );
 
       if (restore.secret) {
-        if (options?.provider === 'apple' && !secretsEqual(localSecret, restore.secret)) {
+        const restoredAddress = derivePersonalV2Address(restore.secret);
+        if (options?.expectedAddress && restoredAddress !== options.expectedAddress) {
+          throw new Error(
+            'El respaldo encontrado en Google Drive pertenece a otra billetera. Usa la cuenta de Google correcta o contacta a soporte.'
+          );
+        }
+
+        if (
+          options?.provider === 'apple' &&
+          !secretsEqual(localSecret, restore.secret) &&
+          !options?.expectedAddress
+        ) {
           throw new Error(
             'Ya existe una billetera respaldada en este Google Drive. Para evitar mezclar cuentas, inicia sesión con la cuenta original o usa otro Google Drive para respaldar esta billetera.'
           );
@@ -1101,7 +1112,7 @@ export async function getOrCreateMasterSecret(
         await credentialStorage.storeSecret(walletIdKey, stringToUtf8Bytes(localWalletId));
         await storeAddressBoundMasterSecret(
           credentialStorage,
-          derivePersonalV2Address(localSecret),
+          restoredAddress,
           localSecret
         );
 

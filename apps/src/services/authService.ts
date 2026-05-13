@@ -1093,9 +1093,27 @@ export class AuthService {
         } catch (v2Err) {
           console.error('[AuthService] Failed to verify/restore Apple V2 Master Secret:', v2Err);
           if (!allowV2SecretGeneration) {
-            throw new Error('Necesitamos recuperar tu billetera existente antes de continuar. Revisa iCloud/Google Drive o contáctanos para evitar crear una dirección nueva.');
+            onProgress?.('Recuperando tu billetera con Google Drive...');
+            const driveAccessToken = await this.getDriveAccessTokenOnly();
+            if (!driveAccessToken) {
+              throw new Error('Para entrar a esta cuenta necesitamos recuperar tu billetera. Toca Continuar con Google y elige la misma cuenta de Google donde guardaste tu respaldo.');
+            }
+
+            try {
+              await getOrCreateMasterSecret(appleSub, driveAccessToken, {
+                allowGenerate: false,
+                provider: 'apple',
+                expectedAddress: serverAlgorandAddress,
+              });
+              console.log('[AuthService] Apple V2 wallet recovered from Google Drive.');
+            } catch (driveRecoveryErr) {
+              console.error('[AuthService] Failed to recover Apple V2 wallet from Drive:', driveRecoveryErr);
+              throw new Error('No encontramos el respaldo correcto en ese Google Drive. Intenta con la cuenta de Google que usaste para el respaldo o contáctanos para ayudarte.');
+            }
           }
-          throw v2Err;
+          if (allowV2SecretGeneration) {
+            throw v2Err;
+          }
         }
         console.log('Master secret checked/created for Apple user');
 
