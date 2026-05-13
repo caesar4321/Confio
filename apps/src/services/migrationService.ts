@@ -160,6 +160,7 @@ class WalletMigrationService {
             try {
                 v2Secret = await getOrCreateMasterSecret(sub, undefined, {
                     allowGenerate: false,
+                    provider,
                 });
             } catch (e) {
                 console.log('[MigrationService] No existing V2 secret found during migration check.');
@@ -335,7 +336,9 @@ class WalletMigrationService {
                 throw new Error('Debes activar el respaldo en Google Drive antes de migrar tu billetera.');
             }
 
-            const v2Secret = await getOrCreateMasterSecret(sub, driveAccessToken);
+            const v2Secret = await getOrCreateMasterSecret(sub, driveAccessToken, {
+                provider,
+            });
             console.log('[MigrationService] V2 Secret ready and backed up to Drive');
 
             const v2Wallet = deriveWalletV2(v2Secret, {

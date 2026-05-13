@@ -349,12 +349,22 @@ interface DriveBackupCandidate {
   name: string;
   modifiedTime?: string;
   walletId?: string | null;
+  deviceHint?: string;
 }
 
 interface OldestDriveBackupResult {
   foundAny: boolean;
   secret: Uint8Array | null;
   walletId: string | null;
+}
+
+function secretsEqual(a?: Uint8Array | null, b?: Uint8Array | null): boolean {
+  if (!a || !b || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a[i] ^ b[i];
+  }
+  return diff === 0;
 }
 
 // Mutex to prevent race conditions during secret creation
@@ -430,6 +440,17 @@ async function findOldestRestorableDriveBackup(
 ): Promise<OldestDriveBackupResult> {
   const safeSub = bytesToHex(sha256(utf8ToBytes(userSub)));
   const legacyFilename = `confio_master_secret_v2_${safeSub}.json`;
+  const manifest = await fetchManifest(googleDriveStorage, accessToken);
+  const manifestById = new Map(
+    manifest.wallets
+      .filter(entry => !!entry.id)
+      .map(entry => [entry.id, entry])
+  );
+  const androidWalletIds = new Set(
+    manifest.wallets
+      .filter(entry => (entry.deviceHint || '').toLowerCase().includes('android'))
+      .map(entry => entry.id)
+  );
 
   const activeFiles = await googleDriveStorage.listFiles(accessToken);
   let trashedFiles: any[] = [];
@@ -451,11 +472,13 @@ async function findOldestRestorableDriveBackup(
   const candidates: DriveBackupCandidate[] = [];
   for (const file of files) {
     const walletId = extractWalletIdFromBackupName(file.name);
+    const manifestEntry = walletId ? manifestById.get(walletId) : undefined;
     candidates.push({
       fileId: file.id,
       name: file.name,
       modifiedTime: file.modifiedTime || file.createdTime,
       walletId,
+      deviceHint: manifestEntry?.deviceHint,
     });
 
     try {
@@ -467,6 +490,7 @@ async function findOldestRestorableDriveBackup(
           name: `${file.name} [Rev ${revision.modifiedTime}]`,
           modifiedTime: revision.modifiedTime,
           walletId,
+          deviceHint: manifestEntry?.deviceHint,
         });
       }
     } catch (e) {
@@ -474,7 +498,12 @@ async function findOldestRestorableDriveBackup(
     }
   }
 
-  candidates.sort((a, b) => getBackupTime(a) - getBackupTime(b));
+  candidates.sort((a, b) => {
+    const aAndroid = !!a.walletId && androidWalletIds.has(a.walletId);
+    const bAndroid = !!b.walletId && androidWalletIds.has(b.walletId);
+    if (aAndroid !== bAndroid) return aAndroid ? -1 : 1;
+    return getBackupTime(a) - getBackupTime(b);
+  });
 
   for (const candidate of candidates) {
     try {
@@ -489,6 +518,7 @@ async function findOldestRestorableDriveBackup(
           name: candidate.name,
           modifiedTime: candidate.modifiedTime,
           walletId: candidate.walletId || 'legacy/no-id',
+          deviceHint: candidate.deviceHint || 'unknown',
         });
         return {
           foundAny: true,
@@ -921,7 +951,7 @@ export async function restoreFromBackup(
 export async function getOrCreateMasterSecret(
   userSub: string,
   accessToken?: string,
-  options?: { allowGenerate?: boolean }
+  options?: { allowGenerate?: boolean; provider?: 'google' | 'apple' }
 ): Promise<Uint8Array> {
   if (!userSub) {
     throw new Error('[MasterSecret] User Sub (OAuth ID) is required to secure the master secret.');
@@ -996,8 +1026,14 @@ export async function getOrCreateMasterSecret(
       );
 
       if (restore.secret) {
-        if (localSecret) {
-          console.log('[MasterSecret] Replacing local V2 secret with canonical oldest Drive backup.');
+        if (options?.provider === 'apple' && !secretsEqual(localSecret, restore.secret)) {
+          throw new Error(
+            'Ya existe una billetera respaldada en este Google Drive. Para evitar mezclar cuentas, inicia sesión con la cuenta original o usa otro Google Drive para respaldar esta billetera.'
+          );
+        }
+
+        if (localSecret && !secretsEqual(localSecret, restore.secret)) {
+          console.log('[MasterSecret] Replacing local V2 secret with canonical Drive backup.');
         }
         localSecret = restore.secret;
         localWalletId = restore.walletId || generateUUID();

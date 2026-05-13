@@ -387,7 +387,9 @@ export class AuthService {
       // backups, getOrCreateMasterSecret restores the oldest valid one
       // automatically instead of prompting or creating a duplicate wallet.
       const { getOrCreateMasterSecret, reportBackupStatus } = await import('./secureDeterministicWallet');
-      await getOrCreateMasterSecret(oauthData.subject, accessToken);
+      await getOrCreateMasterSecret(oauthData.subject, accessToken, {
+        provider: oauthData.provider,
+      });
       console.log('[AuthService] Master secret synced to Drive');
 
       // Report backup status for the CURRENT user (uses existing JWT)
@@ -742,6 +744,7 @@ export class AuthService {
           const tokenForDrive = enableDrive ? driveAccessToken : undefined;
           await getOrCreateMasterSecret(googleSubject, tokenForDrive || undefined, {
             allowGenerate: allowV2SecretGeneration,
+            provider: 'google',
           });
           console.log('[AuthService] ✅ V2 Master Secret verified/restored.');
           driveSyncSucceeded = !!tokenForDrive;
@@ -1083,6 +1086,7 @@ export class AuthService {
         try {
           await getOrCreateMasterSecret(appleSub, undefined, {
             allowGenerate: allowV2SecretGeneration,
+            provider: 'apple',
           });
         } catch (v2Err) {
           console.error('[AuthService] Failed to verify/restore Apple V2 Master Secret:', v2Err);
