@@ -7852,11 +7852,6 @@ react-is@^19.1.0:
   resolved "https://registry.npmjs.org/react-is/-/react-is-19.1.0.tgz"
   integrity sha512-Oe56aUPnkHyyDxxkvqtd7KkdQP5uIUfHxd5XTb3wE9d/kRnZLmKbDB0GWk919tdQ+mxxPtG6EAs6RMT6i1qtHg==
 
-react-native-block-store@^0.1.1:
-  version "0.1.1"
-  resolved "https://registry.npmjs.org/react-native-block-store/-/react-native-block-store-0.1.1.tgz"
-  integrity sha512-pE7EYWILKNZptd5ZtdPir4pt3LOG3PXZ6OVvuX7KvY9lUE3I9yn9qDqjAsFM0MxnSSRK2q2e1/MHef2j38RKrg==
-
 react-native-buffer@^6.0.3:
   version "6.0.3"
   resolved "https://registry.npmjs.org/react-native-buffer/-/react-native-buffer-6.0.3.tgz"

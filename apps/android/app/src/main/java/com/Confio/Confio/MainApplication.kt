@@ -40,7 +40,6 @@ import com.sdkreactnative.SdkReactNativePackage
 import com.reactnativecommunity.clipboard.ClipboardPackage
 
 import com.uerceg.play_install_referrer.PlayInstallReferrerPackage
-import com.blockstore.BlockStorePackage
 
 class MainApplication : Application(), ReactApplication {
 
@@ -79,8 +78,7 @@ class MainApplication : Application(), ReactApplication {
             ClipboardPackage(),
             SdkReactNativePackage(),
 
-            PlayInstallReferrerPackage(),
-            BlockStorePackage()
+            PlayInstallReferrerPackage()
           )
         }
 

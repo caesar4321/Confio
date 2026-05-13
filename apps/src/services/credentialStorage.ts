@@ -1,6 +1,5 @@
 import { Platform } from 'react-native';
 import * as Keychain from 'react-native-keychain';
-import { save as blockStoreSave, retrieve as blockStoreRetrieve, remove as blockStoreRemove } from 'react-native-block-store';
 import { bytesToBase64, base64ToBytes } from '../utils/encoding';
 
 /**
@@ -37,18 +36,12 @@ class CredentialStorageService implements SecureStorageInterface {
                 // NO accessControl - let app-level bio auth handle security
             });
         } else {
-            // Android: Use BlockStore API (GMS) via react-native-block-store
-            try {
-                // Library stores strings as bytes (UTF-8). We pass our Base64 string.
-                // We enable 'shouldBackupToCloud' explicitly.
-                const result = await blockStoreSave(key, base64Secret, true);
-                if (result) {                } else {
-                    throw new Error('BlockStore save returned false');
-                }
-            } catch (error) {
-                console.error('[CredentialStorage] Failed to store to BlockStore:', error);
-                throw new Error('BlockStore storage failed');
-            }
+            // Android: local-only cache. Google Drive is the durable source of
+            // truth for Google accounts.
+            await Keychain.setGenericPassword(key, base64Secret, {
+                service: key,
+                accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK,
+            });
         }
     }
 
@@ -80,17 +73,12 @@ class CredentialStorageService implements SecureStorageInterface {
             }
         } else {
             try {
-                // Android BlockStore
-                // Library returns the string we stored (our Base64 string)
-                const val = await blockStoreRetrieve(key);
-                if (val) {
-                    try {
-                        return base64ToBytes(val);
-                    } catch (e) {
-                        // Fallback? If it returns raw bytes as string?
-                        // For now assume it returns exact string we saved.
-                        return null;
-                    }
+                const credentials = await Keychain.getGenericPassword({
+                    service: key,
+                });
+
+                if (credentials && credentials.password) {
+                    return base64ToBytes(credentials.password);
                 }
                 return null;
             } catch (error) {
@@ -104,7 +92,7 @@ class CredentialStorageService implements SecureStorageInterface {
         if (Platform.OS === 'ios') {
             await Keychain.resetGenericPassword({ service: key, synchronizable: true });
         } else {
-            await blockStoreRemove(key);
+            await Keychain.resetGenericPassword({ service: key });
         }
     }
 }

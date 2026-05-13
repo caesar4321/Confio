@@ -20,10 +20,9 @@ Confío uses a "Keyless Self-Custody" model (V2).
             3.  If missing -> Generate **New Random** Secret -> Save to Keychain.
     *   **Android**:
         1.  **Check Google Drive** (App Data Folder).
-        2.  If found -> Sync to Local.
-        3.  If missing, check **Encrypted BlockStore** / SharedPreferences.
-        4.  If found locally -> Sync Up to Drive.
-        5.  If not found -> Generate **New Random** Secret -> Save to Local & Drive.
+        2.  If found -> Sync to local Android Keychain cache.
+        3.  If missing for a brand-new account -> Generate **New Random** Secret -> Save to local cache & Drive.
+        4.  Local Android storage is cache only; Google Drive is the durable source of truth.
 3.  **Session & JWT**:
     *   Once the Master Secret is secured locally, the app proceeds to authenticated API requests using the Firebase ID Token (exchanged for a Confío Session Cookie/JWT).
 

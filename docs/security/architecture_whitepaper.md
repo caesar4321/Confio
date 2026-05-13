@@ -22,8 +22,8 @@ To support seamless roaming between iOS and Android while maintaining high secur
 
 1.  **Local Hardware Storage (Hot Wallet)**
     *   **iOS**: iCloud Keychain (`react-native-keychain`).
-    *   **Android**: Encrypted SharedPreferences / BlockStore.
-    *   **Security**: Protects the active key for signing daily transactions.
+    *   **Android**: Android Keychain/Keystore via `react-native-keychain` as a local cache.
+    *   **Security**: Protects the active key for signing daily transactions. On Android, Google Drive remains the durable source of truth and local storage is best-effort cache.
 
 2.  **Cloud Backup (Encrypted Backup / Recovery)**
     *   **Android**: **Google Drive AppData Folder** (Hidden from user view).
@@ -93,7 +93,7 @@ When a V1 user logs in to the V2 app:
 *   **Encrypted Backup Weakness**: The "Encrypted Backup" uses a static application key (`APP_BACKUP_KEY`) for obfuscation.
     *   **Risk**: If a user's Google/Apple Account is compromised **AND** the attacker extracts the key from the app binary, the backup can be decrypted.
     *   **Dependence**: Security of the backup ultimately relies on the User's Cloud Account security (Strong Password + 2FA).
-*   **Rooted/Jailbroken Devices**: On devices where the user has granted root access, OS-level protections (Keychain/BlockStore) can be bypassed by malicious apps. We assume a standard, non-rooted security environment.
+*   **Rooted/Jailbroken Devices**: On devices where the user has granted root access, OS-level protections (Keychain/Keystore) can be bypassed by malicious apps. We assume a standard, non-rooted security environment.
 
 ## 6. Smart Contract Security
 

@@ -251,7 +251,6 @@ dependencies {
     implementation project(':didit-sdk-react-native')
 
     implementation project(':react-native-play-install-referrer')
-    implementation project(':react-native-block-store')
 
     // Add Google Sign-In dependencies
     implementation 'com.google.android.gms:play-services-auth:20.7.0'

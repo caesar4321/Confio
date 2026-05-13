@@ -50,7 +50,6 @@
     "punycode": "^2.3.1",
     "react": "19.0.0",
     "react-native": "^0.79.3",
-    "react-native-block-store": "^0.1.1",
     "react-native-buffer": "^6.0.3",
     "react-native-contacts": "^7.0.8",
     "react-native-device-info": "^14.0.4",
