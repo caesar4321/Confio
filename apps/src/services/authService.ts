@@ -98,8 +98,13 @@ export class AuthService {
   private firebaseIsInitialized = false;
   private apolloClient: ApolloClient<any> | null = null;
   private token: string | null = null;
+  private driveAccessToken: string | null = null;
 
   private constructor() {
+  }
+
+  getCachedDriveAccessToken(): string | null {
+    return this.driveAccessToken;
   }
 
   private getGoogleSignInErrorMessage(error: unknown): string {
@@ -326,6 +331,7 @@ export class AuthService {
 
       // Get the access token for Drive
       const { accessToken } = await GoogleSignin.getTokens();
+      this.driveAccessToken = accessToken || null;
 
       console.log('[AuthService] Got Drive access token:', accessToken ? 'obtained' : 'failed');
 
@@ -596,6 +602,7 @@ export class AuthService {
 
       // Use the accessToken for Drive sync if user chose "Accept"
       const driveAccessToken = enableDrive ? accessToken : undefined;
+      this.driveAccessToken = driveAccessToken || null;
       console.log(`[AuthService] enableDrive=${enableDrive}, driveAccessToken=${driveAccessToken ? 'obtained' : 'skipped'}`);
 
       // Debug: Check what's in the userInfo from Google Sign-In
@@ -1531,6 +1538,7 @@ export class AuthService {
   async signOut() {
     try {
       console.log('Starting sign out process...');
+      this.driveAccessToken = null;
 
       // 1. Sign out from Firebase (if there's a current user)
       const currentUser = this.auth.currentUser;

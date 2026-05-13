@@ -328,9 +328,9 @@ class WalletMigrationService {
             console.log('[MigrationService] Starting atomic migration...');
 
             // 1. Get or Create Master Secret and sync it to Google Drive before
-            // moving any V1 funds. V1 users are allowed to generate V2 here, but
-            // the generated secret must be backed up before the atomic sweep.
-            const driveAccessToken = await authService.getDriveAccessTokenOnly();
+            // moving any V1 funds. The migration flow must not prompt for Drive;
+            // it can only use a token already obtained during login/backup.
+            const driveAccessToken = authService.getCachedDriveAccessToken();
             if (!driveAccessToken) {
                 throw new Error('Debes activar el respaldo en Google Drive antes de migrar tu billetera.');
             }
