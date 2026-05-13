@@ -11,6 +11,7 @@ import {
   hasUsableInternetCredentials,
   softClearInternetCredentials,
 } from '../utils/keychainInternetCredentials';
+import { describeTypes, logBreadcrumb, recordCrashError } from './crashLog';
 
 const FCM_TOKEN_SERVICE = 'confio_fcm_token';
 const DEVICE_ID_SERVICE = 'confio_device_id';
@@ -197,9 +198,16 @@ class MessagingService {
       }
 
       // Generate new device ID
-      const deviceId = await DeviceInfo.getUniqueId();
+      const rawDeviceId = await DeviceInfo.getUniqueId();
+      const deviceId = typeof rawDeviceId === 'string' ? rawDeviceId : String(rawDeviceId);
+      logBreadcrumb(
+        `getOrCreateDeviceId.set | ${describeTypes({
+          server: DEVICE_ID_SERVICE,
+          deviceId,
+        })}`
+      );
       await Keychain.setInternetCredentials(
-        DEVICE_ID_SERVICE,
+        String(DEVICE_ID_SERVICE),
         'device_id',
         deviceId
       );
@@ -207,13 +215,19 @@ class MessagingService {
       return deviceId;
     } catch (error) {
       console.error('Error getting device ID:', error);
+      recordCrashError(error);
       // Fallback to a random ID
       const randomId = `device_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      await Keychain.setInternetCredentials(
-        DEVICE_ID_SERVICE,
-        'device_id',
-        randomId
-      );
+      logBreadcrumb(`getOrCreateDeviceId.fallback | ${describeTypes({ randomId })}`);
+      try {
+        await Keychain.setInternetCredentials(
+          String(DEVICE_ID_SERVICE),
+          'device_id',
+          randomId
+        );
+      } catch (e) {
+        recordCrashError(e);
+      }
       return randomId;
     }
   }
@@ -467,13 +481,25 @@ class MessagingService {
     // Handle token refresh
     const unsubscribeOnTokenRefresh = messaging().onTokenRefresh(async token => {
       console.log('FCM token refreshed:', token);
-      await this.registerToken(token);
-      await Keychain.setInternetCredentials(
-        FCM_TOKEN_SERVICE,
-        'fcm_token',
-        token
+      const safeToken = typeof token === 'string' ? token : String(token ?? '');
+      logBreadcrumb(
+        `onTokenRefresh | ${describeTypes({
+          server: FCM_TOKEN_SERVICE,
+          token: safeToken,
+          rawTokenType: typeof token,
+        })}`
       );
-      this.fcmToken = token;
+      try {
+        await this.registerToken(safeToken);
+        await Keychain.setInternetCredentials(
+          String(FCM_TOKEN_SERVICE),
+          'fcm_token',
+          safeToken
+        );
+        this.fcmToken = safeToken;
+      } catch (error) {
+        recordCrashError(error);
+      }
     });
     this.unsubscribeHandlers.push(unsubscribeOnTokenRefresh);
 
@@ -512,13 +538,28 @@ class MessagingService {
       });
     }
 
-    // Construct platform-specific config to avoid native type errors
+    // Construct platform-specific config to avoid native type errors. Coerce
+    // every string-typed field — some Android builds raise ReadableNativeMap→
+    // String during bridge arg extraction if any of these is unexpectedly an
+    // object.
+    const safeId = typeof notificationId === 'string' ? notificationId : String(notificationId);
+    const safeTitle = String(remoteMessage.notification?.title || 'Confío');
+    const safeBody = String(remoteMessage.notification?.body || '');
     const notificationConfig: any = {
-      id: notificationId, // Set explicit ID to prevent duplicates
-      title: remoteMessage.notification?.title || 'Confío',
-      body: remoteMessage.notification?.body || '',
+      id: safeId,
+      title: safeTitle,
+      body: safeBody,
       data: remoteMessage.data || {}, // Ensure data is an object
     };
+
+    logBreadcrumb(
+      `displayNotification | ${describeTypes({
+        id: safeId,
+        title: safeTitle,
+        body: safeBody,
+        hasData: remoteMessage.data != null,
+      })}`
+    );
 
     if (Platform.OS === 'android') {
       notificationConfig.android = {
@@ -532,7 +573,7 @@ class MessagingService {
         },
         groupId: 'confio_notifications',
         groupSummary: false,
-        tag: notificationId,
+        tag: safeId,
       };
     } else {
       notificationConfig.ios = {
@@ -552,6 +593,7 @@ class MessagingService {
       console.log(`[${timestamp}] Notification displayed successfully with ID: ${notificationId}`);
     } catch (error) {
       console.error(`[${timestamp}] Error displaying notification:`, error);
+      recordCrashError(error);
     }
   }
 
@@ -581,6 +623,15 @@ class MessagingService {
 
   private async handleNotificationData(data: any, skipAccountCheck: boolean = false) {
     console.log('[MessagingService] handleNotificationData called with:', data, { skipAccountCheck });
+
+    logBreadcrumb(
+      `handleNotificationData | ${describeTypes({
+        action_url: data?.action_url,
+        notification_type: data?.notification_type,
+        related_type: data?.related_type,
+        related_id: data?.related_id,
+      })}`
+    );
 
     if (!skipAccountCheck && !this.canNavigateIntoMain()) {
       console.log('[MessagingService] Deferring notification until Main navigator is available');
@@ -774,6 +825,17 @@ class MessagingService {
 
   private navigateToDeepLink(url: string, transactionData?: any) {
     console.log('[MessagingService] navigateToDeepLink called with:', { url, transactionData });
+
+    logBreadcrumb(
+      `navigateToDeepLink | ${describeTypes({ url, hasTxData: transactionData != null })}`
+    );
+
+    // Defensive: if `url` arrived as a non-string from a malformed FCM payload,
+    // coerce so downstream string ops (split, replace) don't blow up.
+    if (typeof url !== 'string') {
+      logBreadcrumb(`navigateToDeepLink: non-string url, coercing (was ${typeof url})`);
+      url = String(url ?? '');
+    }
 
     // Parse deep link format: confio://screen/params OR /screen/params
     let path = url;

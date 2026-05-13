@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -6,6 +6,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MessageInboxContent } from '../components/MessageInboxContent';
 import { MainStackParamList } from '../types/navigation';
 import { Header } from '../navigation/Header';
+import { describeTypes, logBreadcrumb } from '../services/crashLog';
 
 
 export const MessageScreen = () => {
@@ -13,6 +14,19 @@ export const MessageScreen = () => {
   const route = useRoute<any>();
   const [screenState, setScreenState] = useState<'inbox' | 'channel'>('inbox');
   const initialChannelId = route.params?.initialChannelId;
+
+  useEffect(() => {
+    logBreadcrumb(
+      `MessageScreen.mount | ${describeTypes({ initialChannelId })}`
+    );
+    return () => {
+      logBreadcrumb('MessageScreen.unmount');
+    };
+  }, []);
+
+  useEffect(() => {
+    logBreadcrumb(`MessageScreen.screenState | state=${screenState}`);
+  }, [screenState]);
 
   return (
     <View style={styles.container}>

@@ -72,6 +72,8 @@ interface Transaction {
   status: string;
   hash: string;
   isInvitation?: boolean;
+  invitationId?: string;
+  idempotencyKey?: string;
   invitationClaimed?: boolean;
   invitationReverted?: boolean;
   invitationExpiresAt?: string;
@@ -837,6 +839,8 @@ export const AccountDetailScreen = () => {
           status: mappedStatus,
           hash: tx.transactionHash || 'pending',
           isInvitation: isActualInvitation,
+          invitationId: tx.idempotencyKey,
+          idempotencyKey: tx.idempotencyKey,
           invitationClaimed: tx.invitationClaimed || false,
           invitationReverted: tx.invitationReverted || false,
           invitationExpiresAt: tx.invitationExpiresAt,
@@ -1304,6 +1308,8 @@ export const AccountDetailScreen = () => {
             transaction.type === 'ramp' ? 'Recarga' :
             undefined,
           isInvitedFriend: transaction.isInvitation || false, // true means friend is NOT on Confío
+          invitationId: transaction.invitationId,
+          idempotencyKey: transaction.idempotencyKey,
           invitationClaimed: transaction.invitationClaimed || false,
           invitationReverted: transaction.invitationReverted || false,
           invitationExpiresAt: transaction.invitationExpiresAt || undefined,

@@ -1322,6 +1322,29 @@ class PortalSaveContentItem(graphene.Mutation):
         )
 
 
+class PortalDeleteContentItem(graphene.Mutation):
+    class Arguments:
+        content_item_id = graphene.ID(required=True)
+
+    success = graphene.Boolean(required=True)
+    deleted_content_item_id = graphene.ID(required=True)
+
+    @classmethod
+    @login_required
+    def mutate(cls, root, info, content_item_id):
+        require_staff_user(info)
+        item = ContentItem.objects.filter(id=content_item_id).first()
+        if item is None:
+            raise GraphQLError('Content item not found')
+
+        deleted_content_item_id = str(item.id)
+        item.delete()
+        return PortalDeleteContentItem(
+            success=True,
+            deleted_content_item_id=deleted_content_item_id,
+        )
+
+
 class RequestPublicationImageUpload(graphene.Mutation):
     class Arguments:
         filename = graphene.String(required=False)
@@ -1401,4 +1424,5 @@ class Mutation(graphene.ObjectType):
     portal_send_support_reply = PortalSendSupportReply.Field()
     portal_set_support_conversation_status = PortalSetSupportConversationStatus.Field()
     portal_save_content_item = PortalSaveContentItem.Field()
+    portal_delete_content_item = PortalDeleteContentItem.Field()
     request_publication_image_upload = RequestPublicationImageUpload.Field()

@@ -48,6 +48,7 @@ import { ReferralSuccessModal } from '../components/ReferralSuccessModal';
 import AutoSwapModal from '../components/AutoSwapModal';
 import { useAutoSwap } from '../hooks/useAutoSwap';
 import { deepLinkHandler } from '../utils/deepLinkHandler';
+import { describeTypes, logBreadcrumb, recordCrashError } from '../services/crashLog';
 const PREFERENCES_KEYCHAIN_SERVICE = 'com.confio.preferences';
 const BALANCE_VISIBILITY_KEY = 'balance_visibility';
 const INVITE_TS_SERVICE = 'com.confio.preferences.invite';
@@ -219,6 +220,15 @@ export const HomeScreen = () => {
   const [presaleDismissed, setPresaleDismissed] = useState(false);
   const showPayrollCard = (isBusinessAccount || isEmployeeDelegate || isPersonalAccount) && pendingPayrollCount > 0;
 
+  // Hunting ReadableNativeArray.getString crash: confirm we reach Home mount,
+  // and timestamp it relative to any subsequent crash in Crashlytics.
+  useEffect(() => {
+    logBreadcrumb('HomeScreen.mount');
+    return () => {
+      logBreadcrumb('HomeScreen.unmount');
+    };
+  }, []);
+
   // Refetch balances when active account changes (skip initial mount — useQuery already fetches)
   const prevAccountIdRef = useRef<string | undefined>(undefined);
   useEffect(() => {
@@ -233,6 +243,7 @@ export const HomeScreen = () => {
   const isMountedRef = useRef(false);
   useFocusEffect(
     useCallback(() => {
+      logBreadcrumb(`HomeScreen.focus | firstFocus=${!isMountedRef.current}`);
       if (!isMountedRef.current) {
         // Skip the very first focus — useQuery's network-only already fires on mount
         isMountedRef.current = true;
@@ -554,49 +565,62 @@ export const HomeScreen = () => {
 
   // Save balance visibility preference to Keychain
   const saveBalanceVisibility = async (isVisible: boolean) => {
+    const server = String(PREFERENCES_KEYCHAIN_SERVICE);
+    const username = String(BALANCE_VISIBILITY_KEY);
+    const password = String(isVisible);
+    logBreadcrumb(
+      `Home.saveBalanceVisibility | ${describeTypes({ server, username, password })}`
+    );
     try {
-      await Keychain.setInternetCredentials(
-        PREFERENCES_KEYCHAIN_SERVICE,
-        BALANCE_VISIBILITY_KEY,
-        isVisible.toString()
-      );
+      await Keychain.setInternetCredentials(server, username, password);
     } catch (error) {
+      recordCrashError(error);
     }
   };
 
   // Load balance visibility preference from Keychain
   const loadBalanceVisibility = async () => {
+    const server = String(PREFERENCES_KEYCHAIN_SERVICE);
+    logBreadcrumb(`Home.loadBalanceVisibility | ${describeTypes({ server })}`);
     try {
-      const credentials = await Keychain.getInternetCredentials(PREFERENCES_KEYCHAIN_SERVICE);
+      const credentials = await Keychain.getInternetCredentials(server);
       if (credentials && credentials.username === BALANCE_VISIBILITY_KEY) {
         setShowBalance(credentials.password === 'true');
       }
     } catch (error) {
       // No saved preference, default to showing balance
+      recordCrashError(error);
     }
   };
 
   // Load last shown invite timestamp
   const loadLastInviteTimestamp = async (): Promise<number | null> => {
+    const server = String(INVITE_TS_SERVICE);
+    logBreadcrumb(`Home.loadLastInviteTimestamp | ${describeTypes({ server })}`);
     try {
-      const creds = await Keychain.getInternetCredentials(INVITE_TS_SERVICE);
+      const creds = await Keychain.getInternetCredentials(server);
       if (creds && creds.username === INVITE_TS_KEY && creds.password) {
         const ts = parseInt(creds.password, 10);
         return isNaN(ts) ? null : ts;
       }
-    } catch { }
+    } catch (error) {
+      recordCrashError(error);
+    }
     return null;
   };
 
   // Save last shown invite timestamp
   const saveLastInviteTimestamp = async (ts: number) => {
+    const server = String(INVITE_TS_SERVICE);
+    const username = String(INVITE_TS_KEY);
+    const password = String(ts);
+    logBreadcrumb(
+      `Home.saveLastInviteTimestamp | ${describeTypes({ server, username, password })}`
+    );
     try {
-      await Keychain.setInternetCredentials(
-        INVITE_TS_SERVICE,
-        INVITE_TS_KEY,
-        ts.toString()
-      );
+      await Keychain.setInternetCredentials(server, username, password);
     } catch (e) {
+      recordCrashError(e);
     }
   };
 

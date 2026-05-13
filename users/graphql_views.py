@@ -22,6 +22,7 @@ class UnifiedTransactionType(DjangoObjectType):
     payment_transaction_id = graphene.String(description="Payment transaction ID")
     transaction_hash = graphene.String(description="Transaction hash on blockchain")
     internal_id = graphene.String(description="Standardized Internal ID (UUID)")
+    idempotency_key = graphene.String(description="Source transaction idempotency key")
     
     # Add conversion-specific computed fields
     conversion_type = graphene.String(description="Conversion type (usdc_to_cusd, cusd_to_usdc)")
@@ -86,6 +87,14 @@ class UnifiedTransactionType(DjangoObjectType):
         
         # For others, return as string (already 32-char hex in DB)
         return str(self.internal_id) if self.internal_id else None
+
+    def resolve_idempotency_key(self, info):
+        """Expose source idempotency key where one exists."""
+        if self.transaction_type == 'send' and self.send_transaction:
+            return self.send_transaction.idempotency_key
+        if self.transaction_type == 'payment' and self.payment_transaction:
+            return self.payment_transaction.idempotency_key
+        return None
 
     def resolve_direction(self, info):
         """Resolve transaction direction based on current user's address"""

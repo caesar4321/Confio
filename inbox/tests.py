@@ -18,7 +18,7 @@ from .models import (
     SupportMessage,
     SupportSenderType,
 )
-from .schema import Query
+from .schema import PortalDeleteContentItem, Query
 
 
 class MockInfo:
@@ -102,6 +102,51 @@ class PortalSupportConversationSearchTests(TestCase):
         )
 
         self.assertEqual([result.id for result in results], [str(target.id)])
+
+
+class PortalContentMutationTests(TestCase):
+    def setUp(self):
+        self.staff = User.objects.create_user(
+            username='content-staff',
+            email='content-staff@example.com',
+            password='testpass123',
+            firebase_uid='firebase-content-staff',
+            is_staff=True,
+        )
+        self.staff.is_verified = lambda: True
+        self.info = MockInfo(self.staff)
+        self.channel = Channel.objects.create(
+            slug='confio-news',
+            kind=ChannelKind.NEWS,
+            title='Confío News',
+        )
+
+    def test_staff_can_delete_portal_content_item(self):
+        item = ContentItem.objects.create(
+            channel=self.channel,
+            author_user=self.staff,
+            owner_type='SYSTEM',
+            item_type='NEWS',
+            status=ContentStatus.DRAFT,
+            title='Draft to remove',
+            body='Body copy',
+        )
+        ContentSurface.objects.create(
+            content_item=item,
+            surface=ContentSurfaceType.CHANNEL,
+            rank=1,
+        )
+
+        result = PortalDeleteContentItem.mutate(
+            None,
+            self.info,
+            content_item_id=item.id,
+        )
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.deleted_content_item_id, str(item.id))
+        self.assertFalse(ContentItem.objects.filter(id=item.id).exists())
+        self.assertFalse(ContentSurface.objects.filter(content_item_id=item.id).exists())
 
 
 class DiscoverStructuredDataTests(TestCase):

@@ -3,6 +3,7 @@ import { ApolloProvider } from '@apollo/client';
 import { NavigationContainer, NavigationContainerRef } from '@react-navigation/native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar, StyleSheet, View, ActivityIndicator, Text } from 'react-native';
+import analytics from '@react-native-firebase/analytics';
 import { colors } from './config/theme';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import apolloClient from './apollo/client';
@@ -22,6 +23,7 @@ import { initializeNotifee } from './services/notifeeConfig';
 import linking from './navigation/linking'; // Import linking config
 import { deepLinkHandler } from './utils/deepLinkHandler';
 import { PushNotificationProvider } from './hooks/usePushNotificationContext';
+import { logBreadcrumb } from './services/crashLog';
 // Dev: attach derivation verifier helper
 if (__DEV__) {
   import('./dev/derivationVerifier').catch(() => { });
@@ -95,6 +97,8 @@ const Navigation: React.FC = () => {
 };
 
 const AppContent: React.FC = () => {
+  const previousScreenRef = useRef<string | undefined>(undefined);
+
   useEffect(() => {
     console.log('[App] Bootstrapping messaging handlers before auth');
     messagingService.initialize(false, false).catch(error => {
@@ -117,6 +121,28 @@ const AppContent: React.FC = () => {
             deepLinkHandler.checkDeferredLinks().catch(error => {
               console.error('[App] Failed to process deferred deep link on navigation ready:', error);
             });
+            const initialRoute = navigationRef.current?.getCurrentRoute();
+            if (initialRoute?.name) {
+              previousScreenRef.current = initialRoute.name;
+              logBreadcrumb(`screen_view | ${initialRoute.name}`);
+              analytics()
+                .logScreenView({
+                  screen_name: initialRoute.name,
+                  screen_class: initialRoute.name,
+                })
+                .catch(() => {});
+            }
+          }}
+          onStateChange={() => {
+            const route = navigationRef.current?.getCurrentRoute();
+            const name = route?.name;
+            if (name && name !== previousScreenRef.current) {
+              previousScreenRef.current = name;
+              logBreadcrumb(`screen_view | ${name}`);
+              analytics()
+                .logScreenView({ screen_name: name, screen_class: name })
+                .catch(() => {});
+            }
           }}
         >
           <AuthProvider

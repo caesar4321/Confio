@@ -23,6 +23,7 @@ import { Channel, ChannelMessage, ChannelAvatar, channelMeta, messageReactionOpt
 import { MainStackParamList } from '../types/navigation';
 import { ResponsiveImage } from './ResponsiveImage';
 import { trackContentPlatformClick } from '../services/contentClickTrackingService';
+import { describeTypes, logBreadcrumb, recordCrashError } from '../services/crashLog';
 
 const platformButtonStyles: Record<'TikTok' | 'Instagram' | 'YouTube', { bg: string; fg: string }> = {
   TikTok: { bg: '#111111', fg: '#FFFFFF' },
@@ -411,6 +412,15 @@ export function MessageChannelThread({
   const prependAdjustmentRef = React.useRef<{ previousContentHeight: number; previousOffset: number } | null>(null);
 
   React.useEffect(() => {
+    logBreadcrumb(
+      `MessageChannelThread.mount | ${describeTypes({
+        channelId: channel.id,
+      })}`
+    );
+    // Intentionally only on channel.id — message-count churn would make this noisy.
+  }, [channel.id]);
+
+  React.useEffect(() => {
     if (channel.id === 'soporte') {
       shouldScrollToBottomRef.current = true;
     }
@@ -439,16 +449,29 @@ export function MessageChannelThread({
       return;
     }
 
+    // Defensive: coerce to string before the bridge call. See ReadableNativeArray.getString
+    // crash in Crashlytics — a non-string here would crash during arg extraction.
+    const safeLink = typeof link === 'string' ? link : String(link);
+
+    logBreadcrumb(
+      `MessageChannelThread.openLink | ${describeTypes({
+        messageId,
+        platform,
+        link: safeLink,
+      })}`
+    );
+
     try {
       await trackContentPlatformClick({
         contentItemId: messageId,
         surface: 'CHANNEL',
         platform: platform.toUpperCase() as 'TIKTOK' | 'INSTAGRAM' | 'YOUTUBE',
         channelId: channel.id,
-        url: link,
+        url: safeLink,
       });
-      await Linking.openURL(link);
+      await Linking.openURL(safeLink);
     } catch (error) {
+      recordCrashError(error);
     }
   };
 

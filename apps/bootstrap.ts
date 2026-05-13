@@ -22,6 +22,24 @@ import { name as appName } from './app.json';
 // Ensure Buffer is available globally before anything else
 global.Buffer = Buffer;
 
+try {
+  (global as any).__confioNativeStringArgCoercion = (
+    moduleName: string,
+    methodName: string,
+    argIndex: number,
+    keys: string,
+  ) => {
+    try {
+      // Breadcrumb for the RN bridge guard. If this crash ever reappears, this
+      // tells us which native String arg received an object before coercion.
+      const crashlytics = require('@react-native-firebase/crashlytics').default;
+      crashlytics().log(
+        `NativeStringArg.coerce | ${moduleName}.${methodName}[${argIndex}] keys=${keys || 'none'}`,
+      );
+    } catch (_error) {}
+  };
+} catch (_error) {}
+
 // Initialize Firebase App Check as early as possible so the first auth request
 // already carries a valid header.
 try {

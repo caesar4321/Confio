@@ -733,6 +733,11 @@ export const GET_SEND_TRANSACTIONS = gql`
       transactionHash
       createdAt
       updatedAt
+      idempotencyKey
+      isInvitation
+      invitationClaimed
+      invitationReverted
+      invitationExpiresAt
     }
   }
 `;
@@ -780,6 +785,7 @@ export const GET_SEND_TRANSACTIONS_WITH_FRIEND = gql`
       transactionHash
       createdAt
       updatedAt
+      idempotencyKey
       isInvitation
       invitationClaimed
       invitationReverted
@@ -2578,6 +2584,7 @@ export const GET_UNIFIED_TRANSACTIONS = gql`
       invoiceId
       # Unified Internal ID (32-char UUID) for QR Verification
       internalId
+      idempotencyKey
       
       # Invitation fields
       isInvitation
@@ -2886,6 +2893,10 @@ export const GET_SEND_TRANSACTION_BY_ID = gql`
       status
       transactionHash
       createdAt
+      idempotencyKey
+      isInvitation
+      invitationClaimed
+      invitationReverted
       invitationExpiresAt
       internalId
     }
@@ -3010,6 +3021,7 @@ export const GET_CURRENT_ACCOUNT_TRANSACTIONS = gql`
       description
       invoiceId
       internalId
+      idempotencyKey
       
       # Invitation fields
       isInvitation
@@ -3105,6 +3117,7 @@ export const GET_UNIFIED_TRANSACTIONS_WITH_FRIEND = gql`
       description
       invoiceId
       internalId
+      idempotencyKey
       
       # Invitation fields
       isInvitation

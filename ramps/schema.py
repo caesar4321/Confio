@@ -1738,13 +1738,27 @@ def _build_effective_ramp_address_snapshot(user):
 
 
 def _is_ramp_address_complete(value) -> bool:
-    return bool(
+    user = getattr(value, 'user', None)
+    country = _get_user_phone_country_alpha3(user)
+    base_complete = bool(
         getattr(value, 'address_street', None)
         and getattr(value, 'address_city', None)
         and getattr(value, 'address_state', None)
         and getattr(value, 'address_zip_code', None)
-        and _get_user_phone_country_alpha3(getattr(value, 'user', None))
+        and country
     )
+    if not base_complete:
+        return False
+
+    if country == 'MEX':
+        economic_activity = str(getattr(value, 'economic_activity', '') or '').strip()
+        return bool(
+            str(getattr(value, 'address_neighborhood', '') or '').strip()
+            and economic_activity
+            and economic_activity.upper() != 'OTHER'
+        )
+
+    return True
 
 
 def _get_koywe_contact_profile(*, user, country_code: str, email_override: str | None = None) -> dict[str, str]:
@@ -1756,18 +1770,16 @@ def _get_koywe_contact_profile(*, user, country_code: str, email_override: str |
         not normalized_email_override or normalized_email_override == override_email
     )
 
-    first_name = str(
-        (override or {}).get('firstName') if use_override_identity else ''
-        or getattr(verification, 'verified_first_name', None)
-        or getattr(user, 'first_name', None)
-        or ''
-    ).strip()
-    last_name = str(
-        (override or {}).get('lastName') if use_override_identity else ''
-        or getattr(verification, 'verified_last_name', None)
-        or getattr(user, 'last_name', None)
-        or ''
-    ).strip()
+    if use_override_identity:
+        first_name = str((override or {}).get('firstName') or '').strip()
+        last_name = str((override or {}).get('lastName') or '').strip()
+    else:
+        if not verification:
+            raise KoyweError('Completa la verificación de identidad antes de usar recargas y retiros')
+        first_name = str(getattr(verification, 'verified_first_name', None) or '').strip()
+        last_name = str(getattr(verification, 'verified_last_name', None) or '').strip()
+        if not first_name or not last_name:
+            raise KoyweError('No pudimos preparar la operación porque falta el nombre legal verificado. Contacta soporte')
     email = str(email_override or (override or {}).get('email') or getattr(user, 'email', None) or '').strip()
     phone_country_code = getattr(user, 'phone_country_code', None) or ''
     phone_number = (getattr(user, 'phone_number', None) or '').strip()

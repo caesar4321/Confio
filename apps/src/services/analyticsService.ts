@@ -2,6 +2,7 @@ import analytics from '@react-native-firebase/analytics';
 import { Platform } from 'react-native';
 import { apolloClient } from '../apollo/client';
 import { TRACK_FUNNEL_EVENT } from '../apollo/mutations';
+import { describeTypes, logBreadcrumb, recordCrashError } from './crashLog';
 
 /**
  * Analytics Service Wrapper
@@ -26,10 +27,19 @@ export const AnalyticsService = {
      * @param params Optional parameters (e.g. { provider: 'google' })
      */
     logEvent: async (name: string, params?: { [key: string]: any }) => {
+        const safeName = typeof name === 'string' ? name : String(name ?? '');
+        logBreadcrumb(
+            `analytics.logEvent | ${describeTypes({
+                name: safeName,
+                rawNameType: typeof name,
+                hasParams: params != null,
+            })}`
+        );
         try {
             if (__DEV__) {            }
-            await analytics().logEvent(name, params);
+            await analytics().logEvent(safeName, params);
         } catch (error) {
+            recordCrashError(error);
         }
     },
 
@@ -39,10 +49,21 @@ export const AnalyticsService = {
      * @param value Property value (e.g. 'true')
      */
     setUserProperty: async (name: string, value: string) => {
+        const safeName = typeof name === 'string' ? name : String(name ?? '');
+        const safeValue = typeof value === 'string' ? value : String(value ?? '');
+        logBreadcrumb(
+            `analytics.setUserProperty | ${describeTypes({
+                name: safeName,
+                value: safeValue,
+                rawNameType: typeof name,
+                rawValueType: typeof value,
+            })}`
+        );
         try {
             if (__DEV__) {            }
-            await analytics().setUserProperty(name, value);
+            await analytics().setUserProperty(safeName, safeValue);
         } catch (error) {
+            recordCrashError(error);
         }
     },
 
@@ -117,18 +138,28 @@ export const AnalyticsService = {
         };
 
         // Firebase side
+        const safeEventName = typeof eventName === 'string' ? eventName : String(eventName ?? '');
+        const rawItemId = params?.invitation_id || params?.referral_code || params?.surface || eventName;
+        const safeItemId = typeof rawItemId === 'string' ? rawItemId : String(rawItemId ?? '');
+        logBreadcrumb(
+            `analytics.logFunnelEvent | ${describeTypes({
+                eventName: safeEventName,
+                channel: options?.channel,
+                rawItemIdType: typeof rawItemId,
+            })}`
+        );
         try {
-            await analytics().logEvent(eventName, platformParams);
-            if (eventName === 'referral_whatsapp_share_tapped' || eventName === 'whatsapp_share_tapped') {
+            await analytics().logEvent(safeEventName, platformParams);
+            if (safeEventName === 'referral_whatsapp_share_tapped' || safeEventName === 'whatsapp_share_tapped') {
                 await analytics().logEvent('share', {
                     method: options?.channel || params?.channel || 'whatsapp',
-                    content_type: eventName === 'whatsapp_share_tapped' ? 'send_invite' : 'referral_link',
-                    item_id: params?.invitation_id || params?.referral_code || params?.surface || eventName,
+                    content_type: safeEventName === 'whatsapp_share_tapped' ? 'send_invite' : 'referral_link',
+                    item_id: safeItemId,
                     ...platformParams,
                 });
             }
-        } catch (_e) {
-            // swallow
+        } catch (error) {
+            recordCrashError(error);
         }
 
         // Confío DB side

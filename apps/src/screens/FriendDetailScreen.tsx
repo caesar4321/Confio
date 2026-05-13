@@ -45,6 +45,8 @@ interface Transaction {
   status: 'completed' | 'pending';
   hash: string;
   isInvitation: boolean;
+  invitationId?: string;
+  idempotencyKey?: string;
   invitationClaimed: boolean;
   invitationReverted: boolean;
   invitationExpiresAt?: string;
@@ -214,6 +216,8 @@ export function FriendDetailScreen() {
         status: tx.status === 'CONFIRMED' ? 'completed' : 'pending',
         hash: tx.transactionHash || tx.id || 'pending',
         isInvitation: tx.isInvitation || false,
+        invitationId: tx.idempotencyKey,
+        idempotencyKey: tx.idempotencyKey,
         invitationClaimed: tx.invitationClaimed || false,
         invitationReverted: tx.invitationReverted || false,
         invitationExpiresAt: tx.invitationExpiresAt,
@@ -668,6 +672,8 @@ export function FriendDetailScreen() {
                                 `Pago a ${friend.name}`,
                           avatar: friend.avatar,
                           isInvitedFriend: transaction.isInvitation || false, // Use transaction's invitation status
+                          invitationId: transaction.invitationId,
+                          idempotencyKey: transaction.idempotencyKey,
                           invitationClaimed: transaction.invitationClaimed || false,
                           invitationReverted: transaction.invitationReverted || false,
                           invitationExpiresAt: transaction.invitationExpiresAt,

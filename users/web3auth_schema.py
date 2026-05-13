@@ -186,12 +186,16 @@ class Web3AuthLoginMutation(graphene.Mutation):
                 if email and user.email != email:
                     user.email = email
                     updated = True
-                if first_name and user.first_name != first_name:
-                    user.first_name = first_name
-                    updated = True
-                if last_name and user.last_name != last_name:
-                    user.last_name = last_name
-                    updated = True
+                # Once identity is verified, legal names are owned by the
+                # IdentityVerification record. Do not let Firebase/Google/Apple
+                # display names overwrite them on subsequent logins.
+                if not user.is_identity_verified:
+                    if first_name and user.first_name != first_name:
+                        user.first_name = first_name
+                        updated = True
+                    if last_name and user.last_name != last_name:
+                        user.last_name = last_name
+                        updated = True
                 # WRITE-ONCE: Only set OS if it's currently null/empty
                 # Once a user's primary OS is set, we don't overwrite it
                 if platform_os and not user.platform_os:
