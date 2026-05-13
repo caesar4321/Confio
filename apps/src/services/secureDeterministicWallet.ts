@@ -394,6 +394,35 @@ async function retrieveAddressBoundMasterSecret(
   return credentialStorage.retrieveSecret(`${ADDRESS_BOUND_SECRET_PREFIX}${address}`);
 }
 
+async function tryStoreRecoveredSecret(
+  credentialStorage: any,
+  key: string,
+  secret: Uint8Array,
+  label: string
+): Promise<boolean> {
+  try {
+    await credentialStorage.storeSecret(key, secret);
+    return true;
+  } catch (error) {
+    console.warn(`[MasterSecret] Failed to persist recovered ${label}; continuing with Drive-backed in-memory secret.`, error);
+    return false;
+  }
+}
+
+async function tryStoreRecoveredAddressBoundSecret(
+  credentialStorage: any,
+  address: string | null | undefined,
+  masterSecret: Uint8Array
+): Promise<void> {
+  if (!address) return;
+  await tryStoreRecoveredSecret(
+    credentialStorage,
+    `${ADDRESS_BOUND_SECRET_PREFIX}${address}`,
+    masterSecret,
+    'address-bound secret'
+  );
+}
+
 // Mutex to prevent race conditions during secret creation
 let v2SecretMutex: Promise<void> = Promise.resolve();
 
@@ -1051,7 +1080,12 @@ export async function getOrCreateMasterSecret(
         );
         if (addressBoundSecret) {
           localSecret = addressBoundSecret;
-          await credentialStorage.storeSecret(secretAlias, localSecret);
+          await tryStoreRecoveredSecret(
+            credentialStorage,
+            secretAlias,
+            localSecret,
+            'subject-bound secret'
+          );
           console.log('[MasterSecret] Recovered V2 secret from address-bound alias.');
         } else if (options.allowGenerate === false && !accessToken) {
           throw new Error(
@@ -1130,9 +1164,19 @@ export async function getOrCreateMasterSecret(
         localSecret = restore.secret;
         localWalletId = restore.walletId || generateUUID();
 
-        await credentialStorage.storeSecret(secretAlias, localSecret);
-        await credentialStorage.storeSecret(walletIdKey, stringToUtf8Bytes(localWalletId));
-        await storeAddressBoundMasterSecret(
+        await tryStoreRecoveredSecret(
+          credentialStorage,
+          secretAlias,
+          localSecret,
+          'subject-bound secret'
+        );
+        await tryStoreRecoveredSecret(
+          credentialStorage,
+          walletIdKey,
+          stringToUtf8Bytes(localWalletId),
+          'wallet id'
+        );
+        await tryStoreRecoveredAddressBoundSecret(
           credentialStorage,
           restoredAddress,
           localSecret
