@@ -153,8 +153,17 @@ class WalletMigrationService {
             // We skip the backend status check entirely - chain state is the source of truth.
             // This eliminates the confusing "Trust But Verify" double-check.
 
-            // Use namespaced V2 secret check
-            const v2Secret = await getOrCreateMasterSecret(sub);
+            // Check for an existing V2 secret without creating one. V1 users
+            // must only generate V2 inside performMigration, where we first
+            // back it up to Drive and then sweep V1 -> V2.
+            let v2Secret: Uint8Array | null = null;
+            try {
+                v2Secret = await getOrCreateMasterSecret(sub, undefined, {
+                    allowGenerate: false,
+                });
+            } catch (e) {
+                console.log('[MigrationService] No existing V2 secret found during migration check.');
+            }
 
             // Restore Legacy V1 Wallet to check its state
             // We purposefully don't use 'createOrRestoreWallet' because it might default to V2
@@ -318,10 +327,16 @@ class WalletMigrationService {
         try {
             console.log('[MigrationService] Starting atomic migration...');
 
-            // 1. Get or Create Master Secret (NEVER overwrites existing)
-            // Properly namespaced by User Sub
-            const v2Secret = await getOrCreateMasterSecret(sub);
-            console.log('[MigrationService] V2 Secret ready');
+            // 1. Get or Create Master Secret and sync it to Google Drive before
+            // moving any V1 funds. V1 users are allowed to generate V2 here, but
+            // the generated secret must be backed up before the atomic sweep.
+            const driveAccessToken = await authService.getDriveAccessTokenOnly();
+            if (!driveAccessToken) {
+                throw new Error('Debes activar el respaldo en Google Drive antes de migrar tu billetera.');
+            }
+
+            const v2Secret = await getOrCreateMasterSecret(sub, driveAccessToken);
+            console.log('[MigrationService] V2 Secret ready and backed up to Drive');
 
             const v2Wallet = deriveWalletV2(v2Secret, {
                 iss, sub, aud, accountType: 'personal', accountIndex, businessId
