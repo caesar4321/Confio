@@ -1102,7 +1102,7 @@ export async function getOrCreateMasterSecret(
           !options?.expectedAddress
         ) {
           throw new Error(
-            'Este Google Drive ya tiene una billetera respaldada. Para evitar mezclar cuentas, usa el Google Drive original de esta cuenta o inicia sesión con Google.'
+            'Esta cuenta de Google ya tiene el respaldo de otra cuenta Confío. Para respaldar esta billetera, elige otra cuenta de Google.'
           );
         }
 
