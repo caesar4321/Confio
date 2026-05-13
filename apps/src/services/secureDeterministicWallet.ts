@@ -358,6 +358,7 @@ interface OldestDriveBackupResult {
   secret: Uint8Array | null;
   walletId: string | null;
   deviceHint?: string | null;
+  foundDecryptable?: boolean;
 }
 
 function secretsEqual(a?: Uint8Array | null, b?: Uint8Array | null): boolean {
@@ -462,7 +463,8 @@ async function findOldestRestorableDriveBackup(
   googleDriveStorage: any,
   AES: any,
   appBackupKey: string,
-  Utf8: any
+  Utf8: any,
+  expectedAddress?: string | null
 ): Promise<OldestDriveBackupResult> {
   const safeSub = bytesToHex(sha256(utf8ToBytes(userSub)));
   const legacyFilename = `confio_master_secret_v2_${safeSub}.json`;
@@ -531,6 +533,7 @@ async function findOldestRestorableDriveBackup(
     return getBackupTime(a) - getBackupTime(b);
   });
 
+  let foundDecryptable = false;
   for (const candidate of candidates) {
     try {
       const content = await googleDriveStorage.downloadFile(
@@ -540,17 +543,31 @@ async function findOldestRestorableDriveBackup(
       );
       const decrypted = decryptBackup(content, AES, appBackupKey, Utf8);
       if (decrypted) {
+        foundDecryptable = true;
+        const candidateAddress = derivePersonalV2Address(decrypted);
+        if (expectedAddress && candidateAddress !== expectedAddress) {
+          console.log('[MasterSecret] Skipping Drive backup candidate with non-matching address:', {
+            name: candidate.name,
+            candidateAddress,
+            expectedAddress,
+            deviceHint: candidate.deviceHint || 'unknown',
+          });
+          continue;
+        }
+
         console.log('[MasterSecret] Restored oldest Drive V2 backup:', {
           name: candidate.name,
           modifiedTime: candidate.modifiedTime,
           walletId: candidate.walletId || 'legacy/no-id',
           deviceHint: candidate.deviceHint || 'unknown',
+          address: candidateAddress,
         });
         return {
           foundAny: true,
           secret: decrypted,
           walletId: candidate.walletId || null,
           deviceHint: candidate.deviceHint || null,
+          foundDecryptable,
         };
       }
     } catch (e) {
@@ -558,7 +575,7 @@ async function findOldestRestorableDriveBackup(
     }
   }
 
-  return { foundAny: true, secret: null, walletId: null };
+  return { foundAny: true, secret: null, walletId: null, foundDecryptable };
 }
 
 /**
@@ -1083,7 +1100,8 @@ export async function getOrCreateMasterSecret(
         googleDriveStorage,
         AES,
         APP_BACKUP_KEY,
-        Utf8
+        Utf8,
+        options?.expectedAddress
       );
 
       if (restore.secret) {
@@ -1122,6 +1140,9 @@ export async function getOrCreateMasterSecret(
 
         reportBackupStatus('google_drive').catch(e => console.warn('[BackupHealth] Drive restore report failed', e));
       } else if (restore.foundAny) {
+        if (options?.expectedAddress && restore.foundDecryptable) {
+          throw new Error('No encontramos en este Google Drive el respaldo de la billetera registrada para esta cuenta.');
+        }
         throw new Error('[MasterSecret] Existing Drive wallet backups were found but none could be decrypted; refusing to generate a replacement secret.');
       }
     }
