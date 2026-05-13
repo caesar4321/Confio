@@ -5214,7 +5214,6 @@ def _ensure_personal_account_mbr_funded(user) -> bool:
 
     from blockchain.algorand_account_manager import AlgorandAccountManager
     from algosdk.v2client import algod
-    from algosdk import mnemonic
     from algosdk.transaction import PaymentTxn, wait_for_confirmation
 
     algod_client = algod.AlgodClient(
@@ -5257,9 +5256,17 @@ def _ensure_personal_account_mbr_funded(user) -> bool:
         algorand_address, funding_amount, balance, new_min_balance,
     )
 
-    sponsor_private_key = mnemonic.to_private_key(
-        AlgorandAccountManager.SPONSOR_MNEMONIC
-    )
+    # Production signs sponsor transactions via KMS — `SPONSOR_MNEMONIC` is
+    # only populated in dev. Use the shared SIGNER so this path works in
+    # both environments.
+    signer = AlgorandAccountManager.SIGNER
+    if signer is None:
+        logger.warning(
+            "Backup MBR backstop: no sponsor signer configured; skipping fund for %s",
+            algorand_address,
+        )
+        return False
+
     params = algod_client.suggested_params()
     fund_txn = PaymentTxn(
         sender=AlgorandAccountManager.SPONSOR_ADDRESS,
@@ -5267,7 +5274,7 @@ def _ensure_personal_account_mbr_funded(user) -> bool:
         receiver=algorand_address,
         amt=funding_amount,
     )
-    signed_txn = fund_txn.sign(sponsor_private_key)
+    signed_txn = signer.sign_transaction(fund_txn)
     tx_id = algod_client.send_transaction(signed_txn)
     wait_for_confirmation(algod_client, tx_id, 4)
     logger.info(
