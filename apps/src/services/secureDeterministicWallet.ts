@@ -357,6 +357,7 @@ interface OldestDriveBackupResult {
   foundAny: boolean;
   secret: Uint8Array | null;
   walletId: string | null;
+  deviceHint?: string | null;
 }
 
 function secretsEqual(a?: Uint8Array | null, b?: Uint8Array | null): boolean {
@@ -549,6 +550,7 @@ async function findOldestRestorableDriveBackup(
           foundAny: true,
           secret: decrypted,
           walletId: candidate.walletId || null,
+          deviceHint: candidate.deviceHint || null,
         };
       }
     } catch (e) {
@@ -1086,6 +1088,8 @@ export async function getOrCreateMasterSecret(
 
       if (restore.secret) {
         const restoredAddress = derivePersonalV2Address(restore.secret);
+        const restoredDeviceHint = (restore.deviceHint || '').toLowerCase();
+        const restoredFromAndroid = restoredDeviceHint.includes('android');
         if (options?.expectedAddress && restoredAddress !== options.expectedAddress) {
           throw new Error(
             'El respaldo encontrado en Google Drive pertenece a otra billetera. Usa la cuenta de Google correcta o contacta a soporte.'
@@ -1094,11 +1098,11 @@ export async function getOrCreateMasterSecret(
 
         if (
           options?.provider === 'apple' &&
-          !secretsEqual(localSecret, restore.secret) &&
+          (!secretsEqual(localSecret, restore.secret) || restoredFromAndroid) &&
           !options?.expectedAddress
         ) {
           throw new Error(
-            'Ya existe una billetera respaldada en este Google Drive. Para evitar mezclar cuentas, inicia sesión con la cuenta original o usa otro Google Drive para respaldar esta billetera.'
+            'Este Google Drive ya tiene una billetera respaldada. Para evitar mezclar cuentas, usa el Google Drive original de esta cuenta o inicia sesión con Google.'
           );
         }
 

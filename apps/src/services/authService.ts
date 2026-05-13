@@ -739,9 +739,9 @@ export class AuthService {
           hasServerAlgorandAddress: !!serverAlgorandAddress,
           allowV2SecretGeneration,
         });
+        const { getOrCreateMasterSecret } = await import('./secureDeterministicWallet');
+        const tokenForDrive = enableDrive ? driveAccessToken : undefined;
         try {
-          const { getOrCreateMasterSecret } = await import('./secureDeterministicWallet');
-          const tokenForDrive = enableDrive ? driveAccessToken : undefined;
           await getOrCreateMasterSecret(googleSubject, tokenForDrive || undefined, {
             allowGenerate: allowV2SecretGeneration,
             provider: 'google',
@@ -752,9 +752,27 @@ export class AuthService {
         } catch (v2Err) {
           console.error('[AuthService] ⚠️ Failed to verify/restore V2 Master Secret:', v2Err);
           if (!allowV2SecretGeneration) {
-            throw new Error('Necesitamos recuperar tu billetera existente antes de continuar. Activa la recuperación desde Google Drive para evitar crear una dirección nueva.');
+            onProgress?.('Recuperando tu billetera con Google Drive...');
+            const recoveryDriveToken = tokenForDrive || await this.getDriveAccessTokenOnly();
+            if (!recoveryDriveToken) {
+              throw new Error('Para entrar a esta cuenta necesitamos recuperar tu billetera. Toca Continuar con Google y elige la misma cuenta de Google donde guardaste tu respaldo.');
+            }
+
+            try {
+              await getOrCreateMasterSecret(googleSubject, recoveryDriveToken, {
+                allowGenerate: false,
+                provider: 'google',
+                expectedAddress: serverAlgorandAddress,
+              });
+              console.log('[AuthService] ✅ Google V2 wallet recovered from Drive.');
+              driveSyncSucceeded = true;
+            } catch (driveRecoveryErr) {
+              console.error('[AuthService] Failed to recover Google V2 wallet from Drive:', driveRecoveryErr);
+              throw new Error('No encontramos el respaldo correcto en ese Google Drive. Intenta con la cuenta de Google que usaste para el respaldo o contáctanos para ayudarte.');
+            }
+          } else {
+            driveSyncSucceeded = false;
           }
-          driveSyncSucceeded = false;
         }
       }
       // ----------------------------------------------------------------------
