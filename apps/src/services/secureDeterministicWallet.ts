@@ -907,13 +907,13 @@ export async function restoreFromBackup(
 /**
  * Get-or-Create Master Secret.
  * 
- * STRATEGY: MANIFEST + UUID (Safe Roaming)
+ * STRATEGY: CANONICAL DRIVE BACKUP + UUID
  * 
  * 1. LOCAL: Check for existing `walletId` and `secret`.
- * 2. CLOUD (Restore): If Local missing, read Manifest.
- *    - If entries found -> Prompt User -> Download specific UUID file.
+ * 2. CLOUD (Restore): With Drive access, restore the oldest valid V2 backup
+ *    automatically. There is no user picker and no "use current wallet" branch.
  * 3. CLOUD (Backup):
- *    - If Local exists (or created) -> Ensure entry in Manifest -> Upload unique file.
+ *    - Sync the canonical secret and rewrite the manifest to exactly one entry.
  * 
  * @param userSub - Unique user identifier (OAuth Subject) to namespace local storage
  * @returns The master secret (32 bytes)
@@ -1091,24 +1091,11 @@ export async function getOrCreateMasterSecret(
 
         const currentDeviceHint = `${deviceName} (${Platform.OS})`; // e.g. "Pixel 8 (android)"
 
-        // DEDUPLICATION: Check if we already have a backup for THIS device
-        // If so, we overwrite that entry instead of creating a huge list of duplicates.
-        // We match by deviceHint (which includes Model + OS).
-        const existingDeviceIndex = manifest.wallets.findIndex(w => w.deviceHint === currentDeviceHint);
-
-        // Determine which index to update (ID match takes precedence, then Device match)
-        let indexToUpdate = existingEntryIndex;
-        if (indexToUpdate === -1 && existingDeviceIndex >= 0) {
-          console.log(`[MasterSecret] Found existing backup slot for device '${currentDeviceHint}'. Updating it.`);
-          indexToUpdate = existingDeviceIndex;
-        }
+        const existingEntry = existingEntryIndex >= 0 ? manifest.wallets[existingEntryIndex] : null;
 
         const entry: WalletEntry = {
           id: finalId,
-          // If we are updating an existing slot, keep its creation date to show history?
-          // actually, if it's a NEW wallet ID (re-install), it's effectively a new wallet.
-          // Let's rely on 'now' for simplicity unless it's strictly the same wallet ID.
-          createdAt: existingEntryIndex >= 0 ? manifest.wallets[existingEntryIndex].createdAt : now,
+          createdAt: existingEntry?.createdAt || now,
           lastBackupAt: now,
           deviceHint: currentDeviceHint,
           providerHint: 'Google'
@@ -1137,11 +1124,10 @@ export async function getOrCreateMasterSecret(
           console.warn('[MasterSecret] Failed to update primary pointer:', e);
         }
 
-        if (indexToUpdate >= 0) {
-          manifest.wallets[indexToUpdate] = entry;
-        } else {
-          manifest.wallets.push(entry);
-        }
+        // One Google Drive account must have one canonical wallet entry.
+        // Historical duplicate files/revisions remain available for oldest-backup recovery,
+        // but the manifest must never invite another active choice.
+        manifest.wallets = [entry];
 
         await saveManifest(googleDriveStorage, accessToken, manifest);
         console.log(`[MasterSecret] Encrypted Backup Synced (ID: ${finalId})`);

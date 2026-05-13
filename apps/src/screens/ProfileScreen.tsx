@@ -11,7 +11,6 @@ import { MainStackParamList } from '../types/navigation';
 import { getCountryByIso } from '../utils/countries';
 import { ReferralInputModal } from '../components/ReferralInputModal';
 import { BackupConsentModal } from '../components/BackupConsentModal';
-import { ExistingBackupModal } from '../components/ExistingBackupModal';
 import { useQuery } from '@apollo/client';
 import { GET_MY_REFERRALS } from '../apollo/queries';
 import { biometricAuthService } from '../services/biometricAuthService';
@@ -64,9 +63,6 @@ export const ProfileScreen = () => {
   const [showReferralModal, setShowReferralModal] = React.useState(false);
   const [showBackupModal, setShowBackupModal] = React.useState(false);
   const [driveBackupEnabled, setDriveBackupEnabled] = React.useState(false);
-  const [showExistingBackupModal, setShowExistingBackupModal] = React.useState(false);
-  const [existingBackupEntries, setExistingBackupEntries] = React.useState<any[]>([]);
-  const [hasLegacyBackup, setHasLegacyBackup] = React.useState(false);
   const [biometricAvailable, setBiometricAvailable] = React.useState(false);
   const [biometricEnabled, setBiometricEnabled] = React.useState(false);
   const [biometricLoading, setBiometricLoading] = React.useState(true);
@@ -829,11 +825,6 @@ export const ProfileScreen = () => {
               driveBackupManuallyEnabled.current = true;
               setDriveBackupEnabled(true);
               Alert.alert('Respaldo Activado', 'Tu copia de seguridad en Google Drive está activa y sincronizada.');
-            } else if (result.existingBackups?.entriesToShow && result.existingBackups.entriesToShow.length > 0) {
-              // Show modal with all backup entries (cross-platform or multiple entries)
-              setExistingBackupEntries(result.existingBackups.entriesToShow);
-              setHasLegacyBackup(result.existingBackups.hasLegacy);
-              setShowExistingBackupModal(true);
             } else if (result.error) {
               Alert.alert('Error', result.error);
             }
@@ -841,61 +832,6 @@ export const ProfileScreen = () => {
           }
         }}
         onCancel={() => setShowBackupModal(false)}
-      />
-
-      {/* Cross-Platform Backup Detection Modal */}
-      <ExistingBackupModal
-        visible={showExistingBackupModal}
-        entries={existingBackupEntries}
-        hasLegacy={hasLegacyBackup}
-        onRestore={async (entry) => {
-          // User chose to restore from a specific backup
-          setShowExistingBackupModal(false);
-          try {
-
-            const walletId = entry?.id || existingBackupEntries[0]?.id;
-            const lastBackupAt = entry?.lastBackupAt || existingBackupEntries[0]?.lastBackupAt;
-
-            // Actually restore the wallet from Drive backup
-            // Pass timestamp to help identify file if ID is null
-            const result = await authService.restoreFromDriveBackup(walletId, lastBackupAt);
-
-            if (result.success) {
-              driveBackupManuallyEnabled.current = true;
-              setDriveBackupEnabled(true);
-
-              // Force global account refresh to update UI immediately (e.g. DepositScreen)
-              await refreshAccounts();
-
-              Alert.alert(
-                'Billetera Restaurada',
-                'Tu billetera ha sido restaurada correctamente.',
-                [{ text: 'Entendido', onPress: () => { } }]
-              );
-            } else if (result.error) {
-              Alert.alert('Error', result.error);
-            }
-          } catch (e) {
-            Alert.alert('Error', 'No se pudo restaurar');
-          }
-        }}
-        onUseCurrentWallet={async () => {
-          // User chose to use current wallet and add to Drive
-          setShowExistingBackupModal(false);
-          try {
-            const result = await authService.enableDriveBackup(true);
-            if (result.success) {
-              driveBackupManuallyEnabled.current = true;
-              setDriveBackupEnabled(true);
-              Alert.alert('Respaldo Activado', 'Se creó un nuevo respaldo en Google Drive.');
-            } else if (result.error) {
-              Alert.alert('Error', result.error);
-            }
-          } catch (e) {
-            Alert.alert('Error', 'No se pudo crear el respaldo');
-          }
-        }}
-        onCancel={() => setShowExistingBackupModal(false)}
       />
     </>
   );

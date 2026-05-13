@@ -6,7 +6,6 @@ import Svg, { Defs, LinearGradient, Stop, Circle as SvgCircle } from 'react-nati
 import { useApolloClient } from '@apollo/client';
 import { useAuth } from '../contexts/AuthContext';
 import { GET_ME } from '../apollo/queries';
-import { ExistingBackupModal } from '../components/ExistingBackupModal';
 import authService from '../services/authService';
 
 export const BackupCompletionScreen = () => {
@@ -14,9 +13,6 @@ export const BackupCompletionScreen = () => {
   const { handleSuccessfulLogin, refreshProfile, signOut } = useAuth();
   const [isRetrying, setIsRetrying] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showExistingBackupModal, setShowExistingBackupModal] = useState(false);
-  const [existingBackupEntries, setExistingBackupEntries] = useState<any[]>([]);
-  const [hasLegacyBackup, setHasLegacyBackup] = useState(false);
 
   useEffect(() => {
     refreshProfile('personal').catch(err => {    });
@@ -37,29 +33,15 @@ export const BackupCompletionScreen = () => {
     await handleSuccessfulLogin(phoneVerified, false);
   }, [apolloClient, handleSuccessfulLogin, refreshProfile]);
 
-  const handleRetryBackup = useCallback(async (forceBackup: boolean = true) => {
+  const handleRetryBackup = useCallback(async () => {
     setIsRetrying(true);
     setError(null);
 
     try {
-      const result = await authService.enableDriveBackup(forceBackup);
+      const result = await authService.enableDriveBackup();
 
       if (result.success) {
         await continueOnboardingIfSafe();
-        return;
-      }
-
-      if (result.existingBackups) {
-        const entries = result.existingBackups.entriesToShow || result.existingBackups.entries || [];
-        entries.sort((a: any, b: any) => {
-          const timeA = a.lastBackupAt ? new Date(a.lastBackupAt).getTime() : 0;
-          const timeB = b.lastBackupAt ? new Date(b.lastBackupAt).getTime() : 0;
-          return timeB - timeA;
-        });
-
-        setExistingBackupEntries(entries);
-        setHasLegacyBackup(result.existingBackups.hasLegacy || false);
-        setShowExistingBackupModal(true);
         return;
       }
 
@@ -70,31 +52,6 @@ export const BackupCompletionScreen = () => {
       setIsRetrying(false);
     }
   }, [continueOnboardingIfSafe]);
-
-  const handleRestore = useCallback(async (entry: any | null) => {
-    setShowExistingBackupModal(false);
-    setIsRetrying(true);
-    setError(null);
-
-    try {
-      const restoreRes = await authService.restoreFromDriveBackup(entry?.id, entry?.lastBackupAt);
-      if (!restoreRes.success) {
-        setError(restoreRes.error || 'No se pudo restaurar la billetera.');
-        return;
-      }
-
-      await continueOnboardingIfSafe();
-    } catch (restoreErr: any) {
-      setError(restoreErr?.message || 'No se pudo restaurar la billetera.');
-    } finally {
-      setIsRetrying(false);
-    }
-  }, [continueOnboardingIfSafe]);
-
-  const handleUseCurrentWallet = useCallback(async () => {
-    setShowExistingBackupModal(false);
-    await handleRetryBackup(true);
-  }, [handleRetryBackup]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
@@ -166,7 +123,7 @@ export const BackupCompletionScreen = () => {
 
         <TouchableOpacity
           style={[styles.primaryButton, isRetrying && styles.buttonDisabled]}
-          onPress={() => handleRetryBackup(true)}
+          onPress={handleRetryBackup}
           disabled={isRetrying}
           activeOpacity={0.8}
         >
@@ -198,15 +155,6 @@ export const BackupCompletionScreen = () => {
           <Text style={styles.secondaryText}>Salir por ahora</Text>
         </TouchableOpacity>
       </ScrollView>
-
-      <ExistingBackupModal
-        visible={showExistingBackupModal}
-        entries={existingBackupEntries}
-        hasLegacy={hasLegacyBackup}
-        onRestore={handleRestore}
-        onUseCurrentWallet={handleUseCurrentWallet}
-        onCancel={() => setShowExistingBackupModal(false)}
-      />
     </SafeAreaView>
   );
 };

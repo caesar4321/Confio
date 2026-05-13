@@ -5,7 +5,6 @@ import { AuthService } from '../services/authService';
 import { useQuery } from '@apollo/client';
 import { GET_MY_BALANCES } from '../apollo/queries';
 import { BackupConsentModal } from '../components/BackupConsentModal';
-import { ExistingBackupModal } from '../components/ExistingBackupModal';
 import { AnalyticsService } from '../services/analyticsService';
 import { migrationService } from '../services/migrationService';
 import { oauthStorage } from '../services/oauthStorageService';
@@ -22,11 +21,6 @@ export const useBackupEnforcement = () => {
     const [, setStrictMode] = useState(false);
     const [migrationVisible, setMigrationVisible] = useState(false);
     const [migrationStatus, setMigrationStatus] = useState('Verificando estado de la billetera...');
-
-    // State for existing backup handling
-    const [existingBackupModalVisible, setExistingBackupModalVisible] = useState(false);
-    const [backupEntries, setBackupEntries] = useState<any[]>([]);
-    const [hasLegacyBackup, setHasLegacyBackup] = useState(false);
 
     const resolveRef = useRef<((value: boolean) => void) | null>(null);
 
@@ -185,68 +179,12 @@ export const useBackupEnforcement = () => {
                 Alert.alert('Respaldo Activado', 'Tu copia de seguridad está lista.');
                 await refreshProfile();
                 resolveRef.current?.(true);
-            } else if (result.existingBackups) {
-                // Conflict found: Show Custom Modal
-                // Set data for modal
-                const entries = result.existingBackups.entriesToShow || result.existingBackups.entries || [];
-                // Sort by lastBackupAt desc (newest first)
-                entries.sort((a: any, b: any) => {
-                    const timeA = a.lastBackupAt ? new Date(a.lastBackupAt).getTime() : 0;
-                    const timeB = b.lastBackupAt ? new Date(b.lastBackupAt).getTime() : 0;
-                    return timeB - timeA;
-                });
-
-                setBackupEntries(entries);
-                setHasLegacyBackup(result.existingBackups.hasLegacy || false);
-                setExistingBackupModalVisible(true);
-
-                // We keep modalVisible(false) for Consent, but open ExistingBackupModal
-                // We do NOT resolve yet. The second modal handles it.
             } else {
                 // If strict (Presale), we must fail.
                 resolveRef.current?.(false);
             }
         } catch (error) {
             console.error('Backup enforcement error:', error);
-            resolveRef.current?.(false);
-        }
-    };
-
-    const handleRestore = async (entry: any | null) => {
-        setExistingBackupModalVisible(false);
-        try {
-            // Restore from specific entry (or legacy if id is null/undefined)
-            const entryId = entry?.id;
-
-            const restoreRes = await AuthService.getInstance().restoreFromDriveBackup(entryId);
-            if (restoreRes.success) {
-                Alert.alert('Restauración Exitosa', 'Tu billetera ha sido restaurada correctamente.');
-                await refreshProfile();
-                resolveRef.current?.(true);
-            } else {
-                Alert.alert('Error', restoreRes.error || 'Falló la restauración.');
-                resolveRef.current?.(false);
-            }
-        } catch (e) {
-            console.error('Restore flow failed:', e);
-            resolveRef.current?.(false);
-        }
-    };
-
-    const handleUseCurrentWallet = async () => {
-        setExistingBackupModalVisible(false);
-        try {
-            const forceRes = await AuthService.getInstance().enableDriveBackup(true);
-            if (forceRes.success) {
-                Alert.alert('Respaldo Activado', 'Tu copia de seguridad actual está lista.');
-                await refreshProfile();
-                resolveRef.current?.(true);
-            } else {
-                Alert.alert('Error', forceRes.error || 'No se pudo crear el respaldo.');
-                resolveRef.current?.(false);
-            }
-        } catch (e) {
-            console.error('Force backup failed:', e);
             resolveRef.current?.(false);
         }
     };
@@ -265,14 +203,6 @@ export const useBackupEnforcement = () => {
             <BackupConsentModal
                 visible={modalVisible}
                 onContinue={handleContinue}
-                onCancel={() => { }}
-            />
-            <ExistingBackupModal
-                visible={existingBackupModalVisible}
-                entries={backupEntries}
-                hasLegacy={hasLegacyBackup}
-                onRestore={handleRestore}
-                onUseCurrentWallet={handleUseCurrentWallet}
                 onCancel={() => { }}
             />
         </>

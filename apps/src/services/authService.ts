@@ -358,19 +358,10 @@ export class AuthService {
    * This gets a Drive access token, syncs the master secret to Drive, and reports the backup
    * status to the CURRENT user (not a new Google user).
    * 
-   * @param forceBackup - If true, skip the existing backup check and proceed
-   * @returns Object with success, existingBackups info, or error
+   * @returns Object with success flag or error
    */
-  async enableDriveBackup(forceBackup: boolean = false): Promise<{
+  async enableDriveBackup(): Promise<{
     success: boolean;
-    existingBackups?: {
-      hasBackup: boolean;
-      entries: any[];
-      hasLegacy: boolean;
-      hasCrossPlatformBackup: boolean;
-      crossPlatformEntries: any[];
-      entriesToShow?: any[]; // All entries to display in modal
-    };
     error?: string;
   }> {
     try {
