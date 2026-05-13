@@ -808,7 +808,11 @@ export async function restoreFromBackup(
  * @param userSub - Unique user identifier (OAuth Subject) to namespace local storage
  * @returns The master secret (32 bytes)
  */
-export async function getOrCreateMasterSecret(userSub: string, accessToken?: string): Promise<Uint8Array> {
+export async function getOrCreateMasterSecret(
+  userSub: string,
+  accessToken?: string,
+  options?: { allowGenerate?: boolean }
+): Promise<Uint8Array> {
   if (!userSub) {
     throw new Error('[MasterSecret] User Sub (OAuth ID) is required to secure the master secret.');
   }
@@ -975,6 +979,10 @@ export async function getOrCreateMasterSecret(userSub: string, accessToken?: str
     // 3. GENERATION (If still missing)
     // =================================================================================
     if (!localSecret) {
+      if (options?.allowGenerate === false) {
+        throw new Error('[MasterSecret] Existing wallet requires recovery; refusing to generate replacement secret.');
+      }
+
       // Check Legacy Local (Migration from V1 Global)
       const legacyGlobalSecret = await credentialStorage.retrieveSecret(legacyAlias);
       if (legacyGlobalSecret && legacyGlobalSecret.length === 32) {

@@ -640,38 +640,14 @@ export class AuthService {
         // Continue without fingerprint rather than failing authentication
       }
 
-      // 5) Generate/Sync Algorand wallet (V2 Master Secret)
-      // CRITICAL: This ensures roaming works. We fetch from Drive (Android) or Keychain (iOS).
-      console.log('Ensuring Master Secret exists (Syncing if needed)...');
-      perfLog('Start Master Secret Sync');
-
+      // 5) Capture OAuth subject. Master secret creation is intentionally
+      // deferred until after backend auth tells us whether this identity already
+      // has a registered Algorand address.
       const googleSubject = userInfo?.data?.user?.id;
       if (!googleSubject) {
         throw new Error('No OAuth subject found in Google sign-in response.');
       }
-
       let driveSyncSucceeded = false;
-      try {
-        const { getOrCreateMasterSecret } = await import('./secureDeterministicWallet');
-        // Inject Access Token for Drive Sync (Android AND iOS for roaming)
-        // iOS will first check Keychain, but if empty, it needs this token to check Drive.
-        const tokenForDrive = enableDrive ? driveAccessToken : undefined;
-
-        console.log(`[AuthService] Calling getOrCreateMasterSecret with:`, {
-          platform: Platform.OS,
-          enableDrive,
-          hasAccessToken: !!driveAccessToken,
-          tokenForDriveProvided: !!tokenForDrive
-        });
-
-        await getOrCreateMasterSecret(googleSubject, tokenForDrive || undefined);
-        console.log('Master Secret synced/verified successfully.');
-        driveSyncSucceeded = true;
-      } catch (walletErr) {
-        console.error('Failed to sync Master Secret:', walletErr);
-        driveSyncSucceeded = false;
-      }
-      perfLog('End Master Secret Sync');
 
       console.log('Store OAuth subject for later wallet derivation');
       perfLog('Store OAuth subject for later wallet derivation');
@@ -721,30 +697,6 @@ export class AuthService {
       if (authData.isNewUser) {
         void emitNewUserSignupOnce(authData.user?.id, 'google');
       }
-
-      // ----------------------------------------------------------------------
-      // NATIVE V2 CHECK:
-      // If the backend says this user is V2 Native (e.g. New User or Migrated),
-      // we MUST ensure the V2 Master Secret exists locally.
-      // If it's missing (New Device / New User), we generate/restore it here
-      // so that deriveWalletV2 is used instead of Legacy V1 fallback.
-      // ----------------------------------------------------------------------
-      if (authData.isKeylessMigrated) {
-        console.log('[AuthService] ⚡️ User is V2 Native (Flag=True). Verifying Master Secret...');
-        try {
-          const { getOrCreateMasterSecret } = await import('./secureDeterministicWallet');
-          // This call will Retrieve OR Generate (if missing).
-          // For NEW users -> Generates Random.
-          // For RESTORING users -> Checks storage (if missing -> Generates NEW, handling backup loss scenario by resetting).
-          // Now passing googleSubject to namespace the secret properly
-          await getOrCreateMasterSecret(googleSubject);
-          console.log('[AuthService] ✅ V2 Master Secret verified/created.');
-        } catch (v2Err) {
-          console.error('[AuthService] ⚠️ Failed to verify V2 Master Secret:', v2Err);
-          // We continue, but createOrRestoreWallet might fall back to V1 or fail.
-        }
-      }
-      // ----------------------------------------------------------------------
 
       // Store Django JWT tokens for authenticated requests using Keychain (store BEFORE any further GraphQL)
       if (authData.accessToken) {
@@ -799,6 +751,38 @@ export class AuthService {
         throw new Error('No auth tokens received from server');
       }
 
+      // ----------------------------------------------------------------------
+      // NATIVE V2 CHECK:
+      // New V2 users may generate a random master secret. Existing identities
+      // with a server-side Algorand address must recover the matching secret
+      // instead of silently minting a replacement V2 wallet.
+      // ----------------------------------------------------------------------
+      const serverAlgorandAddress = authData.user?.algorandAddress || null;
+      const allowV2SecretGeneration = !!authData.isNewUser || !serverAlgorandAddress;
+      if (authData.isKeylessMigrated) {
+        console.log('[AuthService] ⚡️ User is V2 Native/Migrated. Verifying Master Secret...', {
+          isNewUser: !!authData.isNewUser,
+          hasServerAlgorandAddress: !!serverAlgorandAddress,
+          allowV2SecretGeneration,
+        });
+        try {
+          const { getOrCreateMasterSecret } = await import('./secureDeterministicWallet');
+          const tokenForDrive = enableDrive ? driveAccessToken : undefined;
+          await getOrCreateMasterSecret(googleSubject, tokenForDrive || undefined, {
+            allowGenerate: allowV2SecretGeneration,
+          });
+          console.log('[AuthService] ✅ V2 Master Secret verified/restored.');
+          driveSyncSucceeded = !!tokenForDrive;
+        } catch (v2Err) {
+          console.error('[AuthService] ⚠️ Failed to verify/restore V2 Master Secret:', v2Err);
+          if (!allowV2SecretGeneration) {
+            throw new Error('Necesitamos recuperar tu billetera existente antes de continuar. Activa la recuperación desde Google Drive para evitar crear una dirección nueva.');
+          }
+          driveSyncSucceeded = false;
+        }
+      }
+      // ----------------------------------------------------------------------
+
 
 
       // 7) Now derive Algorand wallet (pepper fetch requires JWT)
@@ -827,6 +811,14 @@ export class AuthService {
       }
       console.log('Algorand wallet created:', algorandAddress);
       perfLog('Algorand wallet created');
+
+      if (!legacyAddress && serverAlgorandAddress && algorandAddress !== serverAlgorandAddress) {
+        console.warn('[AuthService] Refusing mismatched V2 wallet for existing account', {
+          serverAlgorandAddress,
+          localAlgorandAddress: algorandAddress,
+        });
+        throw new Error('Esta cuenta ya tiene una billetera registrada. Recupera la billetera correcta desde Google Drive antes de continuar.');
+      }
 
       // Update server with derived address (pass isV2Wallet if V2 sync succeeded)
       try {
@@ -1111,14 +1103,36 @@ export class AuthService {
         await algorandService.setCurrentAddress(legacyAddress);
         console.log('Using legacy Algorand wallet during pending migration (Apple):', algorandAddress);
       } else {
-        // V2 MIGRATION: Ensure Master Secret is created only when we are not pinned to legacy.
+        // V2 MIGRATION: Existing identities with a server-side address must not
+        // silently mint a replacement V2 wallet if local Keychain is empty.
         const { getOrCreateMasterSecret } = await import('./secureDeterministicWallet');
-        await getOrCreateMasterSecret(appleSub);
+        const serverAlgorandAddress = authData.user?.algorandAddress || null;
+        const allowV2SecretGeneration = !!authData.isNewUser || !serverAlgorandAddress;
+        try {
+          await getOrCreateMasterSecret(appleSub, undefined, {
+            allowGenerate: allowV2SecretGeneration,
+          });
+        } catch (v2Err) {
+          console.error('[AuthService] Failed to verify/restore Apple V2 Master Secret:', v2Err);
+          if (!allowV2SecretGeneration) {
+            throw new Error('Necesitamos recuperar tu billetera existente antes de continuar. Revisa iCloud/Google Drive o contáctanos para evitar crear una dirección nueva.');
+          }
+          throw v2Err;
+        }
         console.log('Master secret checked/created for Apple user');
 
         algorandAddress = await algorandService.createOrRestoreWallet(firebaseToken, appleSub);
       }
       console.log('Algorand wallet created (Apple):', algorandAddress);
+
+      const serverAlgorandAddressForApple = authData.user?.algorandAddress || null;
+      if (!legacyAddress && serverAlgorandAddressForApple && algorandAddress !== serverAlgorandAddressForApple) {
+        console.warn('[AuthService] Refusing mismatched Apple V2 wallet for existing account', {
+          serverAlgorandAddress: serverAlgorandAddressForApple,
+          localAlgorandAddress: algorandAddress,
+        });
+        throw new Error('Esta cuenta ya tiene una billetera registrada. Recupera la billetera correcta antes de continuar.');
+      }
 
       // Update server with derived address
       try {
