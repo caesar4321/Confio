@@ -3,11 +3,38 @@ import { Platform } from 'react-native';
 
 const DRIVE_UPLOAD_URL = 'https://www.googleapis.com/upload/drive/v3/files';
 const DRIVE_API_URL = 'https://www.googleapis.com/drive/v3/files';
+const DRIVE_AUTH_ERROR_MESSAGE = 'No pudimos acceder a Google Drive. Vuelve a tocar Reintentar respaldo y elige la cuenta de Google correcta.';
 
 export interface DriveFile {
     id: string;
     name: string;
     modifiedTime?: string;
+}
+
+export class GoogleDriveStorageError extends Error {
+    status: number;
+    operation: string;
+    rawResponse?: string;
+
+    constructor(operation: string, status: number, rawResponse?: string) {
+        super(status === 401 || status === 403
+            ? DRIVE_AUTH_ERROR_MESSAGE
+            : `No pudimos completar la operación de Google Drive (${operation}). Intenta nuevamente.`);
+        this.name = 'GoogleDriveStorageError';
+        this.status = status;
+        this.operation = operation;
+        this.rawResponse = rawResponse;
+    }
+}
+
+async function createDriveError(operation: string, response: Response): Promise<GoogleDriveStorageError> {
+    let rawResponse: string | undefined;
+    try {
+        rawResponse = await response.text();
+    } catch (error) {
+        rawResponse = undefined;
+    }
+    return new GoogleDriveStorageError(operation, response.status, rawResponse);
 }
 
 /**
@@ -42,8 +69,7 @@ export const googleDriveStorage = {
             );
 
             if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`Drive List Failed: ${response.status} ${errorText}`);
+                throw await createDriveError('list', response);
             }
 
             const data = await response.json();
@@ -76,7 +102,7 @@ export const googleDriveStorage = {
             });
 
             if (!response.ok) {
-                throw new Error(`Drive Download Failed: ${response.status}`);
+                throw await createDriveError('download', response);
             }
 
             // We expect the content to be the Base64 string of the secret
@@ -148,8 +174,7 @@ export const googleDriveStorage = {
             });
 
             if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`Drive Upload Failed: ${response.status} ${errorText}`);
+                throw await createDriveError('upload', response);
             }
 
             const data = await response.json();
@@ -178,8 +203,7 @@ export const googleDriveStorage = {
             });
 
             if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`Drive Update Failed: ${response.status} ${errorText}`);
+                throw await createDriveError('update', response);
             }
         } catch (error) {
 

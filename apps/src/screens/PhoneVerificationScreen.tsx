@@ -16,7 +16,7 @@ import {
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { CompositeNavigationProp } from '@react-navigation/native';
 import Feather from 'react-native-vector-icons/Feather';
@@ -27,7 +27,6 @@ import { INITIATE_TELEGRAM_VERIFICATION, VERIFY_TELEGRAM_CODE, UPDATE_PHONE_NUMB
 import { useAuth } from '../contexts/AuthContext';
 import { useCountrySelection } from '../hooks/useCountrySelection';
 import { AuthStackParamList, MainStackParamList } from '../types/navigation';
-import { navigationRef } from '../navigation/RootNavigation';
 import { colors } from '../config/theme';
 
 type PhoneVerificationScreenNavigationProp = CompositeNavigationProp<
@@ -37,8 +36,8 @@ type PhoneVerificationScreenNavigationProp = CompositeNavigationProp<
 
 const PhoneVerificationScreen = () => {
   const navigation = useNavigation<PhoneVerificationScreenNavigationProp>();
-  const route = useRoute();
-  const { handleSuccessfulLogin, completePhoneVerification, userProfile, refreshProfile } = useAuth();
+  const { isAuthenticated, completePhoneVerification, userProfile, refreshProfile } = useAuth();
+  const isProfileUpdateFlow = isAuthenticated && !!userProfile;
   const [phoneNumber, setPhoneNumber] = useState('');
   const { selectedCountry, showCountryModal, selectCountry, openCountryModal, closeCountryModal, setSelectedCountry } = useCountrySelection();
   const [verificationMethod, setVerificationMethod] = useState<'telegram' | 'sms' | null>(null);
@@ -177,8 +176,6 @@ const PhoneVerificationScreen = () => {
 
         if (data.verifyTelegramCode.success) {
           // Check if we're in the profile update flow (user is already authenticated)
-          const isProfileUpdateFlow = !!userProfile;
-
           if (isProfileUpdateFlow) {
             // Update the user's phone number in the database
             const { data: updateData } = await updatePhoneNumber({
@@ -251,7 +248,6 @@ const PhoneVerificationScreen = () => {
           },
         });
         if (data?.verifySmsCode?.success) {
-          const isProfileUpdateFlow = !!userProfile;
           if (isProfileUpdateFlow) {
             const { data: updateData } = await updatePhoneNumber({
               variables: {
@@ -329,7 +325,6 @@ const PhoneVerificationScreen = () => {
   );
 
   const renderPhoneScreen = () => {
-    const isProfileUpdateFlow = !!userProfile;
     const title = isProfileUpdateFlow ? 'Cambiar número de teléfono' : 'Ingresa tu número de teléfono';
     const subtitle = isProfileUpdateFlow
       ? 'Ingresa tu nuevo número de teléfono para actualizar tu perfil'
@@ -340,7 +335,7 @@ const PhoneVerificationScreen = () => {
         <TouchableOpacity
           style={styles.backButton}
           onPress={() => {
-            if (userProfile) {
+            if (isProfileUpdateFlow) {
               // In main flow - just go back
               navigation.goBack();
             } else {
@@ -410,7 +405,6 @@ const PhoneVerificationScreen = () => {
       : codeRequestCooldown > 0
         ? `Reintentar en ${codeRequestCooldown}s`
         : 'Enviar código';
-    const isProfileUpdateFlow = !!userProfile;
     const title = isProfileUpdateFlow ? 'Verifica tu nuevo número' : 'Verifica tu número';
     const subtitle = isProfileUpdateFlow
       ? `Selecciona cómo quieres verificar tu nuevo número\n<Text style={styles.phoneNumber}>${selectedCountry[1]} ${phoneNumber}</Text>`
@@ -493,7 +487,6 @@ const PhoneVerificationScreen = () => {
   };
 
   const renderVerificationCodeScreen = () => {
-    const isProfileUpdateFlow = !!userProfile;
     const title = isProfileUpdateFlow ? 'Verifica tu nuevo número' : 'Ingresa el código';
     const subtitle = isProfileUpdateFlow
       ? `${verificationMethod === 'telegram' ? 'Enviamos un código a tu Telegram' : 'Enviamos un código por SMS'} para verificar tu nuevo número\n`

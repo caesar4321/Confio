@@ -1124,7 +1124,7 @@ export async function restoreFromBackup(
 export async function getOrCreateMasterSecret(
   userSub: string,
   accessToken?: string,
-  options?: { allowGenerate?: boolean; provider?: 'google' | 'apple'; expectedAddress?: string | null }
+  options?: { allowGenerate?: boolean; provider?: 'google' | 'apple'; expectedAddress?: string | null; requireCloudSync?: boolean }
 ): Promise<Uint8Array> {
   if (!userSub) {
     throw new Error('[MasterSecret] User Sub (OAuth ID) is required to secure the master secret.');
@@ -1446,6 +1446,9 @@ export async function getOrCreateMasterSecret(
       } catch (syncErr: any) {
         AnalyticsService.logBackupFailed('google_drive', syncErr?.message || 'Unknown sync error');
         console.warn('[MasterSecret] Sync failed:', syncErr);
+        if (options?.requireCloudSync) {
+          throw syncErr;
+        }
       }
     }
 

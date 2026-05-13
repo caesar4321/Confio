@@ -23,6 +23,7 @@ import algorandService from './algorandService';
 
 const LEGACY_CONFIO_ASSET_ID = '3198568509';
 const MATERIAL_SPENDABLE_ALGO_MICROS = 100_000;
+const GOOGLE_DRIVE_APPDATA_SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
 const ga4SignUpServiceForUser = (userId: string) => `com.confio.analytics.sign_up.${userId}`;
 const pendingGa4SignUps = new Set<string>();
 
@@ -317,16 +318,43 @@ export class AuthService {
       // Check Play Services
       await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
 
-      // Sign in with Google to get Drive access (this doesn't affect Firebase/backend auth)
-      const signInResponse = await GoogleSignin.signIn();
-      if (!isSuccessResponse(signInResponse)) {
-        if (isCancelledResponse(signInResponse)) {
-          console.log('[AuthService] Drive access sign-in cancelled by user');
+      const currentUser = await GoogleSignin.getCurrentUser();
+      const hasDriveScope = currentUser?.scopes?.includes(GOOGLE_DRIVE_APPDATA_SCOPE);
+      if (!hasDriveScope) {
+        const driveScopeResponse = currentUser
+          ? await GoogleSignin.addScopes({ scopes: [GOOGLE_DRIVE_APPDATA_SCOPE] })
+          : await GoogleSignin.signIn();
+
+        if (!isSuccessResponse(driveScopeResponse)) {
+          if (isCancelledResponse(driveScopeResponse)) {
+            console.log('[AuthService] Drive access sign-in cancelled by user');
+            return null;
+          }
+
+          console.warn('[AuthService] Drive access sign-in returned a non-success response');
           return null;
         }
+      }
 
-        console.warn('[AuthService] Drive access sign-in returned a non-success response:', signInResponse.type);
-        return null;
+      const driveScopedUser = await GoogleSignin.getCurrentUser();
+      if (!driveScopedUser?.scopes?.includes(GOOGLE_DRIVE_APPDATA_SCOPE)) {
+        console.warn('[AuthService] Drive scope missing after scope request; forcing fresh Google sign-in');
+        try {
+          await GoogleSignin.signOut();
+        } catch (signOutError) {
+          console.log('[AuthService] Local Google sign-out before Drive retry ignored:', signOutError);
+        }
+
+        const freshSignInResponse = await GoogleSignin.signIn();
+        if (!isSuccessResponse(freshSignInResponse)) {
+          if (isCancelledResponse(freshSignInResponse)) {
+            console.log('[AuthService] Fresh Drive access sign-in cancelled by user');
+            return null;
+          }
+
+          console.warn('[AuthService] Fresh Drive access sign-in returned a non-success response');
+          return null;
+        }
       }
 
       // Get the access token for Drive
@@ -334,14 +362,6 @@ export class AuthService {
       this.driveAccessToken = accessToken || null;
 
       console.log('[AuthService] Got Drive access token:', accessToken ? 'obtained' : 'failed');
-
-      // Sign out from Google to clean up (we only needed the token)
-      // This does NOT affect our Firebase auth or backend JWT
-      try {
-        await GoogleSignin.signOut();
-      } catch (e) {
-        // Ignore sign out errors
-      }
 
       return accessToken || null;
     } catch (error) {
@@ -389,6 +409,7 @@ export class AuthService {
       const { getOrCreateMasterSecret, reportBackupStatus } = await import('./secureDeterministicWallet');
       await getOrCreateMasterSecret(oauthData.subject, accessToken, {
         provider: oauthData.provider,
+        requireCloudSync: true,
       });
       console.log('[AuthService] Master secret synced to Drive');
 
@@ -399,6 +420,14 @@ export class AuthService {
       return { success: true };
     } catch (error: any) {
       console.error('[AuthService] Failed to enable Drive backup:', error);
+      if ((error?.status === 401 || error?.status === 403) && this.driveAccessToken) {
+        try {
+          await GoogleSignin.clearCachedAccessToken(this.driveAccessToken);
+        } catch (clearTokenError) {
+          console.warn('[AuthService] Failed to clear rejected Drive token:', clearTokenError);
+        }
+        this.driveAccessToken = null;
+      }
       return { success: false, error: error?.message || 'Error desconocido' };
     }
   }
