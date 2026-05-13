@@ -745,6 +745,7 @@ export class AuthService {
           await getOrCreateMasterSecret(googleSubject, tokenForDrive || undefined, {
             allowGenerate: allowV2SecretGeneration,
             provider: 'google',
+            expectedAddress: serverAlgorandAddress,
           });
           console.log('[AuthService] ✅ V2 Master Secret verified/restored.');
           driveSyncSucceeded = !!tokenForDrive;
@@ -1087,6 +1088,7 @@ export class AuthService {
           await getOrCreateMasterSecret(appleSub, undefined, {
             allowGenerate: allowV2SecretGeneration,
             provider: 'apple',
+            expectedAddress: serverAlgorandAddress,
           });
         } catch (v2Err) {
           console.error('[AuthService] Failed to verify/restore Apple V2 Master Secret:', v2Err);

@@ -330,6 +330,7 @@ export function deriveDeterministicAlgorandKey(opts: DeriveWalletOptions): Deriv
 // ============================================================================
 
 const MANIFEST_FILENAME = 'confio_wallet_manifest_v2.json';
+const ADDRESS_BOUND_SECRET_PREFIX = 'confio_master_secret_v2_address_';
 
 interface WalletEntry {
   id: string;             // UUID
@@ -365,6 +366,30 @@ function secretsEqual(a?: Uint8Array | null, b?: Uint8Array | null): boolean {
     diff |= a[i] ^ b[i];
   }
   return diff === 0;
+}
+
+function derivePersonalV2Address(masterSecret: Uint8Array): string {
+  return deriveWalletV2(masterSecret, {
+    accountType: 'personal',
+    accountIndex: 0,
+  }).address;
+}
+
+async function storeAddressBoundMasterSecret(
+  credentialStorage: any,
+  address: string | null | undefined,
+  masterSecret: Uint8Array
+): Promise<void> {
+  if (!address) return;
+  await credentialStorage.storeSecret(`${ADDRESS_BOUND_SECRET_PREFIX}${address}`, masterSecret);
+}
+
+async function retrieveAddressBoundMasterSecret(
+  credentialStorage: any,
+  address: string | null | undefined
+): Promise<Uint8Array | null> {
+  if (!address) return null;
+  return credentialStorage.retrieveSecret(`${ADDRESS_BOUND_SECRET_PREFIX}${address}`);
 }
 
 // Mutex to prevent race conditions during secret creation
@@ -906,6 +931,11 @@ export async function restoreFromBackup(
 
     // Store the restored secret locally (overwrites existing)
     await credentialStorage.storeSecret(secretAlias, decrypted);
+    await storeAddressBoundMasterSecret(
+      credentialStorage,
+      derivePersonalV2Address(decrypted),
+      decrypted
+    );
 
     // Also store the wallet ID if we have it, or try to derive it/fail gracefully
     // BUT we must overwrite the current wallet ID to prevent mismatch
@@ -951,7 +981,7 @@ export async function restoreFromBackup(
 export async function getOrCreateMasterSecret(
   userSub: string,
   accessToken?: string,
-  options?: { allowGenerate?: boolean; provider?: 'google' | 'apple' }
+  options?: { allowGenerate?: boolean; provider?: 'google' | 'apple'; expectedAddress?: string | null }
 ): Promise<Uint8Array> {
   if (!userSub) {
     throw new Error('[MasterSecret] User Sub (OAuth ID) is required to secure the master secret.');
@@ -988,6 +1018,35 @@ export async function getOrCreateMasterSecret(
     let localSecret = await credentialStorage.retrieveSecret(secretAlias);
     let localWalletIdBytes = await credentialStorage.retrieveSecret(walletIdKey);
     let localWalletId = localWalletIdBytes ? decodeUtf8(localWalletIdBytes) : null;
+
+    if (localSecret && options?.expectedAddress) {
+      const localAddress = derivePersonalV2Address(localSecret);
+      if (localAddress !== options.expectedAddress) {
+        console.warn('[MasterSecret] Local subject-bound V2 secret does not match server address. Checking address-bound restore alias.', {
+          localAddress,
+          expectedAddress: options.expectedAddress,
+        });
+        const addressBoundSecret = await retrieveAddressBoundMasterSecret(
+          credentialStorage,
+          options.expectedAddress
+        );
+        if (addressBoundSecret) {
+          localSecret = addressBoundSecret;
+          await credentialStorage.storeSecret(secretAlias, localSecret);
+          console.log('[MasterSecret] Recovered V2 secret from address-bound alias.');
+        } else if (options.allowGenerate === false) {
+          throw new Error(
+            'Esta cuenta ya fue vinculada a otra billetera. Necesitamos recuperar esa billetera desde Google Drive antes de continuar.'
+          );
+        }
+      } else {
+        await storeAddressBoundMasterSecret(
+          credentialStorage,
+          options.expectedAddress,
+          localSecret
+        );
+      }
+    }
 
     // SANITY CHECK: Ensure we never use the string "null" or "undefined" as an ID
     if (localWalletId === 'null' || localWalletId === 'undefined') {
@@ -1040,6 +1099,11 @@ export async function getOrCreateMasterSecret(
 
         await credentialStorage.storeSecret(secretAlias, localSecret);
         await credentialStorage.storeSecret(walletIdKey, stringToUtf8Bytes(localWalletId));
+        await storeAddressBoundMasterSecret(
+          credentialStorage,
+          derivePersonalV2Address(localSecret),
+          localSecret
+        );
 
         reportBackupStatus('google_drive').catch(e => console.warn('[BackupHealth] Drive restore report failed', e));
       } else if (restore.foundAny) {
@@ -1072,6 +1136,11 @@ export async function getOrCreateMasterSecret(
       localWalletId = generateUUID();
       await credentialStorage.storeSecret(secretAlias, localSecret);
       await credentialStorage.storeSecret(walletIdKey, stringToUtf8Bytes(localWalletId));
+      await storeAddressBoundMasterSecret(
+        credentialStorage,
+        derivePersonalV2Address(localSecret),
+        localSecret
+      );
     }
 
     // Ensure ID exists if we have a secret but no ID (e.g. after Legacy Restore)
