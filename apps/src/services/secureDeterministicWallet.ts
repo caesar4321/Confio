@@ -17,7 +17,7 @@ import * as nacl from 'tweetnacl';
 // algosdk will be required at runtime to avoid RN bundler issues
 import { jwtDecode } from 'jwt-decode';
 import * as Keychain from 'react-native-keychain';
-import { Platform, Alert } from 'react-native';
+import { Platform } from 'react-native';
 import DeviceInfo from 'react-native-device-info';
 import { apolloClient, AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME } from '../apollo/client';
 import { REPORT_BACKUP_STATUS } from '../apollo/queries';
@@ -343,6 +343,20 @@ interface WalletManifest {
   wallets: WalletEntry[];
 }
 
+interface DriveBackupCandidate {
+  fileId: string;
+  revisionId?: string;
+  name: string;
+  modifiedTime?: string;
+  walletId?: string | null;
+}
+
+interface OldestDriveBackupResult {
+  foundAny: boolean;
+  secret: Uint8Array | null;
+  walletId: string | null;
+}
+
 // Mutex to prevent race conditions during secret creation
 let v2SecretMutex: Promise<void> = Promise.resolve();
 
@@ -393,6 +407,101 @@ async function saveManifest(googleDriveStorage: any, accessToken: string, manife
   } else {
     await googleDriveStorage.createFile(accessToken, MANIFEST_FILENAME, content);
   }
+}
+
+function getBackupTime(candidate: DriveBackupCandidate): number {
+  const time = candidate.modifiedTime ? new Date(candidate.modifiedTime).getTime() : 0;
+  return Number.isFinite(time) ? time : 0;
+}
+
+function extractWalletIdFromBackupName(name?: string): string | null {
+  if (!name) return null;
+  const match = name.match(/confio_wallet_v2_(.+?)\.enc/);
+  return match?.[1] || null;
+}
+
+async function findOldestRestorableDriveBackup(
+  accessToken: string,
+  userSub: string,
+  googleDriveStorage: any,
+  AES: any,
+  appBackupKey: string,
+  Utf8: any
+): Promise<OldestDriveBackupResult> {
+  const safeSub = bytesToHex(sha256(utf8ToBytes(userSub)));
+  const legacyFilename = `confio_master_secret_v2_${safeSub}.json`;
+
+  const activeFiles = await googleDriveStorage.listFiles(accessToken);
+  let trashedFiles: any[] = [];
+  try {
+    trashedFiles = await googleDriveStorage.listFiles(accessToken, undefined, true);
+  } catch (e) {
+    console.warn('[MasterSecret] Failed to list trashed Drive backups:', e);
+  }
+
+  const files = [...activeFiles, ...trashedFiles].filter((f: any) =>
+    (f.name && f.name.startsWith('confio_wallet_v2_')) ||
+    f.name === legacyFilename
+  );
+
+  if (files.length === 0) {
+    return { foundAny: false, secret: null, walletId: null };
+  }
+
+  const candidates: DriveBackupCandidate[] = [];
+  for (const file of files) {
+    const walletId = extractWalletIdFromBackupName(file.name);
+    candidates.push({
+      fileId: file.id,
+      name: file.name,
+      modifiedTime: file.modifiedTime || file.createdTime,
+      walletId,
+    });
+
+    try {
+      const revisions = await googleDriveStorage.listRevisions(accessToken, file.id);
+      for (const revision of revisions || []) {
+        candidates.push({
+          fileId: file.id,
+          revisionId: revision.id,
+          name: `${file.name} [Rev ${revision.modifiedTime}]`,
+          modifiedTime: revision.modifiedTime,
+          walletId,
+        });
+      }
+    } catch (e) {
+      console.warn('[MasterSecret] Failed to list Drive backup revisions:', file.name, e);
+    }
+  }
+
+  candidates.sort((a, b) => getBackupTime(a) - getBackupTime(b));
+
+  for (const candidate of candidates) {
+    try {
+      const content = await googleDriveStorage.downloadFile(
+        accessToken,
+        candidate.fileId,
+        candidate.revisionId
+      );
+      const decrypted = decryptBackup(content, AES, appBackupKey, Utf8);
+      if (decrypted) {
+        console.log('[MasterSecret] Restored oldest Drive V2 backup:', {
+          name: candidate.name,
+          modifiedTime: candidate.modifiedTime,
+          walletId: candidate.walletId || 'legacy/no-id',
+        });
+        return {
+          foundAny: true,
+          secret: decrypted,
+          walletId: candidate.walletId || null,
+        };
+      }
+    } catch (e) {
+      console.warn('[MasterSecret] Failed to restore Drive backup candidate:', candidate.name, e);
+    }
+  }
+
+  return { foundAny: true, secret: null, walletId: null };
 }
 
 /**
@@ -770,12 +879,13 @@ export async function restoreFromBackup(
 
     // Also store the wallet ID if we have it, or try to derive it/fail gracefully
     // BUT we must overwrite the current wallet ID to prevent mismatch
-    if (walletId) {
+    const isSyntheticRestoreId = !walletId || walletId === 'null' || walletId === 'legacy_rescue_option' || walletId.startsWith('deep_search_');
+    if (walletId && !isSyntheticRestoreId) {
       await credentialStorage.storeSecret(walletIdKey, stringToUtf8Bytes(walletId));
     } else {
       // If restored from null ID, try to get ID from filename if possible?
       // confio_wallet_v2_ID.enc
-      const match = filename.match(/confio_wallet_v2_(.+)\.enc/);
+      const match = filename.match(/confio_wallet_v2_(.+?)\.enc/);
       if (match && match[1]) {
         await credentialStorage.storeSecret(walletIdKey, stringToUtf8Bytes(match[1]));
         console.log('[restoreFromBackup] Restored wallet ID from filename:', match[1]);
@@ -821,10 +931,6 @@ export async function getOrCreateMasterSecret(
   const secretAlias = `confio_master_secret_v2_${safeSub}`;
   const walletIdKey = `confio_wallet_id_v2_${safeSub}`; // Store the UUID locally
   const legacyAlias = 'confio_master_secret';
-
-  // Legacy dynamic filename for migration check
-  const legacyDriveFilename = `confio_wallet_id_v2_${safeSub}.json`; // Corrected based on file content observation if needed, but keeping logic
-  // actually line 821 was `confio_master_secret_v2_${safeSub}.json`. Kept as is.
 
   // PRIMARY POINTER: Single Source of Truth for the "Main" wallet of this Google Account
   const PRIMARY_POINTER_FILENAME = 'confio_wallet_primary.json';
@@ -876,102 +982,32 @@ export async function getOrCreateMasterSecret(
     // -------------------------------
 
     // =================================================================================
-    // 2. CLOUD RESTORE (If Local is Missing)
+    // 2. CLOUD RESTORE
     // =================================================================================
-    if (!localSecret && accessToken) {
-      console.log('[MasterSecret] Local secret missing. checking Manifest...');
-      const manifest = await fetchManifest(googleDriveStorage, accessToken);
-      let targetWallet: WalletEntry | null = null;
+    if (accessToken) {
+      console.log('[MasterSecret] Drive available. Restoring oldest Drive V2 backup if present...');
+      const restore = await findOldestRestorableDriveBackup(
+        accessToken,
+        userSub,
+        googleDriveStorage,
+        AES,
+        APP_BACKUP_KEY,
+        Utf8
+      );
 
-      // 2.0 Check for Primary Pointer (Option B Strategy)
-      // This allows us to auto-select the "main" wallet even if multiple exist in manifest
-      try {
-        const primaryFiles = await googleDriveStorage.listFiles(accessToken, PRIMARY_POINTER_FILENAME);
-        if (primaryFiles.length > 0) {
-          const primaryContent = await googleDriveStorage.downloadFile(accessToken, primaryFiles[0].id);
-          const primaryJson = JSON.parse(primaryContent);
-          if (primaryJson && primaryJson.primary_wallet_id) {
-            console.log('[MasterSecret] Found Primary Wallet Pointer:', primaryJson.primary_wallet_id);
-            const primaryMatch = manifest.wallets.find(w => w.id === primaryJson.primary_wallet_id);
-            if (primaryMatch) {
-              console.log('[MasterSecret] Primary wallet found in manifest. Auto-selecting.');
-              targetWallet = primaryMatch;
-            } else {
-              console.warn('[MasterSecret] Primary wallet ID pointer exists, but not found in manifest? Strange.');
-            }
-          }
+      if (restore.secret) {
+        if (localSecret) {
+          console.log('[MasterSecret] Replacing local V2 secret with canonical oldest Drive backup.');
         }
-      } catch (e) {
-        console.warn('[MasterSecret] Failed to check primary pointer:', e);
-      }
+        localSecret = restore.secret;
+        localWalletId = restore.walletId || generateUUID();
 
-      if (targetWallet) {
-        // Already found via Primacy Check
-      } else if (manifest.wallets.length === 0) {
-        // 2a. Check Legacy Migration
-        console.log('[MasterSecret] Manifest empty. Checking Legacy Backup...');
-        const legacyFiles = await googleDriveStorage.listFiles(accessToken, legacyDriveFilename);
-        if (legacyFiles.length > 0) {
-          console.log('[MasterSecret] Found Legacy Backup. Importing...');
-          // Download Legacy
-          const content = await googleDriveStorage.downloadFile(accessToken, legacyFiles[0].id);
-          // Decrypt logic (shared)
-          const decrypted = decryptBackup(content, AES, APP_BACKUP_KEY, Utf8);
-          if (decrypted) {
-            // Generate New UUID for it
-            const newId = generateUUID();
-            const now = new Date().toISOString();
+        await credentialStorage.storeSecret(secretAlias, localSecret);
+        await credentialStorage.storeSecret(walletIdKey, stringToUtf8Bytes(localWalletId));
 
-            // Save Local
-            await credentialStorage.storeSecret(secretAlias, decrypted);
-            await credentialStorage.storeSecret(walletIdKey, stringToUtf8Bytes(newId));
-
-            localSecret = decrypted;
-            localWalletId = newId;
-
-            // Add to Manifest (Will be saved in Step 3)
-            const deviceName = await DeviceInfo.getDeviceName();
-            manifest.wallets.push({
-              id: newId,
-              createdAt: now,
-              lastBackupAt: now,
-              deviceHint: `${deviceName} (${Platform.OS})`, // "iPhone 15 (ios)"
-              providerHint: 'Google'
-            });
-            // Mark as dirty to ensure upload happen in Step 3
-          }
-        }
-      } else if (manifest.wallets.length === 1) {
-        // 2b. Single Wallet - Auto Restore
-        console.log('[MasterSecret] Single wallet found. Auto-restoring...');
-        targetWallet = manifest.wallets[0];
-      } else {
-        // 2c. Multiple Wallets - Prompt User
-        console.log('[MasterSecret] Multiple wallets found. Prompting...');
-        const choice = await promptUserForWalletSelection(manifest.wallets);
-        if (choice === 'new') {
-          // Proceed to Generate New
-        } else {
-          targetWallet = manifest.wallets.find(w => w.id === choice) || null;
-        }
-      }
-
-      // Execute Restore if Target Selected
-      if (targetWallet) {
-        const filename = `confio_wallet_v2_${targetWallet.id}.enc`;
-        const files = await googleDriveStorage.listFiles(accessToken, filename);
-        if (files.length > 0) {
-          const content = await googleDriveStorage.downloadFile(accessToken, files[0].id);
-          const decrypted = decryptBackup(content, AES, APP_BACKUP_KEY, Utf8);
-          if (decrypted) {
-            await credentialStorage.storeSecret(walletIdKey, stringToUtf8Bytes(targetWallet.id));
-            localSecret = decrypted;
-            localWalletId = targetWallet.id;
-
-            // Drive Restore Report
-            reportBackupStatus('google_drive').catch(e => console.warn('[BackupHealth] Drive restore report failed', e));
-          }
-        }
+        reportBackupStatus('google_drive').catch(e => console.warn('[BackupHealth] Drive restore report failed', e));
+      } else if (restore.foundAny) {
+        throw new Error('[MasterSecret] Existing Drive wallet backups were found but none could be decrypted; refusing to generate a replacement secret.');
       }
     }
 
@@ -1078,7 +1114,7 @@ export async function getOrCreateMasterSecret(
           providerHint: 'Google'
         };
 
-        // 4c. Update Primary Pointer (If missing)
+        // 4c. Update Primary Pointer to the canonical restored/created wallet.
         try {
           const primaryFiles = await googleDriveStorage.listFiles(accessToken, PRIMARY_POINTER_FILENAME);
           if (primaryFiles.length === 0) {
@@ -1090,9 +1126,12 @@ export async function getOrCreateMasterSecret(
             });
             await googleDriveStorage.createFile(accessToken, PRIMARY_POINTER_FILENAME, primaryContent);
           } else {
-            console.log('[MasterSecret] Primary Pointer already exists. Respecting existing primary.');
-            // OPTIONAL: If we want to support "Switch Primary", we'd update it here.
-            // For now, "First Come First Served" (Option B).
+            const primaryContent = JSON.stringify({
+              primary_wallet_id: finalId,
+              updated_at: now,
+              device_hint: currentDeviceHint
+            });
+            await googleDriveStorage.updateFile(accessToken, primaryFiles[0].id, primaryContent);
           }
         } catch (e) {
           console.warn('[MasterSecret] Failed to update primary pointer:', e);
@@ -1138,32 +1177,6 @@ function decryptBackup(content: string, AES: any, key: string, Utf8: any): Uint8
     console.warn('Decryption failed:', e);
     return null;
   }
-}
-
-// Helper: User Prompt
-async function promptUserForWalletSelection(wallets: WalletEntry[]): Promise<string> {
-  return new Promise((resolve) => {
-    // Sort by lastBackup (newest first)
-    const sorted = [...wallets].sort((a, b) => new Date(b.lastBackupAt).getTime() - new Date(a.lastBackupAt).getTime());
-
-    // Take top 2 for display, plus 'New'
-    const options = sorted.slice(0, 2).map(w => ({
-      text: `${w.deviceHint} (${w.createdAt.substring(0, 10)})`,
-      onPress: () => resolve(w.id)
-    }));
-
-    options.push({
-      text: 'Crear Nueva (Separada)',
-      onPress: () => resolve('new')
-    });
-
-    Alert.alert(
-      'Multiples Billeteras',
-      'Encontramos varias copias de seguridad. ¿Cual quieres restaurar?',
-      options,
-      { cancelable: false }
-    );
-  });
 }
 
 /**

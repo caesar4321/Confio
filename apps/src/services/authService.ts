@@ -392,35 +392,9 @@ export class AuthService {
         return { success: false, error: 'No se encontró información de la cuenta' };
       }
 
-      // Check for existing backups (unless forceBackup is true)
-      // Show modal if there are multiple entries OR any cross-platform backup
-      if (!forceBackup) {
-        const { checkExistingBackups } = await import('./secureDeterministicWallet');
-        const existingBackups = await checkExistingBackups(accessToken, oauthData.subject);
-
-        // Show modal if:
-        // 1. Multiple backup entries exist (user can choose which to restore)
-        // 2. OR any cross-platform backup exists
-        const hasMultipleEntries = existingBackups.entries.length > 1;
-        if (existingBackups.hasCrossPlatformBackup || hasMultipleEntries) {
-          console.log('[AuthService] Existing backups found, showing modal:', {
-            totalEntries: existingBackups.entries.length,
-            hasCrossPlatform: existingBackups.hasCrossPlatformBackup
-          });
-          // Return all entries so user can choose any of them
-          return {
-            success: false,
-            existingBackups: {
-              ...existingBackups,
-              // Use all entries for the modal, not just cross-platform
-              entriesToShow: existingBackups.entries
-            }
-          };
-        }
-        // Single same-platform backup proceeds automatically (no prompt needed)
-      }
-
-      // Sync to Drive using the access token
+      // Sync to Drive using the access token. If Drive already contains V2
+      // backups, getOrCreateMasterSecret restores the oldest valid one
+      // automatically instead of prompting or creating a duplicate wallet.
       const { getOrCreateMasterSecret, reportBackupStatus } = await import('./secureDeterministicWallet');
       await getOrCreateMasterSecret(oauthData.subject, accessToken);
       console.log('[AuthService] Master secret synced to Drive');
