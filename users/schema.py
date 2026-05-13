@@ -5123,11 +5123,12 @@ class ReportBackupStatus(graphene.Mutation):
                 return ReportBackupStatus(success=False, error="Invalid provider")
 
             update_fields = []
-            
+            had_no_backup_before = not user.backup_provider
+
             # Logic: We overwrite provider only if it's newor if switching to Drive (explicit > implicit)
             # But the user requirements say just track status.
             # Simple logic: Always update last verification.
-            
+
             if is_verified:
                 # PRIORITY: google_drive (explicit user action) > icloud (implicit)
                 # - google_drive can overwrite icloud or null
@@ -5140,27 +5141,140 @@ class ReportBackupStatus(graphene.Mutation):
                     # Explicit Drive backup overwrites implicit iCloud
                     should_update_provider = True
                 # iCloud cannot overwrite google_drive (implicit cannot replace explicit)
-                
+
                 if should_update_provider:
                     user.backup_provider = provider
                     update_fields.append('backup_provider')
                     logger.info(u"Backup provider set for user %s: %s", user.id, provider)
-                
+
                 # Always update the last verification timestamp and device name
                 user.backup_verified_at = timezone.now()
                 update_fields.append('backup_verified_at')
-                
+
                 if device_name:
                     user.backup_device_name = device_name
                     update_fields.append('backup_device_name')
-                
+
                 if update_fields:
                     user.save(update_fields=update_fields)
+
+                # MBR backstop: when a user's backup transitions from "none"
+                # to a real provider, make sure their personal account has
+                # the required minimum balance funded. This covers the case
+                # where the user signed in without Drive (so the initial
+                # UpdateAccountAlgorandAddress ran with no needed opt-ins
+                # and skipped funding), then later activated Drive backup
+                # via BackupCompletion. Without this, the user lands on
+                # PhoneVerification with an unfunded address and Home
+                # screen actions fail.
+                if had_no_backup_before:
+                    try:
+                        _ensure_personal_account_mbr_funded(user)
+                    except Exception as fund_err:
+                        # Non-fatal: backup state is already recorded. The
+                        # next interaction that needs MBR will surface this
+                        # again and the user can retry.
+                        logger.warning(
+                            "ReportBackupStatus MBR backstop failed for user %s: %s",
+                            user.id, fund_err,
+                        )
 
             return ReportBackupStatus(success=True)
         except Exception as e:
             logger.error(u"Error reporting backup status: %s", str(e))
             return ReportBackupStatus(success=False, error=str(e))
+
+
+def _ensure_personal_account_mbr_funded(user) -> bool:
+    """
+    Ensure the user's personal Algorand account has at least the MBR needed
+    to cover its currently-required minimum balance plus opt-ins for the
+    three core assets (CONFIO, cUSD, USDC). Funds the delta from the
+    sponsor account when on-chain balance is short.
+
+    Returns True if no action was needed or the funding tx confirmed,
+    False if a funding attempt failed.
+
+    Idempotent — when on-chain balance already covers the required MBR
+    this is a no-op (one read against algod).
+    """
+    account = (
+        Account.objects.filter(
+            user=user,
+            account_type='personal',
+            account_index=0,
+        )
+        .order_by('account_index')
+        .first()
+    )
+    if not account or not account.algorand_address:
+        return True  # Nothing to fund yet.
+
+    algorand_address = account.algorand_address
+
+    from blockchain.algorand_account_manager import AlgorandAccountManager
+    from algosdk.v2client import algod
+    from algosdk import mnemonic
+    from algosdk.transaction import PaymentTxn, wait_for_confirmation
+
+    algod_client = algod.AlgodClient(
+        AlgorandAccountManager.ALGOD_TOKEN,
+        AlgorandAccountManager.ALGOD_ADDRESS,
+    )
+
+    try:
+        account_info = algod_client.account_info(algorand_address)
+        balance = int(account_info.get('amount', 0) or 0)
+        current_assets = account_info.get('assets', []) or []
+        current_min_balance = int(account_info.get('min-balance', 0) or 0)
+    except Exception:
+        # Account doesn't exist on chain yet — needs full MBR for opt-ins.
+        balance = 0
+        current_assets = []
+        current_min_balance = 0
+
+    current_asset_ids = {
+        a.get('asset-id') for a in current_assets if isinstance(a, dict)
+    }
+    needed_asset_ids = []
+    for aid in (
+        AlgorandAccountManager.CONFIO_ASSET_ID,
+        AlgorandAccountManager.CUSD_ASSET_ID,
+        AlgorandAccountManager.USDC_ASSET_ID,
+    ):
+        if aid and aid not in current_asset_ids:
+            needed_asset_ids.append(aid)
+
+    # 100_000 microAlgos per asset opt-in MBR.
+    new_min_balance = current_min_balance + (len(needed_asset_ids) * 100_000)
+
+    if balance >= new_min_balance:
+        return True  # Already funded.
+
+    funding_amount = new_min_balance - balance
+    logger.info(
+        "Backup MBR backstop: funding %s with %s microAlgos (balance=%s, needed=%s)",
+        algorand_address, funding_amount, balance, new_min_balance,
+    )
+
+    sponsor_private_key = mnemonic.to_private_key(
+        AlgorandAccountManager.SPONSOR_MNEMONIC
+    )
+    params = algod_client.suggested_params()
+    fund_txn = PaymentTxn(
+        sender=AlgorandAccountManager.SPONSOR_ADDRESS,
+        sp=params,
+        receiver=algorand_address,
+        amt=funding_amount,
+    )
+    signed_txn = fund_txn.sign(sponsor_private_key)
+    tx_id = algod_client.send_transaction(signed_txn)
+    wait_for_confirmation(algod_client, tx_id, 4)
+    logger.info(
+        "Backup MBR backstop: funded %s with %s microAlgos. TX: %s",
+        algorand_address, funding_amount, tx_id,
+    )
+    return True
 
 class MarkWalletMigrated(graphene.Mutation):
     """
