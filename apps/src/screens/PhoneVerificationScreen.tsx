@@ -91,19 +91,6 @@ const PhoneVerificationScreen = () => {
     }
   };
 
-  const safeNavigateToMain = (params?: any) => {
-    const state: any = (navigation as any).getState?.();
-    const hasMain = !!state?.routeNames?.includes?.('Main');
-
-    if (hasMain) {
-      (navigation as any).navigate('Main', params);
-      return;
-    }
-
-    if (navigationRef.isReady()) {
-      navigationRef.navigate('Main', params);
-      return;
-    }  };
 
   const handleContinue = async () => {
     if (currentScreen === 'phone') {
@@ -220,22 +207,17 @@ const PhoneVerificationScreen = () => {
               Alert.alert('Error', updateData?.updatePhoneNumber?.error || 'Failed to update phone number');
             }
           } else {
-            // Auth flow - complete phone verification and authenticate
+            // Auth flow - phone is verified server-side. Hand off to
+            // completePhoneVerification, which resets the nav stack to
+            // BiometricSetup. We MUST NOT also call safeNavigateToMain
+            // here — Main isn't mounted yet (isAuthenticated is still
+            // false until biometric completes), and a follow-up navigate
+            // on the same navigationRef can race the reset and leave the
+            // user pinned on PhoneVerification. If they retry the verify
+            // they hit "phone already in use" because the first verify
+            // succeeded server-side.
             Alert.alert('Success', 'Phone number verified!');
             await completePhoneVerification();
-            // Navigate to Home and trigger one-time invite receipt check
-            try {
-              // Prefer nested route when available
-              const state: any = (navigation as any).getState?.();
-              const hasBottomTabs = Array.isArray(state?.routeNames) && state.routeNames.includes('BottomTabs');
-              if (hasBottomTabs) {
-                (navigation as any).navigate('BottomTabs', { screen: 'Home', params: { checkInviteReceipt: true } });
-              } else {
-                safeNavigateToMain({ screen: 'Home', params: { checkInviteReceipt: true } });
-              }
-            } catch (e) {
-              try { safeNavigateToMain(); } catch { }
-            }
           }
         } else {
           const errorMessage = data.verifyTelegramCode.error || 'Verification failed';
@@ -285,19 +267,10 @@ const PhoneVerificationScreen = () => {
               Alert.alert('Error', updateData?.updatePhoneNumber?.error || 'Failed to update phone number');
             }
           } else {
+            // See sibling Telegram branch above for why we don't also
+            // call safeNavigateToMain here.
             Alert.alert('Success', 'Phone number verified!');
             await completePhoneVerification();
-            try {
-              const state: any = (navigation as any).getState?.();
-              const hasBottomTabs = Array.isArray(state?.routeNames) && state.routeNames.includes('BottomTabs');
-              if (hasBottomTabs) {
-                (navigation as any).navigate('BottomTabs', { screen: 'Home', params: { checkInviteReceipt: true } });
-              } else {
-                safeNavigateToMain({ screen: 'Home', params: { checkInviteReceipt: true } });
-              }
-            } catch (e) {
-              try { safeNavigateToMain(); } catch { }
-            }
           }
         } else {
           Alert.alert('Error', data?.verifySmsCode?.error || 'Verification failed');

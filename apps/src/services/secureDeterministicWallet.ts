@@ -359,6 +359,18 @@ interface OldestDriveBackupResult {
   walletId: string | null;
   deviceHint?: string | null;
   foundDecryptable?: boolean;
+  // Whether the manifest contains entries from other OAuth identities,
+  // independent of which candidate the sort ended up picking. Used by
+  // getOrCreateMasterSecret to loudly abort when a user is about to
+  // overwrite/share a Drive that holds another identity's wallet.
+  manifestHasAndroidEntry?: boolean;
+  manifestHasIosEntry?: boolean;
+  // Distinct V2 *base* files seen on the Drive (revisions of the same file
+  // don't count, but two different `confio_wallet_v2_<id>.enc` filenames
+  // do). Used as a fallback signal when the manifest is empty/stale and
+  // can't tell us about cross-identity entries — if Drive has more than
+  // one distinct V2 file, somebody else's wallet is sitting next to ours.
+  distinctV2FileCount?: number;
 }
 
 function secretsEqual(a?: Uint8Array | null, b?: Uint8Array | null): boolean {
@@ -508,6 +520,60 @@ async function findOldestRestorableDriveBackup(
       .filter(entry => (entry.deviceHint || '').toLowerCase().includes('android'))
       .map(entry => entry.id)
   );
+  const manifestHasAndroidEntry = manifest.wallets.some(entry =>
+    (entry.deviceHint || '').toLowerCase().includes('android')
+  );
+  const manifestHasIosEntry = manifest.wallets.some(entry => {
+    const hint = (entry.deviceHint || '').toLowerCase();
+    return hint.includes('ios') || hint.includes('iphone') || hint.includes('ipad');
+  });
+
+  // FAST PATH: when we know which address we're recovering AND the manifest
+  // names some entries, try just those files' HEADs directly. The full scan
+  // below (active + trashed listing + every revision + decrypt-every) costs
+  // 10–30 Drive API calls on a slow mobile connection — exactly what made
+  // the cold-start Android login (no BlockStore) feel stuck on
+  // "Verificando seguridad del dispositivo...". The targeted path is 1
+  // listFiles + 1 downloadFile per manifest entry.
+  if (expectedAddress && manifest.wallets.length > 0) {
+    for (const entry of manifest.wallets) {
+      if (!entry.id) continue;
+      const filename = `confio_wallet_v2_${entry.id}.enc`;
+      try {
+        const matches = await googleDriveStorage.listFiles(accessToken, filename);
+        if (matches.length === 0) continue;
+        const content = await googleDriveStorage.downloadFile(accessToken, matches[0].id);
+        const decrypted = decryptBackup(content, AES, appBackupKey, Utf8);
+        if (!decrypted) continue;
+        const candidateAddress = derivePersonalV2Address(decrypted);
+        if (candidateAddress === expectedAddress) {
+          console.log('[MasterSecret] Fast-path matched manifest entry HEAD:', {
+            id: entry.id,
+            deviceHint: entry.deviceHint || 'unknown',
+          });
+          return {
+            foundAny: true,
+            secret: decrypted,
+            walletId: entry.id,
+            deviceHint: entry.deviceHint || null,
+            foundDecryptable: true,
+            manifestHasAndroidEntry,
+            manifestHasIosEntry,
+            // Fast path can't see all Drive files, so leave the count
+            // undefined here — the caller's guards only apply on the
+            // no-expectedAddress paths anyway.
+          };
+        }
+        console.log('[MasterSecret] Fast-path entry did not match expected address; continuing.', {
+          id: entry.id,
+          candidateAddress,
+          expectedAddress,
+        });
+      } catch (e) {
+        console.warn('[MasterSecret] Fast-path failed for manifest entry; falling back to full scan.', entry.id, e);
+      }
+    }
+  }
 
   const activeFiles = await googleDriveStorage.listFiles(accessToken);
   let trashedFiles: any[] = [];
@@ -522,8 +588,26 @@ async function findOldestRestorableDriveBackup(
     f.name === legacyFilename
   );
 
+  // Count distinct V2 base files on this Drive (ignoring revisions and the
+  // legacy `confio_master_secret_v2_<sub>.json`). This survives an empty
+  // or stale manifest, which the manifest-tag heuristics don't.
+  const v2WalletIds = new Set<string>();
+  for (const f of files) {
+    if (!f.name || !f.name.startsWith('confio_wallet_v2_') || !f.name.endsWith('.enc')) continue;
+    const id = extractWalletIdFromBackupName(f.name);
+    if (id) v2WalletIds.add(id);
+  }
+  const distinctV2FileCount = v2WalletIds.size;
+
   if (files.length === 0) {
-    return { foundAny: false, secret: null, walletId: null };
+    return {
+      foundAny: false,
+      secret: null,
+      walletId: null,
+      manifestHasAndroidEntry,
+      manifestHasIosEntry,
+      distinctV2FileCount,
+    };
   }
 
   const candidates: DriveBackupCandidate[] = [];
@@ -597,6 +681,9 @@ async function findOldestRestorableDriveBackup(
           walletId: candidate.walletId || null,
           deviceHint: candidate.deviceHint || null,
           foundDecryptable,
+          manifestHasAndroidEntry,
+          manifestHasIosEntry,
+          distinctV2FileCount,
         };
       }
     } catch (e) {
@@ -604,7 +691,15 @@ async function findOldestRestorableDriveBackup(
     }
   }
 
-  return { foundAny: true, secret: null, walletId: null, foundDecryptable };
+  return {
+    foundAny: true,
+    secret: null,
+    walletId: null,
+    foundDecryptable,
+    manifestHasAndroidEntry,
+    manifestHasIosEntry,
+    distinctV2FileCount,
+  };
 }
 
 /**
@@ -1098,6 +1193,13 @@ export async function getOrCreateMasterSecret(
           options.expectedAddress,
           localSecret
         );
+        // FAST PATH: local secret already derives to the server's recorded
+        // address. The Drive scan + cloud sync below would just re-upload the
+        // same bytes with a new IV. On a slow network that costs 8–16 Drive
+        // API calls per login and is what made "Verificando seguridad del
+        // dispositivo..." appear stuck. Return the verified secret directly.
+        console.log('[MasterSecret] Local secret matches server address. Skipping Drive scan.');
+        return localSecret;
       }
     }
 
@@ -1148,13 +1250,34 @@ export async function getOrCreateMasterSecret(
           );
         }
 
+        // Cross-identity guards. Per the architectural rules: the
+        //   differentiator is the OAuth PROVIDER, not the device platform.
+        //   - Google Sign-In is always Google-derived (Android wallet IS
+        //     the Drive backup; Google-on-iOS is still Google-derived).
+        //     Multiple historical backups on the user's own Drive are
+        //     normal — never abort.
+        //   - Apple Sign-In creates a separate iOS-Keychain wallet that
+        //     could collide with a pre-existing Google-derived backup on
+        //     the same Drive. Abort when there's any signal of one.
+        //
+        // Triggered only on the no-`expectedAddress` paths (enableDrive,
+        // new user). The login path with a known target address is
+        // already protected by the address-filter inside
+        // findOldestRestorableDriveBackup.
+        const multipleV2BackupsOnDrive =
+          typeof restore.distinctV2FileCount === 'number' &&
+          restore.distinctV2FileCount > 1;
+
         if (
           options?.provider === 'apple' &&
-          (!secretsEqual(localSecret, restore.secret) || restoredFromAndroid) &&
-          !options?.expectedAddress
+          !options?.expectedAddress &&
+          (restore.manifestHasAndroidEntry ||
+            multipleV2BackupsOnDrive ||
+            restoredFromAndroid ||
+            !secretsEqual(localSecret, restore.secret))
         ) {
           throw new Error(
-            'Esta cuenta de Google ya tiene el respaldo de otra cuenta Confío. Para respaldar esta billetera, elige otra cuenta de Google.'
+            'Este Google Drive ya guarda el respaldo de otra billetera Confío. Para respaldar esta billetera, elige otra cuenta de Google.'
           );
         }
 

@@ -104,6 +104,17 @@ class BiometricAuthService {
       const biometryType = await Keychain.getSupportedBiometryType();
       const accessControl = this.getAccessControlForCurrentDevice(biometryType);
 
+      // Clear any prior key. On Android, an existing key bound to a previous
+      // biometric enrollment set will be invalidated as soon as the user
+      // enrolls a new biometric, and subsequent get/set calls throw
+      // KeyPermanentlyInvalidatedException. Resetting ensures we always
+      // start from a fresh key on each enable() attempt.
+      try {
+        await Keychain.resetGenericPassword({ service: BIOMETRIC_SECRET_SERVICE });
+      } catch (resetError) {
+        console.warn('[BiometricAuthService] Failed to reset prior biometric secret:', resetError);
+      }
+
       const randomSecret = `${Date.now()}-${Math.random()}`;
       await Keychain.setGenericPassword(
         BIOMETRIC_SECRET_USERNAME,
@@ -215,13 +226,16 @@ class BiometricAuthService {
       });
 
       const success = !!authResult && authResult.username === BIOMETRIC_SECRET_USERNAME;
-      if (!success) {      } else {
+      if (success) {
         this.lastSuccessTime = Date.now();
         this.lastError = null;
-        this.lastLockout = false;      }
+        this.lastLockout = false;
+      }
       return success;
     } catch (error: any) {
-      // Do not allow device passcode fallback; fail closed      const msg = typeof error?.message === 'string' ? error.message : '';
+      // Do not allow device passcode fallback; fail closed
+      console.warn('[BiometricAuthService] Biometric auth error:', error?.message || error);
+      const msg = typeof error?.message === 'string' ? error.message : '';
       const lower = msg.toLowerCase();
       const lockout = lower.includes('lockout') || lower.includes('locked out') || lower.includes('biometry is locked') || lower.includes('lockedout');
       this.lastError = msg || 'Biometric authentication failed';
