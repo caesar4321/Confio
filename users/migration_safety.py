@@ -60,30 +60,60 @@ def inspect_address_migration_risk(algod_client, address):
     }
 
 
-def get_address_reassignment_blocker(algod_client, current_address, new_address):
+def get_address_reassignment_blocker(algod_client, current_address, new_address, account=None):
     """
     Return a user-facing error if moving the server-side account pointer away from
     the current address would strand funds on the old wallet.
+
+    Policy:
+      * V1 or unknown source: block on ANY material value (relevant assets OR
+        spendable ALGO above threshold). The V1 sweep must complete atomically
+        before the pointer moves.
+      * V2 source (account.is_keyless_migrated=True): block ONLY when the old
+        V2 address still holds user-owned relevant assets (USDC / cUSD /
+        CONFIO / legacy CONFIO). Sponsor-funded leftover ALGO is not user value
+        and must not jail the user out of rotating their V2 secret.
     """
     if not current_address or not new_address or current_address == new_address:
         return None
 
     risk = inspect_address_migration_risk(algod_client, current_address)
-    if not risk['has_material_risk']:
+
+    # Unknown callers stay conservative. Once the account is marked migrated,
+    # this is a V2 pointer update and leftover ALGO alone should not block it.
+    is_v1_source = account is None or not getattr(account, 'is_keyless_migrated', False)
+
+    if is_v1_source:
+        blocking = risk['has_material_risk']
+    else:
+        # V2 -> V2: only relevant assets are user value worth protecting.
+        blocking = bool(risk['relevant_assets'])
+        if not blocking:
+            logger.info(
+                "Allowing V2->V2 reassignment %s -> %s (no user-owned assets at risk; "
+                "spendable_algo=%s)",
+                current_address,
+                new_address,
+                risk['spendable_algo'],
+            )
+
+    if not blocking:
         return None
 
     details = []
     if risk['relevant_assets']:
         details.append('activos pendientes')
-    if risk['spendable_algo'] >= MATERIAL_SPENDABLE_ALGO_MICROS:
+    if is_v1_source and risk['spendable_algo'] >= MATERIAL_SPENDABLE_ALGO_MICROS:
         details.append('ALGO disponible')
 
     logger.warning(
-        "Blocking account address reassignment %s -> %s because the old address still holds value: assets=%s spendable_algo=%s",
+        "Blocking account address reassignment %s -> %s because the old address still holds value: "
+        "assets=%s spendable_algo=%s source=%s",
         current_address,
         new_address,
         risk['relevant_assets'],
         risk['spendable_algo'],
+        'v1' if is_v1_source else 'v2',
     )
 
     detail_text = ' y '.join(details) if details else 'fondos pendientes'

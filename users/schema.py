@@ -3115,6 +3115,7 @@ class UpdateAccountAlgorandAddress(graphene.Mutation):
                     get_algod_client(),
                     account.algorand_address,
                     algorand_address,
+                    account=account,
                 )
                 if blocker:
                     return UpdateAccountAlgorandAddress(success=False, error=blocker)
