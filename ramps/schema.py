@@ -14,7 +14,7 @@ from security.models import IdentityVerification, normalize_document_number
 from users.models import Account, BankInfo, Country
 from ramps.models import KoyweBankInfo, RampPaymentMethod, RampTransaction, RampUserAddress
 from ramps.koywe_sync import build_koywe_instruction_snapshot, sync_koywe_ramp_transaction_from_order, upsert_koywe_ramp_transaction
-from ramps.mexico_economic_activities import MEXICO_ECONOMIC_ACTIVITIES
+from ramps.mexico_economic_activities import MEXICO_ECONOMIC_ACTIVITIES, normalize_mexico_economic_activity
 
 from ramps.koywe_client import (
     KoyweClient,
@@ -795,7 +795,7 @@ class UpsertRampUserAddress(graphene.Mutation):
             'address_city': str(address_city or '').strip(),
             'address_state': str(address_state or '').strip(),
             'address_zip_code': str(address_zip_code or '').strip(),
-            'economic_activity': str(economic_activity or '').strip(),
+            'economic_activity': normalize_mexico_economic_activity(economic_activity),
             'auth_email': normalized_auth_email,
         }
         if values['economic_activity'] and values['economic_activity'] not in MEXICO_ECONOMIC_ACTIVITIES:
