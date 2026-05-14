@@ -798,18 +798,18 @@ class UpsertRampUserAddress(graphene.Mutation):
             'economic_activity': str(economic_activity or '').strip(),
             'auth_email': normalized_auth_email,
         }
-        if _get_user_phone_country_alpha3(user) == 'MEX' and values['economic_activity']:
-            if values['economic_activity'] not in MEXICO_ECONOMIC_ACTIVITIES:
-                return cls(
-                    success=False,
-                    error='Selecciona una actividad económica válida del catálogo.',
-                    ramp_address=None,
-                )
+        if values['economic_activity'] and values['economic_activity'] not in MEXICO_ECONOMIC_ACTIVITIES:
+            return cls(
+                success=False,
+                error='Selecciona una actividad económica válida del catálogo.',
+                ramp_address=None,
+            )
         missing = [label for label, value in (
             ('dirección', values['address_street']),
             ('ciudad', values['address_city']),
             ('provincia/estado', values['address_state']),
             ('código postal', values['address_zip_code']),
+            ('actividad económica', values['economic_activity']),
         ) if not value]
         if missing:
             return cls(
@@ -916,14 +916,18 @@ class CreateRampOrder(graphene.Mutation):
                 country_code=resolved_country_code,
                 email_override=koywe_email,
             )
-            if resolved_country_code == 'MX' and (
-                not contact_profile.get('addressNeighborhood')
-                or not contact_profile.get('activity')
+            missing_profile_fields = []
+            if resolved_country_code == 'MX' and not contact_profile.get('addressNeighborhood'):
+                missing_profile_fields.append('Colonia')
+            if (
+                not contact_profile.get('activity')
                 or str(contact_profile.get('activity') or '').upper() == 'OTHER'
             ):
+                missing_profile_fields.append('Actividad económica')
+            if missing_profile_fields:
                 return RampOrderType(
                     success=False,
-                    error='Actualiza la app y completa Colonia y Actividad económica en tu dirección para usar Koywe en México.',
+                    error=f'Actualiza la app y completa {", ".join(missing_profile_fields)} en tu dirección para usar Koywe.',
                 )
             result = client.create_ramp_order(
                 direction=normalized_direction,
@@ -1151,9 +1155,6 @@ class Query(graphene.ObjectType):
         )
 
     def resolve_economic_activities(self, info, country_code=None):
-        normalized_country = (country_code or _resolve_ramp_country_code(info)).strip().upper()
-        if normalized_country != 'MX':
-            return []
         return [
             EconomicActivityOptionType(label=value, value=value)
             for value in sorted(MEXICO_ECONOMIC_ACTIVITIES)
@@ -1750,13 +1751,12 @@ def _is_ramp_address_complete(value) -> bool:
     if not base_complete:
         return False
 
+    economic_activity = str(getattr(value, 'economic_activity', '') or '').strip()
+    if not economic_activity or economic_activity.upper() == 'OTHER':
+        return False
+
     if country == 'MEX':
-        economic_activity = str(getattr(value, 'economic_activity', '') or '').strip()
-        return bool(
-            str(getattr(value, 'address_neighborhood', '') or '').strip()
-            and economic_activity
-            and economic_activity.upper() != 'OTHER'
-        )
+        return bool(str(getattr(value, 'address_neighborhood', '') or '').strip())
 
     return True
 
