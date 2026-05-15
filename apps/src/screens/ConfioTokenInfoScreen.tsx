@@ -17,13 +17,13 @@ const GET_STATS_SUMMARY = gql`
       totalValueLocked
       circulatingCusd
       statsSource
-      cusdAssetId
-      cusdAppId
       cusdAssetPeraUrl
-      cusdAppPeraUrl
     }
   }
 `;
+
+const CUSD_RESERVE_PERA_URL =
+  'https://explorer.perawallet.app/address/AVHAIQVVHNWAD7W2LQ5URTQYWKO3OXMWXW2NU4CXIQBHLWFA7XC57LDSEY/';
 
 export const ConfioTokenInfoScreen = () => {
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
@@ -76,7 +76,7 @@ export const ConfioTokenInfoScreen = () => {
   ];
 
   const s = data?.statsSummary;
-  const liveLabel = s?.statsSource === 'algorand' ? 'en cadena' : 'actualizado';
+  const liveLabel = s?.statsSource === 'algorand' ? 'en blockchain' : 'actualizado';
   const openPeraLink = (url?: string | null) => {
     if (!url) return;
     Linking.openURL(url).catch(() => {});
@@ -91,17 +91,17 @@ export const ConfioTokenInfoScreen = () => {
       label: 'Ahorros Protegidos',
       value: `${formatWholeNumber(s?.totalValueLocked ?? s?.protectedSavings ?? 0)} cUSD`,
       growth: liveLabel,
-      description: 'cUSD respaldado por USDC dentro del contrato de Confío en Algorand.',
+      description: 'USDC de respaldo que protege los cUSD de los usuarios.',
       links: [
         { label: 'Ver cUSD', url: s?.cusdAssetPeraUrl },
-        { label: 'Ver contrato', url: s?.cusdAppPeraUrl },
+        { label: 'Ver respaldo', url: CUSD_RESERVE_PERA_URL },
       ],
     },
     {
       label: 'cUSD en circulación',
       value: `${formatWholeNumber(s?.circulatingCusd ?? s?.protectedSavings ?? 0)} cUSD`,
       growth: liveLabel,
-      description: 'Cantidad de cUSD emitida y activa en la red.',
+      description: 'Cantidad de cUSD emitida y activa en la blockchain.',
       links: [{ label: 'Ver en Pera', url: s?.cusdAssetPeraUrl }],
     },
   ];
