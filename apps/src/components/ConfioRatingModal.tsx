@@ -1,14 +1,18 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
     View,
     Text,
     StyleSheet,
     Modal,
     TouchableOpacity,
+    TouchableWithoutFeedback,
     TextInput,
     ActivityIndicator,
     Linking,
     Platform,
+    KeyboardAvoidingView,
+    Keyboard,
+    ScrollView,
     useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -38,10 +42,19 @@ export const ConfioRatingModal: React.FC<ConfioRatingModalProps> = ({ visible, o
     const [step, setStep] = useState<Step>('stars');
     const [stars, setStars] = useState(0);
     const [feedbackText, setFeedbackText] = useState('');
+    const feedbackInputRef = useRef<TextInput>(null);
     const [submitRating, { loading }] = useMutation(SUBMIT_CONFIO_RATING, {
         refetchQueries: [{ query: GET_ME }],
         awaitRefetchQueries: true,
     });
+
+    // autoFocus inside a Modal can race with the modal animation; focus
+    // imperatively after a short delay so the keyboard reliably appears.
+    useEffect(() => {
+        if (step !== 'feedback') return;
+        const t = setTimeout(() => feedbackInputRef.current?.focus(), 250);
+        return () => clearTimeout(t);
+    }, [step]);
 
     const reset = useCallback(() => {
         setStep('stars');
@@ -111,12 +124,18 @@ export const ConfioRatingModal: React.FC<ConfioRatingModalProps> = ({ visible, o
 
     return (
         <Modal animationType="fade" transparent visible={visible} statusBarTranslucent onRequestClose={() => { }}>
-            <View
-                style={[
-                    styles.centered,
-                    { paddingTop: Math.max(insets.top, 16), paddingBottom: Math.max(insets.bottom, 16) },
-                ]}
+            <KeyboardAvoidingView
+                style={styles.flex1}
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
             >
+                <TouchableWithoutFeedback onPress={() => Keyboard.dismiss()} accessible={false}>
+                    <View
+                        style={[
+                            styles.centered,
+                            { paddingTop: Math.max(insets.top, 16), paddingBottom: Math.max(insets.bottom, 16) },
+                        ]}
+                    >
+                        <TouchableWithoutFeedback accessible={false}>
                 <View style={[styles.card, { maxHeight: modalMaxHeight }]}>
                     {step === 'stars' && (
                         <View style={styles.body}>
@@ -188,9 +207,15 @@ export const ConfioRatingModal: React.FC<ConfioRatingModalProps> = ({ visible, o
                     )}
 
                     {step === 'feedback' && (
-                        <View style={styles.body}>
+                        <ScrollView
+                            style={styles.flex1}
+                            contentContainerStyle={styles.body}
+                            keyboardShouldPersistTaps="handled"
+                            bounces={false}
+                        >
                             <Text style={styles.title}>¿Qué podemos mejorar?</Text>
                             <TextInput
+                                ref={feedbackInputRef}
                                 style={styles.feedbackInput}
                                 placeholder="Tu comentario nos ayuda a hacer Confío mejor."
                                 placeholderTextColor="#9CA3AF"
@@ -198,19 +223,20 @@ export const ConfioRatingModal: React.FC<ConfioRatingModalProps> = ({ visible, o
                                 onChangeText={setFeedbackText}
                                 multiline
                                 maxLength={500}
-                                autoFocus
+                                returnKeyType="default"
+                                blurOnSubmit={false}
                             />
                             <View style={styles.footer}>
                                 <TouchableOpacity
                                     style={[styles.btn, styles.btnSkip]}
-                                    onPress={() => setStep('action')}
+                                    onPress={() => { Keyboard.dismiss(); setStep('action'); }}
                                     disabled={loading}
                                 >
                                     <Text style={styles.btnSkipText}>Atrás</Text>
                                 </TouchableOpacity>
                                 <TouchableOpacity
                                     style={[styles.btn, styles.btnPrimary]}
-                                    onPress={handleFeedbackSubmit}
+                                    onPress={() => { Keyboard.dismiss(); handleFeedbackSubmit(); }}
                                     disabled={loading}
                                 >
                                     {loading ? (
@@ -220,15 +246,19 @@ export const ConfioRatingModal: React.FC<ConfioRatingModalProps> = ({ visible, o
                                     )}
                                 </TouchableOpacity>
                             </View>
-                        </View>
+                        </ScrollView>
                     )}
                 </View>
-            </View>
+                        </TouchableWithoutFeedback>
+                    </View>
+                </TouchableWithoutFeedback>
+            </KeyboardAvoidingView>
         </Modal>
     );
 };
 
 const styles = StyleSheet.create({
+    flex1: { flex: 1 },
     centered: {
         flex: 1,
         backgroundColor: 'rgba(0, 0, 0, 0.55)',

@@ -8,6 +8,8 @@ import {
     ScrollView,
     TextInput,
     ActivityIndicator,
+    KeyboardAvoidingView,
+    Platform,
     useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -84,6 +86,10 @@ export const ConfioIcpModal: React.FC<ConfioIcpModalProps> = ({ visible, onClose
 
     return (
         <Modal animationType="fade" transparent visible={visible} statusBarTranslucent onRequestClose={() => { }}>
+            <KeyboardAvoidingView
+                style={styles.flex1}
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            >
             <View
                 style={[
                     styles.centered,
@@ -164,11 +170,13 @@ export const ConfioIcpModal: React.FC<ConfioIcpModalProps> = ({ visible, onClose
                     </View>
                 </View>
             </View>
+            </KeyboardAvoidingView>
         </Modal>
     );
 };
 
 const styles = StyleSheet.create({
+    flex1: { flex: 1 },
     centered: {
         flex: 1,
         backgroundColor: 'rgba(0, 0, 0, 0.55)',
