@@ -4,6 +4,7 @@ export const GET_STATS_SUMMARY = gql`
   query GetStatsSummary {
     statsSummary {
       totalUsers
+      diditVerifiedUsers
       usersNew7d
       protectedSavings
       totalValueLocked

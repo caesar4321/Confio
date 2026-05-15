@@ -61,6 +61,17 @@ export const LatamCommunityScreen = () => {
     return { rows: list, maxCount: max, userInList: present };
   }, [data, userCountryIso]);
 
+  const diditVerified = data?.statsSummary?.diditVerifiedUsers ?? 0;
+  const formatVerifiedCount = (n: number) => {
+    try {
+      return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 })
+        .format(Math.round(n))
+        .replace(/,/g, currency.thousandsSeparator);
+    } catch {
+      return `${Math.round(n)}`;
+    }
+  };
+
   const renderItem = ({ item, index }: { item: CountryStat; index: number }) => {
     const isUser = userInList && item.countryIso?.toUpperCase() === userCountryIso;
     const widthPct = maxCount > 0 ? Math.max(8, (item.verifiedCount / maxCount) * 100) : 0;
@@ -103,8 +114,16 @@ export const LatamCommunityScreen = () => {
       <View style={styles.intro}>
         <Text style={styles.introTitle}>Personas verificadas por país</Text>
         <Text style={styles.introSubtitle}>
-          Confío es pan-latino. Aquí están las comunidades que ya forman parte.
+          Confío crece en toda Latinoamérica. Aquí están las comunidades que ya forman parte.
         </Text>
+        {diditVerified > 0 ? (
+          <View style={styles.verifiedPill}>
+            <Icon name="check-circle" size={14} color={colors.primary} />
+            <Text style={styles.verifiedPillText}>
+              {formatVerifiedCount(diditVerified)} verificados con identidad por Didit
+            </Text>
+          </View>
+        ) : null}
       </View>
 
       {loading && rows.length === 0 ? (
@@ -178,6 +197,22 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     marginTop: 4,
     lineHeight: 20,
+  },
+  verifiedPill: {
+    alignSelf: 'flex-start',
+    marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: '#E8F7F0',
+  },
+  verifiedPillText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.primary,
   },
   center: {
     flex: 1,

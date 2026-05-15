@@ -531,6 +531,7 @@ class CountryStatType(graphene.ObjectType):
 class StatsSummaryType(graphene.ObjectType):
     """Lightweight real-time stats for the $CONFIO info screen"""
     total_users = graphene.Int()
+    didit_verified_users = graphene.Int()
     active_users_30d = graphene.Int()
     users_new_7d = graphene.Int()
     protected_savings = graphene.Float()
@@ -1430,7 +1431,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		from django.core.cache import cache
 
 		# Bump cache key version to invalidate old aggregation behavior
-		cache_key = 'stats_summary_v9'
+		cache_key = 'stats_summary_v10'
 		cached = cache.get(cache_key)
 		if cached:
 			return StatsSummaryType(**cached)
@@ -1444,6 +1445,14 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		total_users = verified_qs.count()
 		users_new_7d = verified_qs.filter(date_joined__gte=last_7d).count()
 		active_users_30d = User.objects.filter(last_activity_at__gte=last_30d).count()
+
+		from security.models import IdentityVerification
+		didit_verified_users = (
+			IdentityVerification.objects
+			.filter(status='verified')
+			.exclude(risk_factors__account_type='business')
+			.values('user_id').distinct().count()
+		)
 
 		from django.db.models import Count
 		from .country_codes import COUNTRY_CODES
@@ -1496,6 +1505,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 
 		payload = {
 			'total_users': total_users,
+			'didit_verified_users': didit_verified_users,
 			'active_users_30d': active_users_30d,
 			'users_new_7d': users_new_7d,
 			'protected_savings': protected_savings,

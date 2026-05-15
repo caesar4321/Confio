@@ -32,7 +32,7 @@ const formatWhole = (n: number | null | undefined, sep: string) => {
   }
 };
 
-export const AhorrosProtegidosScreen = () => {
+export const ProtectedSavingsScreen = () => {
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const { currency } = useCurrency();
   const { data } = useQuery(GET_STATS_SUMMARY, {
@@ -69,9 +69,12 @@ export const AhorrosProtegidosScreen = () => {
           <View style={styles.heroStatPill}>
             <Icon name="shield" size={14} color={colors.primary} />
             <Text style={styles.heroStatText}>
-              {tvlLabel} cUSD en reserva
+              {tvlLabel} USDC en reserva
             </Text>
           </View>
+          <Text style={styles.heroFootnote}>
+            Hoy: USDC · A futuro: mTBILL
+          </Text>
         </View>
 
         {/* What is cUSD */}
@@ -224,7 +227,7 @@ export const AhorrosProtegidosScreen = () => {
             activeOpacity={0.9}
           >
             <Icon name="plus-circle" size={20} color="#fff" />
-            <Text style={styles.ctaText}>Recargar cUSD</Text>
+            <Text style={styles.ctaText}>Recargar</Text>
           </TouchableOpacity>
           <Text style={styles.ctaHint}>
             Convierte tu moneda local en cUSD y únete a la reserva.
@@ -290,6 +293,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: colors.primary,
+  },
+  heroFootnote: {
+    marginTop: 6,
+    fontSize: 11,
+    color: '#9CA3AF',
+    fontWeight: '500',
   },
   section: {
     marginHorizontal: 16,

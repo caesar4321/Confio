@@ -3483,6 +3483,7 @@ type CountryStatType {
 
 type StatsSummaryType {
   totalUsers: Int
+  diditVerifiedUsers: Int
   activeUsers30d: Int
   usersNew7d: Int
   protectedSavings: Float

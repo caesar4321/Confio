@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import Icon from 'react-native-vector-icons/Feather';
 import { useQuery } from '@apollo/client';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -10,6 +11,7 @@ import { GET_STATS_SUMMARY } from '../apollo/queries';
 
 type StatsSummary = {
   totalUsers?: number | null;
+  diditVerifiedUsers?: number | null;
   protectedSavings?: number | null;
   totalValueLocked?: number | null;
   presaleCusdRaised?: number | null;
@@ -34,6 +36,16 @@ const formatCompact = (n: number | null | undefined, sep: string): string => {
   }
 };
 
+type Tile = {
+  key: string;
+  icon: string;
+  value: string;
+  unit?: string;
+  label: string;
+  sub: string;
+  onPress: () => void;
+};
+
 export const HomeStatsSection: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const { currency } = useCurrency();
@@ -42,78 +54,75 @@ export const HomeStatsSection: React.FC = () => {
     nextFetchPolicy: 'cache-first',
   });
   const s: StatsSummary | undefined = data?.statsSummary;
-
+  const sep = currency.thousandsSeparator;
   const tvl = s?.totalValueLocked ?? s?.protectedSavings;
 
-  const usersValue = useMemo(
-    () => formatCompact(s?.totalUsers, currency.thousandsSeparator),
-    [s?.totalUsers, currency.thousandsSeparator]
-  );
-  const savingsValue = useMemo(
-    () => formatCompact(tvl, currency.thousandsSeparator),
-    [tvl, currency.thousandsSeparator]
-  );
-  const presaleValue = useMemo(
-    () => formatCompact(s?.presaleCusdRaised, currency.thousandsSeparator),
-    [s?.presaleCusdRaised, currency.thousandsSeparator]
-  );
+  const tiles: Tile[] = useMemo(() => {
+    const verified = s?.diditVerifiedUsers ?? 0;
+    return [
+      {
+        key: 'users',
+        icon: 'users',
+        value: formatCompact(s?.totalUsers, sep),
+        label: 'Usuarios',
+        sub:
+          verified > 0
+            ? `✓ ${formatCompact(verified, sep)} verificados`
+            : 'Verificados con teléfono',
+        onPress: () => navigation.navigate('LatamCommunity'),
+      },
+      {
+        key: 'savings',
+        icon: 'shield',
+        value: formatCompact(tvl, sep),
+        unit: 'cUSD',
+        label: 'Ahorros',
+        sub: 'Respaldado en USDC',
+        onPress: () => navigation.navigate('ProtectedSavings'),
+      },
+      {
+        key: 'presale',
+        icon: 'zap',
+        value: formatCompact(s?.presaleCusdRaised, sep),
+        unit: 'cUSD',
+        label: 'Preventa',
+        sub: 'Aportado por la comunidad',
+        onPress: () => navigation.navigate('ConfioPresale'),
+      },
+    ];
+  }, [s?.totalUsers, s?.diditVerifiedUsers, tvl, s?.presaleCusdRaised, sep, navigation]);
 
   return (
     <View style={styles.container}>
       <View style={styles.strip}>
-        <TouchableOpacity
-          style={styles.tile}
-          activeOpacity={0.6}
-          onPress={() => navigation.navigate('LatamCommunity')}
-        >
-          <Text
-            style={styles.tileValue}
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.7}
-          >
-            {usersValue}
-          </Text>
-          <Text style={styles.tileLabel}>Usuarios</Text>
-        </TouchableOpacity>
-
-        <View style={styles.divider} />
-
-        <TouchableOpacity
-          style={styles.tile}
-          activeOpacity={0.6}
-          onPress={() => navigation.navigate('AhorrosProtegidos')}
-        >
-          <Text
-            style={styles.tileValue}
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.7}
-          >
-            {`${savingsValue}`}
-            <Text style={styles.tileUnit}> cUSD</Text>
-          </Text>
-          <Text style={styles.tileLabel}>Ahorros</Text>
-        </TouchableOpacity>
-
-        <View style={styles.divider} />
-
-        <TouchableOpacity
-          style={styles.tile}
-          activeOpacity={0.6}
-          onPress={() => navigation.navigate('ConfioPresale')}
-        >
-          <Text
-            style={styles.tileValue}
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.7}
-          >
-            {`${presaleValue}`}
-            <Text style={styles.tileUnit}> cUSD</Text>
-          </Text>
-          <Text style={styles.tileLabel}>Preventa</Text>
-        </TouchableOpacity>
+        {tiles.map((tile, idx) => (
+          <React.Fragment key={tile.key}>
+            {idx > 0 && <View style={styles.divider} />}
+            <TouchableOpacity
+              style={styles.tile}
+              activeOpacity={0.7}
+              onPress={tile.onPress}
+            >
+              <View style={styles.tileTopRow}>
+                <Icon name={tile.icon} size={13} color={colors.primary} />
+                <Icon name="chevron-right" size={14} color="#9CA3AF" />
+              </View>
+              <Text
+                style={styles.tileValue}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.7}
+              >
+                {tile.value}
+                {tile.unit ? <Text style={styles.tileUnit}> {tile.unit}</Text> : null}
+              </Text>
+              <Text style={styles.tileLabel}>{tile.label}</Text>
+              <Text style={styles.tileSub} numberOfLines={1}>
+                {tile.sub}
+              </Text>
+            </TouchableOpacity>
+          </React.Fragment>
+        ))}
       </View>
     </View>
   );
@@ -128,35 +137,53 @@ const styles = StyleSheet.create({
   strip: {
     flexDirection: 'row',
     alignItems: 'stretch',
-    backgroundColor: colors.neutral,
-    borderRadius: 12,
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
     paddingVertical: 12,
     paddingHorizontal: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 1,
   },
   tile: {
     flex: 1,
+    paddingHorizontal: 8,
+    justifyContent: 'flex-start',
+  },
+  tileTopRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 6,
+    justifyContent: 'space-between',
+    marginBottom: 6,
   },
   tileValue: {
     fontSize: 18,
-    fontWeight: '700',
-    color: colors.dark,
+    fontWeight: '800',
+    color: colors.primary,
     includeFontPadding: false,
   },
   tileUnit: {
     fontSize: 11,
-    fontWeight: '600',
-    color: '#6B7280',
+    fontWeight: '700',
+    color: colors.primary,
   },
   tileLabel: {
     fontSize: 11,
-    color: '#6B7280',
+    color: colors.dark,
     marginTop: 4,
-    fontWeight: '600',
+    fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 0.4,
+  },
+  tileSub: {
+    fontSize: 10,
+    color: '#6B7280',
+    marginTop: 2,
+    fontWeight: '500',
   },
   divider: {
     width: StyleSheet.hairlineWidth,
