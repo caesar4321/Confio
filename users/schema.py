@@ -1414,12 +1414,14 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		from django.core.cache import cache
 
 		# Bump cache key version to invalidate old aggregation behavior
-		cache_key = 'stats_summary_v5'
+		cache_key = 'stats_summary_v6'
 		cached = cache.get(cache_key)
 		if cached:
 			return StatsSummaryType(**cached)
 
 		total_users = User.objects.exclude(phone_number__isnull=True).exclude(phone_number='').count()
+		last_30d = timezone.now() - timedelta(days=30)
+		active_users_30d = User.objects.filter(last_activity_at__gte=last_30d).count()
 
 		# Protected savings and TVL come from the cUSD contract when algod is available.
 		from blockchain.cusd_metrics import get_cusd_platform_metrics
@@ -1438,7 +1440,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 
 		payload = {
 			'total_users': total_users,
-			'active_users_30d': None,
+			'active_users_30d': active_users_30d,
 			'protected_savings': protected_savings,
 			'total_value_locked': total_value_locked,
 			'circulating_cusd': circulating_cusd,
