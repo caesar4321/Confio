@@ -10,7 +10,6 @@ import {
     Linking,
     Platform,
     Keyboard,
-    ScrollView,
     useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -199,12 +198,7 @@ export const ConfioRatingModal: React.FC<ConfioRatingModalProps> = ({ visible, o
                     )}
 
                     {step === 'feedback' && (
-                        <ScrollView
-                            style={styles.flex1}
-                            contentContainerStyle={styles.body}
-                            keyboardShouldPersistTaps="handled"
-                            bounces={false}
-                        >
+                        <View style={styles.body}>
                             <Text style={styles.title}>¿Qué podemos mejorar?</Text>
                             <TextInput
                                 ref={feedbackInputRef}
@@ -215,8 +209,6 @@ export const ConfioRatingModal: React.FC<ConfioRatingModalProps> = ({ visible, o
                                 onChangeText={setFeedbackText}
                                 multiline
                                 maxLength={500}
-                                returnKeyType="default"
-                                blurOnSubmit={false}
                             />
                             <View style={styles.footer}>
                                 <TouchableOpacity
@@ -238,7 +230,7 @@ export const ConfioRatingModal: React.FC<ConfioRatingModalProps> = ({ visible, o
                                     )}
                                 </TouchableOpacity>
                             </View>
-                        </ScrollView>
+                        </View>
                     )}
                 </View>
             </View>
@@ -247,7 +239,6 @@ export const ConfioRatingModal: React.FC<ConfioRatingModalProps> = ({ visible, o
 };
 
 const styles = StyleSheet.create({
-    flex1: { flex: 1 },
     centered: {
         flex: 1,
         backgroundColor: 'rgba(0, 0, 0, 0.55)',
