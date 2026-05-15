@@ -112,7 +112,7 @@ export const LatamCommunityScreen = () => {
       </View>
 
       <View style={styles.intro}>
-        <Text style={styles.introTitle}>Personas verificadas por país</Text>
+        <Text style={styles.introTitle}>Usuarios por país</Text>
         <Text style={styles.introSubtitle}>
           Confío crece en toda Latinoamérica. Aquí están las comunidades que ya forman parte.
         </Text>
