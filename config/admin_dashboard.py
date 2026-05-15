@@ -72,6 +72,7 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         week_start = today_start - timedelta(days=today_start.weekday())
         last_7_start = now - timedelta(days=7)
         month_start = today_start.replace(day=1)
+        rolling_30_start = now - timedelta(days=30)
         
         # User metrics
         # DAU/MAU now uses centralized last_activity_at field (single source of truth)
@@ -778,11 +779,15 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             ).order_by('-click_count', '-unique_users')[:8]
         )
         
-        # Monthly volumes
-        conversions_volume = Conversion.objects.filter(
-            created_at__gte=month_start,
+        # Rolling 30-day conversion volumes. Use completed_at when present so the
+        # operational dashboard reflects when value actually settled.
+        rolling_completed_conversions = Conversion.objects.filter(
             status='COMPLETED'
-        ).aggregate(
+        ).filter(
+            Q(completed_at__gte=rolling_30_start)
+            | Q(completed_at__isnull=True, created_at__gte=rolling_30_start)
+        )
+        conversions_volume = rolling_completed_conversions.aggregate(
             usdc_to_cusd=Sum('from_amount', filter=Q(conversion_type='usdc_to_cusd')),
             cusd_to_usdc=Sum('from_amount', filter=Q(conversion_type='cusd_to_usdc'))
         )
@@ -792,16 +797,14 @@ class ConfioAdminSite(AdminSiteOTPRequired):
         # Calculate net USDC inflow (positive means more USDC → cUSD)
         context['net_usdc_inflow'] = context['usdc_to_cusd_volume'] - context['cusd_to_usdc_volume']
         
-        # Calculate circulating cUSD (cumulative net conversions)
-        all_conversions = Conversion.objects.filter(
-            status='COMPLETED'
-        ).aggregate(
-            total_usdc_to_cusd=Sum('to_amount', filter=Q(conversion_type='usdc_to_cusd')),
-            total_cusd_to_usdc=Sum('from_amount', filter=Q(conversion_type='cusd_to_usdc'))
-        )
-        total_minted = all_conversions['total_usdc_to_cusd'] or Decimal('0')
-        total_burned = all_conversions['total_cusd_to_usdc'] or Decimal('0')
-        context['circulating_cusd'] = total_minted - total_burned
+        # Live cUSD supply and collateral come from the cUSD contract, with a
+        # database fallback if algod is unavailable.
+        from blockchain.cusd_metrics import get_cusd_platform_metrics
+        cusd_metrics = get_cusd_platform_metrics()
+        context['circulating_cusd'] = cusd_metrics.circulating_cusd
+        context['cusd_tvl'] = cusd_metrics.tvl_cusd
+        context['cusd_metrics_source'] = cusd_metrics.source
+        context['cusd_metrics_as_of'] = cusd_metrics.as_of
         
         # Country breakdown for P2P
         country_stats = P2POffer.objects.filter(

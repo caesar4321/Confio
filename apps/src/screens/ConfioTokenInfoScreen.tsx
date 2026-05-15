@@ -11,7 +11,10 @@ const GET_STATS_SUMMARY = gql`
     statsSummary {
       activeUsers30d
       protectedSavings
+      totalValueLocked
+      circulatingCusd
       dailyTransactions
+      statsSource
     }
   }
 `;
@@ -71,10 +74,11 @@ export const ConfioTokenInfoScreen = () => {
   ];
 
   const s = data?.statsSummary;
+  const liveLabel = s?.statsSource === 'algorand' ? 'en cadena' : 'actualizado';
   const stats = [
-    { label: 'Usuarios Activos mensual', value: `${formatCompact(s?.activeUsers30d ?? 0)}`, growth: 'en vivo' },
-    { label: 'Ahorros Protegidos', value: `$${formatMoney(s?.protectedSavings ?? 0)} cUSD`, growth: 'en vivo' },
-    { label: 'Transacciones Diarias', value: `${formatCompact(s?.dailyTransactions ?? 0)}`, growth: 'en vivo' },
+    { label: 'Usuarios Activos mensual', value: `${formatCompact(s?.activeUsers30d ?? 0)}`, growth: '30 días' },
+    { label: 'TVL en cUSD', value: `$${formatMoney(s?.totalValueLocked ?? s?.protectedSavings ?? 0)} cUSD`, growth: liveLabel },
+    { label: 'cUSD en circulación', value: `$${formatMoney(s?.circulatingCusd ?? s?.protectedSavings ?? 0)}`, growth: liveLabel },
   ];
 
   return (

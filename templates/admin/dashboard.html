@@ -1400,7 +1400,7 @@
         <div class="metric-card">
             <div class="metric-label">USDC → cUSD Volume</div>
             <div class="metric-value">${{ usdc_to_cusd_volume|floatformat:0|intcomma }}</div>
-            <div class="metric-change">This month</div>
+            <div class="metric-change">Rolling 30 days</div>
         </div>
 
         <div class="metric-card">
@@ -1420,7 +1420,15 @@
         <div class="metric-card">
             <div class="metric-label">Circulating cUSD</div>
             <div class="metric-value">${{ circulating_cusd|floatformat:0|intcomma }}</div>
-            <div class="metric-change">Total supply</div>
+            <div class="metric-change">
+                {% if cusd_metrics_source == "algorand" %}On-chain{% else %}Database fallback{% endif %}
+            </div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-label">cUSD TVL</div>
+            <div class="metric-value">${{ cusd_tvl|floatformat:0|intcomma }}</div>
+            <div class="metric-change">USDC collateral value</div>
         </div>
 
         <div class="metric-card">

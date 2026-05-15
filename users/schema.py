@@ -522,7 +522,11 @@ class StatsSummaryType(graphene.ObjectType):
     """Lightweight real-time stats for the $CONFIO info screen"""
     active_users_30d = graphene.Int()
     protected_savings = graphene.Float()
+    total_value_locked = graphene.Float()
+    circulating_cusd = graphene.Float()
     daily_transactions = graphene.Int()
+    stats_source = graphene.String()
+    stats_as_of = graphene.DateTime()
 
 
 class ReferralRewardEventType(DjangoObjectType):
@@ -1409,7 +1413,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		from p2p_exchange.models import P2PTrade
 
 		# Bump cache key version to invalidate old aggregation behavior
-		cache_key = 'stats_summary_v3'
+		cache_key = 'stats_summary_v4'
 		cached = cache.get(cache_key)
 		if cached:
 			return StatsSummaryType(**cached)
@@ -1448,14 +1452,12 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			user_ids.update(UserAchievement.objects.filter(earned_at__gte=last_30d).values_list('user_id', flat=True))
 			active_users_30d = len({int(u) for u in user_ids if u})
 
-		# Protected savings: circulating cUSD from conversions
-		conv = Conversion.objects.filter(status='COMPLETED').aggregate(
-			total_usdc_to_cusd=Sum('to_amount', filter=Q(conversion_type='usdc_to_cusd')),
-			total_cusd_to_usdc=Sum('from_amount', filter=Q(conversion_type='cusd_to_usdc')),
-		)
-		total_minted = conv['total_usdc_to_cusd'] or Decimal('0')
-		total_burned = conv['total_cusd_to_usdc'] or Decimal('0')
-		protected_savings = float(total_minted - total_burned)
+		# Protected savings and TVL come from the cUSD contract when algod is available.
+		from blockchain.cusd_metrics import get_cusd_platform_metrics
+		cusd_metrics = get_cusd_platform_metrics()
+		protected_savings = float(cusd_metrics.total_supply)
+		total_value_locked = float(cusd_metrics.tvl_cusd)
+		circulating_cusd = float(cusd_metrics.circulating_cusd)
 
 		# Daily transactions across sends + payments + completed/released P2P trades
 		send_count = SendTransaction.objects.filter(created_at__gte=today_start).exclude(status='FAILED').count()
@@ -1466,7 +1468,11 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		payload = {
 			'active_users_30d': active_users_30d,
 			'protected_savings': protected_savings,
+			'total_value_locked': total_value_locked,
+			'circulating_cusd': circulating_cusd,
 			'daily_transactions': daily_transactions,
+			'stats_source': cusd_metrics.source,
+			'stats_as_of': cusd_metrics.as_of,
 		}
 		# Cache briefly to reduce load but avoid staleness
 		cache.set(cache_key, payload, 30)
