@@ -19,9 +19,13 @@ import { SUBMIT_CONFIO_RATING, GET_ME } from '../apollo/queries';
 
 const IOS_APP_STORE_ID = '6472662314';
 const ANDROID_PACKAGE = 'com.Confio.Confio';
+const PLAY_STORE_PACKAGE = 'com.android.vending';
 
 const iosReviewUrl = `itms-apps://itunes.apple.com/app/id${IOS_APP_STORE_ID}?action=write-review`;
-const androidReviewUrl = `market://details?id=${ANDROID_PACKAGE}`;
+// Force the resolver to Google Play specifically (not Xiaomi Mi Store, Huawei
+// AppGallery, etc., which all advertise the `market://` intent on devices
+// where they're installed alongside Play).
+const androidReviewUrl = `intent://details?id=${ANDROID_PACKAGE}#Intent;scheme=market;package=${PLAY_STORE_PACKAGE};end`;
 
 type Step = 'stars' | 'action' | 'feedback';
 type RatingAction = 'FEEDBACK' | 'STORE' | 'SKIP';
