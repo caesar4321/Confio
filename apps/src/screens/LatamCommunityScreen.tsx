@@ -116,14 +116,12 @@ export const LatamCommunityScreen = () => {
         <Text style={styles.introSubtitle}>
           Confío crece en toda Latinoamérica. Aquí están las comunidades que ya forman parte.
         </Text>
-        {diditVerified > 0 ? (
-          <View style={styles.verifiedPill}>
-            <Icon name="check-circle" size={14} color={colors.primary} />
-            <Text style={styles.verifiedPillText}>
-              {formatVerifiedCount(diditVerified)} verificados con identidad por Didit
-            </Text>
-          </View>
-        ) : null}
+        <View style={styles.verifiedPill}>
+          <Icon name="check-circle" size={14} color={colors.primary} />
+          <Text style={styles.verifiedPillText}>
+            {formatVerifiedCount(diditVerified)} identidades verificadas con Didit
+          </Text>
+        </View>
       </View>
 
       {loading && rows.length === 0 ? (

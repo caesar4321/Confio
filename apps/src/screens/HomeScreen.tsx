@@ -1648,7 +1648,7 @@ const styles = StyleSheet.create({
   // Wallets section styles
   walletsSection: {
     paddingHorizontal: 20,
-    marginTop: 28,
+    marginTop: 16,
   },
   walletsTitle: {
     fontSize: 20,

@@ -67,7 +67,7 @@ export const HomeStatsSection: React.FC = () => {
         icon: 'users',
         value: formatLocale(s?.totalUsers, sep),
         label: 'Usuarios',
-        descriptor: verified > 0 ? `✓ ${formatLocale(verified, sep)}` : 'Con teléfono',
+        descriptor: verified > 0 ? `Didit: ${formatLocale(verified, sep)}` : 'Con teléfono',
         onPress: () => navigation.navigate('LatamCommunity'),
       },
       {

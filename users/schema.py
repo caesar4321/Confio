@@ -1431,7 +1431,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		from django.core.cache import cache
 
 		# Bump cache key version to invalidate old aggregation behavior
-		cache_key = 'stats_summary_v10'
+		cache_key = 'stats_summary_v11'
 		cached = cache.get(cache_key)
 		if cached:
 			return StatsSummaryType(**cached)
@@ -1450,7 +1450,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		didit_verified_users = (
 			IdentityVerification.objects
 			.filter(status='verified')
-			.exclude(risk_factors__account_type='business')
+			.filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'))
 			.values('user_id').distinct().count()
 		)
 

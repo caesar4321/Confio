@@ -85,12 +85,13 @@ export const ProtectedSavingsScreen = () => {
           </View>
           <Text style={styles.sectionBody}>
             Confío Dollar (cUSD) es nuestro dólar digital. Cada cUSD que ves
-            en la app está respaldado por exactamente $1 USDC en reserva,
-            custodiado en una bóveda pública en la red Algorand.
+            en la app tiene un respaldo equivalente en USDC dentro de una
+            reserva verificable en Algorand.
           </Text>
           <Text style={styles.sectionBody}>
-            Es estable, transferible al instante y siempre verificable. No
-            depende de la inflación local: $1 cUSD = $1 USD, hoy y siempre.
+            Tus cUSD siguen siendo tuyos. La blockchain permite comprobar
+            públicamente que existe el respaldo, sin depender de la inflación
+            local: $1 cUSD = $1 USD, hoy y siempre.
           </Text>
         </View>
 
@@ -136,7 +137,7 @@ export const ProtectedSavingsScreen = () => {
             </TouchableOpacity>
           </View>
           <Text style={styles.tipText}>
-            Tip: En Pera Explorer puedes ver la dirección de la bóveda, el
+            Tip: En Pera Explorer puedes ver la dirección de respaldo, el
             balance USDC y cada transacción que entra o sale.
           </Text>
         </View>
