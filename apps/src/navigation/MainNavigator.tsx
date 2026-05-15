@@ -50,6 +50,7 @@ import { PayoutMethodsScreen } from '../screens/PayoutMethodsScreen';
 import { RampAddressScreen } from '../screens/RampAddressScreen';
 import AchievementsScreen from '../screens/AchievementsScreen';
 import { ConfioTokenInfoScreen } from '../screens/ConfioTokenInfoScreen';
+import { LatamCommunityScreen } from '../screens/LatamCommunityScreen';
 import { ConfioPresaleScreen } from '../screens/ConfioPresaleScreen';
 import { ConfioPresaleParticipateScreen } from '../screens/ConfioPresaleParticipateScreen';
 import { LoadingOverlay } from '../components/LoadingOverlay';
@@ -412,6 +413,11 @@ export const MainNavigator = () => {
         <Stack.Screen
           name="ConfioTokenInfo"
           component={ConfioTokenInfoScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="LatamCommunity"
+          component={LatamCommunityScreen}
           options={{ headerShown: false }}
         />
         <Stack.Screen

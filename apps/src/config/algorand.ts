@@ -1,0 +1,2 @@
+export const CUSD_RESERVE_PERA_URL =
+  'https://explorer.perawallet.app/address/AVHAIQVVHNWAD7W2LQ5URTQYWKO3OXMWXW2NU4CXIQBHLWFA7XC57LDSEY/';

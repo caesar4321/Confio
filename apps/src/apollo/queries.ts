@@ -1,5 +1,25 @@
 import { gql } from '@apollo/client';
 
+export const GET_STATS_SUMMARY = gql`
+  query GetStatsSummary {
+    statsSummary {
+      totalUsers
+      usersNew7d
+      protectedSavings
+      totalValueLocked
+      presaleCusdRaised
+      presaleCusdRaised7d
+      statsSource
+      cusdAssetPeraUrl
+      usersByCountry {
+        countryIso
+        countryName
+        verifiedCount
+      }
+    }
+  }
+`;
+
 // User Queries
 export const GET_ME = gql`
   query GetMe {

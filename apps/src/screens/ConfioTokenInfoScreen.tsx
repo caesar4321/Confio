@@ -2,30 +2,14 @@ import React from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
-import { useQuery, gql } from '@apollo/client';
+import { useQuery } from '@apollo/client';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { colors } from '../config/theme';
 import { useCurrency } from '../hooks/useCurrency';
 import { MainStackParamList } from '../types/navigation';
-
-const GET_STATS_SUMMARY = gql`
-  query GetStatsSummary {
-    statsSummary {
-      totalUsers
-      usersNew7d
-      protectedSavings
-      totalValueLocked
-      presaleCusdRaised
-      presaleCusdRaised7d
-      statsSource
-      cusdAssetPeraUrl
-    }
-  }
-`;
-
-const CUSD_RESERVE_PERA_URL =
-  'https://explorer.perawallet.app/address/AVHAIQVVHNWAD7W2LQ5URTQYWKO3OXMWXW2NU4CXIQBHLWFA7XC57LDSEY/';
+import { GET_STATS_SUMMARY } from '../apollo/queries';
+import { CUSD_RESERVE_PERA_URL } from '../config/algorand';
 
 export const ConfioTokenInfoScreen = () => {
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();

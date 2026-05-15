@@ -25,6 +25,7 @@ import CONFIOLogo from '../assets/png/CONFIO.png';
 import Icon from 'react-native-vector-icons/Feather';
 import MCIcon from 'react-native-vector-icons/MaterialCommunityIcons';
 import InviteClaimBanner from '../components/InviteClaimBanner';
+import { HomeStatsSection } from '../components/HomeStatsSection';
 import * as Keychain from 'react-native-keychain';
 import { RootStackParamList, MainStackParamList } from '../types/navigation';
 import { ProfileMenu } from '../components/ProfileMenu';
@@ -215,7 +216,6 @@ export const HomeScreen = () => {
   const pendingPayrollCount = (isBusinessAccount || isPersonalAccount || isEmployeeDelegate)
     ? (pendingPayrollData?.pendingPayrollItems?.length || 0)
     : 0;
-  const isPresaleActive = presaleStatusData?.isPresaleActive === true;
   const isPresaleClaimsUnlocked = presaleStatusData?.isPresaleClaimsUnlocked === true;
   const [presaleDismissed, setPresaleDismissed] = useState(false);
   const showPayrollCard = (isBusinessAccount || isEmployeeDelegate || isPersonalAccount) && pendingPayrollCount > 0;
@@ -1328,50 +1328,6 @@ export const HomeScreen = () => {
             </View>
           </Animated.View>
         )}
-        {isPresaleActive && !isPresaleClaimsUnlocked && !presaleDismissed && (
-          <Animated.View
-            style={[
-              styles.presaleBanner,
-              {
-                opacity: fadeAnim,
-                transform: [
-                  {
-                    translateY: fadeTranslateY20
-                  }
-                ],
-              }
-            ]}
-          >
-            <View style={styles.presaleBannerContent}>
-              <View style={styles.presaleBannerLeft}>
-                <View style={styles.presaleBadge}>
-                  <Text style={styles.presaleBadgeText}>💎 INFORMACIÓN</Text>
-                </View>
-                <Text style={styles.presaleBannerTitle}>¿Qué es la Moneda $CONFIO?</Text>
-                <Text style={styles.presaleBannerSubtitle}>
-                  Información sobre su papel en el ecosistema de Confío
-                </Text>
-                <TouchableOpacity
-                  onPress={() => navigation.navigate('ConfioPresale')}
-                  activeOpacity={0.7}
-                  style={{ marginTop: 8 }}
-                >
-                  <Text style={styles.presaleDetailsLink}>Ver detalles</Text>
-                </TouchableOpacity>
-              </View>
-              <View style={styles.presaleBannerRight}>
-                <TouchableOpacity onPress={() => setPresaleDismissed(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={{ position: 'absolute', top: -6, right: -6 }}>
-                  <Icon name="x" size={18} color="#8b5cf6" />
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => navigation.navigate('ConfioPresale')} activeOpacity={0.9} style={{ alignItems: 'center' }}>
-                  <Image source={CONFIOLogo} style={styles.presaleBannerLogo} />
-                  <Icon name="chevron-right" size={20} color="#8b5cf6" />
-                </TouchableOpacity>
-              </View>
-            </View>
-          </Animated.View>
-        )}
-
         {/* Quick Actions */}
         <Animated.View
           style={[
@@ -1430,6 +1386,9 @@ export const HomeScreen = () => {
             ))
           )}
         </Animated.View>
+
+        {/* Crecimiento Confío stats */}
+        <HomeStatsSection />
 
         {/* Wallets Section */}
         <View style={styles.walletsSection}>

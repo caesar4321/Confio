@@ -518,6 +518,16 @@ class BusinessType(DjangoObjectType):
         fields = ('id', 'name', 'description', 'category', 'business_registration_number', 'address', 'created_at', 'updated_at')
 
 
+COUNTRY_DISPLAY_MIN = 5
+
+
+class CountryStatType(graphene.ObjectType):
+    """Per-country verified user count for the LATAM community screen"""
+    country_iso = graphene.String(required=True)
+    country_name = graphene.String(required=True)
+    verified_count = graphene.Int(required=True)
+
+
 class StatsSummaryType(graphene.ObjectType):
     """Lightweight real-time stats for the $CONFIO info screen"""
     total_users = graphene.Int()
@@ -529,6 +539,9 @@ class StatsSummaryType(graphene.ObjectType):
     presale_cusd_raised = graphene.Float()
     presale_cusd_raised_7d = graphene.Float()
     daily_transactions = graphene.Int()
+    users_by_country = graphene.NonNull(
+        graphene.List(graphene.NonNull(CountryStatType))
+    )
     stats_source = graphene.String()
     stats_as_of = graphene.DateTime()
     cusd_asset_id = graphene.String()
@@ -1417,7 +1430,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		from django.core.cache import cache
 
 		# Bump cache key version to invalidate old aggregation behavior
-		cache_key = 'stats_summary_v8'
+		cache_key = 'stats_summary_v9'
 		cached = cache.get(cache_key)
 		if cached:
 			return StatsSummaryType(**cached)
@@ -1425,11 +1438,38 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		now = timezone.now()
 		last_7d = now - timedelta(days=7)
 		last_30d = now - timedelta(days=30)
-		total_users = User.objects.exclude(phone_number__isnull=True).exclude(phone_number='').count()
-		users_new_7d = User.objects.filter(date_joined__gte=last_7d).exclude(
-			phone_number__isnull=True
-		).exclude(phone_number='').count()
+		# Reuse the exact predicate as total_users so the two diverge only via
+		# the phone_country filter + COUNTRY_DISPLAY_MIN threshold below.
+		verified_qs = User.objects.exclude(phone_number__isnull=True).exclude(phone_number='')
+		total_users = verified_qs.count()
+		users_new_7d = verified_qs.filter(date_joined__gte=last_7d).count()
 		active_users_30d = User.objects.filter(last_activity_at__gte=last_30d).count()
+
+		from django.db.models import Count
+		from .country_codes import COUNTRY_CODES
+		from .country_names_es import COUNTRY_NAMES_ES
+		_iso_to_en = {row[2]: row[0] for row in COUNTRY_CODES}
+		country_rows = (
+			verified_qs
+			.exclude(phone_country__isnull=True)
+			.exclude(phone_country='')
+			.values('phone_country')
+			.annotate(count=Count('id'))
+			.filter(count__gte=COUNTRY_DISPLAY_MIN)
+			.order_by('-count')
+		)
+		users_by_country = [
+			{
+				'country_iso': r['phone_country'],
+				'country_name': (
+					COUNTRY_NAMES_ES.get(r['phone_country'])
+					or _iso_to_en.get(r['phone_country'])
+					or r['phone_country']
+				),
+				'verified_count': r['count'],
+			}
+			for r in country_rows
+		]
 
 		# Protected savings and TVL come from the cUSD contract when algod is available.
 		from blockchain.cusd_metrics import get_cusd_platform_metrics
@@ -1463,6 +1503,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			'circulating_cusd': circulating_cusd,
 			'presale_cusd_raised': float(presale_cusd_raised),
 			'presale_cusd_raised_7d': float(presale_cusd_raised_7d),
+			'users_by_country': users_by_country,
 			'daily_transactions': None,
 			'stats_source': cusd_metrics.source,
 			'stats_as_of': cusd_metrics.as_of,

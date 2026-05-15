@@ -406,6 +406,7 @@ export type MainStackParamList = {
   } | undefined;
   Achievements: undefined;
   ConfioTokenInfo: undefined;
+  LatamCommunity: undefined;
   ConfioPresale: undefined;
   ConfioPresaleParticipate: undefined;
   ConfioTokenomics: undefined;

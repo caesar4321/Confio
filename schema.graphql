@@ -3474,6 +3474,13 @@ enum AchievementsReferralRewardEventRewardStatusChoices {
 }
 
 """Lightweight real-time stats for the $CONFIO info screen"""
+"""Per-country verified user count for the LATAM community screen"""
+type CountryStatType {
+  countryIso: String!
+  countryName: String!
+  verifiedCount: Int!
+}
+
 type StatsSummaryType {
   totalUsers: Int
   activeUsers30d: Int
@@ -3484,6 +3491,7 @@ type StatsSummaryType {
   presaleCusdRaised: Float
   presaleCusdRaised7d: Float
   dailyTransactions: Int
+  usersByCountry: [CountryStatType!]!
   statsSource: String
   statsAsOf: DateTime
   cusdAssetId: String
