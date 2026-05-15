@@ -13,9 +13,11 @@ const GET_STATS_SUMMARY = gql`
   query GetStatsSummary {
     statsSummary {
       totalUsers
+      usersNew7d
       protectedSavings
       totalValueLocked
       presaleCusdRaised
+      presaleCusdRaised7d
       statsSource
       cusdAssetPeraUrl
     }
@@ -81,11 +83,21 @@ export const ConfioTokenInfoScreen = () => {
     if (!url) return;
     Linking.openURL(url).catch(() => {});
   };
+  const usersNew7d = Math.max(0, Math.round(s?.usersNew7d ?? 0));
+  const presaleRaised7d = Math.max(0, s?.presaleCusdRaised7d ?? 0);
+  const usersGrowth = usersNew7d > 0
+    ? `+${formatWholeNumber(usersNew7d)} esta semana`
+    : 'acumulado';
+  const presaleGrowth = presaleRaised7d > 0
+    ? `+${formatWholeNumber(presaleRaised7d)} cUSD esta semana`
+    : 'acumulado';
   const stats = [
     {
-      label: 'Usuarios en Confío',
+      label: 'Usuarios registrados',
       value: formatWholeNumber(s?.totalUsers ?? 0),
-      growth: 'total',
+      growth: usersGrowth,
+      growthHighlight: usersNew7d > 0,
+      description: 'Personas con teléfono verificado y acceso con Apple o Google.',
     },
     {
       label: 'Ahorros Protegidos',
@@ -100,7 +112,8 @@ export const ConfioTokenInfoScreen = () => {
     {
       label: 'Preventa de $CONFIO',
       value: `${formatWholeNumber(s?.presaleCusdRaised ?? 0)} cUSD`,
-      growth: 'total',
+      growth: presaleGrowth,
+      growthHighlight: presaleRaised7d > 0,
       description: 'cUSD aportados por la comunidad en la preventa.',
     },
   ];
@@ -161,8 +174,19 @@ export const ConfioTokenInfoScreen = () => {
                       {stat.value}
                     </Text>
                     <View style={styles.growthBadge}>
-                      <Icon name="trending-up" size={12} color={colors.primary} />
-                      <Text style={styles.growthText}>{stat.growth}</Text>
+                      <Icon
+                        name="trending-up"
+                        size={12}
+                        color={('growthHighlight' in stat && stat.growthHighlight === false) ? '#6B7280' : colors.primary}
+                      />
+                      <Text
+                        style={[
+                          styles.growthText,
+                          ('growthHighlight' in stat && stat.growthHighlight === false) && styles.growthTextMuted,
+                        ]}
+                      >
+                        {stat.growth}
+                      </Text>
                     </View>
                   </View>
                 </View>
@@ -429,6 +453,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.primary,
     fontWeight: '600',
+  },
+  growthTextMuted: {
+    color: '#6B7280',
+    fontWeight: '500',
   },
   statLinksRow: {
     flexDirection: 'row',

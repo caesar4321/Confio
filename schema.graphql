@@ -3477,10 +3477,12 @@ enum AchievementsReferralRewardEventRewardStatusChoices {
 type StatsSummaryType {
   totalUsers: Int
   activeUsers30d: Int
+  usersNew7d: Int
   protectedSavings: Float
   totalValueLocked: Float
   circulatingCusd: Float
   presaleCusdRaised: Float
+  presaleCusdRaised7d: Float
   dailyTransactions: Int
   statsSource: String
   statsAsOf: DateTime

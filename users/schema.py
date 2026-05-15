@@ -522,10 +522,12 @@ class StatsSummaryType(graphene.ObjectType):
     """Lightweight real-time stats for the $CONFIO info screen"""
     total_users = graphene.Int()
     active_users_30d = graphene.Int()
+    users_new_7d = graphene.Int()
     protected_savings = graphene.Float()
     total_value_locked = graphene.Float()
     circulating_cusd = graphene.Float()
     presale_cusd_raised = graphene.Float()
+    presale_cusd_raised_7d = graphene.Float()
     daily_transactions = graphene.Int()
     stats_source = graphene.String()
     stats_as_of = graphene.DateTime()
@@ -1415,13 +1417,18 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		from django.core.cache import cache
 
 		# Bump cache key version to invalidate old aggregation behavior
-		cache_key = 'stats_summary_v7'
+		cache_key = 'stats_summary_v8'
 		cached = cache.get(cache_key)
 		if cached:
 			return StatsSummaryType(**cached)
 
+		now = timezone.now()
+		last_7d = now - timedelta(days=7)
+		last_30d = now - timedelta(days=30)
 		total_users = User.objects.exclude(phone_number__isnull=True).exclude(phone_number='').count()
-		last_30d = timezone.now() - timedelta(days=30)
+		users_new_7d = User.objects.filter(date_joined__gte=last_7d).exclude(
+			phone_number__isnull=True
+		).exclude(phone_number='').count()
 		active_users_30d = User.objects.filter(last_activity_at__gte=last_30d).count()
 
 		# Protected savings and TVL come from the cUSD contract when algod is available.
@@ -1435,6 +1442,9 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		presale_cusd_raised = PresalePurchase.objects.filter(status='completed').aggregate(
 			total=Sum('cusd_amount')
 		)['total'] or Decimal('0')
+		presale_cusd_raised_7d = PresalePurchase.objects.filter(
+			status='completed', completed_at__gte=last_7d
+		).aggregate(total=Sum('cusd_amount'))['total'] or Decimal('0')
 
 		from django.conf import settings
 		network = (getattr(settings, 'ALGORAND_NETWORK', '') or '').lower()
@@ -1447,10 +1457,12 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		payload = {
 			'total_users': total_users,
 			'active_users_30d': active_users_30d,
+			'users_new_7d': users_new_7d,
 			'protected_savings': protected_savings,
 			'total_value_locked': total_value_locked,
 			'circulating_cusd': circulating_cusd,
 			'presale_cusd_raised': float(presale_cusd_raised),
+			'presale_cusd_raised_7d': float(presale_cusd_raised_7d),
 			'daily_transactions': None,
 			'stats_source': cusd_metrics.source,
 			'stats_as_of': cusd_metrics.as_of,
