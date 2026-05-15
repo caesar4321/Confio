@@ -13,6 +13,7 @@ env
 /static
 /media
 .DS_Store
+._*
 logs
 celerybeat-schedule
 celerybeat-schedule.bak
