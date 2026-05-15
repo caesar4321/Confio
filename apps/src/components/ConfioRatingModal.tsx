@@ -5,12 +5,10 @@ import {
     StyleSheet,
     Modal,
     TouchableOpacity,
-    TouchableWithoutFeedback,
     TextInput,
     ActivityIndicator,
     Linking,
     Platform,
-    KeyboardAvoidingView,
     Keyboard,
     ScrollView,
     useWindowDimensions,
@@ -124,18 +122,12 @@ export const ConfioRatingModal: React.FC<ConfioRatingModalProps> = ({ visible, o
 
     return (
         <Modal animationType="fade" transparent visible={visible} statusBarTranslucent onRequestClose={() => { }}>
-            <KeyboardAvoidingView
-                style={styles.flex1}
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            <View
+                style={[
+                    styles.centered,
+                    { paddingTop: Math.max(insets.top, 16), paddingBottom: Math.max(insets.bottom, 16) },
+                ]}
             >
-                <TouchableWithoutFeedback onPress={() => Keyboard.dismiss()} accessible={false}>
-                    <View
-                        style={[
-                            styles.centered,
-                            { paddingTop: Math.max(insets.top, 16), paddingBottom: Math.max(insets.bottom, 16) },
-                        ]}
-                    >
-                        <TouchableWithoutFeedback accessible={false}>
                 <View style={[styles.card, { maxHeight: modalMaxHeight }]}>
                     {step === 'stars' && (
                         <View style={styles.body}>
@@ -249,10 +241,7 @@ export const ConfioRatingModal: React.FC<ConfioRatingModalProps> = ({ visible, o
                         </ScrollView>
                     )}
                 </View>
-                        </TouchableWithoutFeedback>
-                    </View>
-                </TouchableWithoutFeedback>
-            </KeyboardAvoidingView>
+            </View>
         </Modal>
     );
 };
