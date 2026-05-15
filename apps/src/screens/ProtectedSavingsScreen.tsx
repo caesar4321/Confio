@@ -226,7 +226,7 @@ export const ProtectedSavingsScreen = () => {
             onPress={() => navigation.navigate('TopUp')}
             activeOpacity={0.9}
           >
-            <Icon name="plus-circle" size={20} color="#fff" />
+            <Icon name="dollar-sign" size={20} color="#fff" />
             <Text style={styles.ctaText}>Recargar</Text>
           </TouchableOpacity>
           <Text style={styles.ctaHint}>
@@ -457,7 +457,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: colors.primary,
+    backgroundColor: '#3b82f6',
     paddingHorizontal: 24,
     paddingVertical: 14,
     borderRadius: 999,

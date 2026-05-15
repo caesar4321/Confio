@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Linking } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { useQuery } from '@apollo/client';
@@ -9,7 +9,6 @@ import { colors } from '../config/theme';
 import { useCurrency } from '../hooks/useCurrency';
 import { MainStackParamList } from '../types/navigation';
 import { GET_STATS_SUMMARY } from '../apollo/queries';
-import { CUSD_RESERVE_PERA_URL } from '../config/algorand';
 
 export const ConfioTokenInfoScreen = () => {
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
@@ -63,10 +62,6 @@ export const ConfioTokenInfoScreen = () => {
 
   const s = data?.statsSummary;
   const liveLabel = s?.statsSource === 'algorand' ? 'en blockchain' : 'actualizado';
-  const openPeraLink = (url?: string | null) => {
-    if (!url) return;
-    Linking.openURL(url).catch(() => {});
-  };
   const usersNew7d = Math.max(0, Math.round(s?.usersNew7d ?? 0));
   const presaleRaised7d = Math.max(0, s?.presaleCusdRaised7d ?? 0);
   const usersGrowth = usersNew7d > 0
@@ -75,23 +70,28 @@ export const ConfioTokenInfoScreen = () => {
   const presaleGrowth = presaleRaised7d > 0
     ? `+${formatWholeNumber(presaleRaised7d)} cUSD esta semana`
     : 'acumulado';
-  const stats = [
+  const stats: Array<{
+    label: string;
+    value: string;
+    growth: string;
+    growthHighlight?: boolean;
+    description?: string;
+    route: 'LatamCommunity' | 'ProtectedSavings' | 'ConfioPresale';
+  }> = [
     {
       label: 'Usuarios registrados',
       value: formatWholeNumber(s?.totalUsers ?? 0),
       growth: usersGrowth,
       growthHighlight: usersNew7d > 0,
       description: 'Personas con teléfono verificado y acceso con Apple o Google.',
+      route: 'LatamCommunity',
     },
     {
       label: 'Ahorros Protegidos',
       value: `${formatWholeNumber(s?.totalValueLocked ?? s?.protectedSavings ?? 0)} cUSD`,
       growth: liveLabel,
       description: 'USDC de respaldo que protege los cUSD de los usuarios.',
-      links: [
-        { label: 'Ver cUSD', url: s?.cusdAssetPeraUrl },
-        { label: 'Ver respaldo', url: CUSD_RESERVE_PERA_URL },
-      ],
+      route: 'ProtectedSavings',
     },
     {
       label: 'Preventa de $CONFIO',
@@ -99,6 +99,7 @@ export const ConfioTokenInfoScreen = () => {
       growth: presaleGrowth,
       growthHighlight: presaleRaised7d > 0,
       description: 'cUSD aportados por la comunidad en la preventa.',
+      route: 'ConfioPresale',
     },
   ];
 
@@ -145,11 +146,16 @@ export const ConfioTokenInfoScreen = () => {
           <Text style={styles.statsTitle}>Crecimiento Exponencial</Text>
           <View style={styles.statsGrid}>
             {stats.map((stat, index) => (
-              <View key={index} style={styles.statCard}>
+              <TouchableOpacity
+                key={index}
+                style={styles.statCard}
+                activeOpacity={0.75}
+                onPress={() => navigation.navigate(stat.route)}
+              >
                 <View style={styles.statMainRow}>
                   <View style={styles.statTextBlock}>
                     <Text style={styles.statLabel}>{stat.label}</Text>
-                    {'description' in stat && stat.description ? (
+                    {stat.description ? (
                       <Text style={styles.statDescription}>{stat.description}</Text>
                     ) : null}
                   </View>
@@ -161,37 +167,26 @@ export const ConfioTokenInfoScreen = () => {
                       <Icon
                         name="trending-up"
                         size={12}
-                        color={('growthHighlight' in stat && stat.growthHighlight === false) ? '#6B7280' : colors.primary}
+                        color={stat.growthHighlight === false ? '#6B7280' : colors.primary}
                       />
                       <Text
                         style={[
                           styles.growthText,
-                          ('growthHighlight' in stat && stat.growthHighlight === false) && styles.growthTextMuted,
+                          stat.growthHighlight === false && styles.growthTextMuted,
                         ]}
                       >
                         {stat.growth}
                       </Text>
                     </View>
                   </View>
+                  <Icon
+                    name="chevron-right"
+                    size={18}
+                    color="#9CA3AF"
+                    style={styles.statChevron}
+                  />
                 </View>
-                {'links' in stat && stat.links?.length ? (
-                  <View style={styles.statLinksRow}>
-                    {stat.links.map((link) => (
-                      <TouchableOpacity
-                        key={link.label}
-                        style={[styles.statLinkButton, !link.url && styles.statLinkButtonDisabled]}
-                        onPress={() => openPeraLink(link.url)}
-                        disabled={!link.url}
-                      >
-                        <Icon name="external-link" size={13} color={link.url ? colors.primary : '#9CA3AF'} />
-                        <Text style={[styles.statLinkText, !link.url && styles.statLinkTextDisabled]}>
-                          {link.label}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                ) : null}
-              </View>
+              </TouchableOpacity>
             ))}
           </View>
         </View>
@@ -442,31 +437,8 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     fontWeight: '500',
   },
-  statLinksRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 12,
-  },
-  statLinkButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingVertical: 7,
-    paddingHorizontal: 10,
-    borderRadius: 8,
-    backgroundColor: '#E8F7F0',
-  },
-  statLinkButtonDisabled: {
-    backgroundColor: '#F3F4F6',
-  },
-  statLinkText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.primary,
-  },
-  statLinkTextDisabled: {
-    color: '#9CA3AF',
+  statChevron: {
+    marginLeft: 4,
   },
   sectionCard: {
     marginHorizontal: 16,

@@ -17,15 +17,16 @@ type StatsSummary = {
   presaleCusdRaised?: number | null;
 };
 
-const formatCompact = (n: number | null | undefined, sep: string): string => {
+// Latino-friendly number formatting: full numbers up to 999,999 with the
+// locale thousands separator (typically "." in LATAM Spanish). "M" only kicks
+// in at one million+. No "K" — most readers don't parse it consistently.
+const formatLocale = (n: number | null | undefined, sep: string): string => {
   if (n == null) return '—';
   const r = Math.round(n);
   if (r >= 1_000_000) {
     const v = r / 1_000_000;
-    return `${v >= 10 ? v.toFixed(0) : v.toFixed(1)}M`;
-  }
-  if (r >= 10_000) {
-    return `${Math.round(r / 1_000)}K`;
+    const decimal = v < 10 ? 1 : 0;
+    return `${v.toFixed(decimal).replace('.', ',')} M`;
   }
   try {
     return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 })
@@ -42,7 +43,8 @@ type Tile = {
   value: string;
   unit?: string;
   label: string;
-  sub: string;
+  descriptor: string;
+  descriptorColor?: string;
   onPress: () => void;
 };
 
@@ -56,41 +58,40 @@ export const HomeStatsSection: React.FC = () => {
   const s: StatsSummary | undefined = data?.statsSummary;
   const sep = currency.thousandsSeparator;
   const tvl = s?.totalValueLocked ?? s?.protectedSavings;
+  const verified = s?.diditVerifiedUsers ?? 0;
 
-  const tiles: Tile[] = useMemo(() => {
-    const verified = s?.diditVerifiedUsers ?? 0;
-    return [
+  const tiles: Tile[] = useMemo(
+    () => [
       {
         key: 'users',
         icon: 'users',
-        value: formatCompact(s?.totalUsers, sep),
+        value: formatLocale(s?.totalUsers, sep),
         label: 'Usuarios',
-        sub:
-          verified > 0
-            ? `✓ ${formatCompact(verified, sep)} verificados`
-            : 'Verificados con teléfono',
+        descriptor: verified > 0 ? `✓ ${formatLocale(verified, sep)}` : 'Con teléfono',
         onPress: () => navigation.navigate('LatamCommunity'),
       },
       {
         key: 'savings',
         icon: 'shield',
-        value: formatCompact(tvl, sep),
+        value: formatLocale(tvl, sep),
         unit: 'cUSD',
         label: 'Ahorros',
-        sub: 'Respaldado en USDC',
+        descriptor: 'USDC',
         onPress: () => navigation.navigate('ProtectedSavings'),
       },
       {
         key: 'presale',
         icon: 'zap',
-        value: formatCompact(s?.presaleCusdRaised, sep),
+        value: formatLocale(s?.presaleCusdRaised, sep),
         unit: 'cUSD',
         label: 'Preventa',
-        sub: 'Aportado por la comunidad',
+        descriptor: '$CONFIO',
+        descriptorColor: colors.violet,
         onPress: () => navigation.navigate('ConfioPresale'),
       },
-    ];
-  }, [s?.totalUsers, s?.diditVerifiedUsers, tvl, s?.presaleCusdRaised, sep, navigation]);
+    ],
+    [s?.totalUsers, verified, tvl, s?.presaleCusdRaised, sep, navigation]
+  );
 
   return (
     <View style={styles.container}>
@@ -98,11 +99,7 @@ export const HomeStatsSection: React.FC = () => {
         {tiles.map((tile, idx) => (
           <React.Fragment key={tile.key}>
             {idx > 0 && <View style={styles.divider} />}
-            <TouchableOpacity
-              style={styles.tile}
-              activeOpacity={0.7}
-              onPress={tile.onPress}
-            >
+            <TouchableOpacity style={styles.tile} activeOpacity={0.7} onPress={tile.onPress}>
               <View style={styles.tileTopRow}>
                 <Icon name={tile.icon} size={13} color={colors.primary} />
                 <Icon name="chevron-right" size={14} color="#9CA3AF" />
@@ -111,14 +108,20 @@ export const HomeStatsSection: React.FC = () => {
                 style={styles.tileValue}
                 numberOfLines={1}
                 adjustsFontSizeToFit
-                minimumFontScale={0.7}
+                minimumFontScale={0.65}
               >
                 {tile.value}
                 {tile.unit ? <Text style={styles.tileUnit}> {tile.unit}</Text> : null}
               </Text>
               <Text style={styles.tileLabel}>{tile.label}</Text>
-              <Text style={styles.tileSub} numberOfLines={1}>
-                {tile.sub}
+              <Text
+                style={[
+                  styles.tileDescriptor,
+                  tile.descriptorColor ? { color: tile.descriptorColor } : null,
+                ]}
+                numberOfLines={1}
+              >
+                {tile.descriptor}
               </Text>
             </TouchableOpacity>
           </React.Fragment>
@@ -132,7 +135,7 @@ const styles = StyleSheet.create({
   container: {
     paddingHorizontal: 16,
     marginTop: 4,
-    marginBottom: 8,
+    marginBottom: 0,
   },
   strip: {
     flexDirection: 'row',
@@ -152,7 +155,6 @@ const styles = StyleSheet.create({
   tile: {
     flex: 1,
     paddingHorizontal: 8,
-    justifyContent: 'flex-start',
   },
   tileTopRow: {
     flexDirection: 'row',
@@ -179,11 +181,11 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.4,
   },
-  tileSub: {
+  tileDescriptor: {
     fontSize: 10,
     color: '#6B7280',
     marginTop: 2,
-    fontWeight: '500',
+    fontWeight: '600',
   },
   divider: {
     width: StyleSheet.hairlineWidth,
