@@ -50,6 +50,7 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             path('blockchain-analytics/', self.admin_view(self.blockchain_analytics_view), name='blockchain_analytics'),
             path('blockchain-analytics/scan-now/', self.admin_view(self.blockchain_scan_now_view), name='blockchain_scan_now'),
             path('achievements/', self.admin_view(self.achievement_dashboard_view), name='achievement_dashboard'),
+            path('icp-rating-analytics/', self.admin_view(self.icp_rating_analytics_view), name='icp_rating_analytics'),
         ]
         return custom_urls + urls
     
@@ -1476,6 +1477,150 @@ class ConfioAdminSite(AdminSiteOTPRequired):
                 except Exception as e:
                     messages.error(request, f'Failed to trigger scan: {e}')
         return redirect('admin:blockchain_analytics')
+
+    def icp_rating_analytics_view(self, request):
+        """ICP capture + Rating modal analytics.
+
+        Renders four sections:
+          - Headline counters
+          - Free-text inbox (ICP "Otra razón" + Rating feedback), newest first
+          - Rating cross-tab (star × action)
+          - ICP tag distribution (per country) + co-occurrence matrix
+        """
+        from collections import Counter
+
+        now = timezone.now()
+
+        # Headline counters
+        icp_captured = User.objects.filter(confio_icp_captured_at__isnull=False).count()
+        icp_skipped = User.objects.filter(
+            confio_icp_captured_at__isnull=False, confio_icp_tags=[]
+        ).count()
+        icp_with_tags = icp_captured - icp_skipped
+        rating_prompted = User.objects.filter(confio_rating_prompted_at__isnull=False).count()
+        rating_with_stars = User.objects.filter(
+            confio_rating_prompted_at__isnull=False, confio_rating_star_count__isnull=False
+        ).count()
+
+        # Free-text inbox — union of two sources, sorted newest-first
+        icp_freetext = list(
+            User.objects.filter(confio_icp_other_text__isnull=False)
+            .exclude(confio_icp_other_text='')
+            .values('id', 'username', 'first_name', 'last_name', 'phone_country',
+                    'confio_icp_captured_at', 'confio_icp_other_text', 'confio_icp_tags')
+        )
+        for row in icp_freetext:
+            row['source'] = 'ICP'
+            row['ts'] = row['confio_icp_captured_at']
+            row['text'] = row['confio_icp_other_text']
+        rating_freetext = list(
+            User.objects.filter(confio_rating_feedback_text__isnull=False)
+            .exclude(confio_rating_feedback_text='')
+            .values('id', 'username', 'first_name', 'last_name', 'phone_country',
+                    'confio_rating_prompted_at', 'confio_rating_feedback_text',
+                    'confio_rating_star_count')
+        )
+        for row in rating_freetext:
+            row['source'] = 'Rating'
+            row['ts'] = row['confio_rating_prompted_at']
+            row['text'] = row['confio_rating_feedback_text']
+        feedback_inbox = sorted(
+            icp_freetext + rating_freetext, key=lambda r: r['ts'] or now, reverse=True
+        )[:200]
+
+        # Rating cross-tab: rows = star count (1..5), cols = action (FEEDBACK/STORE/SKIP)
+        cross_qs = (
+            User.objects
+            .filter(confio_rating_prompted_at__isnull=False, confio_rating_star_count__isnull=False)
+            .values('confio_rating_star_count', 'confio_rating_action')
+            .annotate(n=Count('id'))
+        )
+        rating_actions = ['FEEDBACK', 'STORE', 'SKIP']
+        rating_cross = {s: {a: 0 for a in rating_actions} for s in range(1, 6)}
+        for row in cross_qs:
+            s = row['confio_rating_star_count']
+            a = row['confio_rating_action'] or 'SKIP'
+            if s in rating_cross and a in rating_cross[s]:
+                rating_cross[s][a] = row['n']
+        rating_cross_rows = [
+            {'stars': s, 'cells': [rating_cross[s][a] for a in rating_actions], 'total': sum(rating_cross[s].values())}
+            for s in range(1, 6)
+        ]
+        rating_cross_totals = [
+            sum(rating_cross[s][a] for s in range(1, 6)) for a in rating_actions
+        ]
+
+        # ICP tag distribution per country (flatten the ArrayField)
+        tag_labels = {
+            'proteger_ahorros': 'Proteger ahorros',
+            'generar_rendimiento': 'Generar rendimiento',
+            'comprar_confio': 'Comprar CONFIO',
+            'enviar_recibir_pagos': 'Enviar/recibir pagos',
+            'importacion_exportacion': 'Importación/exportación',
+            'otra': 'Otra razón',
+        }
+        country_tag_counts = {}
+        global_tag_counts = Counter()
+        for u in User.objects.filter(confio_icp_captured_at__isnull=False).only(
+            'phone_country', 'confio_icp_tags'
+        ):
+            country = u.phone_country or 'UNK'
+            country_tag_counts.setdefault(country, Counter())
+            for tag in (u.confio_icp_tags or []):
+                country_tag_counts[country][tag] += 1
+                global_tag_counts[tag] += 1
+        # Build a stable column order based on overall popularity
+        tag_columns = [t for t, _ in global_tag_counts.most_common()]
+        if not tag_columns:
+            tag_columns = list(tag_labels.keys())
+        country_rows = []
+        for country, counts in sorted(country_tag_counts.items(), key=lambda kv: -sum(kv[1].values())):
+            country_rows.append({
+                'country': country,
+                'cells': [counts.get(t, 0) for t in tag_columns],
+                'total': sum(counts.values()),
+            })
+
+        # ICP co-occurrence matrix (square, ordered by global tag popularity)
+        co_counts = {a: Counter() for a in tag_columns}
+        for u in User.objects.filter(confio_icp_captured_at__isnull=False).only('confio_icp_tags'):
+            tags = sorted(set(u.confio_icp_tags or []))
+            for a in tags:
+                if a not in co_counts:
+                    continue
+                for b in tags:
+                    if b in co_counts[a]:
+                        co_counts[a][b] += 1
+                    else:
+                        co_counts[a][b] = 1
+        cooc_rows = []
+        for a in tag_columns:
+            cooc_rows.append({
+                'tag': a,
+                'label': tag_labels.get(a, a),
+                'cells': [co_counts.get(a, {}).get(b, 0) for b in tag_columns],
+            })
+
+        context = dict(
+            self.each_context(request),
+            title='ICP + Rating Analytics',
+            icp_captured=icp_captured,
+            icp_skipped=icp_skipped,
+            icp_with_tags=icp_with_tags,
+            icp_response_rate=(icp_with_tags / icp_captured * 100) if icp_captured else 0,
+            rating_prompted=rating_prompted,
+            rating_with_stars=rating_with_stars,
+            feedback_inbox=feedback_inbox,
+            rating_actions=rating_actions,
+            rating_cross_rows=rating_cross_rows,
+            rating_cross_totals=rating_cross_totals,
+            tag_labels=tag_labels,
+            tag_columns=tag_columns,
+            tag_column_labels=[tag_labels.get(t, t) for t in tag_columns],
+            country_rows=country_rows,
+            cooc_rows=cooc_rows,
+        )
+        return render(request, 'admin/icp_rating_analytics.html', context)
 
 
 # Create custom admin site instance

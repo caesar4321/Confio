@@ -1,0 +1,183 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+{% load humanize %}
+
+{% block title %}{{ title }} | {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+    .analytics-container { padding: 20px; max-width: 1400px; margin: 0 auto; }
+    .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 28px; }
+    .metric-card { background: #fff; border-radius: 12px; padding: 18px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); border: 1px solid #e5e7eb; }
+    .metric-label { color: #6b7280; font-size: 13px; font-weight: 500; margin-bottom: 6px; }
+    .metric-value { font-size: 30px; font-weight: 700; color: #111827; }
+    .metric-sub { color: #6b7280; font-size: 12px; margin-top: 4px; }
+    .section-title { font-size: 22px; font-weight: 700; color: #1f2937; margin: 28px 0 14px; }
+    .data-table { background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 24px; }
+    .data-table table { width: 100%; border-collapse: collapse; }
+    .data-table th { background: #f9fafb; padding: 10px 14px; text-align: left; font-weight: 600; color: #4b5563; font-size: 13px; border-bottom: 1px solid #e5e7eb; }
+    .data-table td { padding: 10px 14px; border-bottom: 1px solid #f3f4f6; vertical-align: top; font-size: 14px; }
+    .back-button { background: #f3f4f6; color: #1f2937; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-weight: 500; display: inline-block; margin-bottom: 18px; }
+    .back-button:hover { background: #e5e7eb; color: #1f2937; }
+    .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; margin-right: 4px; margin-bottom: 2px; }
+    .pill-icp { background: #ECFDF5; color: #065F46; }
+    .pill-rating { background: #FEF3C7; color: #92400E; }
+    .pill-tag { background: #EFF6FF; color: #1E40AF; }
+    .heatmap td.cell { text-align: center; font-variant-numeric: tabular-nums; }
+    .heatmap td.cell-0 { color: #d1d5db; }
+    .heatmap td.cell-row { background: #f9fafb; font-weight: 600; text-align: left; }
+    .heatmap td.cell-total { font-weight: 700; background: #f9fafb; }
+    .stars { color: #f59e0b; letter-spacing: 1px; }
+    .feedback-text { white-space: pre-wrap; word-break: break-word; max-width: 560px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="analytics-container">
+    <a href="{% url 'confio_admin:dashboard' %}" class="back-button">← Back to Dashboard</a>
+    <h1>ICP + Rating Analytics</h1>
+
+    <!-- Headline counters -->
+    <div class="metrics-grid">
+        <div class="metric-card">
+            <div class="metric-label">ICP captures</div>
+            <div class="metric-value">{{ icp_captured|intcomma }}</div>
+            <div class="metric-sub">{{ icp_with_tags|intcomma }} answered · {{ icp_skipped|intcomma }} skipped</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">ICP response rate</div>
+            <div class="metric-value">{{ icp_response_rate|floatformat:1 }}%</div>
+            <div class="metric-sub">picked ≥1 tag (vs Saltar)</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Rating prompts</div>
+            <div class="metric-value">{{ rating_prompted|intcomma }}</div>
+            <div class="metric-sub">{{ rating_with_stars|intcomma }} submitted stars</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Free-text entries</div>
+            <div class="metric-value">{{ feedback_inbox|length|intcomma }}</div>
+            <div class="metric-sub">read every one for the first 50</div>
+        </div>
+    </div>
+
+    <!-- Free-text inbox -->
+    <h2 class="section-title">Free-text inbox</h2>
+    <div class="data-table">
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 90px;">Source</th>
+                    <th style="width: 150px;">When</th>
+                    <th style="width: 180px;">User</th>
+                    <th>Text</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in feedback_inbox %}
+                <tr>
+                    <td>
+                        {% if row.source == 'ICP' %}
+                            <span class="pill pill-icp">ICP</span>
+                            {% for tag in row.confio_icp_tags %}<span class="pill pill-tag">{{ tag }}</span>{% endfor %}
+                        {% else %}
+                            <span class="pill pill-rating">Rating</span>
+                            {% if row.confio_rating_star_count %}<span class="stars">{% for _ in "x"|rjust:row.confio_rating_star_count %}★{% endfor %}</span>{% endif %}
+                        {% endif %}
+                    </td>
+                    <td>{{ row.ts|date:"Y-m-d H:i" }}</td>
+                    <td>
+                        <a href="{% url 'confio_admin:users_user_change' row.id %}">
+                            @{{ row.username }}
+                        </a>
+                        {% if row.phone_country %}<div style="color:#6b7280;font-size:12px;">{{ row.phone_country }}</div>{% endif %}
+                    </td>
+                    <td class="feedback-text">{{ row.text }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="4" style="color:#6b7280;">No free-text entries yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Rating cross-tab -->
+    <h2 class="section-title">Rating × Action cross-tab</h2>
+    <p style="color:#6b7280;margin-top:-8px;">Validates the "no-gating still works" hypothesis: do 4–5★ users self-select STORE and 1–3★ users self-select FEEDBACK on their own?</p>
+    <div class="data-table heatmap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Stars</th>
+                    {% for a in rating_actions %}<th style="text-align:center;">{{ a }}</th>{% endfor %}
+                    <th style="text-align:center;">Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in rating_cross_rows %}
+                <tr>
+                    <td class="cell-row"><span class="stars">{% for _ in "x"|rjust:r.stars %}★{% endfor %}</span></td>
+                    {% for n in r.cells %}<td class="cell{% if n == 0 %} cell-0{% endif %}">{{ n }}</td>{% endfor %}
+                    <td class="cell cell-total">{{ r.total }}</td>
+                </tr>
+                {% endfor %}
+                <tr>
+                    <td class="cell-row">Total</td>
+                    {% for t in rating_cross_totals %}<td class="cell cell-total">{{ t }}</td>{% endfor %}
+                    <td class="cell cell-total">{{ rating_prompted }}</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- ICP tag distribution per country -->
+    <h2 class="section-title">ICP tag distribution by country</h2>
+    <div class="data-table heatmap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Country</th>
+                    {% for label in tag_column_labels %}<th style="text-align:center;">{{ label }}</th>{% endfor %}
+                    <th style="text-align:center;">Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in country_rows %}
+                <tr>
+                    <td class="cell-row">{{ r.country }}</td>
+                    {% for n in r.cells %}<td class="cell{% if n == 0 %} cell-0{% endif %}">{{ n }}</td>{% endfor %}
+                    <td class="cell cell-total">{{ r.total }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="{{ tag_columns|length|add:2 }}" style="color:#6b7280;">No ICP captures yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- ICP co-occurrence -->
+    <h2 class="section-title">ICP tag co-occurrence</h2>
+    <p style="color:#6b7280;margin-top:-8px;">Diagonal = total users picking that tag. Off-diagonal = users picking both. This is where the Luis-pattern emerges (e.g. <code>proteger_ahorros</code> ∩ <code>generar_rendimiento</code> ∩ <code>comprar_confio</code>).</p>
+    <div class="data-table heatmap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Tag</th>
+                    {% for label in tag_column_labels %}<th style="text-align:center;">{{ label }}</th>{% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in cooc_rows %}
+                <tr>
+                    <td class="cell-row">{{ r.label }}</td>
+                    {% for n in r.cells %}<td class="cell{% if n == 0 %} cell-0{% endif %}">{{ n }}</td>{% endfor %}
+                </tr>
+                {% empty %}
+                <tr><td colspan="{{ tag_columns|length|add:1 }}" style="color:#6b7280;">No ICP tags captured yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
