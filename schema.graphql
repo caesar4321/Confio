@@ -3483,8 +3483,8 @@ type StatsSummaryType {
   dailyTransactions: Int
   statsSource: String
   statsAsOf: DateTime
-  cusdAssetId: Int
-  cusdAppId: Int
+  cusdAssetId: String
+  cusdAppId: String
   cusdAssetPeraUrl: String
   cusdAppPeraUrl: String
 }

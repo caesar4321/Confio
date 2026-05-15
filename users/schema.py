@@ -528,8 +528,8 @@ class StatsSummaryType(graphene.ObjectType):
     daily_transactions = graphene.Int()
     stats_source = graphene.String()
     stats_as_of = graphene.DateTime()
-    cusd_asset_id = graphene.Int()
-    cusd_app_id = graphene.Int()
+    cusd_asset_id = graphene.String()
+    cusd_app_id = graphene.String()
     cusd_asset_pera_url = graphene.String()
     cusd_app_pera_url = graphene.String()
 
@@ -1435,8 +1435,8 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		pera_base_url = 'https://testnet.explorer.perawallet.app' if network == 'testnet' else 'https://explorer.perawallet.app'
 		cusd_asset_id = getattr(settings, 'ALGORAND_CUSD_ASSET_ID', None)
 		cusd_app_id = getattr(settings, 'ALGORAND_CUSD_APP_ID', None)
-		cusd_asset_id = int(cusd_asset_id) if cusd_asset_id else None
-		cusd_app_id = int(cusd_app_id) if cusd_app_id else None
+		cusd_asset_id = str(cusd_asset_id) if cusd_asset_id else None
+		cusd_app_id = str(cusd_app_id) if cusd_app_id else None
 
 		payload = {
 			'total_users': total_users,
