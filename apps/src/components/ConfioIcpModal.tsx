@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
     View,
     Text,
@@ -8,6 +8,8 @@ import {
     ScrollView,
     TextInput,
     ActivityIndicator,
+    Keyboard,
+    Platform,
     useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -44,10 +46,24 @@ export const ConfioIcpModal: React.FC<ConfioIcpModalProps> = ({ visible, onClose
 
     const [selected, setSelected] = useState<Set<IcpTag>>(new Set());
     const [otherText, setOtherText] = useState('');
+    const [keyboardHeight, setKeyboardHeight] = useState(0);
     const [submitIcp, { loading }] = useMutation(SUBMIT_CONFIO_ICP, {
         refetchQueries: [{ query: GET_ME }],
         awaitRefetchQueries: true,
     });
+
+    // Lift the modal above the soft keyboard manually — see ConfioRatingModal
+    // for rationale (KeyboardAvoidingView inside a transparent Modal breaks).
+    useEffect(() => {
+        const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+        const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+        const showSub = Keyboard.addListener(showEvt, e => setKeyboardHeight(e.endCoordinates.height));
+        const hideSub = Keyboard.addListener(hideEvt, () => setKeyboardHeight(0));
+        return () => {
+            showSub.remove();
+            hideSub.remove();
+        };
+    }, []);
 
     const toggle = useCallback((tag: IcpTag) => {
         setSelected(prev => {
@@ -87,7 +103,10 @@ export const ConfioIcpModal: React.FC<ConfioIcpModalProps> = ({ visible, onClose
             <View
                 style={[
                     styles.centered,
-                    { paddingTop: Math.max(insets.top, 16), paddingBottom: Math.max(insets.bottom, 16) },
+                    {
+                        paddingTop: Math.max(insets.top, 16),
+                        paddingBottom: keyboardHeight > 0 ? keyboardHeight + 16 : Math.max(insets.bottom, 16),
+                    },
                 ]}
             >
                 <View style={[styles.card, { maxHeight: modalMaxHeight }]}>

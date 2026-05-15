@@ -43,6 +43,7 @@ export const ConfioRatingModal: React.FC<ConfioRatingModalProps> = ({ visible, o
     const [step, setStep] = useState<Step>('stars');
     const [stars, setStars] = useState(0);
     const [feedbackText, setFeedbackText] = useState('');
+    const [keyboardHeight, setKeyboardHeight] = useState(0);
     const feedbackInputRef = useRef<TextInput>(null);
     const [submitRating, { loading }] = useMutation(SUBMIT_CONFIO_RATING, {
         refetchQueries: [{ query: GET_ME }],
@@ -56,6 +57,21 @@ export const ConfioRatingModal: React.FC<ConfioRatingModalProps> = ({ visible, o
         const t = setTimeout(() => feedbackInputRef.current?.focus(), 250);
         return () => clearTimeout(t);
     }, [step]);
+
+    // Track keyboard height and add it as bottom padding to the overlay so the
+    // centered card re-centers above the keyboard. KeyboardAvoidingView inside
+    // a transparent Modal mis-sizes on Android and disappears, so we drive the
+    // offset manually instead.
+    useEffect(() => {
+        const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+        const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+        const showSub = Keyboard.addListener(showEvt, e => setKeyboardHeight(e.endCoordinates.height));
+        const hideSub = Keyboard.addListener(hideEvt, () => setKeyboardHeight(0));
+        return () => {
+            showSub.remove();
+            hideSub.remove();
+        };
+    }, []);
 
     const reset = useCallback(() => {
         setStep('stars');
@@ -128,7 +144,10 @@ export const ConfioRatingModal: React.FC<ConfioRatingModalProps> = ({ visible, o
             <View
                 style={[
                     styles.centered,
-                    { paddingTop: Math.max(insets.top, 16), paddingBottom: Math.max(insets.bottom, 16) },
+                    {
+                        paddingTop: Math.max(insets.top, 16),
+                        paddingBottom: keyboardHeight > 0 ? keyboardHeight + 16 : Math.max(insets.bottom, 16),
+                    },
                 ]}
             >
                 <View style={[styles.card, { maxHeight: modalMaxHeight }]}>
