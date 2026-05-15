@@ -520,6 +520,7 @@ class BusinessType(DjangoObjectType):
 
 class StatsSummaryType(graphene.ObjectType):
     """Lightweight real-time stats for the $CONFIO info screen"""
+    total_users = graphene.Int()
     active_users_30d = graphene.Int()
     protected_savings = graphene.Float()
     total_value_locked = graphene.Float()
@@ -527,6 +528,10 @@ class StatsSummaryType(graphene.ObjectType):
     daily_transactions = graphene.Int()
     stats_source = graphene.String()
     stats_as_of = graphene.DateTime()
+    cusd_asset_id = graphene.Int()
+    cusd_app_id = graphene.Int()
+    cusd_asset_pera_url = graphene.String()
+    cusd_app_pera_url = graphene.String()
 
 
 class ReferralRewardEventType(DjangoObjectType):
@@ -1407,50 +1412,14 @@ class Query(EmployeeQueries, graphene.ObjectType):
 	def resolve_stats_summary(self, info):
 		"""Compute small set of aggregates with a short cache TTL."""
 		from django.core.cache import cache
-		from conversion.models import Conversion
-		from send.models import SendTransaction
-		from payments.models import PaymentTransaction
-		from p2p_exchange.models import P2PTrade
 
 		# Bump cache key version to invalidate old aggregation behavior
-		cache_key = 'stats_summary_v4'
+		cache_key = 'stats_summary_v5'
 		cached = cache.get(cache_key)
 		if cached:
 			return StatsSummaryType(**cached)
 
-		now = timezone.now()
-		today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-		last_30d = now - timedelta(days=30)
-
-		# Prefer a single-field metric for performance (requires migration/signals)
-		try:
-			active_users_30d = User.objects.filter(last_activity_at__gte=last_30d).count()
-		except Exception:
-			# Fallback: compute union across 30d activity sources
-			from p2p_exchange.models import P2PTrade, P2PMessage
-			from send.models import SendTransaction
-			from payments.models import PaymentTransaction
-			from conversion.models import Conversion
-			from achievements.models import UserAchievement
-			user_ids = set()
-			user_ids.update(Account.objects.filter(last_login_at__gte=last_30d).values_list('user_id', flat=True))
-			user_ids.update(User.objects.filter(last_login__gte=last_30d).values_list('id', flat=True))
-			trades = P2PTrade.objects.filter(created_at__gte=last_30d)
-			user_ids.update(trades.exclude(buyer_user__isnull=True).values_list('buyer_user_id', flat=True))
-			user_ids.update(trades.exclude(seller_user__isnull=True).values_list('seller_user_id', flat=True))
-			user_ids.update(trades.exclude(buyer__isnull=True).values_list('buyer_id', flat=True))
-			user_ids.update(trades.exclude(seller__isnull=True).values_list('seller_id', flat=True))
-			user_ids.update(P2PMessage.objects.filter(created_at__gte=last_30d).exclude(sender_user__isnull=True).values_list('sender_user_id', flat=True))
-			user_ids.update(P2PMessage.objects.filter(created_at__gte=last_30d).exclude(sender__isnull=True).values_list('sender_id', flat=True))
-			sends = SendTransaction.objects.filter(created_at__gte=last_30d)
-			user_ids.update(sends.exclude(sender_user__isnull=True).values_list('sender_user_id', flat=True))
-			user_ids.update(sends.exclude(recipient_user__isnull=True).values_list('recipient_user_id', flat=True))
-			payments = PaymentTransaction.objects.filter(created_at__gte=last_30d)
-			user_ids.update(payments.values_list('payer_user_id', flat=True))
-			user_ids.update(payments.exclude(merchant_account_user__isnull=True).values_list('merchant_account_user_id', flat=True))
-			user_ids.update(Conversion.objects.filter(created_at__gte=last_30d).exclude(actor_user__isnull=True).values_list('actor_user_id', flat=True))
-			user_ids.update(UserAchievement.objects.filter(earned_at__gte=last_30d).values_list('user_id', flat=True))
-			active_users_30d = len({int(u) for u in user_ids if u})
+		total_users = User.objects.exclude(phone_number__isnull=True).exclude(phone_number='').count()
 
 		# Protected savings and TVL come from the cUSD contract when algod is available.
 		from blockchain.cusd_metrics import get_cusd_platform_metrics
@@ -1459,20 +1428,27 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		total_value_locked = float(cusd_metrics.tvl_cusd)
 		circulating_cusd = float(cusd_metrics.circulating_cusd)
 
-		# Daily transactions across sends + payments + completed/released P2P trades
-		send_count = SendTransaction.objects.filter(created_at__gte=today_start).exclude(status='FAILED').count()
-		payment_count = PaymentTransaction.objects.filter(created_at__gte=today_start).exclude(status='FAILED').count()
-		p2p_count = P2PTrade.objects.filter(created_at__gte=today_start, status__in=['COMPLETED', 'CRYPTO_RELEASED']).count()
-		daily_transactions = send_count + payment_count + p2p_count
+		from django.conf import settings
+		network = (getattr(settings, 'ALGORAND_NETWORK', '') or '').lower()
+		pera_base_url = 'https://testnet.explorer.perawallet.app' if network == 'testnet' else 'https://explorer.perawallet.app'
+		cusd_asset_id = getattr(settings, 'ALGORAND_CUSD_ASSET_ID', None)
+		cusd_app_id = getattr(settings, 'ALGORAND_CUSD_APP_ID', None)
+		cusd_asset_id = int(cusd_asset_id) if cusd_asset_id else None
+		cusd_app_id = int(cusd_app_id) if cusd_app_id else None
 
 		payload = {
-			'active_users_30d': active_users_30d,
+			'total_users': total_users,
+			'active_users_30d': None,
 			'protected_savings': protected_savings,
 			'total_value_locked': total_value_locked,
 			'circulating_cusd': circulating_cusd,
-			'daily_transactions': daily_transactions,
+			'daily_transactions': None,
 			'stats_source': cusd_metrics.source,
 			'stats_as_of': cusd_metrics.as_of,
+			'cusd_asset_id': cusd_asset_id,
+			'cusd_app_id': cusd_app_id,
+			'cusd_asset_pera_url': f'{pera_base_url}/asset/{cusd_asset_id}/' if cusd_asset_id else None,
+			'cusd_app_pera_url': f'{pera_base_url}/application/{cusd_app_id}/' if cusd_app_id else None,
 		}
 		# Cache briefly to reduce load but avoid staleness
 		cache.set(cache_key, payload, 30)

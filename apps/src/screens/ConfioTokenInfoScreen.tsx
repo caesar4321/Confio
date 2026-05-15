@@ -1,50 +1,52 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, Image } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { useQuery, gql } from '@apollo/client';
 import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { colors } from '../config/theme';
+import { useCurrency } from '../hooks/useCurrency';
+import { MainStackParamList } from '../types/navigation';
 
 const GET_STATS_SUMMARY = gql`
   query GetStatsSummary {
     statsSummary {
-      activeUsers30d
+      totalUsers
       protectedSavings
       totalValueLocked
       circulatingCusd
-      dailyTransactions
       statsSource
+      cusdAssetId
+      cusdAppId
+      cusdAssetPeraUrl
+      cusdAppPeraUrl
     }
   }
 `;
 
 export const ConfioTokenInfoScreen = () => {
-  const navigation = useNavigation();
-  const { data, refetch } = useQuery(GET_STATS_SUMMARY, {
+  const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
+  const { currency } = useCurrency();
+  const { data } = useQuery(GET_STATS_SUMMARY, {
     fetchPolicy: 'network-only',
     nextFetchPolicy: 'cache-first',
     notifyOnNetworkStatusChange: true,
   });
 
-  const formatCompact = (n: number | null | undefined) => {
+  const formatWholeNumber = (n: number | null | undefined) => {
     if (n == null) return '-';
-    const abs = Math.abs(n);
-    if (abs >= 1e9) return `${(n / 1e9).toFixed(1).replace(/\.0$/, '')}B`;
-    if (abs >= 1e6) return `${(n / 1e6).toFixed(1).replace(/\.0$/, '')}M`;
-    if (abs >= 1e3) return `${(n / 1e3).toFixed(1).replace(/\.0$/, '')}K`;
-    return `${n}`;
-  };
-
-  const formatMoney = (n: number | null | undefined) => {
-    if (n == null) return '-';
+    const rounded = Math.round(n);
     try {
       return new Intl.NumberFormat('en-US', {
         minimumFractionDigits: 0,
         maximumFractionDigits: 0,
-      }).format(n);
+        useGrouping: true,
+      })
+        .format(rounded)
+        .replace(/,/g, currency.thousandsSeparator);
     } catch {
-      return `${Math.round(n)}`;
+      return `${rounded}`.replace(/\B(?=(\d{3})+(?!\d))/g, currency.thousandsSeparator);
     }
   };
 
@@ -75,10 +77,33 @@ export const ConfioTokenInfoScreen = () => {
 
   const s = data?.statsSummary;
   const liveLabel = s?.statsSource === 'algorand' ? 'en cadena' : 'actualizado';
+  const openPeraLink = (url?: string | null) => {
+    if (!url) return;
+    Linking.openURL(url).catch(() => {});
+  };
   const stats = [
-    { label: 'Usuarios Activos mensual', value: `${formatCompact(s?.activeUsers30d ?? 0)}`, growth: '30 días' },
-    { label: 'TVL en cUSD', value: `$${formatMoney(s?.totalValueLocked ?? s?.protectedSavings ?? 0)} cUSD`, growth: liveLabel },
-    { label: 'cUSD en circulación', value: `$${formatMoney(s?.circulatingCusd ?? s?.protectedSavings ?? 0)}`, growth: liveLabel },
+    {
+      label: 'Usuarios en Confío',
+      value: formatWholeNumber(s?.totalUsers ?? 0),
+      growth: 'total',
+    },
+    {
+      label: 'Ahorros Protegidos',
+      value: `${formatWholeNumber(s?.totalValueLocked ?? s?.protectedSavings ?? 0)} cUSD`,
+      growth: liveLabel,
+      description: 'cUSD respaldado por USDC dentro del contrato de Confío en Algorand.',
+      links: [
+        { label: 'Ver cUSD', url: s?.cusdAssetPeraUrl },
+        { label: 'Ver contrato', url: s?.cusdAppPeraUrl },
+      ],
+    },
+    {
+      label: 'cUSD en circulación',
+      value: `${formatWholeNumber(s?.circulatingCusd ?? s?.protectedSavings ?? 0)} cUSD`,
+      growth: liveLabel,
+      description: 'Cantidad de cUSD emitida y activa en la red.',
+      links: [{ label: 'Ver en Pera', url: s?.cusdAssetPeraUrl }],
+    },
   ];
 
   return (
@@ -125,12 +150,40 @@ export const ConfioTokenInfoScreen = () => {
           <View style={styles.statsGrid}>
             {stats.map((stat, index) => (
               <View key={index} style={styles.statCard}>
-                <Text style={styles.statValue}>{stat.value}</Text>
-                <Text style={styles.statLabel}>{stat.label}</Text>
-                <View style={styles.growthBadge}>
-                  <Icon name="trending-up" size={12} color={colors.primary} />
-                  <Text style={styles.growthText}>{stat.growth}</Text>
+                <View style={styles.statMainRow}>
+                  <View style={styles.statTextBlock}>
+                    <Text style={styles.statLabel}>{stat.label}</Text>
+                    {'description' in stat && stat.description ? (
+                      <Text style={styles.statDescription}>{stat.description}</Text>
+                    ) : null}
+                  </View>
+                  <View style={styles.statValueBlock}>
+                    <Text style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>
+                      {stat.value}
+                    </Text>
+                    <View style={styles.growthBadge}>
+                      <Icon name="trending-up" size={12} color={colors.primary} />
+                      <Text style={styles.growthText}>{stat.growth}</Text>
+                    </View>
+                  </View>
                 </View>
+                {'links' in stat && stat.links?.length ? (
+                  <View style={styles.statLinksRow}>
+                    {stat.links.map((link) => (
+                      <TouchableOpacity
+                        key={link.label}
+                        style={[styles.statLinkButton, !link.url && styles.statLinkButtonDisabled]}
+                        onPress={() => openPeraLink(link.url)}
+                        disabled={!link.url}
+                      >
+                        <Icon name="external-link" size={13} color={link.url ? colors.primary : '#9CA3AF'} />
+                        <Text style={[styles.statLinkText, !link.url && styles.statLinkTextDisabled]}>
+                          {link.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                ) : null}
               </View>
             ))}
           </View>
@@ -325,36 +378,84 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   statsGrid: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     gap: 12,
   },
   statCard: {
-    flex: 1,
     backgroundColor: colors.neutral,
     borderRadius: 12,
     padding: 16,
-    alignItems: 'center',
   },
-  statValue: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: colors.dark,
+  statMainRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  statTextBlock: {
+    flex: 1,
+    minWidth: 0,
   },
   statLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.dark,
+  },
+  statDescription: {
     fontSize: 12,
     color: '#6B7280',
+    lineHeight: 17,
     marginTop: 4,
+  },
+  statValueBlock: {
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    minWidth: 124,
+    flexShrink: 0,
+  },
+  statValue: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: colors.dark,
+    textAlign: 'right',
+    includeFontPadding: false,
   },
   growthBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    marginTop: 8,
+    marginTop: 6,
   },
   growthText: {
     fontSize: 12,
     color: colors.primary,
     fontWeight: '600',
+  },
+  statLinksRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 12,
+  },
+  statLinkButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    backgroundColor: '#E8F7F0',
+  },
+  statLinkButtonDisabled: {
+    backgroundColor: '#F3F4F6',
+  },
+  statLinkText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  statLinkTextDisabled: {
+    color: '#9CA3AF',
   },
   sectionCard: {
     marginHorizontal: 16,
