@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useQuery } from '@apollo/client';
@@ -20,18 +20,22 @@ type StatsSummary = {
 // Latino-friendly number formatting: full numbers up to 999,999 with the
 // locale thousands separator (typically "." in LATAM Spanish). "M" only kicks
 // in at one million+. No "K" — most readers don't parse it consistently.
-const formatLocale = (n: number | null | undefined, sep: string): string => {
+const formatLocale = (
+  n: number | null | undefined,
+  thousandsSeparator: string,
+  decimalSeparator: string
+): string => {
   if (n == null) return '—';
   const r = Math.round(n);
   if (r >= 1_000_000) {
     const v = r / 1_000_000;
     const decimal = v < 10 ? 1 : 0;
-    return `${v.toFixed(decimal).replace('.', ',')} M`;
+    return `${v.toFixed(decimal).replace('.', decimalSeparator)} M`;
   }
   try {
     return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 })
       .format(r)
-      .replace(/,/g, sep);
+      .replace(/,/g, thousandsSeparator);
   } catch {
     return `${r}`;
   }
@@ -48,32 +52,47 @@ type Tile = {
   onPress: () => void;
 };
 
-export const HomeStatsSection: React.FC = () => {
+type HomeStatsSectionProps = {
+  refreshNonce?: number;
+};
+
+export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({ refreshNonce = 0 }) => {
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const { currency } = useCurrency();
-  const { data } = useQuery(GET_STATS_SUMMARY, {
+  const { data, refetch } = useQuery(GET_STATS_SUMMARY, {
     fetchPolicy: 'cache-and-network',
     nextFetchPolicy: 'cache-first',
   });
+  const previousRefreshNonce = useRef(refreshNonce);
+
+  useEffect(() => {
+    if (refreshNonce === previousRefreshNonce.current) return;
+    previousRefreshNonce.current = refreshNonce;
+    refetch().catch(() => {});
+  }, [refreshNonce, refetch]);
+
   const s: StatsSummary | undefined = data?.statsSummary;
-  const sep = currency.thousandsSeparator;
+  const thousandsSeparator = currency.thousandsSeparator;
+  const decimalSeparator = currency.decimalSeparator;
   const tvl = s?.totalValueLocked ?? s?.protectedSavings;
   const verified = s?.diditVerifiedUsers ?? 0;
+  const fmt = (value: number | null | undefined) =>
+    formatLocale(value, thousandsSeparator, decimalSeparator);
 
   const tiles: Tile[] = useMemo(
     () => [
       {
         key: 'users',
         icon: 'users',
-        value: formatLocale(s?.totalUsers, sep),
+        value: fmt(s?.totalUsers),
         label: 'Usuarios',
-        descriptor: verified > 0 ? `Didit: ${formatLocale(verified, sep)}` : 'Con teléfono',
+        descriptor: verified > 0 ? `Didit: ${fmt(verified)}` : 'Con teléfono',
         onPress: () => navigation.navigate('LatamCommunity'),
       },
       {
         key: 'savings',
         icon: 'shield',
-        value: formatLocale(tvl, sep),
+        value: fmt(tvl),
         unit: 'cUSD',
         label: 'Ahorros',
         descriptor: 'USDC',
@@ -82,7 +101,7 @@ export const HomeStatsSection: React.FC = () => {
       {
         key: 'presale',
         icon: 'zap',
-        value: formatLocale(s?.presaleCusdRaised, sep),
+        value: fmt(s?.presaleCusdRaised),
         unit: 'cUSD',
         label: 'Preventa',
         descriptor: '$CONFIO',
@@ -90,7 +109,7 @@ export const HomeStatsSection: React.FC = () => {
         onPress: () => navigation.navigate('ConfioPresale'),
       },
     ],
-    [s?.totalUsers, verified, tvl, s?.presaleCusdRaised, sep, navigation]
+    [s?.totalUsers, verified, tvl, s?.presaleCusdRaised, thousandsSeparator, decimalSeparator, navigation]
   );
 
   return (

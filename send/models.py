@@ -202,6 +202,35 @@ def send_txn_activity(sender, instance: SendTransaction, created, **kwargs):
             pass
 
 
+@receiver(post_save, sender=SendTransaction)
+def handle_first_cusd_on_send_receive(sender, instance: SendTransaction, **kwargs):
+    """Trigger ICP/Rating modal arming when a user receives their first cUSD via P2P send.
+
+    Fires on any save where the row is now CONFIRMED + cUSD + has a recipient_user.
+    Idempotent: mark_first_cusd_acquired_if_null is a no-op if already set.
+    No confirmed_at column on SendTransaction, so use updated_at as the proxy
+    for confirmation time — when status transitions to CONFIRMED, updated_at
+    is set to that moment by auto_now=True.
+    """
+    try:
+        if instance.is_deleted:
+            return
+        if instance.status != 'CONFIRMED' or instance.token_type != 'CUSD':
+            return
+        if instance.recipient_user_id is None:
+            return
+        from users.helpers import mark_first_cusd_acquired_if_null, arm_rating_prompt_if_eligible
+        recipient = instance.recipient_user
+        mark_first_cusd_acquired_if_null(recipient, instance.updated_at)
+        recipient.refresh_from_db(
+            fields=['confio_icp_captured_at', 'rating_prompt_due_at', 'confio_rating_prompted_at']
+        )
+        arm_rating_prompt_if_eligible(recipient)
+    except Exception:
+        # Swallow — never block the send-transaction write path on modal-arming.
+        pass
+
+
 class PhoneInvite(SoftDeleteModel):
     """Track phone-based invites for non-Confío friends (off-chain index)."""
     STATUS_CHOICES = [

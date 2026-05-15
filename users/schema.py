@@ -352,6 +352,18 @@ def jwt_payload_handler(user):
 	}
 	return payload
 
+class PendingModalEnum(graphene.Enum):
+	NONE = 'NONE'
+	ICP = 'ICP'
+	RATING = 'RATING'
+
+
+class RatingActionEnum(graphene.Enum):
+	FEEDBACK = 'FEEDBACK'
+	STORE = 'STORE'
+	SKIP = 'SKIP'
+
+
 class UserType(DjangoObjectType):
 	# Define explicit safe fields
 	is_identity_verified = graphene.Boolean()
@@ -361,6 +373,11 @@ class UserType(DjangoObjectType):
 	accounts = graphene.List(lambda: AccountType)
 	is_staff = graphene.Boolean()
 	requires_backup_completion = graphene.Boolean()
+
+	# Post-deposit ICP/Rating modal coordinator (server-driven priority).
+	pending_modal = graphene.Field(PendingModalEnum, description="Which onboarding modal (if any) should the client render next: ICP > RATING > NONE")
+	confio_icp_captured_at = graphene.DateTime()
+	confio_rating_prompted_at = graphene.DateTime()
 
 	# Status tier (referral-count-gated)
 	status_tier = graphene.String(description="Referral tier: member, early_supporter, community_builder, embajador")
@@ -486,6 +503,39 @@ class UserType(DjangoObjectType):
 	
 	def resolve_accounts(self, info):
 		return Account.objects.filter(user=self).select_related('business')
+
+	def resolve_pending_modal(self, info):
+		"""Server-driven modal coordinator. ICP > RATING > NONE.
+
+		Only the user themselves sees their own pending modal (privacy: the
+		field could appear on UserType in transaction edges, etc.).
+		"""
+		user = getattr(info.context, 'user', None)
+		if not user or not getattr(user, 'is_authenticated', False):
+			return PendingModalEnum.NONE
+		if str(user.id) != str(self.id):
+			return PendingModalEnum.NONE
+		if self.first_cusd_acquired_at and not self.confio_icp_captured_at:
+			return PendingModalEnum.ICP
+		if self.rating_prompt_due_at and not self.confio_rating_prompted_at:
+			return PendingModalEnum.RATING
+		return PendingModalEnum.NONE
+
+	def resolve_confio_icp_captured_at(self, info):
+		user = getattr(info.context, 'user', None)
+		if not user or not getattr(user, 'is_authenticated', False):
+			return None
+		if str(user.id) != str(self.id):
+			return None
+		return self.confio_icp_captured_at
+
+	def resolve_confio_rating_prompted_at(self, info):
+		user = getattr(info.context, 'user', None)
+		if not user or not getattr(user, 'is_authenticated', False):
+			return None
+		if str(user.id) != str(self.id):
+			return None
+		return self.confio_rating_prompted_at
 
 class IdentityVerificationType(DjangoObjectType):
     status_detail = graphene.String()
@@ -2542,6 +2592,114 @@ class UpdateUserProfile(graphene.Mutation):
 			return UpdateUserProfile(success=True, error=None, user=user)
 		except Exception as e:
 			return UpdateUserProfile(success=False, error=str(e), user=None)
+
+_ICP_ALLOWED_TAGS = {
+	'proteger_ahorros',
+	'generar_rendimiento',
+	'comprar_confio',
+	'enviar_recibir_pagos',
+	'importacion_exportacion',
+	'otra',
+}
+
+
+def _sanitize_freeform_text(s):
+	"""Strip control characters and cap to 500 chars. None-safe."""
+	if s is None:
+		return None
+	cleaned = ''.join(ch for ch in s if ch in ('\n', '\t') or ord(ch) >= 32)
+	cleaned = cleaned.strip()
+	if not cleaned:
+		return None
+	return cleaned[:500]
+
+
+class SubmitConfioIcp(graphene.Mutation):
+	"""Persist user's ICP self-report. Empty tags list == user skipped.
+
+	Always sets confio_icp_captured_at, which flips pendingModal off.
+	Single-submit per user; safe to call repeatedly (no-op after first capture).
+	"""
+	class Arguments:
+		tags = graphene.List(graphene.NonNull(graphene.String), required=True)
+		other_text = graphene.String()
+
+	success = graphene.Boolean()
+	error = graphene.String()
+	user = graphene.Field(UserType)
+
+	@classmethod
+	def mutate(cls, root, info, tags, other_text=None):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return SubmitConfioIcp(success=False, error="Authentication required", user=None)
+
+		if user.confio_icp_captured_at is not None:
+			return SubmitConfioIcp(success=True, error=None, user=user)
+
+		# Filter to known tags only; ignore unknown values silently rather
+		# than 400-ing the mutation (forward-compatible if client drifts).
+		cleaned_tags = [t for t in (tags or []) if t in _ICP_ALLOWED_TAGS]
+		cleaned_other = _sanitize_freeform_text(other_text) if 'otra' in cleaned_tags else None
+
+		try:
+			user.confio_icp_tags = cleaned_tags
+			user.confio_icp_other_text = cleaned_other
+			user.confio_icp_captured_at = timezone.now()
+			user.save(update_fields=['confio_icp_tags', 'confio_icp_other_text', 'confio_icp_captured_at'])
+			return SubmitConfioIcp(success=True, error=None, user=user)
+		except Exception as e:
+			return SubmitConfioIcp(success=False, error=str(e), user=None)
+
+
+class SubmitConfioRating(graphene.Mutation):
+	"""Persist user's rating + action choice. Single submit at Step 2.
+
+	Action enum: FEEDBACK | STORE | SKIP. Stars 1-5 required regardless of action.
+	Setting confio_rating_prompted_at gates the modal from re-firing.
+	"""
+	class Arguments:
+		stars = graphene.Int(required=True)
+		action = RatingActionEnum(required=True)
+		feedback_text = graphene.String()
+
+	success = graphene.Boolean()
+	error = graphene.String()
+	user = graphene.Field(UserType)
+
+	@classmethod
+	def mutate(cls, root, info, stars, action, feedback_text=None):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return SubmitConfioRating(success=False, error="Authentication required", user=None)
+
+		if user.confio_rating_prompted_at is not None:
+			return SubmitConfioRating(success=True, error=None, user=user)
+
+		if not isinstance(stars, int) or stars < 1 or stars > 5:
+			return SubmitConfioRating(success=False, error="Stars must be between 1 and 5", user=None)
+
+		action_value = action.value if hasattr(action, 'value') else action
+		if action_value not in ('FEEDBACK', 'STORE', 'SKIP'):
+			return SubmitConfioRating(success=False, error="Invalid action", user=None)
+
+		cleaned_feedback = _sanitize_freeform_text(feedback_text) if action_value == 'FEEDBACK' else None
+
+		try:
+			user.confio_rating_star_count = stars
+			user.confio_rating_action = action_value
+			user.confio_rating_feedback_text = cleaned_feedback
+			user.confio_rating_prompted_at = timezone.now()
+			user.save(update_fields=[
+				'confio_rating_star_count',
+				'confio_rating_action',
+				'confio_rating_feedback_text',
+				'confio_rating_prompted_at',
+			])
+			return SubmitConfioRating(success=True, error=None, user=user)
+		except Exception as e:
+			return SubmitConfioRating(success=False, error=str(e), user=None)
+
 
 class SubmitIdentityVerification(graphene.Mutation):
 	class Arguments:
@@ -5408,6 +5566,8 @@ class Mutation(EmployeeMutations, FunnelMutations, graphene.ObjectType):
     update_phone_number = UpdatePhoneNumber.Field()
     update_username = UpdateUsername.Field()
     update_user_profile = UpdateUserProfile.Field()
+    submit_confio_icp = SubmitConfioIcp.Field()
+    submit_confio_rating = SubmitConfioRating.Field()
     invalidate_auth_tokens = InvalidateAuthTokens.Field()
     refresh_token = RefreshToken.Field()
     switch_account_token = SwitchAccountToken.Field()

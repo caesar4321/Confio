@@ -43,6 +43,9 @@ export const GET_ME = gql`
       nextTierName
       nextTierReferralsNeeded
       isReferralVerified
+      pendingModal
+      confioIcpCapturedAt
+      confioRatingPromptedAt
     }
   }
 `;
@@ -489,6 +492,34 @@ export const UPDATE_USER_PROFILE = gql`
     updateUserProfile(firstName: $firstName, lastName: $lastName) {
       success
       error
+    }
+  }
+`;
+
+export const SUBMIT_CONFIO_ICP = gql`
+  mutation SubmitConfioIcp($tags: [String!]!, $otherText: String) {
+    submitConfioIcp(tags: $tags, otherText: $otherText) {
+      success
+      error
+      user {
+        id
+        pendingModal
+        confioIcpCapturedAt
+      }
+    }
+  }
+`;
+
+export const SUBMIT_CONFIO_RATING = gql`
+  mutation SubmitConfioRating($stars: Int!, $action: RatingActionEnum!, $feedbackText: String) {
+    submitConfioRating(stars: $stars, action: $action, feedbackText: $feedbackText) {
+      success
+      error
+      user {
+        id
+        pendingModal
+        confioRatingPromptedAt
+      }
     }
   }
 `;

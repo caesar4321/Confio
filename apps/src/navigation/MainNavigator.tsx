@@ -74,6 +74,7 @@ import DiscoverPostDetailScreen from '../screens/DiscoverPostDetailScreen';
 // import NotificationSettingsScreen from '../screens/NotificationSettingsScreen';
 
 import { MigrationModal } from '../components/MigrationModal';
+import { OnboardingModalCoordinator } from '../components/OnboardingModalCoordinator';
 import messagingService from '../services/messagingService';
 import { pushNotificationService } from '../services/pushNotificationService';
 import { deepLinkHandler } from '../utils/deepLinkHandler';
@@ -521,6 +522,7 @@ export const MainNavigator = () => {
       */}
       </Stack.Navigator>
       <MigrationModal />
+      <OnboardingModalCoordinator />
     </>
   );
 };

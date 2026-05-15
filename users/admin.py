@@ -17,12 +17,18 @@ from .admin_analytics import DailyMetricsAdmin, CountryMetricsAdmin
 
 @admin.register(User)
 class UserAdmin(admin.ModelAdmin):
-    list_display = ('username', 'email', 'firebase_uid', 'phone_display', 'verification_status_display', 'backup_provider', 'accounts_count', 'is_staff', 'created_at')
-    list_filter = ('backup_provider', 'is_staff', 'is_superuser', 'phone_country', 'created_at')
-    search_fields = ('username', 'email', 'firebase_uid', 'first_name', 'last_name', 'phone_number', 'phone_key')
-    readonly_fields = ('firebase_uid', 'auth_token_version', 'created_at', 'updated_at')
+    list_display = ('username', 'email', 'firebase_uid', 'phone_display', 'verification_status_display', 'backup_provider', 'accounts_count', 'icp_summary', 'rating_summary', 'is_staff', 'created_at')
+    list_filter = ('backup_provider', 'is_staff', 'is_superuser', 'phone_country', 'confio_rating_star_count', 'confio_rating_action', 'created_at')
+    search_fields = ('username', 'email', 'firebase_uid', 'first_name', 'last_name', 'phone_number', 'phone_key', 'confio_icp_other_text', 'confio_rating_feedback_text')
+    readonly_fields = (
+        'firebase_uid', 'auth_token_version', 'created_at', 'updated_at',
+        'first_cusd_acquired_at', 'rating_prompt_due_at',
+        'confio_icp_tags', 'confio_icp_other_text', 'confio_icp_captured_at',
+        'confio_rating_prompted_at', 'confio_rating_star_count',
+        'confio_rating_action', 'confio_rating_feedback_text',
+    )
     actions = ('soft_delete_selected',)
-    
+
     fieldsets = (
         ('Basic Information', {
             'fields': ('username', 'email', 'first_name', 'last_name', 'firebase_uid')
@@ -38,11 +44,45 @@ class UserAdmin(admin.ModelAdmin):
             'fields': ('auth_token_version',),
             'classes': ('collapse',)
         }),
+        ('ICP Capture (Confío segmentation)', {
+            'fields': (
+                'first_cusd_acquired_at',
+                'confio_icp_captured_at',
+                'confio_icp_tags',
+                'confio_icp_other_text',
+            ),
+            'description': 'Set automatically by signal handlers on first cUSD acquisition + the submitConfioIcp mutation. Read-only.',
+        }),
+        ('Rating (Post-engagement)', {
+            'fields': (
+                'rating_prompt_due_at',
+                'confio_rating_prompted_at',
+                'confio_rating_star_count',
+                'confio_rating_action',
+                'confio_rating_feedback_text',
+            ),
+            'description': 'Set by the submitConfioRating mutation. Read-only.',
+        }),
         ('Timestamps', {
             'fields': ('created_at', 'updated_at', 'last_login', 'date_joined'),
             'classes': ('collapse',)
         }),
     )
+
+    def icp_summary(self, obj):
+        if not obj.confio_icp_captured_at:
+            return '—'
+        tags = obj.confio_icp_tags or []
+        return format_html('<span title="{}">{} tag(s)</span>', ', '.join(tags), len(tags))
+    icp_summary.short_description = 'ICP'
+
+    def rating_summary(self, obj):
+        if not obj.confio_rating_prompted_at:
+            return '—'
+        stars = obj.confio_rating_star_count or 0
+        action = obj.confio_rating_action or ''
+        return format_html('{}★ {}', stars, action.lower())
+    rating_summary.short_description = 'Rating'
     
     def phone_display(self, obj):
         if obj.phone_country and obj.phone_number:

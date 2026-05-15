@@ -1,4 +1,6 @@
 from django.contrib.auth.models import AbstractUser
+from django.contrib.postgres.fields import ArrayField
+from django.core.validators import MaxLengthValidator, MinValueValidator, MaxValueValidator
 from django.db import models
 from django.db.models import Q
 from django.conf import settings
@@ -115,6 +117,44 @@ class User(AbstractUser, SoftDeleteModel):
         null=True,
         choices=[('ios', 'iOS'), ('android', 'Android'), ('web', 'Web')],
         help_text="Operating System of the user's primary device"
+    )
+
+    # ── Post-deposit ICP capture + Rating modal (office-hours session 3) ──
+    # First confirmed cUSD acquisition (any source: Koywe, Guardarian, P2P receive).
+    # Set by signal handlers on Conversion(COMPLETED, usdc_to_cusd) and
+    # SendTransaction(CONFIRMED, token_type='CUSD', recipient_user=self).
+    # Gates the ICP modal.
+    first_cusd_acquired_at = models.DateTimeField(null=True, blank=True)
+
+    # Denormalized rating-prompt arming timestamp. Set by signal handlers on
+    # post-ICP cUSD activity, OR by daily Celery beat 14 days after ICP capture.
+    rating_prompt_due_at = models.DateTimeField(null=True, blank=True)
+
+    # ICP capture (user-submitted via submitConfioIcp mutation)
+    confio_icp_tags = ArrayField(
+        models.CharField(max_length=64), default=list, blank=True,
+        help_text="ICP segmentation tags chosen by user (multi-select)"
+    )
+    confio_icp_other_text = models.TextField(
+        null=True, blank=True, validators=[MaxLengthValidator(500)],
+        help_text='Free-text "Otra razón" — 500-char cap, control chars stripped on save'
+    )
+    confio_icp_captured_at = models.DateTimeField(null=True, blank=True)
+
+    # Rating capture (user-submitted via submitConfioRating mutation, single submit at Step 2)
+    confio_rating_prompted_at = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Set when submitConfioRating mutation succeeds. Gates modal re-fire."
+    )
+    confio_rating_star_count = models.PositiveSmallIntegerField(
+        null=True, blank=True, validators=[MinValueValidator(1), MaxValueValidator(5)]
+    )
+    confio_rating_action = models.CharField(
+        max_length=10, null=True, blank=True,
+        choices=[('FEEDBACK', 'Feedback'), ('STORE', 'Store'), ('SKIP', 'Skip')]
+    )
+    confio_rating_feedback_text = models.TextField(
+        null=True, blank=True, validators=[MaxLengthValidator(500)]
     )
 
     auth_token_version = models.IntegerField(default=1, help_text="Version number for JWT tokens. Incrementing this invalidates all existing tokens.")

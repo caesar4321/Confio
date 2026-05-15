@@ -114,6 +114,7 @@ export const HomeScreen = () => {
   // Show local currency by default if not in US and rate is available
   const [showLocalCurrency, setShowLocalCurrency] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [statsRefreshNonce, setStatsRefreshNonce] = useState(0);
   const [showBalance, setShowBalance] = useState(true);
   // Invite receipt banner removed; self-claim card state
   const [showInviteClaimCard, setShowInviteClaimCard] = useState(false);
@@ -669,6 +670,7 @@ export const HomeScreen = () => {
         refreshAccountBalance(), // Force blockchain sync
       ]);
       await refetchMyBalances();
+      setStatsRefreshNonce((nonce) => nonce + 1);
     } catch (error) {
     } finally {
       setRefreshing(false);
@@ -1388,7 +1390,7 @@ export const HomeScreen = () => {
         </Animated.View>
 
         {/* Crecimiento Confío stats */}
-        <HomeStatsSection />
+        <HomeStatsSection refreshNonce={statsRefreshNonce} />
 
         {/* Wallets Section */}
         <View style={styles.walletsSection}>

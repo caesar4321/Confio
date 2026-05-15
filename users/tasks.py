@@ -52,6 +52,30 @@ def check_hodler_achievements():
         raise
 
 
+@shared_task(name='users.arm_dormant_rating_prompts')
+@ensure_db_connection_closed
+def arm_dormant_rating_prompts():
+    """Fallback path: arm rating_prompt_due_at for users who captured ICP but
+    never returned for a second cUSD activity within 14 days.
+
+    The signal-armed path (post_save handlers on Conversion / SendTransaction)
+    handles active users; this beat catches the one-and-done cohort so we still
+    surface a Rating modal on their next app open.
+    """
+    from users.models import User
+
+    cutoff = timezone.now() - timedelta(days=14)
+    armed = User.objects.filter(
+        confio_icp_captured_at__isnull=False,
+        confio_icp_captured_at__lte=cutoff,
+        rating_prompt_due_at__isnull=True,
+        confio_rating_prompted_at__isnull=True,
+        deleted_at__isnull=True,
+    ).update(rating_prompt_due_at=timezone.now())
+    logger.info("arm_dormant_rating_prompts armed %d users", armed)
+    return armed
+
+
 @shared_task(name='users.cleanup_expired_referrals')
 @ensure_db_connection_closed
 def cleanup_expired_referrals():

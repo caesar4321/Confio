@@ -9,6 +9,7 @@ import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.load
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 import com.facebook.react.defaults.DefaultReactNativeHost
 import com.facebook.react.soloader.OpenSourceMergedSoMapping
+import com.facebook.soloader.ExternalSoMapping
 import com.facebook.soloader.SoLoader
 
 // Manual imports for all packages
@@ -96,10 +97,22 @@ class MainApplication : Application(), ReactApplication {
   override fun onCreate() {
     super.onCreate()
 
-    SoLoader.init(this, OpenSourceMergedSoMapping)
+    SoLoader.init(this, ConfioMergedSoMapping)
     if (BuildConfig.IS_NEW_ARCHITECTURE_ENABLED) {
       // If you opted-in for the New Architecture, we load the native entry point for this app.
       load()
+    }
+  }
+}
+
+private object ConfioMergedSoMapping : ExternalSoMapping {
+  override fun mapLibName(input: String): String = OpenSourceMergedSoMapping.mapLibName(input)
+
+  override fun invokeJniOnload(libraryName: String) {
+    // RN 0.79 packages several JNI libraries inside libreactnative.so. The merged children
+    // need explicit JNI_OnLoad dispatch, but "reactnative" itself is only the container.
+    if (libraryName != "reactnative") {
+      OpenSourceMergedSoMapping.invokeJniOnload(libraryName)
     }
   }
 }
