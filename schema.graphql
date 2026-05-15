@@ -3480,6 +3480,7 @@ type StatsSummaryType {
   protectedSavings: Float
   totalValueLocked: Float
   circulatingCusd: Float
+  presaleCusdRaised: Float
   dailyTransactions: Int
   statsSource: String
   statsAsOf: DateTime

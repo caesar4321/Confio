@@ -15,7 +15,7 @@ const GET_STATS_SUMMARY = gql`
       totalUsers
       protectedSavings
       totalValueLocked
-      circulatingCusd
+      presaleCusdRaised
       statsSource
       cusdAssetPeraUrl
     }
@@ -98,11 +98,10 @@ export const ConfioTokenInfoScreen = () => {
       ],
     },
     {
-      label: 'cUSD en circulación',
-      value: `${formatWholeNumber(s?.circulatingCusd ?? s?.protectedSavings ?? 0)} cUSD`,
-      growth: liveLabel,
-      description: 'Cantidad de cUSD emitida y activa en la blockchain.',
-      links: [{ label: 'Ver en Pera', url: s?.cusdAssetPeraUrl }],
+      label: 'Preventa de $CONFIO',
+      value: `${formatWholeNumber(s?.presaleCusdRaised ?? 0)} cUSD`,
+      growth: 'total',
+      description: 'cUSD aportados por la comunidad en la preventa.',
     },
   ];
 

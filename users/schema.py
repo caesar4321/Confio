@@ -525,6 +525,7 @@ class StatsSummaryType(graphene.ObjectType):
     protected_savings = graphene.Float()
     total_value_locked = graphene.Float()
     circulating_cusd = graphene.Float()
+    presale_cusd_raised = graphene.Float()
     daily_transactions = graphene.Int()
     stats_source = graphene.String()
     stats_as_of = graphene.DateTime()
@@ -1414,7 +1415,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		from django.core.cache import cache
 
 		# Bump cache key version to invalidate old aggregation behavior
-		cache_key = 'stats_summary_v6'
+		cache_key = 'stats_summary_v7'
 		cached = cache.get(cache_key)
 		if cached:
 			return StatsSummaryType(**cached)
@@ -1430,6 +1431,11 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		total_value_locked = float(cusd_metrics.tvl_cusd)
 		circulating_cusd = float(cusd_metrics.circulating_cusd)
 
+		from presale.models import PresalePurchase
+		presale_cusd_raised = PresalePurchase.objects.filter(status='completed').aggregate(
+			total=Sum('cusd_amount')
+		)['total'] or Decimal('0')
+
 		from django.conf import settings
 		network = (getattr(settings, 'ALGORAND_NETWORK', '') or '').lower()
 		pera_base_url = 'https://testnet.explorer.perawallet.app' if network == 'testnet' else 'https://explorer.perawallet.app'
@@ -1444,6 +1450,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			'protected_savings': protected_savings,
 			'total_value_locked': total_value_locked,
 			'circulating_cusd': circulating_cusd,
+			'presale_cusd_raised': float(presale_cusd_raised),
 			'daily_transactions': None,
 			'stats_source': cusd_metrics.source,
 			'stats_as_of': cusd_metrics.as_of,
