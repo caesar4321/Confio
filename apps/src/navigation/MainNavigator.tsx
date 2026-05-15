@@ -51,6 +51,7 @@ import { RampAddressScreen } from '../screens/RampAddressScreen';
 import AchievementsScreen from '../screens/AchievementsScreen';
 import { ConfioTokenInfoScreen } from '../screens/ConfioTokenInfoScreen';
 import { LatamCommunityScreen } from '../screens/LatamCommunityScreen';
+import { AhorrosProtegidosScreen } from '../screens/AhorrosProtegidosScreen';
 import { ConfioPresaleScreen } from '../screens/ConfioPresaleScreen';
 import { ConfioPresaleParticipateScreen } from '../screens/ConfioPresaleParticipateScreen';
 import { LoadingOverlay } from '../components/LoadingOverlay';
@@ -418,6 +419,11 @@ export const MainNavigator = () => {
         <Stack.Screen
           name="LatamCommunity"
           component={LatamCommunityScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="AhorrosProtegidos"
+          component={AhorrosProtegidosScreen}
           options={{ headerShown: false }}
         />
         <Stack.Screen
