@@ -396,7 +396,7 @@ class UnifiedTransactionQuery(graphene.ObjectType):
             queryset = queryset.annotate(tok_upper=Upper('token_type')).filter(tok_upper__in=wanted)
         
         queryset = queryset.exclude(
-            Q(transaction_type='conversion') & Q(conversion__ramp_transaction__isnull=False)
+            Q(transaction_type='conversion') & Q(conversion__ramp_transactions__isnull=False)
         )
 
         # Order by created_at descending to show newest first
@@ -509,7 +509,7 @@ class UnifiedTransactionQuery(graphene.ObjectType):
         )
         
         queryset = queryset.exclude(
-            Q(transaction_type='conversion') & Q(conversion__ramp_transaction__isnull=False)
+            Q(transaction_type='conversion') & Q(conversion__ramp_transactions__isnull=False)
         )
 
         # Order by created_at descending to show newest first
@@ -638,7 +638,7 @@ class UnifiedTransactionQuery(graphene.ObjectType):
         )
         
         queryset = queryset.exclude(
-            Q(transaction_type='conversion') & Q(conversion__ramp_transaction__isnull=False)
+            Q(transaction_type='conversion') & Q(conversion__ramp_transactions__isnull=False)
         )
 
         # Order by created_at descending to show newest first
