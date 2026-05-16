@@ -130,6 +130,31 @@ def _derive_final_amount(ramp_tx: RampTransaction) -> tuple[Decimal | None, str]
     return None, ramp_tx.final_currency or 'CUSD'
 
 
+def _find_koywe_ramp_for_conversion(conversion: Conversion) -> RampTransaction | None:
+    """Walk Conversion -> PendingAutoSwap -> USDCDeposit -> RampTransaction.
+
+    The Koywe linking pipeline writes USDCDeposit -> RampTransaction via
+    link_koywe_deposit_to_ramp and creates the PendingAutoSwap from the
+    deposit. The conversion is then attached to the PendingAutoSwap by
+    BuildAutoSwapTransactionsMutation. The final hop (conversion ->
+    ramp) was never wired up, leaving every Koywe ramp's `conversion`
+    FK NULL even after a successful swap.
+    """
+    try:
+        pas = conversion.pending_auto_swap  # OneToOne reverse
+    except Exception:
+        return None
+    if not pas or not pas.usdc_deposit_id:
+        return None
+    try:
+        ramp_tx = pas.usdc_deposit.ramp_transaction  # reverse OneToOne
+    except Exception:
+        return None
+    if not ramp_tx or ramp_tx.provider != 'koywe':
+        return None
+    return ramp_tx
+
+
 def _find_guardarian_ramp_for_conversion(conversion: Conversion) -> RampTransaction | None:
     if conversion.status != 'COMPLETED':
         return None
@@ -527,8 +552,10 @@ def handle_ramp_conversion_link(sender, instance, **kwargs):
     ramp_tx = _safe_related(instance, 'ramp_transaction')
     if not ramp_tx:
         ramp_tx = _find_guardarian_ramp_for_conversion(instance)
-        if not ramp_tx:
-            return
+    if not ramp_tx:
+        ramp_tx = _find_koywe_ramp_for_conversion(instance)
+    if not ramp_tx:
+        return
     ramp_tx.conversion = instance
     ramp_tx.actor_address = instance.actor_address or ramp_tx.actor_address
     ramp_tx.final_amount, ramp_tx.final_currency = _derive_final_amount(ramp_tx)
