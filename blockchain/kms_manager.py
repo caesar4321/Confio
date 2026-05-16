@@ -18,9 +18,9 @@ import os
 from typing import Optional, Tuple
 
 import boto3
-from algosdk import account, encoding, mnemonic
+from algosdk import account, constants, encoding, mnemonic
 from algosdk.atomic_transaction_composer import TransactionSigner
-from algosdk.transaction import Transaction
+from algosdk.transaction import SignedTransaction, Transaction
 from django.core.exceptions import ImproperlyConfigured
 
 logger = logging.getLogger(__name__)
@@ -515,7 +515,7 @@ class KMSSigner:
 class KMSTransactionSigner(TransactionSigner):
     """AtomicTransactionComposer-compatible signer that delegates to KMSSigner."""
 
-    def __init__(self, kms_signer: KMSSigner):
+    def __init__(self, kms_signer):
         self.kms_signer = kms_signer
 
     def sign_transactions(self, txns, indexes=None):
@@ -527,23 +527,177 @@ class KMSTransactionSigner(TransactionSigner):
         return signed
 
 
+class NativeKMSSigner:
+    """
+    Drop-in replacement for KMSSigner that uses AWS KMS native Ed25519 signing.
+
+    Unlike the legacy KMSSigner (which stores the raw Ed25519 private key in
+    SSM Parameter Store encrypted by a symmetric KMS key, decrypts it in
+    memory, and signs locally), this signer uses an asymmetric KMS key with:
+
+        KeySpec=ECC_NIST_EDWARDS25519
+        KeyUsage=SIGN_VERIFY
+        SigningAlgorithm=ED25519_SHA_512
+        MessageType=RAW
+
+    The private key never leaves KMS. The signer sends Algorand's canonical
+    signing payload (`TX` prefix + msgpack(transaction)) to KMS and inserts
+    the returned 64-byte Ed25519 signature into Algorand SDK transaction
+    objects. Returns standard SignedTransaction objects, so it is API-
+    compatible with KMSSigner everywhere the backend uses it.
+
+    Construction accepts a KMS key alias (e.g. "confio-mainnet-sponsor-native-
+    ed25519"), a fully-qualified alias path ("alias/<name>"), or a key ARN.
+    AWS credentials come from the default boto3 chain unless a profile is
+    supplied; on EC2/ECS this is the instance role.
+    """
+
+    ED25519_SPKI_PREFIX = bytes.fromhex("302a300506032b6570032100")
+
+    def __init__(
+        self,
+        key_alias: str,
+        region_name: str = "eu-central-2",
+        profile_name: Optional[str] = None,
+    ):
+        if not key_alias:
+            raise ImproperlyConfigured("NativeKMSSigner requires a key alias or ARN.")
+        if key_alias.startswith("arn:") or key_alias.startswith("alias/"):
+            self.key_id = key_alias
+        else:
+            self.key_id = f"alias/{key_alias}"
+        self.key_alias = key_alias
+        self.region_name = region_name
+
+        session_kwargs = {"region_name": region_name}
+        if profile_name:
+            session_kwargs["profile_name"] = profile_name
+        self.kms_client = boto3.Session(**session_kwargs).client("kms")
+
+        self._public_key: Optional[bytes] = None
+        self._address: Optional[str] = None
+
+    def _get_public_key_bytes(self) -> bytes:
+        if self._public_key is not None:
+            return self._public_key
+
+        response = self.kms_client.get_public_key(KeyId=self.key_id)
+        spec = (response.get("KeySpec"), response.get("KeyUsage"))
+        if spec != ("ECC_NIST_EDWARDS25519", "SIGN_VERIFY"):
+            raise ImproperlyConfigured(
+                f"KMS key {self.key_id} is {spec}; expected "
+                "('ECC_NIST_EDWARDS25519', 'SIGN_VERIFY') for native Ed25519 signing."
+            )
+
+        public_key_der = response["PublicKey"]
+        if not public_key_der.startswith(self.ED25519_SPKI_PREFIX):
+            raise ValueError(
+                f"Unexpected Ed25519 SPKI DER prefix from KMS for {self.key_id}"
+            )
+
+        public_key = public_key_der[-32:]
+        if len(public_key) != constants.key_len_bytes:
+            raise ValueError(
+                f"Expected 32-byte Ed25519 public key, got {len(public_key)}"
+            )
+
+        self._public_key = public_key
+        return public_key
+
+    @property
+    def address(self) -> str:
+        if self._address is None:
+            self._address = encoding.encode_address(self._get_public_key_bytes())
+        return self._address
+
+    def _sign_bytes(self, payload: bytes) -> bytes:
+        response = self.kms_client.sign(
+            KeyId=self.key_id,
+            Message=payload,
+            MessageType="RAW",
+            SigningAlgorithm="ED25519_SHA_512",
+        )
+        signature = response["Signature"]
+        if len(signature) != 64:
+            raise ValueError(
+                f"Expected 64-byte Ed25519 signature from KMS, got {len(signature)}"
+            )
+        return signature
+
+    def _sign_transaction_signature(self, txn: Transaction) -> bytes:
+        """Return the raw 64-byte Ed25519 signature for an Algorand transaction."""
+        txn_b64 = encoding.msgpack_encode(txn)
+        payload = constants.txid_prefix + base64.b64decode(txn_b64)
+        return self._sign_bytes(payload)
+
+    def sign_transaction(self, txn: Transaction) -> SignedTransaction:
+        """
+        Sign a transaction with native KMS Ed25519 and return a SignedTransaction.
+
+        The returned object is API-compatible with what
+        ``transaction.sign(private_key)`` produces, so existing call sites in
+        the backend that pass the result to ``algod.send_transaction`` /
+        ``algod.send_transactions`` work unchanged.
+        """
+        signature = self._sign_transaction_signature(txn)
+        signature_b64 = base64.b64encode(signature).decode()
+        authorizing_address = None
+        if txn.sender != self.address:
+            authorizing_address = self.address
+        signed = SignedTransaction(txn, signature_b64, authorizing_address)
+        logger.info(
+            "Transaction signed with native KMS key %s (alias=%s)",
+            self.key_id,
+            self.key_alias,
+        )
+        return signed
+
+    def sign_transactions(self, txns: list, indexes: list = None) -> list:
+        """Sign multiple transactions (e.g. an atomic group)."""
+        if indexes is None:
+            return [self.sign_transaction(t) for t in txns]
+        return [self.sign_transaction(txns[i]) for i in indexes]
+
+    def sign_transaction_msgpack(self, txn: Transaction) -> str:
+        signed = self.sign_transaction(txn)
+        return encoding.msgpack_encode(signed)
+
+    def sign_transactions_msgpack(self, txns: list) -> list:
+        return [self.sign_transaction_msgpack(t) for t in txns]
+
+    def assert_matches_address(self, expected_address: Optional[str]) -> None:
+        if expected_address and expected_address != self.address:
+            raise ImproperlyConfigured(
+                f"Native KMS alias '{self.key_alias}' resolves to {self.address}, "
+                f"but settings configured {expected_address}"
+            )
+
+
 def get_kms_signer_from_settings(
     use_kms: Optional[bool] = None,
     key_alias: Optional[str] = None,
     region_name: Optional[str] = None,
     role: str = "sponsor",
-) -> KMSSigner:
+    native: Optional[bool] = None,
+):
     """
-    Construct a KMSSigner using Django settings and enforce required flags.
+    Construct a KMS-backed Algorand signer using Django settings.
+
+    Returns either a legacy ``KMSSigner`` (SSM-backed Ed25519 private key
+    decrypted in memory) or a ``NativeKMSSigner`` (KMS-native Ed25519 signing,
+    private key never leaves KMS), depending on the ``KMS_NATIVE_SIGNING``
+    setting (or the explicit ``native`` argument).
 
     Args:
         use_kms: Optional override for USE_KMS_SIGNING (defaults to settings)
         key_alias: Optional override for KMS_KEY_ALIAS
         region_name: Optional override for KMS_REGION
         role: Logical role for this signer ("sponsor" or "admin")
+        native: If provided, force-select native (True) or legacy (False).
+                If None, read settings.KMS_NATIVE_SIGNING.
 
     Returns:
-        KMSSigner configured for the current environment.
+        KMSSigner or NativeKMSSigner configured for the current environment.
     """
     from django.conf import settings
 
@@ -561,7 +715,13 @@ def get_kms_signer_from_settings(
         raise ImproperlyConfigured("KMS_KEY_ALIAS is required when USE_KMS_SIGNING=True.")
 
     region = region_name or getattr(settings, "KMS_REGION", None) or "eu-central-2"
-    signer = KMSSigner(alias, region_name=region)
+
+    use_native = native if native is not None else bool(getattr(settings, "KMS_NATIVE_SIGNING", False))
+    if use_native:
+        signer = NativeKMSSigner(alias, region_name=region)
+    else:
+        signer = KMSSigner(alias, region_name=region)
+
     expected_addr = (
         getattr(settings, "ALGORAND_ADMIN_ADDRESS", None)
         if role == "admin"
