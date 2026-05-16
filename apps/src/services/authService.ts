@@ -403,13 +403,47 @@ export class AuthService {
         return { success: false, error: 'No se encontró información de la cuenta' };
       }
 
+      // Fetch the server's authoritative Algorand address so the restore
+      // path can filter Drive candidates by expectedAddress. Without this,
+      // findOldestRestorableDriveBackup returns the OLDEST decryptable
+      // backup unconditionally — which is the wrong choice for users whose
+      // Drive contains multiple V2 secrets (e.g. an older pre-migration
+      // backup and a newer one from a V1->V2 migration). That manifested as
+      // user 4662 (pebe): server expects VYHV..., but Drive also had the
+      // older IADJP... blob, and the unfiltered restore handed back IADJP
+      // every time the user tapped "Reintentar respaldo" or "Respaldo en
+      // la Nube". Signature errors followed because the local secret no
+      // longer derived to the server's address.
+      let expectedAddress: string | null = null;
+      try {
+        const { GET_MY_MIGRATION_STATUS } = await import('../apollo/queries');
+        const { data } = await apolloClient.query({
+          query: GET_MY_MIGRATION_STATUS,
+          fetchPolicy: 'network-only',
+        });
+        const personalAccount = (data?.userAccounts || []).find(
+          (a: any) => a?.accountType === 'personal' && (a?.accountIndex ?? 0) === 0
+        );
+        expectedAddress = personalAccount?.algorandAddress || null;
+        if (expectedAddress) {
+          console.log('[AuthService] enableDriveBackup expectedAddress fetched from server:', expectedAddress);
+        } else {
+          console.log('[AuthService] enableDriveBackup: no server-side address found; proceeding without filter');
+        }
+      } catch (meErr) {
+        console.warn('[AuthService] Failed to fetch expectedAddress before Drive sync (proceeding without filter):', meErr);
+      }
+
       // Sync to Drive using the access token. If Drive already contains V2
-      // backups, getOrCreateMasterSecret restores the oldest valid one
-      // automatically instead of prompting or creating a duplicate wallet.
+      // backups, getOrCreateMasterSecret restores the oldest valid backup
+      // whose address matches expectedAddress (when provided). Without
+      // expectedAddress it would return the oldest decryptable blob
+      // regardless of address — the bug we are closing here.
       const { getOrCreateMasterSecret, reportBackupStatus } = await import('./secureDeterministicWallet');
       await getOrCreateMasterSecret(oauthData.subject, accessToken, {
         provider: oauthData.provider,
         requireCloudSync: true,
+        expectedAddress,
       });
       console.log('[AuthService] Master secret synced to Drive');
 
