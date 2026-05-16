@@ -387,6 +387,10 @@ class Web3AuthLoginMutation(graphene.Mutation):
                     num_assets = len(current_assets)
                     
                     # Calculate how many NEW assets we need to opt into (keep ints internally)
+                    # IMPORTANT: keep this list in sync with the default branch of
+                    # GenerateOptInTransactionsMutation (blockchain/mutations.py) — both
+                    # must opt new users into CONFIO + cUSD + USDC atomically in a single
+                    # sponsored group so we never rely on a second client-side roundtrip.
                     assets_to_opt_in = []
                     if AlgorandAccountManager.CONFIO_ASSET_ID and AlgorandAccountManager.CONFIO_ASSET_ID not in current_asset_ids:
                         assets_to_opt_in.append(AlgorandAccountManager.CONFIO_ASSET_ID)
@@ -394,6 +398,9 @@ class Web3AuthLoginMutation(graphene.Mutation):
                     if AlgorandAccountManager.CUSD_ASSET_ID and AlgorandAccountManager.CUSD_ASSET_ID not in current_asset_ids:
                         assets_to_opt_in.append(AlgorandAccountManager.CUSD_ASSET_ID)
                         logger.info(f"User needs to opt into cUSD: {AlgorandAccountManager.CUSD_ASSET_ID}")
+                    if AlgorandAccountManager.USDC_ASSET_ID and AlgorandAccountManager.USDC_ASSET_ID not in current_asset_ids:
+                        assets_to_opt_in.append(AlgorandAccountManager.USDC_ASSET_ID)
+                        logger.info(f"User needs to opt into USDC: {AlgorandAccountManager.USDC_ASSET_ID}")
                     
                     logger.info(f"Account {algorand_address}: balance={balance}, current_assets={num_assets}, need_opt_in={len(assets_to_opt_in)}")
                     
@@ -456,7 +463,7 @@ class Web3AuthLoginMutation(graphene.Mutation):
                 except Exception as e:
                     logger.warning(f"Could not check/fund account balance: {e}")
                 
-                # Trigger sponsored opt-in for CONFIO and cUSD (async)
+                # Trigger sponsored opt-in for CONFIO + cUSD + USDC (async)
                 from blockchain.algorand_sponsor_service import algorand_sponsor_service
                 import asyncio
                 
@@ -601,13 +608,15 @@ class AddAlgorandWalletMutation(graphene.Mutation):
                 # Check which assets need opt-in
                 current_assets = [asset['asset-id'] for asset in account_info.get('assets', [])]
                 
-                # CONFIO should be opted in
+                # CONFIO, cUSD, and USDC should all be opted in. Keep this list in
+                # sync with Web3AuthLoginMutation above and the default branch of
+                # GenerateOptInTransactionsMutation (blockchain/mutations.py).
                 if AlgorandAccountManager.CONFIO_ASSET_ID and AlgorandAccountManager.CONFIO_ASSET_ID not in current_assets:
                     needs_opt_in.append(AlgorandAccountManager.CONFIO_ASSET_ID)
-                
-                # Future: cUSD when available
-                # if AlgorandAccountManager.CUSD_ASSET_ID and AlgorandAccountManager.CUSD_ASSET_ID not in current_assets:
-                #     needs_opt_in.append(AlgorandAccountManager.CUSD_ASSET_ID)
+                if AlgorandAccountManager.CUSD_ASSET_ID and AlgorandAccountManager.CUSD_ASSET_ID not in current_assets:
+                    needs_opt_in.append(AlgorandAccountManager.CUSD_ASSET_ID)
+                if AlgorandAccountManager.USDC_ASSET_ID and AlgorandAccountManager.USDC_ASSET_ID not in current_assets:
+                    needs_opt_in.append(AlgorandAccountManager.USDC_ASSET_ID)
                 
             except Exception as e:
                 logger.error(f"Error checking opt-in status: {e}")

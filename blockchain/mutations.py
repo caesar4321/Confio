@@ -2100,17 +2100,21 @@ class CheckBusinessOptInMutation(graphene.Mutation):
 
                 CONFIO_ID = getattr(settings, 'ALGORAND_CONFIO_ASSET_ID', None)
                 CUSD_ID = getattr(settings, 'ALGORAND_CUSD_ASSET_ID', None)
+                USDC_ID = getattr(settings, 'ALGORAND_USDC_ASSET_ID', None)
 
                 has_confio = bool(CONFIO_ID) and any(a['asset-id'] == CONFIO_ID for a in assets)
                 has_cusd = bool(CUSD_ID) and any(a['asset-id'] == CUSD_ID for a in assets)
-                
-                logger.info(f'CheckBusinessOptIn: has_confio={has_confio}, has_cusd={has_cusd}')
-                
+                has_usdc = bool(USDC_ID) and any(a['asset-id'] == USDC_ID for a in assets)
+
+                logger.info(f'CheckBusinessOptIn: has_confio={has_confio}, has_cusd={has_cusd}, has_usdc={has_usdc}')
+
                 needed_assets = []
                 if CONFIO_ID and not has_confio:
                     needed_assets.append('CONFIO')
                 if CUSD_ID and not has_cusd:
                     needed_assets.append('cUSD')
+                if USDC_ID and not has_usdc:
+                    needed_assets.append('USDC')
                 
                 logger.info(f'CheckBusinessOptIn: Needed assets: {needed_assets}')
                 
@@ -2134,8 +2138,9 @@ class CheckBusinessOptInMutation(graphene.Mutation):
                 transactions = []
                 asset_ids = []
                 
+                asset_id_by_name = {'CONFIO': CONFIO_ID, 'cUSD': CUSD_ID, 'USDC': USDC_ID}
                 for asset_name in needed_assets:
-                    asset_id = CONFIO_ID if asset_name == 'CONFIO' else CUSD_ID
+                    asset_id = asset_id_by_name[asset_name]
                     asset_ids.append(asset_id)
                     
                     # Create opt-in transaction (0 amount transfer to self) with 0 fee
