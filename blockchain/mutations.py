@@ -2704,30 +2704,28 @@ class BuildAutoSwapTransactionsMutation(graphene.Mutation):
                 from conversion.models import Conversion
                 from blockchain.auto_swap_state import attach_conversion_to_pending_auto_swap
                 from blockchain.models import PendingAutoSwap
-                
-                amount_decimal = Decimal(amount) / Decimal('1000000')
-                tx_builder = CUSDTransactionBuilder()
-                pending_auto_swap = PendingAutoSwap.objects.filter(
-                    account=account,
-                    asset_type='USDC',
-                    status='PENDING',
-                ).select_related('conversion').order_by('-created_at').first()
 
-                if pending_auto_swap and pending_auto_swap.amount_micro > 0:
-                    amount_decimal = Decimal(str(pending_auto_swap.amount_micro)) / Decimal('1000000')
-                
-                # Use actual on-chain USDC balance to avoid underflow from stale cache.
-                # The client amount is a hint; the real balance may differ slightly
-                # (e.g., right after an ALGO→USDC swap with slippage, or USDC already consumed).
+                amount_decimal = Decimal(amount) / Decimal('1000000')
+                client_amount_micro = int(amount)
+                tx_builder = CUSDTransactionBuilder()
+
+                # Fetch on-chain USDC balance once, up front. We use it for both
+                # GC (canceling zombie PASs that claim more USDC than the wallet
+                # has) and for the slippage clamp below.
+                actual_usdc = None
+                onchain_micro = None
                 try:
                     account_info = algod_client.account_info(account.algorand_address)
                     usdc_asset_id = getattr(settings, 'ALGORAND_USDC_ASSET_ID', None)
-                    actual_usdc = Decimal('0')
                     if usdc_asset_id:
                         for a in (account_info.get('assets') or []):
                             if a.get('asset-id') == usdc_asset_id:
-                                actual_usdc = Decimal(str(a.get('amount', 0))) / Decimal('1000000')
+                                onchain_micro = int(a.get('amount', 0))
+                                actual_usdc = Decimal(str(onchain_micro)) / Decimal('1000000')
                                 break
+                        if onchain_micro is None:
+                            onchain_micro = 0
+                            actual_usdc = Decimal('0')
                     logger.info(
                         "[AutoSwap USDC] on-chain balance=%s requested=%s",
                         actual_usdc,
@@ -2735,8 +2733,49 @@ class BuildAutoSwapTransactionsMutation(graphene.Mutation):
                     )
                 except Exception as e:
                     logger.warning(f"[AutoSwap USDC] Failed to fetch on-chain USDC balance: {e}")
-                    actual_usdc = None
-                
+
+                # Inline GC: cancel any PENDING PASs for this account whose
+                # claim exceeds the on-chain USDC balance. These are orphans
+                # (the underlying USDC was consumed by a previous swap that
+                # submitted before the deposit indexer wrote the PAS row, or
+                # the PAS was left PENDING after a successful out-of-band
+                # swap). Without this they re-fire later against unrelated
+                # funds — see incident PAS #50 / conversion 678 (5/15/2026).
+                if onchain_micro is not None:
+                    gc_cutoff = timezone.now() - timedelta(minutes=5)
+                    zombies = PendingAutoSwap.objects.filter(
+                        account=account,
+                        asset_type='USDC',
+                        status='PENDING',
+                        amount_micro__gt=onchain_micro,
+                        created_at__lt=gc_cutoff,
+                    )
+                    gc_count = zombies.update(
+                        status='CANCELLED',
+                        error_message='orphan_no_onchain_usdc',
+                        completed_at=timezone.now(),
+                        updated_at=timezone.now(),
+                    )
+                    if gc_count:
+                        logger.info(
+                            "[AutoSwap USDC] Cancelled %d orphan PendingAutoSwap rows for account %s (on-chain micro=%s)",
+                            gc_count, account.id, onchain_micro,
+                        )
+
+                # Scope the PAS lookup to ones matching the client's stated
+                # amount. The client is authoritative about what it intends
+                # to swap; the PAS is just state. Previously the selector
+                # picked "newest PENDING" regardless of amount and silently
+                # overrode the client's request with PAS.amount_micro,
+                # which is how a stale May-9 PAS for 426.65 hijacked a
+                # May-15 retry for 5060.79.
+                pending_auto_swap = PendingAutoSwap.objects.filter(
+                    account=account,
+                    asset_type='USDC',
+                    status='PENDING',
+                    amount_micro=client_amount_micro,
+                ).select_related('conversion').order_by('-created_at').first()
+
                 # NOTE: Decimal('0') is falsy in Python, so we MUST use 'is not None'
                 if actual_usdc is not None and actual_usdc < amount_decimal:
                     logger.info(f"[AutoSwap USDC] Client sent {amount_decimal}, actual on-chain is {actual_usdc}. Using actual.")
@@ -2805,6 +2844,29 @@ class BuildAutoSwapTransactionsMutation(graphene.Mutation):
                         fee_amount=Decimal('0.0'),
                         status='PENDING_SIG'
                     )
+                    # If no live PENDING PAS matched, look for a recently
+                    # FAILED PAS with the same client amount and re-point
+                    # it at this fresh conversion. Otherwise the eventual
+                    # successful retry stays orphan and the PAS row shows
+                    # FAILED forever even though the user got their cUSD
+                    # (see incident PAS #70 + conversion 679).
+                    if not pending_auto_swap:
+                        retry_cutoff = timezone.now() - timedelta(minutes=30)
+                        pending_auto_swap = PendingAutoSwap.objects.filter(
+                            account=account,
+                            asset_type='USDC',
+                            status='FAILED',
+                            amount_micro=int((amount_decimal * Decimal('1000000')).quantize(Decimal('1'))),
+                            updated_at__gte=retry_cutoff,
+                        ).order_by('-updated_at').first()
+                        if pending_auto_swap:
+                            pending_auto_swap.status = 'PENDING'
+                            pending_auto_swap.error_message = ''
+                            pending_auto_swap.save(update_fields=['status', 'error_message', 'updated_at'])
+                            logger.info(
+                                "[AutoSwap USDC] Re-using recently FAILED PAS %s for retry conversion %s",
+                                pending_auto_swap.id, conversion.internal_id,
+                            )
                     attach_conversion_to_pending_auto_swap(pending_auto_swap, conversion)
                 _link_autoswap_conversion_to_recent_guardarian_ramp(
                     user=user,

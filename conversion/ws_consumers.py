@@ -256,33 +256,71 @@ class ConvertSessionConsumer(AsyncJsonWebsocketConsumer):
 
         algod_client = get_algod_client()
 
-        try:
-            # Submit raw transaction group
-            txid = algod_client.send_raw_transaction(combined_b64)
-        except Exception as e:
-            err_str = str(e)
-            logger.info(f"Submission error for conversion {internal_id}: {err_str}")
-            
-            # Handle "already in pool" case for robustness (match mutations.py logic)
-            if "TransactionPool.Remember" in err_str or "already in pool" in err_str.lower():
-                import re
-                txid_match = re.search(r'([A-Z2-7]{52})', err_str)
-                txid = txid_match.group(1) if txid_match else ""
-                
-                if not txid:
-                    # Mark as SUBMITTED even without hash to prevent "FAILED" UI
-                    conv.status = 'SUBMITTED'
-                    conv.save(update_fields=['status', 'updated_at'])
-                    return {"success": True, "txid": ""} 
-                
-                logger.info(f"Transaction {txid} already in pool for conversion {internal_id}, recovering as SUBMITTED")
-            else:
+        # Submit with bounded retry on transient HTTP 4xx/5xx from the algod
+        # provider (Nodely). A 403 here is almost always a rate-limit or proxy
+        # hiccup, not a malformed transaction; the same group succeeds on a
+        # second attempt seconds later. See incident PAS #70 / conversion 677
+        # (5/15/2026) where a 403 marked an otherwise-valid swap FAILED.
+        import time as _time
+        txid = None
+        err_str = ""
+        last_exc = None
+        max_attempts = 3
+        backoff_seconds = (0.0, 1.0, 3.0)
+        for attempt in range(max_attempts):
+            if attempt:
+                _time.sleep(backoff_seconds[attempt])
+            try:
+                txid = algod_client.send_raw_transaction(combined_b64)
+                break
+            except Exception as e:
+                last_exc = e
+                err_str = str(e)
+                logger.info(
+                    f"Submission error for conversion {internal_id} (attempt {attempt + 1}/{max_attempts}): {err_str}"
+                )
+
+                # "already in pool" / "already in ledger" — recover txid and stop retrying.
+                if "TransactionPool.Remember" in err_str or "already in pool" in err_str.lower() or "already in ledger" in err_str.lower():
+                    import re
+                    txid_match = re.search(r'([A-Z2-7]{52})', err_str)
+                    txid = txid_match.group(1) if txid_match else ""
+                    if not txid:
+                        conv.status = 'SUBMITTED'
+                        conv.save(update_fields=['status', 'updated_at'])
+                        return {"success": True, "txid": ""}
+                    logger.info(
+                        f"Transaction {txid} already in pool for conversion {internal_id}, recovering as SUBMITTED"
+                    )
+                    break
+
+                # Retry on transient HTTP errors from the provider (403 rate
+                # limit, 429, 5xx). Do NOT retry on protocol-level rejections
+                # (e.g., "signature didn't pass verification", "TransactionPool"
+                # validation, "overspend") — those won't get better with a
+                # second submit and need a fresh group.
+                transient = (
+                    'HTTP Error 403' in err_str
+                    or 'HTTP Error 429' in err_str
+                    or 'HTTP Error 5' in err_str  # 5xx
+                )
+                if transient and attempt < max_attempts - 1:
+                    continue
+
+                # Non-transient or out of attempts: persist and surface.
                 logger.error(f"Error submitting conversion {internal_id}: {e}")
-                # We save the error in the model for admin visibility
                 conv.status = 'FAILED'
                 conv.error_message = err_str
                 conv.save(update_fields=['status', 'error_message', 'updated_at'])
                 return {"success": False, "error": err_str}
+
+        if txid is None:
+            # Shouldn't reach here, but guard against accidental fall-through.
+            err = err_str or (str(last_exc) if last_exc else 'unknown_submit_error')
+            conv.status = 'FAILED'
+            conv.error_message = err
+            conv.save(update_fields=['status', 'error_message', 'updated_at'])
+            return {"success": False, "error": err}
 
         conv.status = 'SUBMITTED'
         conv.to_transaction_hash = txid

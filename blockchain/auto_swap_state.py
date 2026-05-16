@@ -1,3 +1,4 @@
+import logging
 from decimal import Decimal
 
 from django.utils import timezone
@@ -6,7 +7,37 @@ from blockchain.models import PendingAutoSwap
 from users.models import Account
 
 
+logger = logging.getLogger(__name__)
+
 USDC_MICRO_MULTIPLIER = Decimal('1000000')
+
+
+def _fetch_onchain_usdc_micro(address: str):
+    """Fetch live USDC balance in micro-units for an address.
+
+    Returns None on failure (caller should treat as "unknown" and proceed
+    conservatively rather than skip the swap entirely).
+    """
+    try:
+        from django.conf import settings
+        from blockchain.algorand_client import get_algod_client
+
+        asset_id = getattr(settings, 'ALGORAND_USDC_ASSET_ID', None)
+        if not asset_id:
+            return None
+        algod_client = get_algod_client()
+        info = algod_client.account_info(address)
+        for a in (info.get('assets') or []):
+            if a.get('asset-id') == asset_id:
+                return int(a.get('amount', 0))
+        # Opted in to USDC but zero balance, or not opted in.
+        return 0
+    except Exception as exc:
+        logger.warning(
+            "[ensure_pending_usdc_auto_swap] on-chain balance fetch failed for %s: %s",
+            address, exc,
+        )
+        return None
 
 
 def ensure_pending_usdc_auto_swap(deposit):
@@ -24,6 +55,39 @@ def ensure_pending_usdc_auto_swap(deposit):
 
     amount_decimal = Decimal(str(deposit.amount))
     amount_micro = int((amount_decimal * USDC_MICRO_MULTIPLIER).quantize(Decimal('1')))
+
+    # Pre-flight: if the swap that consumes this deposit's USDC already
+    # submitted before the deposit indexer wrote this row, the USDC is
+    # already gone from the wallet. Creating a PENDING PAS for it would
+    # leave behind a zombie that re-fires days later (see incident:
+    # PendingAutoSwap #50, 2026-05-09, re-attempted 2026-05-15 producing
+    # a wrong-amount swap of 426.647684 USDC).
+    onchain_micro = _fetch_onchain_usdc_micro(deposit.actor_address)
+    if onchain_micro is not None and onchain_micro < amount_micro:
+        # Record the deposit as a CANCELLED auto-swap so admins can see
+        # we acknowledged it but skipped — don't silently drop.
+        cancelled, _ = PendingAutoSwap.objects.update_or_create(
+            usdc_deposit=deposit,
+            defaults={
+                'account': account,
+                'actor_user': deposit.actor_user,
+                'actor_business': deposit.actor_business,
+                'actor_type': deposit.actor_type,
+                'actor_address': deposit.actor_address,
+                'asset_type': 'USDC',
+                'amount_micro': amount_micro,
+                'amount_decimal': amount_decimal,
+                'source_address': deposit.source_address or '',
+                'status': 'CANCELLED',
+                'error_message': 'orphan_consumed_before_indexer',
+                'completed_at': timezone.now(),
+            },
+        )
+        logger.info(
+            "[ensure_pending_usdc_auto_swap] Marking deposit %s (%s USDC) CANCELLED — on-chain has %s micro",
+            deposit.id, amount_decimal, onchain_micro,
+        )
+        return cancelled
 
     pending, _ = PendingAutoSwap.objects.update_or_create(
         usdc_deposit=deposit,
