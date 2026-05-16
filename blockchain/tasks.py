@@ -27,6 +27,13 @@ from notifications.models import NotificationType as NotifType
 
 logger = logging.getLogger(__name__)
 
+# Rewind buffer for indexer-based inbound scans. Algorand indexer typically
+# lags algod by 1-2 rounds; this buffer covers that race without re-fetching
+# half an hour of network-wide asset history every 30 seconds. Combined with
+# ProcessedIndexerTransaction(txid, intra) dedupe, overlap is safe — the only
+# cost of a larger value is wasted indexer API calls (free tier is ~50k/day).
+INDEXER_SCAN_REWIND_ROUNDS = 10
+
 
 def ensure_db_connection_closed(func):
     """Decorator to ensure database connections are properly closed after task execution"""
@@ -644,10 +651,11 @@ def scan_inbound_deposits():
 
         # Sweep per asset
         for asset_id in asset_ids:
-            # Cursor with small rewind
             cursor, _ = IndexerAssetCursor.objects.get_or_create(asset_id=asset_id)
-            # Small rewind to catch recent events and avoid misses
-            min_round = max(0, (cursor.last_scanned_round or 0) - 500)
+            # Indexer typically reflects algod within 1-2 rounds; 10 rounds (~30s)
+            # is ample buffer. ProcessedIndexerTransaction(txid, intra) dedupes any
+            # overlap, so the only cost of a larger rewind is wasted indexer calls.
+            min_round = max(0, (cursor.last_scanned_round or 0) - INDEXER_SCAN_REWIND_ROUNDS)
             logger.info(
                 f"[IndexerScan] asset={asset_id} window {min_round}->{current_round} addresses={len(addresses)}"
             )
@@ -703,7 +711,7 @@ def scan_inbound_deposits():
         # Sweep ALGO inbound payments (native coin)
         ALGO_DEPOSIT_MIN_MICRO = 1_000_000  # 1 ALGO minimum to avoid sponsor/MBR noise
         algo_cursor, _ = IndexerAssetCursor.objects.get_or_create(asset_id=0)
-        algo_min_round = max(0, (algo_cursor.last_scanned_round or 0) - 500)
+        algo_min_round = max(0, (algo_cursor.last_scanned_round or 0) - INDEXER_SCAN_REWIND_ROUNDS)
         algo_max_seen_round = algo_cursor.last_scanned_round or 0
         logger.info(
             f"[IndexerScan] asset=ALGO window {algo_min_round}->{current_round} addresses={len(addresses)}"

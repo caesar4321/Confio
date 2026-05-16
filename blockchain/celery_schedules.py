@@ -29,10 +29,13 @@ BLOCKCHAIN_CELERY_BEAT_SCHEDULE = {
 
     # Removed cleanup of old Sui events (no event storage)
     
-    # Indexer inbound deposit scan (USDC, cUSD, CONFIO)
+    # Indexer inbound deposit scan (USDC, cUSD, CONFIO).
+    # Each run hits the Algorand indexer per asset; 60s + a small rewind
+    # (INDEXER_SCAN_REWIND_ROUNDS in blockchain.tasks) keeps deposit detection
+    # latency under ~90s while staying inside the Nodely free-tier daily quota.
     'scan-inbound-deposits': {
         'task': 'blockchain.scan_inbound_deposits',
-        'schedule': 30.0,  # Every 30 seconds
+        'schedule': 60.0,  # Every 60 seconds
     },
     
     # Outbound confirmation scan (payments, sends)
