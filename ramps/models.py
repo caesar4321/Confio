@@ -191,12 +191,15 @@ class RampTransaction(models.Model):
         blank=True,
         related_name='ramp_transaction',
     )
-    conversion = models.OneToOneField(
+    # ForeignKey (not OneToOne) so a single Conversion can settle multiple
+    # RampTransactions when a user batches several deposits into one swap.
+    # Reverse accessor: conversion.ramp_transactions (plural manager).
+    conversion = models.ForeignKey(
         'conversion.Conversion',
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name='ramp_transaction',
+        related_name='ramp_transactions',
     )
 
     created_at = models.DateTimeField(auto_now_add=True)

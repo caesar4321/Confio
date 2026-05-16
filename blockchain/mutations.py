@@ -3288,7 +3288,9 @@ class SubmitAutoSwapTransactionsMutation(graphene.Mutation):
                 logger.warning("Could not derive USDC transfer txid: %s", _e)
 
             try:
-                ramp_tx = getattr(conv, 'ramp_transaction', None)
+                # ramp_transactions is now a FK reverse manager. Off-ramp is
+                # always 1:1 (single burn-and-send -> single Koywe order).
+                ramp_tx = conv.ramp_transactions.first() if hasattr(conv, 'ramp_transactions') else None
                 is_koywe_off_ramp = bool(
                     ramp_tx
                     and ramp_tx.provider == 'koywe'
@@ -3430,11 +3432,12 @@ class SubmitAutoSwapTransactionsMutation(graphene.Mutation):
 
 
             # --- KOYWE INTEGRATION: Associate TX Hash ---
-            # For Algorand off-ramps, Koywe requires us to manually push the TX ID 
+            # For Algorand off-ramps, Koywe requires us to manually push the TX ID
             # to their endpoint so they can link the USDC payment to the order.
             try:
-                # Check for an associated RampTransaction (linked via OneToOne)
-                ramp_tx = getattr(conv, 'ramp_transaction', None)
+                # ramp_transactions is now a FK reverse manager (was OneToOne).
+                # Off-ramp burn-and-send is always 1:1 with the Koywe order.
+                ramp_tx = conv.ramp_transactions.first() if hasattr(conv, 'ramp_transactions') else None
                 if ramp_tx and ramp_tx.provider == 'koywe' and ramp_tx.provider_order_id:
                     from ramps.koywe_client import KoyweClient
                     koywe_client = KoyweClient()

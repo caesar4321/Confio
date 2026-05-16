@@ -775,7 +775,8 @@ class ExecutePendingConversion(graphene.Mutation):
                 try:
                     from notifications.utils import create_transaction_notification
                     try:
-                        linked_ramp = conversion.ramp_transaction
+                        # ramp_transactions is a FK reverse manager (one or many)
+                        linked_ramp = conversion.ramp_transactions.first()
                     except Exception:
                         linked_ramp = None
 

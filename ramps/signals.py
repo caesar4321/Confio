@@ -549,7 +549,14 @@ def handle_ramp_withdrawal_link(sender, instance, **kwargs):
 
 @receiver(post_save, sender=Conversion)
 def handle_ramp_conversion_link(sender, instance, **kwargs):
-    ramp_tx = _safe_related(instance, 'ramp_transaction')
+    # ramp_transactions is now a reverse FK manager (was OneToOne). For the
+    # signal we only auto-attach if the conversion isn't already linked. If
+    # an admin/script has manually linked multiple ramps (consolidated swap
+    # case), we don't second-guess.
+    try:
+        ramp_tx = instance.ramp_transactions.first()
+    except Exception:
+        ramp_tx = None
     if not ramp_tx:
         ramp_tx = _find_guardarian_ramp_for_conversion(instance)
     if not ramp_tx:
