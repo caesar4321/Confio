@@ -391,22 +391,59 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
             sp0 = next((s for s in (tx_pack.get('sponsor_transactions') or []) if int(s.get('index',-1)) == 0), None)
         except Exception:
             pass
-        # Create UnifiedTransactionTable entry for this presale purchase
+        # Create UnifiedTransactionTable entry for this presale purchase.
+        # NOTE: `internal_id` on UnifiedTransactionTable is a @property derived
+        # from the linked source row — passing it as a create() kwarg raises
+        # "property 'internal_id' has no setter". Beyond that, the create was
+        # also missing required fields (sender_type, counterparty_type,
+        # transaction_date), which meant this row was silently never created
+        # since 2025-12-18 (caught by the broad try/except). Use the same
+        # defaults shape as `presale.management.commands.backfill_presale_unified`
+        # for consistency with the post-completion backfill.
         from users.models_unified import UnifiedTransactionTable
+        from django.utils import timezone
+        from django.conf import settings as _dj_settings_prepare
         try:
-            UnifiedTransactionTable.objects.create(
-                transaction_type='presale',
-                internal_id=purchase.internal_id,
-                amount=str(purchase.cusd_amount),
-                token_type='CUSD',
-                status='processing',
-                transaction_hash='',
-                from_address=purchase.from_address,
-                to_address='',
+            user_display = (
+                purchase.user.get_full_name()
+                or purchase.user.username
+                or purchase.user.email
+                or 'Tú'
+            )
+            phase_number = getattr(purchase.phase, 'phase_number', '')
+            description = f"Compra de preventa Fase {phase_number}".strip()
+            vault_address = getattr(_dj_settings_prepare, 'ALGORAND_PRESALE_VAULT_ADDRESS', '') or 'ConfioPresaleVault'
+            UnifiedTransactionTable.objects.update_or_create(
                 presale_purchase=purchase,
+                defaults={
+                    'transaction_type': 'presale',
+                    'amount': str(purchase.cusd_amount),
+                    'token_type': 'CUSD',
+                    'status': 'PENDING_SIG',
+                    'transaction_hash': purchase.transaction_hash or '',
+                    'error_message': '',
+                    'sender_user': None,
+                    'sender_business': None,
+                    'sender_type': 'external',
+                    'sender_display_name': 'Confío Preventa',
+                    'sender_phone': '',
+                    'sender_address': vault_address,
+                    'counterparty_user': purchase.user,
+                    'counterparty_business': None,
+                    'counterparty_type': 'user',
+                    'counterparty_display_name': user_display,
+                    'counterparty_phone': '',
+                    'counterparty_address': purchase.from_address or '',
+                    'description': description,
+                    'from_address': vault_address,
+                    'to_address': purchase.from_address or '',
+                    'transaction_date': purchase.completed_at or purchase.created_at or timezone.now(),
+                    'payment_reference_id': f"presale_purchase:{purchase.id}",
+                },
             )
         except Exception as e:
             logger.error(f"[PRESALE][WS] Failed to create UnifiedTransactionTable entry: {e}")
+        try:
             if sp0 and sp0.get('txn'):
                 stx = _enc.msgpack_decode(sp0['txn'])
                 recv = getattr(stx, 'receiver', None)
