@@ -220,10 +220,10 @@ class User(AbstractUser, SoftDeleteModel):
     @property
     def requires_backup_completion(self):
         """
-        Android users are only considered safe once a successful backup verification
+        Users are only considered safe once a successful backup verification
         has been reported back to the server.
         """
-        return self.platform_os == 'android' and self.backup_verified_at is None
+        return self.backup_verified_at is None
 
     # ── Status tier (referral-count-gated) ──────────────────────────
     # Tier thresholds: 1 → early_supporter, 3 → community_builder, 10 → embajador

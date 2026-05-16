@@ -40,6 +40,8 @@ def _get_wallet_upgrade_blocker(*, user, account):
         return 'Actualiza tu app para completar la migracion de tu billetera antes de continuar.'
 
     if getattr(user, 'requires_backup_completion', False):
+        if getattr(user, 'platform_os', '').lower() == 'ios':
+            return 'Por favor, realiza un respaldo en iCloud para proteger tu cuenta antes de continuar.'
         return 'Por favor, realiza un respaldo en Google Drive para proteger tu cuenta antes de continuar.'
 
     return None

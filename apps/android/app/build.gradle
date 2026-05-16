@@ -93,7 +93,7 @@ android {
         minSdkVersion 24
         targetSdkVersion 35
         versionCode 116
-        versionName "4.4.1"
+        versionName "4.4.2"
         ndk {
             abiFilters(*releaseAbis)
         }

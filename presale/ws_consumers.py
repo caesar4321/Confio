@@ -1041,6 +1041,7 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
                         f"[PRESALE][WS][SUBMIT] Rebuilt sponsors after sender update; have0={bool(sponsor0_b64)} have2={bool(sponsor2_b64)}"
                     )
                 except Exception as _e:
+                    __import__('logging').getLogger(__name__).error(f"[PRESALE][WS][SUBMIT] Error during sender-update rebuild: {_e}")
                     return {"success": False, "error": "cannot_sign_sponsor"}
             # Debug: decode and log group fields
             try:
@@ -1075,40 +1076,34 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
                         f"[PRESALE][WS][SUBMIT] G2 appcall sender={sender2} fee={fee2} accounts={accs2}"
                     )
 
-                    # Self-heal: ensure the appcall accounts[0] matches user-signed sender
+                    # Self-heal check: ensure the appcall accounts[0] matches user-signed sender
                     try:
                         user_sender = sender1
                         app_user = (accs2[0] if (isinstance(accs2, list) and len(accs2) > 0) else None)
+                        
+                        # Log group IDs for diagnostic purposes
+                        import base64 as _b64lib
+                        gid0 = _b64lib.b64encode(t0d.get(b'grp') or b'').decode() if t0d else "none"
+                        gid1 = _b64lib.b64encode(t1d.get(b'grp') or b'').decode() if t1d else "none"
+                        gid2 = _b64lib.b64encode(t2d.get(b'grp') or b'').decode() if t2d else "none"
+                        _log.getLogger(__name__).info(
+                            f"[PRESALE][WS][SUBMIT] GIDs: G0={gid0} G1={gid1} G2={gid2}"
+                        )
+
                         if user_sender and app_user and user_sender != app_user:
-                            _log.getLogger(__name__).warning(
-                                f"[PRESALE][WS][SUBMIT] Mismatch: user sender {user_sender} != app accounts[0] {app_user}; rebuilding sponsor txns"
+                            _log.getLogger(__name__).error(
+                                f"[PRESALE][WS][SUBMIT] Mismatch: user sender {user_sender} != app accounts[0] {app_user}. "
+                                "Aborting because rebuilding sponsors would break Group ID integrity."
                             )
-                            from blockchain.presale_transaction_builder import PresaleTransactionBuilder
-                            builder = PresaleTransactionBuilder()
-                            cusd_base = int(purchase.cusd_amount * 10**6)
-                            pack_fix = builder.build_buy_group(purchase.from_address, cusd_base)
-                            sp_list = pack_fix.get('sponsor_transactions') or []
-                            for e in sp_list:
-                                if int(e.get('index')) == 0:
-                                    sponsor0_b64 = e.get('signed') or e.get('txn')
-                                elif int(e.get('index')) == 2:
-                                    sponsor2_b64 = e.get('signed') or e.get('txn')
-                            # Re-decode for logging after fix
-                            t2d = _tx_dict(sponsor2_b64)
-                            accs2 = []
-                            try:
-                                for a in (t2d or {}).get(b'apat') or []:
-                                    accs2.append(_addr_from_key(a))
-                            except Exception:
-                                accs2 = None
-                            _log.getLogger(__name__).info(
-                                f"[PRESALE][WS][SUBMIT][FIXED] G2 accounts={accs2}"
-                            )
+                            return {"success": False, "error": "user_address_mismatch_in_group"}
                         elif user_sender and purchase.from_address and user_sender != purchase.from_address:
                             # User signed with a different address than expected
+                            _log.getLogger(__name__).warning(
+                                f"[PRESALE][WS][SUBMIT] User sender mismatch: signed={user_sender} expected={purchase.from_address}"
+                            )
                             return {"success": False, "error": "user_sender_mismatch"}
-                    except Exception:
-                        pass
+                    except Exception as _e:
+                        _log.getLogger(__name__).error(f"[PRESALE][WS][SUBMIT] Error during group validation: {_e}")
             except Exception:
                 pass
             # Compose bytes in correct order
@@ -1152,6 +1147,9 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
             return {"success": True, "txid": txid}
         except Exception as e:
             err_str = str(e)
+            _log = __import__('logging').getLogger(__name__)
+            _log.error(f"[PRESALE][WS][SUBMIT] Broadcast failure for purchase {purchase_id}: {err_str}")
+
             if "already in pool" in err_str.lower():
                 import re
                 txid_match = re.search(r'([A-Z2-7]{52})', err_str)
@@ -1161,6 +1159,21 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
                     purchase.save(update_fields=['transaction_hash'])
                     return {"success": True, "txid": txid}
                 else:
-                    # Mark as processing/submitted even without hash if we know it's in pool
                     return {"success": True, "txid": ""}
+
+            # Mark purchase as failed in DB
+            try:
+                purchase.status = 'failed'
+                purchase.notes = (purchase.notes or "") + f"\n[Error] {err_str}"
+                purchase.save(update_fields=['status', 'notes'])
+                
+                # Update UnifiedTransactionTable status
+                from users.models_unified import UnifiedTransactionTable
+                UnifiedTransactionTable.objects.filter(presale_purchase=purchase).update(
+                    status='FAILED',
+                    error_message=err_str[:500]
+                )
+            except Exception as _db_err:
+                _log.error(f"[PRESALE][WS][SUBMIT] Failed to update failure status in DB: {_db_err}")
+
             return {"success": False, "error": err_str or "submit_failed"}
