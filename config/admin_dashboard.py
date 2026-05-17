@@ -979,12 +979,23 @@ class ConfioAdminSite(AdminSiteOTPRequired):
             count=Count('id')
         ).order_by('-usdc_volume')[:5]
         
-        # Top Countries (by User count)
-        context['guardarian_countries'] = GuardarianTransaction.objects.values(
+        # Top Countries by attempted sessions/users
+        context['guardarian_attempt_countries'] = GuardarianTransaction.objects.values(
             'user__phone_country'
         ).annotate(
             count=Count('user', distinct=True)
         ).order_by('-count')[:5]
+
+        # Top Countries by verified completed volume/users
+        context['guardarian_completed_countries'] = GuardarianTransaction.objects.filter(
+            onchain_deposit__isnull=False
+        ).values(
+            'user__phone_country'
+        ).annotate(
+            usdc_volume=Sum('to_amount_actual'),
+            count=Count('user', distinct=True),
+            tx_count=Count('id'),
+        ).order_by('-usdc_volume')[:5]
 
         # Recent Transactions
         context['guardarian_recent'] = GuardarianTransaction.objects.select_related(
@@ -1064,11 +1075,21 @@ class ConfioAdminSite(AdminSiteOTPRequired):
                 count=Count('id')
             ).order_by('-usdc_volume')[:5]
 
-            countries = qs.values(
+            attempt_countries = qs.values(
                 'actor_user__phone_country'
             ).annotate(
                 count=Count('actor_user', distinct=True)
             ).order_by('-count')[:5]
+
+            completed_countries = qs.filter(
+                status='COMPLETED'
+            ).values(
+                'actor_user__phone_country'
+            ).annotate(
+                usdc_volume=Sum('final_amount'),
+                count=Count('actor_user', distinct=True),
+                tx_count=Count('id'),
+            ).order_by('-usdc_volume')[:5]
 
             recent = qs.order_by('-created_at')[:10]
 
@@ -1091,7 +1112,8 @@ class ConfioAdminSite(AdminSiteOTPRequired):
                     'refunded_count': refunded_count,
                 },
                 'currencies': currencies,
-                'countries': countries,
+                'attempt_countries': attempt_countries,
+                'completed_countries': completed_countries,
                 'recent': recent,
             }
 
