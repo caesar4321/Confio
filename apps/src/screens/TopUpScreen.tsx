@@ -200,6 +200,10 @@ const TopUpScreen = () => {
     if (!selectedMethod || !quote) {
       return;
     }
+    const walletSafe = await checkBackupEnforcement('deposit');
+    if (!walletSafe) {
+      return;
+    }
     if (!hasCompleteRampAddress) {
       Alert.alert(
         'Completa tu dirección',

@@ -135,6 +135,11 @@ export const ConfioPresaleParticipateScreen = () => {
 
   const executeSwap = async () => {
     try {
+      const walletSafe = await checkBackupEnforcement('presale');
+      if (!walletSafe) {
+        return;
+      }
+
       const bioOk = await biometricAuthService.authenticate(
         'Autoriza esta compra de preventa (operación crítica)',
         false,

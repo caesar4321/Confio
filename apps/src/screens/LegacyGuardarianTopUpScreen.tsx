@@ -308,6 +308,10 @@ const TopUpScreen = () => {
 
   const handleProceedToGuardarian = async () => {
     setShowPreFlightModal(false);
+    const walletSafe = await checkBackupEnforcement('deposit');
+    if (!walletSafe) {
+      return;
+    }
     setLoading(true);
     const parsedAmount = parseAmount(amount);
 

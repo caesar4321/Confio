@@ -912,6 +912,9 @@ export const GET_MY_MIGRATION_STATUS = gql`
       accountIndex
       algorandAddress
       isKeylessMigrated
+      business {
+        id
+      }
     }
   }
 `;
