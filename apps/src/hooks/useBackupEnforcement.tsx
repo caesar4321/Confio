@@ -15,6 +15,10 @@ type EnforcementAction = 'presale' | 'transaction' | 'app_launch' | 'deposit';
 
 let activeMigrationPromise: Promise<boolean> | null = null;
 
+const WALLET_MISMATCH_TITLE = 'Billetera no sincronizada';
+const WALLET_MISMATCH_MESSAGE =
+    'Por seguridad, no podemos recibir fondos ni continuar esta operación porque la billetera de este dispositivo no coincide con la billetera registrada en tu cuenta. Cierra sesión e inicia sesión nuevamente con la misma cuenta donde guardaste tu respaldo. Si el problema continúa, contáctanos para ayudarte.';
+
 export const useBackupEnforcement = () => {
     const { userProfile, refreshProfile } = useAuth();
     const apolloClient = useApolloClient();
@@ -193,8 +197,8 @@ export const useBackupEnforcement = () => {
             });
 
             Alert.alert(
-                'Revisa tu respaldo',
-                'No podemos recibir fondos en esta billetera porque el respaldo de este dispositivo no coincide con tu cuenta. Cierra sesión e inicia sesión nuevamente con la cuenta donde guardaste tu respaldo.'
+                WALLET_MISMATCH_TITLE,
+                WALLET_MISMATCH_MESSAGE
             );
             return false;
         } catch (error) {
