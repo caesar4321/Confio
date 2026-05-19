@@ -192,6 +192,20 @@ class AlgorandService {
     try {
       await this.ensureInitialized();
 
+      const getUnsignedSender = (): string | null => {
+        try {
+          const algosdk = this.algosdk?.default || this.algosdk;
+          const raw = algosdk.decodeObj(txnBytes);
+          if (raw?.snd) {
+            return algosdk.encodeAddress(raw.snd);
+          }
+        } catch (_e) {
+          // Best-effort guard. If decoding fails, the wallet service will throw
+          // the normal signing error when it decodes the transaction.
+        }
+        return null;
+      };
+
       // Get OAuth data (needed for signing regardless)
       const { oauthStorage } = await import('./oauthStorageService');
       const oauthData = await oauthStorage.getOAuthSubject();
@@ -206,13 +220,9 @@ class AlgorandService {
       const { AuthService } = await import('./authService');
       const authService = AuthService.getInstance();
       const accountContext = await authService.getActiveAccountContext();
+      const expectedSender = getUnsignedSender();
 
-      // Try fast-path signing using in-memory seed/scope. If missing, initialize once.
-      let signedTxn: Uint8Array | null = null;
-      try {
-        signedTxn = await secureDeterministicWallet.signTransaction(txnBytes);
-      } catch (e: any) {
-        // Initialize scope + cache only if needed
+      const restoreWalletForActiveContext = async () => {
         const { GOOGLE_CLIENT_IDS } = await import('../config/env');
         const GOOGLE_WEB_CLIENT_ID = GOOGLE_CLIENT_IDS.production.web;
         const iss = provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
@@ -228,6 +238,27 @@ class AlgorandService {
           accountContext.businessId
         );
         this.currentAccount = { addr: wallet.address, sk: null };
+
+        if (expectedSender && wallet.address !== expectedSender) {
+          throw new Error(`wallet_sender_mismatch: transaction sender ${expectedSender}, restored wallet ${wallet.address}`);
+        }
+      };
+
+      const activeSigningAddress = secureDeterministicWallet.getActiveSigningAddress();
+      if (expectedSender && activeSigningAddress !== expectedSender) {
+        // Only pay the restore cost when the current in-memory signing key is
+        // missing or does not match the transaction sender.
+        await restoreWalletForActiveContext();
+      }
+
+      // Try fast-path signing using in-memory seed/scope. If missing, initialize once.
+      let signedTxn: Uint8Array | null = null;
+      try {
+        signedTxn = await secureDeterministicWallet.signTransaction(txnBytes);
+      } catch (e: any) {
+        // Initialize scope + cache again if the wallet service lost its
+        // in-memory seed during app lifecycle transitions.
+        await restoreWalletForActiveContext();
         signedTxn = await secureDeterministicWallet.signTransaction(txnBytes);
       }
       return signedTxn;

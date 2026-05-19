@@ -319,7 +319,7 @@ export const AccountDetailScreen = () => {
     if (shouldFetchUSDC) refetchUSDC();
   }, [refetchBalances, shouldFetchUSDC, refetchUSDC]);
 
-  const { swapModalAsset } = useAutoSwap({
+  const { swapModalAsset, walletRecoveryRequired, dismissWalletRecovery } = useAutoSwap({
     isAuthenticated,
     myBalancesLoading: balancesLoading,
     usdcBalanceStr: (balancesData as any)?.myBalances?.usdc || '0',
@@ -2438,8 +2438,10 @@ export const AccountDetailScreen = () => {
       />
 
       <AutoSwapModal
-        visible={!!swapModalAsset}
+        visible={!!swapModalAsset || walletRecoveryRequired}
         assetType={swapModalAsset || 'USDC'}
+        mode={walletRecoveryRequired ? 'wallet_recovery_required' : 'processing'}
+        onClose={dismissWalletRecovery}
       />
     </View>
   );

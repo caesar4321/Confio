@@ -3295,6 +3295,45 @@ class SubmitAutoSwapTransactionsMutation(graphene.Mutation):
                 logger.warning("Could not derive USDC transfer txid: %s", _e)
 
             try:
+                import algosdk.encoding as _algo_encoding
+                import algosdk.transaction as _algo_txn
+                import msgpack as _msgpack
+                from nacl.signing import VerifyKey
+
+                verify_idx = None
+                verify_sender = None
+                verify_auth = None
+                for idx, raw_bytes in enumerate(ordered_bytes):
+                    verify_idx = idx
+                    stxn = _algo_txn.SignedTransaction.undictify(_msgpack.unpackb(raw_bytes, raw=False))
+                    txn = stxn.transaction
+                    verify_sender = txn.sender
+                    signature = stxn.signature
+                    if isinstance(signature, str):
+                        signature = base64.b64decode(signature)
+
+                    auth_addr = getattr(stxn, 'authorizing_address', None) or getattr(stxn, 'auth_addr', None)
+                    verify_auth = auth_addr
+                    verifier_addr = auth_addr or txn.sender
+                    payload = b'TX' + base64.b64decode(_algo_encoding.msgpack_encode(txn))
+                    VerifyKey(_algo_encoding.decode_address(verifier_addr)).verify(payload, signature)
+            except Exception as verify_exc:
+                err_msg = (
+                    f'signature_verification_failed:index={verify_idx}:'
+                    f'sender={verify_sender}:auth={verify_auth}:error={verify_exc}'
+                )
+                logger.warning(
+                    "[AutoSwap Submit] local signature verification failed conv=%s error=%s txs=%s",
+                    conv.internal_id,
+                    verify_exc,
+                    tx_summaries,
+                )
+                conv.status = 'FAILED'
+                conv.error_message = err_msg[:500]
+                conv.save(update_fields=['status', 'error_message', 'updated_at'])
+                return cls(success=False, error=err_msg)
+
+            try:
                 # ramp_transactions is now a FK reverse manager. Off-ramp is
                 # always 1:1 (single burn-and-send -> single Koywe order).
                 ramp_tx = conv.ramp_transactions.first() if hasattr(conv, 'ramp_transactions') else None

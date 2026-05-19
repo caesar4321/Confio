@@ -2292,6 +2292,23 @@ export class SecureDeterministicWalletService {
     }
   }
 
+  getActiveSigningAddress(): string | null {
+    try {
+      const currentScope = this.currentScope.get('current');
+      if (!currentScope) return null;
+
+      const seedHex = this.inMemSeeds.get(currentScope);
+      if (!seedHex) return null;
+
+      const seed = hexToBytes(seedHex);
+      const keyPair = nacl.sign.keyPair.fromSeed(seed);
+      const algosdk = require('algosdk');
+      return algosdk.encodeAddress(keyPair.publicKey);
+    } catch (_error) {
+      return null;
+    }
+  }
+
   /**
    * Clear ALL wallet data (we don't support multi-user on same device)
    * This is called on sign-out to ensure complete cleanup

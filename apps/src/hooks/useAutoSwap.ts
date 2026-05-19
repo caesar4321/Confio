@@ -111,6 +111,7 @@ export const useAutoSwap = ({
     // or swaps ALGO only when it exceeds the configured reserve.
     const isSwappingRef = useRef(false);
     const [swapModalAsset, setSwapModalAsset] = useState<'ALGO' | 'USDC' | null>(null);
+    const [walletRecoveryRequired, setWalletRecoveryRequired] = useState(false);
 
     // Track per-swapKey last attempt time to avoid re-triggering same swap on every render.
     const lastAttemptTimestamps = useRef<Record<string, number>>({});
@@ -142,6 +143,7 @@ export const useAutoSwap = ({
                 }
 
                 if (!swapAssetType) return;
+                if (walletRecoveryRequired) return;
                 if (!Number.isFinite(Number(swapAmount)) || Number(swapAmount) <= 0) {
                     return;
                 }
@@ -213,8 +215,16 @@ export const useAutoSwap = ({
                     const signedUserTxns = await Promise.all(
                         unsignedBase64Txns.map(async (b64: string) => {
                             const txnBytes = Uint8Array.from(Buffer.from(b64, 'base64'));
-                            const signedBytes = await algorandService.signTransactionBytes(txnBytes);
-                            return Buffer.from(signedBytes).toString('base64');
+                            try {
+                                const signedBytes = await algorandService.signTransactionBytes(txnBytes);
+                                return Buffer.from(signedBytes).toString('base64');
+                            } catch (signError: any) {
+                                const message = String(signError?.message || signError || '');
+                                if (message.includes('wallet_sender_mismatch') || message.includes('No wallet seed in memory')) {
+                                    setWalletRecoveryRequired(true);
+                                }
+                                throw signError;
+                            }
                         })
                     );
 
@@ -233,6 +243,13 @@ export const useAutoSwap = ({
 
                     const submitData = submitRes.data?.submitAutoSwapTransactions;
                     if (!submitData?.success) {
+                        const submitError = String(submitData?.error || '');
+                        if (
+                            submitError.includes('signature_verification_failed') ||
+                            submitError.includes('wallet_sender_mismatch')
+                        ) {
+                            setWalletRecoveryRequired(true);
+                        }
                     } else {
                         // Keep a post-success cooldown so stale balances do not immediately retrigger the same swap.
                         lastAttemptTimestamps.current[swapKey] = Date.now();
@@ -274,10 +291,12 @@ export const useAutoSwap = ({
             };
 
             checkAndTriggerSwap();
-        }, [usdcBalanceStr, algoBalanceStr, myBalancesLoading, isAuthenticated, buildAutoSwapTransactions, submitAutoSwapTransactions, refreshAccountBalance, activeAccount])
+        }, [usdcBalanceStr, algoBalanceStr, myBalancesLoading, isAuthenticated, buildAutoSwapTransactions, submitAutoSwapTransactions, refreshAccountBalance, activeAccount, walletRecoveryRequired])
     );
 
     return {
-        swapModalAsset
+        swapModalAsset,
+        walletRecoveryRequired,
+        dismissWalletRecovery: () => setWalletRecoveryRequired(false)
     };
 };

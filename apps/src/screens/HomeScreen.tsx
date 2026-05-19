@@ -188,7 +188,7 @@ export const HomeScreen = () => {
   const [setReferrerMutation] = useMutation(SET_REFERRER);
 
   // Use the auto-swap hook for both ALGO and USDC detection
-  const { swapModalAsset } = useAutoSwap({
+  const { swapModalAsset, walletRecoveryRequired, dismissWalletRecovery } = useAutoSwap({
     isAuthenticated,
     myBalancesLoading,
     usdcBalanceStr: (myBalancesData as any)?.myBalances?.usdc || '0',
@@ -1521,8 +1521,10 @@ export const HomeScreen = () => {
       />
 
       <AutoSwapModal
-        visible={swapModalAsset !== null}
+        visible={swapModalAsset !== null || walletRecoveryRequired}
         assetType={swapModalAsset}
+        mode={walletRecoveryRequired ? 'wallet_recovery_required' : 'processing'}
+        onClose={dismissWalletRecovery}
       />
 
     </View>
