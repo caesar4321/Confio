@@ -194,8 +194,7 @@ export const RampAddressScreen: React.FC = () => {
         return;
       }
 
-      void AnalyticsService.logEvent('add_payment_info', {
-        payment_type: 'ramp_address',
+      void AnalyticsService.logEvent('ramp_profile_completed', {
         provider: 'koywe',
         country: phoneCountryIso || '',
         has_auth_email: shouldShowAuthEmailField && Boolean(authEmail.trim()),
