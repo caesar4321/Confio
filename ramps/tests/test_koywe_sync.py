@@ -1,5 +1,6 @@
 from django.test import SimpleTestCase
 
+from ramps import schema as ramps_schema
 from ramps.koywe_client import KoyweClient
 from ramps.koywe_sync import build_koywe_instruction_snapshot, _merge_koywe_metadata
 
@@ -95,3 +96,23 @@ class KoyweClientProviderMergeTests(SimpleTestCase):
         self.assertEqual(enriched['paymentMethodId'], 'provider-id')
         self.assertEqual(enriched['paymentMethodDisplay'], 'WIREAR')
         self.assertEqual(enriched['paymentProvider']['details'], provider['details'])
+
+
+class KoyweEmailSelectionTests(SimpleTestCase):
+    def test_previous_emails_do_not_include_duende_test_accounts(self):
+        emails = ramps_schema._get_koywe_previous_emails(
+            country_code='AR',
+            document_number='',
+        )
+
+        self.assertNotIn('duende-argentina@koywe-test.com', emails)
+
+    def test_test_user_auth_email_still_uses_duende_override(self):
+        user = type('User', (), {
+            'username': 'julianm',
+            'email': 'julian@example.com',
+        })()
+
+        email = ramps_schema._get_koywe_auth_email(user=user, country_code='MX')
+
+        self.assertEqual(email, 'duende-mexico@koywe-test.com')

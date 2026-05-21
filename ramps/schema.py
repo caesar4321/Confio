@@ -1584,9 +1584,7 @@ def _get_koywe_previous_emails(*, country_code: str, document_number: str) -> li
     """Return emails that may hold an existing Koywe account for this document.
 
     Queries IdentityVerification for all users sharing the same document number
-    and collects their user emails plus any stored ramp auth emails. Also includes
-    the test override email for the country, since accounts may have been created
-    under test identities.
+    and collects their user emails plus any stored ramp auth emails.
     """
     normalized_doc = normalize_document_number(document_number)
     emails: list[str] = []
@@ -1607,11 +1605,6 @@ def _get_koywe_previous_emails(*, country_code: str, document_number: str) -> li
                 ).strip().lower()
                 if ramp_email:
                     emails.append(ramp_email)
-    override = _KOYWE_TEST_ACCOUNT_OVERRIDES.get((country_code or '').strip().upper())
-    if override:
-        override_email = str(override.get('email') or '').strip().lower()
-        if override_email:
-            emails.append(override_email)
     # Deduplicate while preserving order
     seen: set[str] = set()
     unique: list[str] = []
