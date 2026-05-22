@@ -134,6 +134,33 @@ def _format_maximum_amount_error(exc: 'KoyweMaximumAmountError', direction: str)
     )
 
 
+def _format_decimal_plain(value: Decimal) -> str:
+    formatted = format(value, 'f')
+    if '.' in formatted:
+        formatted = formatted.rstrip('0').rstrip('.')
+    return formatted or '0'
+
+
+def _validate_koywe_on_ramp_quote_limits(*, client: KoyweClient, amount: Decimal, fiat_symbol: str) -> None:
+    limits = client.get_public_ramp_limits(fiat_symbol=fiat_symbol)
+    minimum = limits.get('on_ramp_min_amount')
+    maximum = limits.get('on_ramp_max_amount')
+    if minimum is not None and amount < minimum:
+        raise KoyweMinimumAmountError(
+            f'Currency amount is less than the minimum available for {fiat_symbol}. {amount} < {minimum}',
+            currency=fiat_symbol,
+            actual=_format_decimal_plain(amount),
+            minimum=_format_decimal_plain(minimum),
+        )
+    if maximum is not None and amount > maximum:
+        raise KoyweMaximumAmountError(
+            f'Currency amount exceeds the maximum available for {fiat_symbol}. {amount} > {maximum}',
+            currency=fiat_symbol,
+            actual=_format_decimal_plain(amount),
+            maximum=_format_decimal_plain(maximum),
+        )
+
+
 def _get_wallet_upgrade_blocker(*, user, account):
     if not user or not account:
         return None
@@ -1285,6 +1312,23 @@ class Query(graphene.ObjectType):
             raise ValidationError("Koywe credentials are not configured on the server")
 
         try:
+            resolved_fiat_symbol = fiat_currency or _get_country_fiat_currency(resolved_country_code)
+            if normalized_direction == "ON_RAMP":
+                try:
+                    _validate_koywe_on_ramp_quote_limits(
+                        client=client,
+                        amount=decimal_amount,
+                        fiat_symbol=resolved_fiat_symbol,
+                    )
+                except KoyweError as exc:
+                    if isinstance(exc, (KoyweMinimumAmountError, KoyweMaximumAmountError)):
+                        raise
+                    logger.warning(
+                        "Koywe public limit preflight failed for %s %s: %s",
+                        normalized_direction,
+                        resolved_country_code,
+                        exc,
+                    )
             user = getattr(info.context, "user", None)
             koywe_email = _get_koywe_auth_email(
                 user=user,
@@ -1293,7 +1337,7 @@ class Query(graphene.ObjectType):
             quote = client.get_ramp_quote(
                 direction=normalized_direction,
                 amount=decimal_amount,
-                fiat_symbol=fiat_currency or _get_country_fiat_currency(resolved_country_code),
+                fiat_symbol=resolved_fiat_symbol,
                 payment_method_code=payment_method_code,
                 email=koywe_email,
             )

@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.test import SimpleTestCase
 
 from ramps import schema as ramps_schema
@@ -116,3 +118,37 @@ class KoyweEmailSelectionTests(SimpleTestCase):
         email = ramps_schema._get_koywe_auth_email(user=user, country_code='MX')
 
         self.assertEqual(email, 'duende-mexico@koywe-test.com')
+
+
+class KoyweQuoteLimitPreflightTests(SimpleTestCase):
+    def test_on_ramp_preflight_rejects_below_cached_minimum(self):
+        client = type('Client', (), {
+            'get_public_ramp_limits': lambda self, *, fiat_symbol: {
+                'on_ramp_min_amount': Decimal('24000'),
+                'on_ramp_max_amount': Decimal('8500000'),
+            },
+        })()
+
+        with self.assertRaises(ramps_schema.KoyweMinimumAmountError) as ctx:
+            ramps_schema._validate_koywe_on_ramp_quote_limits(
+                client=client,
+                amount=Decimal('25'),
+                fiat_symbol='ARS',
+            )
+
+        self.assertEqual(ctx.exception.minimum, '24000')
+        self.assertEqual(ctx.exception.actual, '25')
+
+    def test_on_ramp_preflight_allows_amount_inside_limits(self):
+        client = type('Client', (), {
+            'get_public_ramp_limits': lambda self, *, fiat_symbol: {
+                'on_ramp_min_amount': Decimal('24000'),
+                'on_ramp_max_amount': Decimal('8500000'),
+            },
+        })()
+
+        ramps_schema._validate_koywe_on_ramp_quote_limits(
+            client=client,
+            amount=Decimal('25000'),
+            fiat_symbol='ARS',
+        )
