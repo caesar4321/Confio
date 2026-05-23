@@ -52,57 +52,59 @@ def _link_autoswap_conversion_to_recent_guardarian_ramp(*, user, account, conver
         return
 
     try:
+        from django.db import transaction as db_transaction
         from ramps.models import RampTransaction
 
-        candidates = RampTransaction.objects.select_for_update().filter(
-            provider='guardarian',
-            direction='on_ramp',
-            actor_user=user,
-            conversion__isnull=True,
-            usdc_deposit__isnull=False,
-            created_at__gte=timezone.now() - timedelta(hours=48),
-        ).order_by('-created_at')
+        with db_transaction.atomic():
+            candidates = RampTransaction.objects.select_for_update().filter(
+                provider='guardarian',
+                direction='on_ramp',
+                actor_user=user,
+                conversion__isnull=True,
+                usdc_deposit__isnull=False,
+                created_at__gte=timezone.now() - timedelta(hours=48),
+            ).order_by('-created_at')
 
-        matched = candidates.filter(
-            actor_address=account.algorand_address or '',
-            usdc_deposit__amount=conversion.from_amount,
-        ).first()
-
-        if not matched:
             matched = candidates.filter(
                 actor_address=account.algorand_address or '',
-            ).first() or candidates.first()
+                usdc_deposit__amount=conversion.from_amount,
+            ).first()
 
-        if not matched:
-            logger.info(
-                "[AutoSwap USDC] No recent Guardarian ramp candidate for conversion %s",
-                conversion.internal_id,
-            )
-            return
+            if not matched:
+                matched = candidates.filter(
+                    actor_address=account.algorand_address or '',
+                ).first() or candidates.first()
 
-        update_fields = []
-        if matched.conversion_id != conversion.id:
-            matched.conversion = conversion
-            update_fields.append('conversion')
-        if conversion.actor_address and matched.actor_address != conversion.actor_address:
-            matched.actor_address = conversion.actor_address
-            update_fields.append('actor_address')
-        if matched.final_amount != conversion.to_amount:
-            matched.final_amount = conversion.to_amount
-            update_fields.append('final_amount')
-        if matched.final_currency != 'CUSD':
-            matched.final_currency = 'CUSD'
-            update_fields.append('final_currency')
+            if not matched:
+                logger.info(
+                    "[AutoSwap USDC] No recent Guardarian ramp candidate for conversion %s",
+                    conversion.internal_id,
+                )
+                return
 
-        if update_fields:
-            update_fields.append('updated_at')
-            matched.save(update_fields=update_fields)
-            logger.info(
-                "[AutoSwap USDC] Linked conversion %s to ramp %s (Guardarian %s)",
-                conversion.internal_id,
-                matched.internal_id,
-                matched.provider_order_id,
-            )
+            update_fields = []
+            if matched.conversion_id != conversion.id:
+                matched.conversion = conversion
+                update_fields.append('conversion')
+            if conversion.actor_address and matched.actor_address != conversion.actor_address:
+                matched.actor_address = conversion.actor_address
+                update_fields.append('actor_address')
+            if matched.final_amount != conversion.to_amount:
+                matched.final_amount = conversion.to_amount
+                update_fields.append('final_amount')
+            if matched.final_currency != 'CUSD':
+                matched.final_currency = 'CUSD'
+                update_fields.append('final_currency')
+
+            if update_fields:
+                update_fields.append('updated_at')
+                matched.save(update_fields=update_fields)
+                logger.info(
+                    "[AutoSwap USDC] Linked conversion %s to ramp %s (Guardarian %s)",
+                    conversion.internal_id,
+                    matched.internal_id,
+                    matched.provider_order_id,
+                )
     except Exception:
         logger.exception(
             "[AutoSwap USDC] Failed to link conversion %s to Guardarian ramp",

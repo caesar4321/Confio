@@ -22,6 +22,7 @@ from send.models import PhoneInvite
 GUARDARIAN_CONVERSION_LINK_WINDOW = timedelta(days=14)
 GUARDARIAN_WAITING_FOR_AUTOSWAP = 'deposit_confirmed_waiting_for_user_autoswap'
 GUARDARIAN_AUTOSWAP_FAILED_RETRYABLE = 'deposit_confirmed_autoswap_failed_retryable'
+GUARDARIAN_WAITING_FOR_BLOCKCHAIN_MATCH = 'provider_finished_waiting_for_blockchain_match'
 
 
 def _safe_related(instance, attr_name: str):
@@ -66,7 +67,7 @@ def _derive_guardarian_ramp_outcome(guardarian_tx: GuardarianTransaction) -> tup
                 return 'FAILED', 'provider_failed_after_deposit', None
             return 'PROCESSING', GUARDARIAN_WAITING_FOR_AUTOSWAP, None
         if provider_status == 'COMPLETED':
-            return 'AML_REVIEW', 'provider_finished_missing_blockchain_match', None
+            return 'PROCESSING', GUARDARIAN_WAITING_FOR_BLOCKCHAIN_MATCH, None
     else:
         if withdrawal and withdrawal.status == 'COMPLETED':
             if provider_status == 'FAILED':
@@ -78,7 +79,7 @@ def _derive_guardarian_ramp_outcome(guardarian_tx: GuardarianTransaction) -> tup
                 return 'AML_REVIEW', 'provider_aml_review', None
             return 'PROCESSING', 'withdrawal_confirmed_provider_pending', None
         if provider_status == 'COMPLETED':
-            return 'AML_REVIEW', 'provider_finished_missing_blockchain_match', None
+            return 'PROCESSING', GUARDARIAN_WAITING_FOR_BLOCKCHAIN_MATCH, None
 
     if provider_status == 'AML_REVIEW':
         return 'AML_REVIEW', 'provider_aml_review', None
