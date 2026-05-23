@@ -1,0 +1,18 @@
+[Unit]
+Description=Celery Analytics Worker for Confio (dedicated analytics queue)
+After=network-online.target postgresql.service redis.service redis6.service
+Wants=network-online.target postgresql.service redis.service redis6.service
+
+[Service]
+Type=simple
+User=nginx
+WorkingDirectory=/opt/confio
+Environment=DJANGO_SETTINGS_MODULE=config.settings
+EnvironmentFile=/opt/confio/.env.mainnet
+ExecStart=/opt/confio/myvenv/bin/celery -A config worker --loglevel=INFO --concurrency=1 --prefetch-multiplier=1 -Q analytics -n analytics@%%h
+Restart=always
+RestartSec=5
+TimeoutStartSec=30
+
+[Install]
+WantedBy=multi-user.target
