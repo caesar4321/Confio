@@ -234,5 +234,6 @@ class GuardarianAutoSwapReconciliationTests(TestCase):
         withdrawal.refresh_from_db()
         self.assertEqual(ramp.status, 'FAILED')
         self.assertEqual(ramp.status_detail, 'conversion_failed')
+        self.assertEqual(ramp.final_currency, 'USDC Algorand')
         self.assertEqual(withdrawal.status, 'FAILED')
         self.assertEqual(withdrawal.error_message, 'signature_verification_failed:index=1')

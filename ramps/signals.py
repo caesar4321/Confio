@@ -591,7 +591,6 @@ def handle_ramp_conversion_link(sender, instance, **kwargs):
         return
     ramp_tx.conversion = instance
     ramp_tx.actor_address = instance.actor_address or ramp_tx.actor_address
-    ramp_tx.final_amount, ramp_tx.final_currency = _derive_final_amount(ramp_tx)
     if ramp_tx.provider == 'koywe':
         # Koywe lifecycle is authoritative via the webhook / poller path
         # (sync_koywe_ramp_transaction_from_order). The internal conversion
@@ -615,8 +614,6 @@ def handle_ramp_conversion_link(sender, instance, **kwargs):
                 update_fields=[
                     'conversion',
                     'actor_address',
-                    'final_amount',
-                    'final_currency',
                     'status',
                     'status_detail',
                     'completed_at',
@@ -628,12 +625,11 @@ def handle_ramp_conversion_link(sender, instance, **kwargs):
             update_fields=[
                 'conversion',
                 'actor_address',
-                'final_amount',
-                'final_currency',
                 'updated_at',
             ]
         )
         return
+    ramp_tx.final_amount, ramp_tx.final_currency = _derive_final_amount(ramp_tx)
     if instance.status == 'COMPLETED':
         ramp_tx.status = 'COMPLETED'
         ramp_tx.status_detail = 'conversion_completed'
