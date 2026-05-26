@@ -238,6 +238,6 @@ class GuardarianAutoSwapReconciliationTests(TestCase):
         self.assertEqual(ramp.final_currency, 'USDC Algorand')
         unified = UnifiedTransactionTable.objects.get(ramp_transaction=ramp)
         self.assertEqual(unified.status, 'FAILED')
-        self.assertEqual(unified.token_type, 'USDC ALGORAND')
+        self.assertEqual(unified.token_type, 'USDC')
         self.assertEqual(withdrawal.status, 'FAILED')
         self.assertEqual(withdrawal.error_message, 'signature_verification_failed:index=1')

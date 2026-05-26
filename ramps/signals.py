@@ -134,7 +134,7 @@ def _derive_final_amount(ramp_tx: RampTransaction) -> tuple[Decimal | None, str]
         and ramp_tx.direction == 'off_ramp'
         and ramp_tx.final_amount is not None
     ):
-        return ramp_tx.final_amount, ramp_tx.final_currency or ramp_tx.crypto_currency or 'USDC'
+        return ramp_tx.final_amount, 'USDC'
 
     if ramp_tx.conversion_id and ramp_tx.conversion:
         if ramp_tx.direction == 'on_ramp':
