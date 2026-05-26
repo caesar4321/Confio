@@ -2,7 +2,7 @@ from types import SimpleNamespace
 from decimal import Decimal
 from unittest.mock import patch
 
-from django.test import TestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 
 from achievements.models import (
     AchievementType,
@@ -13,9 +13,36 @@ from achievements.models import (
 from blockchain.mutations import (
     AlgorandSponsoredSendMutation,
     OFFICIAL_APP_REQUIRED_ERROR,
+    _extract_signed_txn_payload,
 )
 from blockchain.algorand_account_manager import AlgorandAccountManager
 from users.models import User, Account
+
+
+class SignedTxnPayloadExtractionTest(SimpleTestCase):
+    def test_extracts_raw_txn_payload_without_reencoding(self):
+        import msgpack
+
+        raw_txn = msgpack.packb(
+            {
+                'snd': b'a' * 32,
+                'arcv': b'b' * 32,
+                'type': 'axfer',
+                'xaid': 123,
+                'aamt': 456,
+                'grp': b'c' * 32,
+                'note': [b'preserve', {'nested': b'bytes'}],
+            },
+            use_bin_type=True,
+        )
+        signature = b's' * 64
+        signed_txn = (
+            b'\x82'
+            b'\xa3sig' + b'\xc4\x40' + signature
+            + b'\xa3txn' + raw_txn
+        )
+
+        self.assertEqual(_extract_signed_txn_payload(signed_txn), raw_txn)
 
 
 class FakeAlgodClient:

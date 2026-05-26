@@ -29,6 +29,134 @@ OFFICIAL_APP_REQUIRED_ERROR = (
 )
 
 
+def _skip_msgpack_object(data: bytes, offset: int) -> int:
+    marker = data[offset]
+    offset += 1
+
+    if marker <= 0x7f or marker >= 0xe0 or marker in (0xc0, 0xc2, 0xc3):
+        return offset
+
+    if 0xa0 <= marker <= 0xbf:
+        return offset + (marker & 0x1f)
+    if 0x90 <= marker <= 0x9f:
+        for _ in range(marker & 0x0f):
+            offset = _skip_msgpack_object(data, offset)
+        return offset
+    if 0x80 <= marker <= 0x8f:
+        for _ in range((marker & 0x0f) * 2):
+            offset = _skip_msgpack_object(data, offset)
+        return offset
+
+    if marker == 0xcc:
+        return offset + 1
+    if marker == 0xcd:
+        return offset + 2
+    if marker == 0xce:
+        return offset + 4
+    if marker == 0xcf:
+        return offset + 8
+    if marker == 0xd0:
+        return offset + 1
+    if marker == 0xd1:
+        return offset + 2
+    if marker == 0xd2:
+        return offset + 4
+    if marker == 0xd3:
+        return offset + 8
+    if marker == 0xca:
+        return offset + 4
+    if marker == 0xcb:
+        return offset + 8
+
+    if marker == 0xc4:
+        length = data[offset]
+        return offset + 1 + length
+    if marker == 0xc5:
+        length = int.from_bytes(data[offset:offset + 2], 'big')
+        return offset + 2 + length
+    if marker == 0xc6:
+        length = int.from_bytes(data[offset:offset + 4], 'big')
+        return offset + 4 + length
+    if marker == 0xd9:
+        length = data[offset]
+        return offset + 1 + length
+    if marker == 0xda:
+        length = int.from_bytes(data[offset:offset + 2], 'big')
+        return offset + 2 + length
+    if marker == 0xdb:
+        length = int.from_bytes(data[offset:offset + 4], 'big')
+        return offset + 4 + length
+
+    if marker == 0xdc:
+        length = int.from_bytes(data[offset:offset + 2], 'big')
+        offset += 2
+        for _ in range(length):
+            offset = _skip_msgpack_object(data, offset)
+        return offset
+    if marker == 0xdd:
+        length = int.from_bytes(data[offset:offset + 4], 'big')
+        offset += 4
+        for _ in range(length):
+            offset = _skip_msgpack_object(data, offset)
+        return offset
+    if marker == 0xde:
+        length = int.from_bytes(data[offset:offset + 2], 'big')
+        offset += 2
+        for _ in range(length * 2):
+            offset = _skip_msgpack_object(data, offset)
+        return offset
+    if marker == 0xdf:
+        length = int.from_bytes(data[offset:offset + 4], 'big')
+        offset += 4
+        for _ in range(length * 2):
+            offset = _skip_msgpack_object(data, offset)
+        return offset
+
+    if marker in (0xd4, 0xd5, 0xd6, 0xd7, 0xd8):
+        ext_lengths = {0xd4: 1, 0xd5: 2, 0xd6: 4, 0xd7: 8, 0xd8: 16}
+        return offset + 1 + ext_lengths[marker]
+    if marker == 0xc7:
+        length = data[offset]
+        return offset + 2 + length
+    if marker == 0xc8:
+        length = int.from_bytes(data[offset:offset + 2], 'big')
+        return offset + 3 + length
+    if marker == 0xc9:
+        length = int.from_bytes(data[offset:offset + 4], 'big')
+        return offset + 5 + length
+
+    raise ValueError(f'unsupported_msgpack_marker:0x{marker:02x}')
+
+
+def _extract_signed_txn_payload(raw_signed_txn: bytes) -> bytes | None:
+    """Return the exact unsigned txn msgpack bytes embedded under SignedTxn.txn."""
+    import msgpack
+
+    marker = raw_signed_txn[0]
+    offset = 1
+    if 0x80 <= marker <= 0x8f:
+        pairs = marker & 0x0f
+    elif marker == 0xde:
+        pairs = int.from_bytes(raw_signed_txn[offset:offset + 2], 'big')
+        offset += 2
+    elif marker == 0xdf:
+        pairs = int.from_bytes(raw_signed_txn[offset:offset + 4], 'big')
+        offset += 4
+    else:
+        return None
+
+    for _ in range(pairs):
+        key_start = offset
+        key_end = _skip_msgpack_object(raw_signed_txn, key_start)
+        key = msgpack.unpackb(raw_signed_txn[key_start:key_end], raw=False)
+        value_start = key_end
+        value_end = _skip_msgpack_object(raw_signed_txn, value_start)
+        if key == 'txn':
+            return raw_signed_txn[value_start:value_end]
+        offset = value_end
+    return None
+
+
 def _get_wallet_upgrade_blocker(*, user, account):
     if not user or not account:
         return None
@@ -3312,7 +3440,10 @@ class SubmitAutoSwapTransactionsMutation(graphene.Mutation):
                     auth_addr = getattr(stxn, 'authorizing_address', None) or getattr(stxn, 'auth_addr', None)
                     verify_auth = auth_addr
                     verifier_addr = auth_addr or txn.sender
-                    payload = b'TX' + base64.b64decode(_algo_encoding.msgpack_encode(txn))
+                    txn_payload = _extract_signed_txn_payload(raw_bytes)
+                    if txn_payload is None:
+                        raise ValueError('signed_txn_missing_raw_txn_payload')
+                    payload = b'TX' + txn_payload
                     VerifyKey(_algo_encoding.decode_address(verifier_addr)).verify(payload, signature)
             except Exception as verify_exc:
                 err_msg = (
