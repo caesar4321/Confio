@@ -129,6 +129,13 @@ def _derive_actor_address(ramp_tx: RampTransaction) -> str:
 
 
 def _derive_final_amount(ramp_tx: RampTransaction) -> tuple[Decimal | None, str]:
+    if (
+        ramp_tx.provider == 'koywe'
+        and ramp_tx.direction == 'off_ramp'
+        and ramp_tx.final_amount is not None
+    ):
+        return ramp_tx.final_amount, ramp_tx.final_currency or ramp_tx.crypto_currency or 'USDC'
+
     if ramp_tx.conversion_id and ramp_tx.conversion:
         if ramp_tx.direction == 'on_ramp':
             return ramp_tx.conversion.to_amount, 'CUSD'

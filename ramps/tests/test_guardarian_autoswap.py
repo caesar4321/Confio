@@ -13,6 +13,7 @@ from ramps.signals import (
     GUARDARIAN_WAITING_FOR_AUTOSWAP,
 )
 from usdc_transactions.models import GuardarianTransaction, USDCDeposit, USDCWithdrawal
+from users.models_unified import UnifiedTransactionTable
 from users.models import Account, User
 
 
@@ -235,5 +236,8 @@ class GuardarianAutoSwapReconciliationTests(TestCase):
         self.assertEqual(ramp.status, 'FAILED')
         self.assertEqual(ramp.status_detail, 'conversion_failed')
         self.assertEqual(ramp.final_currency, 'USDC Algorand')
+        unified = UnifiedTransactionTable.objects.get(ramp_transaction=ramp)
+        self.assertEqual(unified.status, 'FAILED')
+        self.assertEqual(unified.token_type, 'USDC ALGORAND')
         self.assertEqual(withdrawal.status, 'FAILED')
         self.assertEqual(withdrawal.error_message, 'signature_verification_failed:index=1')
