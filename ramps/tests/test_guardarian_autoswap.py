@@ -6,12 +6,13 @@ from django.test import TestCase
 from django.utils import timezone
 
 from conversion.models import Conversion
+from blockchain.models import PendingAutoSwap
 from ramps.models import RampTransaction
 from ramps.signals import (
     GUARDARIAN_AUTOSWAP_FAILED_RETRYABLE,
     GUARDARIAN_WAITING_FOR_AUTOSWAP,
 )
-from usdc_transactions.models import USDCDeposit
+from usdc_transactions.models import GuardarianTransaction, USDCDeposit, USDCWithdrawal
 from users.models import Account, User
 
 
@@ -82,6 +83,20 @@ class GuardarianAutoSwapReconciliationTests(TestCase):
             error_message='Transaction expired or lost from pool' if status == 'FAILED' else None,
         )
 
+    def _create_guardarian_transaction(self, guardarian_id, deposit, amount):
+        return GuardarianTransaction.objects.create(
+            guardarian_id=guardarian_id,
+            user=self.user,
+            from_currency='USD',
+            from_amount=Decimal('20.000000'),
+            to_currency='USDC',
+            to_amount_estimated=amount,
+            to_amount_actual=amount,
+            network='ALGO',
+            status='finished',
+            onchain_deposit=deposit,
+        )
+
     @patch('ramps.signals.emit_event')
     @patch('ramps.signals.create_notification')
     def test_completed_late_autoswap_links_and_completes_guardarian_ramp(self, *_):
@@ -124,3 +139,100 @@ class GuardarianAutoSwapReconciliationTests(TestCase):
         self.assertEqual(ramp.conversion_id, conversion.id)
         self.assertEqual(ramp.status, 'PROCESSING')
         self.assertEqual(ramp.status_detail, GUARDARIAN_AUTOSWAP_FAILED_RETRYABLE)
+
+    @patch('ramps.signals.emit_event')
+    @patch('ramps.signals.create_notification')
+    def test_autoswap_does_not_steal_prior_guardarian_ramp_by_address_only(self, *_):
+        first_deposit = self._create_deposit(amount=Decimal('71.382067'))
+        prior_ramp = self._create_guardarian_ramp(first_deposit, amount=Decimal('71.382067'))
+        prior_ramp.provider_order_id = '6407224612'
+        prior_ramp.save(update_fields=['provider_order_id', 'updated_at'])
+
+        conversion = self._create_conversion(amount=Decimal('70.927202'))
+
+        prior_ramp.refresh_from_db()
+        self.assertIsNone(prior_ramp.conversion_id)
+        self.assertEqual(prior_ramp.final_amount, Decimal('71.382067'))
+        self.assertEqual(conversion.ramp_transactions.count(), 0)
+
+    @patch('ramps.signals.emit_event')
+    @patch('ramps.signals.create_notification')
+    def test_guardarian_sync_uses_completed_deposit_pending_autoswap(self, *_):
+        deposit = self._create_deposit(amount=Decimal('70.927202'))
+        conversion = self._create_conversion(amount=Decimal('70.927202'))
+        PendingAutoSwap.objects.create(
+            account=self.account,
+            actor_user=self.user,
+            actor_type='user',
+            actor_address=self.account.algorand_address,
+            asset_type='USDC',
+            amount_micro=70927202,
+            amount_decimal=Decimal('70.927202'),
+            status='COMPLETED',
+            usdc_deposit=deposit,
+            conversion=conversion,
+            completed_at=timezone.now(),
+        )
+
+        self._create_guardarian_transaction('5455572678', deposit, Decimal('70.927201'))
+
+        ramp = RampTransaction.objects.get(provider_order_id='5455572678')
+        self.assertEqual(ramp.conversion_id, conversion.id)
+        self.assertEqual(ramp.status, 'COMPLETED')
+        self.assertEqual(ramp.status_detail, 'conversion_completed')
+        self.assertEqual(ramp.final_amount, Decimal('70.927202'))
+
+    @patch('ramps.signals.emit_event')
+    @patch('ramps.signals.create_notification')
+    def test_failed_koywe_off_ramp_conversion_marks_ramp_and_withdrawal_failed(self, *_):
+        conversion = Conversion.objects.create(
+            actor_user=self.user,
+            actor_type='user',
+            actor_display_name='Ramp User',
+            actor_address=self.account.algorand_address,
+            conversion_type='cusd_to_usdc',
+            from_amount=Decimal('23.080000'),
+            to_amount=Decimal('23.080000'),
+            exchange_rate=Decimal('1.0'),
+            fee_amount=Decimal('0.0'),
+            status='PENDING_SIG',
+        )
+        withdrawal = USDCWithdrawal.objects.create(
+            actor_user=self.user,
+            actor_type='user',
+            actor_display_name='Ramp User',
+            actor_address=self.account.algorand_address,
+            amount=Decimal('23.080000'),
+            destination_address='B' * 58,
+            status='PENDING',
+        )
+        ramp = RampTransaction.objects.create(
+            provider='koywe',
+            direction='off_ramp',
+            status='PENDING',
+            status_detail='waiting',
+            provider_order_id='5633606c-3df4-49a3-8cc5-9d8d5e8ebbad',
+            actor_user=self.user,
+            actor_type='user',
+            actor_display_name='Ramp User',
+            actor_address=self.account.algorand_address,
+            fiat_currency='ARS',
+            fiat_amount=Decimal('33538.430000'),
+            crypto_currency='USDC Algorand',
+            crypto_amount_actual=Decimal('23.080000'),
+            final_currency='USDC Algorand',
+            final_amount=Decimal('23.080000'),
+            usdc_withdrawal=withdrawal,
+            conversion=conversion,
+        )
+
+        conversion.status = 'FAILED'
+        conversion.error_message = 'signature_verification_failed:index=1'
+        conversion.save(update_fields=['status', 'error_message', 'updated_at'])
+
+        ramp.refresh_from_db()
+        withdrawal.refresh_from_db()
+        self.assertEqual(ramp.status, 'FAILED')
+        self.assertEqual(ramp.status_detail, 'conversion_failed')
+        self.assertEqual(withdrawal.status, 'FAILED')
+        self.assertEqual(withdrawal.error_message, 'signature_verification_failed:index=1')

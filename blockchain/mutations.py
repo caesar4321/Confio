@@ -71,11 +71,6 @@ def _link_autoswap_conversion_to_recent_guardarian_ramp(*, user, account, conver
             ).first()
 
             if not matched:
-                matched = candidates.filter(
-                    actor_address=account.algorand_address or '',
-                ).first() or candidates.first()
-
-            if not matched:
                 logger.info(
                     "[AutoSwap USDC] No recent Guardarian ramp candidate for conversion %s",
                     conversion.internal_id,

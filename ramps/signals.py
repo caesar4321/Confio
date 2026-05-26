@@ -43,6 +43,15 @@ def _map_guardarian_status(status: str | None) -> str:
     return 'PROCESSING' if normalized in {'confirmed', 'exchanging', 'sending'} else 'PENDING'
 
 
+def _get_deposit_auto_swap_conversion(deposit: USDCDeposit | None) -> Conversion | None:
+    if not deposit:
+        return None
+    pending_auto_swap = _safe_related(deposit, 'pending_auto_swap')
+    if not pending_auto_swap:
+        return None
+    return _safe_related(pending_auto_swap, 'conversion')
+
+
 def _derive_guardarian_ramp_outcome(guardarian_tx: GuardarianTransaction) -> tuple[str, str, timezone.datetime | None]:
     provider_status = _map_guardarian_status(guardarian_tx.status)
     provider_status_raw = (guardarian_tx.status or '').lower()
@@ -53,6 +62,7 @@ def _derive_guardarian_ramp_outcome(guardarian_tx: GuardarianTransaction) -> tup
     if deposit:
         conversion = _safe_related(deposit, 'ramp_transaction')
         conversion = getattr(conversion, 'conversion', None) if conversion else None
+        conversion = conversion or _get_deposit_auto_swap_conversion(deposit)
     elif withdrawal:
         conversion = _safe_related(withdrawal, 'ramp_transaction')
         conversion = getattr(conversion, 'conversion', None) if conversion else None
@@ -257,6 +267,18 @@ def sync_ramp_transaction_from_guardarian(guardarian_tx: GuardarianTransaction) 
     final_amount = guardarian_tx.to_amount_actual if direction == 'on_ramp' else guardarian_tx.from_amount
     final_currency = 'CUSD'
     ramp_status, status_detail, completed_at = _derive_guardarian_ramp_outcome(guardarian_tx)
+    conversion = None
+    if direction == 'on_ramp':
+        existing_ramp = _safe_related(guardarian_tx, 'ramp_transaction')
+        if existing_ramp:
+            conversion = _safe_related(existing_ramp, 'conversion')
+        conversion = _get_deposit_auto_swap_conversion(guardarian_tx.onchain_deposit)
+        if not conversion and existing_ramp:
+            conversion = _safe_related(existing_ramp, 'conversion')
+        if conversion and conversion.status != 'COMPLETED':
+            conversion = None
+        if conversion:
+            final_amount = conversion.to_amount
 
     defaults = {
         'provider': 'guardarian',
@@ -290,6 +312,7 @@ def sync_ramp_transaction_from_guardarian(guardarian_tx: GuardarianTransaction) 
         'guardarian_transaction': guardarian_tx,
         'usdc_deposit': guardarian_tx.onchain_deposit,
         'usdc_withdrawal': guardarian_tx.onchain_withdrawal,
+        'conversion': conversion,
         'completed_at': completed_at,
     }
 
@@ -515,6 +538,8 @@ def handle_ramp_deposit_link(sender, instance, **kwargs):
     guardarian_tx = _safe_related(instance, 'guardarian_source')
     if guardarian_tx:
         ramp_tx = sync_ramp_transaction_from_guardarian(guardarian_tx)
+        if ramp_tx.conversion_id and ramp_tx.status == 'COMPLETED':
+            return
         if (
             ramp_tx.usdc_deposit_id != instance.id
             or ramp_tx.actor_address != (instance.actor_address or '')
@@ -571,7 +596,34 @@ def handle_ramp_conversion_link(sender, instance, **kwargs):
         # Koywe lifecycle is authoritative via the webhook / poller path
         # (sync_koywe_ramp_transaction_from_order). The internal conversion
         # completing only means the cUSD<->USDC swap settled, not that Koywe
-        # delivered fiat, so leave status/status_detail/completed_at alone.
+        # delivered fiat. A failed off-ramp conversion, however, means Koywe
+        # was never funded and must not remain WAITING indefinitely.
+        if ramp_tx.direction == 'off_ramp' and instance.status == 'FAILED':
+            ramp_tx.status = 'FAILED'
+            ramp_tx.status_detail = 'conversion_failed'
+            ramp_tx.completed_at = None
+            if ramp_tx.usdc_withdrawal_id:
+                USDCWithdrawal.objects.filter(
+                    pk=ramp_tx.usdc_withdrawal_id,
+                    status__in=['PENDING', 'PROCESSING'],
+                ).update(
+                    status='FAILED',
+                    error_message=instance.error_message or 'conversion_failed',
+                    updated_at=timezone.now(),
+                )
+            ramp_tx.save(
+                update_fields=[
+                    'conversion',
+                    'actor_address',
+                    'final_amount',
+                    'final_currency',
+                    'status',
+                    'status_detail',
+                    'completed_at',
+                    'updated_at',
+                ]
+            )
+            return
         ramp_tx.save(
             update_fields=[
                 'conversion',
