@@ -626,7 +626,7 @@ def guardarian_transaction_proxy(request):
             account = user.accounts.filter(account_type=account_type, account_index=account_index).first()
             if account and account.algorand_address:
                 db_payout_address = account.algorand_address
-                logger.info(f"Using DB address (Server Priority) for user {user_id}: {db_payout_address}")
+                logger.info(f"Using DB address (Server Priority) for user {user_id}")
         except Exception as e:
             logger.warning(f"DB address lookup error: {e}")
 
@@ -693,7 +693,6 @@ def guardarian_transaction_proxy(request):
         guardarian_payload['skip_payout_address_selection'] = True
 
     # Add customer info if email is present
-    # Add customer info if email is present
     if final_email:
         guardarian_payload['customer'] = {
             'contact_info': {
@@ -703,12 +702,9 @@ def guardarian_transaction_proxy(request):
         # Flat email just in case, as some integrations use it
         guardarian_payload['email'] = final_email
 
-    # Log the payload for debugging
-    # Log the payload for debugging
     logger.info(f'Guardarian transaction request for user {user_id}: '
                 f'amount={amount}, currency={from_currency}, '
                 f'email={bool(user.email)}, address={bool(payout_address)}')
-    logger.info(f'Guardarian payload: {json.dumps(guardarian_payload, indent=2)}')
 
     try:
         resp = requests.post(
@@ -730,7 +726,11 @@ def guardarian_transaction_proxy(request):
 
     try:
         data = resp.json()
-        logger.info(f"Guardarian response body: {json.dumps(data)}")
+        logger.info(
+            'Guardarian response summary: '
+            f'has_redirect_url={bool(data.get("redirect_url"))}, '
+            f'status={data.get("status")}'
+        )
         if resp.ok:
             g_id = data.get('id')
             if g_id:
@@ -749,37 +749,6 @@ def guardarian_transaction_proxy(request):
                     )
                 except Exception as e:
                     logger.error(f"Failed to save GuardarianTransaction: {e}")
-
-            redirect_url = data.get("redirect_url")
-            if redirect_url:
-                # Append query parameters to prefill data (Backend fallback)
-                from urllib.parse import urlencode
-                
-                params = {}
-                if final_email:
-                    params['email'] = final_email
-
-                # Address prefill (Attempting as fallback)
-                if payout_address:
-                    params['payout_address'] = payout_address
-                    params['default_payout_address'] = payout_address
-                    params['skip_choose_payout_address'] = 'true'
-                    params['read_only_payout_address'] = 'true'
-
-                if params:
-                    # Parse existing query params from redirect_url to avoid duplication/errors
-                    from urllib.parse import urlparse, parse_qs, urlunparse
-                    
-                    url_parts = list(urlparse(redirect_url))
-                    query = dict(parse_qs(url_parts[4]))
-                    
-                    # Merge our params into existing query
-                    query.update(params)
-                    
-                    # Re-encode
-                    url_parts[4] = urlencode(query, doseq=True)
-                    redirect_url = urlunparse(url_parts)
-                    data['redirect_url'] = redirect_url
 
             logger.debug(f'Guardarian redirect_url: {data.get("redirect_url", "No URL")}')
     except ValueError:
