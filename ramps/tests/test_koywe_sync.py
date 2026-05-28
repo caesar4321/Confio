@@ -120,6 +120,78 @@ class KoyweEmailSelectionTests(SimpleTestCase):
         self.assertEqual(email, 'duende-mexico@koywe-test.com')
 
 
+class KoyweAccountProfileTests(SimpleTestCase):
+    def test_chile_rut_format_difference_satisfies_existing_profile(self):
+        client = KoyweClient()
+        existing = {
+            'document': {
+                'documentNumber': '123456785',
+                'documentType': 'RUT',
+                'country': 'CHL',
+            },
+            'personalInfo': {
+                'names': 'Juan',
+                'firstLastname': 'Perez',
+                'phoneNumber': '56912345678',
+                'dob': '1980-01-01',
+            },
+            'address': {
+                'addressStreet': 'Apoquindo 123',
+                'addressCountry': 'CHL',
+                'addressZipCode': '7550000',
+                'addressCity': 'Santiago',
+                'addressState': 'RM',
+            },
+        }
+        payload = {
+            'document': {
+                'documentNumber': '12345678-5',
+                'documentType': 'RUT',
+                'country': 'CHL',
+            },
+            'personalInfo': {
+                'names': 'Juan',
+                'firstLastname': 'Perez',
+                'phoneNumber': '56912345678',
+                'dob': '1980-01-01',
+            },
+            'address': {
+                'addressStreet': 'Apoquindo 123',
+                'addressCountry': 'CHL',
+                'addressZipCode': '7550000',
+                'addressCity': 'Santiago',
+                'addressState': 'RM',
+            },
+        }
+
+        self.assertTrue(client._account_profile_satisfies_payload(existing, payload))
+
+    def test_chile_rut_format_difference_does_not_request_document_update(self):
+        client = KoyweClient()
+        payload = client._build_migration_payload(
+            existing={
+                'document': {
+                    'documentNumber': '123456785',
+                    'documentType': 'RUT',
+                    'country': 'CHL',
+                },
+            },
+            target_payload={
+                'document': {
+                    'documentNumber': '12345678-5',
+                    'documentType': 'RUT',
+                    'country': 'CHL',
+                },
+            },
+            country_code='CL',
+            current_email='user@example.com',
+            new_email=None,
+        )
+
+        self.assertNotIn('updateDocumentNumber', payload)
+        self.assertEqual(payload['document']['documentNumber'], '123456785')
+
+
 class KoyweQuoteLimitPreflightTests(SimpleTestCase):
     def test_on_ramp_preflight_rejects_below_cached_minimum(self):
         client = type('Client', (), {

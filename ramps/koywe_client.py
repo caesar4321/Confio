@@ -169,7 +169,7 @@ def _normalize_koywe_document_number(*, country_code: str, document_type: str | 
     if not raw_number:
         return ''
 
-    if normalized_country == 'CL' and normalized_type == 'RUT':
+    if normalized_country in {'CL', 'CHL'} and normalized_type == 'RUT':
         cleaned = re.sub(r'[^A-Z0-9]', '', raw_number)
         if cleaned.startswith('RUT'):
             cleaned = cleaned[3:]
@@ -178,6 +178,18 @@ def _normalize_koywe_document_number(*, country_code: str, document_type: str | 
         return cleaned
 
     return raw_number
+
+
+def _koywe_document_numbers_match(*, country_code: str, document_type: str | None, left: str | None, right: str | None) -> bool:
+    return _normalize_koywe_document_number(
+        country_code=country_code,
+        document_type=document_type,
+        document_number=left,
+    ) == _normalize_koywe_document_number(
+        country_code=country_code,
+        document_type=document_type,
+        document_number=right,
+    )
 
 
 def _normalize_account_type(value: str | None) -> str | None:
@@ -790,6 +802,7 @@ class KoyweClient:
                         migration_payload = self._build_migration_payload(
                             existing=existing,
                             target_payload=payload,
+                            country_code=country_code,
                             current_email=prev_email,
                             new_email=email,
                         )
@@ -804,13 +817,14 @@ class KoyweClient:
         update_payload = self._build_migration_payload(
             existing=existing,
             target_payload=payload,
+            country_code=country_code,
             current_email=email,
             new_email=None,
         )
         self.update_account(email=email, payload=update_payload)
         return None
 
-    def _build_migration_payload(self, *, existing: dict[str, Any], target_payload: dict[str, Any], current_email: str, new_email: str | None) -> dict[str, Any]:
+    def _build_migration_payload(self, *, existing: dict[str, Any], target_payload: dict[str, Any], country_code: str, current_email: str, new_email: str | None) -> dict[str, Any]:
         """Build a PUT payload with updateEmail/updateDocumentNumber/updateDocumentType as needed."""
         result = {**target_payload, 'email': current_email}
 
@@ -819,14 +833,23 @@ class KoyweClient:
 
         existing_doc = existing.get('document') or {}
         target_doc = target_payload.get('document') or {}
+        target_country = str(target_doc.get('country') or existing_doc.get('country') or country_code).strip().upper()
+        target_doc_type = str(target_doc.get('documentType') or '').strip().upper()
 
         existing_doc_number = str(existing_doc.get('documentNumber') or '').strip()
         target_doc_number = str(target_doc.get('documentNumber') or '').strip()
-        if target_doc_number and target_doc_number != existing_doc_number:
+        document_number_matches = target_doc_number and _koywe_document_numbers_match(
+            country_code=target_country,
+            document_type=target_doc_type,
+            left=existing_doc_number,
+            right=target_doc_number,
+        )
+        if document_number_matches and existing_doc_number:
+            result.setdefault('document', {})['documentNumber'] = existing_doc_number
+        elif target_doc_number:
             result['updateDocumentNumber'] = target_doc_number
 
         existing_doc_type = str(existing_doc.get('documentType') or '').strip().upper()
-        target_doc_type = str(target_doc.get('documentType') or '').strip().upper()
         if target_doc_type and target_doc_type != existing_doc_type:
             result['updateDocumentType'] = target_doc_type
 
@@ -909,9 +932,16 @@ class KoyweClient:
         wanted_document = payload.get('document') or {}
         wanted_personal_info = payload.get('personalInfo') or {}
         wanted_address = payload.get('address') or {}
+        wanted_country = str(wanted_document.get('country') or existing_document.get('country') or '').strip().upper()
+        wanted_document_type = str(wanted_document.get('documentType') or existing_document.get('documentType') or '').strip().upper()
 
         document_matches = (
-            str(existing_document.get('documentNumber') or '').strip() == str(wanted_document.get('documentNumber') or '').strip()
+            _koywe_document_numbers_match(
+                country_code=wanted_country,
+                document_type=wanted_document_type,
+                left=str(existing_document.get('documentNumber') or '').strip(),
+                right=str(wanted_document.get('documentNumber') or '').strip(),
+            )
             and str(existing_document.get('documentType') or '').strip().upper() == str(wanted_document.get('documentType') or '').strip().upper()
             and str(existing_document.get('country') or '').strip().upper() == str(wanted_document.get('country') or '').strip().upper()
         )
