@@ -117,6 +117,19 @@ def complete_with_youtube_video(prompt: str, *, system: str | None = None) -> st
     return _complete_gemini(prompt, _system_text(system), youtube_urls=urls[:10])
 
 
+def complete_with_images(
+    prompt: str,
+    images: list[tuple[str, bytes]],
+    *,
+    system: str | None = None,
+) -> str:
+    """Analyze image bytes with Gemini vision input plus the user's text/context."""
+    prompt = _trim_prompt(prompt)
+    if not images:
+        raise AIClientError('No images provided.')
+    return _complete_gemini(prompt, _system_text(system), images=images[:8])
+
+
 def debate(prompt: str, *, synthesizer: str | None = None, system: str | None = None) -> str:
     """Ask every configured model the same prompt, then synthesize the discussion."""
     prompt = _trim_prompt(prompt)
@@ -302,7 +315,13 @@ def _complete_deepseek(prompt: str, system: str = '') -> str:
     )
 
 
-def _complete_gemini(prompt: str, system: str = '', *, youtube_urls: list[str] | None = None) -> str:
+def _complete_gemini(
+    prompt: str,
+    system: str = '',
+    *,
+    youtube_urls: list[str] | None = None,
+    images: list[tuple[str, bytes]] | None = None,
+) -> str:
     api_key = _provider_api_key('gemini')
     if not api_key:
         raise AIClientError('Gemini is selected, but GEMINI_API_KEY is not configured.')
@@ -312,6 +331,15 @@ def _complete_gemini(prompt: str, system: str = '', *, youtube_urls: list[str] |
     parts = []
     for video_url in youtube_urls or []:
         parts.append({'file_data': {'file_uri': video_url}})
+    for mime_type, image_bytes in images or []:
+        import base64
+
+        parts.append({
+            'inline_data': {
+                'mime_type': mime_type,
+                'data': base64.b64encode(image_bytes).decode('ascii'),
+            }
+        })
     parts.append({'text': prompt})
     response = requests.post(
         url,

@@ -8,6 +8,7 @@ from django.core.management.base import BaseCommand, CommandError
 from content_ingestion.ai_client import (
     AIClientError,
     debate,
+    complete_with_images,
     complete_with_youtube_video,
     extract_youtube_urls,
     provider_label,
@@ -37,6 +38,7 @@ RECONNECT_DELAY_SECONDS = 5
 # on connect / when the account is added to a group (via getDifference); those
 # carry their original timestamps, so this stops us from answering the backlog.
 MAX_MESSAGE_AGE_SECONDS = 60
+MAX_IMAGE_BYTES = 12 * 1024 * 1024
 
 
 class Command(BaseCommand):
@@ -199,14 +201,21 @@ class Command(BaseCommand):
                 answer = await asyncio.to_thread(
                     complete_with_youtube_video, user_prompt, system=system
                 )
+            elif not debate_mode:
+                images = await _collect_image_inputs(client, event)
+                if images:
+                    logger.info('Routing %s Telegram image(s) to Gemini vision', len(images))
+                    answer = await asyncio.to_thread(
+                        complete_with_images, user_prompt, images, system=system
+                    )
+                else:
+                    loop = asyncio.get_running_loop()
+                    tools = _build_tools(client, event, loop)
+                    answer = await asyncio.to_thread(
+                        run_with_tools, user_prompt, provider, system, tools
+                    )
             elif debate_mode:
                 answer = await asyncio.to_thread(debate, user_prompt, system=system)
-            else:
-                loop = asyncio.get_running_loop()
-                tools = _build_tools(client, event, loop)
-                answer = await asyncio.to_thread(
-                    run_with_tools, user_prompt, provider, system, tools
-                )
         except AIClientError as exc:
             answer = f'AI setup error: {exc}'
         except Exception:
@@ -428,6 +437,48 @@ async def _reply_target(event) -> str:
     except Exception:
         return ''
     return (getattr(replied, 'raw_text', '') or '').strip()[:500]
+
+
+async def _collect_image_inputs(client, event) -> list[tuple[str, bytes]]:
+    """Download image media from this message and its replied-to message, if small enough."""
+    messages = [getattr(event, 'message', None)]
+    if getattr(event, 'is_reply', False):
+        try:
+            replied = await event.get_reply_message()
+            messages.append(replied)
+        except Exception:
+            pass
+
+    images = []
+    seen_ids = set()
+    for message in messages:
+        if not message or id(message) in seen_ids or not _is_image_message(message):
+            continue
+        seen_ids.add(id(message))
+        file = getattr(message, 'file', None)
+        size = getattr(file, 'size', None) if file else None
+        if size and size > MAX_IMAGE_BYTES:
+            logger.info('Skipping image over size limit: %s bytes', size)
+            continue
+        mime_type = _image_mime_type(message)
+        data = await client.download_media(message, file=bytes)
+        if data and len(data) <= MAX_IMAGE_BYTES:
+            images.append((mime_type, data))
+    return images
+
+
+def _is_image_message(message) -> bool:
+    if not getattr(message, 'media', None):
+        return False
+    file = getattr(message, 'file', None)
+    mime = (getattr(file, 'mime_type', '') if file else '') or ''
+    return bool(getattr(message, 'photo', None) or mime.startswith('image/'))
+
+
+def _image_mime_type(message) -> str:
+    file = getattr(message, 'file', None)
+    mime = (getattr(file, 'mime_type', '') if file else '') or ''
+    return mime if mime.startswith('image/') else 'image/jpeg'
 
 
 def _compose_prompt(prompt: str, history: str, reply_to: str) -> str:

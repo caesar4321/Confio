@@ -136,6 +136,25 @@ class AIProviderRoutingTests(SimpleTestCase):
         self.assertEqual(parts[0]['file_data']['file_uri'], 'https://www.youtube.com/watch?v=abc123')
         self.assertIn('Script: hola', parts[1]['text'])
 
+    @override_settings(GEMINI_API_KEY='key', GEMINI_MODEL='gemini-3-flash-preview')
+    @patch('content_ingestion.ai_client.requests.post')
+    def test_complete_with_images_sends_inline_data(self, post):
+        from content_ingestion.ai_client import complete_with_images
+
+        post.return_value.status_code = 200
+        post.return_value.json.return_value = {
+            'candidates': [{'content': {'parts': [{'text': 'image analysis'}]}}],
+        }
+
+        out = complete_with_images('Describe esta imagen', [('image/png', b'abc')], system='SYS')
+
+        self.assertEqual(out, 'image analysis')
+        payload = post.call_args.kwargs['json']
+        parts = payload['contents'][0]['parts']
+        self.assertEqual(parts[0]['inline_data']['mime_type'], 'image/png')
+        self.assertEqual(parts[0]['inline_data']['data'], 'YWJj')
+        self.assertEqual(parts[1]['text'], 'Describe esta imagen')
+
 
 class CommandParsingTests(SimpleTestCase):
     def test_split_command(self):
@@ -173,6 +192,31 @@ class SmartContextTests(SimpleTestCase):
         )
         self.assertEqual(_media_label(video), '[video: demo.mp4]')
         self.assertEqual(_media_label(types.SimpleNamespace(media=None)), '')
+
+    def test_image_message_detection(self):
+        import types
+        from content_ingestion.management.commands.telegram_ai_listener import (
+            _image_mime_type,
+            _is_image_message,
+        )
+
+        photo = types.SimpleNamespace(media=True, photo=True, file=None)
+        doc_image = types.SimpleNamespace(
+            media=True,
+            photo=None,
+            file=types.SimpleNamespace(mime_type='image/png'),
+        )
+        pdf = types.SimpleNamespace(
+            media=True,
+            photo=None,
+            file=types.SimpleNamespace(mime_type='application/pdf'),
+        )
+
+        self.assertTrue(_is_image_message(photo))
+        self.assertTrue(_is_image_message(doc_image))
+        self.assertFalse(_is_image_message(pdf))
+        self.assertEqual(_image_mime_type(photo), 'image/jpeg')
+        self.assertEqual(_image_mime_type(doc_image), 'image/png')
 
     def test_display_name_fallbacks(self):
         import types
