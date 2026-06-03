@@ -222,3 +222,26 @@ class KnowledgeCorpusTests(SimpleTestCase):
             with override_settings(CONFIO_AI_REPO_PATH=d, CONFIO_AI_CONTEXT_ROOT='docs'):
                 corpus = ai_context.load_knowledge_corpus()
         self.assertIn('Lanzar primero en Venezuela', corpus)
+
+
+class ConversationLogTests(SimpleTestCase):
+    def test_append_writes_turn_and_respects_guard(self):
+        import os
+        import tempfile
+        from datetime import datetime, timezone
+        from content_ingestion import conversation_log as cl
+
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, '.git'))  # look like a git worktree
+            with override_settings(CONFIO_AI_REPO_PATH=d, CONFIO_AI_LOG_CONVERSATIONS=True):
+                self.assertTrue(cl.enabled())
+                cl.append_turn(-100, 'Ana', 'hola', 'qué tal')
+                day = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+                path = os.path.join(d, 'docs', 'conversations', '-100', f'{day}.md')
+                content = open(path, encoding='utf-8').read()
+                self.assertIn('Ana: hola', content)
+                self.assertIn('Confío AI: qué tal', content)
+            with override_settings(CONFIO_AI_REPO_PATH=d, CONFIO_AI_LOG_CONVERSATIONS=False):
+                self.assertFalse(cl.enabled())
+            with override_settings(CONFIO_AI_REPO_PATH='/nonexistent', CONFIO_AI_LOG_CONVERSATIONS=True):
+                self.assertFalse(cl.enabled())

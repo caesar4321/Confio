@@ -12,6 +12,7 @@ from content_ingestion.ai_client import (
 )
 from content_ingestion.ai_agent import run_with_tools
 from content_ingestion.ai_context import build_system_prompt, search_knowledge
+from content_ingestion import conversation_log
 from content_ingestion.telegram_client import _entity_identifier, get_client
 
 logger = logging.getLogger(__name__)
@@ -140,6 +141,9 @@ class Command(BaseCommand):
             await client.disconnect()
             return
 
+        # Background task: commit + push conversation logs to ConfioAI on a timer.
+        flush_task = asyncio.create_task(self._flush_loop())
+
         # Self-healing loop: a Telegram disconnect should never take the process down.
         try:
             while True:
@@ -169,6 +173,11 @@ class Command(BaseCommand):
                     )
                 await asyncio.sleep(RECONNECT_DELAY_SECONDS)
         finally:
+            flush_task.cancel()
+            try:
+                await flush_task
+            except asyncio.CancelledError:
+                pass
             await client.disconnect()
 
     async def _answer(self, event, client, prompt, provider, *, debate_mode=False):
@@ -198,6 +207,28 @@ class Command(BaseCommand):
 
         for chunk in _telegram_chunks(answer):
             await event.reply(chunk)
+
+        try:
+            sender = await event.get_sender()
+            sender_name = _display_name(sender, getattr(event, 'sender_id', None))
+        except Exception:
+            sender_name = _display_name(None, getattr(event, 'sender_id', None))
+        await asyncio.to_thread(
+            conversation_log.append_turn,
+            event.chat_id, sender_name, event.raw_text or prompt, answer,
+        )
+
+    async def _flush_loop(self):
+        """Periodically commit + push buffered conversation logs to ConfioAI."""
+        interval = getattr(settings, 'CONFIO_AI_LOG_FLUSH_SECONDS', 180)
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                result = await asyncio.to_thread(conversation_log.commit_and_push)
+                if result not in ('no changes', 'skipped (git busy)', 'disabled', None):
+                    logger.info('Conversation log: %s', result)
+            except Exception:
+                logger.exception('Conversation log flush failed')
 
 
 def _is_stale(event):

@@ -8,4 +8,6 @@ Type=oneshot
 User=nginx
 WorkingDirectory=/opt/ConfioAI
 # Auth via the repo's core.sshCommand (deploy key under /etc/confio).
-ExecStart=/usr/bin/git -C /opt/ConfioAI pull --ff-only
+# flock shares /tmp/confioai-git.lock with the listener's conversation-log writer
+# so a pull and a commit/push never run git at the same time.
+ExecStart=/usr/bin/flock -n /tmp/confioai-git.lock /usr/bin/git -C /opt/ConfioAI pull --rebase --autostash
