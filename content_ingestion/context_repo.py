@@ -89,6 +89,15 @@ def _has_changes(repo_root: Path, relative_path: str) -> bool:
     return bool(result.stdout.strip())
 
 
+def _document_relative_path(document: AIContextDocument, date) -> Path:
+    slug = document.slug or _safe_slug(document.title)
+    filename = f'{date.isoformat()}-{slug}.md'
+    base = Path(settings.CONFIO_AI_CONTEXT_ROOT) / document.category
+    if document.category == 'videos':
+        return base / filename
+    return base / str(date.year) / filename
+
+
 def write_commit_and_push_context(document: AIContextDocument, *, push: bool = True) -> AIContextDocument:
     repo_root = _repo_root()
     root = _context_root(repo_root)
@@ -96,7 +105,7 @@ def write_commit_and_push_context(document: AIContextDocument, *, push: bool = T
     slug = document.slug or _safe_slug(document.title)
     document.slug = slug
 
-    relative_path = Path(settings.CONFIO_AI_CONTEXT_ROOT) / document.category / str(date.year) / f'{date.isoformat()}-{slug}.md'
+    relative_path = _document_relative_path(document, date)
     target = (repo_root / relative_path).resolve()
     if repo_root not in target.parents:
         raise ContextRepoError('Resolved context path escapes CONFIO_AI_REPO_PATH')
@@ -127,4 +136,3 @@ def write_commit_and_push_context(document: AIContextDocument, *, push: bool = T
         document.save(update_fields=['status', 'pushed_at', 'updated_at'])
 
     return document
-

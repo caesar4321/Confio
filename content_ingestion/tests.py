@@ -1,8 +1,9 @@
 from unittest.mock import patch
+from datetime import date
 
 from django.test import RequestFactory, SimpleTestCase, override_settings
 
-from .models import AIContextCategory
+from .models import AIContextCategory, AIContextDocument
 from .views import enqueue_ai_context_commit
 
 
@@ -50,6 +51,40 @@ class AIContextCommitViewTests(SimpleTestCase):
     def test_expected_categories_include_social_video_buckets(self):
         self.assertIn('videos', AIContextCategory.values)
         self.assertIn('social-stats', AIContextCategory.values)
+
+
+class AIContextRepoPathTests(SimpleTestCase):
+    @override_settings(CONFIO_AI_CONTEXT_ROOT='docs')
+    def test_video_documents_are_written_directly_under_videos(self):
+        from content_ingestion.context_repo import _document_relative_path
+
+        document = AIContextDocument(
+            category=AIContextCategory.VIDEOS,
+            title='Coreano, por qué usas la misma camiseta',
+            slug='coreano-por-que-usas-la-misma-camiseta',
+            body='Body',
+        )
+
+        self.assertEqual(
+            str(_document_relative_path(document, date(2026, 6, 3))),
+            'docs/videos/2026-06-03-coreano-por-que-usas-la-misma-camiseta.md',
+        )
+
+    @override_settings(CONFIO_AI_CONTEXT_ROOT='docs')
+    def test_non_video_documents_keep_year_bucket(self):
+        from content_ingestion.context_repo import _document_relative_path
+
+        document = AIContextDocument(
+            category=AIContextCategory.STRATEGY,
+            title='Distribution thesis',
+            slug='distribution-thesis',
+            body='Body',
+        )
+
+        self.assertEqual(
+            str(_document_relative_path(document, date(2026, 6, 3))),
+            'docs/strategy/2026/2026-06-03-distribution-thesis.md',
+        )
 
 
 class AIProviderRoutingTests(SimpleTestCase):
