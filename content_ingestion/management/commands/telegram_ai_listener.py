@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
+from django.db import close_old_connections
 
 from content_ingestion.ai_client import (
     AIClientError,
@@ -85,45 +86,49 @@ class Command(BaseCommand):
 
         @client.on(events.NewMessage(incoming=True))
         async def handler(event):
-            if event.out:  # never react to our own messages
-                return
-            if not _chat_in_scope(event, allowed_chat_ids, include_dms):
-                return
-            if _is_stale(event):  # don't answer replayed history/backlog
-                return
-
-            message = (event.raw_text or '').strip()
-            if not message:
-                return
-
-            # Don't get into bot-to-bot loops in the group.
+            close_old_connections()
             try:
-                sender = await event.get_sender()
-                if getattr(sender, 'bot', False):
+                if event.out:  # never react to our own messages
                     return
-            except Exception:
-                pass
+                if not _chat_in_scope(event, allowed_chat_ids, include_dms):
+                    return
+                if _is_stale(event):  # don't answer replayed history/backlog
+                    return
 
-            command, prompt = _split_command(message)
+                message = (event.raw_text or '').strip()
+                if not message:
+                    return
 
-            if command in PROVIDER_COMMANDS:
-                provider = PROVIDER_COMMANDS[command]
-                if not prompt:
-                    await event.reply(f'Usage: {command} your question')
+                # Don't get into bot-to-bot loops in the group.
+                try:
+                    sender = await event.get_sender()
+                    if getattr(sender, 'bot', False):
+                        return
+                except Exception:
+                    pass
+
+                command, prompt = _split_command(message)
+
+                if command in PROVIDER_COMMANDS:
+                    provider = PROVIDER_COMMANDS[command]
+                    if not prompt:
+                        await event.reply(f'Usage: {command} your question')
+                        return
+                    await self._answer(event, client, prompt, provider)
+                elif command == DEBATE_COMMAND:
+                    if not prompt:
+                        await event.reply(f'Usage: {DEBATE_COMMAND} your question')
+                        return
+                    await event.reply('Convening the panel…')
+                    await self._answer(event, client, prompt, default_provider, debate_mode=True)
+                elif command is not None:
+                    # Unknown slash command (likely meant for another bot) — ignore.
                     return
-                await self._answer(event, client, prompt, provider)
-            elif command == DEBATE_COMMAND:
-                if not prompt:
-                    await event.reply(f'Usage: {DEBATE_COMMAND} your question')
-                    return
-                await event.reply('Convening the panel…')
-                await self._answer(event, client, prompt, default_provider, debate_mode=True)
-            elif command is not None:
-                # Unknown slash command (likely meant for another bot) — ignore.
-                return
-            else:
-                # Ambient: reply to every human message with the default model.
-                await self._answer(event, client, message, default_provider)
+                else:
+                    # Ambient: reply to every human message with the default model.
+                    await self._answer(event, client, message, default_provider)
+            finally:
+                close_old_connections()
 
         # Connect once up front so --once can validate, and so we fail fast on bad config.
         await client.connect()
@@ -243,11 +248,14 @@ class Command(BaseCommand):
         while True:
             await asyncio.sleep(interval)
             try:
+                close_old_connections()
                 result = await asyncio.to_thread(conversation_log.commit_and_push)
                 if result not in ('no changes', 'skipped (git busy)', 'disabled', None):
                     logger.info('Conversation log: %s', result)
             except Exception:
                 logger.exception('Conversation log flush failed')
+            finally:
+                close_old_connections()
 
 
 def _is_stale(event):
@@ -339,6 +347,7 @@ def _write_memory_tool(args: str) -> str:
     if not parsed['body'].strip():
         return 'No escribí nada: falta el cuerpo markdown.'
     try:
+        close_old_connections()
         document = AIContextDocument.objects.create(
             category=parsed['category'],
             title=parsed['title'],
@@ -353,6 +362,8 @@ def _write_memory_tool(args: str) -> str:
     except Exception as exc:  # noqa: BLE001
         logger.exception('write_memory unexpected failure')
         return f'No pude escribir/pushear la memoria por un error inesperado: {exc}'
+    finally:
+        close_old_connections()
     return (
         'Memoria escrita y pusheada.\n'
         f'- Archivo: {document.relative_path}\n'
