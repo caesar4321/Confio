@@ -91,10 +91,10 @@ def _has_changes(repo_root: Path, relative_path: str) -> bool:
 
 def _document_relative_path(document: AIContextDocument, date) -> Path:
     slug = document.slug or _safe_slug(document.title)
-    filename = f'{date.isoformat()}-{slug}.md'
     base = Path(settings.CONFIO_AI_CONTEXT_ROOT) / document.category
     if document.category == 'videos':
-        return base / filename
+        return base / f'{slug}.md'
+    filename = f'{date.isoformat()}-{slug}.md'
     return base / str(date.year) / filename
 
 

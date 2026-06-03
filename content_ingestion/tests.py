@@ -67,7 +67,7 @@ class AIContextRepoPathTests(SimpleTestCase):
 
         self.assertEqual(
             str(_document_relative_path(document, date(2026, 6, 3))),
-            'docs/videos/2026-06-03-coreano-por-que-usas-la-misma-camiseta.md',
+            'docs/videos/coreano-por-que-usas-la-misma-camiseta.md',
         )
 
     @override_settings(CONFIO_AI_CONTEXT_ROOT='docs')
