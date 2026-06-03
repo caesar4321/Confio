@@ -1,0 +1,21 @@
+[Unit]
+Description=Telegram AI Listener for Confio
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=nginx
+WorkingDirectory=/opt/confio
+Environment=DJANGO_SETTINGS_MODULE=config.settings
+EnvironmentFile=/opt/confio/.env.mainnet
+ExecStart=/opt/confio/myvenv/bin/python /opt/confio/manage.py telegram_ai_listener --chat -5283806378
+Restart=always
+RestartSec=5
+TimeoutStartSec=30
+TimeoutStopSec=30
+KillSignal=SIGINT
+
+[Install]
+WantedBy=multi-user.target

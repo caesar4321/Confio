@@ -185,12 +185,15 @@ from .views import guardarian_transaction_proxy, guardarian_fiat_currencies
 from ramps.views import koywe_webhook
 from security.views import didit_webhook
 from users.funnel_ingest import funnel_ingest
+from content_ingestion.views import enqueue_ai_context_commit, enqueue_telegram_sync
 
 # Catch-all pattern should be last
 urlpatterns += [
     path('api/didit/webhook/', didit_webhook, name='didit_webhook'),
     path('api/koywe/webhook/', koywe_webhook, name='koywe_webhook'),
     path('api/funnel/ingest/', funnel_ingest, name='funnel_ingest'),
+    path('api/content-ingestion/telegram-sync/', enqueue_telegram_sync, name='content_ingestion_telegram_sync'),
+    path('api/content-ingestion/ai-context/', enqueue_ai_context_commit, name='content_ingestion_ai_context'),
     path('api/guardarian/fiat/', guardarian_fiat_currencies, name='guardarian_fiat_currencies'),
     path('api/guardarian/transaction/', guardarian_transaction_proxy, name='guardarian_transaction_proxy'),
     re_path(r'^.*$', index),
