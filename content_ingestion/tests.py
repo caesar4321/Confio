@@ -50,3 +50,57 @@ class AIContextCommitViewTests(SimpleTestCase):
     def test_expected_categories_include_social_video_buckets(self):
         self.assertIn('videos', AIContextCategory.values)
         self.assertIn('social-stats', AIContextCategory.values)
+
+
+class AIProviderRoutingTests(SimpleTestCase):
+    def test_normalize_aliases(self):
+        from content_ingestion.ai_client import normalize_provider
+
+        self.assertEqual(normalize_provider('chatgpt'), 'openai')
+        self.assertEqual(normalize_provider('GPT'), 'openai')
+        self.assertEqual(normalize_provider('anthropic'), 'claude')
+        self.assertEqual(normalize_provider('xai'), 'grok')
+        self.assertEqual(normalize_provider('google'), 'gemini')
+
+    def test_normalize_rejects_unknown(self):
+        from content_ingestion.ai_client import AIClientError, normalize_provider
+
+        with self.assertRaises(AIClientError):
+            normalize_provider('llama')
+
+    @override_settings(
+        OPENAI_API_KEY='x', CLAUDE_API_KEY='y',
+        GEMINI_API_KEY='', GROK_API_KEY='', DEEPSEEK_API_KEY='',
+    )
+    def test_configured_providers_reflects_keys(self):
+        from content_ingestion.ai_client import configured_providers
+
+        self.assertEqual(configured_providers(), ['openai', 'claude'])
+
+    def test_complete_text_routes_by_alias(self):
+        from content_ingestion import ai_client
+
+        with patch.dict(ai_client._DISPATCH, {'openai': lambda prompt: f'openai:{prompt}'}):
+            self.assertEqual(ai_client.complete_text('hi', provider='chatgpt'), 'openai:hi')
+
+    @override_settings(
+        OPENAI_API_KEY='x',
+        CLAUDE_API_KEY='', GEMINI_API_KEY='', GROK_API_KEY='', DEEPSEEK_API_KEY='',
+    )
+    def test_debate_with_single_provider_just_answers(self):
+        from content_ingestion import ai_client
+
+        with patch.dict(ai_client._DISPATCH, {'openai': lambda prompt: 'only-answer'}):
+            out = ai_client.debate('q')
+        self.assertIn('ChatGPT', out)
+        self.assertIn('only-answer', out)
+
+
+class CommandParsingTests(SimpleTestCase):
+    def test_split_command(self):
+        from content_ingestion.management.commands.telegram_ai_listener import _split_command
+
+        self.assertEqual(_split_command('hello there'), (None, 'hello there'))
+        self.assertEqual(_split_command('/claude how are you'), ('/claude', 'how are you'))
+        self.assertEqual(_split_command('/debate'), ('/debate', ''))
+        self.assertEqual(_split_command('/CLAUDE@SomeBot hi'), ('/claude', 'hi'))

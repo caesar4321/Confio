@@ -1,11 +1,69 @@
 from __future__ import annotations
 
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 import requests
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
 
 
 class AIClientError(Exception):
     pass
+
+
+# Canonical provider keys and their human-facing labels.
+PROVIDER_LABELS = {
+    'openai': 'ChatGPT',
+    'claude': 'Claude',
+    'grok': 'Grok',
+    'gemini': 'Gemini',
+    'deepseek': 'DeepSeek',
+}
+
+# Accepted aliases (command names, vendor names) -> canonical provider key.
+PROVIDER_ALIASES = {
+    'openai': 'openai',
+    'chatgpt': 'openai',
+    'gpt': 'openai',
+    'claude': 'claude',
+    'anthropic': 'claude',
+    'grok': 'grok',
+    'xai': 'grok',
+    'gemini': 'gemini',
+    'google': 'gemini',
+    'deepseek': 'deepseek',
+}
+
+
+def normalize_provider(provider: str | None) -> str:
+    key = (provider or '').strip().lower()
+    canonical = PROVIDER_ALIASES.get(key)
+    if not canonical:
+        raise AIClientError(f'Unsupported AI provider: {provider}')
+    return canonical
+
+
+def provider_label(provider: str) -> str:
+    return PROVIDER_LABELS.get(normalize_provider(provider), provider)
+
+
+def _provider_api_key(provider: str) -> str:
+    canonical = normalize_provider(provider)
+    setting_name = {
+        'openai': 'OPENAI_API_KEY',
+        'claude': 'CLAUDE_API_KEY',
+        'grok': 'GROK_API_KEY',
+        'gemini': 'GEMINI_API_KEY',
+        'deepseek': 'DEEPSEEK_API_KEY',
+    }[canonical]
+    return getattr(settings, setting_name, '') or ''
+
+
+def configured_providers() -> list[str]:
+    """Canonical providers that currently have an API key configured."""
+    return [key for key in PROVIDER_LABELS if _provider_api_key(key)]
 
 
 def _trim_prompt(prompt: str) -> str:
@@ -16,21 +74,95 @@ def _trim_prompt(prompt: str) -> str:
     return prompt[:max_chars] + '\n\n[Prompt truncated.]'
 
 
-def complete_text(prompt: str) -> str:
-    provider = getattr(settings, 'CONFIO_AI_PROVIDER', 'openai').strip().lower()
+def complete_text(prompt: str, provider: str | None = None) -> str:
+    """Run a single completion. `provider` overrides CONFIO_AI_PROVIDER when given."""
+    provider = normalize_provider(provider or getattr(settings, 'CONFIO_AI_PROVIDER', 'openai'))
     prompt = _trim_prompt(prompt)
     if not prompt:
-        raise AIClientError('Usage: /ai your question')
+        raise AIClientError('Empty prompt.')
+    return _DISPATCH[provider](prompt)
 
-    if provider == 'gemini':
-        return _complete_gemini(prompt)
-    if provider == 'openai':
-        return _complete_openai(prompt)
-    raise AIClientError(f'Unsupported CONFIO_AI_PROVIDER: {provider}')
+
+def debate(prompt: str, *, synthesizer: str | None = None) -> str:
+    """Ask every configured model the same prompt, then synthesize the discussion."""
+    prompt = _trim_prompt(prompt)
+    if not prompt:
+        raise AIClientError('Empty prompt.')
+
+    providers = configured_providers()
+    if not providers:
+        raise AIClientError('No AI providers are configured.')
+    if len(providers) == 1:
+        # Nothing to debate; just answer.
+        only = providers[0]
+        return f'🤖 {provider_label(only)}\n{complete_text(prompt, provider=only)}'
+
+    answers: dict[str, str] = {}
+    with ThreadPoolExecutor(max_workers=len(providers)) as pool:
+        futures = {pool.submit(_safe_complete, p, prompt): p for p in providers}
+        for future in as_completed(futures):
+            answers[futures[future]] = future.result()
+
+    # Stable, readable ordering.
+    ordered = [p for p in PROVIDER_LABELS if p in answers]
+
+    sections = [f'🗣️ Debate: {prompt}', '']
+    for p in ordered:
+        sections.append(f'🤖 {provider_label(p)}')
+        sections.append(answers[p].strip() or '(no answer)')
+        sections.append('')
+
+    # Pick a synthesizer: prefer the requested/Claude, else the first available.
+    synth = None
+    for candidate in (synthesizer, 'claude'):
+        if not candidate:
+            continue
+        try:
+            canonical = normalize_provider(candidate)
+        except AIClientError:
+            continue
+        if canonical in answers:
+            synth = canonical
+            break
+    if synth is None:
+        synth = ordered[0]
+
+    synthesis = _safe_complete(synth, _synthesis_prompt(prompt, answers, ordered))
+    sections.append(f'🧩 Synthesis ({provider_label(synth)})')
+    sections.append(synthesis.strip() or '(no synthesis)')
+
+    return '\n'.join(sections).strip()
+
+
+def _safe_complete(provider: str, prompt: str) -> str:
+    try:
+        return complete_text(prompt, provider=provider)
+    except AIClientError as exc:
+        return f'(error: {exc})'
+    except Exception as exc:  # noqa: BLE001 - one model failing must not sink the debate
+        logger.exception('Debate model %s failed', provider)
+        return f'(error: {exc})'
+
+
+def _synthesis_prompt(prompt: str, answers: dict[str, str], ordered: list[str]) -> str:
+    per_answer_cap = 1500
+    blocks = []
+    for p in ordered:
+        text = answers[p].strip()
+        if len(text) > per_answer_cap:
+            text = text[:per_answer_cap] + ' […]'
+        blocks.append(f'{provider_label(p)} said:\n{text}')
+    joined = '\n\n'.join(blocks)
+    return (
+        f'Several AI models answered this question: "{prompt}"\n\n'
+        f'{joined}\n\n'
+        'Summarize where they agree, call out any meaningful disagreements, '
+        'and give the best combined answer. Be concise.'
+    )
 
 
 def _complete_openai(prompt: str) -> str:
-    api_key = getattr(settings, 'OPENAI_API_KEY', '')
+    api_key = _provider_api_key('openai')
     if not api_key:
         raise AIClientError('OpenAI is selected, but OPENAI_API_KEY is not configured.')
 
@@ -66,8 +198,74 @@ def _complete_openai(prompt: str) -> str:
     raise AIClientError('OpenAI response did not include text output.')
 
 
+def _complete_openai_compatible(
+    *,
+    prompt: str,
+    api_key: str,
+    model: str,
+    base_url: str,
+    provider_name: str,
+) -> str:
+    if not api_key:
+        raise AIClientError(f'{provider_name} is selected, but its API key is not configured.')
+
+    response = requests.post(
+        f'{base_url.rstrip("/")}/chat/completions',
+        headers={
+            'Authorization': f'Bearer {api_key}',
+            'Content-Type': 'application/json',
+        },
+        json={
+            'model': model,
+            'messages': [
+                {'role': 'system', 'content': getattr(settings, 'CONFIO_AI_SYSTEM_PROMPT', '')},
+                {'role': 'user', 'content': prompt},
+            ],
+        },
+        timeout=60,
+    )
+    if response.status_code >= 400:
+        raise AIClientError(f'{provider_name} request failed: {response.status_code} {response.text[:500]}')
+
+    data = response.json()
+    choices = data.get('choices') or []
+    if choices:
+        content = choices[0].get('message', {}).get('content')
+        if isinstance(content, str) and content.strip():
+            return content.strip()
+        if isinstance(content, list):
+            chunks = [
+                item.get('text', '')
+                for item in content
+                if isinstance(item, dict) and item.get('text')
+            ]
+            if chunks:
+                return '\n'.join(chunks).strip()
+    raise AIClientError(f'{provider_name} response did not include text output.')
+
+
+def _complete_grok(prompt: str) -> str:
+    return _complete_openai_compatible(
+        prompt=prompt,
+        api_key=_provider_api_key('grok'),
+        model=getattr(settings, 'GROK_MODEL', 'grok-4.3'),
+        base_url='https://api.x.ai/v1',
+        provider_name='Grok',
+    )
+
+
+def _complete_deepseek(prompt: str) -> str:
+    return _complete_openai_compatible(
+        prompt=prompt,
+        api_key=_provider_api_key('deepseek'),
+        model=getattr(settings, 'DEEPSEEK_MODEL', 'deepseek-chat'),
+        base_url='https://api.deepseek.com',
+        provider_name='DeepSeek',
+    )
+
+
 def _complete_gemini(prompt: str) -> str:
-    api_key = getattr(settings, 'GEMINI_API_KEY', '')
+    api_key = _provider_api_key('gemini')
     if not api_key:
         raise AIClientError('Gemini is selected, but GEMINI_API_KEY is not configured.')
 
@@ -96,3 +294,46 @@ def _complete_gemini(prompt: str) -> str:
     if chunks:
         return '\n'.join(chunks).strip()
     raise AIClientError('Gemini response did not include text output.')
+
+
+def _complete_claude(prompt: str) -> str:
+    api_key = _provider_api_key('claude')
+    if not api_key:
+        raise AIClientError('Claude is selected, but CLAUDE_API_KEY is not configured.')
+
+    model = getattr(settings, 'CLAUDE_MODEL', 'claude-sonnet-4-6')
+    response = requests.post(
+        'https://api.anthropic.com/v1/messages',
+        headers={
+            'x-api-key': api_key,
+            'anthropic-version': '2023-06-01',
+            'Content-Type': 'application/json',
+        },
+        json={
+            'model': model,
+            'max_tokens': 1200,
+            'system': getattr(settings, 'CONFIO_AI_SYSTEM_PROMPT', ''),
+            'messages': [{'role': 'user', 'content': prompt}],
+        },
+        timeout=60,
+    )
+    if response.status_code >= 400:
+        raise AIClientError(f'Claude request failed: {response.status_code} {response.text[:500]}')
+
+    data = response.json()
+    chunks = []
+    for item in data.get('content', []):
+        if item.get('type') == 'text' and item.get('text'):
+            chunks.append(item['text'])
+    if chunks:
+        return '\n'.join(chunks).strip()
+    raise AIClientError('Claude response did not include text output.')
+
+
+_DISPATCH = {
+    'openai': _complete_openai,
+    'claude': _complete_claude,
+    'grok': _complete_grok,
+    'gemini': _complete_gemini,
+    'deepseek': _complete_deepseek,
+}

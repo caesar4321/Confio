@@ -1888,3 +1888,10 @@ confio_admin_site.register(SMSVerification, SMSVerificationAdmin)
 from telegram_verification.models import TelegramVerification
 from telegram_verification.admin import TelegramVerificationAdmin
 confio_admin_site.register(TelegramVerification, TelegramVerificationAdmin)
+
+# Internal content ingestion
+from content_ingestion.models import AIContextDocument, MediaAsset, TelegramChat
+from content_ingestion.admin import AIContextDocumentAdmin, MediaAssetAdmin, TelegramChatAdmin
+confio_admin_site.register(TelegramChat, TelegramChatAdmin)
+confio_admin_site.register(MediaAsset, MediaAssetAdmin)
+confio_admin_site.register(AIContextDocument, AIContextDocumentAdmin)
