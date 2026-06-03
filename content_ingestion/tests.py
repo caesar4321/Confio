@@ -238,13 +238,34 @@ class ToolLoopTests(SimpleTestCase):
     def test_parse_tool_call(self):
         from content_ingestion.ai_agent import _parse_tool_call
 
-        tools = {'get_chat_videos': lambda a: '', 'search_knowledge': lambda a: ''}
+        tools = {'get_chat_videos': lambda a: '', 'search_knowledge': lambda a: '', 'write_video_memory': lambda a: ''}
         self.assertEqual(_parse_tool_call('TOOL get_chat_videos', tools), ('get_chat_videos', ''))
         self.assertEqual(
             _parse_tool_call('TOOL search_knowledge precios koywe', tools),
             ('search_knowledge', 'precios koywe'),
         )
         self.assertEqual(_parse_tool_call('```\nTOOL get_chat_videos\n```', tools), ('get_chat_videos', ''))
+        self.assertEqual(
+            _parse_tool_call(
+                'TOOL write_video_memory\n'
+                'title: Video title\n'
+                '# Video title\n\n'
+                'Full script here.',
+                tools,
+            ),
+            ('write_video_memory', 'title: Video title\n# Video title\n\nFull script here.'),
+        )
+        self.assertEqual(
+            _parse_tool_call(
+                '```\n'
+                'TOOL write_video_memory\n'
+                'title: Video title\n'
+                '# Video title\n'
+                '```',
+                tools,
+            ),
+            ('write_video_memory', 'title: Video title\n# Video title'),
+        )
         self.assertIsNone(_parse_tool_call('Hola, ¿cómo estás?', tools))
         self.assertIsNone(_parse_tool_call('TOOL unknown x', tools))
 

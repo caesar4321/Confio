@@ -62,8 +62,13 @@ def _tool_instructions(tools) -> str:
         'Tienes herramientas para consultar información que NO está en el contexto '
         '(por ejemplo videos del chat, mensajes antiguos, la base de conocimiento, '
         'o escribir memoria curada en ConfioAI cuando el usuario lo pide).',
-        'Para usar una, responde EXCLUSIVAMENTE con una sola línea, sin ningún otro texto:',
+        'Para usar una herramienta corta, responde EXCLUSIVAMENTE con una sola línea:',
         'TOOL <nombre> <argumentos>',
+        'Para herramientas de escritura larga (write_memory, write_video_memory), usa este formato multilinea:',
+        'TOOL <nombre>',
+        'category: <categoria si aplica>',
+        'title: <titulo>',
+        '<markdown completo>',
         'Herramientas disponibles:',
     ]
     for name, fn in tools.items():
@@ -81,13 +86,25 @@ def _parse_tool_call(reply, tools):
     """Return (name, args) if the first meaningful line is a known tool call, else None."""
     if not reply:
         return None
-    for line in reply.strip().splitlines():
+    lines = _strip_code_fence(reply).strip().splitlines()
+    for idx, line in enumerate(lines):
         stripped = line.strip().strip('`').strip()
         if not stripped:
             continue
         match = _TOOL_LINE.match(stripped)
         if match and match.group(1) in tools:
-            return match.group(1), match.group(2).strip()
+            inline_args = match.group(2).strip()
+            trailing = _strip_code_fence('\n'.join(lines[idx + 1:])).strip()
+            args = '\n'.join(part for part in (inline_args, trailing) if part).strip()
+            return match.group(1), args
         # First real line isn't a tool call -> treat the whole reply as the answer.
         return None
     return None
+
+
+def _strip_code_fence(text: str) -> str:
+    stripped = (text or '').strip()
+    if stripped.startswith('```') and stripped.endswith('```'):
+        lines = stripped.splitlines()
+        return '\n'.join(lines[1:-1])
+    return text
