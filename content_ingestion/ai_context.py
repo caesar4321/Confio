@@ -64,19 +64,32 @@ def load_knowledge_corpus(max_chars: int | None = None) -> str:
     return corpus
 
 
+def search_knowledge(query: str, max_chars: int = 2500) -> str:
+    """Keyword search over the ConfioAI knowledge corpus. Returns matching sections."""
+    corpus = load_knowledge_corpus()
+    if not corpus:
+        return 'La base de conocimiento de Confío está vacía (repo no disponible).'
+    terms = [t for t in (query or '').lower().split() if len(t) > 2]
+    if not terms:
+        return corpus[:max_chars]
+    hits = [block for block in corpus.split('\n\n') if any(t in block.lower() for t in terms)]
+    result = '\n\n'.join(hits) if hits else 'Sin coincidencias en la base de conocimiento.'
+    return result[:max_chars]
+
+
 def build_system_prompt() -> str:
     """System prompt: base instructions + accurate capabilities + knowledge base."""
     base = (getattr(settings, 'CONFIO_AI_SYSTEM_PROMPT', '') or '').strip()
     capabilities = (
         'Eres Confío AI, el asistente del equipo interno de Confío en Telegram. '
-        'PUEDES ver los últimos mensajes de este mismo chat (incluidos los textos y '
-        'los títulos/subtítulos de los videos y archivos compartidos recientemente, '
-        'que aparecen marcados como [video: ...] o [archivo: ...]) y la base de '
-        'conocimiento de Confío incluida abajo. NO puedes ver el historial completo '
-        'del chat, ni el contenido interno de los videos, ni datos que no estén en el '
-        'contexto que recibes. Si no tienes un dato, dilo claramente en lugar de '
-        'inventar o dar instrucciones genéricas. Responde en el idioma del usuario '
-        '(normalmente español), de forma concisa y práctica.'
+        'Razonas con base en el contexto que recibes: los últimos mensajes de este '
+        'chat (con los videos y archivos marcados como [video: ...] o [archivo: ...]), '
+        'la base de conocimiento de Confío incluida abajo y, cuando estén disponibles, '
+        'los resultados de las herramientas que puedes invocar (listar videos del chat, '
+        'buscar en el historial, buscar en la base de conocimiento). NO puedes ver el '
+        'contenido interno de los videos. Si te falta un dato, usa una herramienta o '
+        'dilo claramente en lugar de inventar o dar instrucciones genéricas. Responde '
+        'en el idioma del usuario (normalmente español), de forma concisa y práctica.'
     )
 
     parts = [base, capabilities]

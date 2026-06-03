@@ -150,6 +150,48 @@ class SmartContextTests(SimpleTestCase):
         self.assertEqual(_display_name(None, 42), 'usuario 42')
 
 
+class ToolLoopTests(SimpleTestCase):
+    def test_parse_tool_call(self):
+        from content_ingestion.ai_agent import _parse_tool_call
+
+        tools = {'get_chat_videos': lambda a: '', 'search_knowledge': lambda a: ''}
+        self.assertEqual(_parse_tool_call('TOOL get_chat_videos', tools), ('get_chat_videos', ''))
+        self.assertEqual(
+            _parse_tool_call('TOOL search_knowledge precios koywe', tools),
+            ('search_knowledge', 'precios koywe'),
+        )
+        self.assertEqual(_parse_tool_call('```\nTOOL get_chat_videos\n```', tools), ('get_chat_videos', ''))
+        self.assertIsNone(_parse_tool_call('Hola, ¿cómo estás?', tools))
+        self.assertIsNone(_parse_tool_call('TOOL unknown x', tools))
+
+    def test_run_with_tools_executes_then_answers(self):
+        from content_ingestion import ai_agent
+
+        replies = iter(['TOOL get_chat_videos', 'Tienes 2 videos: A y B.'])
+
+        def fake_complete(prompt, provider=None, *, system=None):
+            return next(replies)
+
+        called = {}
+
+        def videos_tool(args):
+            called['hit'] = True
+            return 'A, B'
+
+        with patch('content_ingestion.ai_agent.complete_text', side_effect=fake_complete):
+            out = ai_agent.run_with_tools('¿qué videos hay?', 'gemini', 'SYS', {'get_chat_videos': videos_tool})
+        self.assertIn('videos', out)
+        self.assertTrue(called.get('hit'))
+
+    def test_run_with_tools_no_tools_is_plain_completion(self):
+        from content_ingestion import ai_agent
+
+        with patch('content_ingestion.ai_agent.complete_text', return_value='plain') as mock:
+            out = ai_agent.run_with_tools('hi', 'gemini', 'SYS', {})
+        self.assertEqual(out, 'plain')
+        mock.assert_called_once()
+
+
 class KnowledgeCorpusTests(SimpleTestCase):
     def test_corpus_empty_when_repo_missing(self):
         from content_ingestion import ai_context

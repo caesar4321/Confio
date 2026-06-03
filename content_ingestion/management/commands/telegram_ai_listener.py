@@ -7,11 +7,11 @@ from django.core.management.base import BaseCommand, CommandError
 
 from content_ingestion.ai_client import (
     AIClientError,
-    complete_text,
     debate,
     provider_label,
 )
-from content_ingestion.ai_context import build_system_prompt
+from content_ingestion.ai_agent import run_with_tools
+from content_ingestion.ai_context import build_system_prompt, search_knowledge
 from content_ingestion.telegram_client import _entity_identifier, get_client
 
 logger = logging.getLogger(__name__)
@@ -185,7 +185,11 @@ class Command(BaseCommand):
             if debate_mode:
                 answer = await asyncio.to_thread(debate, user_prompt, system=system)
             else:
-                answer = await asyncio.to_thread(complete_text, user_prompt, provider, system=system)
+                loop = asyncio.get_running_loop()
+                tools = _build_tools(client, event, loop)
+                answer = await asyncio.to_thread(
+                    run_with_tools, user_prompt, provider, system, tools
+                )
         except AIClientError as exc:
             answer = f'AI setup error: {exc}'
         except Exception:
@@ -230,6 +234,78 @@ def _split_command(message: str):
         command = command.split('@', 1)[0]
     rest = parts[1].strip() if len(parts) > 1 else ''
     return command, rest
+
+
+def _build_tools(client, event, loop):
+    """Build the tool callables the model can invoke, bound to this chat.
+
+    The completion runs in a worker thread, but Telethon lives on the main event
+    loop, so chat-data tools hop back via run_coroutine_threadsafe.
+    """
+    chat_id = event.chat_id
+
+    def get_chat_videos(args=''):
+        """Lista los videos compartidos en este chat (fecha y título/caption). Sin argumentos."""
+        return asyncio.run_coroutine_threadsafe(
+            _fetch_chat_videos(client, chat_id), loop
+        ).result(timeout=45)
+
+    def search_chat_history(args=''):
+        """Busca mensajes antiguos de este chat por palabra clave. Argumento: la consulta."""
+        return asyncio.run_coroutine_threadsafe(
+            _search_chat_history(client, chat_id, args), loop
+        ).result(timeout=45)
+
+    def knowledge_search(args=''):
+        """Busca en la base de conocimiento de Confío. Argumento: la consulta."""
+        return search_knowledge(args)
+
+    return {
+        'get_chat_videos': get_chat_videos,
+        'search_chat_history': search_chat_history,
+        'search_knowledge': knowledge_search,
+    }
+
+
+async def _fetch_chat_videos(client, chat_id, limit=80) -> str:
+    from telethon.tl.types import InputMessagesFilterVideo
+
+    items = []
+    try:
+        async for m in client.iter_messages(chat_id, limit=limit, filter=InputMessagesFilterVideo):
+            caption = (getattr(m, 'message', '') or '').strip()
+            file = getattr(m, 'file', None)
+            name = getattr(file, 'name', None) if file else None
+            duration = getattr(file, 'duration', None) if file else None
+            date = m.date.date().isoformat() if getattr(m, 'date', None) else '?'
+            title = caption or name or '(sin título ni caption)'
+            extra = f' · {int(duration)}s' if duration else ''
+            items.append(f'- {date}: {title}{extra}')
+    except Exception as exc:  # noqa: BLE001
+        logger.exception('get_chat_videos failed for %s', chat_id)
+        return f'(no pude listar los videos: {exc})'
+    if not items:
+        return 'No encontré videos en este chat.'
+    return f'Videos en este chat ({len(items)}):\n' + '\n'.join(items)
+
+
+async def _search_chat_history(client, chat_id, query, limit=15) -> str:
+    query = (query or '').strip()
+    if not query:
+        return 'Falta la consulta de búsqueda.'
+    items = []
+    try:
+        async for m in client.iter_messages(chat_id, limit=limit, search=query):
+            text = (getattr(m, 'message', '') or '').strip()
+            if not text:
+                continue
+            who = _display_name(getattr(m, 'sender', None), getattr(m, 'sender_id', None))
+            date = m.date.date().isoformat() if getattr(m, 'date', None) else '?'
+            items.append(f'- [{date}] {who}: {text[:200]}')
+    except Exception as exc:  # noqa: BLE001
+        logger.exception('search_chat_history failed for %s', chat_id)
+        return f'(no pude buscar en el historial: {exc})'
+    return '\n'.join(items) if items else 'Sin resultados para esa búsqueda.'
 
 
 async def _build_history(client, event) -> str:
