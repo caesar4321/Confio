@@ -149,6 +149,14 @@ class SmartContextTests(SimpleTestCase):
         self.assertEqual(_display_name(types.SimpleNamespace(first_name='Ana', last_name='Pérez')), 'Ana Pérez')
         self.assertEqual(_display_name(None, 42), 'usuario 42')
 
+    def test_human_size(self):
+        from content_ingestion.management.commands.telegram_ai_listener import _human_size
+
+        self.assertEqual(_human_size(0), '')
+        self.assertEqual(_human_size(512), '512B')
+        self.assertEqual(_human_size(1536), '1.5KB')
+        self.assertEqual(_human_size(1024 ** 3), '1.0GB')
+
 
 class ToolLoopTests(SimpleTestCase):
     def test_parse_tool_call(self):

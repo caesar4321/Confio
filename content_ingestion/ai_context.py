@@ -85,11 +85,15 @@ def build_system_prompt() -> str:
         'Razonas con base en el contexto que recibes: los últimos mensajes de este '
         'chat (con los videos y archivos marcados como [video: ...] o [archivo: ...]), '
         'la base de conocimiento de Confío incluida abajo y, cuando estén disponibles, '
-        'los resultados de las herramientas que puedes invocar (listar videos del chat, '
-        'buscar en el historial, buscar en la base de conocimiento). NO puedes ver el '
-        'contenido interno de los videos. Si te falta un dato, usa una herramienta o '
-        'dilo claramente en lugar de inventar o dar instrucciones genéricas. Responde '
-        'en el idioma del usuario (normalmente español), de forma concisa y práctica.'
+        'los resultados de las herramientas que puedes invocar (listar los archivos y '
+        'videos del chat, buscar en el historial, buscar en la base de conocimiento). '
+        'Importante: los videos ORIGINALES se comparten como archivos (documentos), no '
+        'como videos de Telegram (esos suelen ser solo clips de prueba); para el '
+        'catálogo de videos usa la herramienta de archivos (get_chat_files). NO puedes '
+        'ver el contenido interno ni descargar los videos (pesan más de 1 GB), solo sus '
+        'nombres y captions. Si te falta un dato, usa una herramienta o dilo claramente '
+        'en lugar de inventar o dar instrucciones genéricas. Responde en el idioma del '
+        'usuario (normalmente español), de forma concisa y práctica.'
     )
 
     parts = [base, capabilities]

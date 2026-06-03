@@ -244,8 +244,14 @@ def _build_tools(client, event, loop):
     """
     chat_id = event.chat_id
 
+    def get_chat_files(args=''):
+        """Lista los archivos/documentos del chat (nombre, tamaño, caption). Aquí están los videos ORIGINALES, que se guardan como archivos. Sin argumentos."""
+        return asyncio.run_coroutine_threadsafe(
+            _fetch_chat_files(client, chat_id), loop
+        ).result(timeout=45)
+
     def get_chat_videos(args=''):
-        """Lista los videos compartidos en este chat (fecha y título/caption). Sin argumentos."""
+        """Lista los videos enviados como video de Telegram (normalmente solo clips de prueba; los originales están en archivos, usa get_chat_files). Sin argumentos."""
         return asyncio.run_coroutine_threadsafe(
             _fetch_chat_videos(client, chat_id), loop
         ).result(timeout=45)
@@ -261,10 +267,48 @@ def _build_tools(client, event, loop):
         return search_knowledge(args)
 
     return {
+        'get_chat_files': get_chat_files,
         'get_chat_videos': get_chat_videos,
         'search_chat_history': search_chat_history,
         'search_knowledge': knowledge_search,
     }
+
+
+def _human_size(num) -> str:
+    if not num:
+        return ''
+    value = float(num)
+    for unit in ('B', 'KB', 'MB', 'GB', 'TB'):
+        if abs(value) < 1024 or unit == 'TB':
+            return f'{value:.0f}{unit}' if unit == 'B' else f'{value:.1f}{unit}'
+        value /= 1024
+    return f'{value:.1f}TB'
+
+
+async def _fetch_chat_files(client, chat_id, limit=80) -> str:
+    from telethon.tl.types import InputMessagesFilterDocument
+
+    items = []
+    try:
+        async for m in client.iter_messages(chat_id, limit=limit, filter=InputMessagesFilterDocument):
+            file = getattr(m, 'file', None)
+            name = getattr(file, 'name', None) if file else None
+            size = getattr(file, 'size', None) if file else None
+            caption = (getattr(m, 'message', '') or '').strip()
+            date = m.date.date().isoformat() if getattr(m, 'date', None) else '?'
+            bits = [f'- {date}: {name or caption or "(sin nombre)"}']
+            human = _human_size(size)
+            if human:
+                bits.append(human)
+            if caption and name:
+                bits.append(f'“{caption[:120]}”')
+            items.append(' · '.join(bits))
+    except Exception as exc:  # noqa: BLE001
+        logger.exception('get_chat_files failed for %s', chat_id)
+        return f'(no pude listar los archivos: {exc})'
+    if not items:
+        return 'No encontré archivos en este chat.'
+    return f'Archivos en este chat ({len(items)}):\n' + '\n'.join(items)
 
 
 async def _fetch_chat_videos(client, chat_id, limit=80) -> str:

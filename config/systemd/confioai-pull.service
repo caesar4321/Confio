@@ -1,0 +1,11 @@
+[Unit]
+Description=Pull latest ConfioAI knowledge repo
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=nginx
+WorkingDirectory=/opt/ConfioAI
+# Auth via the repo's core.sshCommand (deploy key under /etc/confio).
+ExecStart=/usr/bin/git -C /opt/ConfioAI pull --ff-only
