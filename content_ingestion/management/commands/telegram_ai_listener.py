@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from datetime import datetime, timezone
 
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
@@ -27,6 +28,11 @@ DEBATE_COMMAND = '/debate'
 
 # How long to wait before reconnecting after a Telegram disconnect/error.
 RECONNECT_DELAY_SECONDS = 5
+
+# Ignore messages older than this when we receive them. Telegram replays history
+# on connect / when the account is added to a group (via getDifference); those
+# carry their original timestamps, so this stops us from answering the backlog.
+MAX_MESSAGE_AGE_SECONDS = 60
 
 
 class Command(BaseCommand):
@@ -74,6 +80,8 @@ class Command(BaseCommand):
             if event.out:  # never react to our own messages
                 return
             if not _chat_in_scope(event, allowed_chat_ids, include_dms):
+                return
+            if _is_stale(event):  # don't answer replayed history/backlog
                 return
 
             message = (event.raw_text or '').strip()
@@ -191,6 +199,14 @@ class Command(BaseCommand):
 
         for chunk in _telegram_chunks(answer):
             await event.reply(chunk)
+
+
+def _is_stale(event):
+    """True for backlog/history messages replayed by Telegram on connect or on join."""
+    msg_date = getattr(getattr(event, 'message', None), 'date', None)
+    if msg_date is None:
+        return False
+    return (datetime.now(timezone.utc) - msg_date).total_seconds() > MAX_MESSAGE_AGE_SECONDS
 
 
 def _chat_in_scope(event, allowed_chat_ids, include_dms):
