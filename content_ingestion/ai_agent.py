@@ -60,7 +60,8 @@ def run_with_tools(prompt, provider, system, tools, *, max_steps=DEFAULT_MAX_STE
 def _tool_instructions(tools) -> str:
     lines = [
         'Tienes herramientas para consultar información que NO está en el contexto '
-        '(por ejemplo videos del chat, mensajes antiguos, o la base de conocimiento).',
+        '(por ejemplo videos del chat, mensajes antiguos, la base de conocimiento, '
+        'o escribir memoria curada en ConfioAI cuando el usuario lo pide).',
         'Para usar una, responde EXCLUSIVAMENTE con una sola línea, sin ningún otro texto:',
         'TOOL <nombre> <argumentos>',
         'Herramientas disponibles:',
@@ -68,7 +69,11 @@ def _tool_instructions(tools) -> str:
     for name, fn in tools.items():
         doc = (getattr(fn, '__doc__', '') or '').strip().splitlines()
         lines.append(f'- {name}: {doc[0] if doc else ""}')
-    lines.append('Cuando tengas suficiente información, responde al usuario normalmente (sin TOOL).')
+    lines.append(
+        'Si usas una herramienta de escritura de memoria, espera su resultado y luego '
+        'reporta el archivo/commit. Cuando tengas suficiente información, responde al '
+        'usuario normalmente (sin TOOL).'
+    )
     return '\n'.join(lines)
 
 

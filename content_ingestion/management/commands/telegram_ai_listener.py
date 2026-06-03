@@ -16,6 +16,8 @@ from content_ingestion.ai_client import (
 from content_ingestion.ai_agent import run_with_tools
 from content_ingestion.ai_context import build_system_prompt, search_knowledge
 from content_ingestion import conversation_log
+from content_ingestion.context_repo import ContextRepoError, write_commit_and_push_context
+from content_ingestion.models import AIContextCategory, AIContextDocument
 from content_ingestion.telegram_client import _entity_identifier, get_client
 
 logger = logging.getLogger(__name__)
@@ -314,12 +316,89 @@ def _build_tools(client, event, loop):
         """Busca en la base de conocimiento de Confío. Argumento: la consulta."""
         return search_knowledge(args)
 
+    def write_memory(args=''):
+        """Crea/actualiza memoria curada en ConfioAI y hace commit+push. Formato: primera línea 'category: <videos|strategy|decision-log|meeting-notes|weekly-reports|social-stats|legal|user-reports|other>'; segunda línea 'title: <título>'; resto: markdown completo."""
+        return _write_memory_tool(args)
+
+    def write_video_memory(args=''):
+        """Crea una memoria de video en docs/videos y hace commit+push. Formato: primera línea 'title: <título del video>'; resto: markdown completo incluyendo links, stats, análisis y script."""
+        return _write_memory_tool(f'category: videos\ntitle: {_first_title(args)}\n{_strip_title_line(args)}')
+
     return {
         'get_chat_files': get_chat_files,
         'get_chat_videos': get_chat_videos,
         'search_chat_history': search_chat_history,
         'search_knowledge': knowledge_search,
+        'write_memory': write_memory,
+        'write_video_memory': write_video_memory,
     }
+
+
+def _write_memory_tool(args: str) -> str:
+    parsed = _parse_memory_tool_args(args)
+    if not parsed['body'].strip():
+        return 'No escribí nada: falta el cuerpo markdown.'
+    try:
+        document = AIContextDocument.objects.create(
+            category=parsed['category'],
+            title=parsed['title'],
+            slug='',
+            body=parsed['body'],
+            metadata={'source': 'telegram_ai_tool'},
+        )
+        document = write_commit_and_push_context(document, push=True)
+    except (ContextRepoError, OSError) as exc:
+        logger.exception('write_memory tool failed')
+        return f'No pude escribir/pushear la memoria: {exc}'
+    except Exception as exc:  # noqa: BLE001
+        logger.exception('write_memory unexpected failure')
+        return f'No pude escribir/pushear la memoria por un error inesperado: {exc}'
+    return (
+        'Memoria escrita y pusheada.\n'
+        f'- Archivo: {document.relative_path}\n'
+        f'- Commit: {document.commit_sha[:12] if document.commit_sha else "(sin commit)"}\n'
+        f'- Status: {document.status}'
+    )
+
+
+def _parse_memory_tool_args(args: str) -> dict:
+    lines = (args or '').strip().splitlines()
+    category = AIContextCategory.OTHER
+    title = 'Untitled memory'
+    body_start = 0
+    for idx, line in enumerate(lines[:5]):
+        key, sep, value = line.partition(':')
+        if not sep:
+            continue
+        normalized = key.strip().lower()
+        if normalized == 'category':
+            category = value.strip()
+            body_start = max(body_start, idx + 1)
+        elif normalized == 'title':
+            title = value.strip() or title
+            body_start = max(body_start, idx + 1)
+    if category not in AIContextCategory.values:
+        allowed = ', '.join(AIContextCategory.values)
+        raise ContextRepoError(f'Categoría inválida: {category}. Usa una de: {allowed}')
+    body = '\n'.join(lines[body_start:]).strip()
+    return {'category': category, 'title': title, 'body': body}
+
+
+def _first_title(text: str) -> str:
+    for line in (text or '').splitlines()[:5]:
+        key, sep, value = line.partition(':')
+        if sep and key.strip().lower() == 'title':
+            return value.strip() or 'Untitled video memory'
+    return 'Untitled video memory'
+
+
+def _strip_title_line(text: str) -> str:
+    lines = (text or '').strip().splitlines()
+    if lines:
+        key, sep, _ = lines[0].partition(':')
+        if sep and key.strip().lower() == 'title':
+            return '\n'.join(lines[1:]).strip()
+    return text or ''
 
 
 def _human_size(num) -> str:

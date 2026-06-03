@@ -276,6 +276,32 @@ class ToolLoopTests(SimpleTestCase):
         mock.assert_called_once()
 
 
+class MemoryToolTests(SimpleTestCase):
+    def test_parse_memory_tool_args(self):
+        from content_ingestion.management.commands.telegram_ai_listener import _parse_memory_tool_args
+
+        parsed = _parse_memory_tool_args(
+            'category: strategy\n'
+            'title: Koywe focus\n'
+            '# Koywe focus\n\n'
+            'Prioritize Koywe launch.'
+        )
+
+        self.assertEqual(parsed['category'], 'strategy')
+        self.assertEqual(parsed['title'], 'Koywe focus')
+        self.assertIn('Prioritize Koywe', parsed['body'])
+
+    def test_video_memory_title_helpers(self):
+        from content_ingestion.management.commands.telegram_ai_listener import (
+            _first_title,
+            _strip_title_line,
+        )
+
+        text = 'title: Coreano camiseta\n# Body\nFull script'
+        self.assertEqual(_first_title(text), 'Coreano camiseta')
+        self.assertEqual(_strip_title_line(text), '# Body\nFull script')
+
+
 class KnowledgeCorpusTests(SimpleTestCase):
     def test_corpus_empty_when_repo_missing(self):
         from content_ingestion import ai_context
