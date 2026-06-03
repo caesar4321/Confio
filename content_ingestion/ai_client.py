@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
@@ -35,6 +36,11 @@ PROVIDER_ALIASES = {
     'google': 'gemini',
     'deepseek': 'deepseek',
 }
+
+YOUTUBE_URL_RE = re.compile(
+    r'https?://(?:www\.)?(?:youtube\.com/watch\?[^\s<>\]]+|youtu\.be/[^\s<>\]]+|youtube\.com/shorts/[^\s<>\]]+)',
+    re.IGNORECASE,
+)
 
 
 def normalize_provider(provider: str | None) -> str:
@@ -88,6 +94,27 @@ def complete_text(prompt: str, provider: str | None = None, *, system: str | Non
     if not prompt:
         raise AIClientError('Empty prompt.')
     return _DISPATCH[provider](prompt, _system_text(system))
+
+
+def extract_youtube_urls(text: str) -> list[str]:
+    """Return unique YouTube URLs in order, trimmed for Telegram/Markdown punctuation."""
+    urls = []
+    seen = set()
+    for match in YOUTUBE_URL_RE.findall(text or ''):
+        url = match.rstrip(').,;!?"\'')
+        if url not in seen:
+            seen.add(url)
+            urls.append(url)
+    return urls
+
+
+def complete_with_youtube_video(prompt: str, *, system: str | None = None) -> str:
+    """Analyze public YouTube URLs with Gemini video input plus the user's text/script."""
+    prompt = _trim_prompt(prompt)
+    urls = extract_youtube_urls(prompt)
+    if not urls:
+        raise AIClientError('No YouTube URL found.')
+    return _complete_gemini(prompt, _system_text(system), youtube_urls=urls[:10])
 
 
 def debate(prompt: str, *, synthesizer: str | None = None, system: str | None = None) -> str:
@@ -275,13 +302,17 @@ def _complete_deepseek(prompt: str, system: str = '') -> str:
     )
 
 
-def _complete_gemini(prompt: str, system: str = '') -> str:
+def _complete_gemini(prompt: str, system: str = '', *, youtube_urls: list[str] | None = None) -> str:
     api_key = _provider_api_key('gemini')
     if not api_key:
         raise AIClientError('Gemini is selected, but GEMINI_API_KEY is not configured.')
 
     model = getattr(settings, 'GEMINI_MODEL', 'gemini-2.0-flash')
     url = f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent'
+    parts = []
+    for video_url in youtube_urls or []:
+        parts.append({'file_data': {'file_uri': video_url}})
+    parts.append({'text': prompt})
     response = requests.post(
         url,
         params={'key': api_key},
@@ -289,9 +320,9 @@ def _complete_gemini(prompt: str, system: str = '') -> str:
             'systemInstruction': {
                 'parts': [{'text': system}],
             },
-            'contents': [{'role': 'user', 'parts': [{'text': prompt}]}],
+            'contents': [{'role': 'user', 'parts': parts}],
         },
-        timeout=60,
+        timeout=180 if youtube_urls else 60,
     )
     if response.status_code >= 400:
         raise AIClientError(f'Gemini request failed: {response.status_code} {response.text[:500]}')

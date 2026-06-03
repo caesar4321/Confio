@@ -8,6 +8,8 @@ from django.core.management.base import BaseCommand, CommandError
 from content_ingestion.ai_client import (
     AIClientError,
     debate,
+    complete_with_youtube_video,
+    extract_youtube_urls,
     provider_label,
 )
 from content_ingestion.ai_agent import run_with_tools
@@ -191,7 +193,13 @@ class Command(BaseCommand):
             event.chat_id,
         )
         try:
-            if debate_mode:
+            youtube_urls = extract_youtube_urls(user_prompt)
+            if youtube_urls and not debate_mode:
+                logger.info('Routing YouTube video analysis to Gemini: %s', youtube_urls[:3])
+                answer = await asyncio.to_thread(
+                    complete_with_youtube_video, user_prompt, system=system
+                )
+            elif debate_mode:
                 answer = await asyncio.to_thread(debate, user_prompt, system=system)
             else:
                 loop = asyncio.get_running_loop()

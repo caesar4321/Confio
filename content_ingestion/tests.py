@@ -104,6 +104,38 @@ class AIProviderRoutingTests(SimpleTestCase):
         self.assertIn('ChatGPT', out)
         self.assertIn('only-answer', out)
 
+    def test_extract_youtube_urls(self):
+        from content_ingestion.ai_client import extract_youtube_urls
+
+        urls = extract_youtube_urls(
+            'Analiza https://www.youtube.com/watch?v=abc123 y https://youtu.be/xyz789.'
+        )
+        self.assertEqual(
+            urls,
+            ['https://www.youtube.com/watch?v=abc123', 'https://youtu.be/xyz789'],
+        )
+
+    @override_settings(GEMINI_API_KEY='key', GEMINI_MODEL='gemini-3-flash-preview')
+    @patch('content_ingestion.ai_client.requests.post')
+    def test_complete_with_youtube_video_sends_file_data(self, post):
+        from content_ingestion.ai_client import complete_with_youtube_video
+
+        post.return_value.status_code = 200
+        post.return_value.json.return_value = {
+            'candidates': [{'content': {'parts': [{'text': 'analysis'}]}}],
+        }
+
+        out = complete_with_youtube_video(
+            'Script: hola\nVideo: https://www.youtube.com/watch?v=abc123',
+            system='SYS',
+        )
+
+        self.assertEqual(out, 'analysis')
+        payload = post.call_args.kwargs['json']
+        parts = payload['contents'][0]['parts']
+        self.assertEqual(parts[0]['file_data']['file_uri'], 'https://www.youtube.com/watch?v=abc123')
+        self.assertIn('Script: hola', parts[1]['text'])
+
 
 class CommandParsingTests(SimpleTestCase):
     def test_split_command(self):

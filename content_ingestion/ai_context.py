@@ -91,9 +91,14 @@ def build_system_prompt() -> str:
         'como videos de Telegram (esos suelen ser solo clips de prueba); para el '
         'catálogo de videos usa la herramienta de archivos (get_chat_files). NO puedes '
         'ver el contenido interno ni descargar los videos (pesan más de 1 GB), solo sus '
-        'nombres y captions. Si te falta un dato, usa una herramienta o dilo claramente '
-        'en lugar de inventar o dar instrucciones genéricas. Responde en el idioma del '
-        'usuario (normalmente español), de forma concisa y práctica.'
+        'nombres y captions. Sí puedes analizar videos públicos de YouTube cuando el '
+        'usuario pega una URL: el sistema enruta automáticamente esos casos a Gemini con '
+        'el video real como entrada visual/auditiva. Para videos privados, no listados o '
+        'archivos dentro de Telegram, necesitas que el archivo esté disponible mediante '
+        'una ruta compatible o una carga explícita. Si te falta un dato, usa una '
+        'herramienta o dilo claramente en lugar de inventar o dar instrucciones '
+        'genéricas. Responde en el idioma del usuario (normalmente español), de forma '
+        'concisa y práctica.'
     )
 
     parts = [base, capabilities]
