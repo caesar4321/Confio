@@ -80,8 +80,17 @@ class AIProviderRoutingTests(SimpleTestCase):
     def test_complete_text_routes_by_alias(self):
         from content_ingestion import ai_client
 
-        with patch.dict(ai_client._DISPATCH, {'openai': lambda prompt: f'openai:{prompt}'}):
+        with patch.dict(ai_client._DISPATCH, {'openai': lambda prompt, system='': f'openai:{prompt}'}):
             self.assertEqual(ai_client.complete_text('hi', provider='chatgpt'), 'openai:hi')
+
+    def test_complete_text_passes_system_prompt(self):
+        from content_ingestion import ai_client
+
+        with patch.dict(ai_client._DISPATCH, {'openai': lambda prompt, system='': f'{system}|{prompt}'}):
+            self.assertEqual(
+                ai_client.complete_text('hi', provider='openai', system='SYS'),
+                'SYS|hi',
+            )
 
     @override_settings(
         OPENAI_API_KEY='x',
@@ -90,7 +99,7 @@ class AIProviderRoutingTests(SimpleTestCase):
     def test_debate_with_single_provider_just_answers(self):
         from content_ingestion import ai_client
 
-        with patch.dict(ai_client._DISPATCH, {'openai': lambda prompt: 'only-answer'}):
+        with patch.dict(ai_client._DISPATCH, {'openai': lambda prompt, system='': 'only-answer'}):
             out = ai_client.debate('q')
         self.assertIn('ChatGPT', out)
         self.assertIn('only-answer', out)
@@ -104,3 +113,62 @@ class CommandParsingTests(SimpleTestCase):
         self.assertEqual(_split_command('/claude how are you'), ('/claude', 'how are you'))
         self.assertEqual(_split_command('/debate'), ('/debate', ''))
         self.assertEqual(_split_command('/CLAUDE@SomeBot hi'), ('/claude', 'hi'))
+
+
+class SmartContextTests(SimpleTestCase):
+    def test_compose_prompt_puts_message_before_history(self):
+        from content_ingestion.management.commands.telegram_ai_listener import _compose_prompt
+
+        out = _compose_prompt('hola', 'Ana: hi\nBob: yo', 'mensaje previo')
+        self.assertLess(out.index('Mensaje a responder'), out.index('Conversación reciente'))
+        self.assertIn('mensaje previo', out)
+        self.assertIn('hola', out)
+
+    def test_compose_prompt_without_context(self):
+        from content_ingestion.management.commands.telegram_ai_listener import _compose_prompt
+
+        out = _compose_prompt('hola', '', '')
+        self.assertIn('hola', out)
+        self.assertNotIn('Conversación reciente', out)
+
+    def test_media_label_detects_video_and_none(self):
+        import types
+        from content_ingestion.management.commands.telegram_ai_listener import _media_label
+
+        video = types.SimpleNamespace(
+            media=True, video=True, video_note=None, photo=None, voice=None, audio=None,
+            file=types.SimpleNamespace(name='demo.mp4', mime_type='video/mp4'),
+        )
+        self.assertEqual(_media_label(video), '[video: demo.mp4]')
+        self.assertEqual(_media_label(types.SimpleNamespace(media=None)), '')
+
+    def test_display_name_fallbacks(self):
+        import types
+        from content_ingestion.management.commands.telegram_ai_listener import _display_name
+
+        self.assertEqual(_display_name(types.SimpleNamespace(first_name='Ana', last_name='Pérez')), 'Ana Pérez')
+        self.assertEqual(_display_name(None, 42), 'usuario 42')
+
+
+class KnowledgeCorpusTests(SimpleTestCase):
+    def test_corpus_empty_when_repo_missing(self):
+        from content_ingestion import ai_context
+
+        ai_context._CACHE['sig'] = None
+        with override_settings(CONFIO_AI_REPO_PATH='/nonexistent/confioai', CONFIO_AI_CONTEXT_ROOT='docs'):
+            self.assertEqual(ai_context.load_knowledge_corpus(), '')
+
+    def test_corpus_reads_markdown(self):
+        import os
+        import tempfile
+        from content_ingestion import ai_context
+
+        with tempfile.TemporaryDirectory() as d:
+            docs = os.path.join(d, 'docs', 'strategy')
+            os.makedirs(docs)
+            with open(os.path.join(docs, 'plan.md'), 'w', encoding='utf-8') as fh:
+                fh.write('Lanzar primero en Venezuela.')
+            ai_context._CACHE['sig'] = None
+            with override_settings(CONFIO_AI_REPO_PATH=d, CONFIO_AI_CONTEXT_ROOT='docs'):
+                corpus = ai_context.load_knowledge_corpus()
+        self.assertIn('Lanzar primero en Venezuela', corpus)

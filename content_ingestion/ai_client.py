@@ -74,20 +74,28 @@ def _trim_prompt(prompt: str) -> str:
     return prompt[:max_chars] + '\n\n[Prompt truncated.]'
 
 
-def complete_text(prompt: str, provider: str | None = None) -> str:
-    """Run a single completion. `provider` overrides CONFIO_AI_PROVIDER when given."""
+def _system_text(system: str | None) -> str:
+    if system is not None:
+        return system
+    return getattr(settings, 'CONFIO_AI_SYSTEM_PROMPT', '')
+
+
+def complete_text(prompt: str, provider: str | None = None, *, system: str | None = None) -> str:
+    """Run a single completion. `provider` overrides CONFIO_AI_PROVIDER when given;
+    `system` overrides the system prompt (e.g. base prompt + knowledge base)."""
     provider = normalize_provider(provider or getattr(settings, 'CONFIO_AI_PROVIDER', 'openai'))
     prompt = _trim_prompt(prompt)
     if not prompt:
         raise AIClientError('Empty prompt.')
-    return _DISPATCH[provider](prompt)
+    return _DISPATCH[provider](prompt, _system_text(system))
 
 
-def debate(prompt: str, *, synthesizer: str | None = None) -> str:
+def debate(prompt: str, *, synthesizer: str | None = None, system: str | None = None) -> str:
     """Ask every configured model the same prompt, then synthesize the discussion."""
     prompt = _trim_prompt(prompt)
     if not prompt:
         raise AIClientError('Empty prompt.')
+    system = _system_text(system)
 
     providers = configured_providers()
     if not providers:
@@ -95,11 +103,11 @@ def debate(prompt: str, *, synthesizer: str | None = None) -> str:
     if len(providers) == 1:
         # Nothing to debate; just answer.
         only = providers[0]
-        return f'🤖 {provider_label(only)}\n{complete_text(prompt, provider=only)}'
+        return f'🤖 {provider_label(only)}\n{complete_text(prompt, provider=only, system=system)}'
 
     answers: dict[str, str] = {}
     with ThreadPoolExecutor(max_workers=len(providers)) as pool:
-        futures = {pool.submit(_safe_complete, p, prompt): p for p in providers}
+        futures = {pool.submit(_safe_complete, p, prompt, system): p for p in providers}
         for future in as_completed(futures):
             answers[futures[future]] = future.result()
 
@@ -127,16 +135,16 @@ def debate(prompt: str, *, synthesizer: str | None = None) -> str:
     if synth is None:
         synth = ordered[0]
 
-    synthesis = _safe_complete(synth, _synthesis_prompt(prompt, answers, ordered))
+    synthesis = _safe_complete(synth, _synthesis_prompt(prompt, answers, ordered), system)
     sections.append(f'🧩 Synthesis ({provider_label(synth)})')
     sections.append(synthesis.strip() or '(no synthesis)')
 
     return '\n'.join(sections).strip()
 
 
-def _safe_complete(provider: str, prompt: str) -> str:
+def _safe_complete(provider: str, prompt: str, system: str | None = None) -> str:
     try:
-        return complete_text(prompt, provider=provider)
+        return complete_text(prompt, provider=provider, system=system)
     except AIClientError as exc:
         return f'(error: {exc})'
     except Exception as exc:  # noqa: BLE001 - one model failing must not sink the debate
@@ -161,7 +169,7 @@ def _synthesis_prompt(prompt: str, answers: dict[str, str], ordered: list[str]) 
     )
 
 
-def _complete_openai(prompt: str) -> str:
+def _complete_openai(prompt: str, system: str = '') -> str:
     api_key = _provider_api_key('openai')
     if not api_key:
         raise AIClientError('OpenAI is selected, but OPENAI_API_KEY is not configured.')
@@ -175,7 +183,7 @@ def _complete_openai(prompt: str) -> str:
         },
         json={
             'model': model,
-            'instructions': getattr(settings, 'CONFIO_AI_SYSTEM_PROMPT', ''),
+            'instructions': system,
             'input': prompt,
         },
         timeout=60,
@@ -201,6 +209,7 @@ def _complete_openai(prompt: str) -> str:
 def _complete_openai_compatible(
     *,
     prompt: str,
+    system: str,
     api_key: str,
     model: str,
     base_url: str,
@@ -218,7 +227,7 @@ def _complete_openai_compatible(
         json={
             'model': model,
             'messages': [
-                {'role': 'system', 'content': getattr(settings, 'CONFIO_AI_SYSTEM_PROMPT', '')},
+                {'role': 'system', 'content': system},
                 {'role': 'user', 'content': prompt},
             ],
         },
@@ -244,9 +253,10 @@ def _complete_openai_compatible(
     raise AIClientError(f'{provider_name} response did not include text output.')
 
 
-def _complete_grok(prompt: str) -> str:
+def _complete_grok(prompt: str, system: str = '') -> str:
     return _complete_openai_compatible(
         prompt=prompt,
+        system=system,
         api_key=_provider_api_key('grok'),
         model=getattr(settings, 'GROK_MODEL', 'grok-4.3'),
         base_url='https://api.x.ai/v1',
@@ -254,9 +264,10 @@ def _complete_grok(prompt: str) -> str:
     )
 
 
-def _complete_deepseek(prompt: str) -> str:
+def _complete_deepseek(prompt: str, system: str = '') -> str:
     return _complete_openai_compatible(
         prompt=prompt,
+        system=system,
         api_key=_provider_api_key('deepseek'),
         model=getattr(settings, 'DEEPSEEK_MODEL', 'deepseek-chat'),
         base_url='https://api.deepseek.com',
@@ -264,7 +275,7 @@ def _complete_deepseek(prompt: str) -> str:
     )
 
 
-def _complete_gemini(prompt: str) -> str:
+def _complete_gemini(prompt: str, system: str = '') -> str:
     api_key = _provider_api_key('gemini')
     if not api_key:
         raise AIClientError('Gemini is selected, but GEMINI_API_KEY is not configured.')
@@ -276,7 +287,7 @@ def _complete_gemini(prompt: str) -> str:
         params={'key': api_key},
         json={
             'systemInstruction': {
-                'parts': [{'text': getattr(settings, 'CONFIO_AI_SYSTEM_PROMPT', '')}],
+                'parts': [{'text': system}],
             },
             'contents': [{'role': 'user', 'parts': [{'text': prompt}]}],
         },
@@ -296,7 +307,7 @@ def _complete_gemini(prompt: str) -> str:
     raise AIClientError('Gemini response did not include text output.')
 
 
-def _complete_claude(prompt: str) -> str:
+def _complete_claude(prompt: str, system: str = '') -> str:
     api_key = _provider_api_key('claude')
     if not api_key:
         raise AIClientError('Claude is selected, but CLAUDE_API_KEY is not configured.')
@@ -312,7 +323,7 @@ def _complete_claude(prompt: str) -> str:
         json={
             'model': model,
             'max_tokens': 1200,
-            'system': getattr(settings, 'CONFIO_AI_SYSTEM_PROMPT', ''),
+            'system': system,
             'messages': [{'role': 'user', 'content': prompt}],
         },
         timeout=60,

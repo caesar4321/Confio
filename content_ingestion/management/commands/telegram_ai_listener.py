@@ -11,6 +11,7 @@ from content_ingestion.ai_client import (
     debate,
     provider_label,
 )
+from content_ingestion.ai_context import build_system_prompt
 from content_ingestion.telegram_client import _entity_identifier, get_client
 
 logger = logging.getLogger(__name__)
@@ -103,18 +104,19 @@ class Command(BaseCommand):
                 if not prompt:
                     await event.reply(f'Usage: {command} your question')
                     return
-                await self._answer_single(event, prompt, provider)
+                await self._answer(event, client, prompt, provider)
             elif command == DEBATE_COMMAND:
                 if not prompt:
                     await event.reply(f'Usage: {DEBATE_COMMAND} your question')
                     return
-                await self._answer_debate(event, prompt)
+                await event.reply('Convening the panel…')
+                await self._answer(event, client, prompt, default_provider, debate_mode=True)
             elif command is not None:
                 # Unknown slash command (likely meant for another bot) — ignore.
                 return
             else:
                 # Ambient: reply to every human message with the default model.
-                await self._answer_single(event, message, default_provider, announce=False)
+                await self._answer(event, client, message, default_provider)
 
         # Connect once up front so --once can validate, and so we fail fast on bad config.
         await client.connect()
@@ -169,33 +171,26 @@ class Command(BaseCommand):
         finally:
             await client.disconnect()
 
-    async def _answer_single(self, event, prompt, provider, *, announce=True):
-        prompt = await _with_reply_context(event, prompt)
+    async def _answer(self, event, client, prompt, provider, *, debate_mode=False):
+        history = await _build_history(client, event)
+        reply_to = await _reply_target(event)
+        user_prompt = _compose_prompt(prompt, history, reply_to)
+        system = build_system_prompt()
         logger.info(
-            'Telegram AI %s reply in chat %s', provider_label(provider), event.chat_id
+            'Telegram AI %s reply in chat %s',
+            'debate' if debate_mode else provider_label(provider),
+            event.chat_id,
         )
         try:
-            answer = await asyncio.to_thread(complete_text, prompt, provider)
+            if debate_mode:
+                answer = await asyncio.to_thread(debate, user_prompt, system=system)
+            else:
+                answer = await asyncio.to_thread(complete_text, user_prompt, provider, system=system)
         except AIClientError as exc:
             answer = f'AI setup error: {exc}'
         except Exception:
             logger.exception('Telegram AI command failed')
             answer = 'AI command failed. Check server logs.'
-
-        for chunk in _telegram_chunks(answer):
-            await event.reply(chunk)
-
-    async def _answer_debate(self, event, prompt):
-        prompt = await _with_reply_context(event, prompt)
-        logger.info('Telegram AI debate in chat %s', event.chat_id)
-        await event.reply('Convening the panel…')
-        try:
-            answer = await asyncio.to_thread(debate, prompt)
-        except AIClientError as exc:
-            answer = f'AI setup error: {exc}'
-        except Exception:
-            logger.exception('Telegram AI debate failed')
-            answer = 'AI debate failed. Check server logs.'
 
         for chunk in _telegram_chunks(answer):
             await event.reply(chunk)
@@ -237,18 +232,81 @@ def _split_command(message: str):
     return command, rest
 
 
-async def _with_reply_context(event, prompt: str) -> str:
-    """If the message replies to another message, prepend that text as context."""
+async def _build_history(client, event) -> str:
+    """Fetch this chat's recent messages as a transcript (oldest first), annotating
+    media so the model can see videos/files shared in the room."""
+    limit = getattr(settings, 'CONFIO_AI_HISTORY_LIMIT', 25)
+    max_chars = getattr(settings, 'CONFIO_AI_HISTORY_MAX_CHARS', 6000)
+    try:
+        messages = await client.get_messages(event.chat_id, limit=limit)
+    except Exception:
+        logger.warning('Could not fetch chat history for %s', event.chat_id, exc_info=True)
+        return ''
+    lines = []
+    for m in reversed(list(messages)):  # oldest -> newest
+        if getattr(m, 'out', False):
+            who = 'Confío AI'
+        else:
+            who = _display_name(getattr(m, 'sender', None), getattr(m, 'sender_id', None))
+        text = (getattr(m, 'message', '') or '').strip()
+        media = _media_label(m)
+        body = f'{text} {media}'.strip() if (text and media) else (text or media)
+        if not body:
+            continue
+        lines.append(f'{who}: {body}')
+    transcript = '\n'.join(lines)
+    if len(transcript) > max_chars:
+        transcript = transcript[-max_chars:]
+    return transcript
+
+
+async def _reply_target(event) -> str:
+    """The text of the message this one is replying to, if any."""
     if not getattr(event, 'is_reply', False):
-        return prompt
+        return ''
     try:
         replied = await event.get_reply_message()
     except Exception:
-        return prompt
-    context = (getattr(replied, 'raw_text', '') or '').strip()
-    if not context:
-        return prompt
-    return f'Context (the message being replied to):\n{context}\n\nMessage:\n{prompt}'
+        return ''
+    return (getattr(replied, 'raw_text', '') or '').strip()[:500]
+
+
+def _compose_prompt(prompt: str, history: str, reply_to: str) -> str:
+    parts = []
+    if reply_to:
+        parts.append(f'(Este mensaje responde a: "{reply_to}")')
+    parts.append(f'Mensaje a responder:\n{prompt}')
+    if history:
+        parts.append('Conversación reciente en este chat (contexto, más antiguo arriba):\n' + history)
+    return '\n\n'.join(parts)
+
+
+def _display_name(sender, sender_id=None) -> str:
+    if sender is not None:
+        full = (f"{getattr(sender, 'first_name', '') or ''} "
+                f"{getattr(sender, 'last_name', '') or ''}").strip()
+        if full:
+            return full
+        for attr in ('username', 'title'):
+            value = getattr(sender, attr, None)
+            if value:
+                return value
+    return f'usuario {sender_id}' if sender_id else 'alguien'
+
+
+def _media_label(m) -> str:
+    if not getattr(m, 'media', None):
+        return ''
+    file = getattr(m, 'file', None)
+    name = getattr(file, 'name', None) if file else None
+    mime = (getattr(file, 'mime_type', '') if file else '') or ''
+    if getattr(m, 'video', None) or getattr(m, 'video_note', None) or 'video' in mime:
+        return f'[video: {name}]' if name else '[video]'
+    if getattr(m, 'photo', None) or 'image' in mime:
+        return '[imagen]'
+    if getattr(m, 'voice', None) or getattr(m, 'audio', None) or 'audio' in mime:
+        return '[audio]'
+    return f'[archivo: {name}]' if name else '[archivo]'
 
 
 def _telegram_chunks(text: str, limit: int = 3900):
