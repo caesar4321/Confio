@@ -9,8 +9,10 @@ Type=simple
 User=nginx
 WorkingDirectory=/opt/confio
 Environment=DJANGO_SETTINGS_MODULE=config.settings
+Environment=PYTHONUNBUFFERED=1
 EnvironmentFile=/opt/confio/.env.mainnet
-ExecStart=/opt/confio/myvenv/bin/python /opt/confio/manage.py telegram_ai_listener --chat -5283806378
+# No --chat: listen in every group the account is in. Set CONFIO_AI_TELEGRAM_ALLOWED_CHATS to restrict.
+ExecStart=/opt/confio/myvenv/bin/python /opt/confio/manage.py telegram_ai_listener
 Restart=always
 RestartSec=5
 TimeoutStartSec=30

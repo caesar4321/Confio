@@ -41,7 +41,7 @@ class Command(BaseCommand):
             '--chat',
             action='append',
             default=[],
-            help='Allowed Telegram chat ID/username. Repeat for multiple chats.',
+            help='Restrict to this chat ID/username (repeatable). Default: all group chats the account is in.',
         )
         parser.add_argument(
             '--once',
@@ -59,22 +59,21 @@ class Command(BaseCommand):
 
     async def _run(self, options):
         allowed_chats = options['chat'] or list(getattr(settings, 'CONFIO_AI_TELEGRAM_ALLOWED_CHATS', []))
-        if not allowed_chats:
-            raise CommandError('No allowed chats configured. Pass --chat -5283806378 or set CONFIO_AI_TELEGRAM_ALLOWED_CHATS.')
 
         from telethon import events
         from telethon.errors import AuthKeyDuplicatedError
 
         allowed_chat_ids = {str(_entity_identifier(chat)) for chat in allowed_chats}
+        include_dms = getattr(settings, 'CONFIO_AI_TELEGRAM_INCLUDE_DMS', False)
         default_provider = getattr(settings, 'CONFIO_AI_PROVIDER', 'openai')
 
         client = get_client()
 
         @client.on(events.NewMessage(incoming=True))
         async def handler(event):
-            if str(event.chat_id) not in allowed_chat_ids:
-                return
             if event.out:  # never react to our own messages
+                return
+            if not _chat_in_scope(event, allowed_chat_ids, include_dms):
                 return
 
             message = (event.raw_text or '').strip()
@@ -115,12 +114,17 @@ class Command(BaseCommand):
             await client.disconnect()
             raise CommandError('Telegram session is not authorized. Re-run telegram authentication.')
 
+        if allowed_chat_ids:
+            scope = 'chats: ' + ', '.join(str(chat) for chat in allowed_chats)
+        else:
+            scope = 'all group chats' + (' and DMs' if include_dms else '')
+        logger.info(
+            'Telegram AI listener active — replying in %s (default model: %s)',
+            scope,
+            provider_label(default_provider),
+        )
         self.stdout.write(
-            self.style.SUCCESS(
-                'Listening to all messages in chats: '
-                + ', '.join(str(chat) for chat in allowed_chats)
-                + f' (default model: {provider_label(default_provider)})'
-            )
+            self.style.SUCCESS(f'Telegram AI listener active — replying in {scope}')
         )
         if options['once']:
             await client.disconnect()
@@ -187,6 +191,22 @@ class Command(BaseCommand):
 
         for chunk in _telegram_chunks(answer):
             await event.reply(chunk)
+
+
+def _chat_in_scope(event, allowed_chat_ids, include_dms):
+    """Decide whether to act on a message.
+
+    With an explicit allowlist, only those chats. Otherwise every group chat the
+    account belongs to (and DMs only when explicitly enabled). Broadcast channels
+    are always ignored.
+    """
+    if allowed_chat_ids:
+        return str(event.chat_id) in allowed_chat_ids
+    if event.is_group:
+        return True
+    if include_dms and event.is_private:
+        return True
+    return False
 
 
 def _split_command(message: str):
