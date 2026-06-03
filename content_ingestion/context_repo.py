@@ -36,6 +36,15 @@ def _safe_slug(title: str) -> str:
     return value or 'untitled'
 
 
+def _safe_folder(folder: str) -> Path | None:
+    parts = []
+    for raw in str(folder or '').replace('\\', '/').split('/'):
+        part = raw.strip().strip('.')
+        if part:
+            parts.append(part[:80])
+    return Path(*parts) if parts else None
+
+
 def _frontmatter_value(value):
     if value is None:
         return ''
@@ -93,6 +102,9 @@ def _document_relative_path(document: AIContextDocument, date) -> Path:
     slug = document.slug or _safe_slug(document.title)
     base = Path(settings.CONFIO_AI_CONTEXT_ROOT) / document.category
     if document.category == 'videos':
+        folder = _safe_folder((document.metadata or {}).get('folder', ''))
+        if folder:
+            return base / folder / f'{slug}.md'
         return base / f'{slug}.md'
     filename = f'{date.isoformat()}-{slug}.md'
     return base / str(date.year) / filename

@@ -71,6 +71,23 @@ class AIContextRepoPathTests(SimpleTestCase):
         )
 
     @override_settings(CONFIO_AI_CONTEXT_ROOT='docs')
+    def test_video_documents_can_be_written_under_named_folder(self):
+        from content_ingestion.context_repo import _document_relative_path
+
+        document = AIContextDocument(
+            category=AIContextCategory.VIDEOS,
+            title='Un influencer coreano con esquizofrenia',
+            slug='un-influencer-coreano-con-esquizofrenia',
+            body='Body',
+            metadata={'folder': 'Vida y filosofía'},
+        )
+
+        self.assertEqual(
+            str(_document_relative_path(document, date(2026, 6, 3))),
+            'docs/videos/Vida y filosofía/un-influencer-coreano-con-esquizofrenia.md',
+        )
+
+    @override_settings(CONFIO_AI_CONTEXT_ROOT='docs')
     def test_non_video_documents_keep_year_bucket(self):
         from content_ingestion.context_repo import _document_relative_path
 
@@ -199,6 +216,21 @@ class CommandParsingTests(SimpleTestCase):
         self.assertEqual(_split_command('/claude how are you'), ('/claude', 'how are you'))
         self.assertEqual(_split_command('/debate'), ('/debate', ''))
         self.assertEqual(_split_command('/CLAUDE@SomeBot hi'), ('/claude', 'hi'))
+
+    def test_parse_video_memory_folder_from_slash_title(self):
+        from content_ingestion.management.commands.telegram_ai_listener import _parse_memory_tool_args
+
+        parsed = _parse_memory_tool_args(
+            'category: videos\n'
+            'title: Vida y filosofía / Un influencer coreano con esquizofrenia\n'
+            '# Video Memory\n'
+            'Body'
+        )
+
+        self.assertEqual(parsed['category'], 'videos')
+        self.assertEqual(parsed['folder'], 'Vida y filosofía')
+        self.assertEqual(parsed['title'], 'Un influencer coreano con esquizofrenia')
+        self.assertIn('Body', parsed['body'])
 
 
 class SmartContextTests(SimpleTestCase):

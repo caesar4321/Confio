@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone
 
 from django.conf import settings
@@ -325,11 +326,11 @@ def _build_tools(client, event, loop):
         return search_knowledge(args)
 
     def write_memory(args=''):
-        """Crea/actualiza memoria curada en ConfioAI y hace commit+push. Formato: primera línea 'category: <videos|strategy|decision-log|meeting-notes|weekly-reports|social-stats|legal|user-reports|other>'; segunda línea 'title: <título>'; resto: markdown completo."""
+        """Crea/actualiza memoria curada en ConfioAI y hace commit+push. Formato: primera línea 'category: <videos|strategy|decision-log|meeting-notes|weekly-reports|social-stats|legal|user-reports|other>'; segunda línea 'title: <título>'; opcional 'folder: <subcarpeta>'; resto: markdown completo."""
         return _write_memory_tool(args)
 
     def write_video_memory(args=''):
-        """Crea una memoria de video en docs/videos y hace commit+push. Formato: primera línea 'title: <título del video>'; resto: markdown completo incluyendo links, stats, análisis y script."""
+        """Crea una memoria de video en docs/videos y hace commit+push. Formato: opcional 'folder: Vida y filosofía'; línea 'title: <título del video>'; resto: markdown completo incluyendo links, stats, análisis y script."""
         return _write_memory_tool(f'category: videos\ntitle: {_first_title(args)}\n{_strip_title_line(args)}')
 
     return {
@@ -348,12 +349,15 @@ def _write_memory_tool(args: str) -> str:
         return 'No escribí nada: falta el cuerpo markdown.'
     try:
         close_old_connections()
+        metadata = {'source': 'telegram_ai_tool'}
+        if parsed.get('folder'):
+            metadata['folder'] = parsed['folder']
         document = AIContextDocument.objects.create(
             category=parsed['category'],
             title=parsed['title'],
             slug='',
             body=parsed['body'],
-            metadata={'source': 'telegram_ai_tool'},
+            metadata=metadata,
         )
         document = write_commit_and_push_context(document, push=True)
     except (ContextRepoError, OSError) as exc:
@@ -376,6 +380,7 @@ def _parse_memory_tool_args(args: str) -> dict:
     lines = (args or '').strip().splitlines()
     category = AIContextCategory.OTHER
     title = 'Untitled memory'
+    folder = ''
     body_start = 0
     for idx, line in enumerate(lines[:5]):
         key, sep, value = line.partition(':')
@@ -388,11 +393,19 @@ def _parse_memory_tool_args(args: str) -> dict:
         elif normalized == 'title':
             title = value.strip() or title
             body_start = max(body_start, idx + 1)
+        elif normalized == 'folder':
+            folder = value.strip()
+            body_start = max(body_start, idx + 1)
     if category not in AIContextCategory.values:
         allowed = ', '.join(AIContextCategory.values)
         raise ContextRepoError(f'Categoría inválida: {category}. Usa una de: {allowed}')
+    if category == AIContextCategory.VIDEOS and not folder and '/' in title:
+        maybe_folder, maybe_title = re.split(r'\s*/\s*', title, maxsplit=1)
+        if maybe_folder.strip() and maybe_title.strip():
+            folder = maybe_folder.strip()
+            title = maybe_title.strip()
     body = '\n'.join(lines[body_start:]).strip()
-    return {'category': category, 'title': title, 'body': body}
+    return {'category': category, 'title': title, 'folder': folder, 'body': body}
 
 
 def _first_title(text: str) -> str:
