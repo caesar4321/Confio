@@ -937,19 +937,51 @@ def _is_longform_script_request(prompt: str) -> bool:
 
 
 def _script_writer_prompt(user_prompt: str) -> str:
-    return (
-        f'{user_prompt}\n\n'
+    authority = ''
+    current = user_prompt
+    prior_context = ''
+    marker = 'Mensaje a responder:\n'
+    history_marker = '\n\nConversación reciente en este chat (contexto, más antiguo arriba):\n'
+
+    if marker in user_prompt:
+        authority, rest = user_prompt.split(marker, 1)
+        current = rest
+        if history_marker in rest:
+            current, prior_context = rest.split(history_marker, 1)
+
+    parts = []
+    if authority.strip():
+        parts.append(authority.strip())
+    if prior_context.strip():
+        parts.append(
+            '## Contexto previo del chat\n'
+            'Usa esto solo como notas de contexto. Los borradores anteriores del bot '
+            'son ejemplos negativos si contradicen el brief actual.\n\n'
+            f'{prior_context.strip()}'
+        )
+    parts.append(
+        '## Brief actual del usuario - contrato obligatorio\n'
+        f'{current.strip()}'
+    )
+    parts.append(
         '## Instrucciones de control de calidad para este turno\n'
-        '- El mensaje actual del usuario manda sobre cualquier borrador anterior del historial.\n'
+        '- El brief actual manda sobre cualquier borrador anterior del historial.\n'
         '- Si el historial contiene guiones con encabezados, timestamps, las tres fases mezcladas, '
         'o explicaciones después del guion, considéralos ejemplos de lo que salió mal.\n'
         '- No devuelvas análisis del prompt. No digas "claro". No preguntes si quiere otra versión.\n'
         '- Entrega únicamente el guion final en español, listo para cámara.\n'
+        '- La primera línea del guion debe cumplir literalmente la condición de apertura del brief. '
+        'Si el brief pide máximo 8 palabras, no excedas 8 palabras.\n'
+        '- La segunda línea debe ser el rehook que contradice o invierte la primera línea.\n'
+        '- No uses encabezados, timestamps, bullets, títulos de secciones ni explicación posterior.\n'
         '- Si el brief dice que cada video debe encarnar una sola fase, elige una sola fase y sostén '
         'esa imagen hasta el final. Para el brief de Confío como confianza que vuelve de instituciones '
         'a personas, usa Trust Layer como eje.\n'
         '- Confío debe aparecer tarde, cerca del CTA, como conclusión de mundo; no como definición '
         'de app ni lista de funciones.'
+    )
+    return (
+        '\n\n'.join(parts)
     )
 
 

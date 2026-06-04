@@ -384,6 +384,27 @@ class CommandParsingTests(SimpleTestCase):
         self.assertIn('Trust Layer', routed)
         self.assertIn('no como definición', routed)
 
+    def test_script_writer_prompt_puts_current_brief_after_history(self):
+        from content_ingestion.management.commands.telegram_ai_listener import _script_writer_prompt
+
+        prompt = (
+            'Autoridad del remitente: OWNER / Julian.\n\n'
+            'Mensaje a responder:\n'
+            'Escribe un guion con primera frase de 8 palabras.\n\n'
+            'Conversación reciente en este chat (contexto, más antiguo arriba):\n'
+            'Confío AI: [0:00] Hook + Rehook\n'
+            'Confío AI: Claro, aquí tienes una estructura con las tres fases.'
+        )
+
+        routed = _script_writer_prompt(prompt)
+
+        self.assertLess(
+            routed.index('## Contexto previo del chat'),
+            routed.index('## Brief actual del usuario - contrato obligatorio'),
+        )
+        self.assertIn('Los borradores anteriores del bot son ejemplos negativos', routed)
+        self.assertIn('La primera línea del guion debe cumplir literalmente', routed)
+
     def test_youtube_analysis_is_added_to_memory_prompt(self):
         from content_ingestion.management.commands.telegram_ai_listener import _with_youtube_analysis
 
