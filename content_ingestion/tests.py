@@ -280,6 +280,22 @@ class CommandParsingTests(SimpleTestCase):
             )
             self.assertEqual(_sender_authority(types.SimpleNamespace(first_name='Cliente'), 789), 'client')
 
+    def test_whoami_response_includes_identity_and_authority(self):
+        import types
+        from content_ingestion.management.commands.telegram_ai_listener import _whoami_response
+
+        sender = types.SimpleNamespace(first_name='J', last_name='', username='julianmoonluna')
+        with override_settings(
+            CONFIO_AI_TELEGRAM_OWNER_IDENTITIES=['123'],
+            CONFIO_AI_TELEGRAM_TRUSTED_IDENTITIES=[],
+        ):
+            out = _whoami_response(sender, 123)
+
+        self.assertIn('sender_id: 123', out)
+        self.assertIn('username: julianmoonluna', out)
+        self.assertIn('name: J', out)
+        self.assertIn('authority: owner', out)
+
     def test_client_authority_does_not_get_write_tools(self):
         import types
         from content_ingestion.management.commands.telegram_ai_listener import _build_tools

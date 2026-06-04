@@ -35,6 +35,7 @@ PROVIDER_COMMANDS = {
     '/deepseek': 'deepseek',
 }
 DEBATE_COMMAND = '/debate'
+WHOAMI_COMMAND = '/whoami'
 
 # How long to wait before reconnecting after a Telegram disconnect/error.
 RECONNECT_DELAY_SECONDS = 5
@@ -123,6 +124,8 @@ class Command(BaseCommand):
                         return
                     await event.reply('Convening the panel…')
                     await self._answer(event, client, prompt, default_provider, debate_mode=True)
+                elif command == WHOAMI_COMMAND:
+                    await event.reply(_whoami_response(sender, getattr(event, 'sender_id', None)))
                 elif command is not None:
                     # Unknown slash command (likely meant for another bot) — ignore.
                     return
@@ -667,6 +670,16 @@ def _sender_authority(sender, sender_id=None) -> str:
     if tokens & trusted:
         return 'trusted'
     return 'client'
+
+
+def _whoami_response(sender, sender_id=None) -> str:
+    username = getattr(sender, 'username', None) if sender is not None else None
+    return '\n'.join([
+        f'sender_id: {sender_id or ""}',
+        f'username: {username or ""}',
+        f'name: {_display_name(sender, sender_id)}',
+        f'authority: {_sender_authority(sender, sender_id)}',
+    ])
 
 
 def _sender_identity_tokens(sender, sender_id=None) -> list[str]:
