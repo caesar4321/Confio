@@ -741,6 +741,30 @@ class ToolLoopTests(SimpleTestCase):
         self.assertIn('videos', out)
 
     @override_settings(
+        OPENAI_API_KEY='x', GEMINI_API_KEY='x', CLAUDE_API_KEY='',
+        CONFIO_AI_AGENT_BACKEND='gemini', OPENAI_MODEL='gpt-5.5',
+        GEMINI_MODEL='gemini-3-flash-preview', CONFIO_AI_AGENT_MODEL='',
+        CONFIO_AI_AGENT_MAX_TOKENS=8000,
+    )
+    def test_run_with_tools_backend_override_forces_openai_frontier(self):
+        from content_ingestion import ai_agent
+
+        payloads = []
+
+        def openai_post(key, payload):
+            payloads.append(payload)
+            return {'id': 'r1', 'output_text': 'frontier'}
+
+        with patch('content_ingestion.ai_agent._openai_post', side_effect=openai_post):
+            out = ai_agent.run_with_tools(
+                'hi', 'openai', 'SYS', {'search_knowledge': lambda args: 'unused'},
+                backend='openai',
+            )
+
+        self.assertEqual(out, 'frontier')
+        self.assertEqual(payloads[0]['model'], 'gpt-5.5')
+
+    @override_settings(
         CONFIO_AI_AGENT_BACKEND='gemini', GEMINI_API_KEY='x', OPENAI_API_KEY='', CLAUDE_API_KEY='',
         GEMINI_MODEL='gemini-2.5-flash', CONFIO_AI_AGENT_MODEL='', CONFIO_AI_AGENT_MAX_TOKENS=8000,
     )

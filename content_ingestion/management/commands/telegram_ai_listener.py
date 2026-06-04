@@ -136,7 +136,7 @@ class Command(BaseCommand):
                     if not prompt:
                         await event.reply(f'Usage: {command} your question')
                         return
-                    await self._answer(event, client, prompt, provider)
+                    await self._answer(event, client, prompt, provider, force_backend=provider)
                 elif command == DEBATE_COMMAND:
                     if not prompt:
                         await event.reply(f'Usage: {DEBATE_COMMAND} your question')
@@ -228,7 +228,17 @@ class Command(BaseCommand):
                 pass
             await client.disconnect()
 
-    async def _answer(self, event, client, prompt, provider, *, debate_mode=False, explicit_memory=False):
+    async def _answer(
+        self,
+        event,
+        client,
+        prompt,
+        provider,
+        *,
+        debate_mode=False,
+        explicit_memory=False,
+        force_backend=None,
+    ):
         sender = None
         try:
             sender = await event.get_sender()
@@ -255,6 +265,7 @@ class Command(BaseCommand):
                 self._generate_answer(
                     event, client, user_prompt, provider, system, authority, debate_mode,
                     explicit_memory=explicit_memory,
+                    force_backend=force_backend,
                 ),
                 timeout=ANSWER_TIMEOUT_SECONDS,
             )
@@ -278,7 +289,18 @@ class Command(BaseCommand):
             event.chat_id, sender_name, event.raw_text or prompt, answer,
         )
 
-    async def _generate_answer(self, event, client, user_prompt, provider, system, authority, debate_mode, explicit_memory=False):
+    async def _generate_answer(
+        self,
+        event,
+        client,
+        user_prompt,
+        provider,
+        system,
+        authority,
+        debate_mode,
+        explicit_memory=False,
+        force_backend=None,
+    ):
         youtube_urls = extract_youtube_urls(user_prompt)
         # Direct Gemini media analysis (video/image/YouTube) must NOT receive tool
         # instructions — these are generateContent calls with no function declarations, so
@@ -342,7 +364,7 @@ class Command(BaseCommand):
             # (Gemini Flash malforms/truncates them); read-only chat stays on the default.
             write_backend = (
                 getattr(settings, 'CONFIO_AI_AGENT_WRITE_BACKEND', 'openai')
-                if memory_write_request else None
+                if memory_write_request else force_backend
             )
             return await asyncio.to_thread(
                 run_with_tools, user_prompt, provider, system, tools, backend=write_backend
