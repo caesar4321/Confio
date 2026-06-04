@@ -451,7 +451,7 @@ def _build_tools(client, event, loop, *, authority='client'):
         ).result(timeout=45)
 
     def knowledge_search(args=''):
-        """Busca en la base de conocimiento de Confío. Argumento: la consulta."""
+        """Busca en la memoria Git de ConfioAI. Úsala por defecto para videos/docs/memoria existentes, catálogo actual, "más videos" o contexto ya registrado antes de pedir listas o links al usuario. Argumento: la consulta."""
         return search_knowledge(args)
 
     def write_memory(args=''):
