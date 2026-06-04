@@ -18,7 +18,7 @@ from content_ingestion.ai_client import (
     provider_label,
 )
 from content_ingestion.ai_agent import run_with_tools
-from content_ingestion.ai_context import build_system_prompt, search_knowledge
+from content_ingestion.ai_context import build_media_system_prompt, build_system_prompt, search_knowledge
 from content_ingestion import conversation_log
 from content_ingestion.context_repo import (
     ContextRepoError,
@@ -269,6 +269,10 @@ class Command(BaseCommand):
 
     async def _generate_answer(self, event, client, user_prompt, provider, system, authority, debate_mode, explicit_memory=False):
         youtube_urls = extract_youtube_urls(user_prompt)
+        # Direct Gemini media analysis (video/image/YouTube) must NOT receive tool
+        # instructions — these are generateContent calls with no function declarations, so
+        # tool-talk makes Gemini emit MALFORMED_FUNCTION_CALL. Use a tool-free system prompt.
+        media_system = build_media_system_prompt()
         # Write turn = explicit /memory command OR a clearly-worded save/push/update intent
         # (precise detection, not loose keywords). Even then, the system prompt + the model
         # are the final gate on whether to actually call a write tool — casual chat never
@@ -278,7 +282,7 @@ class Command(BaseCommand):
         if youtube_urls and not debate_mode and not memory_write_request:
             logger.info('Routing YouTube video analysis to Gemini: %s', youtube_urls[:3])
             return await asyncio.to_thread(
-                complete_with_youtube_video, user_prompt, system=system
+                complete_with_youtube_video, user_prompt, system=media_system
             )
         if not debate_mode:
             if youtube_urls and memory_write_request:
@@ -286,22 +290,22 @@ class Command(BaseCommand):
                     'Analyzing YouTube video before memory write: %s',
                     youtube_urls[:3],
                 )
-                user_prompt = await self._prompt_with_youtube_analysis(user_prompt, system)
+                user_prompt = await self._prompt_with_youtube_analysis(user_prompt, media_system)
             images = await _collect_image_inputs(client, event)
             videos = await _collect_video_inputs(client, event)
             if videos and memory_write_request:
                 logger.info('Analyzing %s Telegram video(s) before memory write', len(videos))
-                user_prompt = await self._prompt_with_telegram_video_analysis(user_prompt, videos, system)
+                user_prompt = await self._prompt_with_telegram_video_analysis(user_prompt, videos, media_system)
                 videos = []
             if images and not memory_write_request:
                 logger.info('Routing %s Telegram image(s) to Gemini vision', len(images))
                 return await asyncio.to_thread(
-                    complete_with_images, user_prompt, images, system=system
+                    complete_with_images, user_prompt, images, system=media_system
                 )
             if videos:
                 logger.info('Routing %s Telegram video(s) to Gemini video analysis', len(videos))
                 return await asyncio.to_thread(
-                    complete_with_video_files, user_prompt, videos, system=system
+                    complete_with_video_files, user_prompt, videos, system=media_system
                 )
             loop = asyncio.get_running_loop()
             tools = _build_tools(

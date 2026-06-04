@@ -125,3 +125,25 @@ def build_system_prompt() -> str:
     if corpus:
         parts.append('## Base de conocimiento de Confío\n' + corpus)
     return '\n\n'.join(p for p in parts if p)
+
+
+def build_media_system_prompt() -> str:
+    """System prompt for DIRECT Gemini media analysis (video/image/YouTube).
+
+    Deliberately has NO tool-calling instructions. These are plain generateContent calls
+    with no function declarations; if the system prompt talks about tools, Gemini tries to
+    call one and returns finishReason=MALFORMED_FUNCTION_CALL with no text. So keep this
+    purely about analyzing the media in text."""
+    base = (getattr(settings, 'CONFIO_AI_SYSTEM_PROMPT', '') or '').strip()
+    persona = (
+        'Eres Confío AI, asistente del equipo interno de Confío. Estás analizando el '
+        'contenido multimedia (video/imagen) incluido. Describe lo que realmente ves y '
+        'escuchas: tema, hook, estructura, ritmo, tono, escenas, CTA y puntos clave útiles '
+        'para Confío y para la narrativa de Julian. Responde SOLO en texto, en español, '
+        'concreto y útil. No intentes llamar funciones ni herramientas.'
+    )
+    parts = [base, persona]
+    corpus = load_knowledge_corpus()
+    if corpus:
+        parts.append('## Base de conocimiento de Confío\n' + corpus)
+    return '\n\n'.join(p for p in parts if p)
