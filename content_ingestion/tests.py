@@ -265,6 +265,19 @@ class CommandParsingTests(SimpleTestCase):
             'Can you analyze this YouTube video? https://youtu.be/abc123'
         ))
 
+    def test_youtube_analysis_is_added_to_memory_prompt(self):
+        from content_ingestion.management.commands.telegram_ai_listener import _with_youtube_analysis
+
+        out = _with_youtube_analysis(
+            'Push this video memory https://youtu.be/abc123',
+            'Visual analysis details.',
+        )
+
+        self.assertIn('Push this video memory', out)
+        self.assertIn('Análisis real del video de YouTube vía Gemini', out)
+        self.assertIn('Visual analysis details.', out)
+        self.assertIn('No escribas una memoria basada solo', out)
+
     def test_sender_authority_hierarchy(self):
         import types
         from content_ingestion.management.commands.telegram_ai_listener import _sender_authority

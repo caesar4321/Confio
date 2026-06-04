@@ -223,8 +223,14 @@ class Command(BaseCommand):
                     complete_with_youtube_video, user_prompt, system=system
                 )
             elif not debate_mode:
+                if youtube_urls and memory_write_request:
+                    logger.info(
+                        'Analyzing YouTube video before memory write: %s',
+                        youtube_urls[:3],
+                    )
+                    user_prompt = await self._prompt_with_youtube_analysis(user_prompt, system)
                 images = await _collect_image_inputs(client, event)
-                if images:
+                if images and not memory_write_request:
                     logger.info('Routing %s Telegram image(s) to Gemini vision', len(images))
                     answer = await asyncio.to_thread(
                         complete_with_images, user_prompt, images, system=system
@@ -250,6 +256,26 @@ class Command(BaseCommand):
             conversation_log.append_turn,
             event.chat_id, sender_name, event.raw_text or prompt, answer,
         )
+
+    async def _prompt_with_youtube_analysis(self, user_prompt: str, system: str) -> str:
+        analysis_prompt = (
+            f'{user_prompt}\n\n'
+            'Analiza el/los video(s) público(s) de YouTube reales incluidos arriba. '
+            'No te limites al texto del usuario. Extrae detalles visuales, auditivos, '
+            'estructura narrativa, hook, ritmo, escena, tono, CTA, y cualquier dato '
+            'observable útil para una memoria de video. Si el usuario incluyó script, '
+            'compáralo con el video real.'
+        )
+        try:
+            analysis = await asyncio.to_thread(
+                complete_with_youtube_video, analysis_prompt, system=system
+            )
+        except AIClientError as exc:
+            analysis = (
+                'No se pudo completar el análisis visual/auditivo de YouTube antes '
+                f'de escribir memoria: {exc}'
+            )
+        return _with_youtube_analysis(user_prompt, analysis)
 
     async def _flush_loop(self):
         """Periodically commit + push buffered conversation logs to ConfioAI."""
@@ -332,6 +358,17 @@ def _is_memory_write_request(text: str) -> bool:
             'docs',
             'documento',
         )
+    )
+
+
+def _with_youtube_analysis(user_prompt: str, analysis: str) -> str:
+    return (
+        f'{user_prompt}\n\n'
+        '## Análisis real del video de YouTube vía Gemini\n'
+        f'{analysis.strip() if analysis else "(sin análisis devuelto)"}\n\n'
+        'Instrucción obligatoria: si escribes o actualizas una memoria de video, '
+        'incorpora el análisis real anterior. No escribas una memoria basada solo '
+        'en los links o en campos sueltos proporcionados por el usuario.'
     )
 
 
