@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fcntl
 import re
 import subprocess
 from pathlib import Path
@@ -13,6 +14,10 @@ from .models import AIContextCommitStatus, AIContextDocument
 
 class ContextRepoError(Exception):
     pass
+
+
+# Shared with conversation_log.py and confioai-pull.service.
+GIT_LOCKFILE = '/tmp/confioai-git.lock'
 
 
 def _repo_root() -> Path:
@@ -111,8 +116,26 @@ def _document_relative_path(document: AIContextDocument, date) -> Path:
 
 
 def write_commit_and_push_context(document: AIContextDocument, *, push: bool = True) -> AIContextDocument:
+    lock_fd = open(GIT_LOCKFILE, 'w')
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        return _write_commit_and_push_context_locked(document, push=push)
+    finally:
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        lock_fd.close()
+
+
+def _write_commit_and_push_context_locked(document: AIContextDocument, *, push: bool = True) -> AIContextDocument:
     repo_root = _repo_root()
     root = _context_root(repo_root)
+    remote = getattr(settings, 'CONFIO_AI_REPO_REMOTE', 'origin')
+    branch = getattr(settings, 'CONFIO_AI_REPO_BRANCH', 'main')
+
+    _run_git(repo_root, 'pull', '--rebase', '--autostash', remote, branch)
+
     date = timezone.localdate()
     slug = document.slug or _safe_slug(document.title)
     document.slug = slug
@@ -140,11 +163,17 @@ def write_commit_and_push_context(document: AIContextDocument, *, push: bool = T
     document.save(update_fields=['commit_sha', 'committed_at', 'status', 'error', 'updated_at'])
 
     if push:
-        remote = getattr(settings, 'CONFIO_AI_REPO_REMOTE', 'origin')
-        branch = getattr(settings, 'CONFIO_AI_REPO_BRANCH', 'main')
-        _run_git(repo_root, 'push', remote, branch)
+        _push_with_rebase_retry(repo_root, remote, branch)
         document.status = AIContextCommitStatus.PUSHED
         document.pushed_at = timezone.now()
         document.save(update_fields=['status', 'pushed_at', 'updated_at'])
 
     return document
+
+
+def _push_with_rebase_retry(repo_root: Path, remote: str, branch: str) -> None:
+    try:
+        _run_git(repo_root, 'push', remote, branch)
+    except ContextRepoError:
+        _run_git(repo_root, 'pull', '--rebase', '--autostash', remote, branch)
+        _run_git(repo_root, 'push', remote, branch)
