@@ -43,8 +43,11 @@ _TOOL_INPUT_DESC = (
 )
 
 
-def run_with_tools(prompt, provider, system, tools, *, max_steps=DEFAULT_MAX_STEPS):
+def run_with_tools(prompt, provider, system, tools, *, max_steps=DEFAULT_MAX_STEPS, backend=None):
     """Answer `prompt`, letting the model call `tools` (name -> callable(str) -> str).
+
+    `backend` overrides CONFIO_AI_AGENT_BACKEND for this call (e.g. memory writes
+    use a robust backend that doesn't mangle large function-call arguments).
 
     Native function-calling. Backend = CONFIO_AI_AGENT_BACKEND (default 'gemini'):
     'gemini'/'grok'/'deepseek' via their OpenAI-compatible /chat/completions,
@@ -54,16 +57,15 @@ def run_with_tools(prompt, provider, system, tools, *, max_steps=DEFAULT_MAX_STE
     if not tools:
         return complete_text(prompt, provider, system=system)
 
-    backend = (getattr(settings, 'CONFIO_AI_AGENT_BACKEND', 'gemini') or 'gemini').strip().lower()
-    runner = _agent_runner(backend)
-    if runner is None:
-        for fallback in ('gemini', 'openai', 'claude', 'grok', 'deepseek'):
-            runner = _agent_runner(fallback)
-            if runner is not None:
-                break
-    if runner is None:
-        return _run_text_protocol(prompt, provider, system, tools, max_steps=max_steps)
-    return runner(prompt, system, tools, max_steps=max_steps)
+    primary = (backend or getattr(settings, 'CONFIO_AI_AGENT_BACKEND', 'gemini') or 'gemini').strip().lower()
+    # Try the chosen backend first, then other configured ones. Robust backends first
+    # in the fallback (a fallback usually means the primary's API key is missing).
+    order = [primary] + [b for b in ('claude', 'openai', 'gemini', 'grok', 'deepseek') if b != primary]
+    for candidate in order:
+        runner = _agent_runner(candidate)
+        if runner is not None:
+            return runner(prompt, system, tools, max_steps=max_steps)
+    return _run_text_protocol(prompt, provider, system, tools, max_steps=max_steps)
 
 
 # OpenAI-compatible chat-completions backends: native function tools via /chat/completions.

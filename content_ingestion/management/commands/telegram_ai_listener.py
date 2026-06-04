@@ -310,8 +310,14 @@ class Command(BaseCommand):
                 allow_writes=explicit_memory,
                 allow_new_memory=not existing_doc_revision,
             )
+            # Memory writes need a backend that handles large function args reliably
+            # (Gemini Flash malforms/truncates them); read-only chat stays on the default.
+            write_backend = (
+                getattr(settings, 'CONFIO_AI_AGENT_WRITE_BACKEND', 'claude')
+                if explicit_memory else None
+            )
             return await asyncio.to_thread(
-                run_with_tools, user_prompt, provider, system, tools
+                run_with_tools, user_prompt, provider, system, tools, backend=write_backend
             )
         return await asyncio.to_thread(debate, user_prompt, system=system)
 
