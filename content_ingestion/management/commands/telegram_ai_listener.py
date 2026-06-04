@@ -12,6 +12,7 @@ from content_ingestion.ai_client import (
     AIClientError,
     debate,
     complete_with_images,
+    complete_with_video_files,
     complete_with_youtube_video,
     extract_youtube_urls,
     provider_label,
@@ -50,6 +51,7 @@ RECONNECT_DELAY_SECONDS = 5
 # carry their original timestamps, so this stops us from answering the backlog.
 MAX_MESSAGE_AGE_SECONDS = 60
 MAX_IMAGE_BYTES = 12 * 1024 * 1024
+MAX_VIDEO_BYTES = getattr(settings, 'CONFIO_AI_MAX_TELEGRAM_VIDEO_BYTES', 120 * 1024 * 1024)
 
 
 class Command(BaseCommand):
@@ -104,7 +106,7 @@ class Command(BaseCommand):
                     return
 
                 message = (event.raw_text or '').strip()
-                if not message:
+                if not message and not getattr(getattr(event, 'message', None), 'media', None):
                     return
 
                 # Don't get into bot-to-bot loops in the group.
@@ -115,7 +117,7 @@ class Command(BaseCommand):
                 except Exception:
                     pass
 
-                command, prompt = _split_command(message)
+                command, prompt = _split_command(message) if message else (None, _media_only_prompt(event.message))
 
                 if command in PROVIDER_COMMANDS:
                     provider = PROVIDER_COMMANDS[command]
@@ -235,10 +237,20 @@ class Command(BaseCommand):
                     )
                     user_prompt = await self._prompt_with_youtube_analysis(user_prompt, system)
                 images = await _collect_image_inputs(client, event)
+                videos = await _collect_video_inputs(client, event)
+                if videos and memory_write_request:
+                    logger.info('Analyzing %s Telegram video(s) before memory write', len(videos))
+                    user_prompt = await self._prompt_with_telegram_video_analysis(user_prompt, videos, system)
+                    videos = []
                 if images and not memory_write_request:
                     logger.info('Routing %s Telegram image(s) to Gemini vision', len(images))
                     answer = await asyncio.to_thread(
                         complete_with_images, user_prompt, images, system=system
+                    )
+                elif videos:
+                    logger.info('Routing %s Telegram video(s) to Gemini video analysis', len(videos))
+                    answer = await asyncio.to_thread(
+                        complete_with_video_files, user_prompt, videos, system=system
                     )
                 else:
                     loop = asyncio.get_running_loop()
@@ -281,6 +293,30 @@ class Command(BaseCommand):
                 f'de escribir memoria: {exc}'
             )
         return _with_youtube_analysis(user_prompt, analysis)
+
+    async def _prompt_with_telegram_video_analysis(
+        self,
+        user_prompt: str,
+        videos: list[tuple[str, bytes, str]],
+        system: str,
+    ) -> str:
+        analysis_prompt = (
+            f'{user_prompt}\n\n'
+            'Analiza el/los video(s) adjunto(s) de Telegram reales. No te limites al caption. '
+            'Extrae detalles visuales, auditivos, estructura narrativa, hook, ritmo, escena, tono, '
+            'CTA y potencial en TikTok/Instagram/YouTube Shorts usando la memoria de ConfíoAI, '
+            'la narrativa de Julian, su filosofía e identidad.'
+        )
+        try:
+            analysis = await asyncio.to_thread(
+                complete_with_video_files, analysis_prompt, videos, system=system
+            )
+        except AIClientError as exc:
+            analysis = (
+                'No se pudo completar el análisis visual/auditivo del video de Telegram antes '
+                f'de escribir memoria: {exc}'
+            )
+        return _with_telegram_video_analysis(user_prompt, analysis)
 
     async def _flush_loop(self):
         """Periodically commit + push buffered conversation logs to ConfioAI."""
@@ -374,6 +410,17 @@ def _with_youtube_analysis(user_prompt: str, analysis: str) -> str:
         'Instrucción obligatoria: si escribes o actualizas una memoria de video, '
         'incorpora el análisis real anterior. No escribas una memoria basada solo '
         'en los links o en campos sueltos proporcionados por el usuario.'
+    )
+
+
+def _with_telegram_video_analysis(user_prompt: str, analysis: str) -> str:
+    return (
+        f'{user_prompt}\n\n'
+        '## Análisis real del video de Telegram vía Gemini\n'
+        f'{analysis.strip() if analysis else "(sin análisis devuelto)"}\n\n'
+        'Instrucción obligatoria: si escribes o actualizas una memoria de video, '
+        'incorpora el análisis real anterior. No escribas una memoria basada solo '
+        'en el caption, nombre del archivo o campos sueltos proporcionados por el usuario.'
     )
 
 
@@ -731,6 +778,26 @@ async def _collect_image_inputs(client, event) -> list[tuple[str, bytes]]:
     return images
 
 
+async def _collect_video_inputs(client, event) -> list[tuple[str, bytes, str]]:
+    """Download compressed Telegram video media from this message, if within limit."""
+    message = getattr(event, 'message', None)
+    if not message or not _is_video_message(message):
+        return []
+    file = getattr(message, 'file', None)
+    size = getattr(file, 'size', None) if file else None
+    if size and size > MAX_VIDEO_BYTES:
+        logger.info('Skipping video over size limit: %s bytes', size)
+        return []
+    mime_type = _video_mime_type(message)
+    display_name = _video_display_name(message)
+    data = await client.download_media(message, file=bytes)
+    if data and len(data) <= MAX_VIDEO_BYTES:
+        return [(mime_type, data, display_name)]
+    if data:
+        logger.info('Skipping downloaded video over size limit: %s bytes', len(data))
+    return []
+
+
 def _is_image_message(message) -> bool:
     if not getattr(message, 'media', None):
         return False
@@ -739,10 +806,45 @@ def _is_image_message(message) -> bool:
     return bool(getattr(message, 'photo', None) or mime.startswith('image/'))
 
 
+def _is_video_message(message) -> bool:
+    if not getattr(message, 'media', None):
+        return False
+    file = getattr(message, 'file', None)
+    mime = (getattr(file, 'mime_type', '') if file else '') or ''
+    return bool(getattr(message, 'video', None) or getattr(message, 'video_note', None) or mime.startswith('video/'))
+
+
 def _image_mime_type(message) -> str:
     file = getattr(message, 'file', None)
     mime = (getattr(file, 'mime_type', '') if file else '') or ''
     return mime if mime.startswith('image/') else 'image/jpeg'
+
+
+def _video_mime_type(message) -> str:
+    file = getattr(message, 'file', None)
+    mime = (getattr(file, 'mime_type', '') if file else '') or ''
+    return mime if mime.startswith('video/') else 'video/mp4'
+
+
+def _video_display_name(message) -> str:
+    file = getattr(message, 'file', None)
+    name = getattr(file, 'name', None) if file else None
+    return name or f'telegram-video-{getattr(message, "id", "unknown")}.mp4'
+
+
+def _media_only_prompt(message) -> str:
+    if _is_image_message(message):
+        return (
+            'Analiza esta imagen enviada sin caption. Describe lo observable y extrae '
+            'implicaciones útiles para ConfíoAI, contenido, producto o estrategia.'
+        )
+    if _is_video_message(message):
+        return (
+            'Analiza este video comprimido enviado sin caption. Evalúalo como pieza de '
+            'TikTok/Instagram/YouTube Shorts usando la ecuación de éxito social de ConfíoAI, '
+            'los datos propios disponibles, y la narrativa, filosofía e identidad de Julian.'
+        )
+    return 'Analiza este archivo enviado sin caption y responde con lo útil para ConfíoAI.'
 
 
 def _compose_prompt(prompt: str, history: str, reply_to: str, *, sender_name='', authority='client') -> str:

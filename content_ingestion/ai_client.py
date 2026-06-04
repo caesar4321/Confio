@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
@@ -128,6 +129,33 @@ def complete_with_images(
     if not images:
         raise AIClientError('No images provided.')
     return _complete_gemini(prompt, _system_text(system), images=images[:8])
+
+
+def complete_with_video_files(
+    prompt: str,
+    videos: list[tuple[str, bytes, str]],
+    *,
+    system: str | None = None,
+) -> str:
+    """Upload Telegram video bytes to Gemini Files API and analyze them."""
+    prompt = _trim_prompt(prompt)
+    if not videos:
+        raise AIClientError('No videos provided.')
+    api_key = _provider_api_key('gemini')
+    if not api_key:
+        raise AIClientError('Gemini is selected, but GEMINI_API_KEY is not configured.')
+
+    file_parts = []
+    for mime_type, video_bytes, display_name in videos[:2]:
+        uploaded = _upload_gemini_file(
+            api_key,
+            video_bytes,
+            mime_type or 'video/mp4',
+            display_name or 'telegram-video.mp4',
+        )
+        uploaded = _wait_for_gemini_file(api_key, uploaded)
+        file_parts.append((uploaded.get('mime_type') or uploaded.get('mimeType') or mime_type, uploaded['uri']))
+    return _complete_gemini(_video_analysis_prompt(prompt), _system_text(system), file_parts=file_parts)
 
 
 def debate(prompt: str, *, synthesizer: str | None = None, system: str | None = None) -> str:
@@ -321,6 +349,7 @@ def _complete_gemini(
     *,
     youtube_urls: list[str] | None = None,
     images: list[tuple[str, bytes]] | None = None,
+    file_parts: list[tuple[str, str]] | None = None,
 ) -> str:
     api_key = _provider_api_key('gemini')
     if not api_key:
@@ -331,6 +360,8 @@ def _complete_gemini(
     parts = []
     for video_url in youtube_urls or []:
         parts.append({'file_data': {'file_uri': video_url}})
+    for mime_type, file_uri in file_parts or []:
+        parts.append({'file_data': {'mime_type': mime_type, 'file_uri': file_uri}})
     for mime_type, image_bytes in images or []:
         import base64
 
@@ -350,7 +381,7 @@ def _complete_gemini(
             },
             'contents': [{'role': 'user', 'parts': parts}],
         },
-        timeout=180 if youtube_urls else 60,
+        timeout=180 if (youtube_urls or file_parts) else 60,
     )
     if response.status_code >= 400:
         raise AIClientError(f'Gemini request failed: {response.status_code} {response.text[:500]}')
@@ -364,6 +395,78 @@ def _complete_gemini(
     if chunks:
         return '\n'.join(chunks).strip()
     raise AIClientError(_gemini_no_text_message(data))
+
+
+def _video_analysis_prompt(prompt: str) -> str:
+    return (
+        f'{prompt}\n\n'
+        'Analiza el video real con el contexto completo de ConfíoAI cargado en el system prompt. '
+        'Evalúalo para TikTok, Instagram Reels y YouTube Shorts: hook de 0-3s, retención, ritmo, '
+        'claridad narrativa, emoción, identidad de Julian, filosofía de vida, autoridad, CTA, '
+        'potencial de comentarios/compartidos/seguidores y ajustes concretos para maximizar '
+        'views y followers sin traicionar la voz de Julian.'
+    )
+
+
+def _upload_gemini_file(api_key: str, data: bytes, mime_type: str, display_name: str) -> dict:
+    start = requests.post(
+        'https://generativelanguage.googleapis.com/upload/v1beta/files',
+        params={'key': api_key},
+        headers={
+            'X-Goog-Upload-Protocol': 'resumable',
+            'X-Goog-Upload-Command': 'start',
+            'X-Goog-Upload-Header-Content-Length': str(len(data)),
+            'X-Goog-Upload-Header-Content-Type': mime_type,
+            'Content-Type': 'application/json',
+        },
+        json={'file': {'display_name': display_name[:120]}},
+        timeout=60,
+    )
+    if start.status_code >= 400:
+        raise AIClientError(f'Gemini file upload start failed: {start.status_code} {start.text[:500]}')
+    upload_url = start.headers.get('x-goog-upload-url')
+    if not upload_url:
+        raise AIClientError('Gemini file upload did not return an upload URL.')
+
+    upload = requests.post(
+        upload_url,
+        headers={
+            'Content-Length': str(len(data)),
+            'X-Goog-Upload-Offset': '0',
+            'X-Goog-Upload-Command': 'upload, finalize',
+        },
+        data=data,
+        timeout=300,
+    )
+    if upload.status_code >= 400:
+        raise AIClientError(f'Gemini file upload failed: {upload.status_code} {upload.text[:500]}')
+    file_obj = (upload.json() or {}).get('file') or {}
+    if not file_obj.get('uri') or not file_obj.get('name'):
+        raise AIClientError('Gemini file upload response missing file uri/name.')
+    file_obj.setdefault('mime_type', file_obj.get('mimeType') or mime_type)
+    return file_obj
+
+
+def _wait_for_gemini_file(api_key: str, file_obj: dict) -> dict:
+    name = file_obj.get('name', '')
+    if not name:
+        return file_obj
+    for _ in range(24):
+        state = file_obj.get('state')
+        if state in (None, 'ACTIVE'):
+            return file_obj
+        if state == 'FAILED':
+            raise AIClientError(f'Gemini file processing failed for {name}.')
+        time.sleep(5)
+        response = requests.get(
+            f'https://generativelanguage.googleapis.com/v1beta/{name}',
+            params={'key': api_key},
+            timeout=30,
+        )
+        if response.status_code >= 400:
+            raise AIClientError(f'Gemini file status failed: {response.status_code} {response.text[:500]}')
+        file_obj = response.json() or file_obj
+    raise AIClientError(f'Gemini file processing timed out for {name}.')
 
 
 def _gemini_no_text_message(data: dict) -> str:

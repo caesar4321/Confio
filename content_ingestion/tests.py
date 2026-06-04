@@ -230,6 +230,52 @@ class AIProviderRoutingTests(SimpleTestCase):
         self.assertEqual(parts[0]['inline_data']['data'], 'YWJj')
         self.assertEqual(parts[1]['text'], 'Describe esta imagen')
 
+    @override_settings(GEMINI_API_KEY='key', GEMINI_MODEL='gemini-3-flash-preview')
+    @patch('content_ingestion.ai_client.requests.get')
+    @patch('content_ingestion.ai_client.requests.post')
+    def test_complete_with_video_files_uploads_file_data(self, post, get):
+        from content_ingestion.ai_client import complete_with_video_files
+
+        start_response = type('Resp', (), {
+            'status_code': 200,
+            'headers': {'x-goog-upload-url': 'https://upload.example'},
+            'text': '',
+            'json': lambda self: {},
+        })()
+        upload_response = type('Resp', (), {
+            'status_code': 200,
+            'headers': {},
+            'text': '',
+            'json': lambda self: {
+                'file': {
+                    'name': 'files/abc',
+                    'uri': 'https://files.example/abc',
+                    'mimeType': 'video/mp4',
+                    'state': 'ACTIVE',
+                },
+            },
+        })()
+        generate_response = type('Resp', (), {
+            'status_code': 200,
+            'headers': {},
+            'text': '',
+            'json': lambda self: {
+                'candidates': [{'content': {'parts': [{'text': 'video analysis'}]}}],
+            },
+        })()
+        post.side_effect = [start_response, upload_response, generate_response]
+
+        out = complete_with_video_files('Analiza', [('video/mp4', b'videobytes', 'clip.mp4')], system='SYS')
+
+        self.assertEqual(out, 'video analysis')
+        self.assertFalse(get.called)
+        self.assertEqual(post.call_args_list[0].args[0], 'https://generativelanguage.googleapis.com/upload/v1beta/files')
+        generate_payload = post.call_args_list[2].kwargs['json']
+        parts = generate_payload['contents'][0]['parts']
+        self.assertEqual(parts[0]['file_data']['mime_type'], 'video/mp4')
+        self.assertEqual(parts[0]['file_data']['file_uri'], 'https://files.example/abc')
+        self.assertIn('TikTok', parts[1]['text'])
+
 
 class CommandParsingTests(SimpleTestCase):
     def test_split_command(self):
@@ -389,6 +435,37 @@ class SmartContextTests(SimpleTestCase):
         self.assertFalse(_is_image_message(pdf))
         self.assertEqual(_image_mime_type(photo), 'image/jpeg')
         self.assertEqual(_image_mime_type(doc_image), 'image/png')
+
+    def test_video_message_detection_and_media_only_prompt(self):
+        import types
+        from content_ingestion.management.commands.telegram_ai_listener import (
+            _is_video_message,
+            _media_only_prompt,
+            _video_display_name,
+            _video_mime_type,
+        )
+
+        video = types.SimpleNamespace(
+            id=99,
+            media=True,
+            video=True,
+            video_note=None,
+            file=types.SimpleNamespace(name='', mime_type='video/mp4'),
+        )
+        image = types.SimpleNamespace(media=True, photo=True, file=None)
+        pdf = types.SimpleNamespace(
+            media=True,
+            video=False,
+            video_note=None,
+            file=types.SimpleNamespace(name='doc.pdf', mime_type='application/pdf'),
+        )
+
+        self.assertTrue(_is_video_message(video))
+        self.assertFalse(_is_video_message(pdf))
+        self.assertEqual(_video_mime_type(video), 'video/mp4')
+        self.assertEqual(_video_display_name(video), 'telegram-video-99.mp4')
+        self.assertIn('sin caption', _media_only_prompt(image))
+        self.assertIn('TikTok/Instagram/YouTube Shorts', _media_only_prompt(video))
 
     def test_display_name_fallbacks(self):
         import types
