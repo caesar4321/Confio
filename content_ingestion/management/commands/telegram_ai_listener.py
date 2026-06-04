@@ -22,6 +22,7 @@ from content_ingestion.ai_context import build_system_prompt, search_knowledge
 from content_ingestion import conversation_log
 from content_ingestion.context_repo import (
     ContextRepoError,
+    list_video_memories,
     read_context_documents,
     revise_context_documents,
     write_commit_and_push_context,
@@ -503,6 +504,14 @@ def _build_tools(client, event, loop, *, authority='client', allow_new_memory=Tr
         """Busca en la memoria Git de ConfioAI. Úsala por defecto para videos/docs/memoria existentes, catálogo actual, "más videos" o contexto ya registrado antes de pedir listas o links al usuario. Argumento: la consulta."""
         return search_knowledge(args)
 
+    def list_videos(args=''):
+        """Lista determinísticamente todas las memorias de video existentes en docs/videos, con total, título canónico y path. Úsala para "cuántos videos", "lista los videos", catálogo, títulos actuales o inventario."""
+        try:
+            return list_video_memories()
+        except (ContextRepoError, OSError) as exc:
+            logger.exception('list_video_memories tool failed')
+            return f'No pude listar las memorias de video: {exc}'
+
     def write_memory(args=''):
         """Crea/actualiza memoria curada en ConfioAI y hace commit+push. Formato: primera línea 'category: <videos|strategy|decision-log|meeting-notes|weekly-reports|social-stats|legal|user-reports|other>'; segunda línea 'title: <título>'; opcional 'folder: <subcarpeta>'; resto: markdown completo."""
         return _write_memory_tool(args)
@@ -524,6 +533,7 @@ def _build_tools(client, event, loop, *, authority='client', allow_new_memory=Tr
         'get_chat_videos': get_chat_videos,
         'search_chat_history': search_chat_history,
         'search_knowledge': knowledge_search,
+        'list_video_memories': list_videos,
     }
     if authority in {'owner', 'trusted'}:
         if allow_new_memory:

@@ -103,6 +103,29 @@ class AIContextRepoPathTests(SimpleTestCase):
             'docs/strategy/2026/2026-06-03-distribution-thesis.md',
         )
 
+    @override_settings(CONFIO_AI_CONTEXT_ROOT='docs')
+    def test_list_video_memories_returns_count_titles_and_paths(self):
+        import os
+        import tempfile
+        from content_ingestion.context_repo import list_video_memories
+
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, '.git'))
+            videos = os.path.join(d, 'docs', 'videos', 'Vida y filosofía')
+            os.makedirs(videos)
+            with open(os.path.join(videos, 'uno.md'), 'w', encoding='utf-8') as fh:
+                fh.write('---\ntitle: "Video Uno"\n---\n\nBody')
+            with open(os.path.join(videos, 'dos.md'), 'w', encoding='utf-8') as fh:
+                fh.write('# Video Dos\n\nBody')
+
+            with override_settings(CONFIO_AI_REPO_PATH=d):
+                out = list_video_memories()
+
+        self.assertIn('Total videos: 2', out)
+        self.assertIn('Video Uno', out)
+        self.assertIn('Video Dos', out)
+        self.assertIn('docs/videos/Vida y filosofía/uno.md', out)
+
 
 class AIProviderRoutingTests(SimpleTestCase):
     def test_normalize_aliases(self):
@@ -377,6 +400,7 @@ class CommandParsingTests(SimpleTestCase):
         self.assertNotIn('write_memory', client_tools)
         self.assertNotIn('write_video_memory', client_tools)
         self.assertNotIn('revise_memory_docs', client_tools)
+        self.assertIn('list_video_memories', client_tools)
         self.assertIn('write_memory', trusted_tools)
         self.assertIn('write_video_memory', trusted_tools)
         self.assertIn('read_memory_docs', trusted_tools)

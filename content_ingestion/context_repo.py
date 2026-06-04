@@ -140,6 +140,54 @@ def _substantial_shrink(existing: str, replacement: str) -> bool:
     return replacement_len < max(700, int(existing_len * 0.65))
 
 
+def _document_title_from_markdown(text: str, fallback: str) -> str:
+    in_frontmatter = False
+    for idx, line in enumerate((text or '').splitlines()[:80]):
+        stripped = line.strip()
+        if idx == 0 and stripped == '---':
+            in_frontmatter = True
+            continue
+        if in_frontmatter and stripped == '---':
+            in_frontmatter = False
+            continue
+        if in_frontmatter:
+            key, sep, value = stripped.partition(':')
+            if sep and key.strip().lower() == 'title':
+                title = value.strip().strip('"').strip("'").replace('\\"', '"')
+                return title or fallback
+        if stripped.startswith('# '):
+            return stripped[2:].strip() or fallback
+    return fallback
+
+
+def list_video_memories() -> str:
+    repo_root = _repo_root()
+    root = _context_root(repo_root)
+    videos_dir = root / 'videos'
+    if not videos_dir.exists():
+        return 'No encontré docs/videos en ConfioAI.'
+
+    rows = []
+    for path in sorted(videos_dir.rglob('*.md')):
+        if path.name == '.gitkeep':
+            continue
+        relative = path.relative_to(repo_root)
+        try:
+            text = path.read_text(encoding='utf-8')
+        except OSError:
+            continue
+        fallback = path.stem.replace('-', ' ').title()
+        title = _document_title_from_markdown(text, fallback)
+        rows.append((title, str(relative)))
+
+    if not rows:
+        return 'No hay memorias de video registradas en ConfioAI.'
+    lines = [f'Total videos: {len(rows)}']
+    for idx, (title, relative) in enumerate(rows, 1):
+        lines.append(f'{idx}. {title} — {relative}')
+    return '\n'.join(lines)
+
+
 def read_context_documents(paths: list[str]) -> str:
     repo_root = _repo_root()
     out = []
