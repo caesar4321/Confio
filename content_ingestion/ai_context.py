@@ -114,6 +114,11 @@ def build_system_prompt() -> str:
         'archivar, escribir en memoria o pushear a Git, debes usar las herramientas '
         'write_memory o write_video_memory para crear una memoria curada en ConfioAI; '
         'no afirmes que guardaste algo si no usaste una herramienta y recibiste éxito. '
+        'Para memorias de video, las subcarpetas bajo docs/videos representan playlists '
+        'explícitas, no categorías inventadas por el modelo. No crees carpetas nuevas ni '
+        'uses "Vida y filosofía" como comodín. Si el video viene como clip comprimido de '
+        'Telegram y el usuario no dio una playlist explícita, usa folder: Instagram. '
+        'Si el usuario sí dio una playlist/carpeta concreta, respétala literalmente. '
         'No guardes memorias por cada mensaje casual: solo decisiones, estrategias, '
         'learnings importantes, reportes, análisis de video o notas que el equipo pida '
         'preservar. Si te falta un dato, usa una '
@@ -149,7 +154,10 @@ def build_media_system_prompt() -> str:
         '(cortes, subtítulos, b-roll, reordenamiento); 5) 3 hooks alternativos; '
         '6) 2-3 CTAs/captions; 7) recomendación por plataforma; 8) huecos/incertidumbre. '
         'Si no puedes ver u oír algo con suficiente confianza, dilo. Responde SOLO en '
-        'texto, en español, concreto y útil. No intentes llamar funciones ni herramientas.'
+        'texto, en español, concreto y útil. Si luego se guarda como memoria, recuerda que '
+        'las subcarpetas de docs/videos son playlists explícitas; para clips comprimidos '
+        'de Telegram sin playlist indicada, usa Instagram. No intentes llamar funciones '
+        'ni herramientas.'
     )
     parts = [base, persona]
     corpus = load_knowledge_corpus()

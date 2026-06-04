@@ -562,7 +562,7 @@ def _build_tools(client, event, loop, *, authority='client', allow_writes=False,
         return _write_memory_tool(args)
 
     def write_video_memory(args=''):
-        """Crea una memoria de video en docs/videos y hace commit+push. Formato: opcional 'folder: Vida y filosofía'; línea 'title: <título del video>'; resto: markdown completo. Debe ser accionable: links/stats/script si existen, observaciones del video real, diagnóstico de hook/retención, plan de edición, hooks alternativos, CTA/captions, plataforma y huecos."""
+        """Crea una memoria de video en docs/videos y hace commit+push. Formato: opcional 'folder: <playlist>'; línea 'title: <título del video>'; resto: markdown completo. Las carpetas son playlists explícitas, no categorías inferidas: no crees carpetas nuevas ni uses Vida y filosofía como comodín. Para clips comprimidos de Telegram sin playlist indicada, usa folder: Instagram. Debe ser accionable: links/stats/script si existen, observaciones del video real, diagnóstico de hook/retención, plan de edición, hooks alternativos, CTA/captions, plataforma y huecos."""
         return _write_memory_tool(f'category: videos\ntitle: {_first_title(args)}\n{_strip_title_line(args)}')
 
     def read_memory_docs(args=''):
