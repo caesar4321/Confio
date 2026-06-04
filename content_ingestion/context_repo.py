@@ -89,6 +89,20 @@ def _run_git(repo_root: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
+def _has_any_changes(repo_root: Path, relative_paths: list[str]) -> bool:
+    result = subprocess.run(
+        ['git', 'status', '--porcelain', '--', *relative_paths],
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        output = (result.stderr or result.stdout or '').strip()
+        raise ContextRepoError(output or 'git status failed')
+    return bool(result.stdout.strip())
+
+
 def _has_changes(repo_root: Path, relative_path: str) -> bool:
     result = subprocess.run(
         ['git', 'status', '--porcelain', '--', relative_path],
@@ -101,6 +115,93 @@ def _has_changes(repo_root: Path, relative_path: str) -> bool:
         output = (result.stderr or result.stdout or '').strip()
         raise ContextRepoError(output or 'git status failed')
     return bool(result.stdout.strip())
+
+
+def _safe_context_relative_path(path: str) -> Path:
+    clean = str(path or '').strip().replace('\\', '/').lstrip('/')
+    if not clean:
+        raise ContextRepoError('Falta path del documento.')
+    relative = Path(clean)
+    if any(part in {'', '.', '..'} for part in relative.parts):
+        raise ContextRepoError(f'Path inválido: {path}')
+    root = Path(settings.CONFIO_AI_CONTEXT_ROOT)
+    if relative.parts[: len(root.parts)] != root.parts:
+        relative = root / relative
+    if relative.suffix.lower() != '.md':
+        raise ContextRepoError(f'Solo se pueden editar archivos Markdown: {relative}')
+    return relative
+
+
+def read_context_documents(paths: list[str]) -> str:
+    repo_root = _repo_root()
+    out = []
+    for raw_path in paths:
+        relative = _safe_context_relative_path(raw_path)
+        target = (repo_root / relative).resolve()
+        if repo_root not in target.parents:
+            raise ContextRepoError('Resolved context path escapes CONFIO_AI_REPO_PATH')
+        if not target.exists():
+            out.append(f'FILE: {relative}\n(MISSING)')
+            continue
+        out.append(f'FILE: {relative}\n<<<\n{target.read_text(encoding="utf-8")}\n>>>')
+    return '\n\n'.join(out)
+
+
+def revise_context_documents(edits: list[dict], *, message: str = '', push: bool = True) -> dict:
+    if not edits:
+        raise ContextRepoError('No hay documentos para revisar.')
+
+    lock_fd = open(GIT_LOCKFILE, 'w')
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        return _revise_context_documents_locked(edits, message=message, push=push)
+    finally:
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        lock_fd.close()
+
+
+def _revise_context_documents_locked(edits: list[dict], *, message: str = '', push: bool = True) -> dict:
+    repo_root = _repo_root()
+    _context_root(repo_root)
+    remote = getattr(settings, 'CONFIO_AI_REPO_REMOTE', 'origin')
+    branch = getattr(settings, 'CONFIO_AI_REPO_BRANCH', 'main')
+
+    _run_git(repo_root, 'pull', '--rebase', '--autostash', remote, branch)
+
+    changed_paths = []
+    for edit in edits:
+        relative = _safe_context_relative_path(edit.get('path', ''))
+        target = (repo_root / relative).resolve()
+        if repo_root not in target.parents:
+            raise ContextRepoError('Resolved context path escapes CONFIO_AI_REPO_PATH')
+
+        action = str(edit.get('action') or 'write').lower()
+        if action == 'delete':
+            if target.exists():
+                target.unlink()
+                changed_paths.append(str(relative))
+            continue
+
+        body = str(edit.get('body') or '').strip()
+        if not body:
+            raise ContextRepoError(f'Falta markdown para {relative}')
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body.rstrip() + '\n', encoding='utf-8')
+        changed_paths.append(str(relative))
+
+    if not changed_paths or not _has_any_changes(repo_root, changed_paths):
+        return {'status': 'NO_CHANGES', 'paths': changed_paths, 'commit': ''}
+
+    _run_git(repo_root, 'add', *changed_paths)
+    commit_message = (message or 'Revise AI context docs').strip()[:180]
+    _run_git(repo_root, 'commit', '-m', commit_message)
+    sha = _run_git(repo_root, 'rev-parse', 'HEAD')
+    if push:
+        _push_with_rebase_retry(repo_root, remote, branch)
+    return {'status': 'PUSHED' if push else 'COMMITTED', 'paths': changed_paths, 'commit': sha}
 
 
 def _document_relative_path(document: AIContextDocument, date) -> Path:

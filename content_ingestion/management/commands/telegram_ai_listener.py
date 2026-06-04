@@ -19,7 +19,12 @@ from content_ingestion.ai_client import (
 from content_ingestion.ai_agent import run_with_tools
 from content_ingestion.ai_context import build_system_prompt, search_knowledge
 from content_ingestion import conversation_log
-from content_ingestion.context_repo import ContextRepoError, write_commit_and_push_context
+from content_ingestion.context_repo import (
+    ContextRepoError,
+    read_context_documents,
+    revise_context_documents,
+    write_commit_and_push_context,
+)
 from content_ingestion.models import AIContextCategory, AIContextDocument
 from content_ingestion.telegram_client import _entity_identifier, get_client
 
@@ -410,6 +415,14 @@ def _build_tools(client, event, loop, *, authority='client'):
         """Crea una memoria de video en docs/videos y hace commit+push. Formato: opcional 'folder: Vida y filosofía'; línea 'title: <título del video>'; resto: markdown completo incluyendo links, stats, análisis y script."""
         return _write_memory_tool(f'category: videos\ntitle: {_first_title(args)}\n{_strip_title_line(args)}')
 
+    def read_memory_docs(args=''):
+        """Lee uno o varios Markdown exactos de ConfioAI. Formato: un path por línea, por ejemplo docs/videos/Vida y filosofía/video.md."""
+        return _read_memory_docs_tool(args)
+
+    def revise_memory_docs(args=''):
+        """Revisa varios Markdown existentes en ConfioAI en un solo commit+push. Formato: opcional 'message: <commit>'; luego bloques 'FILE: docs/.../archivo.md' + markdown completo, o 'DELETE' para borrar."""
+        return _revise_memory_docs_tool(args)
+
     tools = {
         'get_chat_files': get_chat_files,
         'get_chat_videos': get_chat_videos,
@@ -419,6 +432,8 @@ def _build_tools(client, event, loop, *, authority='client'):
     if authority in {'owner', 'trusted'}:
         tools['write_memory'] = write_memory
         tools['write_video_memory'] = write_video_memory
+        tools['read_memory_docs'] = read_memory_docs
+        tools['revise_memory_docs'] = revise_memory_docs
     return tools
 
 
@@ -453,6 +468,73 @@ def _write_memory_tool(args: str) -> str:
         f'- Commit: {document.commit_sha[:12] if document.commit_sha else "(sin commit)"}\n'
         f'- Status: {document.status}'
     )
+
+
+def _read_memory_docs_tool(args: str) -> str:
+    paths = [line.strip() for line in (args or '').splitlines() if line.strip()]
+    if not paths:
+        return 'No leí nada: falta al menos un path Markdown.'
+    try:
+        return read_context_documents(paths)
+    except (ContextRepoError, OSError) as exc:
+        logger.exception('read_memory_docs tool failed')
+        return f'No pude leer los documentos: {exc}'
+
+
+def _revise_memory_docs_tool(args: str) -> str:
+    parsed = _parse_revise_memory_docs_args(args)
+    if not parsed['edits']:
+        return 'No revisé nada: faltan bloques FILE.'
+    try:
+        result = revise_context_documents(parsed['edits'], message=parsed['message'], push=True)
+    except (ContextRepoError, OSError) as exc:
+        logger.exception('revise_memory_docs tool failed')
+        return f'No pude revisar/pushear los documentos: {exc}'
+    except Exception as exc:  # noqa: BLE001
+        logger.exception('revise_memory_docs unexpected failure')
+        return f'No pude revisar/pushear los documentos por un error inesperado: {exc}'
+    return (
+        'Documentos revisados y pusheados.\n'
+        f'- Archivos: {", ".join(result["paths"]) if result["paths"] else "(sin cambios)"}\n'
+        f'- Commit: {result["commit"][:12] if result["commit"] else "(sin commit)"}\n'
+        f'- Status: {result["status"]}'
+    )
+
+
+def _parse_revise_memory_docs_args(args: str) -> dict:
+    message = 'Revise AI context docs'
+    edits = []
+    current_path = ''
+    current_lines = []
+
+    def flush():
+        nonlocal current_path, current_lines
+        if not current_path:
+            return
+        body = '\n'.join(current_lines).strip()
+        if body == '<<<\n>>>':
+            body = ''
+        if body.startswith('<<<') and body.endswith('>>>'):
+            body = body[3:-3].strip()
+        action = 'delete' if body.strip().upper() == 'DELETE' else 'write'
+        edits.append({'path': current_path, 'action': action, 'body': '' if action == 'delete' else body})
+        current_path = ''
+        current_lines = []
+
+    for raw_line in (args or '').splitlines():
+        key, sep, value = raw_line.partition(':')
+        normalized = key.strip().lower()
+        if sep and normalized == 'message' and not current_path and not edits:
+            message = value.strip() or message
+            continue
+        if sep and normalized == 'file':
+            flush()
+            current_path = value.strip()
+            continue
+        if current_path:
+            current_lines.append(raw_line)
+    flush()
+    return {'message': message, 'edits': edits}
 
 
 def _parse_memory_tool_args(args: str) -> dict:

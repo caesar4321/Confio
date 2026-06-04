@@ -66,11 +66,13 @@ def _tool_instructions(tools) -> str:
         'o escribir memoria curada en ConfioAI cuando el usuario lo pide).',
         'Para usar una herramienta corta, responde EXCLUSIVAMENTE con una sola línea:',
         'TOOL <nombre> <argumentos>',
-        'Para herramientas de escritura larga (write_memory, write_video_memory), usa este formato multilinea:',
+        'Para herramientas de escritura larga (write_memory, write_video_memory, revise_memory_docs), usa este formato multilinea:',
         'TOOL <nombre>',
         'category: <categoria si aplica>',
         'title: <titulo>',
         '<markdown completo>',
+        'Para revise_memory_docs usa: message: <commit>; luego uno o más bloques FILE: docs/.../archivo.md '
+        'con el markdown completo reemplazado, o DELETE como cuerpo para borrar un duplicado.',
         'Para actualizar varios archivos en una sola respuesta, puedes emitir varios bloques TOOL seguidos; '
         'cada bloque se ejecutará en orden. No mezcles texto final dentro de los bloques TOOL.',
         'Herramientas disponibles:',

@@ -320,8 +320,11 @@ class CommandParsingTests(SimpleTestCase):
 
         self.assertNotIn('write_memory', client_tools)
         self.assertNotIn('write_video_memory', client_tools)
+        self.assertNotIn('revise_memory_docs', client_tools)
         self.assertIn('write_memory', trusted_tools)
         self.assertIn('write_video_memory', trusted_tools)
+        self.assertIn('read_memory_docs', trusted_tools)
+        self.assertIn('revise_memory_docs', trusted_tools)
 
 
 class SmartContextTests(SimpleTestCase):
@@ -546,6 +549,36 @@ class MemoryToolTests(SimpleTestCase):
         text = 'title: Coreano camiseta\n# Body\nFull script'
         self.assertEqual(_first_title(text), 'Coreano camiseta')
         self.assertEqual(_strip_title_line(text), '# Body\nFull script')
+
+    def test_parse_revise_memory_docs_args(self):
+        from content_ingestion.management.commands.telegram_ai_listener import _parse_revise_memory_docs_args
+
+        parsed = _parse_revise_memory_docs_args(
+            'message: Clean duplicated video docs\n'
+            'FILE: docs/videos/Vida y filosofía/video-uno.md\n'
+            '<<<\n'
+            '# Video uno\n\n'
+            'Contenido revisado.\n'
+            '>>>\n'
+            'FILE: docs/videos/Vida y filosofía/duplicado.md\n'
+            'DELETE\n'
+        )
+
+        self.assertEqual(parsed['message'], 'Clean duplicated video docs')
+        self.assertEqual(parsed['edits'][0]['path'], 'docs/videos/Vida y filosofía/video-uno.md')
+        self.assertEqual(parsed['edits'][0]['action'], 'write')
+        self.assertIn('Contenido revisado', parsed['edits'][0]['body'])
+        self.assertEqual(parsed['edits'][1]['action'], 'delete')
+
+    @override_settings(CONFIO_AI_CONTEXT_ROOT='docs')
+    def test_memory_doc_paths_stay_under_docs_markdown(self):
+        from content_ingestion.context_repo import ContextRepoError, _safe_context_relative_path
+
+        self.assertEqual(str(_safe_context_relative_path('videos/demo.md')), 'docs/videos/demo.md')
+        with self.assertRaises(ContextRepoError):
+            _safe_context_relative_path('../secrets.md')
+        with self.assertRaises(ContextRepoError):
+            _safe_context_relative_path('docs/videos/demo.txt')
 
 
 class KnowledgeCorpusTests(SimpleTestCase):
