@@ -98,7 +98,7 @@ def complete_text(prompt: str, provider: str | None = None, *, system: str | Non
 
 
 def complete_script(prompt: str, *, system: str | None = None) -> str:
-    """Use a stronger OpenAI writer for long-form creator scripts.
+    """Use the configured OpenAI model for long-form creator scripts.
 
     The normal Telegram agent is optimized for cheap tool use and concise answers.
     Script turns need faithful brief-following and enough output budget, not tools.
@@ -107,7 +107,7 @@ def complete_script(prompt: str, *, system: str | None = None) -> str:
     if not api_key:
         raise AIClientError('OpenAI script writer requires OPENAI_API_KEY.')
 
-    model = getattr(settings, 'CONFIO_AI_SCRIPT_MODEL', '') or getattr(settings, 'OPENAI_MODEL', 'gpt-4.1-mini')
+    model = getattr(settings, 'OPENAI_MODEL', 'gpt-5.5')
     max_tokens = getattr(settings, 'CONFIO_AI_SCRIPT_MAX_TOKENS', 7000)
     response = requests.post(
         'https://api.openai.com/v1/responses',
