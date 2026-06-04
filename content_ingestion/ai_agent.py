@@ -46,26 +46,62 @@ _TOOL_INPUT_DESC = (
 def run_with_tools(prompt, provider, system, tools, *, max_steps=DEFAULT_MAX_STEPS):
     """Answer `prompt`, letting the model call `tools` (name -> callable(str) -> str).
 
-    Uses native function-calling (OpenAI by default, Claude optional). Falls back to
-    the text-protocol loop on `provider` when no native key is configured.
+    Native function-calling. Backend = CONFIO_AI_AGENT_BACKEND (default 'gemini'):
+    'gemini'/'grok'/'deepseek' via their OpenAI-compatible /chat/completions,
+    'openai' via the Responses API, 'claude' via the Messages API. Falls back to the
+    next available backend, then to the text-protocol loop on `provider`.
     """
     if not tools:
         return complete_text(prompt, provider, system=system)
 
-    backend = (getattr(settings, 'CONFIO_AI_AGENT_BACKEND', 'openai') or 'openai').strip().lower()
-    has_openai = bool(getattr(settings, 'OPENAI_API_KEY', ''))
-    has_claude = bool(getattr(settings, 'CLAUDE_API_KEY', ''))
+    backend = (getattr(settings, 'CONFIO_AI_AGENT_BACKEND', 'gemini') or 'gemini').strip().lower()
+    runner = _agent_runner(backend)
+    if runner is None:
+        for fallback in ('gemini', 'openai', 'claude', 'grok', 'deepseek'):
+            runner = _agent_runner(fallback)
+            if runner is not None:
+                break
+    if runner is None:
+        return _run_text_protocol(prompt, provider, system, tools, max_steps=max_steps)
+    return runner(prompt, system, tools, max_steps=max_steps)
 
-    if backend == 'claude' and has_claude:
-        return _run_native_claude(prompt, system, tools, max_steps=max_steps)
-    if backend == 'openai' and has_openai:
-        return _run_native_openai(prompt, system, tools, max_steps=max_steps)
-    # backend not available -> prefer whatever native key we have, else text protocol.
-    if has_openai:
-        return _run_native_openai(prompt, system, tools, max_steps=max_steps)
-    if has_claude:
-        return _run_native_claude(prompt, system, tools, max_steps=max_steps)
-    return _run_text_protocol(prompt, provider, system, tools, max_steps=max_steps)
+
+# OpenAI-compatible chat-completions backends: native function tools via /chat/completions.
+_CHAT_COMPLETIONS_BACKENDS = {
+    'gemini': {
+        'name': 'Gemini', 'key': 'GEMINI_API_KEY', 'model': 'GEMINI_MODEL',
+        'model_default': 'gemini-2.5-flash',
+        'base_url': 'https://generativelanguage.googleapis.com/v1beta/openai',
+    },
+    'grok': {
+        'name': 'Grok', 'key': 'GROK_API_KEY', 'model': 'GROK_MODEL',
+        'model_default': 'grok-4.3', 'base_url': 'https://api.x.ai/v1',
+    },
+    'deepseek': {
+        'name': 'DeepSeek', 'key': 'DEEPSEEK_API_KEY', 'model': 'DEEPSEEK_MODEL',
+        'model_default': 'deepseek-chat', 'base_url': 'https://api.deepseek.com',
+    },
+}
+
+
+def _agent_runner(backend):
+    """Callable(prompt, system, tools, *, max_steps) for `backend`, or None when its
+    API key isn't configured."""
+    if backend == 'openai' and getattr(settings, 'OPENAI_API_KEY', ''):
+        return lambda p, s, t, *, max_steps: _run_native_openai(p, s, t, max_steps=max_steps)
+    if backend == 'claude' and getattr(settings, 'CLAUDE_API_KEY', ''):
+        return lambda p, s, t, *, max_steps: _run_native_claude(p, s, t, max_steps=max_steps)
+    cfg = _CHAT_COMPLETIONS_BACKENDS.get(backend)
+    if cfg:
+        api_key = getattr(settings, cfg['key'], '')
+        if api_key:
+            model = (getattr(settings, 'CONFIO_AI_AGENT_MODEL', '')
+                     or getattr(settings, cfg['model'], cfg['model_default']))
+            return lambda p, s, t, *, max_steps: _run_chat_completions(
+                p, s, t, base_url=cfg['base_url'], api_key=api_key, model=model,
+                provider_name=cfg['name'], max_steps=max_steps,
+            )
+    return None
 
 
 def _tool_description(fn) -> str:
@@ -84,7 +120,92 @@ def _tool_arg(args) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# OpenAI Responses API (default)
+# OpenAI-compatible Chat Completions (Gemini / Grok / DeepSeek)
+# --------------------------------------------------------------------------- #
+
+def _chat_tool_specs(tools):
+    specs = []
+    for name, fn in tools.items():
+        specs.append({
+            'type': 'function',
+            'function': {
+                'name': name,
+                'description': _tool_description(fn)[:1500],
+                'parameters': {
+                    'type': 'object',
+                    'properties': {'input': {'type': 'string', 'description': _TOOL_INPUT_DESC}},
+                    'required': ['input'],
+                },
+            },
+        })
+    return specs
+
+
+def _chat_message_text(message) -> str:
+    content = message.get('content')
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        return '\n'.join(
+            part.get('text', '') for part in content if isinstance(part, dict) and part.get('text')
+        ).strip()
+    return ''
+
+
+def _chat_post(url, api_key, payload, provider_name):
+    response = requests.post(
+        url,
+        headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
+        json=payload,
+        timeout=180,
+    )
+    if response.status_code >= 400:
+        raise AgentError(f'{provider_name} agent request failed: {response.status_code} {response.text[:300]}')
+    return response.json()
+
+
+def _run_chat_completions(prompt, system, tools, *, base_url, api_key, model, provider_name, max_steps):
+    max_tokens = getattr(settings, 'CONFIO_AI_AGENT_MAX_TOKENS', 8000)
+    specs = _chat_tool_specs(tools)
+    url = f'{base_url.rstrip("/")}/chat/completions'
+    messages = [{'role': 'system', 'content': system}, {'role': 'user', 'content': prompt}]
+    for _ in range(max_steps):
+        data = _chat_post(url, api_key, {
+            'model': model, 'messages': messages, 'tools': specs, 'max_tokens': max_tokens,
+        }, provider_name)
+        message = ((data.get('choices') or [{}])[0]).get('message') or {}
+        tool_calls = message.get('tool_calls') or []
+        if not tool_calls:
+            return _chat_message_text(message) or '(respuesta vacía)'
+        messages.append(message)  # assistant turn carrying the tool_calls
+        for call in tool_calls:
+            fn_block = call.get('function') or {}
+            name = fn_block.get('name')
+            try:
+                args = json.loads(fn_block.get('arguments') or '{}')
+            except (ValueError, TypeError):
+                args = {}
+            arg = _tool_arg(args)
+            logger.info('AI tool call: %s %r', name, arg[:80])
+            fn = tools.get(name)
+            try:
+                result = fn(arg) if fn else f'(herramienta desconocida: {name})'
+            except Exception as exc:  # noqa: BLE001 - a failing tool must not crash the reply
+                logger.exception('Tool %s failed', name)
+                result = f'(error ejecutando {name}: {exc})'
+            messages.append({'role': 'tool', 'tool_call_id': call.get('id'), 'content': (result or '')[:16000]})
+
+    data = _chat_post(url, api_key, {
+        'model': model,
+        'messages': messages + [{'role': 'user', 'content': 'Responde ahora al usuario con lo que tengas, sin más herramientas.'}],
+        'max_tokens': max_tokens,
+    }, provider_name)
+    message = ((data.get('choices') or [{}])[0]).get('message') or {}
+    return _chat_message_text(message) or '(respuesta vacía)'
+
+
+# --------------------------------------------------------------------------- #
+# OpenAI Responses API
 # --------------------------------------------------------------------------- #
 
 def _openai_tool_specs(tools):

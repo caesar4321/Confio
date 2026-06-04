@@ -605,7 +605,7 @@ class ToolLoopTests(SimpleTestCase):
         self.assertIsNone(_parse_tool_call('Hola, ¿cómo estás?', tools))
         self.assertIsNone(_parse_tool_call('TOOL unknown x', tools))
 
-    @override_settings(OPENAI_API_KEY='', CLAUDE_API_KEY='')
+    @override_settings(OPENAI_API_KEY='', CLAUDE_API_KEY='', GEMINI_API_KEY='', GROK_API_KEY='', DEEPSEEK_API_KEY='')
     def test_run_with_tools_executes_then_answers(self):
         from content_ingestion import ai_agent
 
@@ -625,7 +625,7 @@ class ToolLoopTests(SimpleTestCase):
         self.assertIn('videos', out)
         self.assertTrue(called.get('hit'))
 
-    @override_settings(OPENAI_API_KEY='', CLAUDE_API_KEY='')
+    @override_settings(OPENAI_API_KEY='', CLAUDE_API_KEY='', GEMINI_API_KEY='', GROK_API_KEY='', DEEPSEEK_API_KEY='')
     def test_run_with_tools_executes_multiple_tool_blocks(self):
         from content_ingestion import ai_agent
 
@@ -686,6 +686,31 @@ class ToolLoopTests(SimpleTestCase):
             out = ai_agent.run_with_tools('¿videos?', 'gemini', 'SYS', {'get_chat_videos': videos_tool})
         self.assertEqual(hits['n'], 1)
         self.assertIn('videos', out)
+
+    @override_settings(
+        CONFIO_AI_AGENT_BACKEND='gemini', GEMINI_API_KEY='x', OPENAI_API_KEY='', CLAUDE_API_KEY='',
+        GEMINI_MODEL='gemini-2.5-flash', CONFIO_AI_AGENT_MODEL='', CONFIO_AI_AGENT_MAX_TOKENS=8000,
+    )
+    def test_run_with_tools_native_gemini_chat_completions(self):
+        from content_ingestion import ai_agent
+
+        responses = iter([
+            {'choices': [{'message': {'role': 'assistant', 'content': None, 'tool_calls': [
+                {'id': 'c1', 'type': 'function',
+                 'function': {'name': 'get_chat_files', 'arguments': '{"input": ""}'}},
+            ]}}]},
+            {'choices': [{'message': {'role': 'assistant', 'content': 'Tienes 3 archivos.'}}]},
+        ])
+        hits = {'n': 0}
+
+        def files_tool(args):
+            hits['n'] += 1
+            return 'a.mp4, b.mp4, c.mp4'
+
+        with patch('content_ingestion.ai_agent._chat_post', side_effect=lambda url, key, payload, name: next(responses)):
+            out = ai_agent.run_with_tools('¿archivos?', 'gemini', 'SYS', {'get_chat_files': files_tool})
+        self.assertEqual(hits['n'], 1)
+        self.assertIn('archivos', out)
 
 
 class MemoryToolTests(SimpleTestCase):
