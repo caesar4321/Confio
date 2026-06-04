@@ -269,10 +269,12 @@ class Command(BaseCommand):
 
     async def _generate_answer(self, event, client, user_prompt, provider, system, authority, debate_mode, explicit_memory=False):
         youtube_urls = extract_youtube_urls(user_prompt)
-        # Writes to git happen ONLY on an explicit /memory-style command — never inferred
-        # from keywords. Plain video/text just gets analyzed and answered.
-        memory_write_request = explicit_memory
-        existing_doc_revision = explicit_memory and _is_existing_doc_revision_request(user_prompt)
+        # Write turn = explicit /memory command OR a clearly-worded save/push/update intent
+        # (precise detection, not loose keywords). Even then, the system prompt + the model
+        # are the final gate on whether to actually call a write tool — casual chat never
+        # auto-commits.
+        memory_write_request = explicit_memory or _is_memory_write_request(user_prompt)
+        existing_doc_revision = memory_write_request and _is_existing_doc_revision_request(user_prompt)
         if youtube_urls and not debate_mode and not memory_write_request:
             logger.info('Routing YouTube video analysis to Gemini: %s', youtube_urls[:3])
             return await asyncio.to_thread(
@@ -307,14 +309,14 @@ class Command(BaseCommand):
                 event,
                 loop,
                 authority=authority,
-                allow_writes=explicit_memory,
+                allow_writes=memory_write_request,
                 allow_new_memory=not existing_doc_revision,
             )
             # Memory writes need a backend that handles large function args reliably
             # (Gemini Flash malforms/truncates them); read-only chat stays on the default.
             write_backend = (
-                getattr(settings, 'CONFIO_AI_AGENT_WRITE_BACKEND', 'claude')
-                if explicit_memory else None
+                getattr(settings, 'CONFIO_AI_AGENT_WRITE_BACKEND', 'openai')
+                if memory_write_request else None
             )
             return await asyncio.to_thread(
                 run_with_tools, user_prompt, provider, system, tools, backend=write_backend
@@ -417,36 +419,32 @@ def _split_command(message: str):
     return command, rest
 
 
+# Precise save/push/commit intent: clear verbs of persisting to memory/git, NOT bare
+# nouns like "video"/"git"/"docs"/"memoria" (which fired far too often and dumped random
+# things). The system prompt + the model are still the final gate on actually writing.
+_MEMORY_WRITE_RE = re.compile(
+    r'\b('
+    r'gu[aá]rda(?:lo|la|los|las|me|melo|r)?'                      # guarda/guárdalo/guardar
+    r'|reg[ií]stra(?:lo|la|los|las|r)?'                           # registra/regístralo
+    r'|arch[ií]va(?:lo|la|los|las|r)?'                            # archiva/archívalo
+    r'|memor[ií]za(?:lo|la|r)?'                                   # memoriza/memorízalo
+    r'|pushe(?:a(?:lo|la|los|las|r)?)?|push'                      # pushea/pushéalo/push
+    r'|comm?it(?:ea(?:r|lo)?)?'                                   # commit/commitea
+    r'|s[uú]be(?:lo|la)?\s+a\s+git'                               # sube(lo) a git
+    r'|save(?:\s+(?:it|this|that|to|in))?'                        # save / save it / save to
+    r'|record\s+(?:it|this|that)'                                 # record this
+    r'|(?:add|write|put)\s+(?:(?:it|this|that)\s+)?(?:to|in|into)\s+(?:the\s+)?(?:memory|git|docs?)'
+    r'|(?:escr[ií]be|an[oó]ta|ap[uú]nta)(?:lo)?\s+en\s+(?:la\s+)?memoria'
+    r'|(?:actualiza|edita|revisa)\s+(?:el|la|los|las)\s+(?:doc|documento|documentos|memoria|archivo|archivos)'
+    r')\b',
+    re.IGNORECASE,
+)
+
+
 def _is_memory_write_request(text: str) -> bool:
-    value = (text or '').lower()
-    return any(
-        term in value
-        for term in (
-            'push',
-            'pushear',
-            'pushed',
-            'commit',
-            'git',
-            'github',
-            'guardar',
-            'guarda',
-            'guardalo',
-            'guárdalo',
-            'registrar',
-            'registra',
-            'archivar',
-            'archiva',
-            'memoria',
-            'memory',
-            'revise',
-            'revisar',
-            'actualizar',
-            'actualiza',
-            'update',
-            'docs',
-            'documento',
-        )
-    )
+    """True when the message clearly asks to save/record/push/update memory. Precise on
+    purpose so casual mentions of videos/docs/memory don't trigger a write turn."""
+    return bool(_MEMORY_WRITE_RE.search(text or ''))
 
 
 def _is_existing_doc_revision_request(text: str) -> bool:
