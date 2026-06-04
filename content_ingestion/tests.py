@@ -190,6 +190,29 @@ class AIProviderRoutingTests(SimpleTestCase):
 
     @override_settings(GEMINI_API_KEY='key', GEMINI_MODEL='gemini-3-flash-preview')
     @patch('content_ingestion.ai_client.requests.post')
+    def test_complete_with_youtube_video_reports_no_text_reason(self, post):
+        from content_ingestion.ai_client import AIClientError, complete_with_youtube_video
+
+        post.return_value.status_code = 200
+        post.return_value.json.return_value = {
+            'candidates': [{
+                'finishReason': 'SAFETY',
+                'safetyRatings': [{
+                    'category': 'HARM_CATEGORY_DANGEROUS_CONTENT',
+                    'probability': 'MEDIUM',
+                    'blocked': True,
+                }],
+            }],
+        }
+
+        with self.assertRaises(AIClientError) as ctx:
+            complete_with_youtube_video('Video: https://youtu.be/abc123')
+
+        self.assertIn('finishReason: SAFETY', str(ctx.exception))
+        self.assertIn('HARM_CATEGORY_DANGEROUS_CONTENT=MEDIUM blocked', str(ctx.exception))
+
+    @override_settings(GEMINI_API_KEY='key', GEMINI_MODEL='gemini-3-flash-preview')
+    @patch('content_ingestion.ai_client.requests.post')
     def test_complete_with_images_sends_inline_data(self, post):
         from content_ingestion.ai_client import complete_with_images
 
@@ -231,6 +254,16 @@ class CommandParsingTests(SimpleTestCase):
         self.assertEqual(parsed['folder'], 'Vida y filosofía')
         self.assertEqual(parsed['title'], 'Un influencer coreano con esquizofrenia')
         self.assertIn('Body', parsed['body'])
+
+    def test_memory_write_request_detects_doc_revision_with_youtube_link(self):
+        from content_ingestion.management.commands.telegram_ai_listener import _is_memory_write_request
+
+        self.assertTrue(_is_memory_write_request(
+            'We should revise this existing git docs https://youtu.be/abc123'
+        ))
+        self.assertFalse(_is_memory_write_request(
+            'Can you analyze this YouTube video? https://youtu.be/abc123'
+        ))
 
 
 class SmartContextTests(SimpleTestCase):

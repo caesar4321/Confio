@@ -363,7 +363,32 @@ def _complete_gemini(
                 chunks.append(part['text'])
     if chunks:
         return '\n'.join(chunks).strip()
-    raise AIClientError('Gemini response did not include text output.')
+    raise AIClientError(_gemini_no_text_message(data))
+
+
+def _gemini_no_text_message(data: dict) -> str:
+    details = []
+    prompt_feedback = data.get('promptFeedback') or {}
+    block_reason = prompt_feedback.get('blockReason')
+    if block_reason:
+        details.append(f'prompt blocked: {block_reason}')
+    for candidate in data.get('candidates', []):
+        finish_reason = candidate.get('finishReason')
+        if finish_reason:
+            details.append(f'finishReason: {finish_reason}')
+        safety = []
+        for rating in candidate.get('safetyRatings') or []:
+            category = rating.get('category')
+            probability = rating.get('probability')
+            blocked = rating.get('blocked')
+            if category and probability:
+                suffix = ' blocked' if blocked else ''
+                safety.append(f'{category}={probability}{suffix}')
+        if safety:
+            details.append('safetyRatings: ' + ', '.join(safety[:4]))
+    if not details:
+        details.append('no candidates/parts with text')
+    return 'Gemini response did not include text output (' + '; '.join(details[:6]) + ').'
 
 
 def _complete_claude(prompt: str, system: str = '') -> str:

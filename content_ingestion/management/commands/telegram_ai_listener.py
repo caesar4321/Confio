@@ -204,7 +204,8 @@ class Command(BaseCommand):
         )
         try:
             youtube_urls = extract_youtube_urls(user_prompt)
-            if youtube_urls and not debate_mode:
+            memory_write_request = _is_memory_write_request(user_prompt)
+            if youtube_urls and not debate_mode and not memory_write_request:
                 logger.info('Routing YouTube video analysis to Gemini: %s', youtube_urls[:3])
                 answer = await asyncio.to_thread(
                     complete_with_youtube_video, user_prompt, system=system
@@ -293,6 +294,38 @@ def _split_command(message: str):
         command = command.split('@', 1)[0]
     rest = parts[1].strip() if len(parts) > 1 else ''
     return command, rest
+
+
+def _is_memory_write_request(text: str) -> bool:
+    value = (text or '').lower()
+    return any(
+        term in value
+        for term in (
+            'push',
+            'pushear',
+            'pushed',
+            'commit',
+            'git',
+            'github',
+            'guardar',
+            'guarda',
+            'guardalo',
+            'guárdalo',
+            'registrar',
+            'registra',
+            'archivar',
+            'archiva',
+            'memoria',
+            'memory',
+            'revise',
+            'revisar',
+            'actualizar',
+            'actualiza',
+            'update',
+            'docs',
+            'documento',
+        )
+    )
 
 
 def _build_tools(client, event, loop):
