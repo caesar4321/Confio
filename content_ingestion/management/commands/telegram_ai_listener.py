@@ -52,6 +52,7 @@ RECONNECT_DELAY_SECONDS = 5
 MAX_MESSAGE_AGE_SECONDS = 60
 MAX_IMAGE_BYTES = 12 * 1024 * 1024
 MAX_VIDEO_BYTES = getattr(settings, 'CONFIO_AI_MAX_TELEGRAM_VIDEO_BYTES', 120 * 1024 * 1024)
+ANSWER_TIMEOUT_SECONDS = getattr(settings, 'CONFIO_AI_TELEGRAM_ANSWER_TIMEOUT_SECONDS', 180)
 
 
 class Command(BaseCommand):
@@ -222,51 +223,16 @@ class Command(BaseCommand):
             event.chat_id,
         )
         try:
-            youtube_urls = extract_youtube_urls(user_prompt)
-            memory_write_request = _is_memory_write_request(user_prompt)
-            existing_doc_revision = _is_existing_doc_revision_request(user_prompt)
-            if youtube_urls and not debate_mode and not memory_write_request:
-                logger.info('Routing YouTube video analysis to Gemini: %s', youtube_urls[:3])
-                answer = await asyncio.to_thread(
-                    complete_with_youtube_video, user_prompt, system=system
-                )
-            elif not debate_mode:
-                if youtube_urls and memory_write_request:
-                    logger.info(
-                        'Analyzing YouTube video before memory write: %s',
-                        youtube_urls[:3],
-                    )
-                    user_prompt = await self._prompt_with_youtube_analysis(user_prompt, system)
-                images = await _collect_image_inputs(client, event)
-                videos = await _collect_video_inputs(client, event)
-                if videos and memory_write_request:
-                    logger.info('Analyzing %s Telegram video(s) before memory write', len(videos))
-                    user_prompt = await self._prompt_with_telegram_video_analysis(user_prompt, videos, system)
-                    videos = []
-                if images and not memory_write_request:
-                    logger.info('Routing %s Telegram image(s) to Gemini vision', len(images))
-                    answer = await asyncio.to_thread(
-                        complete_with_images, user_prompt, images, system=system
-                    )
-                elif videos:
-                    logger.info('Routing %s Telegram video(s) to Gemini video analysis', len(videos))
-                    answer = await asyncio.to_thread(
-                        complete_with_video_files, user_prompt, videos, system=system
-                    )
-                else:
-                    loop = asyncio.get_running_loop()
-                    tools = _build_tools(
-                        client,
-                        event,
-                        loop,
-                        authority=authority,
-                        allow_new_memory=not existing_doc_revision,
-                    )
-                    answer = await asyncio.to_thread(
-                        run_with_tools, user_prompt, provider, system, tools
-                    )
-            elif debate_mode:
-                answer = await asyncio.to_thread(debate, user_prompt, system=system)
+            answer = await asyncio.wait_for(
+                self._generate_answer(event, client, user_prompt, provider, system, authority, debate_mode),
+                timeout=ANSWER_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            logger.warning('Telegram AI answer timed out after %ss in chat %s', ANSWER_TIMEOUT_SECONDS, event.chat_id)
+            answer = (
+                'Esta operación tardó demasiado para un solo turno de Telegram. '
+                'Divide el pedido en lotes más pequeños, por ejemplo un video o 2-3 docs por vez.'
+            )
         except AIClientError as exc:
             answer = f'AI setup error: {exc}'
         except Exception:
@@ -280,6 +246,51 @@ class Command(BaseCommand):
             conversation_log.append_turn,
             event.chat_id, sender_name, event.raw_text or prompt, answer,
         )
+
+    async def _generate_answer(self, event, client, user_prompt, provider, system, authority, debate_mode):
+        youtube_urls = extract_youtube_urls(user_prompt)
+        memory_write_request = _is_memory_write_request(user_prompt)
+        existing_doc_revision = _is_existing_doc_revision_request(user_prompt)
+        if youtube_urls and not debate_mode and not memory_write_request:
+            logger.info('Routing YouTube video analysis to Gemini: %s', youtube_urls[:3])
+            return await asyncio.to_thread(
+                complete_with_youtube_video, user_prompt, system=system
+            )
+        if not debate_mode:
+            if youtube_urls and memory_write_request:
+                logger.info(
+                    'Analyzing YouTube video before memory write: %s',
+                    youtube_urls[:3],
+                )
+                user_prompt = await self._prompt_with_youtube_analysis(user_prompt, system)
+            images = await _collect_image_inputs(client, event)
+            videos = await _collect_video_inputs(client, event)
+            if videos and memory_write_request:
+                logger.info('Analyzing %s Telegram video(s) before memory write', len(videos))
+                user_prompt = await self._prompt_with_telegram_video_analysis(user_prompt, videos, system)
+                videos = []
+            if images and not memory_write_request:
+                logger.info('Routing %s Telegram image(s) to Gemini vision', len(images))
+                return await asyncio.to_thread(
+                    complete_with_images, user_prompt, images, system=system
+                )
+            if videos:
+                logger.info('Routing %s Telegram video(s) to Gemini video analysis', len(videos))
+                return await asyncio.to_thread(
+                    complete_with_video_files, user_prompt, videos, system=system
+                )
+            loop = asyncio.get_running_loop()
+            tools = _build_tools(
+                client,
+                event,
+                loop,
+                authority=authority,
+                allow_new_memory=not existing_doc_revision,
+            )
+            return await asyncio.to_thread(
+                run_with_tools, user_prompt, provider, system, tools
+            )
+        return await asyncio.to_thread(debate, user_prompt, system=system)
 
     async def _prompt_with_youtube_analysis(self, user_prompt: str, system: str) -> str:
         analysis_prompt = (

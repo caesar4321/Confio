@@ -387,6 +387,17 @@ class CommandParsingTests(SimpleTestCase):
         self.assertIn('revise_memory_docs', revision_tools)
 
 
+class TelegramAnswerTimeoutTests(SimpleTestCase):
+    def test_timeout_message_is_actionable(self):
+        from content_ingestion.management.commands.telegram_ai_listener import _telegram_chunks
+
+        message = (
+            'Esta operación tardó demasiado para un solo turno de Telegram. '
+            'Divide el pedido en lotes más pequeños, por ejemplo un video o 2-3 docs por vez.'
+        )
+        self.assertIn('lotes más pequeños', ''.join(_telegram_chunks(message)))
+
+
 class SmartContextTests(SimpleTestCase):
     def test_compose_prompt_puts_message_before_history(self):
         from content_ingestion.management.commands.telegram_ai_listener import _compose_prompt
