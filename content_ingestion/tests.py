@@ -405,6 +405,21 @@ class CommandParsingTests(SimpleTestCase):
         self.assertIn('Los borradores anteriores del bot son ejemplos negativos', routed)
         self.assertIn('La primera línea del guion debe cumplir literalmente', routed)
 
+    def test_bot_script_draft_detector_keeps_useful_bot_discussion(self):
+        from content_ingestion.management.commands.telegram_ai_listener import (
+            _looks_like_bot_script_draft,
+        )
+
+        self.assertTrue(_looks_like_bot_script_draft(
+            'Claro, Julian. Aquí tienes el guion completo para TikTok:\\n\\n[0:00] Hook + Rehook'
+        ))
+        self.assertTrue(_looks_like_bot_script_draft(
+            '## Recomendación\\nHook + Rehook\\nBusca Confío en Google Play.'
+        ))
+        self.assertFalse(_looks_like_bot_script_draft(
+            '맞아요. 메인 주제는 empresa nativa de IA로 잡고 Confío는 실제 사례처럼 넣는 구조가 더 강합니다.'
+        ))
+
     def test_youtube_analysis_is_added_to_memory_prompt(self):
         from content_ingestion.management.commands.telegram_ai_listener import _with_youtube_analysis
 

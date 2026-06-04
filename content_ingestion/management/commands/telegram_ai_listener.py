@@ -247,10 +247,12 @@ class Command(BaseCommand):
         sender_id = getattr(event, 'sender_id', None)
         sender_name = _display_name(sender, sender_id)
         authority = _sender_authority(sender, sender_id)
+        longform_script = _is_longform_script_request(prompt)
         history = await _build_history(
             client,
             event,
             deep_context=_needs_deep_context(prompt),
+            suppress_bot_script_drafts=longform_script,
         )
         reply_to = await _reply_target(event)
         user_prompt = _compose_prompt(prompt, history, reply_to, sender_name=sender_name, authority=authority)
@@ -985,7 +987,31 @@ def _script_writer_prompt(user_prompt: str) -> str:
     )
 
 
-async def _build_history(client, event, *, deep_context=False) -> str:
+_BOT_SCRIPT_DRAFT_RE = re.compile(
+    r'('
+    r'^\s*(?:claro|entendido)[,\s]'
+    r'|^\s*(?:\[?0:00|##\s*(?:hook|recomend|estructura|guion|guión))'
+    r'|hook\s*\+\s*rehook'
+    r'|aquí tienes (?:el guion|un guion|la estructura)'
+    r'|quieres que te (?:prepare|arme|pase)'
+    r'|este guion (?:está|usa|aplica|cumple)'
+    r')',
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _looks_like_bot_script_draft(text: str) -> bool:
+    value = (text or '').strip()
+    if not value:
+        return False
+    if _BOT_SCRIPT_DRAFT_RE.search(value):
+        return True
+    if len(value) > 1800 and re.search(r'\b(guion|guión|script|hook|rehook|cta|tiktok)\b', value, re.IGNORECASE):
+        return True
+    return False
+
+
+async def _build_history(client, event, *, deep_context=False, suppress_bot_script_drafts=False) -> str:
     """Fetch this chat's recent messages as a transcript (oldest first), annotating
     media so the model can see videos/files shared in the room."""
     if deep_context:
@@ -1002,10 +1028,13 @@ async def _build_history(client, event, *, deep_context=False) -> str:
     lines = []
     for m in reversed(list(messages)):  # oldest -> newest
         if getattr(m, 'out', False):
+            text = (getattr(m, 'message', '') or '').strip()
+            if suppress_bot_script_drafts and _looks_like_bot_script_draft(text):
+                continue
             who = 'Confío AI'
         else:
             who = _display_name(getattr(m, 'sender', None), getattr(m, 'sender_id', None))
-        text = (getattr(m, 'message', '') or '').strip()
+            text = (getattr(m, 'message', '') or '').strip()
         media = _media_label(m)
         body = f'{text} {media}'.strip() if (text and media) else (text or media)
         if not body:
