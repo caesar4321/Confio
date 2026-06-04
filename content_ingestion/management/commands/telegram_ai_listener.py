@@ -904,9 +904,11 @@ def _is_image_message(message) -> bool:
 def _is_video_message(message) -> bool:
     if not getattr(message, 'media', None):
         return False
-    file = getattr(message, 'file', None)
-    mime = (getattr(file, 'mime_type', '') if file else '') or ''
-    return bool(getattr(message, 'video', None) or getattr(message, 'video_note', None) or mime.startswith('video/'))
+    # Only TRUE Telegram videos (compressed/inline). Videos sent as files/documents
+    # (archives, up to several GB) are intentionally NOT auto-analyzed — they're just
+    # answered. Analyzing an original file is opt-in via an explicit command (File API),
+    # not an inline RAM download on every send.
+    return bool(getattr(message, 'video', None) or getattr(message, 'video_note', None))
 
 
 def _image_mime_type(message) -> str:
