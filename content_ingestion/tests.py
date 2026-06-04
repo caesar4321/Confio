@@ -556,6 +556,7 @@ class ToolLoopTests(SimpleTestCase):
         self.assertIsNone(_parse_tool_call('Hola, ¿cómo estás?', tools))
         self.assertIsNone(_parse_tool_call('TOOL unknown x', tools))
 
+    @override_settings(OPENAI_API_KEY='', CLAUDE_API_KEY='')
     def test_run_with_tools_executes_then_answers(self):
         from content_ingestion import ai_agent
 
@@ -575,6 +576,7 @@ class ToolLoopTests(SimpleTestCase):
         self.assertIn('videos', out)
         self.assertTrue(called.get('hit'))
 
+    @override_settings(OPENAI_API_KEY='', CLAUDE_API_KEY='')
     def test_run_with_tools_executes_multiple_tool_blocks(self):
         from content_ingestion import ai_agent
 
@@ -610,6 +612,31 @@ class ToolLoopTests(SimpleTestCase):
             out = ai_agent.run_with_tools('hi', 'gemini', 'SYS', {})
         self.assertEqual(out, 'plain')
         mock.assert_called_once()
+
+    @override_settings(
+        OPENAI_API_KEY='x', CLAUDE_API_KEY='', CONFIO_AI_AGENT_BACKEND='openai',
+        OPENAI_MODEL='gpt-4.1-mini', CONFIO_AI_AGENT_MODEL='', CONFIO_AI_AGENT_MAX_TOKENS=8000,
+    )
+    def test_run_with_tools_native_openai_loop(self):
+        from content_ingestion import ai_agent
+
+        responses = iter([
+            {'id': 'r1', 'output': [
+                {'type': 'function_call', 'name': 'get_chat_videos', 'call_id': 'c1', 'arguments': '{"input": ""}'},
+            ]},
+            {'id': 'r2', 'output_text': 'Tienes 2 videos.',
+             'output': [{'type': 'message', 'content': [{'type': 'output_text', 'text': 'Tienes 2 videos.'}]}]},
+        ])
+        hits = {'n': 0}
+
+        def videos_tool(args):
+            hits['n'] += 1
+            return 'A, B'
+
+        with patch('content_ingestion.ai_agent._openai_post', side_effect=lambda key, payload: next(responses)):
+            out = ai_agent.run_with_tools('¿videos?', 'gemini', 'SYS', {'get_chat_videos': videos_tool})
+        self.assertEqual(hits['n'], 1)
+        self.assertIn('videos', out)
 
 
 class MemoryToolTests(SimpleTestCase):
