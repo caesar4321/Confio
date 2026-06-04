@@ -369,6 +369,21 @@ class CommandParsingTests(SimpleTestCase):
         self.assertTrue(_needs_deep_context('based on everything we discussed, write the script'))
         self.assertFalse(_needs_deep_context('AI native company가 뭐야?'))
 
+    def test_longform_script_requests_use_script_writer(self):
+        from content_ingestion.management.commands.telegram_ai_listener import (
+            _is_longform_script_request,
+            _script_writer_prompt,
+        )
+
+        prompt = 'Confío 비전을 파는 5분짜리 스페인어 틱톡 스크립트를 작성해라'
+
+        self.assertTrue(_is_longform_script_request(prompt))
+        self.assertFalse(_is_longform_script_request('AI native company가 구체적으로 뭐야?'))
+        routed = _script_writer_prompt(prompt)
+        self.assertIn('únicamente el guion final', routed)
+        self.assertIn('Trust Layer', routed)
+        self.assertIn('no como definición', routed)
+
     def test_youtube_analysis_is_added_to_memory_prompt(self):
         from content_ingestion.management.commands.telegram_ai_listener import _with_youtube_analysis
 

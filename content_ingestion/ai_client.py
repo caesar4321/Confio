@@ -97,6 +97,50 @@ def complete_text(prompt: str, provider: str | None = None, *, system: str | Non
     return _DISPATCH[provider](prompt, _system_text(system))
 
 
+def complete_script(prompt: str, *, system: str | None = None) -> str:
+    """Use a stronger OpenAI writer for long-form creator scripts.
+
+    The normal Telegram agent is optimized for cheap tool use and concise answers.
+    Script turns need faithful brief-following and enough output budget, not tools.
+    """
+    api_key = _provider_api_key('openai')
+    if not api_key:
+        raise AIClientError('OpenAI script writer requires OPENAI_API_KEY.')
+
+    model = getattr(settings, 'CONFIO_AI_SCRIPT_MODEL', '') or getattr(settings, 'OPENAI_MODEL', 'gpt-4.1-mini')
+    max_tokens = getattr(settings, 'CONFIO_AI_SCRIPT_MAX_TOKENS', 7000)
+    response = requests.post(
+        'https://api.openai.com/v1/responses',
+        headers={
+            'Authorization': f'Bearer {api_key}',
+            'Content-Type': 'application/json',
+        },
+        json={
+            'model': model,
+            'instructions': _system_text(system),
+            'input': prompt,
+            'max_output_tokens': max_tokens,
+        },
+        timeout=180,
+    )
+    if response.status_code >= 400:
+        raise AIClientError(f'OpenAI script request failed: {response.status_code} {response.text[:500]}')
+
+    data = response.json()
+    text = data.get('output_text')
+    if text:
+        return text.strip()
+
+    chunks = []
+    for item in data.get('output', []):
+        for content in item.get('content', []):
+            if content.get('type') in {'output_text', 'text'} and content.get('text'):
+                chunks.append(content['text'])
+    if chunks:
+        return '\n'.join(chunks).strip()
+    raise AIClientError('OpenAI script response did not include text output.')
+
+
 def extract_youtube_urls(text: str) -> list[str]:
     """Return unique YouTube URLs in order, trimmed for Telegram/Markdown punctuation."""
     urls = []

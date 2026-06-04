@@ -10,6 +10,7 @@ from django.db import close_old_connections
 
 from content_ingestion.ai_client import (
     AIClientError,
+    complete_script,
     debate,
     complete_with_images,
     complete_with_video_files,
@@ -18,7 +19,12 @@ from content_ingestion.ai_client import (
     provider_label,
 )
 from content_ingestion.ai_agent import run_with_tools
-from content_ingestion.ai_context import build_media_system_prompt, build_system_prompt, search_knowledge
+from content_ingestion.ai_context import (
+    build_media_system_prompt,
+    build_script_system_prompt,
+    build_system_prompt,
+    search_knowledge,
+)
 from content_ingestion import conversation_log
 from content_ingestion.context_repo import (
     ContextRepoError,
@@ -284,6 +290,17 @@ class Command(BaseCommand):
         # auto-commits.
         memory_write_request = explicit_memory or _is_memory_write_request(user_prompt)
         existing_doc_revision = memory_write_request and _is_existing_doc_revision_request(user_prompt)
+        if (
+            not debate_mode
+            and not memory_write_request
+            and _is_longform_script_request(user_prompt)
+        ):
+            logger.info('Routing long-form script request to script writer')
+            return await asyncio.to_thread(
+                complete_script,
+                _script_writer_prompt(user_prompt),
+                system=build_script_system_prompt(),
+            )
         if youtube_urls and not debate_mode and not memory_write_request:
             logger.info('Routing YouTube video analysis to Gemini: %s', youtube_urls[:3])
             return await asyncio.to_thread(
@@ -884,6 +901,34 @@ _DEEP_CONTEXT_RE = re.compile(
 
 def _needs_deep_context(prompt: str) -> bool:
     return bool(_DEEP_CONTEXT_RE.search(prompt or ''))
+
+
+_LONGFORM_SCRIPT_RE = re.compile(
+    r'(?=.*(?:script|스크립트|guion|guión))'
+    r'(?=.*(?:tiktok|reels?|video|비디오|영상|5\s*분|5\s*min|cinco\s+minutos|completo|풀|완성|작성|써|짜))',
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _is_longform_script_request(prompt: str) -> bool:
+    return bool(_LONGFORM_SCRIPT_RE.search(prompt or ''))
+
+
+def _script_writer_prompt(user_prompt: str) -> str:
+    return (
+        f'{user_prompt}\n\n'
+        '## Instrucciones de control de calidad para este turno\n'
+        '- El mensaje actual del usuario manda sobre cualquier borrador anterior del historial.\n'
+        '- Si el historial contiene guiones con encabezados, timestamps, las tres fases mezcladas, '
+        'o explicaciones después del guion, considéralos ejemplos de lo que salió mal.\n'
+        '- No devuelvas análisis del prompt. No digas "claro". No preguntes si quiere otra versión.\n'
+        '- Entrega únicamente el guion final en español, listo para cámara.\n'
+        '- Si el brief dice que cada video debe encarnar una sola fase, elige una sola fase y sostén '
+        'esa imagen hasta el final. Para el brief de Confío como confianza que vuelve de instituciones '
+        'a personas, usa Trust Layer como eje.\n'
+        '- Confío debe aparecer tarde, cerca del CTA, como conclusión de mundo; no como definición '
+        'de app ni lista de funciones.'
+    )
 
 
 async def _build_history(client, event, *, deep_context=False) -> str:

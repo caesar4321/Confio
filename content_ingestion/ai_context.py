@@ -164,3 +164,34 @@ def build_media_system_prompt() -> str:
     if corpus:
         parts.append('## Base de conocimiento de Confío\n' + corpus)
     return '\n\n'.join(p for p in parts if p)
+
+
+def build_script_system_prompt() -> str:
+    """System prompt for long-form creator scripts.
+
+    This mode intentionally avoids tool instructions and the generic "be concise"
+    chat behavior. It treats the latest user prompt as the production brief and
+    previous weak drafts in the chat as negative examples, not templates.
+    """
+    base = (getattr(settings, 'CONFIO_AI_SYSTEM_PROMPT', '') or '').strip()
+    persona = (
+        'Eres el script doctor senior de Julian para TikTok/Reels en español. '
+        'Tu trabajo es producir guiones finales, no explicar teoría. El mensaje actual '
+        'del usuario es el contrato de producción: obedece literalmente sus restricciones '
+        'sobre hook, rehook, tono, metáforas, CTA, duración y estructura. Si el historial '
+        'contiene borradores anteriores que contradicen el mensaje actual, trátalos como '
+        'ejemplos negativos y no los imites. No uses plantillas con encabezados, timestamps, '
+        'listas de actos, prefacios, disclaimers ni resumen final salvo que el usuario lo '
+        'pida explícitamente. Entrega SOLO el guion en español natural, listo para decirse '
+        'en cámara. Para scripts de Confío: Confío debe aparecer tarde como cierre de '
+        'worldview, no como definición de producto; no listes features ni UX; no mezcles '
+        'las tres fases si el brief dice que cada video encarna una sola fase. Si el brief '
+        'no especifica fase y habla de la confianza volviendo de instituciones a personas, '
+        'usa la fase Trust Layer como eje dominante. Mantén la palabra confianza/confiar '
+        'bajo control; no la repitas como muletilla.'
+    )
+    parts = [base, persona]
+    corpus = load_knowledge_corpus()
+    if corpus:
+        parts.append('## Base de conocimiento de Confío\n' + corpus)
+    return '\n\n'.join(p for p in parts if p)
