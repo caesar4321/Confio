@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 _TOOL_LINE = re.compile(r'^TOOL[:\s]+([a-zA-Z_]\w*)\s*(.*)$', re.IGNORECASE)
 
-DEFAULT_MAX_STEPS = 3
+DEFAULT_MAX_STEPS = 5
 
 
 def run_with_tools(prompt, provider, system, tools, *, max_steps=DEFAULT_MAX_STEPS):
@@ -33,18 +33,20 @@ def run_with_tools(prompt, provider, system, tools, *, max_steps=DEFAULT_MAX_STE
     transcript = prompt
     for _ in range(max_steps):
         reply = complete_text(transcript, provider, system=full_system)
-        call = _parse_tool_call(reply, tools)
-        if call is None:
+        calls = _parse_tool_calls(reply, tools)
+        if not calls:
             return reply
-        name, args = call
-        logger.info('AI tool call: %s %r', name, args[:80])
-        try:
-            result = tools[name](args)
-        except Exception as exc:  # noqa: BLE001 - a failing tool must not crash the reply
-            logger.exception('Tool %s failed', name)
-            result = f'(error ejecutando {name}: {exc})'
+        results = []
+        for name, args in calls:
+            logger.info('AI tool call: %s %r', name, args[:80])
+            try:
+                result = tools[name](args)
+            except Exception as exc:  # noqa: BLE001 - a failing tool must not crash the reply
+                logger.exception('Tool %s failed', name)
+                result = f'(error ejecutando {name}: {exc})'
+            results.append(f'[Resultado de la herramienta {name}:]\n{result}')
         transcript = (
-            f'{transcript}\n\n[Resultado de la herramienta {name}:]\n{result}\n\n'
+            f'{transcript}\n\n' + '\n\n'.join(results) + '\n\n'
             'Si ya puedes responder al usuario, hazlo en lenguaje natural (sin TOOL). '
             'Si necesitas otra herramienta, pídela con otra línea TOOL.'
         )
@@ -69,6 +71,8 @@ def _tool_instructions(tools) -> str:
         'category: <categoria si aplica>',
         'title: <titulo>',
         '<markdown completo>',
+        'Para actualizar varios archivos en una sola respuesta, puedes emitir varios bloques TOOL seguidos; '
+        'cada bloque se ejecutará en orden. No mezcles texto final dentro de los bloques TOOL.',
         'Herramientas disponibles:',
     ]
     for name, fn in tools.items():
@@ -84,22 +88,46 @@ def _tool_instructions(tools) -> str:
 
 def _parse_tool_call(reply, tools):
     """Return (name, args) if the first meaningful line is a known tool call, else None."""
+    calls = _parse_tool_calls(reply, tools)
+    return calls[0] if calls else None
+
+
+def _parse_tool_calls(reply, tools):
+    """Return all tool calls when the first meaningful line is a known tool call."""
     if not reply:
-        return None
+        return []
     lines = _strip_code_fence(reply).strip().splitlines()
+    start_idx = None
     for idx, line in enumerate(lines):
         stripped = line.strip().strip('`').strip()
         if not stripped:
             continue
         match = _TOOL_LINE.match(stripped)
         if match and match.group(1) in tools:
-            inline_args = match.group(2).strip()
-            trailing = _strip_code_fence('\n'.join(lines[idx + 1:])).strip()
-            args = '\n'.join(part for part in (inline_args, trailing) if part).strip()
-            return match.group(1), args
+            start_idx = idx
+            break
         # First real line isn't a tool call -> treat the whole reply as the answer.
-        return None
-    return None
+        return []
+    if start_idx is None:
+        return []
+
+    calls = []
+    current_name = None
+    current_args = []
+    for line in lines[start_idx:]:
+        stripped = line.strip().strip('`').strip()
+        match = _TOOL_LINE.match(stripped)
+        if match and match.group(1) in tools:
+            if current_name is not None:
+                calls.append((current_name, _strip_code_fence('\n'.join(current_args)).strip()))
+            current_name = match.group(1)
+            current_args = [match.group(2).strip()] if match.group(2).strip() else []
+            continue
+        if current_name is not None:
+            current_args.append(line)
+    if current_name is not None:
+        calls.append((current_name, _strip_code_fence('\n'.join(current_args)).strip()))
+    return calls
 
 
 def _strip_code_fence(text: str) -> str:

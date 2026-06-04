@@ -405,7 +405,7 @@ class SmartContextTests(SimpleTestCase):
 
 class ToolLoopTests(SimpleTestCase):
     def test_parse_tool_call(self):
-        from content_ingestion.ai_agent import _parse_tool_call
+        from content_ingestion.ai_agent import _parse_tool_call, _parse_tool_calls
 
         tools = {'get_chat_videos': lambda a: '', 'search_knowledge': lambda a: '', 'write_video_memory': lambda a: ''}
         self.assertEqual(_parse_tool_call('TOOL get_chat_videos', tools), ('get_chat_videos', ''))
@@ -435,6 +435,34 @@ class ToolLoopTests(SimpleTestCase):
             ),
             ('write_video_memory', 'title: Video title\n# Video title'),
         )
+        self.assertEqual(
+            _parse_tool_calls(
+                'TOOL search_knowledge La vida es vivir\n'
+                'TOOL get_chat_videos',
+                tools,
+            ),
+            [
+                ('search_knowledge', 'La vida es vivir'),
+                ('get_chat_videos', ''),
+            ],
+        )
+        self.assertEqual(
+            _parse_tool_calls(
+                'TOOL write_video_memory\n'
+                'title: Video uno\n'
+                '# Uno\n\n'
+                'Body uno\n\n'
+                'TOOL write_video_memory\n'
+                'title: Video dos\n'
+                '# Dos\n\n'
+                'Body dos',
+                tools,
+            ),
+            [
+                ('write_video_memory', 'title: Video uno\n# Uno\n\nBody uno'),
+                ('write_video_memory', 'title: Video dos\n# Dos\n\nBody dos'),
+            ],
+        )
         self.assertIsNone(_parse_tool_call('Hola, ¿cómo estás?', tools))
         self.assertIsNone(_parse_tool_call('TOOL unknown x', tools))
 
@@ -456,6 +484,34 @@ class ToolLoopTests(SimpleTestCase):
             out = ai_agent.run_with_tools('¿qué videos hay?', 'gemini', 'SYS', {'get_chat_videos': videos_tool})
         self.assertIn('videos', out)
         self.assertTrue(called.get('hit'))
+
+    def test_run_with_tools_executes_multiple_tool_blocks(self):
+        from content_ingestion import ai_agent
+
+        replies = iter([
+            'TOOL write_video_memory\n'
+            'title: Uno\n'
+            'Body uno\n\n'
+            'TOOL write_video_memory\n'
+            'title: Dos\n'
+            'Body dos',
+            'Listo.',
+        ])
+
+        def fake_complete(prompt, provider=None, *, system=None):
+            return next(replies)
+
+        calls = []
+
+        def write_tool(args):
+            calls.append(args)
+            return f'ok {len(calls)}'
+
+        with patch('content_ingestion.ai_agent.complete_text', side_effect=fake_complete):
+            out = ai_agent.run_with_tools('push videos', 'gemini', 'SYS', {'write_video_memory': write_tool})
+
+        self.assertEqual(out, 'Listo.')
+        self.assertEqual(calls, ['title: Uno\nBody uno', 'title: Dos\nBody dos'])
 
     def test_run_with_tools_no_tools_is_plain_completion(self):
         from content_ingestion import ai_agent
