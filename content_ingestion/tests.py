@@ -313,6 +313,7 @@ class AIProviderRoutingTests(SimpleTestCase):
         self.assertEqual(parts[0]['file_data']['mime_type'], 'video/mp4')
         self.assertEqual(parts[0]['file_data']['file_uri'], 'https://files.example/abc')
         self.assertIn('TikTok', parts[1]['text'])
+        self.assertIn('hooks alternativos', parts[1]['text'])
 
 
 class CommandParsingTests(SimpleTestCase):
@@ -764,6 +765,52 @@ class MemoryToolTests(SimpleTestCase):
         text = 'title: Coreano camiseta\n# Body\nFull script'
         self.assertEqual(_first_title(text), 'Coreano camiseta')
         self.assertEqual(_strip_title_line(text), '# Body\nFull script')
+
+    def test_video_memory_quality_gate_rejects_generic_summary(self):
+        from content_ingestion.management.commands.telegram_ai_listener import (
+            _parse_memory_tool_args,
+            _video_memory_quality_issue,
+        )
+
+        parsed = _parse_memory_tool_args(
+            'category: videos\n'
+            'title: Vorterix\n'
+            'El video tiene alto potencial y conecta emocionalmente con la audiencia latina.'
+        )
+
+        self.assertIn('demasiado corto', _video_memory_quality_issue(parsed))
+
+    def test_video_memory_quality_gate_accepts_actionable_memo(self):
+        from content_ingestion.management.commands.telegram_ai_listener import (
+            _parse_memory_tool_args,
+            _video_memory_quality_issue,
+        )
+
+        body = (
+            'category: videos\n'
+            'title: Vorterix\n'
+            '## Observaciones por segmento\n'
+            '- 0-3s: escena de radio, micrófono y auriculares.\n'
+            '- 3-10s: pregunta sobre música latina.\n\n'
+            '## Hook 0-3s\n'
+            'El contraste coreano + vallenato debe aparecer antes del segundo 2.\n\n'
+            '## Retención y ritmo\n'
+            'Riesgo: pausas largas entre respuestas; cortar silencios.\n\n'
+            '## Plan de edición\n'
+            'Cortes cada 2-4s, subtítulos grandes, b-roll de Vorterix y géneros.\n\n'
+            '## Hooks alternativos\n'
+            '1. Un coreano que prefiere vallenato a K-pop.\n'
+            '2. La radio argentina no esperaba esta respuesta.\n'
+            '3. Corea conoce Despacito, pero yo canto bachata.\n\n'
+            '## CTA / captions\n'
+            '¿Qué canción latina debería aprender?\n\n'
+            '## Plataforma\n'
+            'TikTok: conversación cultural; Reels: identidad; Shorts: radio + música.\n'
+            + ('Detalle accionable. ' * 80)
+        )
+        parsed = _parse_memory_tool_args(body)
+
+        self.assertEqual(_video_memory_quality_issue(parsed), '')
 
     def test_parse_revise_memory_docs_args(self):
         from content_ingestion.management.commands.telegram_ai_listener import _parse_revise_memory_docs_args

@@ -335,7 +335,10 @@ class Command(BaseCommand):
             'No te limites al texto del usuario. Extrae detalles visuales, auditivos, '
             'estructura narrativa, hook, ritmo, escena, tono, CTA, y cualquier dato '
             'observable útil para una memoria de video. Si el usuario incluyó script, '
-            'compáralo con el video real.'
+            'compáralo con el video real. El resultado debe ser accionable: observaciones '
+            'por segmento/timestamp aproximado, diagnóstico de hook y retención, plan de '
+            'edición, hooks alternativos, CTAs/captions, recomendación por plataforma e '
+            'incertidumbres. Evita frases genéricas sin evidencia.'
         )
         try:
             analysis = await asyncio.to_thread(
@@ -359,7 +362,10 @@ class Command(BaseCommand):
             'Analiza el/los video(s) adjunto(s) de Telegram reales. No te limites al caption. '
             'Extrae detalles visuales, auditivos, estructura narrativa, hook, ritmo, escena, tono, '
             'CTA y potencial en TikTok/Instagram/YouTube Shorts usando la memoria de ConfíoAI, '
-            'la narrativa de Julian, su filosofía e identidad.'
+            'la narrativa de Julian, su filosofía e identidad. El resultado debe ser accionable: '
+            'observaciones por segmento/timestamp aproximado, diagnóstico de hook y retención, '
+            'plan de edición, hooks alternativos, CTAs/captions, recomendación por plataforma e '
+            'incertidumbres. Evita frases genéricas sin evidencia.'
         )
         try:
             analysis = await asyncio.to_thread(
@@ -556,7 +562,7 @@ def _build_tools(client, event, loop, *, authority='client', allow_writes=False,
         return _write_memory_tool(args)
 
     def write_video_memory(args=''):
-        """Crea una memoria de video en docs/videos y hace commit+push. Formato: opcional 'folder: Vida y filosofía'; línea 'title: <título del video>'; resto: markdown completo incluyendo links, stats, análisis y script."""
+        """Crea una memoria de video en docs/videos y hace commit+push. Formato: opcional 'folder: Vida y filosofía'; línea 'title: <título del video>'; resto: markdown completo. Debe ser accionable: links/stats/script si existen, observaciones del video real, diagnóstico de hook/retención, plan de edición, hooks alternativos, CTA/captions, plataforma y huecos."""
         return _write_memory_tool(f'category: videos\ntitle: {_first_title(args)}\n{_strip_title_line(args)}')
 
     def read_memory_docs(args=''):
@@ -591,6 +597,9 @@ def _write_memory_tool(args: str) -> str:
     parsed = _parse_memory_tool_args(args)
     if not parsed['body'].strip():
         return 'No escribí nada: falta el cuerpo markdown.'
+    quality_issue = _video_memory_quality_issue(parsed)
+    if quality_issue:
+        return f'No escribí la memoria de video: {quality_issue}'
     try:
         close_old_connections()
         metadata = {'source': 'telegram_ai_tool'}
@@ -618,6 +627,40 @@ def _write_memory_tool(args: str) -> str:
         f'- Commit: {document.commit_sha[:12] if document.commit_sha else "(sin commit)"}\n'
         f'- Status: {document.status}'
     )
+
+
+def _video_memory_quality_issue(parsed: dict) -> str:
+    if parsed.get('category') != AIContextCategory.VIDEOS:
+        return ''
+    body = parsed.get('body') or ''
+    normalized = body.lower()
+    if len(body.strip()) < 900:
+        return (
+            'el análisis es demasiado corto para ser útil. Incluye observaciones reales, '
+            'hook/retención, plan de edición, hooks alternativos, CTA/captions y huecos.'
+        )
+    required_groups = [
+        ('observaciones', 'escena', 'timestamp', 'segmento'),
+        ('hook', '0-3', 'primeros 3'),
+        ('retención', 'retencion', 'ritmo'),
+        ('edición', 'edicion', 'cortes', 'subtítulos', 'subtitulos', 'b-roll'),
+        ('cta', 'caption', 'copy'),
+    ]
+    hits = sum(1 for group in required_groups if any(term in normalized for term in group))
+    if hits < 4:
+        return (
+            'faltan secciones accionables. Debe cubrir observaciones/segmentos, hook, '
+            'retención, edición concreta y CTA/captions.'
+        )
+    generic_phrases = (
+        'alto potencial',
+        'conecta emocionalmente',
+        'top of funnel',
+        'fortalece tu posicionamiento',
+    )
+    if any(phrase in normalized for phrase in generic_phrases) and hits < len(required_groups):
+        return 'suena genérico; ata cada conclusión a evidencia observable y acciones concretas.'
+    return ''
 
 
 def _read_memory_docs_tool(args: str) -> str:

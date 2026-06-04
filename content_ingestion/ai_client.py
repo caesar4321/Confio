@@ -401,10 +401,12 @@ def _video_analysis_prompt(prompt: str) -> str:
     return (
         f'{prompt}\n\n'
         'Analiza el video real con el contexto completo de ConfíoAI cargado en el system prompt. '
-        'Evalúalo para TikTok, Instagram Reels y YouTube Shorts: hook de 0-3s, retención, ritmo, '
-        'claridad narrativa, emoción, identidad de Julian, filosofía de vida, autoridad, CTA, '
-        'potencial de comentarios/compartidos/seguidores y ajustes concretos para maximizar '
-        'views y followers sin traicionar la voz de Julian.'
+        'Evalúalo para TikTok, Instagram Reels y YouTube Shorts. No hagas un resumen positivo '
+        'genérico. Devuelve un memo accionable con estas secciones: Observaciones reales por '
+        'segmento/timestamp aproximado; Hook 0-3s y 3-10s; riesgos de retención; plan de edición '
+        'con cortes/subtítulos/b-roll/reordenamiento; 3 hooks alternativos; CTAs/captions; '
+        'recomendación por plataforma; huecos o incertidumbre. Cada recomendación debe estar '
+        'atada a algo que viste u oíste en el video.'
     )
 
 
