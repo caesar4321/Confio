@@ -359,6 +359,16 @@ class CommandParsingTests(SimpleTestCase):
             'Create a new memory for this video'
         ))
 
+    def test_deep_context_triggers_for_script_continuation(self):
+        from content_ingestion.management.commands.telegram_ai_listener import (
+            _needs_deep_context,
+        )
+
+        self.assertTrue(_needs_deep_context('여태까지 우리가 논의한 모든 논리를 바탕으로 풀 스크립트 써줘'))
+        self.assertTrue(_needs_deep_context('구조를 다시 짜봐'))
+        self.assertTrue(_needs_deep_context('based on everything we discussed, write the script'))
+        self.assertFalse(_needs_deep_context('AI native company가 뭐야?'))
+
     def test_youtube_analysis_is_added_to_memory_prompt(self):
         from content_ingestion.management.commands.telegram_ai_listener import _with_youtube_analysis
 

@@ -231,7 +231,11 @@ class Command(BaseCommand):
         sender_id = getattr(event, 'sender_id', None)
         sender_name = _display_name(sender, sender_id)
         authority = _sender_authority(sender, sender_id)
-        history = await _build_history(client, event)
+        history = await _build_history(
+            client,
+            event,
+            deep_context=_needs_deep_context(prompt),
+        )
         reply_to = await _reply_target(event)
         user_prompt = _compose_prompt(prompt, history, reply_to, sender_name=sender_name, authority=authority)
         system = build_system_prompt()
@@ -867,11 +871,30 @@ async def _search_chat_history(client, chat_id, query, limit=15) -> str:
     return '\n'.join(items) if items else 'Sin resultados para esa búsqueda.'
 
 
-async def _build_history(client, event) -> str:
+_DEEP_CONTEXT_RE = re.compile(
+    r'('
+    r'여태|지금까지|논의|얘기한|이야기한|기반으로|토대로|맥락|구조|스크립트|풀\s*스크립트|다시\s*(?:짜|써|작성)'
+    r'|based on (?:everything|all) we (?:discussed|said|talked)'
+    r'|with all (?:the )?context'
+    r'|todo lo que hablamos|con todo el contexto|guion completo|estructura'
+    r')',
+    re.IGNORECASE,
+)
+
+
+def _needs_deep_context(prompt: str) -> bool:
+    return bool(_DEEP_CONTEXT_RE.search(prompt or ''))
+
+
+async def _build_history(client, event, *, deep_context=False) -> str:
     """Fetch this chat's recent messages as a transcript (oldest first), annotating
     media so the model can see videos/files shared in the room."""
-    limit = getattr(settings, 'CONFIO_AI_HISTORY_LIMIT', 25)
-    max_chars = getattr(settings, 'CONFIO_AI_HISTORY_MAX_CHARS', 6000)
+    if deep_context:
+        limit = getattr(settings, 'CONFIO_AI_DEEP_HISTORY_LIMIT', 100)
+        max_chars = getattr(settings, 'CONFIO_AI_DEEP_HISTORY_MAX_CHARS', 24000)
+    else:
+        limit = getattr(settings, 'CONFIO_AI_HISTORY_LIMIT', 25)
+        max_chars = getattr(settings, 'CONFIO_AI_HISTORY_MAX_CHARS', 6000)
     try:
         messages = await client.get_messages(event.chat_id, limit=limit)
     except Exception:
