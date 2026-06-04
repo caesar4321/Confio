@@ -302,13 +302,22 @@ class CommandParsingTests(SimpleTestCase):
         self.assertIn('Body', parsed['body'])
 
     def test_memory_write_request_detects_doc_revision_with_youtube_link(self):
-        from content_ingestion.management.commands.telegram_ai_listener import _is_memory_write_request
+        from content_ingestion.management.commands.telegram_ai_listener import (
+            _is_existing_doc_revision_request,
+            _is_memory_write_request,
+        )
 
         self.assertTrue(_is_memory_write_request(
             'We should revise this existing git docs https://youtu.be/abc123'
         ))
+        self.assertTrue(_is_existing_doc_revision_request(
+            'Let\'s revise the current videos analysis in Git and update each doc'
+        ))
         self.assertFalse(_is_memory_write_request(
             'Can you analyze this YouTube video? https://youtu.be/abc123'
+        ))
+        self.assertFalse(_is_existing_doc_revision_request(
+            'Create a new memory for this video'
         ))
 
     def test_youtube_analysis_is_added_to_memory_prompt(self):
@@ -363,6 +372,7 @@ class CommandParsingTests(SimpleTestCase):
 
         client_tools = _build_tools(None, event, None, authority='client')
         trusted_tools = _build_tools(None, event, None, authority='trusted')
+        revision_tools = _build_tools(None, event, None, authority='trusted', allow_new_memory=False)
 
         self.assertNotIn('write_memory', client_tools)
         self.assertNotIn('write_video_memory', client_tools)
@@ -371,6 +381,10 @@ class CommandParsingTests(SimpleTestCase):
         self.assertIn('write_video_memory', trusted_tools)
         self.assertIn('read_memory_docs', trusted_tools)
         self.assertIn('revise_memory_docs', trusted_tools)
+        self.assertNotIn('write_memory', revision_tools)
+        self.assertNotIn('write_video_memory', revision_tools)
+        self.assertIn('read_memory_docs', revision_tools)
+        self.assertIn('revise_memory_docs', revision_tools)
 
 
 class SmartContextTests(SimpleTestCase):

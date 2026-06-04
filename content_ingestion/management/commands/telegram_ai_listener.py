@@ -224,6 +224,7 @@ class Command(BaseCommand):
         try:
             youtube_urls = extract_youtube_urls(user_prompt)
             memory_write_request = _is_memory_write_request(user_prompt)
+            existing_doc_revision = _is_existing_doc_revision_request(user_prompt)
             if youtube_urls and not debate_mode and not memory_write_request:
                 logger.info('Routing YouTube video analysis to Gemini: %s', youtube_urls[:3])
                 answer = await asyncio.to_thread(
@@ -254,7 +255,13 @@ class Command(BaseCommand):
                     )
                 else:
                     loop = asyncio.get_running_loop()
-                    tools = _build_tools(client, event, loop, authority=authority)
+                    tools = _build_tools(
+                        client,
+                        event,
+                        loop,
+                        authority=authority,
+                        allow_new_memory=not existing_doc_revision,
+                    )
                     answer = await asyncio.to_thread(
                         run_with_tools, user_prompt, provider, system, tools
                     )
@@ -402,6 +409,37 @@ def _is_memory_write_request(text: str) -> bool:
     )
 
 
+def _is_existing_doc_revision_request(text: str) -> bool:
+    value = (text or '').lower()
+    has_revision = any(term in value for term in (
+        'revise',
+        'revisar',
+        'actualizar',
+        'actualiza',
+        'update',
+        'edit',
+        'editar',
+        'modify',
+        'modificar',
+    ))
+    has_existing_target = any(term in value for term in (
+        'existing',
+        'current',
+        'actual',
+        'docs',
+        'document',
+        'documento',
+        'git',
+        'github',
+        'memory',
+        'memoria',
+        'analysis',
+        'analisis',
+        'análisis',
+    ))
+    return has_revision and has_existing_target
+
+
 def _with_youtube_analysis(user_prompt: str, analysis: str) -> str:
     return (
         f'{user_prompt}\n\n'
@@ -424,7 +462,7 @@ def _with_telegram_video_analysis(user_prompt: str, analysis: str) -> str:
     )
 
 
-def _build_tools(client, event, loop, *, authority='client'):
+def _build_tools(client, event, loop, *, authority='client', allow_new_memory=True):
     """Build the tool callables the model can invoke, bound to this chat.
 
     The completion runs in a worker thread, but Telethon lives on the main event
@@ -477,8 +515,9 @@ def _build_tools(client, event, loop, *, authority='client'):
         'search_knowledge': knowledge_search,
     }
     if authority in {'owner', 'trusted'}:
-        tools['write_memory'] = write_memory
-        tools['write_video_memory'] = write_video_memory
+        if allow_new_memory:
+            tools['write_memory'] = write_memory
+            tools['write_video_memory'] = write_video_memory
         tools['read_memory_docs'] = read_memory_docs
         tools['revise_memory_docs'] = revise_memory_docs
     return tools
