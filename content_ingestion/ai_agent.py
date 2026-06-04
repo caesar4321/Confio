@@ -73,6 +73,9 @@ def _tool_instructions(tools) -> str:
         '<markdown completo>',
         'Para revise_memory_docs usa: message: <commit>; luego uno o más bloques FILE: docs/.../archivo.md '
         'con el markdown completo reemplazado, o DELETE como cuerpo para borrar un duplicado.',
+        'Antes de revise_memory_docs sobre documentos existentes, usa read_memory_docs para leerlos. '
+        'La revisión debe fusionar lo nuevo con lo previo: preserva scripts completos, métricas, links, '
+        'fechas, análisis anteriores y detalles útiles salvo que el usuario pida borrarlos explícitamente.',
         'Para actualizar varios archivos en una sola respuesta, puedes emitir varios bloques TOOL seguidos; '
         'cada bloque se ejecutará en orden. No mezcles texto final dentro de los bloques TOOL.',
         'Herramientas disponibles:',
@@ -95,11 +98,12 @@ def _parse_tool_call(reply, tools):
 
 
 def _parse_tool_calls(reply, tools):
-    """Return all tool calls when the first meaningful line is a known tool call."""
+    """Return all tool calls, allowing only a short preamble before the first tool."""
     if not reply:
         return []
     lines = _strip_code_fence(reply).strip().splitlines()
     start_idx = None
+    preamble_chars = 0
     for idx, line in enumerate(lines):
         stripped = line.strip().strip('`').strip()
         if not stripped:
@@ -108,8 +112,9 @@ def _parse_tool_calls(reply, tools):
         if match and match.group(1) in tools:
             start_idx = idx
             break
-        # First real line isn't a tool call -> treat the whole reply as the answer.
-        return []
+        preamble_chars += len(stripped)
+        if preamble_chars > 400:
+            return []
     if start_idx is None:
         return []
 

@@ -543,6 +543,16 @@ class ToolLoopTests(SimpleTestCase):
                 ('write_video_memory', 'title: Video dos\n# Dos\n\nBody dos'),
             ],
         )
+        self.assertEqual(
+            _parse_tool_calls(
+                'Entendido, Julian. Procedo a actualizar.\n\n'
+                'TOOL write_video_memory\n'
+                'title: Video con preambulo\n'
+                '# Body',
+                tools,
+            ),
+            [('write_video_memory', 'title: Video con preambulo\n# Body')],
+        )
         self.assertIsNone(_parse_tool_call('Hola, ¿cómo estás?', tools))
         self.assertIsNone(_parse_tool_call('TOOL unknown x', tools))
 
@@ -647,6 +657,18 @@ class MemoryToolTests(SimpleTestCase):
         self.assertIn('Contenido revisado', parsed['edits'][0]['body'])
         self.assertEqual(parsed['edits'][1]['action'], 'delete')
 
+    def test_parse_revise_memory_docs_allow_shrink(self):
+        from content_ingestion.management.commands.telegram_ai_listener import _parse_revise_memory_docs_args
+
+        parsed = _parse_revise_memory_docs_args(
+            'FILE: docs/videos/demo.md\n'
+            'allow_shrink: yes\n'
+            '# Short replacement\n'
+        )
+
+        self.assertTrue(parsed['edits'][0]['allow_shrink'])
+        self.assertIn('Short replacement', parsed['edits'][0]['body'])
+
     @override_settings(CONFIO_AI_CONTEXT_ROOT='docs')
     def test_memory_doc_paths_stay_under_docs_markdown(self):
         from content_ingestion.context_repo import ContextRepoError, _safe_context_relative_path
@@ -656,6 +678,13 @@ class MemoryToolTests(SimpleTestCase):
             _safe_context_relative_path('../secrets.md')
         with self.assertRaises(ContextRepoError):
             _safe_context_relative_path('docs/videos/demo.txt')
+
+    def test_substantial_shrink_guard(self):
+        from content_ingestion.context_repo import _substantial_shrink
+
+        existing = '# Video\n\n' + ('script completo y métricas. ' * 100)
+        self.assertTrue(_substantial_shrink(existing, '# Video\n\nResumen corto.'))
+        self.assertFalse(_substantial_shrink(existing, existing + '\nNuevo análisis.'))
 
 
 class KnowledgeCorpusTests(SimpleTestCase):

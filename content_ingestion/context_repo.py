@@ -132,6 +132,14 @@ def _safe_context_relative_path(path: str) -> Path:
     return relative
 
 
+def _substantial_shrink(existing: str, replacement: str) -> bool:
+    existing_len = len((existing or '').strip())
+    replacement_len = len((replacement or '').strip())
+    if existing_len < 1200:
+        return False
+    return replacement_len < max(700, int(existing_len * 0.65))
+
+
 def read_context_documents(paths: list[str]) -> str:
     repo_root = _repo_root()
     out = []
@@ -188,6 +196,15 @@ def _revise_context_documents_locked(edits: list[dict], *, message: str = '', pu
         body = str(edit.get('body') or '').strip()
         if not body:
             raise ContextRepoError(f'Falta markdown para {relative}')
+        if target.exists() and not edit.get('allow_shrink'):
+            existing = target.read_text(encoding='utf-8')
+            if _substantial_shrink(existing, body):
+                raise ContextRepoError(
+                    f'La revisión de {relative} es mucho más corta que el archivo actual. '
+                    'Probablemente borraría scripts, métricas o detalles previos. '
+                    'Lee el documento actual y envía una versión fusionada completa; '
+                    'usa allow_shrink: yes solo si Julian pidió explícitamente simplificar.'
+                )
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(body.rstrip() + '\n', encoding='utf-8')
         changed_paths.append(str(relative))

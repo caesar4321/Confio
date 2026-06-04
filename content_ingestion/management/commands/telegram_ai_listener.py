@@ -467,7 +467,7 @@ def _build_tools(client, event, loop, *, authority='client'):
         return _read_memory_docs_tool(args)
 
     def revise_memory_docs(args=''):
-        """Revisa varios Markdown existentes en ConfioAI en un solo commit+push. Formato: opcional 'message: <commit>'; luego bloques 'FILE: docs/.../archivo.md' + markdown completo, o 'DELETE' para borrar."""
+        """Revisa varios Markdown existentes en ConfioAI en un solo commit+push. Formato: opcional 'message: <commit>'; luego bloques 'FILE: docs/.../archivo.md' + markdown completo, o 'DELETE' para borrar. Rechaza reemplazos mucho más cortos salvo 'allow_shrink: yes'."""
         return _revise_memory_docs_tool(args)
 
     tools = {
@@ -553,9 +553,10 @@ def _parse_revise_memory_docs_args(args: str) -> dict:
     edits = []
     current_path = ''
     current_lines = []
+    current_allow_shrink = False
 
     def flush():
-        nonlocal current_path, current_lines
+        nonlocal current_path, current_lines, current_allow_shrink
         if not current_path:
             return
         body = '\n'.join(current_lines).strip()
@@ -564,9 +565,15 @@ def _parse_revise_memory_docs_args(args: str) -> dict:
         if body.startswith('<<<') and body.endswith('>>>'):
             body = body[3:-3].strip()
         action = 'delete' if body.strip().upper() == 'DELETE' else 'write'
-        edits.append({'path': current_path, 'action': action, 'body': '' if action == 'delete' else body})
+        edits.append({
+            'path': current_path,
+            'action': action,
+            'body': '' if action == 'delete' else body,
+            'allow_shrink': current_allow_shrink,
+        })
         current_path = ''
         current_lines = []
+        current_allow_shrink = False
 
     for raw_line in (args or '').splitlines():
         key, sep, value = raw_line.partition(':')
@@ -577,6 +584,9 @@ def _parse_revise_memory_docs_args(args: str) -> dict:
         if sep and normalized == 'file':
             flush()
             current_path = value.strip()
+            continue
+        if sep and normalized == 'allow_shrink' and current_path and not current_lines:
+            current_allow_shrink = value.strip().lower() in {'1', 'true', 'yes', 'si', 'sí'}
             continue
         if current_path:
             current_lines.append(raw_line)
