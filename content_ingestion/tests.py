@@ -107,24 +107,39 @@ class AIContextRepoPathTests(SimpleTestCase):
     def test_list_video_memories_returns_count_titles_and_paths(self):
         import os
         import tempfile
-        from content_ingestion.context_repo import list_video_memories
+        from content_ingestion.context_repo import list_memory_documents, list_video_memories
 
         with tempfile.TemporaryDirectory() as d:
             os.makedirs(os.path.join(d, '.git'))
             videos = os.path.join(d, 'docs', 'videos', 'Vida y filosofía')
             os.makedirs(videos)
+            strategy = os.path.join(d, 'docs', 'strategy', '2026')
+            conversations = os.path.join(d, 'docs', 'conversations', '-100')
+            os.makedirs(strategy)
+            os.makedirs(conversations)
             with open(os.path.join(videos, 'uno.md'), 'w', encoding='utf-8') as fh:
                 fh.write('---\ntitle: "Video Uno"\n---\n\nBody')
             with open(os.path.join(videos, 'dos.md'), 'w', encoding='utf-8') as fh:
                 fh.write('# Video Dos\n\nBody')
+            with open(os.path.join(strategy, 'plan.md'), 'w', encoding='utf-8') as fh:
+                fh.write('# Strategy Plan\n\nBody')
+            with open(os.path.join(conversations, 'today.md'), 'w', encoding='utf-8') as fh:
+                fh.write('# Conversation log\n\nShould be excluded')
 
             with override_settings(CONFIO_AI_REPO_PATH=d):
-                out = list_video_memories()
+                videos_out = list_video_memories()
+                strategy_out = list_memory_documents('strategy')
+                all_out = list_memory_documents()
 
-        self.assertIn('Total videos: 2', out)
-        self.assertIn('Video Uno', out)
-        self.assertIn('Video Dos', out)
-        self.assertIn('docs/videos/Vida y filosofía/uno.md', out)
+        self.assertIn('Total videos: 2', videos_out)
+        self.assertIn('Video Uno', videos_out)
+        self.assertIn('Video Dos', videos_out)
+        self.assertIn('docs/videos/Vida y filosofía/uno.md', videos_out)
+        self.assertIn('Total documentos en docs/strategy: 1', strategy_out)
+        self.assertIn('Strategy Plan', strategy_out)
+        self.assertIn('[videos] Video Uno', all_out)
+        self.assertIn('[strategy] Strategy Plan', all_out)
+        self.assertNotIn('Conversation log', all_out)
 
 
 class AIProviderRoutingTests(SimpleTestCase):
@@ -331,7 +346,7 @@ class CommandParsingTests(SimpleTestCase):
         )
 
         self.assertTrue(_is_memory_write_request(
-            'We should revise this existing git docs https://youtu.be/abc123'
+            'Revisa los documentos existentes en Git https://youtu.be/abc123'
         ))
         self.assertTrue(_is_existing_doc_revision_request(
             'Let\'s revise the current videos analysis in Git and update each doc'
@@ -395,16 +410,28 @@ class CommandParsingTests(SimpleTestCase):
 
         client_tools = _build_tools(None, event, None, authority='client')
         trusted_tools = _build_tools(None, event, None, authority='trusted')
-        revision_tools = _build_tools(None, event, None, authority='trusted', allow_new_memory=False)
+        write_tools = _build_tools(None, event, None, authority='trusted', allow_writes=True)
+        revision_tools = _build_tools(
+            None,
+            event,
+            None,
+            authority='trusted',
+            allow_writes=True,
+            allow_new_memory=False,
+        )
 
         self.assertNotIn('write_memory', client_tools)
         self.assertNotIn('write_video_memory', client_tools)
         self.assertNotIn('revise_memory_docs', client_tools)
+        self.assertIn('list_memory_docs', client_tools)
         self.assertIn('list_video_memories', client_tools)
-        self.assertIn('write_memory', trusted_tools)
-        self.assertIn('write_video_memory', trusted_tools)
+        self.assertNotIn('write_memory', trusted_tools)
+        self.assertNotIn('write_video_memory', trusted_tools)
         self.assertIn('read_memory_docs', trusted_tools)
-        self.assertIn('revise_memory_docs', trusted_tools)
+        self.assertNotIn('revise_memory_docs', trusted_tools)
+        self.assertIn('write_memory', write_tools)
+        self.assertIn('write_video_memory', write_tools)
+        self.assertIn('revise_memory_docs', write_tools)
         self.assertNotIn('write_memory', revision_tools)
         self.assertNotIn('write_video_memory', revision_tools)
         self.assertIn('read_memory_docs', revision_tools)

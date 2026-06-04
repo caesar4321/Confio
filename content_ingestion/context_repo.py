@@ -160,16 +160,24 @@ def _document_title_from_markdown(text: str, fallback: str) -> str:
     return fallback
 
 
-def list_video_memories() -> str:
+def list_memory_documents(category: str = '', max_rows: int = 200) -> str:
     repo_root = _repo_root()
     root = _context_root(repo_root)
-    videos_dir = root / 'videos'
-    if not videos_dir.exists():
-        return 'No encontré docs/videos en ConfioAI.'
+    if not root.exists():
+        return f'No encontré {settings.CONFIO_AI_CONTEXT_ROOT} en ConfioAI.'
+
+    category = (category or '').strip().strip('/').replace('\\', '/')
+    scan_root = (root / category).resolve() if category else root
+    if root not in scan_root.parents and scan_root != root:
+        raise ContextRepoError('La categoría solicitada escapa CONFIO_AI_CONTEXT_ROOT')
+    if not scan_root.exists():
+        return f'No encontré docs/{category} en ConfioAI.' if category else 'No encontré documentos en ConfioAI.'
 
     rows = []
-    for path in sorted(videos_dir.rglob('*.md')):
+    for path in sorted(scan_root.rglob('*.md')):
         if path.name == '.gitkeep':
+            continue
+        if 'conversations' in path.relative_to(root).parts:
             continue
         relative = path.relative_to(repo_root)
         try:
@@ -178,14 +186,25 @@ def list_video_memories() -> str:
             continue
         fallback = path.stem.replace('-', ' ').title()
         title = _document_title_from_markdown(text, fallback)
-        rows.append((title, str(relative)))
+        doc_category = path.relative_to(root).parts[0] if path.relative_to(root).parts else ''
+        rows.append((doc_category, title, str(relative)))
 
     if not rows:
-        return 'No hay memorias de video registradas en ConfioAI.'
-    lines = [f'Total videos: {len(rows)}']
-    for idx, (title, relative) in enumerate(rows, 1):
-        lines.append(f'{idx}. {title} — {relative}')
+        return f'No hay memorias registradas en docs/{category}.' if category else 'No hay memorias registradas en ConfioAI.'
+
+    shown = rows[:max_rows]
+    label = f'docs/{category}' if category else 'ConfioAI docs'
+    lines = [f'Total documentos en {label}: {len(rows)}']
+    for idx, (doc_category, title, relative) in enumerate(shown, 1):
+        prefix = f'[{doc_category}] ' if not category and doc_category else ''
+        lines.append(f'{idx}. {prefix}{title} — {relative}')
+    if len(rows) > len(shown):
+        lines.append(f'... {len(rows) - len(shown)} más no mostrados.')
     return '\n'.join(lines)
+
+
+def list_video_memories() -> str:
+    return list_memory_documents('videos').replace('Total documentos en docs/videos:', 'Total videos:')
 
 
 def read_context_documents(paths: list[str]) -> str:
