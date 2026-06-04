@@ -265,6 +265,35 @@ class CommandParsingTests(SimpleTestCase):
             'Can you analyze this YouTube video? https://youtu.be/abc123'
         ))
 
+    def test_sender_authority_hierarchy(self):
+        import types
+        from content_ingestion.management.commands.telegram_ai_listener import _sender_authority
+
+        with override_settings(
+            CONFIO_AI_TELEGRAM_OWNER_IDENTITIES=['julian', 'j', '123'],
+            CONFIO_AI_TELEGRAM_TRUSTED_IDENTITIES=['susy ramirez'],
+        ):
+            self.assertEqual(_sender_authority(types.SimpleNamespace(first_name='J'), 123), 'owner')
+            self.assertEqual(
+                _sender_authority(types.SimpleNamespace(first_name='Susy', last_name='Ramirez'), 456),
+                'trusted',
+            )
+            self.assertEqual(_sender_authority(types.SimpleNamespace(first_name='Cliente'), 789), 'client')
+
+    def test_client_authority_does_not_get_write_tools(self):
+        import types
+        from content_ingestion.management.commands.telegram_ai_listener import _build_tools
+
+        event = types.SimpleNamespace(chat_id=-100)
+
+        client_tools = _build_tools(None, event, None, authority='client')
+        trusted_tools = _build_tools(None, event, None, authority='trusted')
+
+        self.assertNotIn('write_memory', client_tools)
+        self.assertNotIn('write_video_memory', client_tools)
+        self.assertIn('write_memory', trusted_tools)
+        self.assertIn('write_video_memory', trusted_tools)
+
 
 class SmartContextTests(SimpleTestCase):
     def test_compose_prompt_puts_message_before_history(self):
@@ -281,6 +310,17 @@ class SmartContextTests(SimpleTestCase):
         out = _compose_prompt('hola', '', '')
         self.assertIn('hola', out)
         self.assertNotIn('Conversación reciente', out)
+
+    def test_compose_prompt_includes_authority(self):
+        from content_ingestion.management.commands.telegram_ai_listener import _compose_prompt
+
+        owner = _compose_prompt('push it', '', '', sender_name='Julian', authority='owner')
+        client = _compose_prompt('push it', '', '', sender_name='Cliente', authority='client')
+
+        self.assertIn('OWNER / Julian', owner)
+        self.assertIn('órdenes literales', owner)
+        self.assertIn('CLIENT / externo', client)
+        self.assertIn('No hagas commit', client)
 
     def test_media_label_detects_video_and_none(self):
         import types

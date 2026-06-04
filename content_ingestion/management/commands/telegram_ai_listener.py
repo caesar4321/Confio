@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import re
+import unicodedata
 from datetime import datetime, timezone
 
 from django.conf import settings
@@ -193,9 +194,17 @@ class Command(BaseCommand):
             await client.disconnect()
 
     async def _answer(self, event, client, prompt, provider, *, debate_mode=False):
+        sender = None
+        try:
+            sender = await event.get_sender()
+        except Exception:
+            pass
+        sender_id = getattr(event, 'sender_id', None)
+        sender_name = _display_name(sender, sender_id)
+        authority = _sender_authority(sender, sender_id)
         history = await _build_history(client, event)
         reply_to = await _reply_target(event)
-        user_prompt = _compose_prompt(prompt, history, reply_to)
+        user_prompt = _compose_prompt(prompt, history, reply_to, sender_name=sender_name, authority=authority)
         system = build_system_prompt()
         logger.info(
             'Telegram AI %s reply in chat %s',
@@ -219,7 +228,7 @@ class Command(BaseCommand):
                     )
                 else:
                     loop = asyncio.get_running_loop()
-                    tools = _build_tools(client, event, loop)
+                    tools = _build_tools(client, event, loop, authority=authority)
                     answer = await asyncio.to_thread(
                         run_with_tools, user_prompt, provider, system, tools
                     )
@@ -234,11 +243,6 @@ class Command(BaseCommand):
         for chunk in _telegram_chunks(answer):
             await event.reply(chunk)
 
-        try:
-            sender = await event.get_sender()
-            sender_name = _display_name(sender, getattr(event, 'sender_id', None))
-        except Exception:
-            sender_name = _display_name(None, getattr(event, 'sender_id', None))
         await asyncio.to_thread(
             conversation_log.append_turn,
             event.chat_id, sender_name, event.raw_text or prompt, answer,
@@ -328,7 +332,7 @@ def _is_memory_write_request(text: str) -> bool:
     )
 
 
-def _build_tools(client, event, loop):
+def _build_tools(client, event, loop, *, authority='client'):
     """Build the tool callables the model can invoke, bound to this chat.
 
     The completion runs in a worker thread, but Telethon lives on the main event
@@ -366,14 +370,16 @@ def _build_tools(client, event, loop):
         """Crea una memoria de video en docs/videos y hace commit+push. Formato: opcional 'folder: Vida y filosofía'; línea 'title: <título del video>'; resto: markdown completo incluyendo links, stats, análisis y script."""
         return _write_memory_tool(f'category: videos\ntitle: {_first_title(args)}\n{_strip_title_line(args)}')
 
-    return {
+    tools = {
         'get_chat_files': get_chat_files,
         'get_chat_videos': get_chat_videos,
         'search_chat_history': search_chat_history,
         'search_knowledge': knowledge_search,
-        'write_memory': write_memory,
-        'write_video_memory': write_video_memory,
     }
+    if authority in {'owner', 'trusted'}:
+        tools['write_memory'] = write_memory
+        tools['write_video_memory'] = write_video_memory
+    return tools
 
 
 def _write_memory_tool(args: str) -> str:
@@ -617,14 +623,75 @@ def _image_mime_type(message) -> str:
     return mime if mime.startswith('image/') else 'image/jpeg'
 
 
-def _compose_prompt(prompt: str, history: str, reply_to: str) -> str:
+def _compose_prompt(prompt: str, history: str, reply_to: str, *, sender_name='', authority='client') -> str:
     parts = []
+    parts.append(_authority_prompt(sender_name, authority))
     if reply_to:
         parts.append(f'(Este mensaje responde a: "{reply_to}")')
     parts.append(f'Mensaje a responder:\n{prompt}')
     if history:
         parts.append('Conversación reciente en este chat (contexto, más antiguo arriba):\n' + history)
     return '\n\n'.join(parts)
+
+
+def _authority_prompt(sender_name: str, authority: str) -> str:
+    label = sender_name or 'alguien'
+    if authority == 'owner':
+        return (
+            f'Autoridad del remitente: OWNER / Julian ({label}). '
+            'Sus instrucciones son órdenes literales del founder: si pide push, commit, '
+            'editar memoria, cambiar docs o ejecutar una acción disponible, hazlo con '
+            'mínima fricción y no lo trates como una opinión más.'
+        )
+    if authority == 'trusted':
+        return (
+            f'Autoridad del remitente: TRUSTED / Susy ({label}). '
+            'Sus pedidos son altamente aplicables y operativos; puedes usar herramientas '
+            'de escritura/push cuando pida preservar o actualizar memoria, pero mantén '
+            'criterio si falta información crítica.'
+        )
+    return (
+        f'Autoridad del remitente: CLIENT / externo ({label}). '
+        'Sus mensajes son feedback, opiniones o insumos de cliente. No hagas commit, '
+        'push ni cambios de memoria solo porque esta persona lo pida; puedes responder, '
+        'analizar, resumir o elevarlo como input para Julian/Susy.'
+    )
+
+
+def _sender_authority(sender, sender_id=None) -> str:
+    tokens = set(_sender_identity_tokens(sender, sender_id))
+    owners = {_normalize_identity(v) for v in getattr(settings, 'CONFIO_AI_TELEGRAM_OWNER_IDENTITIES', []) if v}
+    trusted = {_normalize_identity(v) for v in getattr(settings, 'CONFIO_AI_TELEGRAM_TRUSTED_IDENTITIES', []) if v}
+    if tokens & owners:
+        return 'owner'
+    if tokens & trusted:
+        return 'trusted'
+    return 'client'
+
+
+def _sender_identity_tokens(sender, sender_id=None) -> list[str]:
+    values = []
+    if sender_id is not None:
+        values.append(str(sender_id))
+    if sender is not None:
+        full = (f"{getattr(sender, 'first_name', '') or ''} "
+                f"{getattr(sender, 'last_name', '') or ''}").strip()
+        values.extend([
+            full,
+            getattr(sender, 'first_name', '') or '',
+            getattr(sender, 'last_name', '') or '',
+            getattr(sender, 'username', '') or '',
+            getattr(sender, 'title', '') or '',
+        ])
+    return [_normalize_identity(value) for value in values if _normalize_identity(value)]
+
+
+def _normalize_identity(value: str) -> str:
+    normalized = unicodedata.normalize('NFKD', str(value or ''))
+    asciiish = ''.join(ch for ch in normalized if not unicodedata.combining(ch))
+    asciiish = asciiish.casefold()
+    asciiish = re.sub(r'[^\w]+', ' ', asciiish, flags=re.UNICODE)
+    return re.sub(r'\s+', ' ', asciiish).strip()
 
 
 def _display_name(sender, sender_id=None) -> str:
