@@ -43,6 +43,9 @@ PROVIDER_COMMANDS = {
 }
 DEBATE_COMMAND = '/debate'
 WHOAMI_COMMAND = '/whoami'
+# Memory writes to ConfioAI (git) ONLY happen via these explicit commands. Without
+# one, the bot just analyzes/answers and never commits anything.
+MEMORY_COMMANDS = {'/memory', '/save', '/recordar', '/guardar', '/savevideo'}
 
 # How long to wait before reconnecting after a Telegram disconnect/error.
 RECONNECT_DELAY_SECONDS = 5
@@ -135,11 +138,24 @@ class Command(BaseCommand):
                     await self._answer(event, client, prompt, default_provider, debate_mode=True)
                 elif command == WHOAMI_COMMAND:
                     await event.reply(_whoami_response(sender, getattr(event, 'sender_id', None)))
+                elif command in MEMORY_COMMANDS:
+                    has_media = bool(getattr(getattr(event, 'message', None), 'media', None))
+                    if not prompt and not has_media:
+                        await event.reply(
+                            f'Usage: {command} <qué guardar> — envíalo como caption del video, '
+                            'o describe la memoria (incluye la carpeta, p. ej. "Vida y filosofía").'
+                        )
+                        return
+                    await self._answer(
+                        event, client, prompt or _media_only_prompt(event.message),
+                        default_provider, explicit_memory=True,
+                    )
                 elif command is not None:
                     # Unknown slash command (likely meant for another bot) — ignore.
                     return
                 else:
                     # Ambient: reply to every human message with the default model.
+                    # No explicit_memory -> the bot analyzes/answers but never writes to git.
                     await self._answer(event, client, message, default_provider)
             finally:
                 close_old_connections()
@@ -205,7 +221,7 @@ class Command(BaseCommand):
                 pass
             await client.disconnect()
 
-    async def _answer(self, event, client, prompt, provider, *, debate_mode=False):
+    async def _answer(self, event, client, prompt, provider, *, debate_mode=False, explicit_memory=False):
         sender = None
         try:
             sender = await event.get_sender()
@@ -225,7 +241,10 @@ class Command(BaseCommand):
         )
         try:
             answer = await asyncio.wait_for(
-                self._generate_answer(event, client, user_prompt, provider, system, authority, debate_mode),
+                self._generate_answer(
+                    event, client, user_prompt, provider, system, authority, debate_mode,
+                    explicit_memory=explicit_memory,
+                ),
                 timeout=ANSWER_TIMEOUT_SECONDS,
             )
         except asyncio.TimeoutError:
@@ -248,10 +267,12 @@ class Command(BaseCommand):
             event.chat_id, sender_name, event.raw_text or prompt, answer,
         )
 
-    async def _generate_answer(self, event, client, user_prompt, provider, system, authority, debate_mode):
+    async def _generate_answer(self, event, client, user_prompt, provider, system, authority, debate_mode, explicit_memory=False):
         youtube_urls = extract_youtube_urls(user_prompt)
-        memory_write_request = _is_memory_write_request(user_prompt)
-        existing_doc_revision = _is_existing_doc_revision_request(user_prompt)
+        # Writes to git happen ONLY on an explicit /memory-style command — never inferred
+        # from keywords. Plain video/text just gets analyzed and answered.
+        memory_write_request = explicit_memory
+        existing_doc_revision = explicit_memory and _is_existing_doc_revision_request(user_prompt)
         if youtube_urls and not debate_mode and not memory_write_request:
             logger.info('Routing YouTube video analysis to Gemini: %s', youtube_urls[:3])
             return await asyncio.to_thread(
@@ -286,6 +307,7 @@ class Command(BaseCommand):
                 event,
                 loop,
                 authority=authority,
+                allow_writes=explicit_memory,
                 allow_new_memory=not existing_doc_revision,
             )
             return await asyncio.to_thread(
@@ -474,7 +496,7 @@ def _with_telegram_video_analysis(user_prompt: str, analysis: str) -> str:
     )
 
 
-def _build_tools(client, event, loop, *, authority='client', allow_new_memory=True):
+def _build_tools(client, event, loop, *, authority='client', allow_writes=False, allow_new_memory=True):
     """Build the tool callables the model can invoke, bound to this chat.
 
     The completion runs in a worker thread, but Telethon lives on the main event
@@ -536,11 +558,14 @@ def _build_tools(client, event, loop, *, authority='client', allow_new_memory=Tr
         'list_video_memories': list_videos,
     }
     if authority in {'owner', 'trusted'}:
-        if allow_new_memory:
-            tools['write_memory'] = write_memory
-            tools['write_video_memory'] = write_video_memory
+        # read is always safe; WRITES (create/revise/delete -> git push) require an
+        # explicit /memory-style command (allow_writes), never an inferred keyword.
         tools['read_memory_docs'] = read_memory_docs
-        tools['revise_memory_docs'] = revise_memory_docs
+        if allow_writes:
+            if allow_new_memory:
+                tools['write_memory'] = write_memory
+                tools['write_video_memory'] = write_video_memory
+            tools['revise_memory_docs'] = revise_memory_docs
     return tools
 
 
