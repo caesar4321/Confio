@@ -399,7 +399,7 @@ def _complete_gemini(
     if not api_key:
         raise AIClientError('Gemini is selected, but GEMINI_API_KEY is not configured.')
 
-    model = getattr(settings, 'GEMINI_MODEL', 'gemini-2.0-flash')
+    model = getattr(settings, 'GEMINI_MODEL', 'gemini-3.5-flash')
     url = f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent'
     parts = []
     for video_url in youtube_urls or []:

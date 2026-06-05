@@ -72,7 +72,7 @@ def run_with_tools(prompt, provider, system, tools, *, max_steps=DEFAULT_MAX_STE
 _CHAT_COMPLETIONS_BACKENDS = {
     'gemini': {
         'name': 'Gemini', 'key': 'GEMINI_API_KEY', 'model': 'GEMINI_MODEL',
-        'model_default': 'gemini-2.5-flash',
+        'model_default': 'gemini-3.5-flash',
         'base_url': 'https://generativelanguage.googleapis.com/v1beta/openai',
     },
     'grok': {
