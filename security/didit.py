@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
@@ -102,6 +103,24 @@ def _first_non_empty(*values: Any) -> Any:
         if value not in (None, '', [], {}):
             return value
     return None
+
+
+def _parsed_address_component(parsed_address: dict[str, Any], *component_types: str) -> str:
+    address_components = (
+        (parsed_address.get('raw_results') or {}).get('address_components') or []
+    )
+    wanted_types = set(component_types)
+    for component in address_components:
+        if not isinstance(component, dict):
+            continue
+        if wanted_types.intersection(component.get('types') or []):
+            return str(component.get('long_name') or component.get('short_name') or '').strip()
+    return ''
+
+
+def _document_postal_code(value: Any) -> str:
+    matches = re.findall(r'(?<!\d)(\d{5})(?!\d)', str(value or ''))
+    return matches[-1] if matches else ''
 
 
 def _safe_json_loads(value: Any) -> dict[str, Any]:
@@ -344,15 +363,52 @@ def _extract_verification_payload(response_payload: dict[str, Any]) -> dict[str,
         response_payload.get('document_type'),
         response_payload.get('document_type_name'),
     )
-    line_parts = [
-        _first_non_empty(parsed_address.get('street'), parsed_address.get('address_line1')),
+    raw_document_address = _first_non_empty(
+        id_verification.get('address'),
+        id_verification.get('formatted_address'),
+    )
+    street = _first_non_empty(
+        parsed_address.get('street'),
+        parsed_address.get('street_1'),
+        parsed_address.get('address_line1'),
+        _parsed_address_component(parsed_address, 'route'),
+    )
+    street_number = _first_non_empty(
         parsed_address.get('street_number'),
-    ]
+        parsed_address.get('house_number'),
+    )
+    if not street_number and re.search(r'\bS/?N\b', str(raw_document_address or ''), flags=re.IGNORECASE):
+        street_number = 'S/N'
+    line_parts = [street, street_number]
     address_line = ' '.join(str(part).strip() for part in line_parts if part)
     address_neighborhood = _first_non_empty(
         parsed_address.get('neighborhood'),
         parsed_address.get('sublocality'),
         parsed_address.get('district'),
+        _parsed_address_component(parsed_address, 'sublocality', 'sublocality_level_1', 'neighborhood'),
+    )
+    address_city = _first_non_empty(
+        parsed_address.get('city'),
+        parsed_address.get('locality'),
+        _parsed_address_component(parsed_address, 'locality'),
+        response_payload.get('city'),
+    )
+    address_state = _first_non_empty(
+        parsed_address.get('state'),
+        parsed_address.get('region'),
+        _parsed_address_component(parsed_address, 'administrative_area_level_1'),
+        response_payload.get('state'),
+    )
+    parsed_postal_code = _first_non_empty(
+        parsed_address.get('postal_code'),
+        _parsed_address_component(parsed_address, 'postal_code'),
+        response_payload.get('postal_code'),
+    )
+    document_postal_code = _document_postal_code(raw_document_address)
+    postal_code = (
+        _first_non_empty(document_postal_code, parsed_postal_code)
+        if issuing_country_iso3 == 'MEX'
+        else parsed_postal_code
     )
 
     document_number = _first_non_empty(
@@ -384,14 +440,19 @@ def _extract_verification_payload(response_payload: dict[str, Any]) -> dict[str,
         'verified_nationality': _normalize_iso3(
             _first_non_empty(id_verification.get('nationality'), response_payload.get('nationality'))
         ),
-        'verified_address': address_line or _first_non_empty(response_payload.get('full_address'), 'Verified by Didit'),
+        'verified_address': address_line or _first_non_empty(
+            raw_document_address,
+            parsed_address.get('formatted_address'),
+            response_payload.get('full_address'),
+            'Verified by Didit',
+        ),
         'verified_address_neighborhood': address_neighborhood or '',
-        'verified_city': _first_non_empty(parsed_address.get('city'), response_payload.get('city'), 'Unknown City'),
-        'verified_state': _first_non_empty(parsed_address.get('state'), response_payload.get('state'), 'Unknown State'),
+        'verified_city': address_city or 'Unknown City',
+        'verified_state': address_state or 'Unknown State',
         'verified_country': _normalize_iso3(
             _first_non_empty(parsed_address.get('country'), response_payload.get('country'), issuing_country)
         ),
-        'verified_postal_code': _first_non_empty(parsed_address.get('postal_code'), response_payload.get('postal_code')),
+        'verified_postal_code': postal_code,
         'document_type': DOCUMENT_TYPE_MAP.get(str(document_type or '').strip().lower(), 'national_id'),
         'document_number': document_number,
         'document_issuing_country': issuing_country_iso3,

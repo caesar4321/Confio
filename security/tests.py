@@ -148,6 +148,52 @@ class DiditIntegrationTests(TestCase):
         self.assertEqual(verification.document_issuing_country, 'VEN')
 
     @patch('security.didit.requests.request')
+    def test_sync_session_extracts_mexico_address_and_prefers_document_postal_code(self, mock_request):
+        mock_request.return_value = self._mock_response({
+            'session_id': 'sess_mex_address',
+            'status': 'Approved',
+            'vendor_data': '{"user_id":1,"account_type":"personal"}',
+            'first_name': 'Martin',
+            'last_name': 'De Jesus Neri',
+            'date_of_birth': '1989-11-03',
+            'id_verifications': [{
+                'nationality': 'MEX',
+                'document_type': 'Identity Card',
+                'document_number': '1234567890',
+                'personal_number': 'JENM891103HMNSRR04',
+                'issuing_state': 'MEX',
+                'address': 'C Cuitlahuac S/N,Pblo San Francisco Chilpan 54946,Tultitlan, Mex.',
+                'parsed_address': {
+                    'city': 'Buenavista',
+                    'region': 'Estado de México',
+                    'country': 'MX',
+                    'street_1': 'Cuitláhuac',
+                    'postal_code': '54913',
+                    'raw_results': {
+                        'address_components': [{
+                            'types': ['sublocality', 'sublocality_level_1'],
+                            'long_name': 'San Francisco Chilpan',
+                            'short_name': 'San Francisco Chilpan',
+                        }],
+                    },
+                },
+            }],
+        })
+
+        verification, _ = sync_didit_session(
+            session_id='sess_mex_address',
+            expected_user=self.user,
+        )
+
+        self.assertEqual(verification.verified_address, 'Cuitláhuac S/N')
+        self.assertEqual(verification.verified_address_neighborhood, 'San Francisco Chilpan')
+        self.assertEqual(verification.verified_city, 'Buenavista')
+        self.assertEqual(verification.verified_state, 'Estado de México')
+        self.assertEqual(verification.verified_postal_code, '54946')
+        self.assertEqual(verification.verified_country, 'MEX')
+        self.assertEqual(verification.document_number, 'JENM891103HMNSRR04')
+
+    @patch('security.didit.requests.request')
     def test_sync_session_defers_duplicate_personal_identity(self, mock_request):
         other_user = User.objects.create_user(
             username='didit-user-2',
