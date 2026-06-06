@@ -238,6 +238,97 @@ def revise_context_documents(edits: list[dict], *, message: str = '', push: bool
         lock_fd.close()
 
 
+def append_canonical_promotions(promotions: list[dict], *, push: bool = True) -> dict:
+    """Append evidence-backed Telegram learnings without rewriting stable canonical docs."""
+    if not promotions:
+        return {'status': 'NO_CHANGES', 'paths': [], 'commit': ''}
+
+    lock_fd = open(GIT_LOCKFILE, 'w')
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        repo_root = _repo_root()
+        _context_root(repo_root)
+        remote = getattr(settings, 'CONFIO_AI_REPO_REMOTE', 'origin')
+        branch = getattr(settings, 'CONFIO_AI_REPO_BRANCH', 'main')
+        _run_git(repo_root, 'pull', '--rebase', '--autostash', remote, branch)
+
+        today = timezone.localdate()
+        grouped: dict[Path, list[dict]] = {}
+        for promotion in promotions:
+            category = str(promotion.get('category') or '').strip()
+            if category not in {'preferences', 'facts', 'decisions', 'content-rules'}:
+                raise ContextRepoError(f'Categoría canónica inválida: {category}')
+            if category == 'decisions':
+                relative = (
+                    Path(settings.CONFIO_AI_CONTEXT_ROOT)
+                    / category
+                    / str(today.year)
+                    / f'{today.isoformat()}-telegram-decisions.md'
+                )
+            else:
+                relative = (
+                    Path(settings.CONFIO_AI_CONTEXT_ROOT)
+                    / category
+                    / 'telegram-learnings.md'
+                )
+            grouped.setdefault(relative, []).append(promotion)
+
+        changed_paths = []
+        for relative, items in grouped.items():
+            target = (repo_root / relative).resolve()
+            if repo_root not in target.parents:
+                raise ContextRepoError('Resolved promotion path escapes CONFIO_AI_REPO_PATH')
+            target.parent.mkdir(parents=True, exist_ok=True)
+            existing = target.read_text(encoding='utf-8') if target.exists() else ''
+            if not existing:
+                title = {
+                    'preferences': 'Telegram-learned preferences',
+                    'facts': 'Telegram-learned facts',
+                    'decisions': f'Telegram decisions — {today.isoformat()}',
+                    'content-rules': 'Telegram-learned content rules',
+                }[items[0]['category']]
+                existing = (
+                    '---\n'
+                    f'title: "{title}"\n'
+                    f'category: "{items[0]["category"]}"\n'
+                    'source: "canonical_promotion_loop"\n'
+                    '---\n\n'
+                    '# Canonical learnings from Telegram\n\n'
+                )
+
+            additions = []
+            for item in items:
+                marker = f'<!-- promotion:{item["fingerprint"]} -->'
+                if marker in existing:
+                    continue
+                source = item.get('source') or 'Telegram'
+                additions.append(
+                    f'{marker}\n'
+                    f'- **{today.isoformat()}** — {item["statement"].strip()} '
+                    f'_(Source: {source})_\n'
+                )
+            if not additions:
+                continue
+            target.write_text(existing.rstrip() + '\n\n' + '\n'.join(additions).rstrip() + '\n', encoding='utf-8')
+            changed_paths.append(str(relative))
+
+        if not changed_paths or not _has_any_changes(repo_root, changed_paths):
+            return {'status': 'NO_CHANGES', 'paths': changed_paths, 'commit': ''}
+
+        _run_git(repo_root, 'add', *changed_paths)
+        _run_git(repo_root, 'commit', '-m', f'Promote canonical Telegram memory ({today.isoformat()})')
+        sha = _run_git(repo_root, 'rev-parse', 'HEAD')
+        if push:
+            _push_with_rebase_retry(repo_root, remote, branch)
+        return {'status': 'PUSHED' if push else 'COMMITTED', 'paths': changed_paths, 'commit': sha}
+    finally:
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        lock_fd.close()
+
+
 def _revise_context_documents_locked(edits: list[dict], *, message: str = '', push: bool = True) -> dict:
     repo_root = _repo_root()
     _context_root(repo_root)

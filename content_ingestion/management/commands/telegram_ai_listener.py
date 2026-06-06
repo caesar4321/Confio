@@ -19,6 +19,7 @@ from content_ingestion.ai_client import (
     provider_label,
 )
 from content_ingestion.ai_agent import run_with_tools
+from content_ingestion import canonical_promotion
 from content_ingestion.ai_context import (
     _memory_chunks,
     build_media_system_prompt,
@@ -52,6 +53,9 @@ PROVIDER_COMMANDS = {
 }
 DEBATE_COMMAND = '/debate'
 WHOAMI_COMMAND = '/whoami'
+MEMORY_REVIEW_COMMAND = '/memoryreview'
+MEMORY_APPROVE_COMMAND = '/memoryapprove'
+MEMORY_REJECT_COMMAND = '/memoryreject'
 # Memory writes to ConfioAI (git) ONLY happen via these explicit commands. Without
 # one, the bot just analyzes/answers and never commits anything.
 MEMORY_COMMANDS = {'/memory', '/save', '/recordar', '/guardar', '/savevideo'}
@@ -147,6 +151,55 @@ class Command(BaseCommand):
                     await self._answer(event, client, prompt, default_provider, debate_mode=True)
                 elif command == WHOAMI_COMMAND:
                     await event.reply(_whoami_response(sender, getattr(event, 'sender_id', None)))
+                elif command == MEMORY_REVIEW_COMMAND:
+                    authority = _sender_authority(sender, getattr(event, 'sender_id', None))
+                    if authority not in {'owner', 'trusted'}:
+                        await event.reply('No tienes permiso para revisar memoria canónica.')
+                        return
+                    result = await asyncio.to_thread(canonical_promotion.list_review_candidates)
+                    for chunk in _telegram_chunks(result):
+                        await event.reply(chunk)
+                elif command == MEMORY_APPROVE_COMMAND:
+                    authority = _sender_authority(sender, getattr(event, 'sender_id', None))
+                    if authority != 'owner':
+                        await event.reply('Solo Julian puede aprobar candidatos inciertos.')
+                        return
+                    candidate_id = _candidate_id(prompt)
+                    if candidate_id is None:
+                        await event.reply(f'Usage: {MEMORY_APPROVE_COMMAND} <candidate-id>')
+                        return
+                    try:
+                        result = await asyncio.to_thread(
+                            canonical_promotion.approve_review_candidate,
+                            candidate_id,
+                        )
+                    except canonical_promotion.CanonicalMemoryPromotion.DoesNotExist:
+                        await event.reply('No encontré ese candidato pendiente.')
+                        return
+                    await event.reply(
+                        f'Memoria aprobada y promovida. Commit: '
+                        f'{result.get("commit", "")[:12] or "(sin cambios)"}'
+                    )
+                elif command == MEMORY_REJECT_COMMAND:
+                    authority = _sender_authority(sender, getattr(event, 'sender_id', None))
+                    if authority != 'owner':
+                        await event.reply('Solo Julian puede rechazar candidatos inciertos.')
+                        return
+                    candidate_id = _candidate_id(prompt)
+                    if candidate_id is None:
+                        await event.reply(f'Usage: {MEMORY_REJECT_COMMAND} <candidate-id> [reason]')
+                        return
+                    reason = re.sub(r'^\s*#?\d+\s*', '', prompt or '', count=1)
+                    try:
+                        await asyncio.to_thread(
+                            canonical_promotion.reject_review_candidate,
+                            candidate_id,
+                            reason=reason,
+                        )
+                    except canonical_promotion.CanonicalMemoryPromotion.DoesNotExist:
+                        await event.reply('No encontré ese candidato pendiente.')
+                        return
+                    await event.reply(f'Candidato #{candidate_id} rechazado.')
                 elif command in MEMORY_COMMANDS:
                     has_media = bool(getattr(getattr(event, 'message', None), 'media', None))
                     if not prompt and not has_media:
@@ -193,8 +246,9 @@ class Command(BaseCommand):
 
         await asyncio.to_thread(_sync_memory_index_best_effort)
 
-        # Background task: commit + push conversation logs to ConfioAI on a timer.
+        # Background tasks: durable raw logs plus conservative canonical promotion.
         flush_task = asyncio.create_task(self._flush_loop())
+        promotion_task = asyncio.create_task(self._promotion_loop())
 
         # Self-healing loop: a Telegram disconnect should never take the process down.
         try:
@@ -226,8 +280,13 @@ class Command(BaseCommand):
                 await asyncio.sleep(RECONNECT_DELAY_SECONDS)
         finally:
             flush_task.cancel()
+            promotion_task.cancel()
             try:
                 await flush_task
+            except asyncio.CancelledError:
+                pass
+            try:
+                await promotion_task
             except asyncio.CancelledError:
                 pass
             await client.disconnect()
@@ -294,6 +353,19 @@ class Command(BaseCommand):
             conversation_log.append_turn,
             event.chat_id, sender_name, event.raw_text or prompt, answer,
         )
+        try:
+            await asyncio.to_thread(
+                canonical_promotion.record_turn,
+                chat_id=event.chat_id,
+                message_id=getattr(event, 'id', 0),
+                sender_id=sender_id,
+                sender_name=sender_name,
+                authority=authority,
+                user_text=event.raw_text or prompt,
+                assistant_text=answer,
+            )
+        except Exception:
+            logger.warning('Could not queue turn for canonical promotion.', exc_info=True)
 
     async def _generate_answer(
         self,
@@ -443,6 +515,21 @@ class Command(BaseCommand):
             finally:
                 close_old_connections()
 
+    async def _promotion_loop(self):
+        """Periodically promote durable owner/trusted learnings into canonical Git memory."""
+        interval = getattr(settings, 'CONFIO_AI_CANONICAL_PROMOTION_SECONDS', 900)
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                close_old_connections()
+                result = await asyncio.to_thread(canonical_promotion.process_pending_turns)
+                if result.get('turns') or result.get('promoted'):
+                    logger.info('Canonical promotion loop: %s', result)
+            except Exception:
+                logger.exception('Canonical promotion loop failed')
+            finally:
+                close_old_connections()
+
 
 def _is_stale(event):
     """True for backlog/history messages replayed by Telegram on connect or on join."""
@@ -450,6 +537,11 @@ def _is_stale(event):
     if msg_date is None:
         return False
     return (datetime.now(timezone.utc) - msg_date).total_seconds() > MAX_MESSAGE_AGE_SECONDS
+
+
+def _candidate_id(value: str) -> int | None:
+    match = re.match(r'^\s*#?(\d+)\b', value or '')
+    return int(match.group(1)) if match else None
 
 
 def _chat_in_scope(event, allowed_chat_ids, include_dms):

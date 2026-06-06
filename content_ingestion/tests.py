@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from datetime import date
 
 import requests
@@ -213,6 +213,242 @@ class MemoryEmbeddingTests(SimpleTestCase):
         sleep.assert_not_called()
 
 
+class CanonicalPromotionValidationTests(SimpleTestCase):
+    def _turn(self, *, pk, authority='owner', user_text='We decided to ship Telegram first.'):
+        from content_ingestion.models import CanonicalMemoryTurn
+
+        return CanonicalMemoryTurn(
+            pk=pk,
+            telegram_chat_id=-100,
+            telegram_message_id=pk,
+            sender_id=809234244,
+            sender_name='Julian',
+            authority=authority,
+            user_text=user_text,
+            assistant_text='Understood. Telegram first.',
+        )
+
+    @override_settings(
+        CONFIO_AI_CANONICAL_OWNER_THRESHOLD=0.90,
+        CONFIO_AI_CANONICAL_TRUSTED_THRESHOLD=0.95,
+    )
+    def test_owner_candidate_with_exact_evidence_is_auto_pending(self):
+        from content_ingestion.canonical_promotion import _validate_candidate
+        from content_ingestion.models import CanonicalPromotionStatus
+
+        turn = self._turn(pk=1)
+        result = _validate_candidate({
+            'category': 'decisions',
+            'statement': 'Confío will prioritize Telegram as the first internal AI interface.',
+            'evidence_quote': 'We decided to ship Telegram first.',
+            'source_turn_ids': [1],
+            'confidence': 0.94,
+            'requires_review': False,
+            'reason': 'Explicit founder decision.',
+        }, {1: turn})
+
+        self.assertEqual(result['status'], CanonicalPromotionStatus.AUTO_PENDING)
+        self.assertEqual(result['source_authority'], 'owner')
+
+    def test_assistant_only_evidence_is_rejected(self):
+        from content_ingestion.canonical_promotion import _validate_candidate
+
+        turn = self._turn(pk=1, user_text='Sounds good.')
+        result = _validate_candidate({
+            'category': 'decisions',
+            'statement': 'Confío will prioritize Telegram as the first internal AI interface.',
+            'evidence_quote': 'Telegram first.',
+            'source_turn_ids': [1],
+            'confidence': 0.99,
+            'requires_review': False,
+            'reason': '',
+        }, {1: turn})
+
+        self.assertIsNone(result)
+
+    def test_credentials_and_private_contact_data_are_rejected(self):
+        from content_ingestion.canonical_promotion import _validate_candidate
+
+        turn = self._turn(pk=1, user_text='The API key is sk-test-secret-123456789.')
+        result = _validate_candidate({
+            'category': 'facts',
+            'statement': 'The API key is sk-test-secret-123456789.',
+            'evidence_quote': 'The API key is sk-test-secret-123456789.',
+            'source_turn_ids': [1],
+            'confidence': 1.0,
+            'requires_review': False,
+            'reason': '',
+        }, {1: turn})
+
+        self.assertIsNone(result)
+
+    @override_settings(CONFIO_AI_CANONICAL_TRUSTED_THRESHOLD=0.95)
+    def test_trusted_candidate_below_threshold_requires_review(self):
+        from content_ingestion.canonical_promotion import _validate_candidate
+        from content_ingestion.models import CanonicalPromotionStatus
+
+        turn = self._turn(pk=2, authority='trusted')
+        result = _validate_candidate({
+            'category': 'preferences',
+            'statement': 'The team prefers operational updates through Telegram.',
+            'evidence_quote': 'We decided to ship Telegram first.',
+            'source_turn_ids': [2],
+            'confidence': 0.93,
+            'requires_review': False,
+            'reason': 'Trusted operator preference.',
+        }, {2: turn})
+
+        self.assertEqual(result['status'], CanonicalPromotionStatus.REVIEW)
+
+    @override_settings(
+        GEMINI_API_KEY='test-key',
+        GEMINI_MODEL='gemini-3.5-flash',
+    )
+    @patch('content_ingestion.canonical_promotion.render_retrieved_knowledge', return_value='Known memory')
+    @patch('content_ingestion.canonical_promotion.requests.post')
+    def test_extractor_uses_structured_json_and_includes_assistant_context(
+        self,
+        post,
+        render_memory,
+    ):
+        from content_ingestion.canonical_promotion import _extract_candidates
+
+        response = requests.Response()
+        response.status_code = 200
+        response._content = (
+            b'{"candidates":[{"content":{"parts":[{"text":"'
+            b'{\\"candidates\\":[{\\"category\\":\\"decisions\\",'
+            b'\\"statement\\":\\"Confio prioritizes Telegram as its internal interface.\\",'
+            b'\\"evidence_quote\\":\\"We decided to ship Telegram first.\\",'
+            b'\\"source_turn_ids\\":[1],\\"confidence\\":0.97,'
+            b'\\"requires_review\\":false,\\"reason\\":\\"Explicit decision.\\"}]}'
+            b'"}]}}]}'
+        )
+        post.return_value = response
+        turn = self._turn(pk=1)
+
+        candidates = _extract_candidates([turn])
+
+        self.assertEqual(candidates[0]['category'], 'decisions')
+        payload = post.call_args.kwargs['json']
+        prompt = payload['contents'][0]['parts'][0]['text']
+        self.assertIn('Understood. Telegram first.', prompt)
+        self.assertEqual(
+            payload['generationConfig']['responseMimeType'],
+            'application/json',
+        )
+        render_memory.assert_called_once()
+
+
+class CanonicalPromotionGitTests(SimpleTestCase):
+    @patch('content_ingestion.context_repo._has_any_changes', return_value=True)
+    @patch('content_ingestion.context_repo._run_git')
+    def test_promotions_are_appended_with_provenance_markers(self, run_git, has_changes):
+        import os
+        import tempfile
+
+        from content_ingestion.context_repo import append_canonical_promotions
+
+        def git_result(_repo, *args):
+            return 'abc123' if args[:2] == ('rev-parse', 'HEAD') else ''
+
+        run_git.side_effect = git_result
+        with tempfile.TemporaryDirectory() as repo:
+            os.makedirs(os.path.join(repo, '.git'))
+            with override_settings(
+                CONFIO_AI_REPO_PATH=repo,
+                CONFIO_AI_CONTEXT_ROOT='docs',
+            ):
+                result = append_canonical_promotions([{
+                    'category': 'facts',
+                    'statement': 'Confío uses Telegram as an internal operating interface.',
+                    'fingerprint': 'f' * 64,
+                    'source': 'Julian, message 42',
+                }], push=False)
+            path = os.path.join(repo, 'docs', 'facts', 'telegram-learnings.md')
+            content = open(path, encoding='utf-8').read()
+
+        self.assertEqual(result['status'], 'COMMITTED')
+        self.assertIn(f'<!-- promotion:{"f" * 64} -->', content)
+        self.assertIn('Julian, message 42', content)
+        has_changes.assert_called_once()
+
+
+class CanonicalPromotionPersistenceTests(SimpleTestCase):
+    @patch('content_ingestion.canonical_promotion.CanonicalMemoryTurn.objects.update_or_create')
+    def test_only_authoritative_turns_are_queued(self, update_or_create):
+        from content_ingestion.canonical_promotion import record_turn
+
+        client_turn = record_turn(
+            chat_id=-100,
+            message_id=1,
+            sender_id=123,
+            sender_name='Client',
+            authority='client',
+            user_text='Change the roadmap.',
+            assistant_text='Noted.',
+        )
+        persisted = MagicMock()
+        update_or_create.return_value = (persisted, True)
+        owner_turn = record_turn(
+            chat_id=-100,
+            message_id=2,
+            sender_id=809234244,
+            sender_name='Julian',
+            authority='owner',
+            user_text='Make Telegram the canonical operational interface.',
+            assistant_text='Understood.',
+        )
+
+        self.assertIsNone(client_turn)
+        self.assertIs(owner_turn, persisted)
+        update_or_create.assert_called_once()
+
+    @patch('content_ingestion.canonical_promotion.CanonicalMemoryTurn.objects.filter')
+    @patch('content_ingestion.canonical_promotion.CanonicalMemoryPromotion.objects.filter')
+    @patch('content_ingestion.canonical_promotion.sync_chunks')
+    @patch('content_ingestion.canonical_promotion.append_canonical_promotions')
+    def test_ready_candidate_is_written_and_marked_promoted(
+        self,
+        append,
+        sync,
+        promotion_filter,
+        turn_filter,
+    ):
+        from content_ingestion.canonical_promotion import promote_ready_candidates
+        from content_ingestion.models import CanonicalPromotionStatus
+
+        turn = MagicMock(
+            pk=10,
+            sender_name='Julian',
+            sender_id=809234244,
+            telegram_chat_id=-100,
+            telegram_message_id=10,
+        )
+        candidate = MagicMock(
+            category='decisions',
+            statement='Confío uses Telegram as its internal operating interface.',
+            fingerprint='a' * 64,
+            source_turn_ids=[10],
+        )
+        promotion_filter.return_value.order_by.return_value.__getitem__.return_value = [candidate]
+        turn_filter.return_value = [turn]
+        append.return_value = {
+            'status': 'PUSHED',
+            'paths': ['docs/decisions/2026/2026-06-06-telegram-decisions.md'],
+            'commit': 'abc123',
+        }
+
+        result = promote_ready_candidates()
+
+        self.assertEqual(candidate.status, CanonicalPromotionStatus.PROMOTED)
+        self.assertEqual(candidate.commit_sha, 'abc123')
+        self.assertEqual(result['promoted'], 1)
+        append.assert_called_once()
+        sync.assert_called_once()
+        candidate.save.assert_called_once()
+
+
 class AIProviderRoutingTests(SimpleTestCase):
     def test_normalize_aliases(self):
         from content_ingestion.ai_client import normalize_provider
@@ -389,12 +625,18 @@ class AIProviderRoutingTests(SimpleTestCase):
 
 class CommandParsingTests(SimpleTestCase):
     def test_split_command(self):
-        from content_ingestion.management.commands.telegram_ai_listener import _split_command
+        from content_ingestion.management.commands.telegram_ai_listener import (
+            _candidate_id,
+            _split_command,
+        )
 
         self.assertEqual(_split_command('hello there'), (None, 'hello there'))
         self.assertEqual(_split_command('/claude how are you'), ('/claude', 'how are you'))
         self.assertEqual(_split_command('/debate'), ('/debate', ''))
         self.assertEqual(_split_command('/CLAUDE@SomeBot hi'), ('/claude', 'hi'))
+        self.assertEqual(_split_command('/memoryapprove #42'), ('/memoryapprove', '#42'))
+        self.assertEqual(_candidate_id('#42 approve this'), 42)
+        self.assertIsNone(_candidate_id('missing'))
 
     def test_parse_video_memory_folder_from_slash_title(self):
         from content_ingestion.management.commands.telegram_ai_listener import _parse_memory_tool_args

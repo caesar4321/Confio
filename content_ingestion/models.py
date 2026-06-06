@@ -40,6 +40,13 @@ class AIContextCommitStatus(models.TextChoices):
     FAILED = 'FAILED', 'Failed'
 
 
+class CanonicalPromotionStatus(models.TextChoices):
+    AUTO_PENDING = 'AUTO_PENDING', 'Pending automatic promotion'
+    PROMOTED = 'PROMOTED', 'Promoted'
+    REVIEW = 'REVIEW', 'Needs review'
+    REJECTED = 'REJECTED', 'Rejected'
+
+
 class TelegramChat(models.Model):
     title = models.CharField(max_length=255)
     chat_identifier = models.CharField(
@@ -155,3 +162,55 @@ class AIContextDocument(models.Model):
 
     def __str__(self):
         return f'{self.category}: {self.title}'
+
+
+class CanonicalMemoryTurn(models.Model):
+    telegram_chat_id = models.BigIntegerField()
+    telegram_message_id = models.BigIntegerField()
+    sender_id = models.BigIntegerField(null=True, blank=True)
+    sender_name = models.CharField(max_length=255, blank=True, default='')
+    authority = models.CharField(max_length=16)
+    user_text = models.TextField()
+    assistant_text = models.TextField(blank=True, default='')
+    processed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['created_at', 'pk']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['telegram_chat_id', 'telegram_message_id'],
+                name='canonical_turn_tg_message_unique',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['processed_at', 'created_at'], name='canonical_turn_pending_idx'),
+        ]
+
+
+class CanonicalMemoryPromotion(models.Model):
+    category = models.CharField(max_length=32, choices=AIContextCategory.choices)
+    statement = models.TextField()
+    evidence_quote = models.TextField()
+    confidence = models.FloatField(default=0)
+    fingerprint = models.CharField(max_length=64, unique=True)
+    source_turn_ids = models.JSONField(default=list, blank=True)
+    source_authority = models.CharField(max_length=16, blank=True, default='')
+    status = models.CharField(
+        max_length=16,
+        choices=CanonicalPromotionStatus.choices,
+        default=CanonicalPromotionStatus.REVIEW,
+    )
+    reason = models.TextField(blank=True, default='')
+    target_path = models.CharField(max_length=500, blank=True, default='')
+    commit_sha = models.CharField(max_length=64, blank=True, default='')
+    promoted_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['status', '-created_at'], name='canonical_promo_status_idx'),
+            models.Index(fields=['category', '-created_at'], name='canonical_promo_category_idx'),
+        ]
