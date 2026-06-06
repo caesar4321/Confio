@@ -1,6 +1,7 @@
 from unittest.mock import patch
 from datetime import date
 
+import requests
 from django.test import RequestFactory, SimpleTestCase, override_settings
 
 from .models import AIContextCategory, AIContextDocument
@@ -164,6 +165,52 @@ class AIContextRepoPathTests(SimpleTestCase):
         self.assertIn('[videos] Video Uno', all_out)
         self.assertIn('[strategy] Strategy Plan', all_out)
         self.assertNotIn('Conversation log', all_out)
+
+
+class MemoryEmbeddingTests(SimpleTestCase):
+    @override_settings(
+        GEMINI_API_KEY='test-key',
+        CONFIO_AI_EMBEDDING_MODEL='gemini-embedding-2',
+        CONFIO_AI_EMBEDDING_DIMENSIONS=3,
+    )
+    @patch('content_ingestion.memory_index.time.sleep')
+    @patch('content_ingestion.memory_index.requests.post')
+    def test_background_embedding_retries_quota_errors(self, post, sleep):
+        from content_ingestion.memory_index import embed_texts
+
+        quota_response = requests.Response()
+        quota_response.status_code = 429
+        quota_response._content = b'quota exceeded'
+        quota_response.headers['Retry-After'] = '2'
+        success_response = requests.Response()
+        success_response.status_code = 200
+        success_response._content = b'{"embeddings":[{"values":[0.1,0.2,0.3]}]}'
+        post.side_effect = [quota_response, success_response]
+
+        self.assertEqual(
+            embed_texts(['memory'], max_retries=1),
+            [[0.1, 0.2, 0.3]],
+        )
+        sleep.assert_called_once_with(2.0)
+
+    @override_settings(
+        GEMINI_API_KEY='test-key',
+        CONFIO_AI_EMBEDDING_MODEL='gemini-embedding-2',
+        CONFIO_AI_EMBEDDING_DIMENSIONS=3,
+    )
+    @patch('content_ingestion.memory_index.time.sleep')
+    @patch('content_ingestion.memory_index.requests.post')
+    def test_interactive_embedding_does_not_wait_on_quota(self, post, sleep):
+        from content_ingestion.memory_index import embed_texts
+
+        quota_response = requests.Response()
+        quota_response.status_code = 429
+        quota_response._content = b'quota exceeded'
+        post.return_value = quota_response
+
+        with self.assertRaisesRegex(RuntimeError, '429'):
+            embed_texts(['query'])
+        sleep.assert_not_called()
 
 
 class AIProviderRoutingTests(SimpleTestCase):

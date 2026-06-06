@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import time
 from dataclasses import dataclass
 
 import requests
@@ -34,7 +35,12 @@ def _vector_literal(values: list[float]) -> str:
     return '[' + ','.join(f'{float(value):.9g}' for value in values) + ']'
 
 
-def embed_texts(texts: list[str]) -> list[list[float]]:
+def embed_texts(
+    texts: list[str],
+    *,
+    max_retries: int = 0,
+    retry_base_seconds: float = 5.0,
+) -> list[list[float]]:
     if not texts:
         return []
     api_key = getattr(settings, 'GEMINI_API_KEY', '')
@@ -54,12 +60,30 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
         }
         for text in texts
     ]
-    response = requests.post(
-        url,
-        params={'key': api_key},
-        json={'requests': requests_payload},
-        timeout=120,
-    )
+    response = None
+    for attempt in range(max_retries + 1):
+        response = requests.post(
+            url,
+            params={'key': api_key},
+            json={'requests': requests_payload},
+            timeout=120,
+        )
+        if response.status_code != 429 or attempt >= max_retries:
+            break
+        retry_after = response.headers.get('Retry-After')
+        try:
+            delay = float(retry_after) if retry_after else retry_base_seconds * (2 ** attempt)
+        except (TypeError, ValueError):
+            delay = retry_base_seconds * (2 ** attempt)
+        delay = min(delay, 60.0)
+        logger.warning(
+            'Gemini embedding quota exceeded; retrying in %.1f seconds (%s/%s).',
+            delay,
+            attempt + 1,
+            max_retries,
+        )
+        time.sleep(delay)
+    assert response is not None
     if response.status_code >= 400:
         raise RuntimeError(
             f'Gemini embedding request failed: {response.status_code} {response.text[:300]}'
@@ -123,7 +147,7 @@ def semantic_search(
         return []
 
 
-def sync_chunks(chunks, *, batch_size: int = 50) -> dict:
+def sync_chunks(chunks, *, batch_size: int = 20) -> dict:
     desired = {}
     for chunk in chunks:
         key = chunk_key(chunk.path, chunk.heading, chunk.text)
@@ -141,7 +165,7 @@ def sync_chunks(chunks, *, batch_size: int = 50) -> dict:
             f'Title: {chunk.title}\nSection: {chunk.heading}\n{chunk.text}'
             for _, chunk in batch
         ]
-        embeddings = embed_texts(texts)
+        embeddings = embed_texts(texts, max_retries=5)
         with connection.cursor() as cursor:
             for (key, chunk), embedding in zip(batch, embeddings):
                 cursor.execute(
@@ -175,4 +199,3 @@ def sync_chunks(chunks, *, batch_size: int = 50) -> dict:
         'deleted': len(stale),
         'unchanged': len(desired) - inserted,
     }
-
