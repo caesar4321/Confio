@@ -18,6 +18,10 @@ class IngestionStatus(models.TextChoices):
 
 
 class AIContextCategory(models.TextChoices):
+    PREFERENCES = 'preferences', 'Preferences'
+    FACTS = 'facts', 'Facts'
+    DECISIONS = 'decisions', 'Decisions'
+    CONTENT_RULES = 'content-rules', 'Content rules'
     DECISION_LOG = 'decision-log', 'Decision log'
     MEETING_NOTES = 'meeting-notes', 'Meeting notes'
     VIDEOS = 'videos', 'Videos'

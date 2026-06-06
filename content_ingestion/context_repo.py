@@ -296,6 +296,8 @@ def _document_relative_path(document: AIContextDocument, date) -> Path:
         if folder:
             return base / folder / f'{slug}.md'
         return base / f'{slug}.md'
+    if document.category in {'preferences', 'facts', 'content-rules'}:
+        return base / f'{slug}.md'
     filename = f'{date.isoformat()}-{slug}.md'
     return base / str(date.year) / filename
 

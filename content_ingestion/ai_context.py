@@ -5,12 +5,41 @@ from __future__ import annotations
 
 import glob
 import os
+import re
+import unicodedata
+from dataclasses import dataclass
 
 from django.conf import settings
 
 # Cache the corpus keyed by the set of files and their mtimes, so we only re-read
 # the ConfioAI repo when something actually changed.
 _CACHE: dict = {'sig': None, 'corpus': ''}
+_INDEX_CACHE: dict = {'sig': None, 'chunks': []}
+
+CANONICAL_CATEGORY_WEIGHTS = {
+    'content-rules': 5.0,
+    'preferences': 4.5,
+    'decisions': 4.0,
+    'facts': 4.0,
+    'strategy': 2.5,
+    'legal': 2.5,
+    'social-stats': 2.0,
+    'weekly-reports': 1.5,
+    'user-reports': 1.5,
+    'meeting-notes': 1.0,
+    'decision-log': 1.0,
+    'videos': 0.5,
+}
+
+
+@dataclass(frozen=True)
+class MemoryChunk:
+    path: str
+    category: str
+    title: str
+    heading: str
+    text: str
+    score: float = 0.0
 
 
 def _docs_dir() -> str:
@@ -64,21 +93,189 @@ def load_knowledge_corpus(max_chars: int | None = None) -> str:
     return corpus
 
 
-def search_knowledge(query: str, max_chars: int = 2500) -> str:
-    """Keyword search over the ConfioAI knowledge corpus. Returns matching sections."""
-    corpus = load_knowledge_corpus()
-    if not corpus:
+def _normalize_text(value: str) -> str:
+    value = unicodedata.normalize('NFKD', value or '')
+    value = ''.join(ch for ch in value if not unicodedata.combining(ch))
+    return re.sub(r'\s+', ' ', value.lower()).strip()
+
+
+def _query_terms(query: str) -> list[str]:
+    normalized = _normalize_text(query)
+    terms = re.findall(r'[a-z0-9][a-z0-9_-]{2,}|[\uac00-\ud7a3]{2,}', normalized)
+    stop = {
+        'the', 'and', 'for', 'con', 'que', 'una', 'uno', 'por', 'para', 'como',
+        'this', 'that', 'from', 'what', 'when', 'write', 'please', 'quiero',
+        'vamos', 'hacer', '해줘', '작성', '기반으로',
+    }
+    return [term for term in terms if term not in stop]
+
+
+def _markdown_title(text: str, fallback: str) -> str:
+    in_frontmatter = False
+    for idx, line in enumerate((text or '').splitlines()[:80]):
+        stripped = line.strip()
+        if idx == 0 and stripped == '---':
+            in_frontmatter = True
+            continue
+        if in_frontmatter and stripped == '---':
+            in_frontmatter = False
+            continue
+        if in_frontmatter:
+            key, sep, value = stripped.partition(':')
+            if sep and key.strip().lower() == 'title':
+                return value.strip().strip('"').strip("'") or fallback
+        if stripped.startswith('# '):
+            return stripped[2:].strip() or fallback
+    return fallback
+
+
+def _split_markdown_chunks(text: str, *, path: str, category: str) -> list[MemoryChunk]:
+    title = _markdown_title(text, os.path.splitext(os.path.basename(path))[0].replace('-', ' ').title())
+    chunks = []
+    heading = title
+    body: list[str] = []
+    in_frontmatter = False
+
+    def flush():
+        content = '\n'.join(body).strip()
+        if content:
+            chunks.append(MemoryChunk(path, category, title, heading, content))
+
+    for idx, line in enumerate((text or '').splitlines()):
+        stripped = line.strip()
+        if idx == 0 and stripped == '---':
+            in_frontmatter = True
+            continue
+        if in_frontmatter:
+            if stripped == '---':
+                in_frontmatter = False
+            continue
+        if re.match(r'^#{1,3}\s+', stripped):
+            flush()
+            body = []
+            heading = re.sub(r'^#{1,3}\s+', '', stripped).strip() or title
+            continue
+        body.append(line)
+    flush()
+    return chunks
+
+
+def _memory_chunks() -> list[MemoryChunk]:
+    docs = _docs_dir()
+    if not docs or not os.path.isdir(docs):
+        return []
+    files = [
+        path for path in glob.glob(os.path.join(docs, '**', '*.md'), recursive=True)
+        if f'{os.sep}conversations{os.sep}' not in path and os.path.basename(path) != '.gitkeep'
+    ]
+    sig = tuple(sorted((path, os.path.getmtime(path), os.path.getsize(path)) for path in files))
+    if _INDEX_CACHE['sig'] == sig:
+        return _INDEX_CACHE['chunks']
+
+    chunks = []
+    for path in files:
+        relative = os.path.relpath(path, docs)
+        parts = relative.split(os.sep)
+        if not parts:
+            continue
+        try:
+            text = open(path, encoding='utf-8').read()
+        except OSError:
+            continue
+        chunks.extend(_split_markdown_chunks(text, path=relative, category=parts[0]))
+    _INDEX_CACHE['sig'] = sig
+    _INDEX_CACHE['chunks'] = chunks
+    return chunks
+
+
+def retrieve_knowledge(
+    query: str,
+    *,
+    max_chunks: int | None = None,
+    max_chars: int | None = None,
+    categories: set[str] | None = None,
+) -> list[MemoryChunk]:
+    """Return bounded, authority-aware Markdown chunks relevant to the request."""
+    max_chunks = max_chunks or getattr(settings, 'CONFIO_AI_RETRIEVAL_MAX_CHUNKS', 8)
+    max_chars = max_chars or getattr(settings, 'CONFIO_AI_RETRIEVAL_MAX_CHARS', 9000)
+    terms = _query_terms(query)
+    phrase = _normalize_text(query)
+    ranked = []
+
+    for chunk in _memory_chunks():
+        if categories is not None and chunk.category not in categories:
+            continue
+        haystack = _normalize_text(f'{chunk.title} {chunk.heading} {chunk.text}')
+        path_text = _normalize_text(chunk.path)
+        category_weight = CANONICAL_CATEGORY_WEIGHTS.get(chunk.category, 0.25)
+        score = category_weight
+        matches = 0
+        for term in set(terms):
+            count = haystack.count(term)
+            if count:
+                matches += 1
+                score += min(count, 4) * 1.5
+                if term in _normalize_text(chunk.title):
+                    score += 3.0
+                if term in _normalize_text(chunk.heading):
+                    score += 2.0
+                if term in path_text:
+                    score += 1.0
+        if terms:
+            score += (matches / len(set(terms))) * 8.0
+        if phrase and len(phrase) <= 160 and phrase in haystack:
+            score += 10.0
+        if matches or chunk.category in {'preferences', 'facts', 'decisions', 'content-rules'}:
+            ranked.append(MemoryChunk(
+                chunk.path, chunk.category, chunk.title, chunk.heading, chunk.text, score
+            ))
+
+    ranked.sort(key=lambda item: (-item.score, item.path, item.heading))
+    selected = []
+    total = 0
+    per_file: dict[str, int] = {}
+    for chunk in ranked:
+        if len(selected) >= max_chunks:
+            break
+        if per_file.get(chunk.path, 0) >= 2:
+            continue
+        rendered_len = len(chunk.path) + len(chunk.heading) + len(chunk.text) + 40
+        if selected and total + rendered_len > max_chars:
+            continue
+        selected.append(chunk)
+        per_file[chunk.path] = per_file.get(chunk.path, 0) + 1
+        total += rendered_len
+    return selected
+
+
+def render_retrieved_knowledge(
+    query: str,
+    *,
+    max_chars: int | None = None,
+    categories: set[str] | None = None,
+) -> str:
+    chunks = retrieve_knowledge(query, max_chars=max_chars, categories=categories)
+    blocks = []
+    for chunk in chunks:
+        blocks.append(
+            f'SOURCE: docs/{chunk.path}\n'
+            f'TITLE: {chunk.title}\n'
+            f'SECTION: {chunk.heading}\n'
+            f'{chunk.text}'
+        )
+    return '\n\n'.join(blocks)
+
+
+def search_knowledge(query: str, max_chars: int = 4000) -> str:
+    """Retrieve bounded canonical-memory sections relevant to the query."""
+    result = render_retrieved_knowledge(query, max_chars=max_chars)
+    if not _memory_chunks():
         return 'La base de conocimiento de Confío está vacía (repo no disponible).'
-    terms = [t for t in (query or '').lower().split() if len(t) > 2]
-    if not terms:
-        return corpus[:max_chars]
-    hits = [block for block in corpus.split('\n\n') if any(t in block.lower() for t in terms)]
-    result = '\n\n'.join(hits) if hits else 'Sin coincidencias en la base de conocimiento.'
-    return result[:max_chars]
+    return result or 'Sin coincidencias relevantes en la memoria canónica.'
 
 
-def build_system_prompt() -> str:
-    """System prompt: base instructions + accurate capabilities + knowledge base."""
+def build_system_prompt(query: str = '') -> str:
+    """System prompt with bounded memory retrieved for the current request."""
     base = (getattr(settings, 'CONFIO_AI_SYSTEM_PROMPT', '') or '').strip()
     capabilities = (
         'Eres Confío AI, el asistente del equipo interno de Confío en Telegram. '
@@ -114,6 +311,10 @@ def build_system_prompt() -> str:
         'archivar, escribir en memoria o pushear a Git, debes usar las herramientas '
         'write_memory o write_video_memory para crear una memoria curada en ConfioAI; '
         'no afirmes que guardaste algo si no usaste una herramienta y recibiste éxito. '
+        'Jerarquía de memoria: preferences, facts, decisions y content-rules son memoria '
+        'canónica aprobada y tienen prioridad sobre strategy, reports, videos, meeting-notes '
+        'y conversaciones. Los chats y borradores aportan contexto, pero no deben contradecir '
+        'una regla o hecho canónico sin señalar explícitamente el conflicto. '
         'Para memorias de video, las subcarpetas bajo docs/videos representan playlists '
         'explícitas, no categorías inventadas por el modelo. No crees carpetas nuevas ni '
         'uses "Vida y filosofía" como comodín. Si el video viene como clip comprimido de '
@@ -128,13 +329,24 @@ def build_system_prompt() -> str:
     )
 
     parts = [base, capabilities]
-    corpus = load_knowledge_corpus()
-    if corpus:
-        parts.append('## Base de conocimiento de Confío\n' + corpus)
+    retrieved = render_retrieved_knowledge(
+        query,
+        categories={
+            'preferences', 'facts', 'decisions', 'content-rules', 'strategy',
+            'legal', 'social-stats', 'weekly-reports', 'user-reports',
+            'meeting-notes', 'decision-log', 'videos',
+        },
+    )
+    if retrieved:
+        parts.append(
+            '## Memoria canónica recuperada para esta solicitud\n'
+            'Prioriza estas fuentes sobre borradores del chat. No asumas que documentos '
+            'no recuperados dicen algo distinto.\n' + retrieved
+        )
     return '\n\n'.join(p for p in parts if p)
 
 
-def build_media_system_prompt() -> str:
+def build_media_system_prompt(query: str = '') -> str:
     """System prompt for DIRECT Gemini media analysis (video/image/YouTube).
 
     Deliberately has NO tool-calling instructions. These are plain generateContent calls
@@ -160,13 +372,19 @@ def build_media_system_prompt() -> str:
         'ni herramientas.'
     )
     parts = [base, persona]
-    corpus = load_knowledge_corpus()
-    if corpus:
-        parts.append('## Base de conocimiento de Confío\n' + corpus)
+    retrieved = render_retrieved_knowledge(
+        query,
+        categories={
+            'preferences', 'facts', 'decisions', 'content-rules', 'strategy',
+            'social-stats', 'videos',
+        },
+    )
+    if retrieved:
+        parts.append('## Memoria canónica relevante\n' + retrieved)
     return '\n\n'.join(p for p in parts if p)
 
 
-def build_script_system_prompt() -> str:
+def build_script_system_prompt(query: str = '') -> str:
     """System prompt for long-form creator scripts.
 
     This mode intentionally avoids tool instructions and the generic "be concise"
@@ -191,7 +409,14 @@ def build_script_system_prompt() -> str:
         'bajo control; no la repitas como muletilla.'
     )
     parts = [base, persona]
-    corpus = load_knowledge_corpus()
-    if corpus:
-        parts.append('## Base de conocimiento de Confío\n' + corpus)
+    retrieved = render_retrieved_knowledge(
+        query,
+        categories={'preferences', 'facts', 'decisions', 'content-rules', 'strategy'},
+    )
+    if retrieved:
+        parts.append(
+            '## Reglas y memoria canónica relevantes\n'
+            'Estas reglas son autoritativas y tienen prioridad sobre borradores anteriores.\n'
+            + retrieved
+        )
     return '\n\n'.join(p for p in parts if p)

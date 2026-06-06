@@ -256,7 +256,7 @@ class Command(BaseCommand):
         )
         reply_to = await _reply_target(event)
         user_prompt = _compose_prompt(prompt, history, reply_to, sender_name=sender_name, authority=authority)
-        system = build_system_prompt()
+        system = build_system_prompt(prompt)
         logger.info(
             'Telegram AI %s reply in chat %s',
             'debate' if debate_mode else provider_label(provider),
@@ -307,7 +307,7 @@ class Command(BaseCommand):
         # Direct Gemini media analysis (video/image/YouTube) must NOT receive tool
         # instructions — these are generateContent calls with no function declarations, so
         # tool-talk makes Gemini emit MALFORMED_FUNCTION_CALL. Use a tool-free system prompt.
-        media_system = build_media_system_prompt()
+        media_system = build_media_system_prompt(user_prompt)
         # Write turn = explicit /memory command OR a clearly-worded save/push/update intent
         # (precise detection, not loose keywords). Even then, the system prompt + the model
         # are the final gate on whether to actually call a write tool — casual chat never
@@ -323,7 +323,7 @@ class Command(BaseCommand):
             return await asyncio.to_thread(
                 complete_script,
                 _script_writer_prompt(user_prompt),
-                system=build_script_system_prompt(),
+                system=build_script_system_prompt(user_prompt),
             )
         if youtube_urls and not debate_mode and not memory_write_request:
             logger.info('Routing YouTube video analysis to Gemini: %s', youtube_urls[:3])
@@ -595,7 +595,7 @@ def _build_tools(client, event, loop, *, authority='client', allow_writes=False,
             return f'No pude listar las memorias de video: {exc}'
 
     def list_memory_docs(args=''):
-        """Lista determinísticamente memorias Markdown en ConfioAI, con total, categoría, título y path. Argumento opcional: categoría como videos, strategy, social-stats, legal, decision-log, weekly-reports; vacío lista todo excepto conversations."""
+        """Lista determinísticamente memorias Markdown en ConfioAI, con total, categoría, título y path. Argumento opcional: categoría como preferences, facts, decisions, content-rules, videos, strategy, social-stats o legal; vacío lista todo excepto conversations."""
         try:
             return list_memory_documents(args)
         except (ContextRepoError, OSError) as exc:
@@ -603,7 +603,7 @@ def _build_tools(client, event, loop, *, authority='client', allow_writes=False,
             return f'No pude listar las memorias: {exc}'
 
     def write_memory(args=''):
-        """Crea/actualiza memoria curada en ConfioAI y hace commit+push. Formato: primera línea 'category: <videos|strategy|decision-log|meeting-notes|weekly-reports|social-stats|legal|user-reports|other>'; segunda línea 'title: <título>'; opcional 'folder: <subcarpeta>'; resto: markdown completo."""
+        """Crea/actualiza memoria curada en ConfioAI y hace commit+push. Formato: primera línea 'category: <preferences|facts|decisions|content-rules|videos|strategy|meeting-notes|weekly-reports|social-stats|legal|user-reports|other>'; segunda línea 'title: <título>'; opcional 'folder: <subcarpeta>'; resto: markdown completo. Usa preferences/facts/content-rules para memoria canónica estable y decisions para decisiones aprobadas."""
         return _write_memory_tool(args)
 
     def write_video_memory(args=''):
