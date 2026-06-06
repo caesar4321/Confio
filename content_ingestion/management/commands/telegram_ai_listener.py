@@ -20,6 +20,7 @@ from content_ingestion.ai_client import (
 )
 from content_ingestion.ai_agent import run_with_tools
 from content_ingestion.ai_context import (
+    _memory_chunks,
     build_media_system_prompt,
     build_script_system_prompt,
     build_system_prompt,
@@ -35,6 +36,7 @@ from content_ingestion.context_repo import (
     write_commit_and_push_context,
 )
 from content_ingestion.models import AIContextCategory, AIContextDocument
+from content_ingestion.memory_index import sync_chunks
 from content_ingestion.telegram_client import _entity_identifier, get_client
 
 logger = logging.getLogger(__name__)
@@ -188,6 +190,8 @@ class Command(BaseCommand):
         if options['once']:
             await client.disconnect()
             return
+
+        await asyncio.to_thread(_sync_memory_index_best_effort)
 
         # Background task: commit + push conversation logs to ConfioAI on a timer.
         flush_task = asyncio.create_task(self._flush_loop())
@@ -433,6 +437,7 @@ class Command(BaseCommand):
                 result = await asyncio.to_thread(conversation_log.commit_and_push)
                 if result not in ('no changes', 'skipped (git busy)', 'disabled', None):
                     logger.info('Conversation log: %s', result)
+                await asyncio.to_thread(_sync_memory_index_best_effort)
             except Exception:
                 logger.exception('Conversation log flush failed')
             finally:
@@ -658,6 +663,7 @@ def _write_memory_tool(args: str) -> str:
             metadata=metadata,
         )
         document = write_commit_and_push_context(document, push=True)
+        _sync_memory_index_best_effort()
     except (ContextRepoError, OSError) as exc:
         logger.exception('write_memory tool failed')
         return f'No pude escribir/pushear la memoria: {exc}'
@@ -672,6 +678,20 @@ def _write_memory_tool(args: str) -> str:
         f'- Commit: {document.commit_sha[:12] if document.commit_sha else "(sin commit)"}\n'
         f'- Status: {document.status}'
     )
+
+
+def _sync_memory_index_best_effort():
+    if not getattr(settings, 'CONFIO_AI_SEMANTIC_RETRIEVAL_ENABLED', True):
+        return
+    try:
+        close_old_connections()
+        result = sync_chunks(_memory_chunks())
+        if result['inserted'] or result['deleted']:
+            logger.info('ConfioAI memory index synchronized: %s', result)
+    except Exception:
+        logger.warning('Could not synchronize ConfioAI memory index.', exc_info=True)
+    finally:
+        close_old_connections()
 
 
 def _video_memory_quality_issue(parsed: dict) -> str:
@@ -725,6 +745,7 @@ def _revise_memory_docs_tool(args: str) -> str:
         return 'No revisé nada: faltan bloques FILE.'
     try:
         result = revise_context_documents(parsed['edits'], message=parsed['message'], push=True)
+        _sync_memory_index_best_effort()
     except (ContextRepoError, OSError) as exc:
         logger.exception('revise_memory_docs tool failed')
         return f'No pude revisar/pushear los documentos: {exc}'

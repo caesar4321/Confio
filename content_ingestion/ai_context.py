@@ -11,6 +11,8 @@ from dataclasses import dataclass
 
 from django.conf import settings
 
+from .memory_index import semantic_search
+
 # Cache the corpus keyed by the set of files and their mtimes, so we only re-read
 # the ConfioAI repo when something actually changed.
 _CACHE: dict = {'sig': None, 'corpus': ''}
@@ -231,6 +233,39 @@ def retrieve_knowledge(
             ))
 
     ranked.sort(key=lambda item: (-item.score, item.path, item.heading))
+    lexical_by_key = {
+        (chunk.path, chunk.heading, chunk.text): chunk
+        for chunk in ranked
+    }
+    for semantic in semantic_search(query, categories=categories, limit=max_chunks * 2):
+        key = (semantic.source_path, semantic.heading, semantic.content)
+        semantic_score = (
+            CANONICAL_CATEGORY_WEIGHTS.get(semantic.category, 0.25)
+            + max(0.0, semantic.similarity) * 20.0
+        )
+        existing = lexical_by_key.get(key)
+        if existing:
+            lexical_by_key[key] = MemoryChunk(
+                existing.path,
+                existing.category,
+                existing.title,
+                existing.heading,
+                existing.text,
+                existing.score + max(0.0, semantic.similarity) * 10.0,
+            )
+        else:
+            lexical_by_key[key] = MemoryChunk(
+                semantic.source_path,
+                semantic.category,
+                semantic.title,
+                semantic.heading,
+                semantic.content,
+                semantic_score,
+            )
+    ranked = sorted(
+        lexical_by_key.values(),
+        key=lambda item: (-item.score, item.path, item.heading),
+    )
     selected = []
     total = 0
     per_file: dict[str, int] = {}

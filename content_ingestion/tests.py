@@ -971,6 +971,7 @@ class MemoryToolTests(SimpleTestCase):
         self.assertFalse(_substantial_shrink(existing, existing + '\nNuevo análisis.'))
 
 
+@override_settings(CONFIO_AI_SEMANTIC_RETRIEVAL_ENABLED=False)
 class KnowledgeCorpusTests(SimpleTestCase):
     def test_corpus_empty_when_repo_missing(self):
         from content_ingestion import ai_context
