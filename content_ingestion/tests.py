@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import date
 
 import requests
@@ -638,6 +638,15 @@ class CommandParsingTests(SimpleTestCase):
         self.assertEqual(_candidate_id('#42 approve this'), 42)
         self.assertIsNone(_candidate_id('missing'))
 
+    def test_write_intent_is_evaluated_from_current_request_not_authority_prompt(self):
+        from content_ingestion.management.commands.telegram_ai_listener import (
+            _authority_prompt,
+            _is_memory_write_request,
+        )
+
+        self.assertTrue(_is_memory_write_request(_authority_prompt('Julian', 'owner')))
+        self.assertFalse(_is_memory_write_request('Analiza esta imagen.'))
+
     def test_parse_video_memory_folder_from_slash_title(self):
         from content_ingestion.management.commands.telegram_ai_listener import _parse_memory_tool_args
 
@@ -811,6 +820,119 @@ class CommandParsingTests(SimpleTestCase):
         self.assertNotIn('write_video_memory', revision_tools)
         self.assertIn('read_memory_docs', revision_tools)
         self.assertIn('revise_memory_docs', revision_tools)
+
+
+class TelegramImageRoutingTests(SimpleTestCase):
+    @patch(
+        'content_ingestion.management.commands.telegram_ai_listener.build_media_system_prompt',
+        return_value='MEDIA SYSTEM',
+    )
+    @patch(
+        'content_ingestion.management.commands.telegram_ai_listener._collect_video_inputs',
+        new_callable=AsyncMock,
+        return_value=[],
+    )
+    @patch(
+        'content_ingestion.management.commands.telegram_ai_listener._collect_image_inputs',
+        new_callable=AsyncMock,
+        return_value=[('image/jpeg', b'image-bytes')],
+    )
+    @patch(
+        'content_ingestion.management.commands.telegram_ai_listener.complete_with_images',
+        return_value='I can see the image.',
+    )
+    @patch('content_ingestion.management.commands.telegram_ai_listener.run_with_tools')
+    def test_owner_ambient_image_routes_to_vision_not_write_agent(
+        self,
+        run_with_tools,
+        complete_images,
+        collect_images,
+        collect_videos,
+        media_prompt,
+    ):
+        import asyncio
+        import types
+
+        from content_ingestion.management.commands.telegram_ai_listener import Command
+
+        result = asyncio.run(Command()._generate_answer(
+            types.SimpleNamespace(chat_id=-100),
+            None,
+            (
+                'Autoridad del remitente: OWNER / Julian. '
+                'Si pide push, commit o editar memoria, hazlo.\n\n'
+                'Mensaje a responder:\nAnaliza esta imagen.'
+            ),
+            'gemini',
+            'SYSTEM',
+            'owner',
+            False,
+            request_text='Analiza esta imagen.',
+            routing_text='Analiza esta imagen.',
+        ))
+
+        self.assertEqual(result, 'I can see the image.')
+        complete_images.assert_called_once()
+        run_with_tools.assert_not_called()
+
+    @patch(
+        'content_ingestion.management.commands.telegram_ai_listener.build_media_system_prompt',
+        return_value='MEDIA SYSTEM',
+    )
+    @patch(
+        'content_ingestion.management.commands.telegram_ai_listener._collect_video_inputs',
+        new_callable=AsyncMock,
+        return_value=[],
+    )
+    @patch(
+        'content_ingestion.management.commands.telegram_ai_listener._collect_image_inputs',
+        new_callable=AsyncMock,
+        return_value=[('image/jpeg', b'image-bytes')],
+    )
+    @patch(
+        'content_ingestion.management.commands.telegram_ai_listener.complete_with_images',
+        return_value='Visible text: principio de la sospecha.',
+    )
+    @patch(
+        'content_ingestion.management.commands.telegram_ai_listener._build_tools',
+        return_value={'write_memory': object()},
+    )
+    @patch(
+        'content_ingestion.management.commands.telegram_ai_listener.run_with_tools',
+        return_value='Memory saved.',
+    )
+    def test_image_memory_write_includes_visual_analysis(
+        self,
+        run_with_tools,
+        build_tools,
+        complete_images,
+        collect_images,
+        collect_videos,
+        media_prompt,
+    ):
+        import asyncio
+        import types
+
+        from content_ingestion.management.commands.telegram_ai_listener import Command
+
+        result = asyncio.run(Command()._generate_answer(
+            types.SimpleNamespace(chat_id=-100),
+            None,
+            'Mensaje a responder:\nGuarda esta imagen en memoria.',
+            'gemini',
+            'SYSTEM',
+            'owner',
+            False,
+            explicit_memory=True,
+            request_text='Guarda esta imagen en memoria.',
+            routing_text='Guarda esta imagen en memoria.',
+        ))
+
+        self.assertEqual(result, 'Memory saved.')
+        complete_images.assert_called_once()
+        agent_prompt = run_with_tools.call_args.args[0]
+        self.assertIn('Visible text: principio de la sospecha.', agent_prompt)
+        self.assertIn('Análisis real de la imagen vía Gemini', agent_prompt)
 
 
 class TelegramAnswerTimeoutTests(SimpleTestCase):

@@ -319,7 +319,8 @@ class Command(BaseCommand):
         )
         reply_to = await _reply_target(event)
         user_prompt = _compose_prompt(prompt, history, reply_to, sender_name=sender_name, authority=authority)
-        system = build_system_prompt(prompt)
+        routing_text = '\n'.join(part for part in (prompt, reply_to) if part)
+        system = await asyncio.to_thread(build_system_prompt, prompt)
         logger.info(
             'Telegram AI %s reply in chat %s',
             'debate' if debate_mode else provider_label(provider),
@@ -331,6 +332,8 @@ class Command(BaseCommand):
                     event, client, user_prompt, provider, system, authority, debate_mode,
                     explicit_memory=explicit_memory,
                     force_backend=force_backend,
+                    request_text=prompt,
+                    routing_text=routing_text,
                 ),
                 timeout=ANSWER_TIMEOUT_SECONDS,
             )
@@ -378,31 +381,38 @@ class Command(BaseCommand):
         debate_mode,
         explicit_memory=False,
         force_backend=None,
+        request_text='',
+        routing_text='',
     ):
-        youtube_urls = extract_youtube_urls(user_prompt)
-        # Direct Gemini media analysis (video/image/YouTube) must NOT receive tool
-        # instructions — these are generateContent calls with no function declarations, so
-        # tool-talk makes Gemini emit MALFORMED_FUNCTION_CALL. Use a tool-free system prompt.
-        media_system = build_media_system_prompt(user_prompt)
+        request_text = request_text or user_prompt
+        routing_text = routing_text or request_text
+        youtube_urls = extract_youtube_urls(routing_text)
         # Write turn = explicit /memory command OR a clearly-worded save/push/update intent
         # (precise detection, not loose keywords). Even then, the system prompt + the model
         # are the final gate on whether to actually call a write tool — casual chat never
         # auto-commits.
-        memory_write_request = explicit_memory or _is_memory_write_request(user_prompt)
-        existing_doc_revision = memory_write_request and _is_existing_doc_revision_request(user_prompt)
+        memory_write_request = explicit_memory or _is_memory_write_request(request_text)
+        existing_doc_revision = (
+            memory_write_request and _is_existing_doc_revision_request(request_text)
+        )
         if (
             not debate_mode
             and not memory_write_request
-            and _is_longform_script_request(user_prompt)
+            and _is_longform_script_request(request_text)
         ):
             logger.info('Routing long-form script request to script writer')
+            script_system = await asyncio.to_thread(
+                build_script_system_prompt,
+                request_text,
+            )
             return await asyncio.to_thread(
                 complete_script,
                 _script_writer_prompt(user_prompt),
-                system=build_script_system_prompt(user_prompt),
+                system=script_system,
             )
         if youtube_urls and not debate_mode and not memory_write_request:
             logger.info('Routing YouTube video analysis to Gemini: %s', youtube_urls[:3])
+            media_system = await asyncio.to_thread(build_media_system_prompt, routing_text)
             return await asyncio.to_thread(
                 complete_with_youtube_video, user_prompt, system=media_system
             )
@@ -412,9 +422,26 @@ class Command(BaseCommand):
                     'Analyzing YouTube video before memory write: %s',
                     youtube_urls[:3],
                 )
+                media_system = await asyncio.to_thread(build_media_system_prompt, routing_text)
                 user_prompt = await self._prompt_with_youtube_analysis(user_prompt, media_system)
             images = await _collect_image_inputs(client, event)
             videos = await _collect_video_inputs(client, event)
+            if (images or videos) and not youtube_urls:
+                # Direct Gemini media analysis must not receive tool instructions. Build
+                # this prompt only for actual media turns to avoid a second retrieval call
+                # on every ordinary text message.
+                media_system = await asyncio.to_thread(
+                    build_media_system_prompt,
+                    routing_text,
+                )
+            if images and memory_write_request:
+                logger.info('Analyzing %s Telegram image(s) before memory write', len(images))
+                user_prompt = await self._prompt_with_telegram_image_analysis(
+                    user_prompt,
+                    images,
+                    media_system,
+                )
+                images = []
             if videos and memory_write_request:
                 logger.info('Analyzing %s Telegram video(s) before memory write', len(videos))
                 user_prompt = await self._prompt_with_telegram_video_analysis(user_prompt, videos, media_system)
@@ -448,6 +475,36 @@ class Command(BaseCommand):
                 run_with_tools, user_prompt, provider, system, tools, backend=write_backend
             )
         return await asyncio.to_thread(debate, user_prompt, system=system)
+
+    async def _prompt_with_telegram_image_analysis(
+        self,
+        user_prompt: str,
+        images: list[tuple[str, bytes]],
+        system: str,
+    ) -> str:
+        analysis_prompt = (
+            f'{user_prompt}\n\n'
+            'Analiza la(s) imagen(es) reales adjuntas. Extrae el texto visible, objetos, '
+            'estructura, relaciones y cualquier evidencia útil para la solicitud actual. '
+            'No digas que recibiste solo una etiqueta [imagen]. Si algo no es legible, '
+            'indica exactamente qué parte es incierta.'
+        )
+        try:
+            analysis = await asyncio.to_thread(
+                complete_with_images,
+                analysis_prompt,
+                images,
+                system=system,
+            )
+        except AIClientError as exc:
+            analysis = f'No se pudo completar el análisis visual antes de escribir memoria: {exc}'
+        return (
+            f'{user_prompt}\n\n'
+            '## Análisis real de la imagen vía Gemini\n'
+            f'{analysis}\n\n'
+            'Usa este análisis visual como evidencia para la respuesta o memoria. '
+            'No afirmes que la imagen no era accesible.'
+        )
 
     async def _prompt_with_youtube_analysis(self, user_prompt: str, system: str) -> str:
         analysis_prompt = (

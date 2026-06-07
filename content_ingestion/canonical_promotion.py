@@ -8,7 +8,7 @@ import unicodedata
 
 import requests
 from django.conf import settings
-from django.db import transaction
+from django.db import close_old_connections, transaction
 from django.utils import timezone
 
 from .ai_context import render_retrieved_knowledge
@@ -53,6 +53,14 @@ def record_turn(
 
 
 def process_pending_turns(*, limit: int | None = None, dry_run: bool = False) -> dict:
+    close_old_connections()
+    try:
+        return _process_pending_turns(limit=limit, dry_run=dry_run)
+    finally:
+        close_old_connections()
+
+
+def _process_pending_turns(*, limit: int | None = None, dry_run: bool = False) -> dict:
     if not getattr(settings, 'CONFIO_AI_CANONICAL_PROMOTION_ENABLED', True):
         return {'status': 'disabled', 'turns': 0, 'candidates': 0, 'promoted': 0, 'review': 0}
 
