@@ -18,7 +18,7 @@ import { NavigationProp } from '@react-navigation/native';
 import { MainStackParamList } from '../types/navigation';
 import { useAuth } from '../contexts/AuthContext';
 import { ReferralInputModal } from '../components/ReferralInputModal';
-import { buildInviteLink, normalizeInviteUsername } from '../utils/inviteLinks';
+import { buildReferralShareMessage, normalizeInviteUsername } from '../utils/inviteLinks';
 import { AnalyticsService } from '../services/analyticsService';
 import { colors } from '../config/theme';
 
@@ -41,42 +41,23 @@ export const AchievementsScreen: React.FC = () => {
   const [showReferralModal, setShowReferralModal] = useState(false);
 
   const shareMessage = useMemo(() => {
-    // Generate clean, uppercase username for the link
-    const cleanUsername = normalizeInviteUsername(username || 'tuUsuario');
-    const inviteLink = buildInviteLink({
-      username: username || 'tuUsuario',
-      source: 'whatsapp',
-    });
-
-    return [
-      'Te envié un regalo de US$5 en $CONFIO 🎁',
-      '',
-      'Estoy usando Confío para guardar dólares sin bancos y sin restricciones.',
-      'Es como una bóveda digital personal 💰✨',
-      '',
-      '👇 Reclamá tu regalo acá:',
-      inviteLink,
-      '',
-      `Código: ${cleanUsername}`,
-      '',
-      '(El regalo se activa cuando cargues tus primeros 20 USDC y los pases a cUSD)',
-    ].join('\n');
+    return buildReferralShareMessage(username || 'tuUsuario');
   }, [username]);
 
   const steps: Step[] = useMemo(
     () => [
       {
         title: 'Compartí tu link',
-        description: 'Toca "Enviar regalo por WhatsApp" y elige a tus amigos. El mensaje incluye tu link único.',
+        description: 'Toca "Invitar por WhatsApp" y elige a tus amigos. El mensaje incluye tu link y la historia de Julian.',
       },
       {
-        title: 'Tu amigo se crea la cuenta',
-        description: 'Al crear su cuenta usando tu enlace, recibe automáticamente US$5 en $CONFIO (se activan luego).',
+        title: 'Tu amigo descubre Confío',
+        description: 'Al crear su cuenta usando tu enlace, queda asociado a tu invitación.',
       },
       {
-        title: 'Carga 20 USDC, pásalos a cUSD y se activan los US$5 en $CONFIO',
+        title: 'Carga 20 cUSD y se activan los US$5 en $CONFIO',
         description:
-          'Cuando tu amigo carga 20 USDC y los pasa a cUSD, se activan los US$5 en $CONFIO para los dos.',
+          'Cuando tu amigo carga al menos 20 cUSD, se activan los US$5 en $CONFIO para los dos.',
       },
       {
         title: '¡Ganen sin límites!',
@@ -144,10 +125,10 @@ export const AchievementsScreen: React.FC = () => {
           <View style={styles.heroIconWrap}>
             <Icon name="gift" size={24} color={colors.primaryDark} />
           </View>
-          <Text style={styles.heroTitle}>Regalá US$5 en $CONFIO y recibí US$5 vos también</Text>
+          <Text style={styles.heroTitle}>Invitá a tus amigos a la red de confianza</Text>
           <Text style={styles.heroSubtitle}>
-            Tu amigo se crea la cuenta con tu link.{'\n'}
-            Listo: ambos reciben US$5 en $CONFIO (se activan cuando cargan sus primeros 20 USDC y los pasan a cUSD).
+            Compartí la historia de Julian y por qué nació Confío.{'\n'}
+            Cuando tu amigo haga su primer depósito, ambos reciben US$5 en $CONFIO como bienvenida.
           </Text>
 
           <View style={styles.usernamePill}>
@@ -167,7 +148,7 @@ export const AchievementsScreen: React.FC = () => {
             </TouchableOpacity>
             <TouchableOpacity style={styles.shareButton} onPress={handleShare}>
               <WhatsAppLogo width={18} height={18} style={{ marginRight: 8 }} />
-              <Text style={styles.shareButtonText}>Enviar regalo por WhatsApp</Text>
+              <Text style={styles.shareButtonText}>Invitar por WhatsApp</Text>
             </TouchableOpacity>
           </View>
           {needsFriendlyUsername && (
@@ -210,7 +191,7 @@ export const AchievementsScreen: React.FC = () => {
           <Text style={styles.sectionTitle}>Tips para compartir</Text>
           <View style={styles.tipRow}>
             <Icon name="send" size={18} color={colors.primaryDark} />
-            <Text style={styles.tipText}>Usa el botón de WhatsApp para que el link se pegue automáticamente.</Text>
+            <Text style={styles.tipText}>Usa el botón de WhatsApp para enviar el link con la historia de Julian automáticamente.</Text>
           </View>
           <View style={styles.tipRow}>
             <Icon name="check-circle" size={18} color={colors.primaryDark} />
@@ -218,7 +199,7 @@ export const AchievementsScreen: React.FC = () => {
           </View>
           <View style={styles.tipRow}>
             <Icon name="zap" size={18} color={colors.primaryDark} />
-            <Text style={styles.tipText}>Ayúdalo a completar su recarga de 20 USDC para liberar el dinero.</Text>
+            <Text style={styles.tipText}>Ayúdalo a completar su recarga de 20 cUSD para liberar el bono.</Text>
           </View>
         </View>
 
@@ -242,8 +223,8 @@ export const AchievementsScreen: React.FC = () => {
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Operaciones que activan el bono</Text>
           <View style={styles.criteria}>
-            <Text style={styles.criteriaItem}>• Primera recarga de al menos 20 USDC (y pasarlos a cUSD)</Text>
-            <Text style={styles.criteriaItem}>• Primer depósito de USDC convertido a cUSD (≥ 20 USDC)</Text>
+            <Text style={styles.criteriaItem}>• Primera recarga de al menos 20 cUSD</Text>
+            <Text style={styles.criteriaItem}>• Primer depósito convertido automáticamente a cUSD (≥ 20 cUSD)</Text>
             <Text style={styles.criteriaNote}>El bono se acredita en $CONFIO automáticamente.</Text>
           </View>
         </View>

@@ -279,18 +279,18 @@ export default {
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Regalo de Confío</title>
+  <title>Traer confianza a América Latina</title>
   <meta property="og:type" content="website">
-  <meta property="og:title" content="Recibí US$5 por activar tu Confío App">
-  <meta property="og:description" content="Digital Dollar sin bancos. Gratis y en 1 minuto.">
+  <meta property="og:title" content="Traer confianza a América Latina">
+  <meta property="og:description" content="Dólares digitales para guardar, enviar y pagar sin bancos.">
   <meta property="og:image" content="https://confio.lat/WhatsApp_og_card_v2.jpeg">
   <meta property="og:image:width" content="1024">
   <meta property="og:image:height" content="1024">
   <meta property="og:image:type" content="image/jpeg">
   <meta property="og:url" content="${url.href}">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Recibí US$5 por activar tu Confío App">
-  <meta name="twitter:description" content="Digital Dollar sin bancos. Gratis y en 1 minuto.">
+  <meta name="twitter:title" content="Traer confianza a América Latina">
+  <meta name="twitter:description" content="Dólares digitales para guardar, enviar y pagar sin bancos.">
   <meta name="twitter:image" content="https://confio.lat/WhatsApp_og_card_v2.jpeg">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>

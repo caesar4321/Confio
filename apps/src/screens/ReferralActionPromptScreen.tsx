@@ -16,11 +16,11 @@ export const ReferralActionPromptScreen: React.FC = () => {
       title: 'Desbloquea tu bono de 5 $CONFIO',
       steps: [
         'Tienes 5 $CONFIO bloqueados en tu cuenta',
-        'Haz una recarga de 20 USDC o más para activarlos',
+        'Haz una recarga de 20 cUSD o más para activarlos',
         '¡Listo! El bono se desbloquea al instante',
       ],
       requirement:
-        'El bono está reservado para ti. Solo necesitas completar tu primera recarga de 20 USDC (con tarjeta o cripto) para desbloquearlo y usarlo.',
+        'El bono está reservado para ti. Solo necesitas completar tu primera recarga de 20 cUSD para desbloquearlo y usarlo.',
       actions: [
         {
           label: 'Recargar en Confío',
@@ -29,7 +29,7 @@ export const ReferralActionPromptScreen: React.FC = () => {
             navigation.navigate('TopUp'),
         },
         {
-          label: 'Depositar USDC/cUSD',
+          label: 'Depositar cUSD',
           icon: 'download',
           onPress: () =>
             navigation.navigate('USDCDeposit', {
@@ -44,9 +44,9 @@ export const ReferralActionPromptScreen: React.FC = () => {
         }),
     },
     conversion_usdc_to_cusd: {
-      title: 'Conversión USDC → cUSD',
-      steps: ['Deposita USDC en su cuenta', 'Abre la pantalla de Conversión', 'Convierte al menos 20 USDC a cUSD'],
-      requirement: 'Solo registramos la primera conversión exitosa de 20 USDC o más para liberar el bono.',
+      title: 'Depósito convertido a cUSD',
+      steps: ['Deposita dólares digitales en tu cuenta', 'Confío los convierte a cUSD', 'Mantén al menos 20 cUSD para activar el bono'],
+      requirement: 'Solo registramos el primer depósito convertido a 20 cUSD o más para liberar el bono.',
       ctaLabel: 'Ir a Convertir',
       action: () => navigation.navigate('USDCConversion'),
     },

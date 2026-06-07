@@ -35,7 +35,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { getSupportCopy } from '../utils/supportMessaging';
 import { colors } from '../config/theme';
 import { StatusTierBadge } from '../components/StatusTierBadge';
-import { buildInviteLink } from '../utils/inviteLinks';
+import { buildInviteLink, buildSendAndInviteShareMessage } from '../utils/inviteLinks';
 import { technicalFontFamily } from '../utils/fontFamily';
 import { inviteSendService } from '../services/inviteSendService';
 
@@ -2618,7 +2618,7 @@ export const TransactionDetailScreen = () => {
                       invitationId,
                     });
 
-                    const message = `¡Hola! Te envié ${amount} ${currency} por Confío. 🎉\n\nTienes 7 días para reclamarlo. Descarga la app y crea tu cuenta:\n\n📲 ${inviteLink}\n\n¡Es gratis y en segundos recibes tu dinero!`;
+                    const message = buildSendAndInviteShareMessage({ amount, currency, inviteLink });
                     const encodedMessage = encodeURIComponent(message);
 
                     if (Platform.OS === 'android') {
@@ -2702,15 +2702,11 @@ export const TransactionDetailScreen = () => {
                         source: 'whatsapp',
                         invitationId,
                       });
-                      const fallbackMessage = [
-                        'Te envié dinero por Confío 💰',
-                        '',
-                        'Descarga la app y crea tu cuenta para recibirlo:',
-                        '',
-                        `📲 ${inviteLink}`,
-                        '',
-                        '¡Es gratis y en segundos recibes tu dinero!',
-                      ].join('\n');
+                      const fallbackMessage = buildSendAndInviteShareMessage({
+                        amount: formatAmount(currentTx.amount),
+                        currency: currentTx.currency || 'cUSD',
+                        inviteLink,
+                      });
                       await Share.share({ message: fallbackMessage });
                     } catch (_) { }
                     Alert.alert('Error', 'No se pudo abrir WhatsApp.');

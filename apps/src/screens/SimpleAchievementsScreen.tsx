@@ -87,7 +87,7 @@ export const SimpleAchievementsScreen: React.FC<SimpleAchievementsScreenProps> =
       <View style={styles.mainCard}>
         <Text style={styles.mainTitle}>🎁 Gana 5 $CONFIO por recarga</Text>
         <Text style={styles.mainDescription}>
-          Si eres nuevo, recarga o convierte al menos 20 USDC y tanto tú como quien te invitó ganan 5 $CONFIO.
+          Si eres nuevo, carga al menos 20 cUSD y tanto tú como quien te invitó ganan 5 $CONFIO.
         </Text>
 
         {!hasFirstTransaction && (
@@ -95,7 +95,7 @@ export const SimpleAchievementsScreen: React.FC<SimpleAchievementsScreenProps> =
             style={styles.ctaButton}
             onPress={() => navigation.navigate('TopUp')}
           >
-            <Text style={styles.ctaButtonText}>Recargar 20 USDC</Text>
+            <Text style={styles.ctaButtonText}>Recargar 20 cUSD</Text>
           </TouchableOpacity>
         )}
 
@@ -130,7 +130,7 @@ export const SimpleAchievementsScreen: React.FC<SimpleAchievementsScreenProps> =
           <View style={styles.stepContent}>
             <Text style={styles.stepTitle}>Recarga o Convierte</Text>
             <Text style={styles.stepDescription}>
-              Un depósito de 20 USDC o más activa el bono
+              Una recarga de 20 cUSD o más activa el bono
             </Text>
           </View>
         </View>

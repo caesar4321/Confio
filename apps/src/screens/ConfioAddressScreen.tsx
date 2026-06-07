@@ -16,7 +16,7 @@ import { MainStackParamList, RootStackParamList } from '../types/navigation';
 import { useAuth } from '../contexts/AuthContext';
 import { Header } from '../navigation/Header';
 import { ReferralInputModal } from '../components/ReferralInputModal';
-import { buildInviteLink, normalizeInviteUsername } from '../utils/inviteLinks';
+import { buildReferralShareMessage, normalizeInviteUsername } from '../utils/inviteLinks';
 import { AnalyticsService } from '../services/analyticsService';
 import WhatsAppLogo from '../assets/svg/WhatsApp.svg';
 import { colors } from '../config/theme';
@@ -36,22 +36,7 @@ export const ConfioAddressScreen: React.FC = () => {
   const [showReferralModal, setShowReferralModal] = React.useState(false);
 
   const shareMessage = React.useMemo(() => {
-    // Generate clean, uppercase username for the link
-    const cleanUsername = normalizeInviteUsername(username || 'tuUsuario');
-    const inviteLink = buildInviteLink({
-      username: username || 'tuUsuario',
-      source: 'whatsapp',
-    });
-
-    return [
-      'Únete a Confío y gana US$5 en $CONFIO conmigo.',
-      '',
-      `📲 Descarga la App aquí: ${inviteLink}`,
-      '',
-      `Mi código de invitado es: ${cleanUsername}`,
-      '',
-      'Completa tu primera operación válida (recarga, depósito o P2P) y ambos recibiremos US$5 en $CONFIO.',
-    ].join('\n');
+    return buildReferralShareMessage(username || 'tuUsuario');
   }, [username]);
 
   const handleCopy = React.useCallback(() => {
@@ -183,7 +168,7 @@ export const ConfioAddressScreen: React.FC = () => {
             </View>
             <View style={styles.criteriaRow}>
               <Icon name="download" size={14} color={colors.primaryDark} />
-              <Text style={styles.criteriaItem}>Depósito de USDC convertido a cUSD (≥ US$20)</Text>
+              <Text style={styles.criteriaItem}>Depósito convertido a cUSD (≥ US$20)</Text>
             </View>
             <View style={styles.criteriaRow}>
               <Icon name="send" size={14} color={colors.primaryDark} />

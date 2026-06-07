@@ -18,7 +18,7 @@ import authService from '../services/authService';
 import { AnalyticsService } from '../services/analyticsService';
 import { StatusTierBadge, TierProgress } from '../components/StatusTierBadge';
 import { colors } from '../config/theme';
-import { buildInviteLink, normalizeInviteUsername } from '../utils/inviteLinks';
+import { buildReferralShareMessage, normalizeInviteUsername } from '../utils/inviteLinks';
 
 // Utility function to format phone number with country code
 const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string => {
@@ -71,26 +71,7 @@ export const ProfileScreen = () => {
   const appState = React.useRef(AppState.currentState);
 
   const referralShareMessage = React.useMemo(() => {
-    // Generate clean, uppercase username for the link
-    const cleanUsername = normalizeInviteUsername(userProfile?.username);
-    const inviteLink = buildInviteLink({
-      username: userProfile?.username,
-      source: 'whatsapp',
-    });
-
-    return [
-      'Te envié un regalo de US$5 en $CONFIO 🎁',
-      '',
-      'Estoy usando Confío para guardar dólares sin bancos y sin restricciones.',
-      'Es como una bóveda digital personal 💰✨',
-      '',
-      '👇 Reclamá tu regalo acá:',
-      inviteLink,
-      '',
-      `Código: ${cleanUsername}`,
-      '',
-      '(El regalo se activa cuando cargues tus primeros 20 USDC y los pases a cUSD)',
-    ].join('\n');
+    return buildReferralShareMessage(userProfile?.username);
   }, [userProfile?.username]);
 
   const handleShareReferral = React.useCallback(async () => {
@@ -446,9 +427,9 @@ export const ProfileScreen = () => {
                 <Icon name="lock" size={20} color="#FFFFFF" />
               </View>
               <View style={styles.referralHeaderText}>
-                <Text style={styles.referralTitle}>Regalá US$5 en $CONFIO y recibí US$5 vos también</Text>
+                <Text style={styles.referralTitle}>Invitá a tus amigos a la red de confianza</Text>
                 <Text style={styles.referralSubtitle}>
-                  Tu amigo se crea la cuenta con tu link. Listo: ambos reciben US$5 en $CONFIO (se activan cuando cargan sus primeros 20 USDC y los pasan a cUSD).
+                  Compartí tu link con videos de Julian sobre por qué nació Confío. Ayudá a los tuyos a proteger sus ahorros; cuando hagan su primer depósito, ambos reciben US$5 en $CONFIO como bienvenida.
                 </Text>
               </View>
             </View>
@@ -456,7 +437,7 @@ export const ProfileScreen = () => {
             <View style={styles.referralActions}>
               <TouchableOpacity style={styles.referralShareButton} onPress={handleShareReferral}>
                 <WhatsAppLogo width={20} height={20} style={{ marginRight: 8 }} />
-                <Text style={styles.referralShareText}>Enviar regalo por WhatsApp</Text>
+                <Text style={styles.referralShareText}>Invitar por WhatsApp</Text>
               </TouchableOpacity>
             </View>
 
@@ -524,9 +505,9 @@ export const ProfileScreen = () => {
 
             <View style={styles.referralCriteria}>
               <Text style={styles.referralCriteriaTitle}>¿Cómo funciona?</Text>
-              <Text style={styles.referralCriteriaItem}>1. Compartí tu link por WhatsApp.</Text>
-              <Text style={styles.referralCriteriaItem}>2. Tu amigo se crea la cuenta (recibe US$5 en $CONFIO).</Text>
-              <Text style={styles.referralCriteriaItem}>3. Carga 20 USDC, pásalos a cUSD y se activan los US$5 para los dos.</Text>
+              <Text style={styles.referralCriteriaItem}>1. Compartí tu link por WhatsApp con la historia del fundador.</Text>
+              <Text style={styles.referralCriteriaItem}>2. Tu amigo se crea la cuenta y descubre Confío.</Text>
+              <Text style={styles.referralCriteriaItem}>3. Carga al menos 20 cUSD y se activan los US$5 para los dos.</Text>
             </View>
 
             {/* Status tier explainer — visual preview with user's own name */}

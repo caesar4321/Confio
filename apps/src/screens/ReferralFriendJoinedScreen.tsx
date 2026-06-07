@@ -39,7 +39,7 @@ export const ReferralFriendJoinedScreen: React.FC = () => {
             <View style={styles.stepRow}>
               <Icon name="credit-card" size={18} color="#10B981" />
               <Text style={styles.stepText}>
-                Guíalo para que recargue 20 USDC o más.
+                Guíalo para que recargue 20 cUSD o más.
               </Text>
             </View>
             <View style={styles.stepRow}>

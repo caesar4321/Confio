@@ -2,6 +2,7 @@ package com.Confio.Confio
 
 import android.app.Application
 import android.content.Context
+import android.util.Log
 import com.facebook.react.ReactApplication
 import com.facebook.react.ReactHost
 import com.facebook.react.ReactNativeHost
@@ -12,6 +13,7 @@ import com.facebook.react.defaults.DefaultReactNativeHost
 import com.facebook.react.soloader.OpenSourceMergedSoMapping
 import com.facebook.soloader.ExternalSoMapping
 import com.facebook.soloader.SoLoader
+import java.io.File
 
 // Manual imports for all packages
 import com.RNAppleAuthentication.AppleAuthenticationAndroidPackage
@@ -97,6 +99,7 @@ class MainApplication : Application(), ReactApplication {
 
   override fun attachBaseContext(base: Context) {
     super.attachBaseContext(base)
+    clearStaleSoLoaderBackupStore(base)
     // Initialize SoLoader as early as possible so the RN merged-so mapping
     // (libreact_featureflagsjni → libreactnative.so) is registered before any
     // ContentProvider, Activity, or static initializer can trigger
@@ -112,6 +115,17 @@ class MainApplication : Application(), ReactApplication {
       // If you opted-in for the New Architecture, we load the native entry point for this app.
       load()
     }
+  }
+}
+
+private fun clearStaleSoLoaderBackupStore(context: Context) {
+  try {
+    val soLoaderBackupDir = File(context.applicationInfo.dataDir, "lib-main")
+    if (soLoaderBackupDir.exists() && !soLoaderBackupDir.deleteRecursively()) {
+      Log.w("MainApplication", "Unable to fully clear stale SoLoader backup store")
+    }
+  } catch (e: Throwable) {
+    Log.w("MainApplication", "Failed to clear stale SoLoader backup store", e)
   }
 }
 

@@ -121,3 +121,4 @@ GoogleService-Info.plist
 service-account.json
 confio.tar.gz
 .kms-local/
+.gstack/
