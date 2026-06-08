@@ -15,7 +15,11 @@ from blockchain.mutations import (
     OFFICIAL_APP_REQUIRED_ERROR,
     _extract_signed_txn_payload,
 )
+from blockchain.auto_swap_state import ensure_pending_usdc_auto_swap
 from blockchain.algorand_account_manager import AlgorandAccountManager
+from blockchain.models import PendingAutoSwap
+from conversion.models import Conversion
+from usdc_transactions.models import USDCDeposit
 from users.models import User, Account
 
 
@@ -43,6 +47,70 @@ class SignedTxnPayloadExtractionTest(SimpleTestCase):
         )
 
         self.assertEqual(_extract_signed_txn_payload(signed_txn), raw_txn)
+
+
+class ConsumedDepositRecoveryTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='consumed-deposit-user',
+            email='consumed@example.com',
+            password='password123',
+            firebase_uid='uid-consumed-deposit-user',
+        )
+        self.account = Account.objects.create(
+            user=self.user,
+            account_type='personal',
+            account_index=0,
+            algorand_address='D' * 58,
+        )
+        self.deposit = USDCDeposit.objects.create(
+            actor_user=self.user,
+            actor_type='user',
+            actor_display_name='Consumed Deposit User',
+            actor_address=self.account.algorand_address,
+            amount=Decimal('45.451401'),
+            source_address='S' * 58,
+            status='PENDING',
+        )
+
+    def _create_completed_conversion(self):
+        return Conversion.objects.create(
+            actor_user=self.user,
+            actor_type='user',
+            actor_display_name='Consumed Deposit User',
+            actor_address=self.account.algorand_address,
+            conversion_type='usdc_to_cusd',
+            from_amount=Decimal('45.451401'),
+            to_amount=Decimal('45.451401'),
+            exchange_rate=Decimal('1.0'),
+            fee_amount=Decimal('0.0'),
+            status='COMPLETED',
+        )
+
+    @patch('blockchain.auto_swap_state._fetch_onchain_usdc_micro', return_value=0)
+    def test_links_completed_conversion_that_consumed_deposit_before_indexing(self, _):
+        conversion = self._create_completed_conversion()
+        USDCDeposit.objects.filter(pk=self.deposit.pk).update(status='COMPLETED')
+        self.deposit.refresh_from_db()
+
+        pending = ensure_pending_usdc_auto_swap(self.deposit)
+
+        self.assertEqual(pending.status, 'COMPLETED')
+        self.assertEqual(pending.conversion_id, conversion.id)
+        self.assertEqual(pending.error_message, '')
+
+    @patch('blockchain.auto_swap_state._fetch_onchain_usdc_micro', return_value=0)
+    def test_ambiguous_completed_conversions_leave_consumed_deposit_cancelled(self, _):
+        self._create_completed_conversion()
+        self._create_completed_conversion()
+        USDCDeposit.objects.filter(pk=self.deposit.pk).update(status='COMPLETED')
+        self.deposit.refresh_from_db()
+
+        pending = ensure_pending_usdc_auto_swap(self.deposit)
+
+        self.assertEqual(pending.status, 'CANCELLED')
+        self.assertIsNone(pending.conversion_id)
+        self.assertEqual(pending.error_message, 'orphan_consumed_before_indexer')
 
 
 class FakeAlgodClient:

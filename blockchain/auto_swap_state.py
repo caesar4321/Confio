@@ -1,4 +1,5 @@
 import logging
+from datetime import timedelta
 from decimal import Decimal
 
 from django.utils import timezone
@@ -10,6 +11,7 @@ from users.models import Account
 logger = logging.getLogger(__name__)
 
 USDC_MICRO_MULTIPLIER = Decimal('1000000')
+CONSUMED_DEPOSIT_RECOVERY_WINDOW = timedelta(minutes=10)
 
 
 def _fetch_onchain_usdc_micro(address: str):
@@ -40,6 +42,28 @@ def _fetch_onchain_usdc_micro(address: str):
         return None
 
 
+def _find_completed_conversion_before_indexer(deposit, amount_decimal):
+    """Find an unlinked swap that already consumed this exact indexed deposit."""
+    from conversion.models import Conversion
+
+    candidates = list(
+        Conversion.objects.filter(
+            actor_user_id=deposit.actor_user_id,
+            actor_business_id=deposit.actor_business_id,
+            actor_type=deposit.actor_type,
+            actor_address=deposit.actor_address,
+            conversion_type='usdc_to_cusd',
+            from_amount=amount_decimal,
+            status='COMPLETED',
+            pending_auto_swap__isnull=True,
+            created_at__gte=deposit.created_at - CONSUMED_DEPOSIT_RECOVERY_WINDOW,
+            created_at__lte=deposit.created_at + CONSUMED_DEPOSIT_RECOVERY_WINDOW,
+        )
+        .order_by('-completed_at', '-created_at')[:2]
+    )
+    return candidates[0] if len(candidates) == 1 else None
+
+
 def ensure_pending_usdc_auto_swap(deposit):
     if deposit.status != 'COMPLETED':
         return None
@@ -64,6 +88,36 @@ def ensure_pending_usdc_auto_swap(deposit):
     # a wrong-amount swap of 426.647684 USDC).
     onchain_micro = _fetch_onchain_usdc_micro(deposit.actor_address)
     if onchain_micro is not None and onchain_micro < amount_micro:
+        completed_conversion = _find_completed_conversion_before_indexer(
+            deposit,
+            amount_decimal,
+        )
+        if completed_conversion:
+            recovered, _ = PendingAutoSwap.objects.update_or_create(
+                usdc_deposit=deposit,
+                defaults={
+                    'account': account,
+                    'actor_user': deposit.actor_user,
+                    'actor_business': deposit.actor_business,
+                    'actor_type': deposit.actor_type,
+                    'actor_address': deposit.actor_address,
+                    'asset_type': 'USDC',
+                    'amount_micro': amount_micro,
+                    'amount_decimal': amount_decimal,
+                    'source_address': deposit.source_address or '',
+                    'status': 'COMPLETED',
+                    'error_message': '',
+                    'conversion': completed_conversion,
+                    'completed_at': completed_conversion.completed_at or timezone.now(),
+                },
+            )
+            logger.info(
+                "[ensure_pending_usdc_auto_swap] Recovered deposit %s from completed conversion %s",
+                deposit.id,
+                completed_conversion.internal_id,
+            )
+            return recovered
+
         # Record the deposit as a CANCELLED auto-swap so admins can see
         # we acknowledged it but skipped — don't silently drop.
         cancelled, _ = PendingAutoSwap.objects.update_or_create(
@@ -80,6 +134,7 @@ def ensure_pending_usdc_auto_swap(deposit):
                 'source_address': deposit.source_address or '',
                 'status': 'CANCELLED',
                 'error_message': 'orphan_consumed_before_indexer',
+                'conversion': None,
                 'completed_at': timezone.now(),
             },
         )
