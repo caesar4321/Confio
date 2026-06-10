@@ -204,11 +204,22 @@ class FinancieraReview(SoftDeleteModel):
     rating = models.PositiveSmallIntegerField(
         validators=[MinValueValidator(1), MaxValueValidator(5)]
     )
+    SENT_TOKEN_CHOICES = [
+        ('USDC', 'USD Coin'),
+        ('CUSD', 'Confío Dollar'),
+    ]
+    sent_token = models.CharField(
+        max_length=8,
+        choices=SENT_TOKEN_CHOICES,
+        default='USDC',
+        help_text='Token of the backing transaction; both are $1-pegged so the '
+                  'derived rate math is identical',
+    )
     sent_usdc = models.DecimalField(
         max_digits=18,
         decimal_places=6,
         validators=[MinValueValidator(Decimal('0.000001'))],
-        help_text='USDC amount copied from the backing transaction',
+        help_text='Dollar-stable amount copied from the backing transaction',
     )
     received_usd = models.DecimalField(
         max_digits=18,

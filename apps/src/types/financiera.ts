@@ -9,16 +9,21 @@
 
 export const USDC_ALGORAND_TAG = 'USDC-Algorand';
 
-// Anonymous review by an identity-verified user. Decimal fields arrive as
-// strings over GraphQL.
+// Anonymous review by an identity-verified user, backed by a real transaction.
+// Decimal fields arrive as strings over GraphQL.
 export interface FinancieraReview {
   id: string;
   rating: number;
+  sentToken: 'USDC' | 'CUSD'; // token of the backing transaction, both $1-pegged
   sentUsdc: string;
   receivedUsd: string;
   comment?: string;
   createdAt: string;
 }
+
+// Display label: the app brands Confío Dollar as 'cUSD'.
+export const tokenLabel = (token: 'USDC' | 'CUSD'): string =>
+  token === 'CUSD' ? 'cUSD' : 'USDC';
 
 export interface Financiera {
   id: string;

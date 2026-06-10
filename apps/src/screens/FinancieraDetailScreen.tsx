@@ -28,6 +28,7 @@ import {
   FinancieraReview,
   USDC_ALGORAND_TAG,
   serviceBadges,
+  tokenLabel,
 } from '../types/financiera';
 import { GET_FINANCIERA, REPORT_FINANCIERA } from '../apollo/queries';
 
@@ -64,7 +65,7 @@ const ReviewRow = ({ review }: { review: FinancieraReview }) => {
       </View>
       <View style={styles.reviewRateRow}>
         <Text style={styles.reviewRateText}>
-          Envié <Text style={styles.reviewRateStrong}>{formatNumber(parseFloat(review.sentUsdc), { maximumFractionDigits: 2 })} USDC</Text>
+          Envié <Text style={styles.reviewRateStrong}>{formatNumber(parseFloat(review.sentUsdc), { maximumFractionDigits: 2 })} {tokenLabel(review.sentToken)}</Text>
         </Text>
         <Icon name="arrow-right" size={13} color={colors.text.light} />
         <Text style={styles.reviewRateText}>

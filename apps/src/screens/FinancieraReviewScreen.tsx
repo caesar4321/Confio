@@ -21,6 +21,7 @@ import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useAuth } from '../contexts/AuthContext';
+import { tokenLabel } from '../types/financiera';
 import {
   GET_FINANCIERA,
   GET_MY_REVIEWABLE_USDC_SENDS,
@@ -35,6 +36,7 @@ const STAR_GOLD = '#F59E0B';
 interface ReviewableSend {
   id: string;
   kind: 'send' | 'withdrawal';
+  token: 'USDC' | 'CUSD';
   amountUsdc: string;
   destination: string;
   createdAt: string;
@@ -86,8 +88,9 @@ const NoSendsGate = ({ onBack }: { onBack: () => void }) => (
     </View>
     <Text style={styles.gateTitle}>Primero realiza el cambio</Text>
     <Text style={styles.gateText}>
-      Las reseñas se conectan a un envío real de USDC para que las tasas del directorio sean
-      confiables. Cambia con la financiera y vuelve aquí para contar tu experiencia.
+      Las reseñas se conectan a un envío real de USDC o cUSD para que las tasas del
+      directorio sean confiables. Cambia con la financiera y vuelve aquí para contar tu
+      experiencia.
     </Text>
     <TouchableOpacity style={styles.gatePrimary} onPress={onBack}>
       <Text style={styles.gatePrimaryText}>Entendido</Text>
@@ -135,7 +138,7 @@ export const FinancieraReviewScreen = () => {
   const amountWarning =
     sent > 0 && received > 0
       ? received > sent
-        ? `Enviaste ${formatNumber(sent, { maximumFractionDigits: 2 })} USDC — no puedes haber recibido más dólares que eso.`
+        ? `Enviaste ${formatNumber(sent, { maximumFractionDigits: 2 })} ${selectedSend ? tokenLabel(selectedSend.token) : 'USDC'} — no puedes haber recibido más dólares que eso.`
         : received < sent / 2
         ? 'Eso es menos de la mitad de lo que enviaste. Revisa el monto.'
         : null
@@ -225,7 +228,7 @@ export const FinancieraReviewScreen = () => {
 
           {/* Backing transaction */}
           <View style={styles.card}>
-            <Text style={styles.label}>¿Cuál envío de USDC respalda tu reseña?</Text>
+            <Text style={styles.label}>¿Cuál envío respalda tu reseña?</Text>
             <Text style={styles.sublabel}>
               Tu reseña se conecta a un envío real para que las tasas sean confiables.
             </Text>
@@ -243,7 +246,7 @@ export const FinancieraReviewScreen = () => {
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.txAmount}>
-                      {formatNumber(parseFloat(tx.amountUsdc), { maximumFractionDigits: 2 })} USDC
+                      {formatNumber(parseFloat(tx.amountUsdc), { maximumFractionDigits: 2 })} {tokenLabel(tx.token)}
                     </Text>
                     <Text style={styles.txMeta}>
                       {formatDate(tx.createdAt)} · {tx.kind === 'withdrawal' ? 'a wallet externa' : 'envío Confío'}
@@ -273,7 +276,7 @@ export const FinancieraReviewScreen = () => {
             <Text style={styles.label}>¿Cuánto recibiste en dólares (USD)?</Text>
             {selectedSend && (
               <Text style={styles.sublabel}>
-                Enviaste {formatNumber(sent, { maximumFractionDigits: 2 })} USDC
+                Enviaste {formatNumber(sent, { maximumFractionDigits: 2 })} {tokenLabel(selectedSend.token)}
               </Text>
             )}
             <View style={styles.usdInputWrap}>
@@ -298,7 +301,7 @@ export const FinancieraReviewScreen = () => {
             {previewPer100 != null && amountWarning == null && (
               <View style={styles.preview}>
                 <Text style={styles.previewText}>
-                  Equivale a 100 USDC →{' '}
+                  Equivale a 100 {selectedSend ? tokenLabel(selectedSend.token) : 'USDC'} →{' '}
                   <Text style={styles.previewStrong}>
                     ${formatNumber(previewPer100, { maximumFractionDigits: 1 })}
                   </Text>

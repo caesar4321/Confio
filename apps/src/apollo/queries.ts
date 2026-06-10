@@ -3997,6 +3997,7 @@ export const GET_FINANCIERA = gql`
       reviews {
         id
         rating
+        sentToken
         sentUsdc
         receivedUsd
         comment
@@ -4071,6 +4072,7 @@ export const GET_MY_REVIEWABLE_USDC_SENDS = gql`
     myReviewableUsdcSends {
       id
       kind
+      token
       amountUsdc
       destination
       createdAt

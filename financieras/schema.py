@@ -37,7 +37,7 @@ class FinancieraReviewType(DjangoObjectType):
     class Meta:
         model = FinancieraReview
         # Deliberately excludes 'reviewer' to keep reviews anonymous.
-        fields = ('id', 'rating', 'sent_usdc', 'received_usd', 'comment', 'created_at')
+        fields = ('id', 'rating', 'sent_token', 'sent_usdc', 'received_usd', 'comment', 'created_at')
 
 
 class FinancieraType(DjangoObjectType):
@@ -126,10 +126,11 @@ class CountrySubdivisionType(graphene.ObjectType):
 
 
 class ReviewableUsdcSendType(graphene.ObjectType):
-    """A real USDC outflow the user can attach a review to."""
+    """A real dollar-stable outflow the user can attach a review to."""
 
     id = graphene.ID()
     kind = graphene.String(description="'send' (Confío send) or 'withdrawal' (external)")
+    token = graphene.String(description="'USDC' or 'CUSD' (withdrawals are always USDC)")
     amount_usdc = graphene.Decimal()
     destination = graphene.String(description='Recipient address, for recognition')
     created_at = graphene.DateTime()
@@ -259,7 +260,7 @@ class Query(graphene.ObjectType):
         ).values_list('send_transaction_id', flat=True)
         sends = SendTransaction.objects.filter(
             sender_user=user,
-            token_type='USDC',
+            token_type__in=REVIEWABLE_SEND_TOKENS,
             status='CONFIRMED',
             deleted_at__isnull=True,
             created_at__gte=cutoff,
@@ -276,13 +277,13 @@ class Query(graphene.ObjectType):
 
         items = [
             ReviewableUsdcSendType(
-                id=tx.pk, kind='send', amount_usdc=tx.amount,
+                id=tx.pk, kind='send', token=tx.token_type, amount_usdc=tx.amount,
                 destination=tx.recipient_address or '', created_at=tx.created_at,
             )
             for tx in sends
         ] + [
             ReviewableUsdcSendType(
-                id=w.pk, kind='withdrawal', amount_usdc=w.amount,
+                id=w.pk, kind='withdrawal', token='USDC', amount_usdc=w.amount,
                 destination=w.destination_address or '', created_at=w.created_at,
             )
             for w in withdrawals
@@ -524,35 +525,42 @@ class DeleteFinanciera(graphene.Mutation):
         return DeleteFinanciera(success=True)
 
 
-def _resolve_backing_transaction(user, send_transaction_id, usdc_withdrawal_id):
-    """Resolve and validate the USDC transaction a review claims to be about.
+# Within-app transfers can be in cUSD too — it's the app's main balance, so a
+# financiera on Confío usually receives cUSD. Both tokens are $1-pegged, so the
+# derived rate math is identical. External withdrawals are USDC by nature.
+REVIEWABLE_SEND_TOKENS = ('USDC', 'CUSD')
 
-    Returns (send_tx, withdrawal, sent_amount, error). Exactly one reference is
-    required; the transaction must be the user's own confirmed USDC outflow,
-    recent enough to review, and not already backing another review.
+
+def _resolve_backing_transaction(user, send_transaction_id, usdc_withdrawal_id):
+    """Resolve and validate the transaction a review claims to be about.
+
+    Returns (send_tx, withdrawal, sent_amount, sent_token, error). Exactly one
+    reference is required; the transaction must be the user's own confirmed
+    dollar-stable outflow, recent enough to review, and not already backing
+    another review.
     """
     from send.models import SendTransaction
     from usdc_transactions.models import USDCWithdrawal
 
     if bool(send_transaction_id) == bool(usdc_withdrawal_id):
-        return None, None, None, 'Selecciona el envío de USDC que respalda tu reseña.'
+        return None, None, None, None, 'Selecciona el envío que respalda tu reseña.'
 
     cutoff = timezone.now() - REVIEWABLE_TX_MAX_AGE
     if send_transaction_id:
         tx = SendTransaction.objects.filter(
             pk=send_transaction_id,
             sender_user=user,
-            token_type='USDC',
+            token_type__in=REVIEWABLE_SEND_TOKENS,
             status='CONFIRMED',
             deleted_at__isnull=True,
         ).first()
         if not tx:
-            return None, None, None, 'No encontramos ese envío de USDC en tu cuenta.'
+            return None, None, None, None, 'No encontramos ese envío en tu cuenta.'
         if tx.created_at < cutoff:
-            return None, None, None, 'Ese envío es muy antiguo para reseñar (máx. 90 días).'
+            return None, None, None, None, 'Ese envío es muy antiguo para reseñar (máx. 90 días).'
         if FinancieraReview.objects.filter(send_transaction=tx).exists():
-            return None, None, None, 'Ese envío ya respalda otra reseña.'
-        return tx, None, tx.amount, None
+            return None, None, None, None, 'Ese envío ya respalda otra reseña.'
+        return tx, None, tx.amount, tx.token_type, None
 
     withdrawal = USDCWithdrawal.objects.filter(
         pk=usdc_withdrawal_id,
@@ -560,12 +568,12 @@ def _resolve_backing_transaction(user, send_transaction_id, usdc_withdrawal_id):
         status='COMPLETED',
     ).first()
     if not withdrawal:
-        return None, None, None, 'No encontramos ese retiro de USDC en tu cuenta.'
+        return None, None, None, None, 'No encontramos ese retiro de USDC en tu cuenta.'
     if withdrawal.created_at < cutoff:
-        return None, None, None, 'Ese retiro es muy antiguo para reseñar (máx. 90 días).'
+        return None, None, None, None, 'Ese retiro es muy antiguo para reseñar (máx. 90 días).'
     if FinancieraReview.objects.filter(usdc_withdrawal=withdrawal).exists():
-        return None, None, None, 'Ese retiro ya respalda otra reseña.'
-    return None, withdrawal, withdrawal.amount, None
+        return None, None, None, None, 'Ese retiro ya respalda otra reseña.'
+    return None, withdrawal, withdrawal.amount, 'USDC', None
 
 
 class SubmitFinancieraReview(graphene.Mutation):
@@ -610,7 +618,7 @@ class SubmitFinancieraReview(graphene.Mutation):
         if not (1 <= rating <= 5):
             return SubmitFinancieraReview(success=False, error='La calificación debe ser de 1 a 5.')
 
-        send_tx, withdrawal, sent, error = _resolve_backing_transaction(
+        send_tx, withdrawal, sent, sent_token, error = _resolve_backing_transaction(
             user, send_transaction_id, usdc_withdrawal_id
         )
         if error:
@@ -645,6 +653,7 @@ class SubmitFinancieraReview(graphene.Mutation):
             send_transaction=send_tx,
             usdc_withdrawal=withdrawal,
             rating=rating,
+            sent_token=sent_token,
             sent_usdc=sent,
             received_usd=received,
             comment=(comment or '').strip()[:280],
