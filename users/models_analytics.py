@@ -259,6 +259,8 @@ class FunnelEvent(models.Model):
     #   invite_claimed        — recipient claimed escrow (ClaimInviteForPhone)
     #   first_send            — user's first outbound send of any kind
     #   first_deposit         — user's first successful on-ramp (Koywe, etc.)
+    #   financiera_whatsapp_tapped — user tapped WhatsApp on a financiera
+    #                           listing (properties: financiera_id, surface)
 
     event_name = models.CharField(
         max_length=64,

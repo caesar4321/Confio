@@ -86,11 +86,11 @@ const NoSendsGate = ({ onBack }: { onBack: () => void }) => (
     <View style={styles.gateIcon}>
       <Icon name="send" size={32} color={colors.primaryDark} />
     </View>
-    <Text style={styles.gateTitle}>Primero realiza el cambio</Text>
+    <Text style={styles.gateTitle}>Aún no tienes envíos para reseñar</Text>
     <Text style={styles.gateText}>
-      Las reseñas se conectan a un envío real de USDC o cUSD para que las tasas del
-      directorio sean confiables. Cambia con la financiera y vuelve aquí para contar tu
-      experiencia.
+      Las reseñas se conectan a un envío real de USDC o cUSD para que la información del
+      directorio sea confiable. Cuando hayas usado los servicios de la financiera, vuelve
+      aquí para contar tu experiencia.
     </Text>
     <TouchableOpacity style={styles.gatePrimary} onPress={onBack}>
       <Text style={styles.gatePrimaryText}>Entendido</Text>
@@ -164,7 +164,7 @@ export const FinancieraReviewScreen = () => {
       if (payload?.success) {
         Alert.alert(
           '¡Gracias!',
-          'Tu reseña anónima ayuda a tu comunidad a cambiar con confianza.',
+          'Tu reseña anónima ayuda a tu comunidad a elegir con confianza.',
           [{ text: 'Listo', onPress: () => navigation.goBack() }],
         );
       } else {

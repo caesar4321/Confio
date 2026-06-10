@@ -234,8 +234,7 @@ export const MyFinancierasScreen = () => {
               <Icon name="briefcase" size={40} color={colors.text.light} />
               <Text style={styles.emptyTitle}>Aún no tienes financieras</Text>
               <Text style={styles.emptyText}>
-                Registra tu financiera gratis y recibe clientes que quieren cambiar USDC por
-                dólares en efectivo.
+                Registra tu financiera gratis en el directorio y recibe clientes de tu zona.
               </Text>
               <TouchableOpacity
                 style={styles.emptyBtn}

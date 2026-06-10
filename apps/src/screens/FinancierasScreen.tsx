@@ -26,6 +26,7 @@ import { useCountry } from '../contexts/CountryContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { buildInviteLink } from '../utils/inviteLinks';
+import { AnalyticsService } from '../services/analyticsService';
 import { Financiera, USDC_ALGORAND_TAG, serviceBadges } from '../types/financiera';
 import {
   GET_FINANCIERAS,
@@ -313,8 +314,13 @@ export const FinancierasScreen = () => {
   const ownedCount = (myData?.myFinancieras || []).length;
 
   const openWhatsApp = (f: Financiera) => {
+    void AnalyticsService.logFunnelEvent(
+      'financiera_whatsapp_tapped',
+      { financiera_id: f.id, surface: 'directory', country: f.countryCode },
+      { sourceType: 'financieras', channel: 'whatsapp' },
+    );
     const text = encodeURIComponent(
-      `Hola ${f.name}, te encontré en Confío. Quiero cambiar USDC por dólares.`,
+      `Hola ${f.name}, te encontré en el directorio de Confío y quiero más información.`,
     );
     Linking.openURL(`https://wa.me/${f.whatsapp}?text=${text}`).catch(() => {});
   };
@@ -327,7 +333,7 @@ export const FinancierasScreen = () => {
       : SHARE_LINKS.web.landing;
     Share.share({
       message:
-        `¿Tienes una financiera? Regístrala gratis en Confío y recibe clientes que quieren cambiar dólares digitales por efectivo: ${inviteLink}`,
+        `¿Tienes una financiera? Regístrala gratis en el directorio de Confío y recibe clientes de tu zona: ${inviteLink}`,
     }).catch(() => {});
   };
 
@@ -366,8 +372,8 @@ export const FinancierasScreen = () => {
           </View>
           <Text style={styles.headerSubtitle}>
             {countryIso ? `${flagFor(countryIso)} ` : ''}
-            Cambia USDC por dólares en efectivo con financieras
-            {countryIso ? ` de ${countryNameFor(countryIso)}` : ' locales'}
+            Directorio de financieras locales verificadas
+            {countryIso ? ` de ${countryNameFor(countryIso)}` : ''}
           </Text>
         </View>
       </SafeAreaView>
@@ -407,8 +413,8 @@ export const FinancierasScreen = () => {
             <View style={styles.disclaimer}>
               <Icon name="info" size={14} color={colors.accent} />
               <Text style={styles.disclaimerText}>
-                Confío no participa en estos cambios. Solo mostramos financieras locales y sus
-                reseñas para que decidas con confianza.
+                Confío es un directorio informativo. No participa en los acuerdos entre tú y
+                la financiera; solo mostramos listados y reseñas para que decidas con confianza.
               </Text>
             </View>
 

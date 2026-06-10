@@ -31,6 +31,7 @@ import {
   tokenLabel,
 } from '../types/financiera';
 import { GET_FINANCIERA, REPORT_FINANCIERA } from '../apollo/queries';
+import { AnalyticsService } from '../services/analyticsService';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 type DetailRoute = RouteProp<MainStackParamList, 'FinancieraDetail'>;
@@ -156,8 +157,13 @@ export const FinancieraDetailScreen = () => {
   const reviews = financiera.reviews || [];
 
   const openWhatsApp = () => {
+    void AnalyticsService.logFunnelEvent(
+      'financiera_whatsapp_tapped',
+      { financiera_id: financiera.id, surface: 'detail', country: financiera.countryCode },
+      { sourceType: 'financieras', channel: 'whatsapp' },
+    );
     const text = encodeURIComponent(
-      `Hola ${financiera.name}, te encontré en Confío. Quiero cambiar USDC por dólares.`,
+      `Hola ${financiera.name}, te encontré en el directorio de Confío y quiero más información.`,
     );
     Linking.openURL(`https://wa.me/${financiera.whatsapp}?text=${text}`).catch(() => {});
   };
@@ -220,12 +226,12 @@ export const FinancieraDetailScreen = () => {
           <Text style={styles.sectionLabel}>Tasa promedio según reseñas</Text>
           <View style={styles.rateBox}>
             <View style={styles.rateSide}>
-              <Text style={styles.rateLabel}>Envías</Text>
+              <Text style={styles.rateLabel}>Enviaron</Text>
               <Text style={styles.rateValue}>100 USDC</Text>
             </View>
             <Icon name="arrow-right" size={20} color={colors.text.light} />
             <View style={styles.rateSide}>
-              <Text style={styles.rateLabel}>Recibes aprox.</Text>
+              <Text style={styles.rateLabel}>Recibieron aprox.</Text>
               <Text style={[styles.rateValue, { color: colors.primaryDark }]}>
                 {per100 != null ? `$${formatNumber(per100, { maximumFractionDigits: 1 })}` : '—'}
               </Text>
@@ -300,8 +306,9 @@ export const FinancieraDetailScreen = () => {
         <View style={styles.disclaimer}>
           <Icon name="info" size={14} color={colors.accent} />
           <Text style={styles.disclaimerText}>
-            Confío no participa en este cambio. Verifica siempre con quién operas; puedes pedir
-            visitar la financiera en persona.
+            Confío es un directorio informativo y no participa en los acuerdos entre tú y la
+            financiera. Verifica siempre con quién tratas; puedes visitar la financiera en
+            persona.
           </Text>
         </View>
 

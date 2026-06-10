@@ -535,8 +535,8 @@ export const RegisterFinancieraScreen = () => {
           <View style={styles.infoNote}>
             <Icon name="info" size={14} color={colors.accent} />
             <Text style={styles.infoNoteText}>
-              No registres una tasa de cambio. La tasa se calcula automáticamente con las reseñas
-              reales de los usuarios.
+              No necesitas registrar tasas: la información de tu listado se calcula
+              automáticamente con las reseñas reales de los usuarios.
             </Text>
           </View>
         </ScrollView>

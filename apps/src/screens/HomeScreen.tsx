@@ -725,8 +725,8 @@ export const HomeScreen = () => {
         Alert.alert(
           'No disponible en tu país',
           screen === 'TopUp'
-            ? 'Las recargas con proveedores aún no están disponibles en tu país. Usa Efectivo para comprar dólares digitales con financieras locales verificadas.'
-            : 'Los retiros con proveedores aún no están disponibles en tu país. Usa Efectivo para cambiar tus dólares digitales por efectivo con financieras locales verificadas.',
+            ? 'Las recargas con proveedores aún no están disponibles en tu país. En el menú Efectivo encuentras financieras locales verificadas cerca de ti.'
+            : 'Los retiros con proveedores aún no están disponibles en tu país. En el menú Efectivo encuentras financieras locales verificadas cerca de ti.',
           [
             { text: 'Cancelar', style: 'cancel' },
             { text: 'Ir a Efectivo', onPress: () => navigation.navigate('Financieras') },
