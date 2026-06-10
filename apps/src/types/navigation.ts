@@ -158,6 +158,10 @@ export type MainStackParamList = {
   };
   TopUp: undefined;
   Sell: undefined;
+  Financieras: undefined;
+  FinancieraDetail: { financieraId: string };
+  FinancieraReview: { financieraId: string };
+  RegisterFinanciera: undefined;
   RampHistory: {
     initialFilter?: 'all' | 'on_ramp' | 'off_ramp';
   } | undefined;

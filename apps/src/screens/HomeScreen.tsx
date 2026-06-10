@@ -800,6 +800,13 @@ export const HomeScreen = () => {
           color: '#F59E0B',
           route: () => navigation.navigate('Sell'),
         },
+        {
+          id: 'efectivo',
+          label: 'Efectivo',
+          icon: 'cash',
+          color: '#10B981',
+          route: () => navigation.navigate('Financieras'),
+        },
       ].filter(action => {
         switch (action.id) {
           case 'send':
@@ -853,6 +860,13 @@ export const HomeScreen = () => {
         icon: 'bank',
         color: '#F59E0B',
         route: () => navigation.navigate('Sell'),
+      },
+      {
+        id: 'efectivo',
+        label: 'Efectivo',
+        icon: 'cash',
+        color: '#10B981',
+        route: () => navigation.navigate('Financieras'),
       }
     ];
   }, [activeAccount, navigation]);
@@ -1377,8 +1391,8 @@ export const HomeScreen = () => {
                   ]}
                 >
                   {/* @ts-ignore */}
-                  {action.icon === 'bank' ? (
-                    <MCIcon name="bank" size={20} color="#fff" />
+                  {action.icon === 'bank' || action.icon === 'cash' ? (
+                    <MCIcon name={action.icon} size={action.icon === 'cash' ? 22 : 20} color="#fff" />
                   ) : (
                     <Icon name={action.icon} size={22} color="#fff" />
                   )}
@@ -1632,9 +1646,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   actionIcon: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 8,

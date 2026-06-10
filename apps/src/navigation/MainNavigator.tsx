@@ -18,6 +18,10 @@ import { USDCHistoryScreen } from '../screens/USDCHistoryScreen';
 import { USDCConversionScreen } from '../screens/USDCConversionScreen';
 import TopUpScreen from '../screens/TopUpScreen';
 import { SellScreen } from '../screens/SellScreen';
+import { FinancierasScreen } from '../screens/FinancierasScreen';
+import { FinancieraDetailScreen } from '../screens/FinancieraDetailScreen';
+import { FinancieraReviewScreen } from '../screens/FinancieraReviewScreen';
+import { RegisterFinancieraScreen } from '../screens/RegisterFinancieraScreen';
 import RampInstructionsScreen from '../screens/RampInstructionsScreen';
 import RampHistoryScreen from '../screens/RampHistoryScreen';
 
@@ -242,6 +246,34 @@ export const MainNavigator = () => {
         <Stack.Screen
           name="Sell"
           component={SellScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="Financieras"
+          component={FinancierasScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="FinancieraDetail"
+          component={FinancieraDetailScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="FinancieraReview"
+          component={FinancieraReviewScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="RegisterFinanciera"
+          component={RegisterFinancieraScreen}
           options={{
             headerShown: false,
           }}
