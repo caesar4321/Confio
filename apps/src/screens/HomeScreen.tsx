@@ -39,6 +39,7 @@ import { useQuery, useMutation } from '@apollo/client';
 import { GET_PRESALE_STATUS, GET_MY_BALANCES, GET_ACTIVE_PRESALE, GET_ALL_PRESALE_PHASES, CHECK_REFERRAL_STATUS } from '../apollo/queries';
 import { REFRESH_ACCOUNT_BALANCE, SET_REFERRER } from '../apollo/mutations';
 import { useCountry } from '../contexts/CountryContext';
+import { isRampBlockedCountry } from '../config/env';
 import { useCurrency } from '../hooks/useCurrency';
 import { useSelectedCountryRate } from '../hooks/useExchangeRate';
 import { inviteSendService } from '../services/inviteSendService';
@@ -713,6 +714,31 @@ export const HomeScreen = () => {
     }
   }, [claimingInvite, userProfile?.phoneNumber, userProfile?.phoneCountry]);
 
+  // Recargar/Retirar run through ramp providers (Koywe/Guardarian). Where
+  // neither operates (VE, NI, PA, CU, ...), block up front and point to the
+  // Efectivo directory instead of failing deep inside the provider flow.
+  const rampCountryCode =
+    userProfile?.phoneCountry || selectedCountry?.[2] || userCountry?.[2] || '';
+  const navigateToRampOrEfectivo = React.useCallback(
+    (screen: 'TopUp' | 'Sell') => {
+      if (isRampBlockedCountry(rampCountryCode)) {
+        Alert.alert(
+          'No disponible en tu país',
+          screen === 'TopUp'
+            ? 'Las recargas con proveedores aún no están disponibles en tu país. Usa Efectivo para comprar dólares digitales con financieras locales verificadas.'
+            : 'Los retiros con proveedores aún no están disponibles en tu país. Usa Efectivo para cambiar tus dólares digitales por efectivo con financieras locales verificadas.',
+          [
+            { text: 'Cancelar', style: 'cancel' },
+            { text: 'Ir a Efectivo', onPress: () => navigation.navigate('Financieras') },
+          ],
+        );
+        return;
+      }
+      navigation.navigate(screen);
+    },
+    [rampCountryCode, navigation],
+  );
+
   // Quick actions configuration - filter based on permissions
   const quickActionsData: QuickAction[] = [
     {
@@ -747,7 +773,7 @@ export const HomeScreen = () => {
       label: 'Recargar',
       icon: 'dollar-sign',
       color: '#3b82f6',
-      route: () => navigation.navigate('TopUp'),
+      route: () => navigateToRampOrEfectivo('TopUp'),
     },
   ];
 
@@ -791,14 +817,14 @@ export const HomeScreen = () => {
           label: 'Recargar',
           icon: 'dollar-sign',
           color: '#3b82f6',
-          route: () => navigation.navigate('TopUp'),
+          route: () => navigateToRampOrEfectivo('TopUp'),
         },
         {
           id: 'withdraw',
           label: 'Retirar',
           icon: 'bank',
           color: '#F59E0B',
-          route: () => navigation.navigate('Sell'),
+          route: () => navigateToRampOrEfectivo('Sell'),
         },
         {
           id: 'efectivo',
@@ -852,14 +878,14 @@ export const HomeScreen = () => {
         label: 'Recargar',
         icon: 'dollar-sign',
         color: '#3b82f6',
-        route: () => navigation.navigate('TopUp'),
+        route: () => navigateToRampOrEfectivo('TopUp'),
       },
       {
         id: 'withdraw',
         label: 'Retirar',
         icon: 'bank',
         color: '#F59E0B',
-        route: () => navigation.navigate('Sell'),
+        route: () => navigateToRampOrEfectivo('Sell'),
       },
       {
         id: 'efectivo',
@@ -869,7 +895,7 @@ export const HomeScreen = () => {
         route: () => navigation.navigate('Financieras'),
       }
     ];
-  }, [activeAccount, navigation]);
+  }, [activeAccount, navigation, navigateToRampOrEfectivo]);
 
   // Entrance animation - only run after initialization
   React.useEffect(() => {
