@@ -76,11 +76,12 @@ class FinancieraAdmin(admin.ModelAdmin):
 
 class FinancieraReviewAdmin(admin.ModelAdmin):
     list_display = (
-        'financiera', 'rating', 'sent_usdc', 'received_usd', 'reviewer', 'created_at',
+        'financiera', 'rating', 'sent_usdc', 'received_usd', 'reviewer',
+        'send_transaction', 'usdc_withdrawal', 'created_at',
     )
     list_filter = ('rating',)
     search_fields = ('financiera__name', 'reviewer__username', 'comment')
-    raw_id_fields = ('financiera', 'reviewer')
+    raw_id_fields = ('financiera', 'reviewer', 'send_transaction', 'usdc_withdrawal')
 
 
 class FinancieraReportAdmin(admin.ModelAdmin):

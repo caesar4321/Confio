@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
@@ -20,12 +21,24 @@ import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useAuth } from '../contexts/AuthContext';
-import { GET_FINANCIERA, SUBMIT_FINANCIERA_REVIEW } from '../apollo/queries';
+import {
+  GET_FINANCIERA,
+  GET_MY_REVIEWABLE_USDC_SENDS,
+  SUBMIT_FINANCIERA_REVIEW,
+} from '../apollo/queries';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 type ReviewRoute = RouteProp<MainStackParamList, 'FinancieraReview'>;
 
 const STAR_GOLD = '#F59E0B';
+
+interface ReviewableSend {
+  id: string;
+  kind: 'send' | 'withdrawal';
+  amountUsdc: string;
+  destination: string;
+  createdAt: string;
+}
 
 const ratingText: Record<number, string> = {
   1: 'Muy malo',
@@ -34,6 +47,16 @@ const ratingText: Record<number, string> = {
   4: 'Bueno',
   5: 'Excelente',
 };
+
+// Decimal-pad keyboards show a comma in most LATAM locales; accept both
+// separators rather than silently truncating "98,5" to 98.
+const parseAmount = (value: string) => parseFloat(value.replace(',', '.'));
+
+const shortAddress = (addr: string) =>
+  addr.length > 14 ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : addr;
+
+const formatDate = (iso: string) =>
+  new Date(iso).toLocaleDateString('es', { day: 'numeric', month: 'short' });
 
 const VerificationGate = ({ onBack, onVerify }: { onBack: () => void; onVerify: () => void }) => (
   <View style={styles.gate}>
@@ -54,9 +77,23 @@ const VerificationGate = ({ onBack, onVerify }: { onBack: () => void; onVerify: 
   </View>
 );
 
-// Decimal-pad keyboards show a comma in most LATAM locales; accept both
-// separators rather than silently truncating "98,5" to 98.
-const parseAmount = (value: string) => parseFloat(value.replace(',', '.'));
+// Reviews are anchored to real transactions: without a recent USDC send there
+// is nothing to review.
+const NoSendsGate = ({ onBack }: { onBack: () => void }) => (
+  <View style={styles.gate}>
+    <View style={styles.gateIcon}>
+      <Icon name="send" size={32} color={colors.primaryDark} />
+    </View>
+    <Text style={styles.gateTitle}>Primero realiza el cambio</Text>
+    <Text style={styles.gateText}>
+      Las reseñas se conectan a un envío real de USDC para que las tasas del directorio sean
+      confiables. Cambia con la financiera y vuelve aquí para contar tu experiencia.
+    </Text>
+    <TouchableOpacity style={styles.gatePrimary} onPress={onBack}>
+      <Text style={styles.gatePrimaryText}>Entendido</Text>
+    </TouchableOpacity>
+  </View>
+);
 
 export const FinancieraReviewScreen = () => {
   const navigation = useNavigation<NavProp>();
@@ -72,43 +109,52 @@ export const FinancieraReviewScreen = () => {
   });
   const financiera = data?.financiera || null;
 
+  const { data: sendsData, loading: sendsLoading } = useQuery(GET_MY_REVIEWABLE_USDC_SENDS, {
+    fetchPolicy: 'cache-and-network',
+  });
+  const reviewableSends: ReviewableSend[] = sendsData?.myReviewableUsdcSends || [];
+
   const [submitMutation, { loading: submitting }] = useMutation(SUBMIT_FINANCIERA_REVIEW, {
-    refetchQueries: [{ query: GET_FINANCIERA, variables: { id: financieraId } }],
+    refetchQueries: [
+      { query: GET_FINANCIERA, variables: { id: financieraId } },
+      { query: GET_MY_REVIEWABLE_USDC_SENDS },
+    ],
   });
 
+  const [selectedSend, setSelectedSend] = useState<ReviewableSend | null>(null);
   const [rating, setRating] = useState(0);
-  const [sentUsdc, setSentUsdc] = useState('');
   const [receivedUsd, setReceivedUsd] = useState('');
   const [comment, setComment] = useState('');
 
-  const sent = parseAmount(sentUsdc);
+  const sent = selectedSend ? parseFloat(selectedSend.amountUsdc) : 0;
   const received = parseAmount(receivedUsd);
   const previewPer100 =
     sent > 0 && received > 0 ? Math.round((received / sent) * 100 * 10) / 10 : null;
 
-  // Soft typo guard: receiving more USD than USDC sent is implausible (the
-  // financiera takes a cut), and less than half suggests a slipped digit.
-  // The API hard-rejects received > sent.
+  // Soft typo guard; the API hard-rejects received > sent.
   const amountWarning =
     sent > 0 && received > 0
       ? received > sent
-        ? '¿Recibiste más dólares de los que enviaste? Revisa los montos.'
+        ? `Enviaste ${formatNumber(sent, { maximumFractionDigits: 2 })} USDC — no puedes haber recibido más dólares que eso.`
         : received < sent / 2
-        ? 'Eso es menos de la mitad de lo que enviaste. Revisa los montos.'
+        ? 'Eso es menos de la mitad de lo que enviaste. Revisa el monto.'
         : null
       : null;
 
-  const canSubmit = rating > 0 && sent > 0 && received > 0 && received <= sent && !submitting;
+  const canSubmit =
+    !!selectedSend && rating > 0 && received > 0 && received <= sent && !submitting;
 
   const submitReview = async () => {
+    if (!selectedSend) return;
     try {
       const res = await submitMutation({
         variables: {
           financieraId,
           rating,
-          sentUsdc: String(sent),
           receivedUsd: String(received),
           comment: comment.trim() || null,
+          sendTransactionId: selectedSend.kind === 'send' ? selectedSend.id : null,
+          usdcWithdrawalId: selectedSend.kind === 'withdrawal' ? selectedSend.id : null,
         },
       });
       const payload = res.data?.submitFinancieraReview;
@@ -139,6 +185,28 @@ export const FinancieraReviewScreen = () => {
     );
   }
 
+  if (sendsLoading && reviewableSends.length === 0) {
+    return (
+      <View style={styles.container}>
+        <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
+        <Header title="Dejar reseña" onBack={() => navigation.goBack()} />
+        <View style={styles.gate}>
+          <ActivityIndicator color={colors.primary} size="large" />
+        </View>
+      </View>
+    );
+  }
+
+  if (reviewableSends.length === 0) {
+    return (
+      <View style={styles.container}>
+        <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
+        <Header title="Dejar reseña" onBack={() => navigation.goBack()} />
+        <NoSendsGate onBack={() => navigation.goBack()} />
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
@@ -155,6 +223,38 @@ export const FinancieraReviewScreen = () => {
             </Text>
           )}
 
+          {/* Backing transaction */}
+          <View style={styles.card}>
+            <Text style={styles.label}>¿Cuál envío de USDC respalda tu reseña?</Text>
+            <Text style={styles.sublabel}>
+              Tu reseña se conecta a un envío real para que las tasas sean confiables.
+            </Text>
+            {reviewableSends.map((tx) => {
+              const active = selectedSend?.id === tx.id && selectedSend?.kind === tx.kind;
+              return (
+                <TouchableOpacity
+                  key={`${tx.kind}-${tx.id}`}
+                  style={[styles.txItem, active && styles.txItemActive]}
+                  onPress={() => setSelectedSend(tx)}
+                  activeOpacity={0.8}
+                >
+                  <View style={[styles.txRadio, active && styles.txRadioActive]}>
+                    {active && <Icon name="check" size={12} color="#fff" />}
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.txAmount}>
+                      {formatNumber(parseFloat(tx.amountUsdc), { maximumFractionDigits: 2 })} USDC
+                    </Text>
+                    <Text style={styles.txMeta}>
+                      {formatDate(tx.createdAt)} · {tx.kind === 'withdrawal' ? 'a wallet externa' : 'envío Confío'}
+                      {tx.destination ? ` · ${shortAddress(tx.destination)}` : ''}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
           {/* Rating */}
           <View style={styles.card}>
             <Text style={styles.label}>¿Cómo fue tu experiencia?</Text>
@@ -168,22 +268,14 @@ export const FinancieraReviewScreen = () => {
             {rating > 0 && <Text style={styles.ratingLabel}>{ratingText[rating]}</Text>}
           </View>
 
-          {/* Amounts */}
+          {/* Received amount */}
           <View style={styles.card}>
-            <Text style={styles.label}>¿Cuánto enviaste?</Text>
-            <View style={styles.amountInputWrap}>
-              <TextInput
-                style={styles.amountInput}
-                placeholder="100"
-                placeholderTextColor={colors.text.light}
-                keyboardType="decimal-pad"
-                value={sentUsdc}
-                onChangeText={setSentUsdc}
-              />
-              <Text style={styles.amountUnit}>USDC</Text>
-            </View>
-
-            <Text style={[styles.label, { marginTop: 20 }]}>¿Cuánto recibiste en dólares (USD)?</Text>
+            <Text style={styles.label}>¿Cuánto recibiste en dólares (USD)?</Text>
+            {selectedSend && (
+              <Text style={styles.sublabel}>
+                Enviaste {formatNumber(sent, { maximumFractionDigits: 2 })} USDC
+              </Text>
+            )}
             <View style={styles.usdInputWrap}>
               <Text style={styles.usdPrefix}>$</Text>
               <TextInput
@@ -233,7 +325,8 @@ export const FinancieraReviewScreen = () => {
           <View style={styles.anonNote}>
             <Icon name="eye-off" size={14} color={colors.text.secondary} />
             <Text style={styles.anonText}>
-              Tu reseña es anónima. Solo se muestra que proviene de un usuario verificado.
+              Tu reseña es anónima. Solo se muestra que proviene de un usuario verificado con un
+              envío real.
             </Text>
           </View>
         </ScrollView>
@@ -244,7 +337,9 @@ export const FinancieraReviewScreen = () => {
             disabled={!canSubmit}
             onPress={submitReview}
           >
-            <Text style={styles.submitText}>Publicar reseña</Text>
+            <Text style={styles.submitText}>
+              {submitting ? 'Publicando…' : 'Publicar reseña'}
+            </Text>
           </TouchableOpacity>
         </SafeAreaView>
       </KeyboardAvoidingView>
@@ -291,23 +386,35 @@ const styles = StyleSheet.create({
     borderColor: colors.borderLight,
   },
   label: { fontSize: 14, fontWeight: '600', color: colors.text.primary },
+  sublabel: { fontSize: 12, color: colors.text.secondary, marginTop: 4, lineHeight: 17 },
+
+  txItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 10,
+  },
+  txItemActive: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  txRadio: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: colors.borderMedium,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  txRadioActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  txAmount: { fontSize: 15, fontWeight: '700', color: colors.text.primary },
+  txMeta: { fontSize: 12, color: colors.text.secondary, marginTop: 2 },
 
   starRow: { flexDirection: 'row', justifyContent: 'center', gap: 6, marginTop: 14 },
   starBtn: { padding: 2 },
   ratingLabel: { textAlign: 'center', marginTop: 10, fontSize: 15, fontWeight: '700', color: STAR_GOLD },
-
-  amountInputWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    marginTop: 12,
-    height: 52,
-  },
-  amountInput: { flex: 1, fontSize: 18, fontWeight: '700', color: colors.text.primary, paddingVertical: 0 },
-  amountUnit: { fontSize: 15, fontWeight: '700', color: colors.accent, marginLeft: 8 },
 
   usdInputWrap: {
     flexDirection: 'row',
@@ -376,7 +483,7 @@ const styles = StyleSheet.create({
   submitBtnDisabled: { backgroundColor: colors.borderMedium },
   submitText: { fontSize: 16, fontWeight: '700', color: '#fff' },
 
-  // Verification gate
+  // Gates
   gate: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
   gateIcon: {
     width: 72,

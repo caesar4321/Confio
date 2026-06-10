@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,10 @@ import {
   StatusBar,
   Alert,
   ActivityIndicator,
+  Modal,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
@@ -85,32 +89,31 @@ export const FinancieraDetailScreen = () => {
   });
   const financiera: Financiera | null = data?.financiera || null;
 
-  const [reportMutation] = useMutation(REPORT_FINANCIERA);
+  const [reportMutation, { loading: reporting }] = useMutation(REPORT_FINANCIERA);
+  const [reportModal, setReportModal] = useState(false);
+  const [reportReason, setReportReason] = useState('');
 
-  const reportFinanciera = () => {
-    Alert.alert(
-      'Reportar financiera',
-      '¿Tuviste un problema con esta financiera? Tu reporte es anónimo y nuestro equipo lo revisará.',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Reportar',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const res = await reportMutation({ variables: { financieraId } });
-              if (res.data?.reportFinanciera?.success) {
-                Alert.alert('Gracias', 'Recibimos tu reporte. Nuestro equipo lo revisará pronto.');
-              } else {
-                Alert.alert('Error', res.data?.reportFinanciera?.error || 'No se pudo enviar el reporte.');
-              }
-            } catch {
-              Alert.alert('Error', 'No se pudo enviar el reporte. Intenta de nuevo.');
-            }
-          },
-        },
-      ],
-    );
+  // Reports must carry substance the moderation team can act on; the API
+  // enforces the same minimum.
+  const reasonReady = reportReason.trim().length >= 10;
+
+  const reportFinanciera = () => setReportModal(true);
+
+  const submitReport = async () => {
+    try {
+      const res = await reportMutation({
+        variables: { financieraId, reason: reportReason.trim() },
+      });
+      if (res.data?.reportFinanciera?.success) {
+        setReportModal(false);
+        setReportReason('');
+        Alert.alert('Gracias', 'Recibimos tu reporte. Nuestro equipo lo revisará pronto.');
+      } else {
+        Alert.alert('Error', res.data?.reportFinanciera?.error || 'No se pudo enviar el reporte.');
+      }
+    } catch {
+      Alert.alert('Error', 'No se pudo enviar el reporte. Intenta de nuevo.');
+    }
   };
 
   if (loading && !financiera) {
@@ -314,6 +317,60 @@ export const FinancieraDetailScreen = () => {
           <Text style={styles.whatsappText}>Contactar por WhatsApp</Text>
         </TouchableOpacity>
       </SafeAreaView>
+
+      {/* Report modal: a report without content is noise, so the reason is required */}
+      <Modal
+        visible={reportModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setReportModal(false)}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalBackdrop}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHandle} />
+            <View style={styles.modalHeaderRow}>
+              <Text style={styles.modalTitle}>Reportar financiera</Text>
+              <TouchableOpacity onPress={() => setReportModal(false)} style={styles.modalIconBtn}>
+                <Icon name="x" size={22} color={colors.text.primary} />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.modalText}>
+              Cuéntanos qué pasó con {financiera.name}. Tu reporte es anónimo y nuestro equipo lo
+              revisará.
+            </Text>
+            <TextInput
+              style={styles.reportInput}
+              placeholder="Ej. No entregó el efectivo acordado, cambió la tasa al llegar..."
+              placeholderTextColor={colors.text.light}
+              multiline
+              value={reportReason}
+              onChangeText={setReportReason}
+              maxLength={500}
+              autoFocus
+            />
+            <View style={styles.reportMetaRow}>
+              {!reasonReady && reportReason.length > 0 ? (
+                <Text style={styles.reportHint}>Mínimo 10 caracteres</Text>
+              ) : (
+                <View />
+              )}
+              <Text style={styles.charCount}>{reportReason.length}/500</Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.reportBtn, (!reasonReady || reporting) && styles.reportBtnDisabled]}
+              disabled={!reasonReady || reporting}
+              onPress={submitReport}
+            >
+              <Text style={styles.reportBtnText}>
+                {reporting ? 'Enviando…' : 'Enviar reporte'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 };
@@ -448,6 +505,57 @@ const styles = StyleSheet.create({
     height: 52,
   },
   whatsappText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+
+  // Report modal
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  modalSheet: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 16,
+    paddingBottom: 28,
+    paddingTop: 8,
+  },
+  modalHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.border,
+    alignSelf: 'center',
+    marginBottom: 8,
+  },
+  modalHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  modalIconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  modalTitle: { fontSize: 16, fontWeight: '700', color: colors.text.primary },
+  modalText: { fontSize: 13, color: colors.text.secondary, lineHeight: 19, marginBottom: 12 },
+  reportInput: {
+    minHeight: 100,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    padding: 12,
+    fontSize: 15,
+    color: colors.text.primary,
+    textAlignVertical: 'top',
+  },
+  reportMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 6,
+  },
+  reportHint: { fontSize: 11, color: colors.warning.icon },
+  charCount: { fontSize: 11, color: colors.text.light },
+  reportBtn: {
+    height: 50,
+    borderRadius: 14,
+    backgroundColor: colors.danger,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 14,
+  },
+  reportBtnDisabled: { backgroundColor: colors.borderMedium },
+  reportBtnText: { fontSize: 15, fontWeight: '700', color: '#fff' },
 });
 
 export default FinancieraDetailScreen;

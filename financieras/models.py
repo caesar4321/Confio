@@ -165,11 +165,15 @@ class Financiera(SoftDeleteModel):
 
 
 class FinancieraReview(SoftDeleteModel):
-    """Anonymous review by an identity-verified user.
+    """Anonymous review by an identity-verified user, anchored to a real
+    USDC-Algorand transaction.
 
-    The reported amounts are the source of the directory's exchange rates, so
-    they are validated hard at the API layer (rate must be plausible) and the
-    reviewer is kept for moderation/rate-limiting but never exposed.
+    Every review must reference exactly one confirmed USDC outflow owned by the
+    reviewer — either a Confío send or an external withdrawal — and each
+    transaction can back at most one review. sent_usdc is copied from the
+    transaction server-side, never taken from the client, so the directory's
+    derived rates reflect money that actually moved. The reviewer is kept for
+    moderation/rate-limiting but never exposed.
     """
 
     financiera = models.ForeignKey(
@@ -181,6 +185,22 @@ class FinancieraReview(SoftDeleteModel):
         related_name='financiera_reviews',
         help_text='Kept for moderation and rate-limiting; never exposed via API',
     )
+    send_transaction = models.ForeignKey(
+        'send.SendTransaction',
+        on_delete=models.PROTECT,
+        related_name='financiera_reviews',
+        null=True,
+        blank=True,
+        help_text='Confirmed USDC send backing this review (XOR usdc_withdrawal)',
+    )
+    usdc_withdrawal = models.ForeignKey(
+        'usdc_transactions.USDCWithdrawal',
+        on_delete=models.PROTECT,
+        related_name='financiera_reviews',
+        null=True,
+        blank=True,
+        help_text='Completed USDC withdrawal backing this review (XOR send_transaction)',
+    )
     rating = models.PositiveSmallIntegerField(
         validators=[MinValueValidator(1), MaxValueValidator(5)]
     )
@@ -188,7 +208,7 @@ class FinancieraReview(SoftDeleteModel):
         max_digits=18,
         decimal_places=6,
         validators=[MinValueValidator(Decimal('0.000001'))],
-        help_text='USDC the reviewer sent (USDC-Algorand at launch)',
+        help_text='USDC amount copied from the backing transaction',
     )
     received_usd = models.DecimalField(
         max_digits=18,
@@ -205,6 +225,25 @@ class FinancieraReview(SoftDeleteModel):
         ordering = ['-created_at']
         indexes = [
             models.Index(fields=['financiera', '-created_at']),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(send_transaction__isnull=False, usdc_withdrawal__isnull=True)
+                    | models.Q(send_transaction__isnull=True, usdc_withdrawal__isnull=False)
+                ),
+                name='review_backed_by_exactly_one_transaction',
+            ),
+            models.UniqueConstraint(
+                fields=['send_transaction'],
+                condition=models.Q(send_transaction__isnull=False),
+                name='unique_review_per_send_transaction',
+            ),
+            models.UniqueConstraint(
+                fields=['usdc_withdrawal'],
+                condition=models.Q(usdc_withdrawal__isnull=False),
+                name='unique_review_per_usdc_withdrawal',
+            ),
         ]
 
     def __str__(self):

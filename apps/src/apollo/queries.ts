@@ -4044,16 +4044,18 @@ export const SUBMIT_FINANCIERA_REVIEW = gql`
   mutation SubmitFinancieraReview(
     $financieraId: ID!
     $rating: Int!
-    $sentUsdc: Decimal!
     $receivedUsd: Decimal!
     $comment: String
+    $sendTransactionId: ID
+    $usdcWithdrawalId: ID
   ) {
     submitFinancieraReview(
       financieraId: $financieraId
       rating: $rating
-      sentUsdc: $sentUsdc
       receivedUsd: $receivedUsd
       comment: $comment
+      sendTransactionId: $sendTransactionId
+      usdcWithdrawalId: $usdcWithdrawalId
     ) {
       success
       error
@@ -4064,8 +4066,20 @@ export const SUBMIT_FINANCIERA_REVIEW = gql`
   }
 `;
 
+export const GET_MY_REVIEWABLE_USDC_SENDS = gql`
+  query GetMyReviewableUsdcSends {
+    myReviewableUsdcSends {
+      id
+      kind
+      amountUsdc
+      destination
+      createdAt
+    }
+  }
+`;
+
 export const REPORT_FINANCIERA = gql`
-  mutation ReportFinanciera($financieraId: ID!, $reason: String) {
+  mutation ReportFinanciera($financieraId: ID!, $reason: String!) {
     reportFinanciera(financieraId: $financieraId, reason: $reason) {
       success
       error
