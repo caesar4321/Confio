@@ -1,6 +1,18 @@
-from django.contrib import admin
+from django import forms
+from django.contrib import admin, messages
+from django.contrib.admin.helpers import ActionForm
 
 from .models import Financiera, FinancieraReport, FinancieraReview
+
+
+class LocationMergeActionForm(ActionForm):
+    """Extra input for the merge actions: the canonical value to apply."""
+
+    location_value = forms.CharField(
+        required=False,
+        label='Location value',
+        widget=forms.TextInput(attrs={'placeholder': 'e.g. Bella Vista'}),
+    )
 
 
 class FinancieraReviewInline(admin.TabularInline):
@@ -21,7 +33,8 @@ class FinancieraAdmin(admin.ModelAdmin):
     search_fields = ('name', 'city', 'neighborhood', 'state', 'whatsapp', 'owner__username')
     raw_id_fields = ('owner',)
     inlines = [FinancieraReviewInline]
-    actions = ['unlist_financieras', 'relist_financieras']
+    action_form = LocationMergeActionForm
+    actions = ['unlist_financieras', 'relist_financieras', 'merge_city', 'merge_neighborhood']
 
     @admin.display(description='Reviews')
     def review_count_display(self, obj):
@@ -39,6 +52,26 @@ class FinancieraAdmin(admin.ModelAdmin):
     @admin.action(description='Relist selected financieras')
     def relist_financieras(self, request, queryset):
         queryset.update(is_active=True)
+
+    def _merge_location(self, request, queryset, field):
+        value = ' '.join((request.POST.get('location_value') or '').split())
+        if not value:
+            self.message_user(
+                request,
+                'Type the canonical value in the "Location value" box next to the action selector.',
+                messages.ERROR,
+            )
+            return
+        updated = queryset.update(**{field: value})
+        self.message_user(request, f'Set {field} to "{value}" on {updated} financieras.')
+
+    @admin.action(description='Merge: set CITY of selected to "Location value"')
+    def merge_city(self, request, queryset):
+        self._merge_location(request, queryset, 'city')
+
+    @admin.action(description='Merge: set BARRIO of selected to "Location value"')
+    def merge_neighborhood(self, request, queryset):
+        self._merge_location(request, queryset, 'neighborhood')
 
 
 class FinancieraReviewAdmin(admin.ModelAdmin):

@@ -16,11 +16,16 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useQuery } from '@apollo/client';
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
 import { countries, Country } from '../utils/countries';
 import { useCountry } from '../contexts/CountryContext';
 import { FINANCIERA_SERVICES, MANDATORY_SERVICE_ID } from '../types/financiera';
+import {
+  GET_COUNTRY_SUBDIVISIONS,
+  GET_FINANCIERA_LOCATION_OPTIONS,
+} from '../apollo/queries';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 
@@ -93,6 +98,100 @@ const CountryPickerModal = ({
   );
 };
 
+// Searchable picker for the estado/provincia list (ISO 3166-2 names from the API).
+const StatePickerModal = ({
+  visible,
+  options,
+  onClose,
+  onSelect,
+}: {
+  visible: boolean;
+  options: string[];
+  onClose: () => void;
+  onSelect: (value: string) => void;
+}) => {
+  const [q, setQ] = useState('');
+  const data = useMemo(() => {
+    const query = q.trim().toLowerCase();
+    if (!query) return options;
+    return options.filter((o) => o.toLowerCase().includes(query));
+  }, [q, options]);
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.modalBackdrop}>
+        <View style={styles.modalSheet}>
+          <View style={styles.modalHandle} />
+          <View style={styles.modalHeaderRow}>
+            <Text style={styles.modalTitle}>Estado / Provincia</Text>
+            <TouchableOpacity onPress={onClose} style={styles.modalIconBtn}>
+              <Icon name="x" size={22} color={colors.text.primary} />
+            </TouchableOpacity>
+          </View>
+          <View style={styles.searchBox}>
+            <Icon name="search" size={18} color={colors.text.light} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Buscar"
+              placeholderTextColor={colors.text.light}
+              value={q}
+              onChangeText={setQ}
+            />
+          </View>
+          <FlatList
+            data={data}
+            keyExtractor={(item) => item}
+            style={{ maxHeight: 420 }}
+            initialNumToRender={20}
+            maxToRenderPerBatch={15}
+            windowSize={21}
+            keyboardShouldPersistTaps="handled"
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={styles.optionRow}
+                onPress={() => {
+                  onSelect(item);
+                  setQ('');
+                }}
+              >
+                <Text style={styles.optionLabel}>{item}</Text>
+              </TouchableOpacity>
+            )}
+          />
+        </View>
+      </View>
+    </Modal>
+  );
+};
+
+// Tappable suggestions under city/barrio inputs, sourced from existing
+// listings so spellings converge instead of fragmenting the filter cascade.
+const SuggestionChips = ({
+  options,
+  current,
+  onPick,
+}: {
+  options: string[];
+  current: string;
+  onPick: (value: string) => void;
+}) => {
+  const text = current.trim().toLowerCase();
+  const matches = options
+    .filter((o) => o.toLowerCase() !== text)
+    .filter((o) => !text || o.toLowerCase().includes(text))
+    .slice(0, 6);
+  if (!matches.length) return null;
+  return (
+    <View style={styles.suggestionRow}>
+      {matches.map((o) => (
+        <TouchableOpacity key={o} style={styles.suggestionChip} onPress={() => onPick(o)}>
+          <Text style={styles.suggestionChipText}>{o}</Text>
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+};
+
 const VerificationGate = ({ onBack }: { onBack: () => void }) => (
   <View style={styles.gate}>
     <View style={styles.gateIcon}>
@@ -124,6 +223,31 @@ export const RegisterFinancieraScreen = () => {
   const [whatsapp, setWhatsapp] = useState('');
   const [services, setServices] = useState<string[]>([]);
   const [countryModal, setCountryModal] = useState(false);
+  const [stateModal, setStateModal] = useState(false);
+
+  const countryIso = country ? String(country[2]) : null;
+
+  // ISO 3166-2 estados/provincias for the picker; empty for the rare
+  // territories ISO doesn't cover, where we fall back to free text.
+  const { data: subdivisionsData } = useQuery(GET_COUNTRY_SUBDIVISIONS, {
+    variables: { countryCode: countryIso },
+    skip: !countryIso,
+  });
+  const subdivisions: string[] = (subdivisionsData?.countrySubdivisions || []).map(
+    (s: { name: string }) => s.name,
+  );
+
+  // Existing listing locations, so city/barrio spellings converge.
+  const { data: cityOptionsData } = useQuery(GET_FINANCIERA_LOCATION_OPTIONS, {
+    variables: { level: 'city', state, countryCode: countryIso },
+    skip: !countryIso || !state,
+  });
+  const { data: barrioOptionsData } = useQuery(GET_FINANCIERA_LOCATION_OPTIONS, {
+    variables: { level: 'neighborhood', state, city, countryCode: countryIso },
+    skip: !countryIso || !state || !city.trim(),
+  });
+  const cityOptions: string[] = cityOptionsData?.financieraLocationOptions || [];
+  const barrioOptions: string[] = barrioOptionsData?.financieraLocationOptions || [];
 
   const toggleService = (id: string) =>
     setServices((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
@@ -189,35 +313,44 @@ export const RegisterFinancieraScreen = () => {
           </View>
           <View style={styles.field}>
             <Text style={styles.label}>Estado / Provincia</Text>
+            {subdivisions.length > 0 ? (
+              <TouchableOpacity style={styles.selectInput} onPress={() => setStateModal(true)}>
+                <Text style={[styles.selectText, !state && { color: colors.text.light }]}>
+                  {state || 'Selecciona el estado o provincia'}
+                </Text>
+                <Icon name="chevron-down" size={18} color={colors.text.secondary} />
+              </TouchableOpacity>
+            ) : (
+              <TextInput
+                style={styles.input}
+                placeholder="Ej. Distrito Capital"
+                placeholderTextColor={colors.text.light}
+                value={state}
+                onChangeText={setState}
+              />
+            )}
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>Ciudad</Text>
             <TextInput
               style={styles.input}
-              placeholder="Ej. Distrito Capital"
+              placeholder="Ej. Caracas"
               placeholderTextColor={colors.text.light}
-              value={state}
-              onChangeText={setState}
+              value={city}
+              onChangeText={setCity}
             />
+            <SuggestionChips options={cityOptions} current={city} onPick={setCity} />
           </View>
-          <View style={styles.row}>
-            <View style={[styles.field, { flex: 1 }]}>
-              <Text style={styles.label}>Ciudad</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Ej. Caracas"
-                placeholderTextColor={colors.text.light}
-                value={city}
-                onChangeText={setCity}
-              />
-            </View>
-            <View style={[styles.field, { flex: 1 }]}>
-              <Text style={styles.label}>Barrio / Zona</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Ej. Chacao"
-                placeholderTextColor={colors.text.light}
-                value={barrio}
-                onChangeText={setBarrio}
-              />
-            </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>Barrio / Zona</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Ej. Chacao"
+              placeholderTextColor={colors.text.light}
+              value={barrio}
+              onChangeText={setBarrio}
+            />
+            <SuggestionChips options={barrioOptions} current={barrio} onPick={setBarrio} />
           </View>
 
           {/* WhatsApp */}
@@ -310,8 +443,27 @@ export const RegisterFinancieraScreen = () => {
         visible={countryModal}
         onClose={() => setCountryModal(false)}
         onSelect={(c) => {
+          if (String(c[2]) !== countryIso) {
+            // Location levels belong to the old country
+            setState('');
+            setCity('');
+            setBarrio('');
+          }
           setCountry(c);
           setCountryModal(false);
+        }}
+      />
+      <StatePickerModal
+        visible={stateModal}
+        options={subdivisions}
+        onClose={() => setStateModal(false)}
+        onSelect={(value) => {
+          if (value !== state) {
+            setCity('');
+            setBarrio('');
+          }
+          setState(value);
+          setStateModal(false);
         }}
       />
     </View>
@@ -398,6 +550,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
   phoneCodeText: { fontSize: 15, fontWeight: '600', color: colors.text.primary },
+
+  suggestionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
+  suggestionChip: {
+    backgroundColor: colors.primarySoft,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  suggestionChipText: { fontSize: 13, fontWeight: '600', color: colors.primaryDark },
 
   // Service checklist
   serviceItem: {

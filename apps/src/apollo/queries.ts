@@ -3937,3 +3937,19 @@ export const ALL_PENDING_INVITES_FOR_PHONE = gql`
     }
   }
 `;
+
+// ============= FINANCIERAS DIRECTORY =============
+
+export const GET_COUNTRY_SUBDIVISIONS = gql`
+  query GetCountrySubdivisions($countryCode: String!) {
+    countrySubdivisions(countryCode: $countryCode) {
+      name
+    }
+  }
+`;
+
+export const GET_FINANCIERA_LOCATION_OPTIONS = gql`
+  query GetFinancieraLocationOptions($level: String!, $state: String, $city: String, $countryCode: String) {
+    financieraLocationOptions(level: $level, state: $state, city: $city, countryCode: $countryCode)
+  }
+`;

@@ -34,4 +34,5 @@ django-otp==1.6.3
 django-two-factor-auth==1.18.1
 django-cors-headers==4.3.1
 qrcode==8.2
+pycountry==26.2.16
 git+https://github.com/tinymanorg/tinyman-py-sdk.git@v2.1.1#egg=tinyman-py-sdk

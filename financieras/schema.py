@@ -9,10 +9,12 @@ Country scoping: the directory always serves the requesting user's country
 """
 
 import logging
+import unicodedata
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 
 import graphene
+import pycountry
 from django.db.models import F, Q
 from django.utils import timezone
 from graphene_django import DjangoObjectType
@@ -76,6 +78,51 @@ def _require_user(info):
     return user
 
 
+def _sort_key(name):
+    """Accent-insensitive sort so 'Táchira' lands between Sucre and Trujillo."""
+    return unicodedata.normalize('NFKD', name).encode('ascii', 'ignore').decode().lower()
+
+
+def _subdivision_names(country_code):
+    """ISO 3166-2 subdivision names for a country, [] when ISO has none."""
+    try:
+        subdivisions = pycountry.subdivisions.get(country_code=country_code)
+    except LookupError:
+        return []
+    if not subdivisions:
+        return []
+    return sorted((s.name for s in subdivisions), key=_sort_key)
+
+
+def _collapse_ws(value):
+    return ' '.join((value or '').split())
+
+
+def _adopt_existing_casing(value, country_code, field, **scope):
+    """Converge free-text locations on the first writer's spelling.
+
+    If any active financiera in the same scope already has this value
+    (case-insensitive), reuse its exact casing so the cascade filter never
+    splits on 'chacao' vs 'Chacao'.
+    """
+    value = _collapse_ws(value)
+    if not value:
+        return value
+    existing = (
+        Financiera.objects.filter(
+            country_code=country_code, deleted_at__isnull=True, **scope
+        )
+        .filter(**{f'{field}__iexact': value})
+        .values_list(field, flat=True)
+        .first()
+    )
+    return existing or value
+
+
+class CountrySubdivisionType(graphene.ObjectType):
+    name = graphene.String()
+
+
 class Query(graphene.ObjectType):
     financieras = graphene.List(
         FinancieraType,
@@ -95,7 +142,15 @@ class Query(graphene.ObjectType):
         level=graphene.String(required=True, description="'state', 'city' or 'neighborhood'"),
         state=graphene.String(),
         city=graphene.String(),
+        country_code=graphene.String(
+            description="Defaults to the user's country; override for registration autocomplete"
+        ),
         description='Distinct location values for the cascade filter',
+    )
+    country_subdivisions = graphene.List(
+        CountrySubdivisionType,
+        country_code=graphene.String(required=True),
+        description='ISO 3166-2 states/provinces for the registration picker',
     )
 
     def resolve_financieras(
@@ -148,13 +203,14 @@ class Query(graphene.ObjectType):
             return []
         return Financiera.objects.filter(owner=user, deleted_at__isnull=True).with_stats()
 
-    def resolve_financiera_location_options(self, info, level, state=None, city=None):
+    def resolve_financiera_location_options(self, info, level, state=None, city=None, country_code=None):
         user = _require_user(info)
-        if not user or not user.phone_country:
+        if not user:
             return []
-        if level not in ('state', 'city', 'neighborhood'):
+        country = (country_code or '').upper().strip() or user.phone_country
+        if not country or level not in ('state', 'city', 'neighborhood'):
             return []
-        qs = Financiera.objects.visible().filter(country_code=user.phone_country)
+        qs = Financiera.objects.visible().filter(country_code=country)
         if state:
             qs = qs.filter(state__iexact=state)
         if city:
@@ -165,6 +221,13 @@ class Query(graphene.ObjectType):
             .distinct()
             .order_by(level)
         )
+
+    def resolve_country_subdivisions(self, info, country_code):
+        # Static ISO data; no auth or country scoping needed.
+        return [
+            CountrySubdivisionType(name=name)
+            for name in _subdivision_names(country_code.upper().strip())
+        ]
 
 
 class RegisterFinanciera(graphene.Mutation):
@@ -209,11 +272,36 @@ class RegisterFinanciera(graphene.Mutation):
         whatsapp = ''.join(ch for ch in whatsapp if ch.isdigit())
         if not (8 <= len(whatsapp) <= 15):
             return RegisterFinanciera(success=False, error='Número de WhatsApp inválido.')
-        name = name.strip()
+        name = _collapse_ws(name)
         if not name:
             return RegisterFinanciera(success=False, error='El nombre es obligatorio.')
+
+        # Estado/provincia must be an ISO 3166-2 subdivision when ISO covers the
+        # country (it does for all of LATAM); free text only as a fallback for
+        # territories without subdivisions. Matching is accent/case-insensitive
+        # and the canonical ISO spelling is what gets stored.
+        state = _collapse_ws(state)
+        subdivision_names = _subdivision_names(country_code)
+        if subdivision_names:
+            canonical = next(
+                (n for n in subdivision_names if _sort_key(n) == _sort_key(state)), None
+            )
+            if canonical is None:
+                return RegisterFinanciera(
+                    success=False, error='Selecciona un estado o provincia válido.'
+                )
+            state = canonical
+
+        # City/barrio are free text that converge on the first writer's spelling.
+        city = _adopt_existing_casing(city, country_code, 'city', state__iexact=state)
+        neighborhood = _adopt_existing_casing(
+            neighborhood, country_code, 'neighborhood', state__iexact=state, city__iexact=city
+        )
+        if not city:
+            return RegisterFinanciera(success=False, error='La ciudad es obligatoria.')
+
         if Financiera.objects.filter(
-            owner=user, name__iexact=name, city__iexact=city.strip(), deleted_at__isnull=True
+            owner=user, name__iexact=name, city__iexact=city, deleted_at__isnull=True
         ).exists():
             return RegisterFinanciera(
                 success=False, error='Ya registraste una financiera con ese nombre en esa ciudad.'
@@ -223,9 +311,9 @@ class RegisterFinanciera(graphene.Mutation):
             owner=user,
             name=name,
             country_code=country_code,
-            state=state.strip(),
-            city=city.strip(),
-            neighborhood=(neighborhood or '').strip(),
+            state=state,
+            city=city,
+            neighborhood=neighborhood,
             whatsapp=whatsapp,
             supports_usdc_algorand=True,
             helps_with_confio=helps_with_confio,
