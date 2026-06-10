@@ -10,6 +10,7 @@ const facebookIcon = process.env.PUBLIC_URL + '/images/Facebook.png';
 const telegramIcon = process.env.PUBLIC_URL + '/images/Telegram.png';
 const linkedInIcon = process.env.PUBLIC_URL + '/images/LinkedIn.png';
 const youtubeIcon = process.env.PUBLIC_URL + '/images/YouTube.png';
+const whatsappIcon = process.env.PUBLIC_URL + '/images/WhatsApp.svg';
 import { useLanguage } from '../../contexts/LanguageContext';
 
 const FriendlyFounder = () => {
@@ -83,6 +84,9 @@ const FriendlyFounder = () => {
               </a>
               <a href="https://t.me/julianmoonluna" target="_blank" rel="noopener noreferrer" className={styles.socialIconLink} title="Telegram">
                 <img src={telegramIcon} alt="Telegram" className={styles.socialIcon} />
+              </a>
+              <a href="https://whatsapp.com/channel/0029Vb8g5GJIiRotAGdWKI1t" target="_blank" rel="noopener noreferrer" className={styles.socialIconLink} title="WhatsApp">
+                <img src={whatsappIcon} alt="WhatsApp" className={styles.socialIcon} />
               </a>
               <a href="https://linkedin.com/in/julianmoonluna" target="_blank" rel="noopener noreferrer" className={styles.socialIconLink} title="LinkedIn">
                 <img src={linkedInIcon} alt="LinkedIn" className={styles.socialIcon} />

@@ -255,7 +255,7 @@ export const ProfileScreen = () => {
     navigation.navigate('LegalDocument', { docType });
   };
 
-  const handleSocialMediaPress = async (platform: 'tiktok' | 'instagram' | 'youtube') => {
+  const handleSocialMediaPress = async (platform: 'tiktok' | 'instagram' | 'youtube' | 'whatsapp') => {
     let url = '';
     switch (platform) {
       case 'tiktok':
@@ -266,6 +266,9 @@ export const ProfileScreen = () => {
         break;
       case 'youtube':
         url = 'https://www.youtube.com/@julianmoonluna';
+        break;
+      case 'whatsapp':
+        url = 'https://whatsapp.com/channel/0029Vb8g5GJIiRotAGdWKI1t';
         break;
     }
 
@@ -744,6 +747,15 @@ export const ProfileScreen = () => {
                 style={styles.socialButtonImage}
                 resizeMode="contain"
               />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.socialImageButton}
+              onPress={() => handleSocialMediaPress('whatsapp')}
+              accessibilityRole="link"
+              accessibilityLabel="Canal de WhatsApp de Julian Moon"
+            >
+              <WhatsAppLogo width={53} height={53} />
             </TouchableOpacity>
           </View>
 
@@ -1230,7 +1242,7 @@ const styles = StyleSheet.create({
     height: 69, // Fixed height for all buttons
     justifyContent: 'center',
     alignItems: 'center',
-    marginHorizontal: 10, // Equal spacing between buttons
+    marginHorizontal: 4,
   },
   socialButtonImage: {
     width: 53, // 2/3 of 80px for Instagram and YouTube
