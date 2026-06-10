@@ -52,7 +52,7 @@ class FinancieraType(DjangoObjectType):
         fields = (
             'id', 'name', 'country_code', 'state', 'city', 'neighborhood',
             'whatsapp', 'supports_usdc_algorand', 'helps_with_confio',
-            'home_service', 'open_weekends', 'created_at',
+            'home_service', 'open_weekends', 'is_active', 'created_at',
         )
 
     def resolve_avg_rating(self, info):
@@ -324,6 +324,145 @@ class RegisterFinanciera(graphene.Mutation):
         return RegisterFinanciera(success=True, financiera=financiera)
 
 
+def _get_owned_financiera(info, financiera_id):
+    """Resolve a financiera the requesting user owns, or (None, error)."""
+    user = _require_user(info)
+    if not user:
+        return None, 'Debes iniciar sesión.'
+    try:
+        financiera = Financiera.objects.get(pk=financiera_id, deleted_at__isnull=True)
+    except Financiera.DoesNotExist:
+        return None, 'Financiera no encontrada.'
+    if financiera.owner_id != user.id:
+        return None, 'Solo el dueño puede gestionar esta financiera.'
+    return financiera, None
+
+
+class UpdateFinanciera(graphene.Mutation):
+    """Owner edits to a listing. Country is fixed (delete + re-register to move
+    countries) and supports_usdc_algorand stays mandatory, so neither is editable."""
+
+    class Arguments:
+        financiera_id = graphene.ID(required=True)
+        name = graphene.String()
+        state = graphene.String()
+        city = graphene.String()
+        neighborhood = graphene.String()
+        whatsapp = graphene.String()
+        helps_with_confio = graphene.Boolean()
+        home_service = graphene.Boolean()
+        open_weekends = graphene.Boolean()
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    financiera = graphene.Field(FinancieraType)
+
+    def mutate(
+        self, info, financiera_id, name=None, state=None, city=None,
+        neighborhood=None, whatsapp=None, helps_with_confio=None,
+        home_service=None, open_weekends=None,
+    ):
+        financiera, error = _get_owned_financiera(info, financiera_id)
+        if error:
+            return UpdateFinanciera(success=False, error=error)
+
+        if name is not None:
+            name = _collapse_ws(name)
+            if not name:
+                return UpdateFinanciera(success=False, error='El nombre es obligatorio.')
+            financiera.name = name
+
+        if state is not None:
+            state = _collapse_ws(state)
+            subdivision_names = _subdivision_names(financiera.country_code)
+            if subdivision_names:
+                canonical = next(
+                    (n for n in subdivision_names if _sort_key(n) == _sort_key(state)), None
+                )
+                if canonical is None:
+                    return UpdateFinanciera(
+                        success=False, error='Selecciona un estado o provincia válido.'
+                    )
+                state = canonical
+            financiera.state = state
+
+        if city is not None:
+            city = _adopt_existing_casing(
+                city, financiera.country_code, 'city', state__iexact=financiera.state
+            )
+            if not city:
+                return UpdateFinanciera(success=False, error='La ciudad es obligatoria.')
+            financiera.city = city
+
+        if neighborhood is not None:
+            financiera.neighborhood = _adopt_existing_casing(
+                neighborhood, financiera.country_code, 'neighborhood',
+                state__iexact=financiera.state, city__iexact=financiera.city,
+            )
+
+        if whatsapp is not None:
+            whatsapp = ''.join(ch for ch in whatsapp if ch.isdigit())
+            if not (8 <= len(whatsapp) <= 15):
+                return UpdateFinanciera(success=False, error='Número de WhatsApp inválido.')
+            financiera.whatsapp = whatsapp
+
+        if helps_with_confio is not None:
+            financiera.helps_with_confio = helps_with_confio
+        if home_service is not None:
+            financiera.home_service = home_service
+        if open_weekends is not None:
+            financiera.open_weekends = open_weekends
+
+        if Financiera.objects.filter(
+            owner=financiera.owner, name__iexact=financiera.name,
+            city__iexact=financiera.city, deleted_at__isnull=True,
+        ).exclude(pk=financiera.pk).exists():
+            return UpdateFinanciera(
+                success=False, error='Ya tienes una financiera con ese nombre en esa ciudad.'
+            )
+
+        financiera.save()
+        logger.info('Financiera %s updated by owner', financiera.id)
+        return UpdateFinanciera(success=True, financiera=financiera)
+
+
+class SetFinancieraActive(graphene.Mutation):
+    """Pause/unpause a listing (e.g. vacations) without losing its reviews."""
+
+    class Arguments:
+        financiera_id = graphene.ID(required=True)
+        is_active = graphene.Boolean(required=True)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    financiera = graphene.Field(FinancieraType)
+
+    def mutate(self, info, financiera_id, is_active):
+        financiera, error = _get_owned_financiera(info, financiera_id)
+        if error:
+            return SetFinancieraActive(success=False, error=error)
+        financiera.is_active = is_active
+        financiera.save(update_fields=['is_active', 'updated_at'])
+        logger.info('Financiera %s set active=%s by owner', financiera.id, is_active)
+        return SetFinancieraActive(success=True, financiera=financiera)
+
+
+class DeleteFinanciera(graphene.Mutation):
+    class Arguments:
+        financiera_id = graphene.ID(required=True)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+
+    def mutate(self, info, financiera_id):
+        financiera, error = _get_owned_financiera(info, financiera_id)
+        if error:
+            return DeleteFinanciera(success=False, error=error)
+        financiera.delete()  # SoftDeleteModel: sets deleted_at
+        logger.info('Financiera %s soft-deleted by owner', financiera.id)
+        return DeleteFinanciera(success=True)
+
+
 class SubmitFinancieraReview(graphene.Mutation):
     class Arguments:
         financiera_id = graphene.ID(required=True)
@@ -417,5 +556,8 @@ class ReportFinanciera(graphene.Mutation):
 
 class Mutation(graphene.ObjectType):
     register_financiera = RegisterFinanciera.Field()
+    update_financiera = UpdateFinanciera.Field()
+    set_financiera_active = SetFinancieraActive.Field()
+    delete_financiera = DeleteFinanciera.Field()
     submit_financiera_review = SubmitFinancieraReview.Field()
     report_financiera = ReportFinanciera.Field()

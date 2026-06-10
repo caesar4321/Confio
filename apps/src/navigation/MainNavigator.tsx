@@ -22,6 +22,7 @@ import { FinancierasScreen } from '../screens/FinancierasScreen';
 import { FinancieraDetailScreen } from '../screens/FinancieraDetailScreen';
 import { FinancieraReviewScreen } from '../screens/FinancieraReviewScreen';
 import { RegisterFinancieraScreen } from '../screens/RegisterFinancieraScreen';
+import { MyFinancierasScreen } from '../screens/MyFinancierasScreen';
 import RampInstructionsScreen from '../screens/RampInstructionsScreen';
 import RampHistoryScreen from '../screens/RampHistoryScreen';
 
@@ -274,6 +275,13 @@ export const MainNavigator = () => {
         <Stack.Screen
           name="RegisterFinanciera"
           component={RegisterFinancieraScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="MyFinancieras"
+          component={MyFinancierasScreen}
           options={{
             headerShown: false,
           }}

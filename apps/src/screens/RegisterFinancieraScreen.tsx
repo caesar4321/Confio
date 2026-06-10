@@ -15,12 +15,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQuery, useMutation } from '@apollo/client';
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
-import { countries, Country } from '../utils/countries';
+import { countries, Country, getCountryByIso } from '../utils/countries';
 import { useCountry } from '../contexts/CountryContext';
 import { useAuth } from '../contexts/AuthContext';
 import { FINANCIERA_SERVICES, MANDATORY_SERVICE_ID } from '../types/financiera';
@@ -28,10 +28,14 @@ import {
   GET_COUNTRY_SUBDIVISIONS,
   GET_FINANCIERA_LOCATION_OPTIONS,
   GET_FINANCIERAS,
+  GET_MY_FINANCIERAS,
+  GET_FINANCIERA,
   REGISTER_FINANCIERA,
+  UPDATE_FINANCIERA,
 } from '../apollo/queries';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
+type RegisterRoute = RouteProp<MainStackParamList, 'RegisterFinanciera'>;
 
 const CountryPickerModal = ({
   visible,
@@ -214,16 +218,38 @@ const VerificationGate = ({ onBack, onVerify }: { onBack: () => void; onVerify: 
 
 export const RegisterFinancieraScreen = () => {
   const navigation = useNavigation<NavProp>();
+  const route = useRoute<RegisterRoute>();
   const { userCountry } = useCountry();
   const { userProfile } = useAuth();
 
-  const [name, setName] = useState('');
-  const [country, setCountry] = useState<Country | null>(userCountry || null);
-  const [state, setState] = useState('');
-  const [city, setCity] = useState('');
-  const [barrio, setBarrio] = useState('');
-  const [whatsapp, setWhatsapp] = useState('');
-  const [services, setServices] = useState<string[]>([]);
+  // Edit mode: prefilled from an owned listing. Country is not editable and
+  // the stored WhatsApp is full E.164, so strip the calling code for display.
+  const edit = route.params?.edit;
+  const editCountry = edit ? getCountryByIso(edit.countryCode) || null : null;
+  const editLocalWhatsapp = (() => {
+    if (!edit || !editCountry) return edit?.whatsapp || '';
+    const callingCode = String(editCountry[1]).replace(/\D/g, '');
+    return edit.whatsapp.startsWith(callingCode)
+      ? edit.whatsapp.slice(callingCode.length)
+      : edit.whatsapp;
+  })();
+
+  const [name, setName] = useState(edit?.name || '');
+  const [country, setCountry] = useState<Country | null>(editCountry || userCountry || null);
+  const [state, setState] = useState(edit?.state || '');
+  const [city, setCity] = useState(edit?.city || '');
+  const [barrio, setBarrio] = useState(edit?.neighborhood || '');
+  const [whatsapp, setWhatsapp] = useState(editLocalWhatsapp);
+  const [services, setServices] = useState<string[]>(
+    edit
+      ? [
+          MANDATORY_SERVICE_ID,
+          ...(edit.helpsWithConfio ? ['help_confio'] : []),
+          ...(edit.homeService ? ['home_service'] : []),
+          ...(edit.openWeekends ? ['weekends'] : []),
+        ]
+      : [],
+  );
   const [countryModal, setCountryModal] = useState(false);
   const [stateModal, setStateModal] = useState(false);
 
@@ -254,9 +280,19 @@ export const RegisterFinancieraScreen = () => {
   const toggleService = (id: string) =>
     setServices((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
-  const [registerMutation, { loading: submitting }] = useMutation(REGISTER_FINANCIERA, {
-    refetchQueries: [{ query: GET_FINANCIERAS, variables: { sortBy: 'rating', limit: 100, offset: 0 } }],
+  const refetchAfterChange = [
+    { query: GET_FINANCIERAS, variables: { sortBy: 'rating', limit: 100, offset: 0 } },
+    { query: GET_MY_FINANCIERAS },
+  ];
+  const [registerMutation, { loading: registering }] = useMutation(REGISTER_FINANCIERA, {
+    refetchQueries: refetchAfterChange,
   });
+  const [updateMutation, { loading: updating }] = useMutation(UPDATE_FINANCIERA, {
+    refetchQueries: edit
+      ? [...refetchAfterChange, { query: GET_FINANCIERA, variables: { id: edit.financieraId } }]
+      : refetchAfterChange,
+  });
+  const submitting = registering || updating;
 
   const supportsUsdcAlgorand = services.includes(MANDATORY_SERVICE_ID);
   const canSubmit =
@@ -273,7 +309,32 @@ export const RegisterFinancieraScreen = () => {
     // wa.me needs the full number: calling code (e.g. '+58') + local digits.
     const callingCode = String(country[1]).replace(/\D/g, '');
     const localDigits = whatsapp.replace(/\D/g, '').replace(/^0+/, '');
+    const fullWhatsapp = `${callingCode}${localDigits}`;
     try {
+      if (edit) {
+        const res = await updateMutation({
+          variables: {
+            financieraId: edit.financieraId,
+            name: name.trim(),
+            state: state.trim(),
+            city: city.trim(),
+            neighborhood: barrio.trim(),
+            whatsapp: fullWhatsapp,
+            helpsWithConfio: services.includes('help_confio'),
+            homeService: services.includes('home_service'),
+            openWeekends: services.includes('weekends'),
+          },
+        });
+        const payload = res.data?.updateFinanciera;
+        if (payload?.success) {
+          Alert.alert('Cambios guardados', 'Tu financiera quedó actualizada.', [
+            { text: 'Listo', onPress: () => navigation.goBack() },
+          ]);
+        } else {
+          Alert.alert('No se pudo guardar', payload?.error || 'Intenta de nuevo.');
+        }
+        return;
+      }
       const res = await registerMutation({
         variables: {
           name: name.trim(),
@@ -281,7 +342,7 @@ export const RegisterFinancieraScreen = () => {
           state: state.trim(),
           city: city.trim(),
           neighborhood: barrio.trim() || null,
-          whatsapp: `${callingCode}${localDigits}`,
+          whatsapp: fullWhatsapp,
           supportsUsdcAlgorand: true,
           helpsWithConfio: services.includes('help_confio'),
           homeService: services.includes('home_service'),
@@ -299,7 +360,10 @@ export const RegisterFinancieraScreen = () => {
         Alert.alert('No se pudo registrar', payload?.error || 'Intenta de nuevo.');
       }
     } catch {
-      Alert.alert('No se pudo registrar', 'Revisa tu conexión e intenta de nuevo.');
+      Alert.alert(
+        edit ? 'No se pudo guardar' : 'No se pudo registrar',
+        'Revisa tu conexión e intenta de nuevo.',
+      );
     }
   };
 
@@ -307,7 +371,7 @@ export const RegisterFinancieraScreen = () => {
     return (
       <View style={styles.container}>
         <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
-        <Header title="Registrar financiera" onBack={() => navigation.goBack()} />
+        <Header title={edit ? 'Editar financiera' : 'Registrar financiera'} onBack={() => navigation.goBack()} />
         <VerificationGate
           onBack={() => navigation.goBack()}
           onVerify={() => navigation.navigate('Verification')}
@@ -319,7 +383,7 @@ export const RegisterFinancieraScreen = () => {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
-      <Header title="Registrar financiera" onBack={() => navigation.goBack()} />
+      <Header title={edit ? 'Editar financiera' : 'Registrar financiera'} onBack={() => navigation.goBack()} />
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
@@ -349,7 +413,11 @@ export const RegisterFinancieraScreen = () => {
           <Text style={styles.sectionTitle}>Ubicación</Text>
           <View style={styles.field}>
             <Text style={styles.label}>País</Text>
-            <TouchableOpacity style={styles.selectInput} onPress={() => setCountryModal(true)}>
+            <TouchableOpacity
+              style={[styles.selectInput, !!edit && { opacity: 0.6 }]}
+              disabled={!!edit}
+              onPress={() => setCountryModal(true)}
+            >
               <Text style={[styles.selectText, !country && { color: colors.text.light }]}>
                 {country ? `${country[3]}  ${country[0]}` : 'Selecciona el país'}
               </Text>
@@ -403,7 +471,7 @@ export const RegisterFinancieraScreen = () => {
           <View style={styles.field}>
             <Text style={styles.label}>WhatsApp</Text>
             <View style={styles.phoneRow}>
-              <TouchableOpacity style={styles.phoneCode} onPress={() => setCountryModal(true)}>
+              <TouchableOpacity style={styles.phoneCode} disabled={!!edit} onPress={() => setCountryModal(true)}>
                 <Text style={styles.phoneCodeText}>{country ? country[1] : '+__'}</Text>
                 <Icon name="chevron-down" size={14} color={colors.text.secondary} />
               </TouchableOpacity>
@@ -480,7 +548,7 @@ export const RegisterFinancieraScreen = () => {
             onPress={submitRegistration}
           >
             <Text style={styles.submitText}>
-              {submitting ? 'Registrando…' : 'Registrar financiera'}
+              {submitting ? 'Guardando…' : edit ? 'Guardar cambios' : 'Registrar financiera'}
             </Text>
           </TouchableOpacity>
         </SafeAreaView>

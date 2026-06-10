@@ -33,6 +33,7 @@ export interface Financiera {
   homeService: boolean;
   openWeekends: boolean;
   isVerified: boolean;
+  isActive?: boolean; // only fetched on owner-facing queries
   avgRating: number | null;
   reviewCount: number;
   avgReceivedPer100: number | null; // derived from reviews, never set by the financiera

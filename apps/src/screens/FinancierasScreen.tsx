@@ -25,7 +25,11 @@ import { getCountryByIso } from '../utils/countries';
 import { useCountry } from '../contexts/CountryContext';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { Financiera, USDC_ALGORAND_TAG, serviceBadges } from '../types/financiera';
-import { GET_FINANCIERAS, GET_FINANCIERA_LOCATION_OPTIONS } from '../apollo/queries';
+import {
+  GET_FINANCIERAS,
+  GET_FINANCIERA_LOCATION_OPTIONS,
+  GET_MY_FINANCIERAS,
+} from '../apollo/queries';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 
@@ -301,6 +305,10 @@ export const FinancierasScreen = () => {
   const financieras: Financiera[] = data?.financieras || [];
   const refreshing = networkStatus === 4;
 
+  // Owners get a management shortcut at the top of the directory.
+  const { data: myData } = useQuery(GET_MY_FINANCIERAS, { fetchPolicy: 'cache-and-network' });
+  const ownedCount = (myData?.myFinancieras || []).length;
+
   const openWhatsApp = (f: Financiera) => {
     const text = encodeURIComponent(
       `Hola ${f.name}, te encontré en Confío. Quiero cambiar USDC por dólares.`,
@@ -374,6 +382,20 @@ export const FinancierasScreen = () => {
         }
         ListHeaderComponent={
           <View>
+            {/* Owner shortcut */}
+            {ownedCount > 0 && (
+              <TouchableOpacity
+                style={styles.myFinancierasBanner}
+                onPress={() => navigation.navigate('MyFinancieras')}
+              >
+                <Icon name="briefcase" size={16} color={colors.primaryDark} />
+                <Text style={styles.myFinancierasText}>
+                  {ownedCount === 1 ? 'Gestionar mi financiera' : `Gestionar mis ${ownedCount} financieras`}
+                </Text>
+                <Icon name="chevron-right" size={16} color={colors.primaryDark} />
+              </TouchableOpacity>
+            )}
+
             {/* Disclaimer: we only list, we don't intermediate */}
             <View style={styles.disclaimer}>
               <Icon name="info" size={14} color={colors.accent} />
@@ -513,6 +535,18 @@ const styles = StyleSheet.create({
   headerSubtitle: { fontSize: 13, color: '#fff', opacity: 0.9, marginTop: 8, lineHeight: 18 },
 
   listContent: { padding: 16, paddingBottom: 40 },
+
+  myFinancierasBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: colors.primaryLight,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 12,
+  },
+  myFinancierasText: { flex: 1, fontSize: 14, fontWeight: '700', color: colors.primaryDark },
 
   // Disclaimer
   disclaimer: {

@@ -4072,3 +4072,80 @@ export const REPORT_FINANCIERA = gql`
     }
   }
 `;
+
+export const GET_MY_FINANCIERAS = gql`
+  query GetMyFinancieras {
+    myFinancieras {
+      id
+      name
+      countryCode
+      state
+      city
+      neighborhood
+      whatsapp
+      supportsUsdcAlgorand
+      helpsWithConfio
+      homeService
+      openWeekends
+      isActive
+      isVerified
+      avgRating
+      reviewCount
+      avgReceivedPer100
+    }
+  }
+`;
+
+export const UPDATE_FINANCIERA = gql`
+  mutation UpdateFinanciera(
+    $financieraId: ID!
+    $name: String
+    $state: String
+    $city: String
+    $neighborhood: String
+    $whatsapp: String
+    $helpsWithConfio: Boolean
+    $homeService: Boolean
+    $openWeekends: Boolean
+  ) {
+    updateFinanciera(
+      financieraId: $financieraId
+      name: $name
+      state: $state
+      city: $city
+      neighborhood: $neighborhood
+      whatsapp: $whatsapp
+      helpsWithConfio: $helpsWithConfio
+      homeService: $homeService
+      openWeekends: $openWeekends
+    ) {
+      success
+      error
+      financiera {
+        id
+      }
+    }
+  }
+`;
+
+export const SET_FINANCIERA_ACTIVE = gql`
+  mutation SetFinancieraActive($financieraId: ID!, $isActive: Boolean!) {
+    setFinancieraActive(financieraId: $financieraId, isActive: $isActive) {
+      success
+      error
+      financiera {
+        id
+        isActive
+      }
+    }
+  }
+`;
+
+export const DELETE_FINANCIERA = gql`
+  mutation DeleteFinanciera($financieraId: ID!) {
+    deleteFinanciera(financieraId: $financieraId) {
+      success
+      error
+    }
+  }
+`;

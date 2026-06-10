@@ -161,7 +161,21 @@ export type MainStackParamList = {
   Financieras: undefined;
   FinancieraDetail: { financieraId: string };
   FinancieraReview: { financieraId: string };
-  RegisterFinanciera: undefined;
+  MyFinancieras: undefined;
+  RegisterFinanciera: {
+    edit?: {
+      financieraId: string;
+      name: string;
+      countryCode: string;
+      state: string;
+      city: string;
+      neighborhood: string;
+      whatsapp: string;
+      helpsWithConfio: boolean;
+      homeService: boolean;
+      openWeekends: boolean;
+    };
+  } | undefined;
   RampHistory: {
     initialFilter?: 'all' | 'on_ramp' | 'off_ramp';
   } | undefined;
