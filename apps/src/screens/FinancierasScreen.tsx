@@ -23,7 +23,9 @@ import { colors } from '../config/theme';
 import { SHARE_LINKS } from '../config/shareLinks';
 import { getCountryByIso } from '../utils/countries';
 import { useCountry } from '../contexts/CountryContext';
+import { useAuth } from '../contexts/AuthContext';
 import { useNumberFormat } from '../utils/numberFormatting';
+import { buildInviteLink } from '../utils/inviteLinks';
 import { Financiera, USDC_ALGORAND_TAG, serviceBadges } from '../types/financiera';
 import {
   GET_FINANCIERAS,
@@ -282,6 +284,7 @@ const FinancieraCard = ({
 export const FinancierasScreen = () => {
   const navigation = useNavigation<NavProp>();
   const { userCountry } = useCountry();
+  const { userProfile } = useAuth();
   // Display only — the API scopes the directory to the JWT user's country.
   const countryIso = userCountry ? String(userCountry[2]) : '';
 
@@ -316,11 +319,15 @@ export const FinancierasScreen = () => {
     Linking.openURL(`https://wa.me/${f.whatsapp}?text=${text}`).catch(() => {});
   };
 
-  // Growth loop: let users invite a financiera they already trust.
+  // Growth loop: let users invite a financiera they already trust. The
+  // personalized invite link credits the inviter and tracks this funnel.
   const inviteFinanciera = () => {
+    const inviteLink = userProfile?.username
+      ? buildInviteLink({ username: userProfile.username, source: 'financieras' })
+      : SHARE_LINKS.web.landing;
     Share.share({
       message:
-        `¿Tienes una financiera? Regístrala gratis en Confío y recibe clientes que quieren cambiar dólares digitales por efectivo: ${SHARE_LINKS.web.landing}`,
+        `¿Tienes una financiera? Regístrala gratis en Confío y recibe clientes que quieren cambiar dólares digitales por efectivo: ${inviteLink}`,
     }).catch(() => {});
   };
 
