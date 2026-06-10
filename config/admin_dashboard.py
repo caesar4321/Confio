@@ -1895,3 +1895,10 @@ from content_ingestion.admin import AIContextDocumentAdmin, MediaAssetAdmin, Tel
 confio_admin_site.register(TelegramChat, TelegramChatAdmin)
 confio_admin_site.register(MediaAsset, MediaAssetAdmin)
 confio_admin_site.register(AIContextDocument, AIContextDocumentAdmin)
+
+# Financieras directory
+from financieras.models import Financiera, FinancieraReview, FinancieraReport
+from financieras.admin import FinancieraAdmin, FinancieraReviewAdmin, FinancieraReportAdmin
+confio_admin_site.register(Financiera, FinancieraAdmin)
+confio_admin_site.register(FinancieraReview, FinancieraReviewAdmin)
+confio_admin_site.register(FinancieraReport, FinancieraReportAdmin)
