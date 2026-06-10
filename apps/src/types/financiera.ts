@@ -1,74 +1,68 @@
-// Financieras directory — shared types.
+// Financieras directory — shared types, matching the GraphQL API shape.
 //
 // Confío does NOT intermediate these exchanges. We only list local financieras
 // (casas de cambio) with their WhatsApp, location and community ratings so users
-// can convert their balance to physical USD cash with someone they can verify
-// and, if they want, visit in person.
+// can convert USDC to physical USD cash with someone they can verify and,
+// if they want, visit in person.
 //
-// For launch we support exactly one rail: USDC on the Algorand network. There is
-// no USDT and no Solana yet, so the whole directory is implicitly "USDC-Algorand"
-// and we show it as a single tag — never as separate token/network jargon.
+// One rail at launch: USDC on Algorand, shown as a single friendly tag.
 
 export const USDC_ALGORAND_TAG = 'USDC-Algorand';
 
-// One anonymous review left by an identity-verified user. The exchange rate is
-// never registered by the financiera itself — it is derived from what real users
-// report sending vs. receiving, e.g. "envié 100 USDC, recibí $98".
+// Anonymous review by an identity-verified user. Decimal fields arrive as
+// strings over GraphQL.
 export interface FinancieraReview {
   id: string;
-  rating: number; // 1-5 stars
-  sentUsdc: number; // USDC the user sent (always USDC-Algorand for now)
-  receivedUsd: number; // physical USD received
+  rating: number;
+  sentUsdc: string;
+  receivedUsd: string;
   comment?: string;
-  createdAt: string; // ISO date
+  createdAt: string;
 }
-
-// Services a financiera can offer. Supporting USDC-Algorand is mandatory — a
-// financiera cannot register without committing to it. The rest are optional and
-// shown as small badges in the directory.
-export interface FinancieraService {
-  id: string;
-  label: string; // first-person label used in the registration checklist
-  badge: string; // short label shown on directory cards
-  mandatory?: boolean;
-}
-
-// "Dólares en efectivo" is the baseline premise of the whole directory, so we
-// don't list it as a peer service — it's reinforced directly on the rate figure
-// instead. These are the genuinely optional extras a financiera can offer.
-export const FINANCIERA_SERVICES: FinancieraService[] = [
-  { id: 'usdc_algorand', label: 'Soporta USDC por la red Algorand', badge: USDC_ALGORAND_TAG, mandatory: true },
-  { id: 'help_confio', label: 'Ayuda a los nuevos a usar Confío', badge: 'Ayuda con Confío' },
-  { id: 'home_service', label: 'Atención a domicilio', badge: 'A domicilio' },
-  { id: 'weekends', label: 'Abierto fines de semana', badge: 'Fines de semana' },
-];
-
-export const MANDATORY_SERVICE_ID = 'usdc_algorand';
-export const OPTIONAL_SERVICES = FINANCIERA_SERVICES.filter((s) => !s.mandatory);
-
-export const serviceBadge = (id: string): string =>
-  FINANCIERA_SERVICES.find((s) => s.id === id)?.badge || id;
 
 export interface Financiera {
   id: string;
   name: string;
-  verified: boolean; // identity verified (shown to users as "Verificado")
-  countryIso: string; // e.g. 'VE', 'AR'
-  state: string; // estado / provincia
+  countryCode: string;
+  state: string;
   city: string;
-  barrio: string;
-  whatsapp: string; // digits only, E.164 without '+'
-  services: string[]; // service ids; always includes 'usdc_algorand'
-  avgRating: number;
+  neighborhood: string;
+  whatsapp: string; // digits-only E.164 without '+'
+  supportsUsdcAlgorand: boolean;
+  helpsWithConfio: boolean;
+  homeService: boolean;
+  openWeekends: boolean;
+  isVerified: boolean;
+  avgRating: number | null;
   reviewCount: number;
-  reviews: FinancieraReview[];
+  avgReceivedPer100: number | null; // derived from reviews, never set by the financiera
+  reviews?: FinancieraReview[];
 }
 
-// Average USD received per 100 USDC sent, across all reviews. This is the
-// headline figure we show: "100 USDC → $98 promedio según reseñas".
-export const avgReceivedPer100 = (f: Financiera): number | null => {
-  if (!f.reviews.length) return null;
-  const ratios = f.reviews.map((r) => r.receivedUsd / r.sentUsdc);
-  const avg = ratios.reduce((a, b) => a + b, 0) / ratios.length;
-  return Math.round(avg * 100 * 10) / 10; // one decimal
+// Optional-service badges shown on cards/detail (the mandatory USDC-Algorand
+// rail is rendered separately as the primary tag).
+export const serviceBadges = (f: Financiera): string[] => {
+  const badges: string[] = [];
+  if (f.helpsWithConfio) badges.push('Ayuda con Confío');
+  if (f.homeService) badges.push('A domicilio');
+  if (f.openWeekends) badges.push('Fines de semana');
+  return badges;
 };
+
+// Registration checklist. Supporting USDC-Algorand is mandatory — a financiera
+// cannot register without committing to it; the rest map to optional flags on
+// the registerFinanciera mutation.
+export interface FinancieraServiceOption {
+  id: 'usdc_algorand' | 'help_confio' | 'home_service' | 'weekends';
+  label: string;
+  mandatory?: boolean;
+}
+
+export const FINANCIERA_SERVICES: FinancieraServiceOption[] = [
+  { id: 'usdc_algorand', label: 'Soporta USDC por la red Algorand', mandatory: true },
+  { id: 'help_confio', label: 'Ayuda a los nuevos a usar Confío' },
+  { id: 'home_service', label: 'Atención a domicilio' },
+  { id: 'weekends', label: 'Abierto fines de semana' },
+];
+
+export const MANDATORY_SERVICE_ID = 'usdc_algorand';

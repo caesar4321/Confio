@@ -10,40 +10,37 @@ import {
   Linking,
   StatusBar,
   Share,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useQuery } from '@apollo/client';
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
 import { SHARE_LINKS } from '../config/shareLinks';
 import { getCountryByIso } from '../utils/countries';
 import { useCountry } from '../contexts/CountryContext';
 import { useNumberFormat } from '../utils/numberFormatting';
-import {
-  Financiera,
-  USDC_ALGORAND_TAG,
-  avgReceivedPer100,
-  serviceBadge,
-  MANDATORY_SERVICE_ID,
-} from '../types/financiera';
-import { MOCK_FINANCIERAS } from '../utils/financierasMock';
+import { Financiera, USDC_ALGORAND_TAG, serviceBadges } from '../types/financiera';
+import { GET_FINANCIERAS, GET_FINANCIERA_LOCATION_OPTIONS } from '../apollo/queries';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 
 const WHATSAPP_GREEN = '#25D366';
 const STAR_GOLD = '#F59E0B';
 
-// Location is always scoped to the user's country, so we only cascade through
-// the levels below it.
+// Location is always scoped to the user's country server-side; the filter only
+// cascades through the levels below it.
 type LocationFilter = {
   state?: string;
   city?: string;
   barrio?: string;
 };
 
-type LevelKey = 'state' | 'city' | 'barrio';
+type LevelKey = 'state' | 'city' | 'neighborhood';
 
 // ---- Small presentational helpers -------------------------------------------
 
@@ -85,22 +82,14 @@ const LocationFilterModal = ({
     if (visible) setDraft(value);
   }, [visible, value]);
 
-  const level: LevelKey = !draft.state ? 'state' : !draft.city ? 'city' : 'barrio';
+  const level: LevelKey = !draft.state ? 'state' : !draft.city ? 'city' : 'neighborhood';
 
-  const options = useMemo(() => {
-    const within = MOCK_FINANCIERAS.filter((f) => {
-      if (f.countryIso !== countryIso) return false;
-      if (draft.state && f.state !== draft.state) return false;
-      if (draft.city && f.city !== draft.city) return false;
-      return true;
-    });
-    const counts = new Map<string, number>();
-    within.forEach((f) => {
-      const v = f[level];
-      counts.set(v, (counts.get(v) || 0) + 1);
-    });
-    return Array.from(counts.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-  }, [draft, level, countryIso]);
+  const { data, loading } = useQuery(GET_FINANCIERA_LOCATION_OPTIONS, {
+    variables: { level, state: draft.state, city: draft.city },
+    skip: !visible,
+    fetchPolicy: 'cache-and-network',
+  });
+  const options: string[] = data?.financieraLocationOptions || [];
 
   const title =
     level === 'state' ? 'Estado / Provincia' : level === 'city' ? 'Ciudad' : 'Barrio / Zona';
@@ -114,7 +103,7 @@ const LocationFilterModal = ({
   };
 
   const stepBack = () => {
-    if (level === 'barrio') setDraft({ ...draft, city: undefined });
+    if (level === 'neighborhood') setDraft({ ...draft, city: undefined });
     else if (level === 'city') setDraft({ state: undefined });
   };
 
@@ -147,31 +136,40 @@ const LocationFilterModal = ({
             </View>
           )}
 
-          <FlatList
-            data={options}
-            keyExtractor={(item) => item[0]}
-            style={{ maxHeight: 360 }}
-            initialNumToRender={20}
-            maxToRenderPerBatch={10}
-            windowSize={21}
-            renderItem={({ item }) => {
-              const [v, count] = item;
-              const selected = draft[level] === v;
-              return (
-                <TouchableOpacity style={styles.optionRow} onPress={() => select(v)}>
-                  <Text style={[styles.optionLabel, selected && styles.optionLabelSelected]}>{v}</Text>
-                  <View style={styles.optionRight}>
-                    <Text style={styles.optionCount}>{count}</Text>
+          {loading && options.length === 0 ? (
+            <View style={styles.modalLoading}>
+              <ActivityIndicator color={colors.primary} />
+            </View>
+          ) : options.length === 0 ? (
+            <Text style={styles.modalEmptyText}>
+              No hay más zonas con financieras dentro de esta selección.
+            </Text>
+          ) : (
+            <FlatList
+              data={options}
+              keyExtractor={(item) => item}
+              style={{ maxHeight: 360 }}
+              initialNumToRender={20}
+              maxToRenderPerBatch={10}
+              windowSize={21}
+              renderItem={({ item }) => {
+                const selected =
+                  (level === 'neighborhood' ? draft.barrio : draft[level as 'state' | 'city']) === item;
+                return (
+                  <TouchableOpacity style={styles.optionRow} onPress={() => select(item)}>
+                    <Text style={[styles.optionLabel, selected && styles.optionLabelSelected]}>
+                      {item}
+                    </Text>
                     {selected ? (
                       <Icon name="check" size={18} color={colors.primaryDark} />
                     ) : (
                       <Icon name="chevron-right" size={18} color={colors.text.light} />
                     )}
-                  </View>
-                </TouchableOpacity>
-              );
-            }}
-          />
+                  </TouchableOpacity>
+                );
+              }}
+            />
+          )}
 
           <View style={styles.modalActions}>
             <TouchableOpacity
@@ -208,8 +206,7 @@ const FinancieraCard = ({
   onWhatsApp: () => void;
 }) => {
   const { formatNumber } = useNumberFormat();
-  const per100 = avgReceivedPer100(financiera);
-  const extraServices = financiera.services.filter((s) => s !== MANDATORY_SERVICE_ID);
+  const badges = serviceBadges(financiera);
 
   return (
     <TouchableOpacity style={styles.card} activeOpacity={0.85} onPress={onPress}>
@@ -219,28 +216,37 @@ const FinancieraCard = ({
             <Text style={styles.cardName} numberOfLines={1}>
               {financiera.name}
             </Text>
-            {financiera.verified && (
+            {financiera.isVerified && (
               <Icon name="check-circle" size={14} color={colors.primaryDark} />
             )}
           </View>
           <View style={styles.ratingRow}>
-            <Stars rating={financiera.avgRating} size={12} />
-            <Text style={styles.ratingValue}>
-              {formatNumber(financiera.avgRating, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
-            </Text>
-            <Text style={styles.reviewCount}>({financiera.reviewCount})</Text>
+            {financiera.avgRating != null ? (
+              <>
+                <Stars rating={financiera.avgRating} size={12} />
+                <Text style={styles.ratingValue}>
+                  {formatNumber(financiera.avgRating, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                </Text>
+                <Text style={styles.reviewCount}>({financiera.reviewCount})</Text>
+              </>
+            ) : (
+              <Text style={styles.newTag}>Nuevo · sin reseñas</Text>
+            )}
           </View>
           <View style={styles.locationRow}>
             <Icon name="map-pin" size={11} color={colors.text.secondary} />
             <Text style={styles.locationText} numberOfLines={1}>
-              {financiera.barrio}, {financiera.city}
+              {financiera.neighborhood ? `${financiera.neighborhood}, ` : ''}
+              {financiera.city}
             </Text>
           </View>
         </View>
 
         <View style={styles.rateCol}>
           <Text style={styles.rateBig}>
-            {per100 != null ? `$${formatNumber(per100, { maximumFractionDigits: 1 })}` : '—'}
+            {financiera.avgReceivedPer100 != null
+              ? `$${formatNumber(financiera.avgReceivedPer100, { maximumFractionDigits: 1 })}`
+              : '—'}
           </Text>
           <Text style={styles.rateSub}>por 100 USDC</Text>
           <Text style={styles.rateCashTag}>en efectivo</Text>
@@ -252,9 +258,9 @@ const FinancieraCard = ({
           <View style={styles.railChip}>
             <Text style={styles.railChipText}>{USDC_ALGORAND_TAG}</Text>
           </View>
-          {extraServices.map((s) => (
-            <View key={s} style={styles.serviceChip}>
-              <Text style={styles.serviceChipText}>{serviceBadge(s)}</Text>
+          {badges.map((b) => (
+            <View key={b} style={styles.serviceChip}>
+              <Text style={styles.serviceChipText}>{b}</Text>
             </View>
           ))}
         </View>
@@ -272,14 +278,28 @@ const FinancieraCard = ({
 export const FinancierasScreen = () => {
   const navigation = useNavigation<NavProp>();
   const { userCountry } = useCountry();
-  // Scope the directory to the user's country. Fall back to Venezuela for the
-  // mock when there is no detected country (e.g. not signed in).
-  const countryIso = userCountry?.[2] || 'VE';
+  // Display only — the API scopes the directory to the JWT user's country.
+  const countryIso = userCountry ? String(userCountry[2]) : '';
 
   const [search, setSearch] = useState('');
   const [location, setLocation] = useState<LocationFilter>({});
   const [locationModal, setLocationModal] = useState(false);
   const [sortBy, setSortBy] = useState<'rating' | 'rate'>('rating');
+
+  const { data, loading, refetch, networkStatus } = useQuery(GET_FINANCIERAS, {
+    variables: {
+      state: location.state,
+      city: location.city,
+      neighborhood: location.barrio,
+      sortBy,
+      limit: 100,
+      offset: 0,
+    },
+    fetchPolicy: 'cache-and-network',
+    notifyOnNetworkStatusChange: true,
+  });
+  const financieras: Financiera[] = data?.financieras || [];
+  const refreshing = networkStatus === 4;
 
   const openWhatsApp = (f: Financiera) => {
     const text = encodeURIComponent(
@@ -296,29 +316,20 @@ export const FinancierasScreen = () => {
     }).catch(() => {});
   };
 
+  // Server handles location + sort; the search box filters the loaded page.
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return MOCK_FINANCIERAS.filter((f) => {
-      if (f.countryIso !== countryIso) return false;
-      if (location.state && f.state !== location.state) return false;
-      if (location.city && f.city !== location.city) return false;
-      if (location.barrio && f.barrio !== location.barrio) return false;
-      if (q && !`${f.name} ${f.city} ${f.barrio} ${f.state}`.toLowerCase().includes(q)) return false;
-      return true;
-    }).sort((a, b) => {
-      if (sortBy === 'rate') {
-        // Most dollars received per 100 USDC first; unrated (no reviews) last.
-        return (avgReceivedPer100(b) ?? -1) - (avgReceivedPer100(a) ?? -1);
-      }
-      return b.avgRating - a.avgRating;
-    });
-  }, [search, location, countryIso, sortBy]);
+    if (!q) return financieras;
+    return financieras.filter((f) =>
+      `${f.name} ${f.city} ${f.neighborhood} ${f.state}`.toLowerCase().includes(q),
+    );
+  }, [search, financieras]);
 
   const locationLabel = useMemo(() => {
     if (location.barrio) return location.barrio;
     if (location.city) return location.city;
     if (location.state) return location.state;
-    return `Todo ${countryNameFor(countryIso)}`;
+    return countryIso ? `Todo ${countryNameFor(countryIso)}` : 'Todas las zonas';
   }, [location, countryIso]);
 
   return (
@@ -332,15 +343,16 @@ export const FinancierasScreen = () => {
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Financieras</Text>
             <TouchableOpacity
-              onPress={() => navigation.navigate('RegisterFinanciera' as any)}
+              onPress={() => navigation.navigate('RegisterFinanciera')}
               style={styles.headerIconBtn}
             >
               <Icon name="plus" size={24} color="#fff" />
             </TouchableOpacity>
           </View>
           <Text style={styles.headerSubtitle}>
-            {flagFor(countryIso)} Cambia USDC por dólares en efectivo con financieras de{' '}
-            {countryNameFor(countryIso)}
+            {countryIso ? `${flagFor(countryIso)} ` : ''}
+            Cambia USDC por dólares en efectivo con financieras
+            {countryIso ? ` de ${countryNameFor(countryIso)}` : ' locales'}
           </Text>
         </View>
       </SafeAreaView>
@@ -353,6 +365,13 @@ export const FinancierasScreen = () => {
         maxToRenderPerBatch={8}
         windowSize={11}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => refetch()}
+            tintColor={colors.primary}
+          />
+        }
         ListHeaderComponent={
           <View>
             {/* Disclaimer: we only list, we don't intermediate */}
@@ -431,7 +450,7 @@ export const FinancierasScreen = () => {
               </View>
               <TouchableOpacity
                 style={styles.registerBtn}
-                onPress={() => navigation.navigate('RegisterFinanciera' as any)}
+                onPress={() => navigation.navigate('RegisterFinanciera')}
               >
                 <Text style={styles.registerBtnText}>Registrar</Text>
               </TouchableOpacity>
@@ -441,27 +460,31 @@ export const FinancierasScreen = () => {
         renderItem={({ item }) => (
           <FinancieraCard
             financiera={item}
-            onPress={() =>
-              navigation.navigate('FinancieraDetail' as any, { financieraId: item.id })
-            }
+            onPress={() => navigation.navigate('FinancieraDetail', { financieraId: item.id })}
             onWhatsApp={() => openWhatsApp(item)}
           />
         )}
         ListEmptyComponent={
-          <View style={styles.empty}>
-            <Icon name="map-pin" size={40} color={colors.text.light} />
-            <Text style={styles.emptyTitle}>Aún no hay financieras aquí</Text>
-            <Text style={styles.emptyText}>
-              Prueba otra zona, o invita a una financiera de confianza a registrarse.
-            </Text>
-            <TouchableOpacity style={styles.emptyInviteBtn} onPress={inviteFinanciera}>
-              <Icon name="share-2" size={16} color="#fff" />
-              <Text style={styles.emptyInviteText}>Invitar a una financiera</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => navigation.navigate('RegisterFinanciera' as any)}>
-              <Text style={styles.emptyRegisterLink}>¿Es tuya? Regístrala gratis</Text>
-            </TouchableOpacity>
-          </View>
+          loading ? (
+            <View style={styles.empty}>
+              <ActivityIndicator color={colors.primary} size="large" />
+            </View>
+          ) : (
+            <View style={styles.empty}>
+              <Icon name="map-pin" size={40} color={colors.text.light} />
+              <Text style={styles.emptyTitle}>Aún no hay financieras aquí</Text>
+              <Text style={styles.emptyText}>
+                Prueba otra zona, o invita a una financiera de confianza a registrarse.
+              </Text>
+              <TouchableOpacity style={styles.emptyInviteBtn} onPress={inviteFinanciera}>
+                <Icon name="share-2" size={16} color="#fff" />
+                <Text style={styles.emptyInviteText}>Invitar a una financiera</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => navigation.navigate('RegisterFinanciera')}>
+                <Text style={styles.emptyRegisterLink}>¿Es tuya? Regístrala gratis</Text>
+              </TouchableOpacity>
+            </View>
+          )
         }
       />
 
@@ -567,6 +590,7 @@ const styles = StyleSheet.create({
   ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
   ratingValue: { fontSize: 12, fontWeight: '700', color: colors.text.primary },
   reviewCount: { fontSize: 11, color: colors.text.secondary },
+  newTag: { fontSize: 12, fontWeight: '600', color: colors.accent },
   locationRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
   locationText: { fontSize: 12, color: colors.text.secondary, flex: 1 },
 
@@ -670,6 +694,13 @@ const styles = StyleSheet.create({
   modalHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   modalIconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   modalTitle: { fontSize: 16, fontWeight: '700', color: colors.text.primary },
+  modalLoading: { paddingVertical: 40, alignItems: 'center' },
+  modalEmptyText: {
+    paddingVertical: 32,
+    textAlign: 'center',
+    fontSize: 13,
+    color: colors.text.secondary,
+  },
   breadcrumbRow: { flexDirection: 'row', flexWrap: 'wrap', paddingVertical: 6 },
   breadcrumb: { fontSize: 12, color: colors.text.secondary },
   optionRow: {
@@ -682,8 +713,6 @@ const styles = StyleSheet.create({
   },
   optionLabel: { fontSize: 15, color: colors.text.primary },
   optionLabelSelected: { fontWeight: '700', color: colors.primaryDark },
-  optionRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  optionCount: { fontSize: 12, color: colors.text.light },
   modalActions: { flexDirection: 'row', gap: 12, marginTop: 16 },
   modalClearBtn: {
     flex: 1,

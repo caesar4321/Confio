@@ -3953,3 +3953,122 @@ export const GET_FINANCIERA_LOCATION_OPTIONS = gql`
     financieraLocationOptions(level: $level, state: $state, city: $city, countryCode: $countryCode)
   }
 `;
+
+export const GET_FINANCIERAS = gql`
+  query GetFinancieras($state: String, $city: String, $neighborhood: String, $sortBy: String, $limit: Int, $offset: Int) {
+    financieras(state: $state, city: $city, neighborhood: $neighborhood, sortBy: $sortBy, limit: $limit, offset: $offset) {
+      id
+      name
+      countryCode
+      state
+      city
+      neighborhood
+      whatsapp
+      supportsUsdcAlgorand
+      helpsWithConfio
+      homeService
+      openWeekends
+      isVerified
+      avgRating
+      reviewCount
+      avgReceivedPer100
+    }
+  }
+`;
+
+export const GET_FINANCIERA = gql`
+  query GetFinanciera($id: ID!) {
+    financiera(id: $id) {
+      id
+      name
+      countryCode
+      state
+      city
+      neighborhood
+      whatsapp
+      supportsUsdcAlgorand
+      helpsWithConfio
+      homeService
+      openWeekends
+      isVerified
+      avgRating
+      reviewCount
+      avgReceivedPer100
+      reviews {
+        id
+        rating
+        sentUsdc
+        receivedUsd
+        comment
+        createdAt
+      }
+    }
+  }
+`;
+
+export const REGISTER_FINANCIERA = gql`
+  mutation RegisterFinanciera(
+    $name: String!
+    $countryCode: String!
+    $state: String!
+    $city: String!
+    $neighborhood: String
+    $whatsapp: String!
+    $supportsUsdcAlgorand: Boolean!
+    $helpsWithConfio: Boolean
+    $homeService: Boolean
+    $openWeekends: Boolean
+  ) {
+    registerFinanciera(
+      name: $name
+      countryCode: $countryCode
+      state: $state
+      city: $city
+      neighborhood: $neighborhood
+      whatsapp: $whatsapp
+      supportsUsdcAlgorand: $supportsUsdcAlgorand
+      helpsWithConfio: $helpsWithConfio
+      homeService: $homeService
+      openWeekends: $openWeekends
+    ) {
+      success
+      error
+      financiera {
+        id
+      }
+    }
+  }
+`;
+
+export const SUBMIT_FINANCIERA_REVIEW = gql`
+  mutation SubmitFinancieraReview(
+    $financieraId: ID!
+    $rating: Int!
+    $sentUsdc: Decimal!
+    $receivedUsd: Decimal!
+    $comment: String
+  ) {
+    submitFinancieraReview(
+      financieraId: $financieraId
+      rating: $rating
+      sentUsdc: $sentUsdc
+      receivedUsd: $receivedUsd
+      comment: $comment
+    ) {
+      success
+      error
+      review {
+        id
+      }
+    }
+  }
+`;
+
+export const REPORT_FINANCIERA = gql`
+  mutation ReportFinanciera($financieraId: ID!, $reason: String) {
+    reportFinanciera(financieraId: $financieraId, reason: $reason) {
+      success
+      error
+    }
+  }
+`;

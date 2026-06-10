@@ -8,23 +8,24 @@ import {
   Linking,
   StatusBar,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useQuery, useMutation } from '@apollo/client';
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
 import { getCountryByIso } from '../utils/countries';
 import { useNumberFormat } from '../utils/numberFormatting';
 import {
+  Financiera,
   FinancieraReview,
   USDC_ALGORAND_TAG,
-  avgReceivedPer100,
-  serviceBadge,
-  MANDATORY_SERVICE_ID,
+  serviceBadges,
 } from '../types/financiera';
-import { MOCK_FINANCIERAS } from '../utils/financierasMock';
+import { GET_FINANCIERA, REPORT_FINANCIERA } from '../apollo/queries';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 type DetailRoute = RouteProp<MainStackParamList, 'FinancieraDetail'>;
@@ -59,11 +60,11 @@ const ReviewRow = ({ review }: { review: FinancieraReview }) => {
       </View>
       <View style={styles.reviewRateRow}>
         <Text style={styles.reviewRateText}>
-          Envié <Text style={styles.reviewRateStrong}>{formatNumber(review.sentUsdc, { maximumFractionDigits: 2 })} USDC</Text>
+          Envié <Text style={styles.reviewRateStrong}>{formatNumber(parseFloat(review.sentUsdc), { maximumFractionDigits: 2 })} USDC</Text>
         </Text>
         <Icon name="arrow-right" size={13} color={colors.text.light} />
         <Text style={styles.reviewRateText}>
-          Recibí <Text style={[styles.reviewRateStrong, { color: colors.primaryDark }]}>${formatNumber(review.receivedUsd, { maximumFractionDigits: 2 })}</Text>
+          Recibí <Text style={[styles.reviewRateStrong, { color: colors.primaryDark }]}>${formatNumber(parseFloat(review.receivedUsd), { maximumFractionDigits: 2 })}</Text>
         </Text>
       </View>
       {!!review.comment && <Text style={styles.reviewComment}>“{review.comment}”</Text>}
@@ -77,9 +78,15 @@ export const FinancieraDetailScreen = () => {
   const route = useRoute<DetailRoute>();
   const { formatNumber } = useNumberFormat();
   const { financieraId } = route.params;
-  const financiera = MOCK_FINANCIERAS.find((f) => f.id === financieraId);
 
-  // Mock report flow — wire to the backend moderation queue when it lands.
+  const { data, loading } = useQuery(GET_FINANCIERA, {
+    variables: { id: financieraId },
+    fetchPolicy: 'cache-and-network',
+  });
+  const financiera: Financiera | null = data?.financiera || null;
+
+  const [reportMutation] = useMutation(REPORT_FINANCIERA);
+
   const reportFinanciera = () => {
     Alert.alert(
       'Reportar financiera',
@@ -89,24 +96,60 @@ export const FinancieraDetailScreen = () => {
         {
           text: 'Reportar',
           style: 'destructive',
-          onPress: () =>
-            Alert.alert('Gracias', 'Recibimos tu reporte. Nuestro equipo lo revisará pronto.'),
+          onPress: async () => {
+            try {
+              const res = await reportMutation({ variables: { financieraId } });
+              if (res.data?.reportFinanciera?.success) {
+                Alert.alert('Gracias', 'Recibimos tu reporte. Nuestro equipo lo revisará pronto.');
+              } else {
+                Alert.alert('Error', res.data?.reportFinanciera?.error || 'No se pudo enviar el reporte.');
+              }
+            } catch {
+              Alert.alert('Error', 'No se pudo enviar el reporte. Intenta de nuevo.');
+            }
+          },
         },
       ],
     );
   };
 
-  if (!financiera) {
+  if (loading && !financiera) {
     return (
-      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <Text style={{ color: colors.text.secondary }}>Financiera no encontrada</Text>
+      <View style={styles.container}>
+        <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
+        <SafeAreaView edges={['top']} style={{ backgroundColor: colors.primary }}>
+          <View style={styles.header}>
+            <View style={styles.headerTopRow}>
+              <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerIconBtn}>
+                <Icon name="arrow-left" size={24} color="#fff" />
+              </TouchableOpacity>
+              <Text style={styles.headerTitle}>Financiera</Text>
+              <View style={styles.headerIconBtn} />
+            </View>
+          </View>
+        </SafeAreaView>
+        <View style={styles.loadingBox}>
+          <ActivityIndicator color={colors.primary} size="large" />
+        </View>
       </View>
     );
   }
 
-  const per100 = avgReceivedPer100(financiera);
-  const country = getCountryByIso(financiera.countryIso);
-  const extraServices = financiera.services.filter((s) => s !== MANDATORY_SERVICE_ID);
+  if (!financiera) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <Text style={{ color: colors.text.secondary }}>Financiera no encontrada</Text>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={{ marginTop: 16 }}>
+          <Text style={{ color: colors.primaryDark, fontWeight: '600' }}>Volver</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  const per100 = financiera.avgReceivedPer100;
+  const country = getCountryByIso(financiera.countryCode);
+  const badges = serviceBadges(financiera);
+  const reviews = financiera.reviews || [];
 
   const openWhatsApp = () => {
     const text = encodeURIComponent(
@@ -139,7 +182,7 @@ export const FinancieraDetailScreen = () => {
         <View style={styles.card}>
           <View style={styles.nameRow}>
             <Text style={styles.name}>{financiera.name}</Text>
-            {financiera.verified && (
+            {financiera.isVerified && (
               <View style={styles.verifiedBadge}>
                 <Icon name="check-circle" size={12} color={colors.primaryDark} />
                 <Text style={styles.verifiedText}>Identidad verificada</Text>
@@ -149,16 +192,22 @@ export const FinancieraDetailScreen = () => {
           <View style={styles.locationRow}>
             <Icon name="map-pin" size={14} color={colors.text.secondary} />
             <Text style={styles.locationText}>
-              {country?.[3]} {financiera.barrio}, {financiera.city}, {financiera.state},{' '}
-              {country?.[0]}
+              {country?.[3]} {financiera.neighborhood ? `${financiera.neighborhood}, ` : ''}
+              {financiera.city}, {financiera.state}, {country?.[0]}
             </Text>
           </View>
           <View style={styles.ratingRow}>
-            <Stars rating={financiera.avgRating} />
-            <Text style={styles.ratingValue}>
-              {formatNumber(financiera.avgRating, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
-            </Text>
-            <Text style={styles.reviewCount}>· {financiera.reviewCount} reseñas</Text>
+            {financiera.avgRating != null ? (
+              <>
+                <Stars rating={financiera.avgRating} />
+                <Text style={styles.ratingValue}>
+                  {formatNumber(financiera.avgRating, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
+                </Text>
+                <Text style={styles.reviewCount}>· {financiera.reviewCount} reseñas</Text>
+              </>
+            ) : (
+              <Text style={styles.newTag}>Nuevo · aún sin reseñas</Text>
+            )}
           </View>
         </View>
 
@@ -180,7 +229,9 @@ export const FinancieraDetailScreen = () => {
             </View>
           </View>
           <Text style={styles.rateCaption}>
-            Calculado con {financiera.reviewCount} reseñas reales
+            {financiera.reviewCount > 0
+              ? `Calculado con ${financiera.reviewCount} reseñas reales`
+              : 'Se calculará con las primeras reseñas'}
           </Text>
         </View>
 
@@ -193,10 +244,10 @@ export const FinancieraDetailScreen = () => {
               <Text style={styles.railChipText}>{USDC_ALGORAND_TAG}</Text>
             </View>
           </View>
-          {extraServices.map((s) => (
-            <View key={s} style={styles.serviceRow}>
+          {badges.map((b) => (
+            <View key={b} style={styles.serviceRow}>
               <Icon name="check" size={16} color={colors.primaryDark} />
-              <Text style={styles.serviceRowText}>{serviceBadge(s)}</Text>
+              <Text style={styles.serviceRowText}>{b}</Text>
             </View>
           ))}
         </View>
@@ -207,15 +258,20 @@ export const FinancieraDetailScreen = () => {
             <Text style={styles.sectionLabel}>Reseñas ({financiera.reviewCount})</Text>
             <TouchableOpacity
               onPress={() =>
-                navigation.navigate('FinancieraReview' as any, { financieraId: financiera.id })
+                navigation.navigate('FinancieraReview', { financieraId: financiera.id })
               }
             >
               <Text style={styles.addReviewLink}>Dejar reseña</Text>
             </TouchableOpacity>
           </View>
-          {financiera.reviews.map((r) => (
-            <ReviewRow key={r.id} review={r} />
-          ))}
+          {reviews.length === 0 ? (
+            <Text style={styles.noReviewsText}>
+              Nadie ha dejado una reseña todavía. Si ya cambiaste aquí, tu reseña ayuda a toda
+              tu comunidad.
+            </Text>
+          ) : (
+            reviews.map((r) => <ReviewRow key={r.id} review={r} />)
+          )}
         </View>
 
         {/* Safety tips — the last thing read before tapping the WhatsApp CTA */}
@@ -270,6 +326,8 @@ const styles = StyleSheet.create({
   headerIconBtn: { padding: 6, width: 40, alignItems: 'center' },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#fff', flex: 1, textAlign: 'center' },
 
+  loadingBox: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+
   scrollContent: { padding: 16, paddingBottom: 24 },
 
   card: {
@@ -298,6 +356,7 @@ const styles = StyleSheet.create({
   ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12 },
   ratingValue: { fontSize: 15, fontWeight: '700', color: colors.text.primary },
   reviewCount: { fontSize: 13, color: colors.text.secondary },
+  newTag: { fontSize: 13, fontWeight: '600', color: colors.accent },
 
   sectionLabel: { fontSize: 13, fontWeight: '700', color: colors.text.secondary, marginBottom: 12 },
 
@@ -332,6 +391,7 @@ const styles = StyleSheet.create({
 
   reviewsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   addReviewLink: { fontSize: 13, fontWeight: '700', color: colors.primaryDark, marginBottom: 12 },
+  noReviewsText: { fontSize: 13, color: colors.text.secondary, lineHeight: 19 },
   reviewRow: { paddingVertical: 12, borderTopWidth: 1, borderTopColor: colors.borderLight },
   reviewTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   reviewDate: { fontSize: 12, color: colors.text.light },

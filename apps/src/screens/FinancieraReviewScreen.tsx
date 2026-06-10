@@ -15,18 +15,17 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useQuery, useMutation } from '@apollo/client';
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
 import { useNumberFormat } from '../utils/numberFormatting';
-import { MOCK_FINANCIERAS } from '../utils/financierasMock';
+import { useAuth } from '../contexts/AuthContext';
+import { GET_FINANCIERA, SUBMIT_FINANCIERA_REVIEW } from '../apollo/queries';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 type ReviewRoute = RouteProp<MainStackParamList, 'FinancieraReview'>;
 
 const STAR_GOLD = '#F59E0B';
-
-// Simulated: in production this comes from the user's identity-verification status.
-const USER_VERIFIED = true;
 
 const ratingText: Record<number, string> = {
   1: 'Muy malo',
@@ -36,7 +35,7 @@ const ratingText: Record<number, string> = {
   5: 'Excelente',
 };
 
-const VerificationGate = ({ onBack }: { onBack: () => void }) => (
+const VerificationGate = ({ onBack, onVerify }: { onBack: () => void; onVerify: () => void }) => (
   <View style={styles.gate}>
     <View style={styles.gateIcon}>
       <Icon name="user-check" size={32} color={colors.primaryDark} />
@@ -46,7 +45,7 @@ const VerificationGate = ({ onBack }: { onBack: () => void }) => (
       Solo las personas con identidad verificada pueden dejar reseñas. Así mantenemos las
       reseñas reales y confiables para todos.
     </Text>
-    <TouchableOpacity style={styles.gatePrimary}>
+    <TouchableOpacity style={styles.gatePrimary} onPress={onVerify}>
       <Text style={styles.gatePrimaryText}>Verificar mi identidad</Text>
     </TouchableOpacity>
     <TouchableOpacity onPress={onBack}>
@@ -63,8 +62,19 @@ export const FinancieraReviewScreen = () => {
   const navigation = useNavigation<NavProp>();
   const route = useRoute<ReviewRoute>();
   const { formatNumber } = useNumberFormat();
+  const { userProfile } = useAuth();
   const { financieraId } = route.params;
-  const financiera = MOCK_FINANCIERAS.find((f) => f.id === financieraId);
+
+  // Usually a cache hit from the detail screen the user just came from.
+  const { data } = useQuery(GET_FINANCIERA, {
+    variables: { id: financieraId },
+    fetchPolicy: 'cache-first',
+  });
+  const financiera = data?.financiera || null;
+
+  const [submitMutation, { loading: submitting }] = useMutation(SUBMIT_FINANCIERA_REVIEW, {
+    refetchQueries: [{ query: GET_FINANCIERA, variables: { id: financieraId } }],
+  });
 
   const [rating, setRating] = useState(0);
   const [sentUsdc, setSentUsdc] = useState('');
@@ -78,6 +88,7 @@ export const FinancieraReviewScreen = () => {
 
   // Soft typo guard: receiving more USD than USDC sent is implausible (the
   // financiera takes a cut), and less than half suggests a slipped digit.
+  // The API hard-rejects received > sent.
   const amountWarning =
     sent > 0 && received > 0
       ? received > sent
@@ -87,22 +98,43 @@ export const FinancieraReviewScreen = () => {
         : null
       : null;
 
-  const canSubmit = rating > 0 && sent > 0 && received > 0;
+  const canSubmit = rating > 0 && sent > 0 && received > 0 && received <= sent && !submitting;
 
-  const submitReview = () => {
-    Alert.alert(
-      '¡Gracias!',
-      'Tu reseña anónima ayuda a tu comunidad a cambiar con confianza.',
-      [{ text: 'Listo', onPress: () => navigation.goBack() }],
-    );
+  const submitReview = async () => {
+    try {
+      const res = await submitMutation({
+        variables: {
+          financieraId,
+          rating,
+          sentUsdc: String(sent),
+          receivedUsd: String(received),
+          comment: comment.trim() || null,
+        },
+      });
+      const payload = res.data?.submitFinancieraReview;
+      if (payload?.success) {
+        Alert.alert(
+          '¡Gracias!',
+          'Tu reseña anónima ayuda a tu comunidad a cambiar con confianza.',
+          [{ text: 'Listo', onPress: () => navigation.goBack() }],
+        );
+      } else {
+        Alert.alert('No se pudo publicar', payload?.error || 'Intenta de nuevo.');
+      }
+    } catch {
+      Alert.alert('No se pudo publicar', 'Revisa tu conexión e intenta de nuevo.');
+    }
   };
 
-  if (!USER_VERIFIED) {
+  if (!userProfile?.isIdentityVerified) {
     return (
       <View style={styles.container}>
         <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
         <Header title="Dejar reseña" onBack={() => navigation.goBack()} />
-        <VerificationGate onBack={() => navigation.goBack()} />
+        <VerificationGate
+          onBack={() => navigation.goBack()}
+          onVerify={() => navigation.navigate('Verification')}
+        />
       </View>
     );
   }

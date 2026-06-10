@@ -11,26 +11,27 @@ import {
   FlatList,
   KeyboardAvoidingView,
   Platform,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useQuery } from '@apollo/client';
+import { useQuery, useMutation } from '@apollo/client';
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
 import { countries, Country } from '../utils/countries';
 import { useCountry } from '../contexts/CountryContext';
+import { useAuth } from '../contexts/AuthContext';
 import { FINANCIERA_SERVICES, MANDATORY_SERVICE_ID } from '../types/financiera';
 import {
   GET_COUNTRY_SUBDIVISIONS,
   GET_FINANCIERA_LOCATION_OPTIONS,
+  GET_FINANCIERAS,
+  REGISTER_FINANCIERA,
 } from '../apollo/queries';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
-
-// Simulated: in production this reflects the owner's identity-verification status.
-const USER_VERIFIED = true;
 
 const CountryPickerModal = ({
   visible,
@@ -192,7 +193,7 @@ const SuggestionChips = ({
   );
 };
 
-const VerificationGate = ({ onBack }: { onBack: () => void }) => (
+const VerificationGate = ({ onBack, onVerify }: { onBack: () => void; onVerify: () => void }) => (
   <View style={styles.gate}>
     <View style={styles.gateIcon}>
       <Icon name="user-check" size={32} color={colors.primaryDark} />
@@ -202,7 +203,7 @@ const VerificationGate = ({ onBack }: { onBack: () => void }) => (
       Para registrar tu financiera primero verifica tu identidad. Esto da confianza a las
       personas que te contactarán.
     </Text>
-    <TouchableOpacity style={styles.gatePrimary}>
+    <TouchableOpacity style={styles.gatePrimary} onPress={onVerify}>
       <Text style={styles.gatePrimaryText}>Verificar mi identidad</Text>
     </TouchableOpacity>
     <TouchableOpacity onPress={onBack}>
@@ -214,6 +215,7 @@ const VerificationGate = ({ onBack }: { onBack: () => void }) => (
 export const RegisterFinancieraScreen = () => {
   const navigation = useNavigation<NavProp>();
   const { userCountry } = useCountry();
+  const { userProfile } = useAuth();
 
   const [name, setName] = useState('');
   const [country, setCountry] = useState<Country | null>(userCountry || null);
@@ -252,6 +254,10 @@ export const RegisterFinancieraScreen = () => {
   const toggleService = (id: string) =>
     setServices((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
+  const [registerMutation, { loading: submitting }] = useMutation(REGISTER_FINANCIERA, {
+    refetchQueries: [{ query: GET_FINANCIERAS, variables: { sortBy: 'rating', limit: 100, offset: 0 } }],
+  });
+
   const supportsUsdcAlgorand = services.includes(MANDATORY_SERVICE_ID);
   const canSubmit =
     !!name.trim() &&
@@ -259,14 +265,53 @@ export const RegisterFinancieraScreen = () => {
     !!state.trim() &&
     !!city.trim() &&
     !!whatsapp.trim() &&
-    supportsUsdcAlgorand;
+    supportsUsdcAlgorand &&
+    !submitting;
 
-  if (!USER_VERIFIED) {
+  const submitRegistration = async () => {
+    if (!country) return;
+    // wa.me needs the full number: calling code (e.g. '+58') + local digits.
+    const callingCode = String(country[1]).replace(/\D/g, '');
+    const localDigits = whatsapp.replace(/\D/g, '').replace(/^0+/, '');
+    try {
+      const res = await registerMutation({
+        variables: {
+          name: name.trim(),
+          countryCode: countryIso,
+          state: state.trim(),
+          city: city.trim(),
+          neighborhood: barrio.trim() || null,
+          whatsapp: `${callingCode}${localDigits}`,
+          supportsUsdcAlgorand: true,
+          helpsWithConfio: services.includes('help_confio'),
+          homeService: services.includes('home_service'),
+          openWeekends: services.includes('weekends'),
+        },
+      });
+      const payload = res.data?.registerFinanciera;
+      if (payload?.success) {
+        Alert.alert(
+          '¡Financiera registrada!',
+          'Ya apareces en el directorio de tu zona. Las reseñas de tus clientes construirán tu reputación.',
+          [{ text: 'Listo', onPress: () => navigation.goBack() }],
+        );
+      } else {
+        Alert.alert('No se pudo registrar', payload?.error || 'Intenta de nuevo.');
+      }
+    } catch {
+      Alert.alert('No se pudo registrar', 'Revisa tu conexión e intenta de nuevo.');
+    }
+  };
+
+  if (!userProfile?.isIdentityVerified) {
     return (
       <View style={styles.container}>
         <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
         <Header title="Registrar financiera" onBack={() => navigation.goBack()} />
-        <VerificationGate onBack={() => navigation.goBack()} />
+        <VerificationGate
+          onBack={() => navigation.goBack()}
+          onVerify={() => navigation.navigate('Verification')}
+        />
       </View>
     );
   }
@@ -432,9 +477,11 @@ export const RegisterFinancieraScreen = () => {
           <TouchableOpacity
             style={[styles.submitBtn, !canSubmit && styles.submitBtnDisabled]}
             disabled={!canSubmit}
-            onPress={() => navigation.goBack()}
+            onPress={submitRegistration}
           >
-            <Text style={styles.submitText}>Registrar financiera</Text>
+            <Text style={styles.submitText}>
+              {submitting ? 'Registrando…' : 'Registrar financiera'}
+            </Text>
           </TouchableOpacity>
         </SafeAreaView>
       </KeyboardAvoidingView>
