@@ -15,11 +15,17 @@ from decimal import Decimal, InvalidOperation
 
 import graphene
 import pycountry
-from django.db.models import F, Q
+from django.db.models import Case, F, FloatField, Q, When
 from django.utils import timezone
 from graphene_django import DjangoObjectType
 
-from .models import COUNTRY_CHOICES, Financiera, FinancieraReport, FinancieraReview
+from .models import (
+    COUNTRY_CHOICES,
+    MIN_DISTINCT_RATE_REVIEWERS,
+    Financiera,
+    FinancieraReport,
+    FinancieraReview,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +50,10 @@ class FinancieraType(DjangoObjectType):
     avg_rating = graphene.Float()
     review_count = graphene.Int()
     avg_received_per_100 = graphene.Float(
-        description='Average USD received per 100 USDC sent, derived from reviews'
+        description=(
+            'Median USD received per 100 USDC sent, derived from reviews; '
+            f'null until {MIN_DISTINCT_RATE_REVIEWERS}+ distinct verified users have reviewed'
+        )
     )
     is_verified = graphene.Boolean()
     reviews = graphene.List(FinancieraReviewType, limit=graphene.Int(default_value=20))
@@ -198,8 +207,19 @@ class Query(graphene.ObjectType):
             )
 
         if sort_by == 'rate':
-            # Most dollars received per 100 USDC first; unreviewed listings last.
-            qs = qs.order_by(F('annotated_avg_ratio').desc(nulls_last=True))
+            # Most dollars received per 100 USDC first. Listings whose rate is
+            # still hidden (fewer distinct reviewers than the public threshold)
+            # sort with the unreviewed ones, so a listing never ranks on a
+            # number users can't see.
+            qs = qs.annotate(
+                public_ratio=Case(
+                    When(
+                        annotated_distinct_reviewers__gte=MIN_DISTINCT_RATE_REVIEWERS,
+                        then=F('annotated_median_ratio'),
+                    ),
+                    output_field=FloatField(),
+                )
+            ).order_by(F('public_ratio').desc(nulls_last=True))
         else:
             qs = qs.order_by(F('annotated_avg_rating').desc(nulls_last=True))
 

@@ -40,6 +40,24 @@ whatsapp_validator = RegexValidator(
     message='WhatsApp number must be 8-15 digits (country code included, no +)',
 )
 
+# The public derived rate stays hidden until this many *distinct* verified
+# users have reviewed. Below that the number is one person's claim, not a
+# market rate, and an owner with a sock-puppet account could set it.
+MIN_DISTINCT_RATE_REVIEWERS = 3
+
+
+class Median(models.Aggregate):
+    """PostgreSQL continuous median (PERCENTILE_CONT).
+
+    The headline rate uses the median instead of the mean so one implausible
+    review can't drag the displayed number.
+    """
+
+    function = 'PERCENTILE_CONT'
+    name = 'median'
+    output_field = models.FloatField()
+    template = '%(function)s(0.5) WITHIN GROUP (ORDER BY %(expressions)s)'
+
 
 class FinancieraQuerySet(models.QuerySet):
     def with_stats(self):
@@ -51,7 +69,12 @@ class FinancieraQuerySet(models.QuerySet):
             annotated_review_count=Count(
                 'reviews', filter=models.Q(reviews__deleted_at__isnull=True)
             ),
-            annotated_avg_ratio=Avg(
+            annotated_distinct_reviewers=Count(
+                'reviews__reviewer',
+                distinct=True,
+                filter=models.Q(reviews__deleted_at__isnull=True),
+            ),
+            annotated_median_ratio=Median(
                 F('reviews__received_usd') / F('reviews__sent_usdc'),
                 filter=models.Q(reviews__deleted_at__isnull=True),
             ),
@@ -152,12 +175,26 @@ class Financiera(SoftDeleteModel):
         return self.reviews.count()
 
     @property
+    def distinct_reviewer_count(self):
+        annotated = getattr(self, 'annotated_distinct_reviewers', None)
+        if annotated is not None:
+            return annotated
+        return self.reviews.values('reviewer').distinct().count()
+
+    @property
     def avg_received_per_100(self):
-        """Average USD received per 100 USDC sent, from reviews ("100 USDC → $98")."""
-        ratio = getattr(self, 'annotated_avg_ratio', None)
+        """Median USD received per 100 USDC sent, from reviews ("100 USDC → $98").
+
+        None until MIN_DISTINCT_RATE_REVIEWERS distinct users have reviewed.
+        Keeps its historical name because the mobile app queries
+        avgReceivedPer100; the GraphQL field name must stay stable.
+        """
+        if self.distinct_reviewer_count < MIN_DISTINCT_RATE_REVIEWERS:
+            return None
+        ratio = getattr(self, 'annotated_median_ratio', None)
         if ratio is None:
             ratio = self.reviews.aggregate(
-                v=Avg(F('received_usd') / F('sent_usdc'))
+                v=Median(F('received_usd') / F('sent_usdc'))
             )['v']
         if ratio is None:
             return None

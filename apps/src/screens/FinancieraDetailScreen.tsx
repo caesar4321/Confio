@@ -223,7 +223,7 @@ export const FinancieraDetailScreen = () => {
 
         {/* Headline rate */}
         <View style={styles.card}>
-          <Text style={styles.sectionLabel}>Tasa promedio según reseñas</Text>
+          <Text style={styles.sectionLabel}>Tasa típica según reseñas</Text>
           <View style={styles.rateBox}>
             <View style={styles.rateSide}>
               <Text style={styles.rateLabel}>Enviaron</Text>
@@ -239,9 +239,11 @@ export const FinancieraDetailScreen = () => {
             </View>
           </View>
           <Text style={styles.rateCaption}>
-            {financiera.reviewCount > 0
+            {per100 != null
               ? `Calculado con ${financiera.reviewCount} reseñas reales`
-              : 'Se calculará con las primeras reseñas'}
+              : financiera.reviewCount > 0
+                ? 'Se mostrará con reseñas de al menos 3 usuarios distintos'
+                : 'Se calculará con las primeras reseñas'}
           </Text>
         </View>
 
