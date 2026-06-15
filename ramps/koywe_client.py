@@ -389,11 +389,13 @@ class KoyweClient:
     def resolve_payment_provider(self, *, fiat_symbol: str, payment_method_code: str, email: str | None = None) -> tuple[str, str, dict[str, Any] | None]:
         providers = self.list_payment_providers(fiat_symbol=fiat_symbol, email=email)
         normalized = (payment_method_code or '').strip().upper()
+        normalized_alias = normalized.replace('_', '-')
         for provider in providers:
             provider_code = str(provider.get('code') or provider.get('symbol') or provider.get('name') or '').strip().upper()
             provider_id = str(provider.get('_id') or provider.get('id') or provider.get('paymentMethodId') or provider_code)
             display = provider.get('displayName') or provider.get('name') or provider_code
-            if provider_code == normalized or provider_id.upper() == normalized:
+            provider_code_alias = provider_code.replace('_', '-')
+            if provider_code == normalized or provider_code_alias == normalized_alias or provider_id.upper() == normalized:
                 return provider_id, display, provider
         return normalized, payment_method_code, None
 
