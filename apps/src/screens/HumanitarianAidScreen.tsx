@@ -424,15 +424,29 @@ export const HumanitarianAidScreen = () => {
         <Text style={[styles.balanceHint, exceedsBalance && styles.balanceError]}>
           Saldo disponible: {balancesLoading ? 'Cargando...' : `${availableCusd.toFixed(2)} cUSD`} · Mínimo: 1 cUSD
         </Text>
-        <TouchableOpacity
-          style={[styles.donateButton, !canDonate && styles.donateButtonDisabled]}
-          onPress={onDonate}
-          activeOpacity={0.9}
-          disabled={!canDonate}
-        >
-          <Icon name="heart" size={17} color="#FFFFFF" />
-          <Text style={styles.donateButtonText}>{donateLabel}</Text>
-        </TouchableOpacity>
+        {needsTopUp ? (
+          <>
+            <Text style={styles.topUpHint}>
+              {hasNoBalance
+                ? 'Aún no tienes cUSD. Recárgalo en segundos para poder donar.'
+                : 'No te alcanza para este monto. Recarga cUSD para completar tu donación.'}
+            </Text>
+            <TouchableOpacity style={styles.topUpButton} onPress={onTopUp} activeOpacity={0.9}>
+              <Icon name="plus-circle" size={17} color="#FFFFFF" />
+              <Text style={styles.donateButtonText}>Recargar cUSD</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <TouchableOpacity
+            style={[styles.donateButton, !canDonate && styles.donateButtonDisabled]}
+            onPress={onDonate}
+            activeOpacity={0.9}
+            disabled={!canDonate}
+          >
+            <Icon name="heart" size={17} color="#FFFFFF" />
+            <Text style={styles.donateButtonText}>{donateLabel}</Text>
+          </TouchableOpacity>
+        )}
         <View style={styles.trustRow}>
           <Icon name="shield" size={13} color={colors.primaryDark} />
           <Text style={styles.trustText}>100% directo · sin comisiones · prueba pública</Text>
@@ -681,6 +695,8 @@ const styles = StyleSheet.create({
   donateButton: { height: 50, borderRadius: 12, backgroundColor: colors.primaryDark, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8 },
   donateButtonDisabled: { opacity: 0.5 },
   donateButtonText: { color: colors.white, fontSize: 16, fontWeight: '800' },
+  topUpHint: { fontSize: 13, lineHeight: 18, color: colors.textSecondary, marginBottom: 10 },
+  topUpButton: { height: 50, borderRadius: 12, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8 },
   trustRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 10 },
   trustText: { fontSize: 12, color: colors.textSecondary },
   publicAccountLink: { marginTop: 12, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
