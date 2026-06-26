@@ -124,6 +124,7 @@ export const HumanitarianAidScreen = () => {
   const [customAmount, setCustomAmount] = useState('');
   const [donating, setDonating] = useState(false);
   const [donationLoadingMessage, setDonationLoadingMessage] = useState('');
+  const [showProofSection, setShowProofSection] = useState(false);
   const [heroSize, setHeroSize] = useState({ width: 0, height: 0 });
   const { data, loading, error, refetch } = useQuery(GET_HUMANITARIAN_CAMPAIGN, {
     variables: { slug: campaignSlug },
@@ -576,75 +577,93 @@ export const HumanitarianAidScreen = () => {
       </View>
 
       <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Entregas con prueba</Text>
-          {campaign.releaseCount > 0 && (
-            <View style={styles.countPill}>
-              <Text style={styles.countPillText}>{campaign.releaseCount}</Text>
-            </View>
-          )}
-        </View>
-        <Text style={styles.sectionHint}>Cada compra y entrega queda registrada con prueba pública.</Text>
-        {(campaign.releases || []).map((release: any) => {
-          const published = normalizeStatus(release.status) === 'proof_published';
-          const c = avatarColor(release.volunteerName);
-          return (
-            <View key={release.publicId} style={styles.releaseCard}>
-              <View style={styles.releaseHeader}>
-                <View style={[styles.avatar, { backgroundColor: c.bg }]}>
-                  <Text style={[styles.avatarText, { color: c.fg }]}>{initials(release.volunteerName)}</Text>
-                </View>
-                <View style={styles.releaseHeaderInfo}>
-                  <Text style={styles.releaseVolunteer} numberOfLines={1}>{release.volunteerName}</Text>
-                  {!!release.releasedAt && <Text style={styles.timeText}>{timeAgo(release.releasedAt)}</Text>}
-                </View>
-                <View style={styles.amountPill}>
-                  <Text style={styles.amountPillText}>{formatAmount(release.amount)}</Text>
-                </View>
+        <TouchableOpacity
+          style={styles.foldHeader}
+          onPress={() => setShowProofSection((value) => !value)}
+          activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel={showProofSection ? 'Ocultar entregas con prueba' : 'Ver entregas con prueba'}
+        >
+          <View style={styles.foldTitleRow}>
+            <Text style={styles.sectionTitle}>Entregas con prueba</Text>
+            {campaign.releaseCount > 0 && (
+              <View style={styles.countPill}>
+                <Text style={styles.countPillText}>{campaign.releaseCount}</Text>
               </View>
-              <Text style={styles.releasePurpose}>{release.purpose}</Text>
-              {!!release.publicNote && <Text style={styles.note}>{release.publicNote}</Text>}
-              <View style={styles.chipRow}>
-                <View style={[styles.statusBadge, published ? styles.statusBadgeDone : styles.statusBadgePending]}>
-                  <Icon
-                    name={published ? 'check-circle' : 'clock'}
-                    size={12}
-                    color={published ? colors.successText : colors.textSecondary}
-                  />
-                  <Text style={[styles.statusText, published ? styles.statusTextDone : styles.statusTextPending]}>
-                    {published ? 'prueba publicada' : 'prueba en camino'}
-                  </Text>
-                </View>
-                {(release.proofLinks || []).map((proof: any) => (
-                  <TouchableOpacity
-                    key={`${release.publicId}-${proof.url}`}
-                    style={styles.chip}
-                    onPress={() => Linking.openURL(proof.url)}
-                    activeOpacity={0.85}
-                  >
-                    <Icon name="external-link" size={12} color={colors.primaryDark} />
-                    <Text style={styles.chipText}>{proof.title || proof.platform || 'Ver prueba'}</Text>
-                  </TouchableOpacity>
-                ))}
-                {!!release.transactionHash && (
-                  <TouchableOpacity
-                    style={styles.chip}
-                    onPress={() => openTransaction(release.transactionHash)}
-                    activeOpacity={0.85}
-                  >
-                    <Icon name="link" size={12} color={colors.primaryDark} />
-                    <Text style={styles.chipText}>{shortHash(release.transactionHash)}</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            </View>
-          );
-        })}
-        {(!campaign.releases || campaign.releases.length === 0) && (
-          <View style={styles.emptyCard}>
-            <Icon name="package" size={22} color={colors.primaryDark} />
-            <Text style={styles.emptyCardText}>Las primeras entregas aparecerán aquí con monto, voluntario y prueba pública.</Text>
+            )}
           </View>
+          <View style={styles.foldAction}>
+            <Text style={styles.foldActionText}>{showProofSection ? 'Ocultar' : 'Ver pruebas'}</Text>
+            <Icon name={showProofSection ? 'chevron-up' : 'chevron-down'} size={18} color={colors.primaryDark} />
+          </View>
+        </TouchableOpacity>
+        {showProofSection && (
+          <Text style={styles.sectionHint}>Cada compra y entrega queda registrada con prueba pública.</Text>
+        )}
+        {showProofSection && (
+          <>
+            {(campaign.releases || []).map((release: any) => {
+              const published = normalizeStatus(release.status) === 'proof_published';
+              const c = avatarColor(release.volunteerName);
+              return (
+                <View key={release.publicId} style={styles.releaseCard}>
+                  <View style={styles.releaseHeader}>
+                    <View style={[styles.avatar, { backgroundColor: c.bg }]}>
+                      <Text style={[styles.avatarText, { color: c.fg }]}>{initials(release.volunteerName)}</Text>
+                    </View>
+                    <View style={styles.releaseHeaderInfo}>
+                      <Text style={styles.releaseVolunteer} numberOfLines={1}>{release.volunteerName}</Text>
+                      {!!release.releasedAt && <Text style={styles.timeText}>{timeAgo(release.releasedAt)}</Text>}
+                    </View>
+                    <View style={styles.amountPill}>
+                      <Text style={styles.amountPillText}>{formatAmount(release.amount)}</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.releasePurpose}>{release.purpose}</Text>
+                  {!!release.publicNote && <Text style={styles.note}>{release.publicNote}</Text>}
+                  <View style={styles.chipRow}>
+                    <View style={[styles.statusBadge, published ? styles.statusBadgeDone : styles.statusBadgePending]}>
+                      <Icon
+                        name={published ? 'check-circle' : 'clock'}
+                        size={12}
+                        color={published ? colors.successText : colors.textSecondary}
+                      />
+                      <Text style={[styles.statusText, published ? styles.statusTextDone : styles.statusTextPending]}>
+                        {published ? 'prueba publicada' : 'prueba en camino'}
+                      </Text>
+                    </View>
+                    {(release.proofLinks || []).map((proof: any) => (
+                      <TouchableOpacity
+                        key={`${release.publicId}-${proof.url}`}
+                        style={styles.chip}
+                        onPress={() => Linking.openURL(proof.url)}
+                        activeOpacity={0.85}
+                      >
+                        <Icon name="external-link" size={12} color={colors.primaryDark} />
+                        <Text style={styles.chipText}>{proof.title || proof.platform || 'Ver prueba'}</Text>
+                      </TouchableOpacity>
+                    ))}
+                    {!!release.transactionHash && (
+                      <TouchableOpacity
+                        style={styles.chip}
+                        onPress={() => openTransaction(release.transactionHash)}
+                        activeOpacity={0.85}
+                      >
+                        <Icon name="link" size={12} color={colors.primaryDark} />
+                        <Text style={styles.chipText}>{shortHash(release.transactionHash)}</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </View>
+              );
+            })}
+            {(!campaign.releases || campaign.releases.length === 0) && (
+              <View style={styles.emptyCard}>
+                <Icon name="package" size={22} color={colors.primaryDark} />
+                <Text style={styles.emptyCardText}>Las primeras entregas aparecerán aquí con monto, voluntario y prueba pública.</Text>
+              </View>
+            )}
+          </>
         )}
       </View>
 
@@ -780,6 +799,10 @@ const styles = StyleSheet.create({
   sectionSubtitle: { fontSize: 14, lineHeight: 20, color: colors.textSecondary, marginTop: -4, marginBottom: 12 },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
   sectionHint: { fontSize: 13, lineHeight: 18, color: colors.textSecondary, marginTop: 2, marginBottom: 12 },
+  foldHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, backgroundColor: colors.background, borderRadius: 12, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 12, paddingVertical: 12, ...softShadow },
+  foldTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
+  foldAction: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  foldActionText: { fontSize: 13, fontWeight: '800', color: colors.primaryDark },
   countPill: { backgroundColor: colors.primarySoft, borderRadius: 12, paddingHorizontal: 8, paddingVertical: 2, minWidth: 24, alignItems: 'center' },
   countPillText: { fontSize: 12, fontWeight: '800', color: colors.primaryDark },
 
