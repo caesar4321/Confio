@@ -10,7 +10,6 @@ import { ContactsScreen } from '../screens/ContactsScreen';
 import EmployeesScreen from '../screens/EmployeesScreen';
 import ScanTab from '../screens/ScanTab';
 import { ChargeScreen } from '../screens/ChargeScreen';
-import { HumanitarianAidScreen } from '../screens/HumanitarianAidScreen';
 import DiscoverScreen from '../screens/DiscoverScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { Header } from './Header';
@@ -290,15 +289,6 @@ export const BottomTabNavigator = () => {
           options={{ ...chargeTabOptions, freezeOnBlur: true }}
         />
       )}
-        <Tabs.Screen
-          name="Ayuda"
-          component={HumanitarianAidScreen}
-          options={{
-            headerShown: false,
-            tabBarLabel: 'Ayuda',
-            tabBarIcon: ({ color, size }: any) => <Icon name="heart" size={size} color={color} />
-          }}
-        />
         <Tabs.Screen
           name="Discover"
           component={DiscoverScreen}

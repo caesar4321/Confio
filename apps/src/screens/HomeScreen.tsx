@@ -1314,6 +1314,23 @@ export const HomeScreen = () => {
           </TouchableOpacity>
         )}
 
+        <TouchableOpacity
+          style={[styles.humanitarianCard, { marginHorizontal: 16, marginBottom: 12 }]}
+          onPress={() => navigation.navigate('HumanitarianAid')}
+          activeOpacity={0.9}
+        >
+          <View style={styles.humanitarianIconWrap}>
+            <Icon name="heart" size={20} color="#fff" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.humanitarianTitle}>Ayuda humanitaria: Venezuela</Text>
+            <Text style={styles.humanitarianSubtitle}>
+              Donaciones, avances y pruebas públicas para voluntarios verificados.
+            </Text>
+          </View>
+          <Icon name="chevron-right" size={18} color="#9CA3AF" />
+        </TouchableOpacity>
+
         {/* CONFIO Presale Banner - Show claims unlocked (green) or presale active (purple) */}
         {isPresaleClaimsUnlocked && !presaleDismissed && (
           <Animated.View
@@ -1688,6 +1705,35 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#374151',
     fontWeight: '600',
+  },
+  humanitarianCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#D1FAE5',
+    padding: 14,
+  },
+  humanitarianIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#14B8A6',
+  },
+  humanitarianTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#0F172A',
+    marginBottom: 3,
+  },
+  humanitarianSubtitle: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#64748B',
   },
   // Wallets section styles
   walletsSection: {
