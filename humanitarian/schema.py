@@ -103,7 +103,7 @@ class HumanitarianQueries(graphene.ObjectType):
     my_humanitarian_volunteer_application = graphene.Field(HumanitarianVolunteerApplicationType, slug=graphene.String(required=True))
 
     def resolve_humanitarian_campaign(self, info, slug):
-        return HumanitarianCampaign.objects.filter(slug=slug, status__in=['active', 'paused', 'closed']).first()
+        return HumanitarianCampaign.objects.filter(slug=slug, status__iregex='^(active|paused|closed)$').first()
 
     def resolve_active_venezuela_humanitarian_campaign(self, info):
         return HumanitarianCampaign.get_active_venezuela()
@@ -130,7 +130,7 @@ class ApplyHumanitarianVolunteer(graphene.Mutation):
     @login_required
     def mutate(self, info, campaign_slug, service_area='', local_phone='', notes=''):
         user = info.context.user
-        campaign = HumanitarianCampaign.objects.filter(slug=campaign_slug, status='active').first()
+        campaign = HumanitarianCampaign.objects.filter(slug=campaign_slug, status__iexact='active').first()
         if not campaign:
             return ApplyHumanitarianVolunteer(success=False, error='campaign_not_active')
 

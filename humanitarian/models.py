@@ -48,7 +48,7 @@ class HumanitarianCampaign(models.Model):
 
     @classmethod
     def get_active_venezuela(cls):
-        return cls.objects.filter(slug='venezuela-2026-earthquake', status='active').first()
+        return cls.objects.filter(slug='venezuela-2026-earthquake', status__iexact='active').first()
 
 
 class HumanitarianVolunteerApplication(models.Model):
