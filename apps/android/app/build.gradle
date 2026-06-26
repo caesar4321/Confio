@@ -96,8 +96,8 @@ android {
         applicationId "com.Confio.Confio"
         minSdkVersion 24
         targetSdkVersion 35
-        versionCode 118
-        versionName "4.4.4"
+        versionCode 125
+        versionName "4.4.8"
         ndk {
             abiFilters(*releaseAbis)
         }

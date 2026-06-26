@@ -1,5 +1,34 @@
 import { gql } from '@apollo/client';
 
+export const APPLY_HUMANITARIAN_VOLUNTEER = gql`
+  mutation ApplyHumanitarianVolunteer(
+    $campaignSlug: String!
+    $serviceArea: String
+    $localPhone: String
+    $notes: String
+  ) {
+    applyHumanitarianVolunteer(
+      campaignSlug: $campaignSlug
+      serviceArea: $serviceArea
+      localPhone: $localPhone
+      notes: $notes
+    ) {
+      success
+      error
+      application {
+        publicId
+        status
+        serviceArea
+        localPhone
+        notes
+        hasVerifiedVenezuelanKyc
+        createdAt
+        updatedAt
+      }
+    }
+  }
+`;
+
 export const CREATE_RAMP_ORDER = gql`
   mutation CreateRampOrder(
     $direction: String!

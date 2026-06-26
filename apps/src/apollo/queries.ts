@@ -158,6 +158,64 @@ export const GET_MY_PERSONAL_VERIFIED_KYC = gql`
   }
 `;
 
+export const GET_ACTIVE_VENEZUELA_HUMANITARIAN_CAMPAIGN = gql`
+  query GetActiveVenezuelaHumanitarianCampaign {
+    activeVenezuelaHumanitarianCampaign {
+      publicId
+      slug
+      title
+      description
+      status
+      goalAmount
+      totalDonated
+      totalReleased
+      donationCount
+      releaseCount
+      vaultAddress
+      updatedAt
+      donations(limit: 10) {
+        publicId
+        donorDisplayName
+        amount
+        status
+        transactionHash
+        donatedAt
+      }
+      releases(limit: 20) {
+        publicId
+        volunteerName
+        amount
+        status
+        purpose
+        publicNote
+        transactionHash
+        releasedAt
+        proofLinks {
+          url
+          title
+          platform
+          position
+        }
+      }
+    }
+  }
+`;
+
+export const GET_MY_HUMANITARIAN_VOLUNTEER_APPLICATION = gql`
+  query GetMyHumanitarianVolunteerApplication($slug: String!) {
+    myHumanitarianVolunteerApplication(slug: $slug) {
+      publicId
+      status
+      serviceArea
+      localPhone
+      notes
+      hasVerifiedVenezuelanKyc
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
 export const GET_BUSINESS_KYC_STATUS = gql`
   query GetBusinessKycStatus($businessId: ID!) {
     businessKycStatus(businessId: $businessId) {

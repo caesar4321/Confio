@@ -18,7 +18,7 @@ import {
 } from '@env';
 
 
-class AppCheckService {
+export class AppCheckService {
     private isInitialized = false;
     private initPromise: Promise<void> | null = null;
     private tokenPromise: Promise<string | null> | null = null;
@@ -27,14 +27,15 @@ class AppCheckService {
     private lastFailureAt = 0;
     private lastFetchAttemptAt = 0;
     private lastError: string | null = null;
+    private lastActionableError: string | null = null;
     private lastErrorAt = 0;
-    private rateLimitedUntil = 0;
+    private lastAuthRetryAt = 0;
 
     private static readonly TOKEN_REUSE_MS = 5 * 60 * 1000;
     private static readonly FAILURE_BACKOFF_MS = 30 * 1000;
     private static readonly ERROR_DEBUG_WINDOW_MS = 2 * 60 * 1000;
-    private static readonly RATE_LIMIT_BACKOFF_MS = 10 * 60 * 1000;
     private static readonly FETCH_ATTEMPT_COOLDOWN_MS = 10 * 1000;
+    private static readonly AUTH_RETRY_COOLDOWN_MS = 30 * 1000;
 
     private isDebugAllowed(): boolean {
         return String(ALLOW_APP_CHECK_DEBUG).toLowerCase() === 'true';
@@ -115,33 +116,33 @@ class AppCheckService {
     private recordFailure(message: string) {
         this.lastFailureAt = Date.now();
         this.lastError = message;
-        this.lastErrorAt = this.lastFailureAt;
-        if (this.isRateLimitedMessage(message)) {
-            this.rateLimitedUntil = this.lastFailureAt + AppCheckService.RATE_LIMIT_BACKOFF_MS;
+        if (!this.isNativeBackoffMessage(message)) {
+            this.lastActionableError = message;
         }
+        this.lastErrorAt = this.lastFailureAt;
     }
 
     private clearFailure() {
         this.lastError = null;
+        this.lastActionableError = null;
         this.lastErrorAt = 0;
-        this.rateLimitedUntil = 0;
     }
 
-    private isRateLimitedMessage(message: string): boolean {
+    private isNativeBackoffMessage(message: string): boolean {
         return message.toLowerCase().includes('too many attempts');
     }
 
-    private isRateLimitedNow(): boolean {
-        return this.rateLimitedUntil > Date.now();
+    private isAttestationRejectedMessage(message: string): boolean {
+        return message.toLowerCase().includes('app attestation failed');
     }
 
     private isFetchCoolingDown(now = Date.now()): boolean {
         return Boolean(this.lastFetchAttemptAt && now - this.lastFetchAttemptAt < AppCheckService.FETCH_ATTEMPT_COOLDOWN_MS);
     }
 
-    private startTokenFetch(forceRefresh = false): Promise<string | null> {
+    private startTokenFetch(forceRefresh = false, bypassFetchCooldown = false): Promise<string | null> {
         if (!this.tokenPromise) {
-            this.tokenPromise = this.fetchToken(forceRefresh).finally(() => {
+            this.tokenPromise = this.fetchToken(forceRefresh, bypassFetchCooldown).finally(() => {
                 this.tokenPromise = null;
             });
         }
@@ -153,10 +154,10 @@ class AppCheckService {
      * Get App Check token
      * Returns null if unavailable (which is logged but not blocked)
      */
-    private async fetchToken(forceRefresh = false): Promise<string | null> {
+    private async fetchToken(forceRefresh = false, bypassFetchCooldown = false): Promise<string | null> {
         try {
             const now = Date.now();
-            if (this.isRateLimitedNow() || this.isFetchCoolingDown(now)) {
+            if (!bypassFetchCooldown && this.isFetchCoolingDown(now)) {
                 return this.lastToken;
             }
 
@@ -198,7 +199,7 @@ class AppCheckService {
             return this.tokenPromise;
         }
 
-        if (this.isRateLimitedNow() || this.isFetchCoolingDown(now)) {
+        if (this.isFetchCoolingDown(now)) {
             return this.lastToken;
         }
 
@@ -221,12 +222,51 @@ class AppCheckService {
         return this.lastError;
     }
 
-    async primeTokenForAuth(): Promise<string | null> {
-        if (this.tokenPromise) {
-            return this.tokenPromise;
+    getAuthFailureMessage(): string {
+        const error = (this.lastActionableError || this.getLastErrorForDebug() || '').toLowerCase();
+
+        if (error.includes('app attestation failed')) {
+            return Platform.OS === 'android'
+                ? 'Google Play no pudo validar esta instalación. Instala o actualiza Confío desde Google Play y verifica que Play Protect certifique tu dispositivo.'
+                : 'Apple no pudo validar esta instalación. Actualiza iOS y vuelve a intentar.';
         }
 
-        return this.getTokenForHeader();
+        return Platform.OS === 'android'
+            ? 'No se pudo verificar el dispositivo en este intento. Revisa Google Play Services y vuelve a intentar.'
+            : 'No se pudo verificar el dispositivo en este intento. Actualiza el sistema y vuelve a intentar.';
+    }
+
+    async primeTokenForAuth(): Promise<string | null> {
+        if (this.tokenPromise) {
+            const pendingToken = await this.tokenPromise;
+            if (pendingToken) {
+                return pendingToken;
+            }
+        }
+
+        const immediateToken = await this.getTokenForHeader();
+        if (immediateToken) {
+            return immediateToken;
+        }
+
+        const latestError = this.getLastErrorForDebug() || '';
+        const actionableError = this.lastActionableError || latestError;
+        if (
+            this.isNativeBackoffMessage(latestError)
+            || this.isAttestationRejectedMessage(actionableError)
+        ) {
+            return this.lastToken;
+        }
+
+        const now = Date.now();
+        if (this.lastAuthRetryAt && now - this.lastAuthRetryAt < AppCheckService.AUTH_RETRY_COOLDOWN_MS) {
+            return this.lastToken;
+        }
+
+        // Background startup checks can cache a transient failure for 30 seconds.
+        // Authentication gets one real retry without reopening the general fetch loop.
+        this.lastAuthRetryAt = now;
+        return this.startTokenFetch(true, true);
     }
 }
 

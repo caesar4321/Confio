@@ -14,6 +14,7 @@ from usdc_transactions import schema as usdc_transactions_schema
 from financieras import schema as financieras_schema
 from security import schema as security_schema
 from presale import schema as presale_schema
+from humanitarian import schema as humanitarian_schema
 from notifications import schema as notifications_schema
 from inbox import schema as inbox_schema
 from blockchain import schema as blockchain_schema
@@ -22,7 +23,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-class Query(users_schema.Query, UnifiedTransactionQuery, send_schema.Query, payments_schema.Query, ramps_schema.Query, payroll_schema.Query, p2p_exchange_schema.Query, exchange_rates_schema.Query, conversion_schema.Query, usdc_transactions_schema.Query, financieras_schema.Query, security_schema.Query, presale_schema.PresaleQueries, notifications_schema.Query, inbox_schema.Query, blockchain_schema.Query, web3auth_schema.Web3AuthQuery, graphene.ObjectType):
+class Query(users_schema.Query, UnifiedTransactionQuery, send_schema.Query, payments_schema.Query, ramps_schema.Query, payroll_schema.Query, p2p_exchange_schema.Query, exchange_rates_schema.Query, conversion_schema.Query, usdc_transactions_schema.Query, financieras_schema.Query, security_schema.Query, presale_schema.PresaleQueries, humanitarian_schema.HumanitarianQueries, notifications_schema.Query, inbox_schema.Query, blockchain_schema.Query, web3auth_schema.Web3AuthQuery, graphene.ObjectType):
 	# Override the legalDocument field to make it public
 	legalDocument = users_schema.Query.legalDocument
 	# Expose the user query
@@ -42,6 +43,7 @@ class Mutation(
 	financieras_schema.Mutation,
 	security_schema.Mutation,
 	presale_schema.PresaleMutations,
+	humanitarian_schema.HumanitarianMutations,
 	notifications_schema.Mutation,
 	inbox_schema.Mutation,
 	blockchain_schema.Mutation,
@@ -102,6 +104,12 @@ types = [
 	presale_schema.PresalePurchaseType,
 	presale_schema.PresaleStatsType,
 	presale_schema.UserPresaleLimitType,
+	# Humanitarian aid types
+	humanitarian_schema.HumanitarianCampaignType,
+	humanitarian_schema.HumanitarianDonationType,
+	humanitarian_schema.HumanitarianReleaseType,
+	humanitarian_schema.HumanitarianProofLinkType,
+	humanitarian_schema.HumanitarianVolunteerApplicationType,
 	payroll_schema.PayrollRunType,
 	payroll_schema.PayrollItemType,
 ]

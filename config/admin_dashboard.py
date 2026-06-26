@@ -1851,6 +1851,15 @@ confio_admin_site.register(PresaleStats, PresaleStatsAdmin)
 confio_admin_site.register(UserPresaleLimit, UserPresaleLimitAdmin)
 confio_admin_site.register(PresaleWaitlist, PresaleWaitlistAdmin)
 
+# Humanitarian aid models
+from humanitarian.models import HumanitarianCampaign, HumanitarianDonation, HumanitarianProofLink, HumanitarianRelease, HumanitarianVolunteerApplication
+from humanitarian.admin import HumanitarianCampaignAdmin, HumanitarianDonationAdmin, HumanitarianProofLinkAdmin, HumanitarianReleaseAdmin, HumanitarianVolunteerApplicationAdmin
+confio_admin_site.register(HumanitarianCampaign, HumanitarianCampaignAdmin)
+confio_admin_site.register(HumanitarianDonation, HumanitarianDonationAdmin)
+confio_admin_site.register(HumanitarianVolunteerApplication, HumanitarianVolunteerApplicationAdmin)
+confio_admin_site.register(HumanitarianRelease, HumanitarianReleaseAdmin)
+confio_admin_site.register(HumanitarianProofLink, HumanitarianProofLinkAdmin)
+
 # Notification models
 from notifications.models import Notification, NotificationPreference, FCMDeviceToken
 from notifications.admin import NotificationAdmin, NotificationPreferenceAdmin, FCMDeviceTokenAdmin
