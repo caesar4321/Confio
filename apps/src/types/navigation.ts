@@ -426,7 +426,7 @@ export type MainStackParamList = {
   ConfioTokenInfo: undefined;
   LatamCommunity: undefined;
   ProtectedSavings: undefined;
-  HumanitarianAid: undefined;
+  HumanitarianAid: { slug?: string } | undefined;
   ConfioPresale: undefined;
   ConfioPresaleParticipate: undefined;
   ConfioTokenomics: undefined;

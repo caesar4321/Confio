@@ -16,11 +16,11 @@ import { Buffer } from 'buffer';
 import Icon from 'react-native-vector-icons/Feather';
 import Svg, { Defs, LinearGradient as SvgLinearGradient, Stop, Rect } from 'react-native-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useMutation, useQuery } from '@apollo/client';
 import {
-  GET_ACTIVE_VENEZUELA_HUMANITARIAN_CAMPAIGN,
+  GET_HUMANITARIAN_CAMPAIGN,
   GET_MY_BALANCES,
   GET_MY_HUMANITARIAN_VOLUNTEER_APPLICATION,
 } from '../apollo/queries';
@@ -30,8 +30,9 @@ import { colors } from '../config/theme';
 import algorandService from '../services/algorandService';
 import { biometricAuthService } from '../services/biometricAuthService';
 import { HumanitarianWsSession } from '../services/humanitarianWs';
+import { countryInfo } from '../utils/humanitarianCountry';
 
-const CAMPAIGN_SLUG = 'venezuela-2026-earthquake';
+const DEFAULT_CAMPAIGN_SLUG = 'venezuela-2026-earthquake';
 const SUGGESTED_AMOUNTS = ['5', '10', '25', '50'];
 type Navigation = NativeStackNavigationProp<MainStackParamList>;
 
@@ -79,6 +80,22 @@ function initials(name?: string | null) {
   return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
 }
 
+const AVATAR_COLORS = [
+  { bg: '#D1FAE5', fg: '#047857' }, // emerald
+  { bg: '#DBEAFE', fg: '#1D4ED8' }, // blue
+  { bg: '#EDE9FE', fg: '#6D28D9' }, // violet
+  { bg: '#FEF3C7', fg: '#B45309' }, // amber
+  { bg: '#FCE7F3', fg: '#BE185D' }, // pink
+  { bg: '#CCFBF1', fg: '#0F766E' }, // teal
+];
+
+function avatarColor(name?: string | null) {
+  const s = String(name || '');
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return AVATAR_COLORS[h % AVATAR_COLORS.length];
+}
+
 function explorerBase() {
   return __DEV__ ? 'https://testnet.explorer.perawallet.app' : 'https://explorer.perawallet.app';
 }
@@ -95,24 +112,33 @@ function openTransaction(hash?: string | null) {
 
 export const HumanitarianAidScreen = () => {
   const navigation = useNavigation<Navigation>();
+  const route = useRoute<RouteProp<MainStackParamList, 'HumanitarianAid'>>();
+  const campaignSlug = route.params?.slug || DEFAULT_CAMPAIGN_SLUG;
   const [serviceArea, setServiceArea] = useState('');
   const [notes, setNotes] = useState('');
   const [selectedAmount, setSelectedAmount] = useState<string | null>(null);
   const [customAmount, setCustomAmount] = useState('');
   const [donating, setDonating] = useState(false);
   const [heroSize, setHeroSize] = useState({ width: 0, height: 0 });
-  const { data, loading, error, refetch } = useQuery(GET_ACTIVE_VENEZUELA_HUMANITARIAN_CAMPAIGN, {
+  const { data, loading, error, refetch } = useQuery(GET_HUMANITARIAN_CAMPAIGN, {
+    variables: { slug: campaignSlug },
     fetchPolicy: 'cache-and-network',
   });
   const { data: balancesData, loading: balancesLoading, refetch: refetchBalances } = useQuery(GET_MY_BALANCES, {
     fetchPolicy: 'cache-and-network',
   });
-  const campaign = data?.activeVenezuelaHumanitarianCampaign;
+  const campaign = data?.humanitarianCampaign;
+  const country = countryInfo(campaign?.countryCode);
+  const volunteerSectionTitle = campaign?.volunteerSectionTitle || '';
+  const volunteerSectionSubtitle = campaign?.volunteerSectionSubtitle || '';
+  const volunteerServiceAreaPlaceholder = campaign?.volunteerServiceAreaPlaceholder || '';
+  const volunteerNotesPlaceholder = campaign?.volunteerNotesPlaceholder || '';
+  const volunteerCtaLabel = campaign?.volunteerCtaLabel || '';
   const {
     data: myApplicationData,
     refetch: refetchApplication,
   } = useQuery(GET_MY_HUMANITARIAN_VOLUNTEER_APPLICATION, {
-    variables: { slug: CAMPAIGN_SLUG },
+    variables: { slug: campaignSlug },
     skip: !campaign?.slug,
     fetchPolicy: 'cache-and-network',
   });
@@ -135,22 +161,28 @@ export const HumanitarianAidScreen = () => {
   const availableCusd = useMemo(() => parseFloat(balancesData?.myBalances?.cusd || '0'), [balancesData?.myBalances?.cusd]);
   const exceedsBalance = !balancesLoading && parsedDonationAmount > availableCusd;
   const canDonate = parsedDonationAmount >= 1 && !exceedsBalance && !donating;
+  const hasNoBalance = !balancesLoading && availableCusd <= 0;
+  const needsTopUp = hasNoBalance || exceedsBalance;
 
   const onApply = async () => {
     try {
       const res = await applyVolunteer({
         variables: {
-          campaignSlug: CAMPAIGN_SLUG,
+          campaignSlug,
           serviceArea: serviceArea.trim(),
           notes: notes.trim(),
         },
       });
       const payload = res.data?.applyHumanitarianVolunteer;
       if (!payload?.success) {
-        if (payload?.error === 'venezuelan_didit_kyc_required') {
+        if (payload?.error === 'country_kyc_required') {
           Alert.alert(
             'Verifica tu identidad',
-            'Para ser voluntario, primero confirma tu identidad como residente en Venezuela. Así nos aseguramos de que la ayuda llegue a personas reales.',
+            `Para ser voluntario en ${country.name}, primero confirma tu identidad con Didit. Así nos aseguramos de que la ayuda llegue a personas reales.`,
+            [
+              { text: 'Ahora no', style: 'cancel' },
+              { text: 'Verificar ahora', onPress: () => navigation.navigate('Verification') },
+            ],
           );
         } else {
           Alert.alert('No se pudo enviar', payload?.error || 'Intenta de nuevo.');
@@ -179,7 +211,7 @@ export const HumanitarianAidScreen = () => {
       setDonating(true);
       const session = new HumanitarianWsSession();
       await session.open();
-      const pack = await session.prepareDonation(CAMPAIGN_SLUG, parsedDonationAmount.toFixed(2));
+      const pack = await session.prepareDonation(campaignSlug, parsedDonationAmount.toFixed(2));
       const donationId = pack?.donation_id || pack?.donationId;
       if (!donationId) throw new Error('donation_id_missing');
       const txns = Array.isArray(pack?.transactions) ? pack.transactions : [];
@@ -213,12 +245,16 @@ export const HumanitarianAidScreen = () => {
     }
     Alert.alert(
       'Confirmar donación',
-      `¿Donar ${parsedDonationAmount.toFixed(2)} cUSD a la ayuda humanitaria de Venezuela?`,
+      `¿Donar ${parsedDonationAmount.toFixed(2)} cUSD a esta campaña de ayuda humanitaria?`,
       [
         { text: 'Cancelar', style: 'cancel' },
         { text: 'Donar', onPress: executeDonation },
       ],
     );
+  };
+
+  const onTopUp = () => {
+    navigation.navigate('TopUp');
   };
 
   const goBack = () => {
@@ -262,7 +298,7 @@ export const HumanitarianAidScreen = () => {
         refreshControl={<RefreshControl refreshing={loading} onRefresh={refetch} />}
       >
         <View style={styles.emptyTopBar}>{renderBackButton()}</View>
-        <Text style={styles.emptyFlag}>🇻🇪</Text>
+        <Text style={styles.emptyFlag}>{country.flag}</Text>
         <Text style={styles.emptyTitle}>Ayuda humanitaria</Text>
         <Text style={styles.emptyText}>Todavía no hay una campaña activa.</Text>
       </ScrollView>
@@ -310,12 +346,13 @@ export const HumanitarianAidScreen = () => {
 
         <View style={styles.heroBody}>
           <View style={styles.kickerRow}>
-            <Text style={styles.heroFlag}>🇻🇪</Text>
+            <Text style={styles.heroFlag}>{country.flag}</Text>
             <Text style={styles.kicker}>CONFÍO · AYUDA HUMANITARIA</Text>
           </View>
-          <Text style={styles.title}>Juntos por Venezuela tras el terremoto</Text>
+          <Text style={styles.title}>{campaign.title || 'Ayuda humanitaria directa'}</Text>
           <Text style={styles.description}>
-            Tu donación llega completa. Voluntarios venezolanos verificados compran y entregan ayuda local — cada entrega queda publicada con monto y prueba.
+            {campaign.description ||
+              'Tu donación llega completa. Voluntarios verificados compran y entregan ayuda local — cada entrega queda publicada con monto y prueba.'}
           </Text>
 
           {/* Progress toward goal */}
@@ -432,18 +469,35 @@ export const HumanitarianAidScreen = () => {
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Entregas con prueba</Text>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Entregas con prueba</Text>
+          {campaign.releaseCount > 0 && (
+            <View style={styles.countPill}>
+              <Text style={styles.countPillText}>{campaign.releaseCount}</Text>
+            </View>
+          )}
+        </View>
+        <Text style={styles.sectionHint}>Cada compra y entrega queda registrada con prueba pública.</Text>
         {(campaign.releases || []).map((release: any) => {
           const published = normalizeStatus(release.status) === 'proof_published';
+          const c = avatarColor(release.volunteerName);
           return (
-            <View key={release.publicId} style={styles.row}>
-              <View style={styles.rowTop}>
-                <Text style={styles.rowTitle}>{release.volunteerName}</Text>
-                <Text style={styles.amount}>{formatAmount(release.amount)}</Text>
+            <View key={release.publicId} style={styles.releaseCard}>
+              <View style={styles.releaseHeader}>
+                <View style={[styles.avatar, { backgroundColor: c.bg }]}>
+                  <Text style={[styles.avatarText, { color: c.fg }]}>{initials(release.volunteerName)}</Text>
+                </View>
+                <View style={styles.releaseHeaderInfo}>
+                  <Text style={styles.releaseVolunteer} numberOfLines={1}>{release.volunteerName}</Text>
+                  {!!release.releasedAt && <Text style={styles.timeText}>{timeAgo(release.releasedAt)}</Text>}
+                </View>
+                <View style={styles.amountPill}>
+                  <Text style={styles.amountPillText}>{formatAmount(release.amount)}</Text>
+                </View>
               </View>
-              <Text style={styles.rowText}>{release.purpose}</Text>
+              <Text style={styles.releasePurpose}>{release.purpose}</Text>
               {!!release.publicNote && <Text style={styles.note}>{release.publicNote}</Text>}
-              <View style={styles.metaRow}>
+              <View style={styles.chipRow}>
                 <View style={[styles.statusBadge, published ? styles.statusBadgeDone : styles.statusBadgePending]}>
                   <Icon
                     name={published ? 'check-circle' : 'clock'}
@@ -454,72 +508,86 @@ export const HumanitarianAidScreen = () => {
                     {published ? 'prueba publicada' : 'prueba en camino'}
                   </Text>
                 </View>
-                {!!release.releasedAt && <Text style={styles.timeText}>{timeAgo(release.releasedAt)}</Text>}
+                {(release.proofLinks || []).map((proof: any) => (
+                  <TouchableOpacity
+                    key={`${release.publicId}-${proof.url}`}
+                    style={styles.chip}
+                    onPress={() => Linking.openURL(proof.url)}
+                    activeOpacity={0.85}
+                  >
+                    <Icon name="external-link" size={12} color={colors.primaryDark} />
+                    <Text style={styles.chipText}>{proof.title || proof.platform || 'Ver prueba'}</Text>
+                  </TouchableOpacity>
+                ))}
+                {!!release.transactionHash && (
+                  <TouchableOpacity
+                    style={styles.chip}
+                    onPress={() => openTransaction(release.transactionHash)}
+                    activeOpacity={0.85}
+                  >
+                    <Icon name="link" size={12} color={colors.primaryDark} />
+                    <Text style={styles.chipText}>{shortHash(release.transactionHash)}</Text>
+                  </TouchableOpacity>
+                )}
               </View>
-              {!!release.transactionHash && (
-                <TouchableOpacity
-                  style={styles.txLink}
-                  onPress={() => openTransaction(release.transactionHash)}
-                  activeOpacity={0.85}
-                >
-                  <Icon name="external-link" size={13} color={colors.primaryDark} />
-                  <Text style={styles.txLinkText}>Ver transacción · {shortHash(release.transactionHash)}</Text>
-                </TouchableOpacity>
-              )}
-              {(release.proofLinks || []).map((proof: any) => (
-                <TouchableOpacity
-                  key={`${release.publicId}-${proof.url}`}
-                  style={styles.proofButton}
-                  onPress={() => Linking.openURL(proof.url)}
-                >
-                  <Icon name="external-link" size={14} color={colors.primaryDark} />
-                  <Text style={styles.proofText}>{proof.title || proof.platform || 'Ver prueba'}</Text>
-                </TouchableOpacity>
-              ))}
             </View>
           );
         })}
         {(!campaign.releases || campaign.releases.length === 0) && (
-          <Text style={styles.emptyText}>Las primeras entregas aparecerán aquí con monto, voluntario y prueba pública.</Text>
+          <View style={styles.emptyCard}>
+            <Icon name="package" size={22} color={colors.primaryDark} />
+            <Text style={styles.emptyCardText}>Las primeras entregas aparecerán aquí con monto, voluntario y prueba pública.</Text>
+          </View>
         )}
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Gracias a quienes ya ayudaron</Text>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Gracias a quienes ya ayudaron</Text>
+          {campaign.donationCount > 0 && (
+            <View style={styles.countPill}>
+              <Text style={styles.countPillText}>{campaign.donationCount}</Text>
+            </View>
+          )}
+        </View>
+        <Text style={styles.sectionHint}>Cada donación llega completa a la zona afectada. ❤</Text>
         {donations.map((donation: any) => {
           const name = donation.donorDisplayName || 'Donante Confío';
+          const c = avatarColor(name);
           return (
             <View key={donation.publicId} style={styles.donorRow}>
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>{initials(donation.donorDisplayName)}</Text>
+              <View style={[styles.avatar, { backgroundColor: c.bg }]}>
+                <Text style={[styles.avatarText, { color: c.fg }]}>{initials(donation.donorDisplayName)}</Text>
               </View>
               <View style={styles.donorInfo}>
-                <Text style={styles.donorName}>{name}</Text>
-                {!!donation.donatedAt && <Text style={styles.timeText}>{timeAgo(donation.donatedAt)}</Text>}
-                {!!donation.transactionHash && (
-                  <TouchableOpacity
-                    style={styles.donorTxLink}
-                    onPress={() => openTransaction(donation.transactionHash)}
-                    activeOpacity={0.85}
-                  >
-                    <Text style={styles.donorTxText}>Ver transacción</Text>
-                  </TouchableOpacity>
-                )}
+                <Text style={styles.donorName} numberOfLines={1}>{name}</Text>
+                <View style={styles.donorMetaRow}>
+                  {!!donation.donatedAt && <Text style={styles.timeText}>{timeAgo(donation.donatedAt)}</Text>}
+                  {!!donation.donatedAt && !!donation.transactionHash && <Text style={styles.dot}>·</Text>}
+                  {!!donation.transactionHash && (
+                    <TouchableOpacity onPress={() => openTransaction(donation.transactionHash)} activeOpacity={0.85}>
+                      <Text style={styles.donorTxText}>Ver transacción</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               </View>
-              <Text style={styles.amount}>{formatAmount(donation.amount)}</Text>
+              <View style={styles.amountPill}>
+                <Text style={styles.amountPillText}>{formatAmount(donation.amount)}</Text>
+              </View>
             </View>
           );
         })}
         {donations.length === 0 && (
-          <Text style={styles.emptyText}>Sé la primera persona en donar y abrir el camino para más ayuda.</Text>
+          <View style={styles.emptyCard}>
+            <Icon name="heart" size={22} color={colors.primaryDark} />
+            <Text style={styles.emptyCardText}>Sé la primera persona en donar y abrir el camino para más ayuda.</Text>
+          </View>
         )}
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Voluntarios en Venezuela</Text>
-        <Text style={styles.sectionSubtitle}>
-          ¿Estás en Venezuela y puedes comprar y entregar ayuda? Postúlate aquí. Confirmamos tu identidad antes de enviarte fondos, para que cada donación llegue a personas reales.
-        </Text>
+        <Text style={styles.sectionTitle}>{volunteerSectionTitle}</Text>
+        <Text style={styles.sectionSubtitle}>{volunteerSectionSubtitle}</Text>
         {application ? (
           <View style={styles.applicationCard}>
             <Icon name="user-check" size={18} color={colors.primaryDark} />
@@ -530,20 +598,20 @@ export const HumanitarianAidScreen = () => {
             <TextInput
               value={serviceArea}
               onChangeText={setServiceArea}
-              placeholder="Zona donde puedes ayudar"
+              placeholder={volunteerServiceAreaPlaceholder}
               style={styles.input}
               placeholderTextColor="#94A3B8"
             />
             <TextInput
               value={notes}
               onChangeText={setNotes}
-              placeholder="Qué puedes comprar o distribuir"
+              placeholder={volunteerNotesPlaceholder}
               style={[styles.input, styles.textArea]}
               multiline
               placeholderTextColor="#94A3B8"
             />
             <TouchableOpacity style={styles.primaryButton} onPress={onApply} disabled={applying}>
-              {applying ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryButtonText}>Postular como voluntario</Text>}
+              {applying ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryButtonText}>{volunteerCtaLabel}</Text>}
             </TouchableOpacity>
           </>
         )}
@@ -623,9 +691,28 @@ const styles = StyleSheet.create({
   statLabel: { fontSize: 12, color: colors.textSecondary, marginBottom: 6 },
   statValue: { fontSize: 17, fontWeight: '800', color: colors.textFlat },
 
-  section: { marginTop: 14 },
-  sectionTitle: { fontSize: 18, fontWeight: '800', color: colors.textFlat, marginBottom: 10 },
+  section: { marginTop: 18 },
+  sectionTitle: { fontSize: 18, fontWeight: '800', color: colors.textFlat },
   sectionSubtitle: { fontSize: 14, lineHeight: 20, color: colors.textSecondary, marginTop: -4, marginBottom: 12 },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
+  sectionHint: { fontSize: 13, lineHeight: 18, color: colors.textSecondary, marginTop: 2, marginBottom: 12 },
+  countPill: { backgroundColor: colors.primarySoft, borderRadius: 12, paddingHorizontal: 8, paddingVertical: 2, minWidth: 24, alignItems: 'center' },
+  countPillText: { fontSize: 12, fontWeight: '800', color: colors.primaryDark },
+
+  releaseCard: { backgroundColor: colors.background, borderRadius: 14, padding: 14, marginBottom: 10, ...softShadow },
+  releaseHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
+  releaseHeaderInfo: { flex: 1 },
+  releaseVolunteer: { fontSize: 15, fontWeight: '800', color: colors.textFlat },
+  releasePurpose: { fontSize: 14, lineHeight: 20, color: colors.textFlat },
+  amountPill: { backgroundColor: colors.primarySoft, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5 },
+  amountPillText: { fontSize: 13, fontWeight: '800', color: colors.primaryDark },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 12 },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.neutral, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: colors.border },
+  chipText: { fontSize: 12, fontWeight: '700', color: colors.primaryDark },
+  donorMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
+  dot: { fontSize: 12, color: colors.textSecondary },
+  emptyCard: { backgroundColor: colors.background, borderRadius: 14, padding: 18, alignItems: 'center', gap: 10, ...softShadow },
+  emptyCardText: { fontSize: 14, lineHeight: 20, color: colors.textSecondary, textAlign: 'center' },
 
   row: { backgroundColor: colors.background, borderRadius: 12, padding: 14, marginBottom: 10, ...softShadow },
   rowTop: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, marginBottom: 6 },

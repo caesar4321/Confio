@@ -158,14 +158,35 @@ export const GET_MY_PERSONAL_VERIFIED_KYC = gql`
   }
 `;
 
-export const GET_ACTIVE_VENEZUELA_HUMANITARIAN_CAMPAIGN = gql`
-  query GetActiveVenezuelaHumanitarianCampaign {
-    activeVenezuelaHumanitarianCampaign {
+export const GET_ACTIVE_HUMANITARIAN_CAMPAIGNS = gql`
+  query GetActiveHumanitarianCampaigns {
+    activeHumanitarianCampaigns {
       publicId
       slug
       title
       description
+      countryCode
+      goalAmount
+      totalDonated
+      donationCount
+    }
+  }
+`;
+
+export const GET_HUMANITARIAN_CAMPAIGN = gql`
+  query GetHumanitarianCampaign($slug: String!) {
+    humanitarianCampaign(slug: $slug) {
+      publicId
+      slug
+      title
+      description
+      volunteerSectionTitle
+      volunteerSectionSubtitle
+      volunteerServiceAreaPlaceholder
+      volunteerNotesPlaceholder
+      volunteerCtaLabel
       status
+      countryCode
       goalAmount
       totalDonated
       totalReleased
@@ -209,7 +230,7 @@ export const GET_MY_HUMANITARIAN_VOLUNTEER_APPLICATION = gql`
       serviceArea
       localPhone
       notes
-      hasVerifiedVenezuelanKyc
+      hasVerifiedCountryKyc
       createdAt
       updatedAt
     }

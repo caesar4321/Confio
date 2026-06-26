@@ -14,7 +14,6 @@ import {
   Vibration,
 } from 'react-native';
 import ConvertModal from '../components/ConvertModal';
-import { Gradient } from '../components/common/Gradient';
 import { AuthService } from '../services/authService';
 import { useNavigation, useFocusEffect, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -42,9 +41,10 @@ import {
   GET_ACTIVE_PRESALE,
   GET_ALL_PRESALE_PHASES,
   CHECK_REFERRAL_STATUS,
-  GET_ACTIVE_VENEZUELA_HUMANITARIAN_CAMPAIGN,
+  GET_ACTIVE_HUMANITARIAN_CAMPAIGNS,
 } from '../apollo/queries';
 import { REFRESH_ACCOUNT_BALANCE, SET_REFERRER } from '../apollo/mutations';
+import { countryInfo } from '../utils/humanitarianCountry';
 import { useCountry } from '../contexts/CountryContext';
 import { isRampBlockedCountry } from '../config/env';
 import { useCurrency } from '../hooks/useCurrency';
@@ -222,13 +222,13 @@ export const HomeScreen = () => {
     skip: !activeAccount,
     fetchPolicy: 'cache-and-network',
   });
-  const { data: humanitarianCampaignData } = useQuery(GET_ACTIVE_VENEZUELA_HUMANITARIAN_CAMPAIGN, {
+  const { data: humanitarianCampaignData } = useQuery(GET_ACTIVE_HUMANITARIAN_CAMPAIGNS, {
     fetchPolicy: 'cache-and-network',
   });
   const pendingPayrollCount = (isBusinessAccount || isPersonalAccount || isEmployeeDelegate)
     ? (pendingPayrollData?.pendingPayrollItems?.length || 0)
     : 0;
-  const activeHumanitarianCampaign = humanitarianCampaignData?.activeVenezuelaHumanitarianCampaign;
+  const activeHumanitarianCampaign = humanitarianCampaignData?.activeHumanitarianCampaigns?.[0];
   const isPresaleClaimsUnlocked = presaleStatusData?.isPresaleClaimsUnlocked === true;
   const [presaleDismissed, setPresaleDismissed] = useState(false);
   const showPayrollCard = (isBusinessAccount || isEmployeeDelegate || isPersonalAccount) && pendingPayrollCount > 0;
@@ -1328,16 +1328,18 @@ export const HomeScreen = () => {
         {activeHumanitarianCampaign && (
           <TouchableOpacity
             style={[styles.humanitarianCard, { marginHorizontal: 16, marginBottom: 12 }]}
-            onPress={() => navigation.navigate('HumanitarianAid')}
+            onPress={() => navigation.navigate('HumanitarianAid', { slug: activeHumanitarianCampaign.slug })}
             activeOpacity={0.9}
           >
             <View style={styles.humanitarianIconWrap}>
-              <Text style={styles.humanitarianFlag}>🇻🇪</Text>
+              <Text style={styles.humanitarianFlag}>{countryInfo(activeHumanitarianCampaign.countryCode).flag}</Text>
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.humanitarianTitle}>Venezuela: ayuda directa</Text>
+              <Text style={styles.humanitarianTitle} numberOfLines={2}>
+                {activeHumanitarianCampaign.title || 'Ayuda humanitaria directa'}
+              </Text>
               <Text style={styles.humanitarianSubtitle}>
-                Dona cUSD y sigue cada entrega hecha por voluntarios verificados.
+                Dona cUSD para familias afectadas. Cada entrega se publica con prueba.
               </Text>
             </View>
             <Icon name="chevron-right" size={18} color="#9CA3AF" />
@@ -1723,22 +1725,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 8,
+    backgroundColor: '#ECFDF5',
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: '#A7F3D0',
     padding: 14,
   },
   humanitarianIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 36,
+    height: 36,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#D1FAE5',
   },
   humanitarianFlag: {
-    fontSize: 23,
+    fontSize: 30,
   },
   humanitarianTitle: {
     fontSize: 15,

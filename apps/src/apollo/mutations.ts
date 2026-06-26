@@ -21,7 +21,7 @@ export const APPLY_HUMANITARIAN_VOLUNTEER = gql`
         serviceArea
         localPhone
         notes
-        hasVerifiedVenezuelanKyc
+        hasVerifiedCountryKyc
         createdAt
         updatedAt
       }
