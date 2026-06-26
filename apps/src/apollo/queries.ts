@@ -197,6 +197,7 @@ export const GET_HUMANITARIAN_CAMPAIGN = gql`
       donations(limit: 10) {
         publicId
         donorDisplayName
+        donorCountryCode
         amount
         status
         transactionHash

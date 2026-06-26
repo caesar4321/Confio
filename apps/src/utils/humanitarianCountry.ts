@@ -24,3 +24,10 @@ const COUNTRY_INFO: Record<string, { flag: string; name: string }> = {
 export function countryInfo(code?: string | null): { flag: string; name: string } {
   return COUNTRY_INFO[String(code || '').toUpperCase()] || { flag: '🌎', name: 'la zona afectada' };
 }
+
+// Flag emoji from an ISO-2 country code (e.g. 'VE' → 🇻🇪). Returns '' for invalid input.
+export function flagFromIso2(code?: string | null): string {
+  const cc = String(code || '').trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(cc)) return '';
+  return String.fromCodePoint(...[...cc].map((ch) => 0x1f1e6 + ch.charCodeAt(0) - 65));
+}

@@ -27,6 +27,7 @@ import {
 import { APPLY_HUMANITARIAN_VOLUNTEER } from '../apollo/mutations';
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
+import { flagFromIso2 } from '../utils/humanitarianCountry';
 import algorandService from '../services/algorandService';
 import { biometricAuthService } from '../services/biometricAuthService';
 import { HumanitarianWsSession } from '../services/humanitarianWs';
@@ -568,13 +569,17 @@ export const HumanitarianAidScreen = () => {
         {donations.map((donation: any) => {
           const name = donation.donorDisplayName || 'Donante Confío';
           const c = avatarColor(name);
+          const donorFlag = flagFromIso2(donation.donorCountryCode);
           return (
             <View key={donation.publicId} style={styles.donorRow}>
               <View style={[styles.avatar, { backgroundColor: c.bg }]}>
                 <Text style={[styles.avatarText, { color: c.fg }]}>{initials(donation.donorDisplayName)}</Text>
               </View>
               <View style={styles.donorInfo}>
-                <Text style={styles.donorName} numberOfLines={1}>{name}</Text>
+                <View style={styles.donorNameRow}>
+                  <Text style={styles.donorName} numberOfLines={1}>{name}</Text>
+                  {!!donorFlag && <Text style={styles.donorFlag}>{donorFlag}</Text>}
+                </View>
                 <View style={styles.donorMetaRow}>
                   {!!donation.donatedAt && <Text style={styles.timeText}>{timeAgo(donation.donatedAt)}</Text>}
                   {!!donation.donatedAt && !!donation.transactionHash && <Text style={styles.dot}>·</Text>}
@@ -753,7 +758,9 @@ const styles = StyleSheet.create({
   avatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primaryLight, alignItems: 'center', justifyContent: 'center' },
   avatarText: { fontSize: 13, fontWeight: '800', color: colors.primaryDark },
   donorInfo: { flex: 1 },
-  donorName: { fontSize: 14, fontWeight: '700', color: colors.textFlat },
+  donorNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  donorName: { flexShrink: 1, fontSize: 14, fontWeight: '700', color: colors.textFlat },
+  donorFlag: { fontSize: 14 },
   donorTxLink: { marginTop: 3, alignSelf: 'flex-start' },
   donorTxText: { fontSize: 12, fontWeight: '700', color: colors.primaryDark },
 

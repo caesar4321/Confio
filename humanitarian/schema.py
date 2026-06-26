@@ -46,6 +46,8 @@ class HumanitarianReleaseType(DjangoObjectType):
 
 
 class HumanitarianDonationType(DjangoObjectType):
+    donor_country_code = graphene.String()
+
     class Meta:
         model = HumanitarianDonation
         fields = (
@@ -56,6 +58,10 @@ class HumanitarianDonationType(DjangoObjectType):
             'transaction_hash',
             'donated_at',
         )
+
+    def resolve_donor_country_code(self, info):
+        user = self.donor_user
+        return ((getattr(user, 'phone_country', '') or '').upper()) if user else ''
 
 
 class HumanitarianCampaignType(DjangoObjectType):
@@ -91,7 +97,7 @@ class HumanitarianCampaignType(DjangoObjectType):
         ).select_related('volunteer_application__user').prefetch_related('proof_links').order_by('-released_at', '-created_at')[:limit]
 
     def resolve_donations(self, info, limit=20):
-        return self.donations.filter(status='confirmed').order_by('-donated_at')[:limit]
+        return self.donations.filter(status='confirmed').select_related('donor_user').order_by('-donated_at')[:limit]
 
 
 class HumanitarianVolunteerApplicationType(DjangoObjectType):
