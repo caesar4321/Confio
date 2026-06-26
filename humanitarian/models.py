@@ -25,6 +25,35 @@ class HumanitarianCampaign(models.Model):
     title = models.CharField(max_length=160)
     country_code = models.CharField(max_length=3, default='VEN')
     description = models.TextField(blank=True)
+    volunteer_section_title = models.CharField(
+        max_length=160,
+        blank=True,
+        default='',
+        help_text='Title shown above the volunteer application form.',
+    )
+    volunteer_section_subtitle = models.TextField(
+        blank=True,
+        default='',
+        help_text='Body copy shown above the volunteer application form.',
+    )
+    volunteer_service_area_placeholder = models.CharField(
+        max_length=120,
+        blank=True,
+        default='Zona donde puedes ayudar',
+        help_text='Placeholder for the volunteer service area input.',
+    )
+    volunteer_notes_placeholder = models.CharField(
+        max_length=160,
+        blank=True,
+        default='Qué puedes comprar o distribuir',
+        help_text='Placeholder for the volunteer notes input.',
+    )
+    volunteer_cta_label = models.CharField(
+        max_length=80,
+        blank=True,
+        default='Postular como voluntario',
+        help_text='Submit button label for volunteer applications.',
+    )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft', db_index=True)
     goal_amount = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'))
     total_donated = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'))
@@ -47,8 +76,8 @@ class HumanitarianCampaign(models.Model):
         return self.title
 
     @classmethod
-    def get_active_venezuela(cls):
-        return cls.objects.filter(slug='venezuela-2026-earthquake', status__iexact='active').first()
+    def active_campaigns(cls):
+        return cls.objects.filter(status__iexact='active').order_by('-created_at')
 
 
 class HumanitarianVolunteerApplication(models.Model):
@@ -90,11 +119,12 @@ class HumanitarianVolunteerApplication(models.Model):
         return f'{self.user} - {self.campaign} ({self.status})'
 
     @property
-    def has_verified_venezuelan_kyc(self):
+    def has_verified_country_kyc(self):
+        country = (self.campaign.country_code or 'VEN').upper()
         return self.user.security_verifications.filter(
-            Q(verified_country__iexact='VEN')
-            | Q(verified_nationality__iexact='VEN')
-            | Q(document_issuing_country__iexact='VEN'),
+            Q(verified_country__iexact=country)
+            | Q(verified_nationality__iexact=country)
+            | Q(document_issuing_country__iexact=country),
             status='verified',
             deleted_at__isnull=True,
         ).exists()

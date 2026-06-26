@@ -34,24 +34,61 @@ class HumanitarianCampaignAdmin(admin.ModelAdmin):
     list_filter = ('status', 'country_code')
     search_fields = ('title', 'slug', 'description', 'vault_address')
     readonly_fields = ('public_id', 'created_at', 'updated_at')
+    fieldsets = (
+        (None, {
+            'fields': (
+                'public_id',
+                'slug',
+                'title',
+                'country_code',
+                'description',
+                'status',
+            )
+        }),
+        ('Donation settings', {
+            'fields': (
+                'goal_amount',
+                'total_donated',
+                'total_released',
+                'donation_count',
+                'release_count',
+                'algorand_app_id',
+                'vault_address',
+            )
+        }),
+        ('Volunteer section', {
+            'fields': (
+                'volunteer_section_title',
+                'volunteer_section_subtitle',
+                'volunteer_service_area_placeholder',
+                'volunteer_notes_placeholder',
+                'volunteer_cta_label',
+            ),
+            'description': 'Copy shown in the app volunteer application section for this campaign.',
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',),
+        }),
+    )
 
 
 @admin.register(HumanitarianVolunteerApplication)
 class HumanitarianVolunteerApplicationAdmin(admin.ModelAdmin):
-    list_display = ('user', 'campaign', 'status', 'service_area', 'has_verified_venezuelan_kyc', 'created_at')
+    list_display = ('user', 'campaign', 'status', 'service_area', 'has_verified_country_kyc', 'created_at')
     list_filter = ('status', 'campaign')
     search_fields = ('user__username', 'user__phone_number', 'service_area', 'local_phone')
-    readonly_fields = ('public_id', 'has_verified_venezuelan_kyc', 'created_at', 'updated_at', 'reviewed_at')
+    readonly_fields = ('public_id', 'has_verified_country_kyc', 'created_at', 'updated_at', 'reviewed_at')
     actions = ('approve_verified_volunteers', 'suspend_volunteers')
 
-    @admin.action(description='Approve selected verified Venezuelan volunteers')
+    @admin.action(description='Approve selected volunteers with verified campaign-country KYC')
     def approve_verified_volunteers(self, request, queryset):
         approved = 0
-        for application in queryset.select_related('user'):
-            if not application.has_verified_venezuelan_kyc:
+        for application in queryset.select_related('user', 'campaign'):
+            if not application.has_verified_country_kyc:
                 self.message_user(
                     request,
-                    f'{application.user} skipped: Venezuelan Didit KYC is not verified.',
+                    f'{application.user} skipped: Didit KYC is not verified for {application.campaign.country_code}.',
                     messages.WARNING,
                 )
                 continue

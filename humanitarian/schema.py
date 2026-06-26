@@ -70,6 +70,11 @@ class HumanitarianCampaignType(DjangoObjectType):
             'title',
             'country_code',
             'description',
+            'volunteer_section_title',
+            'volunteer_section_subtitle',
+            'volunteer_service_area_placeholder',
+            'volunteer_notes_placeholder',
+            'volunteer_cta_label',
             'status',
             'goal_amount',
             'total_donated',
@@ -90,23 +95,34 @@ class HumanitarianCampaignType(DjangoObjectType):
 
 
 class HumanitarianVolunteerApplicationType(DjangoObjectType):
+    has_verified_country_kyc = graphene.Boolean()
     has_verified_venezuelan_kyc = graphene.Boolean()
 
     class Meta:
         model = HumanitarianVolunteerApplication
         fields = ('public_id', 'status', 'service_area', 'local_phone', 'notes', 'created_at', 'updated_at')
 
+    def resolve_has_verified_country_kyc(self, info):
+        return self.has_verified_country_kyc
+
+    def resolve_has_verified_venezuelan_kyc(self, info):
+        return self.has_verified_country_kyc
+
 
 class HumanitarianQueries(graphene.ObjectType):
     humanitarian_campaign = graphene.Field(HumanitarianCampaignType, slug=graphene.String(required=True))
+    active_humanitarian_campaigns = graphene.List(HumanitarianCampaignType)
     active_venezuela_humanitarian_campaign = graphene.Field(HumanitarianCampaignType)
     my_humanitarian_volunteer_application = graphene.Field(HumanitarianVolunteerApplicationType, slug=graphene.String(required=True))
 
     def resolve_humanitarian_campaign(self, info, slug):
         return HumanitarianCampaign.objects.filter(slug=slug, status__iregex='^(active|paused|closed)$').first()
 
+    def resolve_active_humanitarian_campaigns(self, info):
+        return HumanitarianCampaign.active_campaigns()
+
     def resolve_active_venezuela_humanitarian_campaign(self, info):
-        return HumanitarianCampaign.get_active_venezuela()
+        return HumanitarianCampaign.objects.filter(slug='venezuela-2026-earthquake', status__iexact='active').first()
 
     @login_required
     def resolve_my_humanitarian_volunteer_application(self, info, slug):
@@ -134,16 +150,17 @@ class ApplyHumanitarianVolunteer(graphene.Mutation):
         if not campaign:
             return ApplyHumanitarianVolunteer(success=False, error='campaign_not_active')
 
-        has_verified_venezuelan_kyc = IdentityVerification.objects.filter(
-            Q(verified_country__iexact='VEN')
-            | Q(verified_nationality__iexact='VEN')
-            | Q(document_issuing_country__iexact='VEN'),
+        campaign_country = (campaign.country_code or 'VEN').upper()
+        has_country_kyc = IdentityVerification.objects.filter(
+            Q(verified_country__iexact=campaign_country)
+            | Q(verified_nationality__iexact=campaign_country)
+            | Q(document_issuing_country__iexact=campaign_country),
             user=user,
             status='verified',
             deleted_at__isnull=True,
         ).exists()
-        if not has_verified_venezuelan_kyc:
-            return ApplyHumanitarianVolunteer(success=False, error='venezuelan_didit_kyc_required')
+        if not has_country_kyc:
+            return ApplyHumanitarianVolunteer(success=False, error='country_kyc_required')
 
         application, _ = HumanitarianVolunteerApplication.objects.update_or_create(
             user=user,
