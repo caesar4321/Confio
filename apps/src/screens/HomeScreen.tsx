@@ -36,7 +36,14 @@ import { AccountSwitchOverlay } from '../components/AccountSwitchOverlay';
 import { getCountryByIso } from '../utils/countries';
 import { WalletCardSkeleton } from '../components/SkeletonLoader';
 import { useQuery, useMutation } from '@apollo/client';
-import { GET_PRESALE_STATUS, GET_MY_BALANCES, GET_ACTIVE_PRESALE, GET_ALL_PRESALE_PHASES, CHECK_REFERRAL_STATUS } from '../apollo/queries';
+import {
+  GET_PRESALE_STATUS,
+  GET_MY_BALANCES,
+  GET_ACTIVE_PRESALE,
+  GET_ALL_PRESALE_PHASES,
+  CHECK_REFERRAL_STATUS,
+  GET_ACTIVE_VENEZUELA_HUMANITARIAN_CAMPAIGN,
+} from '../apollo/queries';
 import { REFRESH_ACCOUNT_BALANCE, SET_REFERRER } from '../apollo/mutations';
 import { useCountry } from '../contexts/CountryContext';
 import { isRampBlockedCountry } from '../config/env';
@@ -215,9 +222,13 @@ export const HomeScreen = () => {
     skip: !activeAccount,
     fetchPolicy: 'cache-and-network',
   });
+  const { data: humanitarianCampaignData } = useQuery(GET_ACTIVE_VENEZUELA_HUMANITARIAN_CAMPAIGN, {
+    fetchPolicy: 'cache-and-network',
+  });
   const pendingPayrollCount = (isBusinessAccount || isPersonalAccount || isEmployeeDelegate)
     ? (pendingPayrollData?.pendingPayrollItems?.length || 0)
     : 0;
+  const activeHumanitarianCampaign = humanitarianCampaignData?.activeVenezuelaHumanitarianCampaign;
   const isPresaleClaimsUnlocked = presaleStatusData?.isPresaleClaimsUnlocked === true;
   const [presaleDismissed, setPresaleDismissed] = useState(false);
   const showPayrollCard = (isBusinessAccount || isEmployeeDelegate || isPersonalAccount) && pendingPayrollCount > 0;
@@ -1314,22 +1325,24 @@ export const HomeScreen = () => {
           </TouchableOpacity>
         )}
 
-        <TouchableOpacity
-          style={[styles.humanitarianCard, { marginHorizontal: 16, marginBottom: 12 }]}
-          onPress={() => navigation.navigate('HumanitarianAid')}
-          activeOpacity={0.9}
-        >
-          <View style={styles.humanitarianIconWrap}>
-            <Text style={styles.humanitarianFlag}>🇻🇪</Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.humanitarianTitle}>Venezuela: ayuda directa</Text>
-            <Text style={styles.humanitarianSubtitle}>
-              Dona cUSD y sigue cada entrega hecha por voluntarios verificados.
-            </Text>
-          </View>
-          <Icon name="chevron-right" size={18} color="#9CA3AF" />
-        </TouchableOpacity>
+        {activeHumanitarianCampaign && (
+          <TouchableOpacity
+            style={[styles.humanitarianCard, { marginHorizontal: 16, marginBottom: 12 }]}
+            onPress={() => navigation.navigate('HumanitarianAid')}
+            activeOpacity={0.9}
+          >
+            <View style={styles.humanitarianIconWrap}>
+              <Text style={styles.humanitarianFlag}>🇻🇪</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.humanitarianTitle}>Venezuela: ayuda directa</Text>
+              <Text style={styles.humanitarianSubtitle}>
+                Dona cUSD y sigue cada entrega hecha por voluntarios verificados.
+              </Text>
+            </View>
+            <Icon name="chevron-right" size={18} color="#9CA3AF" />
+          </TouchableOpacity>
+        )}
 
         {/* CONFIO Presale Banner - Show claims unlocked (green) or presale active (purple) */}
         {isPresaleClaimsUnlocked && !presaleDismissed && (

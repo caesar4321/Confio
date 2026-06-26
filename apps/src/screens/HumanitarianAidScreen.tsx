@@ -106,10 +106,35 @@ export const HumanitarianAidScreen = () => {
     });
   };
 
+  const goBack = () => {
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+    navigation.navigate('BottomTabs', { screen: 'Home' });
+  };
+
+  const renderBackButton = () => (
+    <TouchableOpacity
+      style={styles.backButton}
+      onPress={goBack}
+      activeOpacity={0.85}
+      accessibilityRole="button"
+      accessibilityLabel="Volver"
+    >
+      <Icon name="arrow-left" size={20} color={colors.textFlat} />
+    </TouchableOpacity>
+  );
+
   if (loading && !campaign) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator color={colors.primary} />
+      <View style={styles.container}>
+        <View style={styles.loadingContent}>
+          <View style={styles.topBar}>{renderBackButton()}</View>
+          <View style={styles.loadingBody}>
+            <ActivityIndicator color={colors.primary} />
+          </View>
+        </View>
       </View>
     );
   }
@@ -121,6 +146,7 @@ export const HumanitarianAidScreen = () => {
         contentContainerStyle={styles.centerContent}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={refetch} />}
       >
+        <View style={styles.emptyTopBar}>{renderBackButton()}</View>
         <Text style={styles.emptyFlag}>🇻🇪</Text>
         <Text style={styles.emptyTitle}>Ayuda humanitaria</Text>
         <Text style={styles.emptyText}>Todavía no hay una campaña activa.</Text>
@@ -136,6 +162,7 @@ export const HumanitarianAidScreen = () => {
       contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={loading} onRefresh={refetch} />}
     >
+      <View style={styles.topBar}>{renderBackButton()}</View>
       <View style={styles.hero}>
         <View style={styles.heroIcon}>
           <Text style={styles.heroFlag}>🇻🇪</Text>
@@ -257,9 +284,13 @@ export const HumanitarianAidScreen = () => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.neutral },
   content: { padding: 16, paddingBottom: 32 },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.neutral },
+  loadingContent: { flex: 1, padding: 16 },
+  loadingBody: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   centerContent: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  hero: { paddingTop: 18, paddingBottom: 20 },
+  topBar: { width: '100%', alignItems: 'flex-start', marginBottom: 8 },
+  emptyTopBar: { position: 'absolute', top: 16, left: 16 },
+  backButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
+  hero: { paddingTop: 6, paddingBottom: 20 },
   heroIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: colors.primaryLight, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
   heroFlag: { fontSize: 26 },
   kicker: { fontSize: 13, fontWeight: '700', color: colors.primaryDark, marginBottom: 6 },
