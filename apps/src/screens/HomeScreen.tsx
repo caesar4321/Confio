@@ -1320,12 +1320,12 @@ export const HomeScreen = () => {
           activeOpacity={0.9}
         >
           <View style={styles.humanitarianIconWrap}>
-            <Icon name="heart" size={20} color="#fff" />
+            <Text style={styles.humanitarianFlag}>🇻🇪</Text>
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.humanitarianTitle}>Ayuda humanitaria: Venezuela</Text>
+            <Text style={styles.humanitarianTitle}>Venezuela: ayuda directa</Text>
             <Text style={styles.humanitarianSubtitle}>
-              Donaciones, avances y pruebas públicas para voluntarios verificados.
+              Dona cUSD y sigue cada entrega hecha por voluntarios verificados.
             </Text>
           </View>
           <Icon name="chevron-right" size={18} color="#9CA3AF" />
@@ -1713,7 +1713,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#D1FAE5',
+    borderColor: '#E5E7EB',
     padding: 14,
   },
   humanitarianIconWrap: {
@@ -1722,7 +1722,10 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#14B8A6',
+    backgroundColor: '#D1FAE5',
+  },
+  humanitarianFlag: {
+    fontSize: 23,
   },
   humanitarianTitle: {
     fontSize: 15,

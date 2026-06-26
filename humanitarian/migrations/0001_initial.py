@@ -12,9 +12,9 @@ def create_initial_venezuela_campaign(apps, schema_editor):
     HumanitarianCampaign.objects.get_or_create(
         slug='venezuela-2026-earthquake',
         defaults={
-            'title': 'Venezuela: ayuda humanitaria',
+            'title': 'Venezuela: ayuda directa y transparente',
             'country_code': 'VEN',
-            'description': 'Donaciones y liberaciones transparentes para voluntarios verificados en Venezuela.',
+            'description': 'Donaciones en cUSD para compras locales y entregas publicadas por voluntarios venezolanos verificados.',
             'status': 'active',
         },
     )
