@@ -117,12 +117,28 @@ class HumanitarianVolunteerApplicationType(DjangoObjectType):
 
 class HumanitarianQueries(graphene.ObjectType):
     humanitarian_campaign = graphene.Field(HumanitarianCampaignType, slug=graphene.String(required=True))
+    humanitarian_donations = graphene.List(
+        HumanitarianDonationType,
+        slug=graphene.String(required=True),
+        offset=graphene.Int(default_value=0),
+        limit=graphene.Int(default_value=15),
+    )
     active_humanitarian_campaigns = graphene.List(HumanitarianCampaignType)
     active_venezuela_humanitarian_campaign = graphene.Field(HumanitarianCampaignType)
     my_humanitarian_volunteer_application = graphene.Field(HumanitarianVolunteerApplicationType, slug=graphene.String(required=True))
 
     def resolve_humanitarian_campaign(self, info, slug):
         return HumanitarianCampaign.objects.filter(slug=slug, status__iregex='^(active|paused|closed)$').first()
+
+    def resolve_humanitarian_donations(self, info, slug, offset=0, limit=15):
+        campaign = HumanitarianCampaign.objects.filter(slug=slug).first()
+        if not campaign:
+            return []
+        offset = max(0, offset)
+        limit = max(1, min(limit, 50))
+        return (campaign.donations.filter(status='confirmed')
+                .select_related('donor_user')
+                .order_by('-donated_at')[offset:offset + limit])
 
     def resolve_active_humanitarian_campaigns(self, info):
         return HumanitarianCampaign.active_campaigns()

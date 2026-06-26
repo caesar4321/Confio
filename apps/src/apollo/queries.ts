@@ -194,15 +194,6 @@ export const GET_HUMANITARIAN_CAMPAIGN = gql`
       releaseCount
       vaultAddress
       updatedAt
-      donations(limit: 10) {
-        publicId
-        donorDisplayName
-        donorCountryCode
-        amount
-        status
-        transactionHash
-        donatedAt
-      }
       releases(limit: 20) {
         publicId
         volunteerName
@@ -219,6 +210,19 @@ export const GET_HUMANITARIAN_CAMPAIGN = gql`
           position
         }
       }
+    }
+  }
+`;
+
+export const GET_HUMANITARIAN_DONATIONS = gql`
+  query GetHumanitarianDonations($slug: String!, $offset: Int, $limit: Int) {
+    humanitarianDonations(slug: $slug, offset: $offset, limit: $limit) {
+      publicId
+      donorDisplayName
+      donorCountryCode
+      amount
+      transactionHash
+      donatedAt
     }
   }
 `;

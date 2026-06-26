@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -21,6 +21,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useMutation, useQuery } from '@apollo/client';
 import {
   GET_HUMANITARIAN_CAMPAIGN,
+  GET_HUMANITARIAN_DONATIONS,
   GET_MY_BALANCES,
   GET_MY_HUMANITARIAN_VOLUNTEER_APPLICATION,
 } from '../apollo/queries';
@@ -32,9 +33,11 @@ import algorandService from '../services/algorandService';
 import { biometricAuthService } from '../services/biometricAuthService';
 import { HumanitarianWsSession } from '../services/humanitarianWs';
 import { countryInfo } from '../utils/humanitarianCountry';
+import { LoadingOverlay } from '../components/LoadingOverlay';
 
 const DEFAULT_CAMPAIGN_SLUG = 'venezuela-2026-earthquake';
 const SUGGESTED_AMOUNTS = ['5', '10', '25', '50'];
+const DONATIONS_PAGE_SIZE = 15;
 type Navigation = NativeStackNavigationProp<MainStackParamList>;
 
 function toNumber(value?: string | number | null) {
@@ -120,6 +123,7 @@ export const HumanitarianAidScreen = () => {
   const [selectedAmount, setSelectedAmount] = useState<string | null>(null);
   const [customAmount, setCustomAmount] = useState('');
   const [donating, setDonating] = useState(false);
+  const [donationLoadingMessage, setDonationLoadingMessage] = useState('');
   const [heroSize, setHeroSize] = useState({ width: 0, height: 0 });
   const { data, loading, error, refetch } = useQuery(GET_HUMANITARIAN_CAMPAIGN, {
     variables: { slug: campaignSlug },
@@ -164,6 +168,54 @@ export const HumanitarianAidScreen = () => {
   const canDonate = parsedDonationAmount >= 1 && !exceedsBalance && !donating;
   const hasNoBalance = !balancesLoading && availableCusd <= 0;
   const needsTopUp = hasNoBalance || exceedsBalance;
+
+  const {
+    data: donationsData,
+    fetchMore: fetchMoreDonations,
+    refetch: refetchDonations,
+  } = useQuery(GET_HUMANITARIAN_DONATIONS, {
+    variables: { slug: campaignSlug, offset: 0, limit: DONATIONS_PAGE_SIZE },
+    skip: !campaign?.slug,
+    fetchPolicy: 'cache-and-network',
+    notifyOnNetworkStatusChange: true,
+  });
+  const donations = donationsData?.humanitarianDonations || [];
+  const [loadingMoreDonations, setLoadingMoreDonations] = useState(false);
+  const [donationsEnded, setDonationsEnded] = useState(false);
+  const hasMoreDonations = !donationsEnded && donations.length < (campaign?.donationCount || 0);
+
+  const loadMoreDonations = useCallback(() => {
+    if (loadingMoreDonations || !hasMoreDonations) return;
+    setLoadingMoreDonations(true);
+    fetchMoreDonations({
+      variables: { offset: donations.length },
+      updateQuery: (prev: any, { fetchMoreResult }: any) => {
+        if (!fetchMoreResult) return prev;
+        const existing = prev?.humanitarianDonations || [];
+        const seen = new Set(existing.map((d: any) => d.publicId));
+        const more = (fetchMoreResult.humanitarianDonations || []).filter((d: any) => !seen.has(d.publicId));
+        return { humanitarianDonations: [...existing, ...more] };
+      },
+    })
+      .then((res: any) => {
+        if ((res?.data?.humanitarianDonations || []).length < DONATIONS_PAGE_SIZE) setDonationsEnded(true);
+      })
+      .catch(() => {})
+      .finally(() => setLoadingMoreDonations(false));
+  }, [loadingMoreDonations, hasMoreDonations, donations.length, fetchMoreDonations]);
+
+  const onScrollNearBottom = useCallback((e: any) => {
+    const { layoutMeasurement, contentOffset, contentSize } = e.nativeEvent;
+    if (layoutMeasurement.height + contentOffset.y >= contentSize.height - 600) {
+      loadMoreDonations();
+    }
+  }, [loadMoreDonations]);
+
+  const onRefresh = useCallback(() => {
+    setDonationsEnded(false);
+    refetch();
+    refetchDonations();
+  }, [refetch, refetchDonations]);
 
   const onApply = async () => {
     try {
@@ -210,6 +262,7 @@ export const HumanitarianAidScreen = () => {
       }
 
       setDonating(true);
+      setDonationLoadingMessage('Preparando tu donación...');
       const session = new HumanitarianWsSession();
       await session.open();
       const pack = await session.prepareDonation(campaignSlug, parsedDonationAmount.toFixed(2));
@@ -219,19 +272,24 @@ export const HumanitarianAidScreen = () => {
       const sponsorTxns = (pack?.sponsor_transactions || []).slice();
       const userToSign = txns.find((txn: any) => txn?.index === 0 && (txn?.needs_signature || !txn?.signed));
       if (!userToSign) throw new Error('donation_missing_user_txn');
+      setDonationLoadingMessage('Firmando la transacción...');
       const userBytes = Buffer.from(userToSign.transaction, 'base64');
       const signedUser = await algorandService.signTransactionBytes(userBytes);
       const signedUserB64 = Buffer.from(signedUser).toString('base64');
+      setDonationLoadingMessage('Enviando tu donación...');
       await session.submitDonation(donationId, signedUserB64, sponsorTxns);
       session.close();
       setSelectedAmount(null);
       setCustomAmount('');
-      await Promise.all([refetch(), refetchBalances()]);
+      setDonationsEnded(false);
+      setDonationLoadingMessage('Actualizando la lista pública...');
+      await Promise.all([refetch(), refetchBalances(), refetchDonations()]);
       Alert.alert('Donación enviada', 'Gracias. Tu donación aparecerá en la lista pública de donaciones recientes.');
     } catch (e: any) {
       Alert.alert('No se pudo donar', e?.message || 'Intenta de nuevo.');
     } finally {
       setDonating(false);
+      setDonationLoadingMessage('');
     }
   };
 
@@ -307,7 +365,6 @@ export const HumanitarianAidScreen = () => {
   }
 
   const application = myApplicationData?.myHumanitarianVolunteerApplication;
-  const donations = campaign.donations || [];
   const donateLabel = donating
     ? 'Donando...'
     : parsedDonationAmount > 0
@@ -317,11 +374,14 @@ export const HumanitarianAidScreen = () => {
   return (
     <View style={styles.container}>
       <SafeAreaView edges={['top']} style={styles.safeTop} />
+      <LoadingOverlay visible={donating} message={donationLoadingMessage || 'Procesando tu donación...'} />
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={refetch} tintColor={colors.primary} />}
+        onScroll={onScrollNearBottom}
+        scrollEventThrottle={200}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={onRefresh} tintColor={colors.primary} />}
       >
       {/* Hero with warm emerald gradient */}
       <View
@@ -484,6 +544,38 @@ export const HumanitarianAidScreen = () => {
       </View>
 
       <View style={styles.section}>
+        <Text style={styles.sectionTitle}>{volunteerSectionTitle}</Text>
+        <Text style={styles.sectionSubtitle}>{volunteerSectionSubtitle}</Text>
+        {application ? (
+          <View style={styles.applicationCard}>
+            <Icon name="user-check" size={18} color={colors.primaryDark} />
+            <Text style={styles.applicationText}>Tu solicitud está en estado: {application.status}</Text>
+          </View>
+        ) : (
+          <>
+            <TextInput
+              value={serviceArea}
+              onChangeText={setServiceArea}
+              placeholder={volunteerServiceAreaPlaceholder}
+              style={styles.input}
+              placeholderTextColor="#94A3B8"
+            />
+            <TextInput
+              value={notes}
+              onChangeText={setNotes}
+              placeholder={volunteerNotesPlaceholder}
+              style={[styles.input, styles.textArea]}
+              multiline
+              placeholderTextColor="#94A3B8"
+            />
+            <TouchableOpacity style={styles.primaryButton} onPress={onApply} disabled={applying}>
+              {applying ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryButtonText}>{volunteerCtaLabel}</Text>}
+            </TouchableOpacity>
+          </>
+        )}
+      </View>
+
+      <View style={styles.section}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Entregas con prueba</Text>
           {campaign.releaseCount > 0 && (
@@ -602,37 +694,8 @@ export const HumanitarianAidScreen = () => {
             <Text style={styles.emptyCardText}>Sé la primera persona en donar y abrir el camino para más ayuda.</Text>
           </View>
         )}
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>{volunteerSectionTitle}</Text>
-        <Text style={styles.sectionSubtitle}>{volunteerSectionSubtitle}</Text>
-        {application ? (
-          <View style={styles.applicationCard}>
-            <Icon name="user-check" size={18} color={colors.primaryDark} />
-            <Text style={styles.applicationText}>Tu solicitud está en estado: {application.status}</Text>
-          </View>
-        ) : (
-          <>
-            <TextInput
-              value={serviceArea}
-              onChangeText={setServiceArea}
-              placeholder={volunteerServiceAreaPlaceholder}
-              style={styles.input}
-              placeholderTextColor="#94A3B8"
-            />
-            <TextInput
-              value={notes}
-              onChangeText={setNotes}
-              placeholder={volunteerNotesPlaceholder}
-              style={[styles.input, styles.textArea]}
-              multiline
-              placeholderTextColor="#94A3B8"
-            />
-            <TouchableOpacity style={styles.primaryButton} onPress={onApply} disabled={applying}>
-              {applying ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryButtonText}>{volunteerCtaLabel}</Text>}
-            </TouchableOpacity>
-          </>
+        {loadingMoreDonations && (
+          <ActivityIndicator style={styles.listFooterSpinner} color={colors.primary} />
         )}
       </View>
       </View>
@@ -734,6 +797,7 @@ const styles = StyleSheet.create({
   dot: { fontSize: 12, color: colors.textSecondary },
   emptyCard: { backgroundColor: colors.background, borderRadius: 14, padding: 18, alignItems: 'center', gap: 10, ...softShadow },
   emptyCardText: { fontSize: 14, lineHeight: 20, color: colors.textSecondary, textAlign: 'center' },
+  listFooterSpinner: { marginTop: 12, marginBottom: 4 },
 
   row: { backgroundColor: colors.background, borderRadius: 12, padding: 14, marginBottom: 10, ...softShadow },
   rowTop: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, marginBottom: 6 },
