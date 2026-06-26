@@ -23,7 +23,7 @@ from algosdk.transaction import (
 )
 from algosdk.v2client import algod
 
-from blockchain.kms_manager import KMSSigner
+from blockchain.kms_manager import KMSSigner, NativeKMSSigner
 
 
 ARTIFACTS = Path(__file__).resolve().parent / "artifacts"
@@ -50,7 +50,8 @@ def get_admin_signer():
         alias = env("KMS_ADMIN_KEY_ALIAS") or env("KMS_KEY_ALIAS")
         if not alias:
             raise SystemExit("KMS_ADMIN_KEY_ALIAS or KMS_KEY_ALIAS is required for KMS signing")
-        signer = KMSSigner(alias, region_name=env("KMS_REGION", "eu-central-2"))
+        signer_cls = NativeKMSSigner if env("KMS_NATIVE_SIGNING").lower() == "true" else KMSSigner
+        signer = signer_cls(alias, region_name=env("KMS_REGION", "eu-central-2"))
         return signer.address, signer.sign_transaction
 
     admin_mnemonic = env("ALGORAND_ADMIN_MNEMONIC")
