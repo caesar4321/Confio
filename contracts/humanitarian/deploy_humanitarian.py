@@ -84,8 +84,12 @@ def main() -> int:
     client = get_algod_client()
     admin_address, admin_sign = get_admin_signer()
     sponsor_address = env("ALGORAND_SPONSOR_ADDRESS")
-    release_operator = env("ALGORAND_HUMANITARIAN_RELEASE_OPERATOR") or sponsor_address or admin_address
+    release_operator = env("ALGORAND_HUMANITARIAN_RELEASE_OPERATOR")
     cusd_asset_id = int(env("ALGORAND_CUSD_ASSET_ID", "0") or "0")
+    if not release_operator:
+        raise SystemExit("ALGORAND_HUMANITARIAN_RELEASE_OPERATOR is required")
+    if sponsor_address and release_operator == sponsor_address:
+        raise SystemExit("ALGORAND_HUMANITARIAN_RELEASE_OPERATOR must not be the hot sponsor address")
     if not cusd_asset_id:
         raise SystemExit("ALGORAND_CUSD_ASSET_ID is required")
 

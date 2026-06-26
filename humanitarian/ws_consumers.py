@@ -2,6 +2,7 @@ import asyncio
 import base64
 import json
 import logging
+import re
 from decimal import Decimal
 from urllib.parse import parse_qs
 
@@ -291,22 +292,38 @@ class HumanitarianSessionConsumer(AsyncJsonWebsocketConsumer):
             txid = algod_client.send_raw_transaction(combined_b64)
             try:
                 wait_for_confirmation(algod_client, txid, 4)
-            except Exception:
-                pass
-            donation.status = "confirmed"
-            donation.transaction_hash = txid
-            donation.save(update_fields=["status", "transaction_hash", "updated_at"])
-            campaign = donation.campaign
-            campaign.total_donated = (campaign.total_donated or Decimal("0.00")) + donation.amount
-            campaign.donation_count = (campaign.donation_count or 0) + 1
-            campaign.save(update_fields=["total_donated", "donation_count", "updated_at"])
+            except Exception as confirm_exc:
+                donation.transaction_hash = txid
+                donation.save(update_fields=["transaction_hash", "updated_at"])
+                logger.warning(
+                    "[HUMANITARIAN][WS] donation confirmation pending donation=%s txid=%s error=%s",
+                    donation.public_id,
+                    txid,
+                    confirm_exc,
+                )
+                return {"success": False, "error": "confirmation_pending"}
+
+            from django.db import transaction as db_transaction
+
+            with db_transaction.atomic():
+                locked = HumanitarianDonation.objects.select_for_update().select_related("campaign").get(pk=donation.pk)
+                if locked.status != "confirmed":
+                    locked.status = "confirmed"
+                    locked.transaction_hash = txid
+                    locked.save(update_fields=["status", "transaction_hash", "updated_at"])
+                    campaign = locked.campaign
+                    campaign.total_donated = (campaign.total_donated or Decimal("0.00")) + locked.amount
+                    campaign.donation_count = (campaign.donation_count or 0) + 1
+                    campaign.save(update_fields=["total_donated", "donation_count", "updated_at"])
             return {"success": True, "txid": txid}
         except Exception as e:
             err = str(e)
-            if "already in pool" in err.lower():
-                donation.status = "confirmed"
-                donation.save(update_fields=["status", "updated_at"])
-                return {"success": True, "txid": donation.transaction_hash or ""}
+            if "already in pool" in err.lower() or "already in ledger" in err.lower():
+                match = re.search(r"(?:already in pool|already in ledger):\s*([A-Z2-7]{52})", err, re.IGNORECASE)
+                if match and not donation.transaction_hash:
+                    donation.transaction_hash = match.group(1)
+                    donation.save(update_fields=["transaction_hash", "updated_at"])
+                return {"success": False, "error": "confirmation_pending"}
             donation.status = "failed"
             donation.save(update_fields=["status", "updated_at"])
             return {"success": False, "error": err}
