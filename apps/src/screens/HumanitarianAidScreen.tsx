@@ -15,6 +15,7 @@ import {
 import { Buffer } from 'buffer';
 import Icon from 'react-native-vector-icons/Feather';
 import Svg, { Defs, LinearGradient as SvgLinearGradient, Stop, Rect } from 'react-native-svg';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useMutation, useQuery } from '@apollo/client';
@@ -46,7 +47,7 @@ function formatAmount(value?: string | number | null) {
 
 function formatCompact(value?: string | number | null) {
   const n = toNumber(value);
-  return `$${n.toLocaleString('es-VE', { maximumFractionDigits: 0 })}`;
+  return `${n.toLocaleString('es-VE', { maximumFractionDigits: 0 })} cUSD`;
 }
 
 function shortHash(hash?: string | null) {
@@ -78,14 +79,28 @@ function initials(name?: string | null) {
   return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
 }
 
+function explorerBase() {
+  return __DEV__ ? 'https://testnet.explorer.perawallet.app' : 'https://explorer.perawallet.app';
+}
+
+function openAddress(address?: string | null) {
+  if (!address) return;
+  Linking.openURL(`${explorerBase()}/address/${encodeURIComponent(address)}`);
+}
+
+function openTransaction(hash?: string | null) {
+  if (!hash) return;
+  Linking.openURL(`${explorerBase()}/tx/${encodeURIComponent(hash)}`);
+}
+
 export const HumanitarianAidScreen = () => {
   const navigation = useNavigation<Navigation>();
   const [serviceArea, setServiceArea] = useState('');
-  const [localPhone, setLocalPhone] = useState('');
   const [notes, setNotes] = useState('');
   const [selectedAmount, setSelectedAmount] = useState<string | null>(null);
   const [customAmount, setCustomAmount] = useState('');
   const [donating, setDonating] = useState(false);
+  const [heroSize, setHeroSize] = useState({ width: 0, height: 0 });
   const { data, loading, error, refetch } = useQuery(GET_ACTIVE_VENEZUELA_HUMANITARIAN_CAMPAIGN, {
     fetchPolicy: 'cache-and-network',
   });
@@ -111,7 +126,10 @@ export const HumanitarianAidScreen = () => {
 
   const goal = toNumber(campaign?.goalAmount);
   const donated = toNumber(campaign?.totalDonated);
-  const progress = goal > 0 ? Math.min(100, Math.round((donated / goal) * 100)) : 0;
+  const rawProgress = goal > 0 ? (donated / goal) * 100 : 0;
+  const displayProgress = Math.round(rawProgress);
+  const fillWidth = Math.min(100, Math.max(rawProgress, donated > 0 ? 3 : 0));
+  const goalReached = goal > 0 && donated >= goal;
   const donationAmount = selectedAmount || customAmount;
   const parsedDonationAmount = parseFloat(String(donationAmount || '').replace(',', '.')) || 0;
   const availableCusd = useMemo(() => parseFloat(balancesData?.myBalances?.cusd || '0'), [balancesData?.myBalances?.cusd]);
@@ -124,14 +142,16 @@ export const HumanitarianAidScreen = () => {
         variables: {
           campaignSlug: CAMPAIGN_SLUG,
           serviceArea: serviceArea.trim(),
-          localPhone: localPhone.trim(),
           notes: notes.trim(),
         },
       });
       const payload = res.data?.applyHumanitarianVolunteer;
       if (!payload?.success) {
         if (payload?.error === 'venezuelan_didit_kyc_required') {
-          Alert.alert('Verificación requerida', 'Para ser voluntario necesitas KYC Didit verificado como Venezuela.');
+          Alert.alert(
+            'Verifica tu identidad',
+            'Para ser voluntario, primero confirma tu identidad como residente en Venezuela. Así nos aseguramos de que la ayuda llegue a personas reales.',
+          );
         } else {
           Alert.alert('No se pudo enviar', payload?.error || 'Intenta de nuevo.');
         }
@@ -258,22 +278,33 @@ export const HumanitarianAidScreen = () => {
       : 'Donar cUSD';
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      refreshControl={<RefreshControl refreshing={loading} onRefresh={refetch} />}
-    >
+    <View style={styles.container}>
+      <SafeAreaView edges={['top']} style={styles.safeTop} />
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={refetch} tintColor={colors.primary} />}
+      >
       {/* Hero with warm emerald gradient */}
-      <View style={styles.hero}>
-        <Svg style={StyleSheet.absoluteFill} width="100%" height="100%">
-          <Defs>
-            <SvgLinearGradient id="heroGrad" x1="0" y1="0" x2="1" y2="1">
-              <Stop offset="0%" stopColor={colors.primaryDeep} stopOpacity="1" />
-              <Stop offset="100%" stopColor={colors.primaryDark} stopOpacity="1" />
-            </SvgLinearGradient>
-          </Defs>
-          <Rect x="0" y="0" width="100%" height="100%" rx="20" fill="url(#heroGrad)" />
-        </Svg>
+      <View
+        style={styles.hero}
+        onLayout={(e) => {
+          const { width, height } = e.nativeEvent.layout;
+          setHeroSize((prev) => (prev.width === width && prev.height === height ? prev : { width, height }));
+        }}
+      >
+        {heroSize.width > 0 && heroSize.height > 0 && (
+          <Svg style={StyleSheet.absoluteFill} width={heroSize.width} height={heroSize.height}>
+            <Defs>
+              <SvgLinearGradient id="heroGrad" x1="0" y1="0" x2="0" y2="1">
+                <Stop offset="0%" stopColor="#34D399" stopOpacity="1" />
+                <Stop offset="100%" stopColor="#059669" stopOpacity="1" />
+              </SvgLinearGradient>
+            </Defs>
+            <Rect x="0" y="0" width={heroSize.width} height={heroSize.height} fill="url(#heroGrad)" />
+          </Svg>
+        )}
 
         <View style={styles.heroTopBar}>{renderBackButton(true)}</View>
 
@@ -295,17 +326,29 @@ export const HumanitarianAidScreen = () => {
                 <Text style={styles.progressGoal}>de {formatCompact(goal)} meta</Text>
               </View>
               <View style={styles.progressTrack}>
-                <View style={[styles.progressFill, { width: `${Math.max(progress, 2)}%` }]} />
+                <View style={[styles.progressFill, goalReached && styles.progressFillDone, { width: `${fillWidth}%` }]} />
               </View>
               <View style={styles.progressBottomRow}>
-                <Text style={styles.progressMeta}>{progress}% recaudado</Text>
+                {goalReached ? (
+                  <View style={styles.metaBadge}>
+                    <Text style={styles.metaBadgeText}>🎉 ¡Meta superada! {displayProgress}%</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.progressMeta}>{displayProgress}% recaudado</Text>
+                )}
                 <Text style={styles.progressMeta}>{campaign.donationCount} donantes ❤</Text>
               </View>
+              {goalReached && (
+                <Text style={styles.progressOver}>
+                  Gracias por superar la meta — cada donación extra ayuda a más familias.
+                </Text>
+              )}
             </View>
           )}
         </View>
       </View>
 
+      <View style={styles.body}>
       {/* Quick-pick donate */}
       <View style={styles.donateCard}>
         <Text style={styles.donateLabel}>Elige un monto para donar</Text>
@@ -322,7 +365,7 @@ export const HumanitarianAidScreen = () => {
                 }}
                 activeOpacity={0.85}
               >
-                <Text style={[styles.amountChipText, active && styles.amountChipTextActive]}>${amt}</Text>
+                <Text style={[styles.amountChipText, active && styles.amountChipTextActive]}>{amt} cUSD</Text>
               </TouchableOpacity>
             );
           })}
@@ -357,6 +400,16 @@ export const HumanitarianAidScreen = () => {
           <Icon name="shield" size={13} color={colors.primaryDark} />
           <Text style={styles.trustText}>100% directo · sin comisiones · prueba pública</Text>
         </View>
+        {!!campaign.vaultAddress && (
+          <TouchableOpacity
+            style={styles.publicAccountLink}
+            onPress={() => openAddress(campaign.vaultAddress)}
+            activeOpacity={0.85}
+          >
+            <Icon name="external-link" size={14} color={colors.primaryDark} />
+            <Text style={styles.publicAccountText}>Ver cuenta pública de ayuda</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       <View style={styles.statsGrid}>
@@ -404,7 +457,14 @@ export const HumanitarianAidScreen = () => {
                 {!!release.releasedAt && <Text style={styles.timeText}>{timeAgo(release.releasedAt)}</Text>}
               </View>
               {!!release.transactionHash && (
-                <Text style={styles.hash}>on-chain · {shortHash(release.transactionHash)}</Text>
+                <TouchableOpacity
+                  style={styles.txLink}
+                  onPress={() => openTransaction(release.transactionHash)}
+                  activeOpacity={0.85}
+                >
+                  <Icon name="external-link" size={13} color={colors.primaryDark} />
+                  <Text style={styles.txLinkText}>Ver transacción · {shortHash(release.transactionHash)}</Text>
+                </TouchableOpacity>
               )}
               {(release.proofLinks || []).map((proof: any) => (
                 <TouchableOpacity
@@ -436,6 +496,15 @@ export const HumanitarianAidScreen = () => {
               <View style={styles.donorInfo}>
                 <Text style={styles.donorName}>{name}</Text>
                 {!!donation.donatedAt && <Text style={styles.timeText}>{timeAgo(donation.donatedAt)}</Text>}
+                {!!donation.transactionHash && (
+                  <TouchableOpacity
+                    style={styles.donorTxLink}
+                    onPress={() => openTransaction(donation.transactionHash)}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.donorTxText}>Ver transacción</Text>
+                  </TouchableOpacity>
+                )}
               </View>
               <Text style={styles.amount}>{formatAmount(donation.amount)}</Text>
             </View>
@@ -449,7 +518,7 @@ export const HumanitarianAidScreen = () => {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Voluntarios en Venezuela</Text>
         <Text style={styles.sectionSubtitle}>
-          ¿Estás en Venezuela y puedes comprar y entregar ayuda? Postúlate para recibir fondos verificados.
+          ¿Estás en Venezuela y puedes comprar y entregar ayuda? Postúlate aquí. Confirmamos tu identidad antes de enviarte fondos, para que cada donación llegue a personas reales.
         </Text>
         {application ? (
           <View style={styles.applicationCard}>
@@ -462,13 +531,6 @@ export const HumanitarianAidScreen = () => {
               value={serviceArea}
               onChangeText={setServiceArea}
               placeholder="Zona donde puedes ayudar"
-              style={styles.input}
-              placeholderTextColor="#94A3B8"
-            />
-            <TextInput
-              value={localPhone}
-              onChangeText={setLocalPhone}
-              placeholder="Teléfono local"
               style={styles.input}
               placeholderTextColor="#94A3B8"
             />
@@ -486,13 +548,26 @@ export const HumanitarianAidScreen = () => {
           </>
         )}
       </View>
-    </ScrollView>
+      </View>
+      </ScrollView>
+    </View>
   );
+};
+
+const softShadow = {
+  shadowColor: '#0F172A',
+  shadowOffset: { width: 0, height: 4 },
+  shadowOpacity: 0.08,
+  shadowRadius: 12,
+  elevation: 3,
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.neutral },
-  content: { padding: 16, paddingBottom: 32 },
+  safeTop: { backgroundColor: '#34D399' },
+  scroll: { flex: 1, backgroundColor: colors.neutral },
+  content: { paddingBottom: 36 },
+  body: { paddingHorizontal: 16 },
   loadingContent: { flex: 1, padding: 16 },
   loadingBody: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   centerContent: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
@@ -501,25 +576,29 @@ const styles = StyleSheet.create({
   backButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
   backButtonLight: { backgroundColor: 'rgba(255,255,255,0.18)', borderColor: 'rgba(255,255,255,0.28)' },
 
-  hero: { borderRadius: 20, overflow: 'hidden', paddingHorizontal: 18, paddingTop: 14, paddingBottom: 22, marginBottom: 16 },
-  heroTopBar: { alignItems: 'flex-start', marginBottom: 10 },
+  hero: { backgroundColor: '#34D399', borderBottomLeftRadius: 28, borderBottomRightRadius: 28, overflow: 'hidden', paddingHorizontal: 20, paddingTop: 8, paddingBottom: 30 },
+  heroTopBar: { alignItems: 'flex-start', marginBottom: 12 },
   heroBody: {},
   kickerRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
   heroFlag: { fontSize: 22 },
-  kicker: { fontSize: 12, fontWeight: '700', letterSpacing: 0.4, color: colors.primaryMuted },
-  title: { fontSize: 25, lineHeight: 31, fontWeight: '800', color: '#FFFFFF', marginBottom: 8 },
-  description: { fontSize: 14, lineHeight: 21, color: '#D1FAE5' },
+  kicker: { fontSize: 12, fontWeight: '700', letterSpacing: 0.4, color: 'rgba(255,255,255,0.9)' },
+  title: { fontSize: 26, lineHeight: 32, fontWeight: '800', color: '#FFFFFF', marginBottom: 8 },
+  description: { fontSize: 14, lineHeight: 21, color: 'rgba(255,255,255,0.9)' },
 
-  progressBlock: { marginTop: 18 },
+  progressBlock: { marginTop: 20 },
   progressTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 },
-  progressDonated: { fontSize: 20, fontWeight: '800', color: '#FFFFFF' },
-  progressGoal: { fontSize: 13, color: colors.primaryMuted },
-  progressTrack: { height: 9, borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.2)', overflow: 'hidden' },
-  progressFill: { height: '100%', borderRadius: 6, backgroundColor: colors.primary },
-  progressBottomRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 7 },
-  progressMeta: { fontSize: 12, color: colors.primaryMuted },
+  progressDonated: { fontSize: 22, fontWeight: '800', color: '#FFFFFF' },
+  progressGoal: { fontSize: 13, color: 'rgba(255,255,255,0.85)' },
+  progressTrack: { height: 10, borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.25)', overflow: 'hidden' },
+  progressFill: { height: '100%', borderRadius: 6, backgroundColor: '#FFFFFF' },
+  progressFillDone: { backgroundColor: '#FCD34D' },
+  progressBottomRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 },
+  progressMeta: { fontSize: 12, color: 'rgba(255,255,255,0.85)' },
+  metaBadge: { backgroundColor: 'rgba(255,255,255,0.22)', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 },
+  metaBadgeText: { fontSize: 12, fontWeight: '800', color: '#FFFFFF' },
+  progressOver: { marginTop: 8, fontSize: 12, lineHeight: 17, color: 'rgba(255,255,255,0.9)' },
 
-  donateCard: { backgroundColor: colors.background, borderRadius: 16, borderWidth: 1, borderColor: colors.border, padding: 16, marginBottom: 18 },
+  donateCard: { backgroundColor: colors.background, borderRadius: 16, padding: 16, marginTop: -16, marginBottom: 18, ...softShadow },
   donateLabel: { fontSize: 13, color: colors.textSecondary, marginBottom: 10 },
   amountGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
   amountChip: { width: '48%', borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
@@ -536,9 +615,11 @@ const styles = StyleSheet.create({
   donateButtonText: { color: colors.white, fontSize: 16, fontWeight: '800' },
   trustRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 10 },
   trustText: { fontSize: 12, color: colors.textSecondary },
+  publicAccountLink: { marginTop: 12, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  publicAccountText: { fontSize: 13, fontWeight: '800', color: colors.primaryDark },
 
   statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 18 },
-  stat: { width: '48%', backgroundColor: colors.background, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: colors.border },
+  stat: { width: '48%', backgroundColor: colors.background, borderRadius: 12, padding: 14, ...softShadow },
   statLabel: { fontSize: 12, color: colors.textSecondary, marginBottom: 6 },
   statValue: { fontSize: 17, fontWeight: '800', color: colors.textFlat },
 
@@ -546,7 +627,7 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 18, fontWeight: '800', color: colors.textFlat, marginBottom: 10 },
   sectionSubtitle: { fontSize: 14, lineHeight: 20, color: colors.textSecondary, marginTop: -4, marginBottom: 12 },
 
-  row: { backgroundColor: colors.background, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 14, marginBottom: 10 },
+  row: { backgroundColor: colors.background, borderRadius: 12, padding: 14, marginBottom: 10, ...softShadow },
   rowTop: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, marginBottom: 6 },
   rowTitle: { flex: 1, fontSize: 15, fontWeight: '700', color: colors.textFlat },
   rowText: { fontSize: 14, lineHeight: 20, color: colors.textSecondary },
@@ -560,15 +641,18 @@ const styles = StyleSheet.create({
   statusTextDone: { color: colors.successText },
   statusTextPending: { color: colors.textSecondary },
   timeText: { fontSize: 12, color: colors.textSecondary },
-  hash: { fontSize: 12, color: colors.textSecondary, marginTop: 8 },
+  txLink: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 10 },
+  txLinkText: { fontSize: 12, fontWeight: '700', color: colors.primaryDark },
   proofButton: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10 },
   proofText: { fontSize: 13, fontWeight: '700', color: colors.primaryDark },
 
-  donorRow: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.background, borderRadius: 12, borderWidth: 1, borderColor: colors.border, padding: 12, marginBottom: 8 },
+  donorRow: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.background, borderRadius: 12, padding: 12, marginBottom: 8, ...softShadow },
   avatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primaryLight, alignItems: 'center', justifyContent: 'center' },
   avatarText: { fontSize: 13, fontWeight: '800', color: colors.primaryDark },
   donorInfo: { flex: 1 },
   donorName: { fontSize: 14, fontWeight: '700', color: colors.textFlat },
+  donorTxLink: { marginTop: 3, alignSelf: 'flex-start' },
+  donorTxText: { fontSize: 12, fontWeight: '700', color: colors.primaryDark },
 
   applicationCard: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.primarySoft, borderRadius: 12, borderWidth: 1, borderColor: colors.primaryMuted, padding: 14 },
   applicationText: { flex: 1, fontSize: 14, fontWeight: '600', color: colors.primaryDark, textTransform: 'capitalize' },
