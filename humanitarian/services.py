@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from algosdk import abi, transaction
+from algosdk import abi, encoding as algo_encoding, transaction
 from algosdk.logic import get_application_address
 from algosdk.transaction import wait_for_confirmation
 from django.conf import settings
@@ -69,7 +69,7 @@ class HumanitarianReleaseService:
             foreign_assets=[cusd_asset_id],
         )
         signed = self.signer.sign_transaction(app_call)
-        txid = self.algod.send_raw_transaction(signed)
+        txid = self.algod.send_raw_transaction(algo_encoding.msgpack_encode(signed))
         wait_for_confirmation(self.algod, txid, 6)
 
         with db_transaction.atomic():
