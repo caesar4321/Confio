@@ -123,6 +123,10 @@ export function FriendDetailScreen() {
       exchange: true,
       conversion: true,
       reward: true,
+      presale: true,
+      payroll: true,
+      ramp: true,
+      humanitarian: true,
     },
     currencies: {
       cUSD: true,
@@ -264,7 +268,7 @@ export function FriendDetailScreen() {
     // Apply type filters
     if (transactionFilters.types) {
       filtered = filtered.filter(tx => {
-        return transactionFilters.types[tx.type];
+        return transactionFilters.types[tx.type] ?? true;
       });
     }
     
@@ -322,7 +326,18 @@ export function FriendDetailScreen() {
     
     // Check if any filter is non-default
     const defaultFilters: TransactionFilters = {
-      types: { sent: true, received: true, payment: true, exchange: true, conversion: true, reward: true },
+      types: {
+        sent: true,
+        received: true,
+        payment: true,
+        exchange: true,
+        conversion: true,
+        reward: true,
+        presale: true,
+        payroll: true,
+        ramp: true,
+        humanitarian: true,
+      },
       currencies: { cUSD: true, CONFIO: true, USDC: true },
       status: { completed: true, pending: true },
       timeRange: 'all',

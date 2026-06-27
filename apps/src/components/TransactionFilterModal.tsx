@@ -20,6 +20,8 @@ export interface TransactionFilters {
     reward: boolean;
     presale: boolean;
     payroll: boolean;
+    ramp: boolean;
+    humanitarian: boolean;
   };
   currencies: {
     cUSD: boolean;
@@ -73,6 +75,8 @@ export const TransactionFilterModal = ({
         reward: true,
         presale: true,
         payroll: true,
+        ramp: true,
+        humanitarian: true,
       },
       currencies: {
         cUSD: true,
@@ -264,6 +268,30 @@ export const TransactionFilterModal = ({
                   <Icon name="briefcase" size={16} color={filters.types.payroll ? '#10B981' : '#6B7280'} />
                   <Text style={[styles.filterChipText, filters.types.payroll && { color: '#10B981' }]}>
                     Nómina
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.filterChip,
+                    filters.types.ramp && { backgroundColor: '#0EA5E9' + '20', borderColor: '#0EA5E9' }
+                  ]}
+                  onPress={() => toggleType('ramp')}
+                >
+                  <Icon name="download-cloud" size={16} color={filters.types.ramp ? '#0EA5E9' : '#6B7280'} />
+                  <Text style={[styles.filterChipText, filters.types.ramp && { color: '#0EA5E9' }]}>
+                    Recarga/retiro
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.filterChip,
+                    filters.types.humanitarian && { backgroundColor: '#E11D48' + '20', borderColor: '#E11D48' }
+                  ]}
+                  onPress={() => toggleType('humanitarian')}
+                >
+                  <Icon name="heart" size={16} color={filters.types.humanitarian ? '#E11D48' : '#6B7280'} />
+                  <Text style={[styles.filterChipText, filters.types.humanitarian && { color: '#E11D48' }]}>
+                    Ayuda humanitaria
                   </Text>
                 </TouchableOpacity>
               </View>

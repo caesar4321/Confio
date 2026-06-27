@@ -219,6 +219,14 @@ class UnifiedTransactionType(DjangoObjectType):
                 if getattr(self, 'ramp_transaction', None):
                     return 'Recarga' if self.ramp_transaction.direction == 'on_ramp' else 'Retiro'
                 return self.description or 'Ramp'
+
+            if self.transaction_type == 'humanitarian':
+                direction = UnifiedTransactionType.resolve_direction(self, info)
+                if direction == 'received':
+                    return 'Ayuda humanitaria recibida'
+                if direction == 'sent':
+                    return 'Donación humanitaria'
+                return self.description or 'Ayuda humanitaria'
             
             # Handle P2P exchanges with their description
             if self.transaction_type == 'exchange':
@@ -359,6 +367,8 @@ class UnifiedTransactionQuery(graphene.ObjectType):
                 'referral_reward_event', 
                 'presale_purchase',
                 'ramp_transaction',
+                'humanitarian_donation',
+                'humanitarian_release',
             ).filter(
                 Q(sender_business=account.business) | 
                 Q(counterparty_business=account.business)
@@ -377,6 +387,8 @@ class UnifiedTransactionQuery(graphene.ObjectType):
                 'referral_reward_event', 
                 'presale_purchase',
                 'ramp_transaction',
+                'humanitarian_donation',
+                'humanitarian_release',
             ).filter(
                 Q(
                     Q(sender_user=user) & Q(sender_business__isnull=True)
@@ -506,6 +518,8 @@ class UnifiedTransactionQuery(graphene.ObjectType):
             'referral_reward_event',
             'presale_purchase',
             'ramp_transaction',
+            'humanitarian_donation',
+            'humanitarian_release',
         )
         
         queryset = queryset.exclude(
@@ -635,6 +649,8 @@ class UnifiedTransactionQuery(graphene.ObjectType):
             'referral_reward_event',
             'presale_purchase',
             'ramp_transaction',
+            'humanitarian_donation',
+            'humanitarian_release',
         )
         
         queryset = queryset.exclude(

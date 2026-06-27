@@ -1820,6 +1820,8 @@ export const TransactionDetailScreen = () => {
         return <Icon name="repeat" size={24} color="#0ea5e9" />;
       case 'payroll':
         return <Icon name="briefcase" size={24} color="#10B981" />;
+      case 'humanitarian':
+        return <Icon name="heart" size={24} color="#E11D48" />;
       case 'deposit':
         return <Icon name="arrow-down-circle" size={24} color="#10b981" />;
       case 'withdrawal':
@@ -1871,6 +1873,10 @@ export const TransactionDetailScreen = () => {
         return tx.amount.startsWith('+')
           ? `Nómina recibida de ${displayFromName}`
           : `Pago de nómina a ${displayToName}`;
+      case 'humanitarian':
+        return tx.amount.startsWith('+')
+          ? 'Ayuda humanitaria recibida'
+          : 'Donación humanitaria';
       case 'deposit':
         return tx.formattedTitle || `Depósito ${tx.currency}`;
       case 'withdrawal':
@@ -1966,7 +1972,7 @@ export const TransactionDetailScreen = () => {
               return (
                 <Text style={[
                   styles.amountText,
-                    (currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'payment' || currentTx.type === 'withdrawal' ||
+                    (isNeg || currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'payment' || currentTx.type === 'withdrawal' ||
                     (currentTx.type === 'conversion' && currentTx.amount?.startsWith('-')) ||
                     (currentTx.type === 'ramp' && normalizeRampDirection(currentTx.rampDirection || currentTx.ramp_direction || currentTx.direction, currentTx.amount, currentTx.formattedTitle || currentTx.title) === 'off_ramp')) && styles.negativeAmount
                 ]}>

@@ -1232,6 +1232,9 @@ enum UsersUnifiedTransactionTableTransactionTypeChoices {
 
   """Presale Purchase"""
   PRESALE
+
+  """Humanitarian Aid"""
+  HUMANITARIAN
 }
 
 """An enumeration."""

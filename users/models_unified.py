@@ -18,6 +18,7 @@ class UnifiedTransactionTable(models.Model):
         ('reward', 'Reward'),
         ('presale', 'Presale Purchase'),
         ('ramp', 'Ramp'),
+        ('humanitarian', 'Humanitarian Aid'),
     ]
     
     STATUS_CHOICES = [
@@ -49,7 +50,7 @@ class UnifiedTransactionTable(models.Model):
     id = models.BigAutoField(primary_key=True)
     
     # Transaction type
-    transaction_type = models.CharField(max_length=10, choices=TRANSACTION_TYPES, db_index=True)
+    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES, db_index=True)
     
     # Foreign keys to source tables (only one will be set)
     send_transaction = models.OneToOneField(
@@ -104,6 +105,20 @@ class UnifiedTransactionTable(models.Model):
     )
     ramp_transaction = models.OneToOneField(
         'ramps.RampTransaction',
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name='unified_transaction',
+    )
+    humanitarian_donation = models.OneToOneField(
+        'humanitarian.HumanitarianDonation',
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name='unified_transaction',
+    )
+    humanitarian_release = models.OneToOneField(
+        'humanitarian.HumanitarianRelease',
         null=True,
         blank=True,
         on_delete=models.CASCADE,
@@ -302,6 +317,10 @@ class UnifiedTransactionTable(models.Model):
             return self.presale_purchase.internal_id
         if self.transaction_type == 'ramp' and self.ramp_transaction:
             return self.ramp_transaction.internal_id
+        if self.transaction_type == 'humanitarian' and self.humanitarian_donation:
+            return self.humanitarian_donation.public_id
+        if self.transaction_type == 'humanitarian' and self.humanitarian_release:
+            return self.humanitarian_release.public_id
         return None
 
     @property

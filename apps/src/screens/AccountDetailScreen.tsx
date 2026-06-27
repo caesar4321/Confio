@@ -60,7 +60,7 @@ type AccountDetailScreenRouteProp = RouteProp<MainStackParamList, 'AccountDetail
 
 interface Transaction {
   id?: string;
-  type: 'received' | 'sent' | 'exchange' | 'payment' | 'conversion' | 'reward' | 'presale' | 'payroll' | 'ramp';
+  type: 'received' | 'sent' | 'exchange' | 'payment' | 'conversion' | 'reward' | 'presale' | 'payroll' | 'ramp' | 'humanitarian';
   from?: string;
   to?: string;
   fromPhone?: string;
@@ -199,6 +199,8 @@ export const AccountDetailScreen = () => {
       reward: true,
       presale: true,
       payroll: true,
+      ramp: true,
+      humanitarian: true,
     },
     currencies: {
       cUSD: true,
@@ -569,7 +571,7 @@ export const AccountDetailScreen = () => {
     if (sourceTransactions.length > 0) {
       sourceTransactions.forEach((tx: any) => {
         // Determine transaction type based on both transactionType and direction
-        let type: 'sent' | 'received' | 'payment' | 'conversion' | 'exchange' | 'reward' | 'presale' | 'payroll' | 'ramp' = 'sent';
+        let type: 'sent' | 'received' | 'payment' | 'conversion' | 'exchange' | 'reward' | 'presale' | 'payroll' | 'ramp' | 'humanitarian' = 'sent';
         const normalizedTxType = (tx.transactionType || '').toLowerCase();
         if (normalizedTxType === 'payment') {
           type = 'payment';
@@ -585,11 +587,14 @@ export const AccountDetailScreen = () => {
           type = 'presale';
         } else if (normalizedTxType === 'payroll') {
           type = 'payroll';
+        } else if (normalizedTxType === 'humanitarian') {
+          type = 'humanitarian';
         } else {
           type = tx.direction === 'sent' ? 'sent' : 'received';
         }
         const isReward = type === 'reward';
         const isPresale = type === 'presale';
+        const isHumanitarian = type === 'humanitarian';
 
         // Fix invitation detection: 
         // 1. If we have a counterpartyUser, it's not an invitation
@@ -723,6 +728,12 @@ export const AccountDetailScreen = () => {
           } else {
             toDisplay = tx.counterpartyDisplayName || tx.displayCounterparty;
           }
+        } else if (isHumanitarian) {
+          if (tx.direction === 'received') {
+            fromDisplay = tx.senderDisplayName || tx.displayCounterparty || 'Confío Ayuda Humanitaria';
+          } else {
+            toDisplay = tx.counterpartyDisplayName || tx.displayCounterparty || 'Confío Ayuda Humanitaria';
+          }
         }
 
         // Ensure display amount has a sign for proper direction (helps payroll visibility)
@@ -766,7 +777,18 @@ export const AccountDetailScreen = () => {
         const fromPhoneKey = (tx.senderUser && (tx.senderUser as any).phoneKey) || tx.senderPhone || (tx as any).fromPhone;
         const toPhoneKey = (tx.counterpartyUser && (tx.counterpartyUser as any).phoneKey) || tx.counterpartyPhone || (tx as any).toPhone;
 
-        const finalDescription = isConversion ? tx.description : isReward ? rewardDescription : isPresale ? presaleDescription : tx.description;
+        const humanitarianDescription = isHumanitarian
+          ? (tx.displayDescription || tx.description || (tx.direction === 'received' ? 'Ayuda humanitaria recibida' : 'Donación humanitaria'))
+          : undefined;
+        const finalDescription = isConversion
+          ? tx.description
+          : isReward
+            ? rewardDescription
+            : isPresale
+              ? presaleDescription
+              : isHumanitarian
+                ? humanitarianDescription
+                : tx.description;
 
         const payrollBusinessName = (() => {
           if (type !== 'payroll') return undefined;
@@ -810,7 +832,7 @@ export const AccountDetailScreen = () => {
             : (() => {
               const normalizedToken = (tx.tokenType || '').toUpperCase();
               const isCusdToken = normalizedToken === 'CUSD' || normalizedToken.includes('CONFIO DOLLAR') || normalizedToken.includes('CUSD ');
-              if (type === 'payroll' || isCusdToken) {
+              if (type === 'payroll' || type === 'humanitarian' || isCusdToken) {
                 return 'cUSD';
               }
               return tx.tokenType || route.params.accountSymbol || '';
@@ -935,6 +957,10 @@ export const AccountDetailScreen = () => {
         return transaction.amount.startsWith('+')
           ? `Nómina recibida de ${transaction.from || 'Empresa'}`
           : `Pago de nómina a ${transaction.to || 'Empleado'}`;
+      case 'humanitarian':
+        return transaction.amount.startsWith('+')
+          ? 'Ayuda humanitaria recibida'
+          : 'Donación humanitaria';
       default:
         return 'Transacción';
     }
@@ -960,6 +986,8 @@ export const AccountDetailScreen = () => {
         return <Icon name="lock" size={20} color="#6366F1" />;
       case 'payroll':
         return <Icon name="briefcase" size={20} color="#10B981" />;
+      case 'humanitarian':
+        return <Icon name="heart" size={20} color="#E11D48" />;
       default:
         return <Icon name="arrow-up" size={20} color="#6B7280" />;
     }
@@ -1029,7 +1057,7 @@ export const AccountDetailScreen = () => {
 
     // Apply type filters
     filtered = filtered.filter(tx => {
-      return transactionFilters.types[tx.type];
+      return transactionFilters.types[tx.type as keyof typeof transactionFilters.types] ?? true;
     });
 
     // Apply currency filters
@@ -1232,6 +1260,11 @@ export const AccountDetailScreen = () => {
             baseTitle = `Pago de nómina a ${transaction.to || 'Empleado'}`;
           }
           break;
+        case 'humanitarian':
+          baseTitle = transaction.amount.startsWith('+')
+            ? 'Ayuda humanitaria recibida'
+            : 'Donación humanitaria';
+          break;
         default:
           baseTitle = 'Transacción';
       }
@@ -1400,7 +1433,8 @@ export const AccountDetailScreen = () => {
     const isCounterpartyTheSender =
       transaction.type === 'received' ||
       (transaction.type === 'payment' && transaction.amount.startsWith('+')) ||
-      (transaction.type === 'payroll' && transaction.amount.startsWith('+'));
+      (transaction.type === 'payroll' && transaction.amount.startsWith('+')) ||
+      (transaction.type === 'humanitarian' && transaction.amount.startsWith('+'));
     const titleStatusTier = isCounterpartyTheSender ? senderStatusTier : recipientStatusTier;
     const titleIsReferralVerified = isCounterpartyTheSender ? senderIsReferralVerified : recipientIsReferralVerified;
 

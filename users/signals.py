@@ -10,6 +10,7 @@ from p2p_exchange.models import P2PTrade
 from conversion.models import Conversion
 from .models_unified import UnifiedTransactionTable
 from payroll.models import PayrollRecipient, PayrollItem, PayrollRun
+from humanitarian.models import HumanitarianDonation, HumanitarianRelease
 from users.models_employee import BusinessEmployee
 from users.models import Account
 from achievements.signals import _award_referral_pair
@@ -374,6 +375,104 @@ def create_unified_transaction_from_payroll(payroll_item):
         return None
 
 
+def _display_name_for_user(user, fallback=''):
+    if not user:
+        return fallback
+    return f"{user.first_name} {user.last_name}".strip() or user.username or fallback
+
+
+def create_unified_transaction_from_humanitarian_donation(donation):
+    """Create or update UnifiedTransactionTable from a confirmed humanitarian donation."""
+    if donation.status != 'confirmed':
+        UnifiedTransactionTable.objects.filter(humanitarian_donation=donation).delete()
+        return None
+    try:
+        campaign = donation.campaign
+        donor = donation.donor_user
+        donor_name = donation.donor_display_name or _display_name_for_user(donor, 'Donante Confío')
+        unified, created = UnifiedTransactionTable.objects.update_or_create(
+            humanitarian_donation=donation,
+            defaults={
+                'transaction_type': 'humanitarian',
+                'amount': str(donation.amount),
+                'token_type': 'CUSD',
+                'status': 'CONFIRMED',
+                'transaction_hash': donation.transaction_hash or '',
+                'error_message': '',
+                'sender_user': donor,
+                'sender_business': None,
+                'sender_type': 'user' if donor else 'external',
+                'sender_display_name': donor_name,
+                'sender_phone': donor.phone_number if donor else '',
+                'sender_address': donation.from_address or '',
+                'counterparty_user': None,
+                'counterparty_business': None,
+                'counterparty_type': 'external',
+                'counterparty_display_name': 'Confío Ayuda Humanitaria',
+                'counterparty_phone': None,
+                'counterparty_address': campaign.vault_address or '',
+                'description': f"Donación humanitaria: {campaign.title}",
+                'from_address': donation.from_address or '',
+                'to_address': campaign.vault_address or '',
+                'transaction_date': donation.donated_at,
+                'deleted_at': None,
+            }
+        )
+        if created and donation.donated_at:
+            UnifiedTransactionTable.objects.filter(id=unified.id).update(created_at=donation.donated_at)
+        return unified
+    except Exception:
+        logger.exception("Error creating unified transaction from humanitarian donation %s", donation.id)
+        return None
+
+
+def create_unified_transaction_from_humanitarian_release(release):
+    """Create or update UnifiedTransactionTable from a visible humanitarian release."""
+    visible_statuses = ['confirmed', 'proof_pending', 'proof_published']
+    if release.status not in visible_statuses:
+        UnifiedTransactionTable.objects.filter(humanitarian_release=release).delete()
+        return None
+    try:
+        campaign = release.campaign
+        recipient_user = release.volunteer_application.user
+        recipient_name = _display_name_for_user(recipient_user, 'Voluntario Confío')
+        unified, created = UnifiedTransactionTable.objects.update_or_create(
+            humanitarian_release=release,
+            defaults={
+                'transaction_type': 'humanitarian',
+                'amount': str(release.amount),
+                'token_type': 'CUSD',
+                'status': 'CONFIRMED',
+                'transaction_hash': release.transaction_hash or '',
+                'error_message': '',
+                'sender_user': None,
+                'sender_business': None,
+                'sender_type': 'external',
+                'sender_display_name': 'Confío Ayuda Humanitaria',
+                'sender_phone': '',
+                'sender_address': campaign.vault_address or '',
+                'counterparty_user': recipient_user,
+                'counterparty_business': None,
+                'counterparty_type': 'user',
+                'counterparty_display_name': recipient_name,
+                'counterparty_phone': recipient_user.phone_number if recipient_user else '',
+                'counterparty_address': release.recipient_address or '',
+                'description': f"Ayuda humanitaria recibida: {release.purpose}",
+                'from_address': campaign.vault_address or '',
+                'to_address': release.recipient_address or '',
+                'transaction_date': release.released_at or release.updated_at,
+                'deleted_at': None,
+            }
+        )
+        tx_date = release.released_at or release.updated_at
+        if created and tx_date:
+            UnifiedTransactionTable.objects.filter(id=unified.id).update(created_at=tx_date)
+        return unified
+    except Exception:
+        logger.exception("Error creating unified transaction from humanitarian release %s", release.id)
+        return None
+
+
 # Signal receivers
 @receiver(post_save, sender=SendTransaction)
 def handle_send_transaction_save(sender, instance, created, **kwargs):
@@ -633,6 +732,18 @@ def handle_payroll_item_soft_delete(sender, instance, **kwargs):
         sync_payroll_run_status(instance.run_id)
     except Exception as e:
         logger.warning(f"Failed to sync payroll run after delete for item {instance.internal_id}: {e}")
+
+
+@receiver(post_save, sender=HumanitarianDonation)
+def handle_humanitarian_donation_save(sender, instance, created, **kwargs):
+    """Create/update unified transaction when a humanitarian donation is confirmed."""
+    create_unified_transaction_from_humanitarian_donation(instance)
+
+
+@receiver(post_save, sender=HumanitarianRelease)
+def handle_humanitarian_release_save(sender, instance, created, **kwargs):
+    """Create/update unified transaction when a humanitarian release is visible to users."""
+    create_unified_transaction_from_humanitarian_release(instance)
 
 
 def sync_payroll_run_status(run_id: int):
