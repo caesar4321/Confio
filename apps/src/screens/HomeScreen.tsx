@@ -44,7 +44,7 @@ import {
   GET_ACTIVE_HUMANITARIAN_CAMPAIGNS,
 } from '../apollo/queries';
 import { REFRESH_ACCOUNT_BALANCE, SET_REFERRER } from '../apollo/mutations';
-import { countryInfo } from '../utils/humanitarianCountry';
+import { HumanitarianHomeBanner } from '../components/HumanitarianHomeBanner';
 import { useCountry } from '../contexts/CountryContext';
 import { isRampBlockedCountry } from '../config/env';
 import { useCurrency } from '../hooks/useCurrency';
@@ -1326,24 +1326,11 @@ export const HomeScreen = () => {
         )}
 
         {activeHumanitarianCampaign && (
-          <TouchableOpacity
-            style={[styles.humanitarianCard, { marginHorizontal: 16, marginBottom: 12 }]}
+          <HumanitarianHomeBanner
+            campaign={activeHumanitarianCampaign}
             onPress={() => navigation.navigate('HumanitarianAid', { slug: activeHumanitarianCampaign.slug })}
-            activeOpacity={0.9}
-          >
-            <View style={styles.humanitarianIconWrap}>
-              <Text style={styles.humanitarianFlag}>{countryInfo(activeHumanitarianCampaign.countryCode).flag}</Text>
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.humanitarianTitle} numberOfLines={2}>
-                {activeHumanitarianCampaign.title || 'Ayuda humanitaria directa'}
-              </Text>
-              <Text style={styles.humanitarianSubtitle}>
-                Dona cUSD para familias afectadas. Cada entrega se publica con prueba.
-              </Text>
-            </View>
-            <Icon name="chevron-right" size={18} color="#9CA3AF" />
-          </TouchableOpacity>
+            style={{ marginHorizontal: 16, marginBottom: 12 }}
+          />
         )}
 
         {/* CONFIO Presale Banner - Show claims unlocked (green) or presale active (purple) */}
@@ -1720,36 +1707,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#374151',
     fontWeight: '600',
-  },
-  humanitarianCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    backgroundColor: '#ECFDF5',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#A7F3D0',
-    padding: 14,
-  },
-  humanitarianIconWrap: {
-    width: 36,
-    height: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  humanitarianFlag: {
-    fontSize: 30,
-  },
-  humanitarianTitle: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: '#0F172A',
-    marginBottom: 3,
-  },
-  humanitarianSubtitle: {
-    fontSize: 13,
-    lineHeight: 18,
-    color: '#64748B',
   },
   // Wallets section styles
   walletsSection: {

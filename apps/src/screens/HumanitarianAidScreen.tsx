@@ -585,17 +585,14 @@ export const HumanitarianAidScreen = () => {
           accessibilityLabel={showProofSection ? 'Ocultar entregas con prueba' : 'Ver entregas con prueba'}
         >
           <View style={styles.foldTitleRow}>
-            <Text style={styles.sectionTitle}>Entregas con prueba</Text>
+            <Text style={[styles.sectionTitle, styles.foldTitle]} numberOfLines={1}>Entregas con prueba</Text>
             {campaign.releaseCount > 0 && (
               <View style={styles.countPill}>
                 <Text style={styles.countPillText}>{campaign.releaseCount}</Text>
               </View>
             )}
           </View>
-          <View style={styles.foldAction}>
-            <Text style={styles.foldActionText}>{showProofSection ? 'Ocultar' : 'Ver pruebas'}</Text>
-            <Icon name={showProofSection ? 'chevron-up' : 'chevron-down'} size={18} color={colors.primaryDark} />
-          </View>
+          <Icon name={showProofSection ? 'chevron-up' : 'chevron-down'} size={22} color={colors.primaryDark} />
         </TouchableOpacity>
         {showProofSection && (
           <Text style={styles.sectionHint}>Cada compra y entrega queda registrada con prueba pública.</Text>
@@ -796,11 +793,12 @@ const styles = StyleSheet.create({
 
   section: { marginTop: 18 },
   sectionTitle: { fontSize: 18, fontWeight: '800', color: colors.textFlat },
-  sectionSubtitle: { fontSize: 14, lineHeight: 20, color: colors.textSecondary, marginTop: -4, marginBottom: 12 },
+  sectionSubtitle: { fontSize: 14, lineHeight: 20, color: colors.textSecondary, marginTop: 6, marginBottom: 12 },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
   sectionHint: { fontSize: 13, lineHeight: 18, color: colors.textSecondary, marginTop: 2, marginBottom: 12 },
   foldHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, backgroundColor: colors.background, borderRadius: 12, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 12, paddingVertical: 12, ...softShadow },
   foldTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
+  foldTitle: { flexShrink: 1 },
   foldAction: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   foldActionText: { fontSize: 13, fontWeight: '800', color: colors.primaryDark },
   countPill: { backgroundColor: colors.primarySoft, borderRadius: 12, paddingHorizontal: 8, paddingVertical: 2, minWidth: 24, alignItems: 'center' },
