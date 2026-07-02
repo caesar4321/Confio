@@ -34,6 +34,7 @@ import { SHARE_LINKS } from '../config/shareLinks';
 import { useAuth } from '../contexts/AuthContext';
 import { getSupportCopy } from '../utils/supportMessaging';
 import { colors } from '../config/theme';
+import { SkeletonLoader, TransactionItemSkeleton } from '../components/SkeletonLoader';
 import { StatusTierBadge } from '../components/StatusTierBadge';
 import { buildInviteLink, buildSendAndInviteShareMessage } from '../utils/inviteLinks';
 import { technicalFontFamily } from '../utils/fontFamily';
@@ -1648,9 +1649,13 @@ export const TransactionDetailScreen = () => {
   // Show loading state while fetching
   if (fetchLoading) {
     return (
-      <View style={[styles.container, styles.centerContent]}>
-        <ActivityIndicator size="large" color={colors.accent} />
-        <Text style={styles.loadingText}>Cargando transacción...</Text>
+      <View style={[styles.container, { paddingTop: 48 }]}>
+        <SkeletonLoader width={48} height={48} borderRadius={24} style={{ alignSelf: 'center', marginBottom: 16 }} />
+        <SkeletonLoader width={180} height={28} style={{ alignSelf: 'center', marginBottom: 8 }} />
+        <SkeletonLoader width={120} height={16} style={{ alignSelf: 'center', marginBottom: 24 }} />
+        <TransactionItemSkeleton />
+        <TransactionItemSkeleton />
+        <TransactionItemSkeleton />
       </View>
     );
   }
