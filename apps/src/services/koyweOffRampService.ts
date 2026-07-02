@@ -57,6 +57,10 @@ type FundingResult = {
 };
 
 const ALGORAND_ADDRESS_REGEX = /\b[A-Z2-7]{58}\b/;
+const APP_OPT_IN_RETRY_DELAY_MS = 3000;
+const BUILD_BURN_AND_SEND_MAX_ATTEMPTS = 5;
+
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 const parsePaymentDetails = (value: unknown): Record<string, unknown> | null => {
   if (!value) return null;
@@ -126,7 +130,8 @@ export const tryFundKoyweOffRampInBackground = async ({
   try {
     let buildResult: any = null;
 
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+    let attemptedAppOptIn = false;
+    for (let attempt = 0; attempt < BUILD_BURN_AND_SEND_MAX_ATTEMPTS; attempt += 1) {
       const res = await apolloClient.mutate({
         mutation: BUILD_BURN_AND_SEND,
         variables: {
@@ -143,11 +148,15 @@ export const tryFundKoyweOffRampInBackground = async ({
         break;
       }
 
-      if (buildResult?.error === 'requires_app_optin' && attempt === 0) {
-        const optInResult = await cusdAppOptInService.handleAppOptIn(activeAccount);
-        if (!optInResult.success) {
-          return { status: 'failed', reason: optInResult.error || 'requires_app_optin' };
+      if (buildResult?.error === 'requires_app_optin') {
+        if (!attemptedAppOptIn) {
+          const optInResult = await cusdAppOptInService.handleAppOptIn(activeAccount);
+          if (!optInResult.success) {
+            return { status: 'failed', reason: optInResult.error || 'requires_app_optin' };
+          }
+          attemptedAppOptIn = true;
         }
+        await delay(APP_OPT_IN_RETRY_DELAY_MS);
         continue;
       }
 

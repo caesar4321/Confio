@@ -255,7 +255,7 @@ export const ProfileScreen = () => {
     navigation.navigate('LegalDocument', { docType });
   };
 
-  const handleSocialMediaPress = async (platform: 'tiktok' | 'instagram' | 'youtube' | 'whatsapp') => {
+  const handleSocialMediaPress = async (platform: 'tiktok' | 'instagram' | 'youtube' | 'facebook' | 'whatsapp') => {
     let url = '';
     switch (platform) {
       case 'tiktok':
@@ -266,6 +266,9 @@ export const ProfileScreen = () => {
         break;
       case 'youtube':
         url = 'https://www.youtube.com/@julianmoonluna';
+        break;
+      case 'facebook':
+        url = 'https://facebook.com/JulianMoonLuna';
         break;
       case 'whatsapp':
         url = 'https://whatsapp.com/channel/0029Vb8g5GJIiRotAGdWKI1t';
@@ -744,6 +747,19 @@ export const ProfileScreen = () => {
             >
               <Image
                 source={require('../assets/png/YouTube.png')}
+                style={styles.socialButtonImage}
+                resizeMode="contain"
+              />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.socialImageButton}
+              onPress={() => handleSocialMediaPress('facebook')}
+              accessibilityRole="link"
+              accessibilityLabel="Facebook de Julian Moon"
+            >
+              <Image
+                source={require('../assets/png/Facebook.png')}
                 style={styles.socialButtonImage}
                 resizeMode="contain"
               />

@@ -185,10 +185,38 @@ export class AppCheckService {
     }
 
     /**
-     * Get token for API request headers
-     * Can be used to add X-Firebase-AppCheck header to requests
+     * Best-effort token for ordinary request headers (X-Firebase-AppCheck).
+     *
+     * Never blocks on a network fetch: the backend only enforces App Check on
+     * login and money operations, which use primeTokenForAuth()/waitForToken().
+     * On networks where the Firebase token exchange stalls (e.g. hotspots that
+     * advertise IPv6 but black-hole it, ~2 min of TCP retries), awaiting here
+     * would serialize every GraphQL request behind that stall.
      */
     async getTokenForHeader(): Promise<string | null> {
+        const now = Date.now();
+
+        if (this.lastToken && now - this.lastTokenAt < AppCheckService.TOKEN_REUSE_MS) {
+            return this.lastToken;
+        }
+
+        if (
+            !this.tokenPromise
+            && !this.isFetchCoolingDown(now)
+            && !(this.lastFailureAt && now - this.lastFailureAt < AppCheckService.FAILURE_BACKOFF_MS)
+        ) {
+            void this.startTokenFetch();
+        }
+
+        return this.lastToken;
+    }
+
+    /**
+     * Token for operations the backend enforces App Check on (send/pay/withdraw
+     * sessions, top-up/sell). Awaits a real fetch result so the operation isn't
+     * rejected server-side just because no token was cached yet.
+     */
+    async waitForToken(): Promise<string | null> {
         const now = Date.now();
 
         if (this.lastToken && now - this.lastTokenAt < AppCheckService.TOKEN_REUSE_MS) {
@@ -244,7 +272,7 @@ export class AppCheckService {
             }
         }
 
-        const immediateToken = await this.getTokenForHeader();
+        const immediateToken = await this.waitForToken();
         if (immediateToken) {
             return immediateToken;
         }

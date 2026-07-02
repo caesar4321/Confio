@@ -1224,7 +1224,7 @@ class Query(graphene.ObjectType):
         koywe_client = KoyweClient()
         dynamic_limits = {}
         try:
-            dynamic_limits = koywe_client.get_public_ramp_limits(
+            dynamic_limits = koywe_client.get_dynamic_ramp_limits(
                 fiat_symbol=config["fiat_currency"],
             )
         except KoyweError as exc:

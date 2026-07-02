@@ -62,9 +62,9 @@ export class SendWsSession {
         const token = await getJwtToken();
         if (!token) throw new Error('no_token');
 
-        // Fetch App Check token using the shared service so WS send flow
-        // behaves like Apollo requests and fails with a user-safe message.
-        const appCheckToken = await appCheckService.getTokenForHeader();
+        // The send session is App Check-enforced server-side, so wait for a
+        // real token instead of the best-effort header path.
+        const appCheckToken = await appCheckService.waitForToken();
         if (!appCheckToken) {
           throw new Error(OFFICIAL_APP_REQUIRED_ERROR);
         }

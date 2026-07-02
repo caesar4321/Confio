@@ -2,7 +2,10 @@ from django.test import TestCase
 from django.contrib.auth import get_user_model
 from graphene_django.utils.testing import GraphQLTestCase
 from graphql_jwt.testcases import JSONWebTokenTestCase
+from graphql_jwt.exceptions import PermissionDenied
+from graphql_jwt.utils import jwt_encode
 import json
+from users.jwt import jwt_payload_handler, verify_auth_token_version
 from users.migration_safety import (
     MATERIAL_SPENDABLE_ALGO_MICROS,
     get_address_reassignment_blocker,
@@ -10,6 +13,40 @@ from users.migration_safety import (
 )
 
 User = get_user_model()
+
+
+class UserSoftDeleteAuthTestCase(TestCase):
+    def test_soft_deleted_users_are_hidden_from_default_manager(self):
+        user = User.objects.create_user(
+            username='deleteduser',
+            email='deleted@example.com',
+            password='testpass123',
+            firebase_uid='deleted-firebase-uid',
+        )
+
+        user.soft_delete()
+
+        self.assertFalse(User.objects.filter(id=user.id).exists())
+        self.assertTrue(User.all_objects.filter(id=user.id).exists())
+
+        deleted_user = User.all_objects.get(id=user.id)
+        self.assertFalse(deleted_user.is_active)
+        self.assertIsNotNone(deleted_user.deleted_at)
+        self.assertEqual(deleted_user.auth_token_version, 2)
+
+    def test_soft_delete_invalidates_existing_jwt(self):
+        user = User.objects.create_user(
+            username='tokenuser',
+            email='token@example.com',
+            password='testpass123',
+            firebase_uid='token-firebase-uid',
+        )
+        token = jwt_encode(jwt_payload_handler(user))
+
+        user.soft_delete()
+
+        with self.assertRaises(PermissionDenied):
+            verify_auth_token_version(token)
 
 class AccountBalanceQueryTestCase(TestCase):
     def setUp(self):

@@ -32,6 +32,10 @@ def jwt_decode_handler_with_version_check(token, context=None):
         logger.error(f"User not found: id={user_id}")
         raise PermissionDenied('User not found')
 
+    if not user.is_active or user.deleted_at is not None:
+        logger.error(f"User is inactive or deleted: id={user_id}")
+        raise PermissionDenied('User account is inactive')
+
     if user.auth_token_version != token_version:
         logger.error(f"Token version mismatch: token={token_version}, user={user.auth_token_version}")
         raise PermissionDenied('Token has been invalidated')
@@ -162,6 +166,10 @@ def verify_auth_token_version(token):
         except User.DoesNotExist:
             logger.error(f"User not found: id={user_id}")
             raise PermissionDenied('User not found')
+
+        if not user.is_active or user.deleted_at is not None:
+            logger.error(f"User is inactive or deleted: id={user_id}")
+            raise PermissionDenied('User account is inactive')
             
         if user.auth_token_version != token_version:
             logger.error(f"Token version mismatch: token={token_version}, user={user.auth_token_version}")

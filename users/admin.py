@@ -466,8 +466,8 @@ class BankInfoAdmin(admin.ModelAdmin):
     payment_method_display.short_description = "Payment Method"
     
     def masked_account(self, obj):
-        return obj.get_masked_account_number()
-    masked_account.short_description = "Account Number"
+        return obj.get_primary_identifier()
+    masked_account.short_description = "Destination"
 
     def provider_metadata_summary(self, obj):
         if not obj.provider_metadata:

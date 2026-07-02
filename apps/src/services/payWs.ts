@@ -68,7 +68,7 @@ export class PayWsSession {
         const token = await getJwtToken();
         if (!token) throw new Error('no_token');
 
-        const appCheckToken = await appCheckService.getTokenForHeader() || '';
+        const appCheckToken = await appCheckService.waitForToken() || '';
 
         const wsUrl = `${getWsBase()}ws/pay_session?token=${encodeURIComponent(token)}&app_check_token=${encodeURIComponent(appCheckToken)}`;        const ws = new WebSocket(wsUrl);
         this.ws = ws;

@@ -1,4 +1,4 @@
-from django.contrib.auth.models import AbstractUser
+from django.contrib.auth.models import AbstractUser, UserManager
 from django.contrib.postgres.fields import ArrayField
 from django.core.validators import MaxLengthValidator, MinValueValidator, MaxValueValidator
 from django.db import models
@@ -43,6 +43,25 @@ class SoftDeleteManager(models.Manager):
         """Return queryset with only soft-deleted objects"""
         return super().get_queryset().filter(deleted_at__isnull=False)
 
+
+class SoftDeleteUserManager(UserManager):
+    """User manager that preserves create_user while hiding soft-deleted users."""
+
+    use_in_migrations = True
+
+    def get_queryset(self):
+        return super().get_queryset().filter(deleted_at__isnull=True)
+
+    def with_deleted(self):
+        return super().get_queryset()
+
+    def only_deleted(self):
+        return super().get_queryset().filter(deleted_at__isnull=False)
+
+
+class AllObjectsUserManager(UserManager):
+    use_in_migrations = True
+
 class SoftDeleteModel(models.Model):
     """Base model with soft delete functionality"""
     
@@ -76,6 +95,9 @@ class SoftDeleteModel(models.Model):
         return self.deleted_at is not None
 
 class User(AbstractUser, SoftDeleteModel):
+    objects = SoftDeleteUserManager()
+    all_objects = AllObjectsUserManager()
+
     firebase_uid = models.CharField(max_length=128, unique=True)
     # Unified activity timestamp for MAU/WAU/DAU (updated on any user activity)
     last_activity_at = models.DateTimeField(null=True, blank=True, db_index=True)
@@ -216,6 +238,13 @@ class User(AbstractUser, SoftDeleteModel):
         """Increment the auth token version to invalidate all existing tokens"""
         self.auth_token_version += 1
         self.save(update_fields=['auth_token_version'])
+
+    def soft_delete(self):
+        """Deactivate the user and invalidate outstanding JWTs."""
+        self.deleted_at = timezone.now()
+        self.is_active = False
+        self.auth_token_version += 1
+        self.save(update_fields=['deleted_at', 'is_active', 'auth_token_version'])
 
     @property
     def requires_backup_completion(self):

@@ -63,7 +63,7 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
       }
     }
 
-    const appCheckToken = await appCheckService.getTokenForHeader();
+    const appCheckToken = await appCheckService.waitForToken();
     if (appCheckToken) {
       headers['X-Firebase-AppCheck'] = appCheckToken;
     }

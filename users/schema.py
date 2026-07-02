@@ -3665,6 +3665,9 @@ class RefreshToken(graphene.Mutation):
 				user = User.objects.get(id=user_id)
 			except User.DoesNotExist:
 				raise Exception("User not found")
+
+			if not user.is_active or user.deleted_at is not None:
+				raise Exception("User account is inactive")
 			
 			# Verify token version
 			if user.auth_token_version != token_version:
