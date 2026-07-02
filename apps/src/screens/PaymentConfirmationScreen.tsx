@@ -19,6 +19,7 @@ import { apolloClient } from '../apollo/client';
 import { prepareViaWs } from '../services/payWs';
 import { useAccount } from '../contexts/AccountContext';
 import { colors } from '../config/theme';
+import { Button } from '../components/common/Button';
 import { formatNumber } from '../utils/numberFormatting';
 import { useMutation } from '@apollo/client';
 import { GET_INVOICE } from '../apollo/queries';
@@ -597,27 +598,21 @@ export const PaymentConfirmationScreen = () => {
 
           {/* Action Buttons */}
           <View style={styles.actionButtons}>
-            <TouchableOpacity
-              style={[
-                styles.confirmButton,
-                { backgroundColor: hasEnoughBalance && !isProcessing ? colors.primary : '#D1D5DB' },
-                (!hasEnoughBalance || isProcessing) && styles.disabledButton
-              ]}
+            <Button
+              title={hasEnoughBalance ? 'Confirmar Pago' : (balanceSnapshot == null ? 'Cargando saldo…' : 'Saldo Insuficiente')}
               onPress={handleConfirmPayment}
-              disabled={!hasEnoughBalance || isProcessing}
-              accessibilityRole="button"
+              loading={isProcessing}
+              disabled={!hasEnoughBalance}
               accessibilityLabel="Confirmar pago"
-              accessibilityState={{ disabled: !hasEnoughBalance || isProcessing }}
-            >
-              <Text style={styles.confirmButtonText}>
-                {isProcessing ? 'Procesando...' :
-                  hasEnoughBalance ? 'Confirmar Pago' : (balanceSnapshot == null ? 'Cargando saldo…' : 'Saldo Insuficiente')}
-              </Text>
-            </TouchableOpacity>
+              style={{ backgroundColor: hasEnoughBalance && !isProcessing ? colors.primary : '#D1D5DB' }}
+            />
 
-            <TouchableOpacity style={styles.cancelButton} onPress={handleCancel}>
-              <Text style={styles.cancelButtonText}>Cancelar</Text>
-            </TouchableOpacity>
+            <Button
+              title="Cancelar"
+              variant="secondary"
+              onPress={handleCancel}
+              style={{ backgroundColor: '#F3F4F6', borderWidth: 0 }}
+            />
           </View>
 
           {/* Value Proposition */}
@@ -934,30 +929,6 @@ const styles = StyleSheet.create({
   actionButtons: {
     gap: 12,
     marginBottom: 16,
-  },
-  confirmButton: {
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  confirmButtonText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: 'white',
-  },
-  disabledButton: {
-    opacity: 0.5,
-  },
-  cancelButton: {
-    paddingVertical: 12,
-    backgroundColor: '#F3F4F6',
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  cancelButtonText: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#374151',
   },
   valueCard: {
     padding: 16,
