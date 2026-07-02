@@ -28,6 +28,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useCountrySelection } from '../hooks/useCountrySelection';
 import { AuthStackParamList, MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
+import { Button } from '../components/common/Button';
 
 type PhoneVerificationScreenNavigationProp = CompositeNavigationProp<
   NativeStackNavigationProp<AuthStackParamList, 'PhoneVerification'>,
@@ -380,13 +381,12 @@ const PhoneVerificationScreen = () => {
           />
         </View>
 
-        <TouchableOpacity
-          style={[styles.continueButton, !phoneNumber && styles.continueButtonDisabled]}
+        <Button
+          title="Continuar"
           onPress={handleContinue}
           disabled={!phoneNumber}
-        >
-          <Text style={styles.continueButtonText}>Continuar</Text>
-        </TouchableOpacity>
+          style={{ backgroundColor: !phoneNumber ? '#D1D5DB' : colors.primary, marginBottom: 24 }}
+        />
 
         <Text style={styles.supportingText}>
           {isProfileUpdateFlow
@@ -531,13 +531,12 @@ const PhoneVerificationScreen = () => {
           ))}
         </View>
 
-        <TouchableOpacity
-          style={[styles.continueButton, verificationCode.join('').length !== 6 && styles.continueButtonDisabled]}
+        <Button
+          title="Verificar"
           onPress={handleContinue}
           disabled={verificationCode.join('').length !== 6}
-        >
-          <Text style={styles.continueButtonText}>Verificar</Text>
-        </TouchableOpacity>
+          style={{ backgroundColor: verificationCode.join('').length !== 6 ? '#D1D5DB' : colors.primary, marginBottom: 24 }}
+        />
 
         <TouchableOpacity
           style={[styles.resendButton, (isRequestingCode || codeRequestCooldown > 0) && styles.disabledLink]}
@@ -701,21 +700,6 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     borderTopRightRadius: 16,
     borderBottomRightRadius: 16,
-  },
-  continueButton: {
-    backgroundColor: '#34D399',
-    padding: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  continueButtonDisabled: {
-    backgroundColor: '#D1D5DB',
-  },
-  continueButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
   },
   supportingText: {
     fontSize: 14,
