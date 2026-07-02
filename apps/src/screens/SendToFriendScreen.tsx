@@ -11,6 +11,7 @@ import { useNumberFormat } from '../utils/numberFormatting';
 import { useAuth } from '../contexts/AuthContext';
 import { getSupportCopy } from '../utils/supportMessaging';
 import { colors } from '../config/theme';
+import { Button } from '../components/common/Button';
 import { inviteSendService } from '../services/inviteSendService';
 
 type TokenType = 'cusd' | 'confio';
@@ -331,26 +332,16 @@ export const SendToFriendScreen = () => {
             </View>
           </View>
 
-          <TouchableOpacity
-            style={[
-              styles.confirmButton,
-              (!amount || parseFloat(amount) < config.minSend || parseFloat(amount || '0') > availableBalance || isProcessing) && styles.confirmButtonDisabled
-            ]}
-            disabled={!amount || parseFloat(amount) < config.minSend || parseFloat(amount || '0') > availableBalance || isProcessing}
-            onPress={() => {
-              handleSend();
-            }}
-            accessibilityRole="button"
+          <Button
+            title={balanceSnapshot == null ? 'Cargando saldo…' :
+              parseFloat(amount || '0') > availableBalance ? 'Saldo insuficiente' :
+                `Enviar a ${friend.name}`}
+            onPress={handleSend}
+            loading={isProcessing}
+            disabled={!amount || parseFloat(amount) < config.minSend || parseFloat(amount || '0') > availableBalance}
             accessibilityLabel={`Enviar ${amount || ''} a ${friend.name}`}
-            accessibilityState={{ disabled: !amount || parseFloat(amount) < config.minSend || parseFloat(amount || '0') > availableBalance || isProcessing }}
-          >
-            <Text style={styles.confirmButtonText}>
-              {isProcessing ? 'Procesando...' :
-                balanceSnapshot == null ? 'Cargando saldo…' :
-                  parseFloat(amount || '0') > availableBalance ? 'Saldo insuficiente' :
-                    `Enviar a ${friend.name}`}
-            </Text>
-          </TouchableOpacity>
+            style={{ backgroundColor: colors.accent }}
+          />
 
           {showSuccess && (
             <View style={styles.successBox}>
@@ -595,20 +586,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: colors.accent,
-  },
-  confirmButton: {
-    backgroundColor: colors.accent,
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  confirmButtonDisabled: {
-    opacity: 0.5,
-  },
-  confirmButtonText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: 'bold',
   },
   successBox: {
     alignItems: 'center',
