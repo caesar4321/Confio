@@ -18,6 +18,7 @@ import { CameraRoll } from '@react-native-camera-roll/camera-roll';
 import { MainStackParamList } from '../types/navigation';
 import { TransactionReceiptView } from '../components/TransactionReceiptView';
 import { PayrollRunReceiptView } from '../components/PayrollRunReceiptView';
+import { Button } from '../components/common/Button';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'PayrollRunDetail'>;
 type RouteProps = RouteProp<MainStackParamList, 'PayrollRunDetail'>;
@@ -331,10 +332,19 @@ export const PayrollRunDetailScreen = () => {
 
         {/* Action Buttons */}
         <View style={styles.actionsContainer}>
-          <TouchableOpacity style={styles.primaryButton} onPress={handleSharePdf}>
-            <Icon name="file-text" size={20} color="#fff" />
-            <Text style={styles.primaryButtonText}>Descargar comprobante completo</Text>
-          </TouchableOpacity>
+          <Button
+            title="Descargar comprobante completo"
+            onPress={handleSharePdf}
+            icon={<Icon name="file-text" size={20} color="#fff" />}
+            style={{
+              shadowColor: '#10B981',
+              shadowOpacity: 0.3,
+              shadowRadius: 12,
+              shadowOffset: { width: 0, height: 4 },
+              elevation: 4,
+            }}
+            textStyle={{ fontWeight: '700', fontSize: 15 }}
+          />
 
           <Text style={styles.actionsHint}>
             El comprobante incluye todos los pagos de esta corrida
@@ -561,21 +571,6 @@ const styles = StyleSheet.create({
     marginTop: 8,
     gap: 12,
   },
-  primaryButton: {
-    backgroundColor: '#10B981',
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 8,
-    shadowColor: '#10B981',
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
-  },
-  primaryButtonText: { color: '#fff', fontWeight: '700', fontSize: 15 },
   actionsHint: {
     fontSize: 12,
     color: '#9CA3AF',
