@@ -394,15 +394,16 @@ const PayrollTopUpScreen = () => {
                 returnKeyType="done"
               />
             </View>
-            <TouchableOpacity
-              style={[styles.secondaryButton, (!isBusinessAccount || processing) && styles.primaryButtonDisabled]}
+            <Button
+              title="Retirar de bóveda"
+              variant="secondary"
               onPress={handleWithdraw}
-              disabled={processing || !isBusinessAccount}
-              activeOpacity={0.9}
-            >
-              {processing ? <ActivityIndicator color="#111" /> : <Icon name="arrow-down-left" size={16} color="#111" />}
-              <Text style={styles.secondaryButtonText}>{processing ? 'Procesando...' : 'Retirar de bóveda'}</Text>
-            </TouchableOpacity>
+              loading={processing}
+              disabled={!isBusinessAccount}
+              icon={<Icon name="arrow-down-left" size={16} color="#111" />}
+              style={{ marginTop: 12, backgroundColor: '#e5e7eb', borderWidth: 0 }}
+              textStyle={{ color: '#111827', fontWeight: '700' }}
+            />
           </View>
         </ScrollView>
       </TouchableWithoutFeedback>
@@ -506,21 +507,6 @@ const styles = StyleSheet.create({
     flex: 1,
     color: '#92400e',
     fontSize: 13,
-  },
-  secondaryButton: {
-    marginTop: 12,
-    paddingVertical: 12,
-    borderRadius: 12,
-    backgroundColor: '#e5e7eb',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  secondaryButtonText: {
-    color: '#111827',
-    fontWeight: '700',
-    fontSize: 16,
   },
 });
 
