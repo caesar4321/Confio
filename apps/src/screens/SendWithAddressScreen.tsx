@@ -11,6 +11,7 @@ import USDCLogo from '../assets/png/USDC.png';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { colors } from '../config/theme';
+import { Button } from '../components/common/Button';
 
 type TokenType = 'cusd' | 'confio' | 'usdc';
 
@@ -367,30 +368,15 @@ export const SendWithAddressScreen = () => {
 
       {/* Send Button */}
       <View style={[styles.footer, { paddingBottom: 20 }]}>
-        <TouchableOpacity
-          style={[
-            styles.sendButton,
-            { backgroundColor: config.color },
-            (isProcessing || !amount || !destination || parseFloat(amount || '0') > (tokenType === 'usdc' ? Math.max(availableBalance, availableCusdBalance) : availableBalance)) &&
-            styles.sendButtonDisabled
-          ]}
+        <Button
+          title={balanceSnapshot == null ? 'Cargando saldo…' : parseFloat(amount || '0') > (tokenType === 'usdc' ? Math.max(availableBalance, availableCusdBalance) : availableBalance) ? 'Saldo insuficiente' : 'Enviar'}
           onPress={handleSend}
-          disabled={isProcessing || !amount || !destination || parseFloat(amount || '0') > (tokenType === 'usdc' ? Math.max(availableBalance, availableCusdBalance) : availableBalance)}
-          accessibilityRole="button"
+          loading={isProcessing}
+          disabled={!amount || !destination || parseFloat(amount || '0') > (tokenType === 'usdc' ? Math.max(availableBalance, availableCusdBalance) : availableBalance)}
           accessibilityLabel="Enviar"
-          accessibilityState={{ disabled: isProcessing || !amount || !destination }}
-        >
-          {isProcessing ? (
-            <ActivityIndicator color="white" />
-          ) : (
-            <>
-              <Icon name="send" size={20} color="#ffffff" style={{ marginRight: 8 }} />
-              <Text style={styles.sendButtonText}>
-                {balanceSnapshot == null ? 'Cargando saldo…' : parseFloat(amount || '0') > (tokenType === 'usdc' ? Math.max(availableBalance, availableCusdBalance) : availableBalance) ? 'Saldo insuficiente' : 'Enviar'}
-              </Text>
-            </>
-          )}
-        </TouchableOpacity>
+          icon={<Icon name="send" size={20} color="#ffffff" />}
+          style={{ backgroundColor: config.color }}
+        />
       </View>
 
       {/* Success Modal */}
@@ -661,21 +647,6 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     borderTopWidth: 1,
     borderTopColor: colors.neutralDark,
-  },
-  sendButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    borderRadius: 12,
-  },
-  sendButtonDisabled: {
-    opacity: 0.5,
-  },
-  sendButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#ffffff',
   },
   overlay: {
     position: 'absolute',
