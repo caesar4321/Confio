@@ -46,14 +46,14 @@ const NotificationSettingsScreen: React.FC = () => {
       const granted = await messagingService.requestPermissions();
       if (granted) {
         setSystemNotificationsEnabled(true);
-        Alert.alert('Success', 'Push notifications enabled');
+        Alert.alert('Listo', 'Notificaciones activadas');
       } else {
         Alert.alert(
-          'Permission Denied',
-          'Please enable notifications in your device settings to receive push notifications.',
+          'Permiso denegado',
+          'Activa las notificaciones en la configuración de tu dispositivo para recibir avisos.',
           [
             { text: 'Cancelar', style: 'cancel' },
-            { text: 'Open Settings', onPress: () => {
+            { text: 'Abrir configuración', onPress: () => {
               // Open system settings
               // Linking.openSettings();
             }},
@@ -62,11 +62,11 @@ const NotificationSettingsScreen: React.FC = () => {
       }
     } else {
       Alert.alert(
-        'Disable Notifications',
-        'To disable notifications, please go to your device settings.',
+        'Desactivar notificaciones',
+        'Para desactivar las notificaciones, ve a la configuración de tu dispositivo.',
         [
           { text: 'Entendido' },
-          { text: 'Open Settings', onPress: () => {
+          { text: 'Abrir configuración', onPress: () => {
             // Open system settings
             // Linking.openSettings();
           }},
@@ -90,7 +90,7 @@ const NotificationSettingsScreen: React.FC = () => {
         },
       });
     } catch (error) {
-      Alert.alert('Error', 'Failed to update notification preferences');
+      Alert.alert('Error', 'No se pudieron actualizar tus preferencias. Intenta de nuevo.');
     }
   };
 
@@ -98,12 +98,12 @@ const NotificationSettingsScreen: React.FC = () => {
     try {
       const result = await sendTestPush();
       if (result.data?.sendTestPushNotification?.success) {
-        Alert.alert('Success', 'Test notification sent successfully');
+        Alert.alert('Listo', 'Notificación de prueba enviada');
       } else {
-        Alert.alert('Error', 'Failed to send test notification');
+        Alert.alert('Error', 'No se pudo enviar la notificación de prueba');
       }
     } catch (error) {
-      Alert.alert('Error', 'Failed to send test notification');
+      Alert.alert('Error', 'No se pudo enviar la notificación de prueba');
     }
   };
 
@@ -120,8 +120,8 @@ const NotificationSettingsScreen: React.FC = () => {
       
       // Test local notification with Notifee
       await notifee.displayNotification({
-        title: 'Test Local Notification',
-        body: 'This is a test notification from Confío',
+        title: 'Notificación de prueba',
+        body: 'Esta es una notificación de prueba de Confío',
         android: {
           channelId: 'default',
           smallIcon: 'ic_stat_ic_notification',
@@ -138,9 +138,9 @@ const NotificationSettingsScreen: React.FC = () => {
           },
         },
       });
-      Alert.alert('Success', 'Local notification displayed');
+      Alert.alert('Listo', 'Notificación local mostrada');
     } catch (error) {
-      Alert.alert('Error', 'Failed to display local notification');
+      Alert.alert('Error', 'No se pudo mostrar la notificación local');
     }
   };
 
