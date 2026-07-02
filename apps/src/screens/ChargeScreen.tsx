@@ -31,6 +31,7 @@ import ViewShot from 'react-native-view-shot';
 import { CameraRoll } from '@react-native-camera-roll/camera-roll';
 import { useRef } from 'react';
 import { colors } from '../config/theme';
+import { Button } from '../components/common/Button';
 
 // Import currency icons
 const cUSDIcon = require('../assets/png/cUSD.png');
@@ -570,22 +571,13 @@ const ChargeScreen = () => {
                       </View>
                     </View>
 
-                    <TouchableOpacity
-                      style={[
-                        styles.generateButton,
-                        { backgroundColor: currentCurrency.color },
-                        isLoading && styles.generateButtonDisabled
-                      ]}
+                    <Button
+                      title="Generar Código QR"
                       onPress={handleGenerateQR}
-                      disabled={isLoading}
-                      accessibilityRole="button"
+                      loading={isLoading}
                       accessibilityLabel="Generar código QR de cobro"
-                      accessibilityState={{ disabled: isLoading }}
-                    >
-                      <Text style={styles.generateButtonText}>
-                        {isLoading ? 'Generando...' : 'Generar Código QR'}
-                      </Text>
-                    </TouchableOpacity>
+                      style={{ backgroundColor: currentCurrency.color }}
+                    />
                   </View>
 
                   {/* Info Card */}
@@ -963,19 +955,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#374151',
-  },
-  generateButton: {
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  generateButtonDisabled: {
-    opacity: 0.5,
-  },
-  generateButtonText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: 'white',
   },
   infoCard: {
     padding: 16,
