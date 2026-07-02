@@ -23,6 +23,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { AnalyticsService } from '../services/analyticsService';
 import { getCountryByIso } from '../utils/countries';
 import { colors } from '../config/theme';
+import { Button } from '../components/common/Button';
 
 type Navigation = NavigationProp<MainStackParamList>;
 type EconomicActivityOption = {
@@ -385,17 +386,14 @@ export const RampAddressScreen: React.FC = () => {
             </View>
           ) : null}
 
-          <TouchableOpacity
-            style={[styles.saveButton, isButtonDisabled && styles.saveButtonDisabled]}
-            disabled={isButtonDisabled}
+          <Button
+            title="Guardar dirección"
             onPress={handleSave}
-          >
-            {isSaving ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <Text style={styles.saveButtonText}>Guardar dirección</Text>
-            )}
-          </TouchableOpacity>
+            loading={isSaving}
+            disabled={isButtonDisabled}
+            style={{ marginTop: 20, backgroundColor: colors.primary }}
+            textStyle={{ fontWeight: '700' }}
+          />
         </View>
       </ScrollView>
 
@@ -675,22 +673,6 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 13,
     color: colors.error.text,
-  },
-  saveButton: {
-    marginTop: 20,
-    height: 50,
-    borderRadius: 14,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  saveButtonDisabled: {
-    opacity: 0.45,
-  },
-  saveButtonText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#FFFFFF',
   },
 });
 
