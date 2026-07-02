@@ -156,5 +156,43 @@ export const darkColors = {
   gray700: '#D1D5DB', // gray-300 (inverted for dark mode)
 };
 
+// Design tokens — use these instead of raw numbers in new/edited styles.
+// Spacing follows a 4pt grid; radius and type sizes collapse the ad-hoc
+// values found across screens into one scale.
+export const spacing = {
+  xs: 4,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 20,
+  xxl: 24,
+  xxxl: 32,
+} as const;
+
+export const radius = {
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 24,
+  pill: 999,
+} as const;
+
+export const fontSize = {
+  caption: 12,
+  small: 14,
+  body: 16,
+  subtitle: 18,
+  title: 20,
+  heading: 24,
+  display: 32,
+} as const;
+
+export const fontWeight = {
+  regular: '400',
+  medium: '500',
+  semibold: '600',
+  bold: '700',
+} as const;
+
 // Legacy export for backwards compatibility
-export const colors = lightColors; 
+export const colors = lightColors;

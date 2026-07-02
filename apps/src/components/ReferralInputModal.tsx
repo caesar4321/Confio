@@ -19,6 +19,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import { countries, Country } from '../utils/countries';
 import { useAuth } from '../contexts/AuthContext';
 import { colors } from '../config/theme';
+import { Button } from './common/Button';
 
 const CHECK_REFERRAL_STATUS = gql`
   mutation CheckReferralStatus {
@@ -298,24 +299,19 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
               </View>
 
               <View style={styles.buttonRow}>
-                <TouchableOpacity
-                  style={styles.skipButton}
+                <Button
+                  title="Saltar"
+                  variant="secondary"
                   onPress={onClose}
-                >
-                  <Text style={styles.skipButtonText}>Saltar</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.submitButton, loading && styles.submitButtonDisabled]}
+                  style={{ flex: 1 }}
+                />
+                <Button
+                  title="Registrar"
                   onPress={handleSubmit}
-                  disabled={loading}
-                >
-                  {loading ? (
-                    <ActivityIndicator color="white" size="small" />
-                  ) : (
-                    <Text style={styles.submitButtonText}>Registrar</Text>
-                  )}
-                </TouchableOpacity>
+                  loading={loading}
+                  accessibilityLabel="Registrar referidor"
+                  style={{ flex: 1 }}
+                />
               </View>
             </>
           ) : (
@@ -485,34 +481,6 @@ const styles = StyleSheet.create({
   buttonRow: {
     flexDirection: 'row',
     gap: 12,
-  },
-  skipButton: {
-    flex: 1,
-    padding: 16,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    alignItems: 'center',
-  },
-  skipButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#6B7280',
-  },
-  submitButton: {
-    flex: 1,
-    padding: 16,
-    borderRadius: 8,
-    backgroundColor: colors.primaryDark,
-    alignItems: 'center',
-  },
-  submitButtonDisabled: {
-    opacity: 0.7,
-  },
-  submitButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: 'white',
   },
   successCard: {
     backgroundColor: 'white',
