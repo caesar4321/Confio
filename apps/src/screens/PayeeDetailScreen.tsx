@@ -8,6 +8,7 @@ import { MainStackParamList } from '../types/navigation';
 import { Header } from '../navigation/Header';
 import { useMutation, useQuery } from '@apollo/client';
 import { DELETE_PAYROLL_RECIPIENT } from '../apollo/mutations/payroll';
+import { Button } from '../components/common/Button';
 import { GET_PAYROLL_RECIPIENTS, CREATE_PAYROLL_RUN, GET_PAYROLL_RUNS } from '../apollo/queries';
 
 type PayeeDetailNavigationProp = NativeStackNavigationProp<MainStackParamList, 'PayeeDetail'>;
@@ -355,10 +356,15 @@ export const PayeeDetailScreen = () => {
         </View>
 
         <View style={styles.actions}>
-          <TouchableOpacity style={[styles.actionButton, styles.dangerButton]} onPress={handleRemove}>
-            <Icon name="trash-2" size={18} color="#b91c1c" />
-            <Text style={[styles.actionText, { color: '#b91c1c' }]}>{loading ? 'Removiendo...' : 'Remover destinatario'}</Text>
-          </TouchableOpacity>
+          <Button
+            title="Remover destinatario"
+            variant="secondary"
+            onPress={handleRemove}
+            loading={loading}
+            icon={<Icon name="trash-2" size={18} color="#b91c1c" />}
+            style={{ alignSelf: 'flex-start', backgroundColor: '#fef2f2', borderColor: '#fecdd3' }}
+            textStyle={{ color: '#b91c1c', fontWeight: '700' }}
+          />
         </View>
       </ScrollView>
     </View>
@@ -494,20 +500,6 @@ const styles = StyleSheet.create({
   },
   scheduleText: { color: '#fff', fontSize: 15, fontWeight: '700' },
   actions: { gap: 12 },
-  actionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    alignSelf: 'flex-start',
-    minWidth: 0,
-  },
-  actionText: { fontSize: 15, fontWeight: '700', color: '#111827' },
-  dangerButton: { borderColor: '#fecdd3', backgroundColor: '#fef2f2' },
   historyBox: {
     marginTop: 12,
     padding: 0,
