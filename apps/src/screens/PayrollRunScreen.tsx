@@ -9,6 +9,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import { biometricAuthService } from '../services/biometricAuthService';
 import LoadingOverlay from '../components/LoadingOverlay';
 import { APP_LAYOUT } from '../config/layout';
+import { Button } from '../components/common/Button';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'PayrollRun'>;
 
@@ -212,16 +213,14 @@ export const PayrollRunScreen = () => {
         }}
       />
 
-      <TouchableOpacity
-        style={[styles.submitButton, (creating || isProcessing) && styles.submitButtonDisabled]}
+      <Button
+        title={schedule === 'now' ? 'Crear nómina' : 'Programar nómina'}
         onPress={handleSubmit}
-        disabled={creating || isProcessing}
-      >
-        <Icon name={schedule === 'now' ? 'send' : 'repeat'} size={16} color="#fff" />
-        <Text style={styles.submitText}>
-          {creating || isProcessing ? 'Guardando...' : schedule === 'now' ? 'Crear nómina' : 'Programar nómina'}
-        </Text>
-      </TouchableOpacity>
+        loading={creating || isProcessing}
+        icon={<Icon name={schedule === 'now' ? 'send' : 'repeat'} size={16} color="#fff" />}
+        style={{ marginTop: 20 }}
+        textStyle={{ fontWeight: '700' }}
+      />
 
       <LoadingOverlay visible={isProcessing} message={processingMessage} />
     </ScrollView>
@@ -331,18 +330,6 @@ const styles = StyleSheet.create({
   },
   amountPrefix: { fontSize: 13, fontWeight: '700', color: '#6b7280', marginRight: 6 },
   amountInput: { flex: 1, fontSize: 15, fontWeight: '600', color: '#111827' },
-  submitButton: {
-    marginTop: 20,
-    backgroundColor: '#10b981',
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  submitButtonDisabled: { opacity: 0.6 },
-  submitText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 });
 
 export default PayrollRunScreen;
