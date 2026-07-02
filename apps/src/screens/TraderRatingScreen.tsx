@@ -14,6 +14,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
+import { Button } from '../components/common/Button';
 import { useMutation } from '@apollo/client';
 import { RATE_P2P_TRADE, GET_MY_P2P_TRADES } from '../apollo/queries';
 import { useAccount } from '../contexts/AccountContext';
@@ -193,9 +194,12 @@ export const TraderRatingScreen: React.FC = () => {
               </View>
               <Text style={styles.ratingText}>{getRatingText(overallRating)}</Text>
             </View>
-            <TouchableOpacity style={styles.primaryButton} onPress={handleGoBack}>
-              <Text style={styles.primaryButtonText}>Volver a Intercambios</Text>
-            </TouchableOpacity>
+            <Button
+              title="Volver a Intercambios"
+              onPress={handleGoBack}
+              style={{ backgroundColor: colors.primary, paddingHorizontal: 24 }}
+              textStyle={{ fontSize: 17, fontWeight: 'bold' }}
+            />
           </View>
         </View>
       </SafeAreaView>
@@ -349,15 +353,14 @@ export const TraderRatingScreen: React.FC = () => {
         </View>
       </ScrollView>
       <View style={styles.submitBar}>
-        <TouchableOpacity
-          style={[styles.primaryButton, (overallRating === 0 || submitting) && styles.primaryButtonDisabled]}
+        <Button
+          title="Enviar Calificación"
           onPress={handleSubmitRating}
-          disabled={overallRating === 0 || submitting}
-        >
-          <Text style={styles.primaryButtonText}>
-            {submitting ? 'Enviando...' : 'Enviar Calificación'}
-          </Text>
-        </TouchableOpacity>
+          loading={submitting}
+          disabled={overallRating === 0}
+          style={{ backgroundColor: overallRating === 0 ? '#E5E7EB' : colors.primary, paddingHorizontal: 24 }}
+          textStyle={{ fontSize: 17, fontWeight: 'bold' }}
+        />
       </View>
     </SafeAreaView>
   );
@@ -400,17 +403,6 @@ const styles = StyleSheet.create({
   warningTitle: { fontWeight: '600', color: '#92400E', marginBottom: 2 },
   warningText: { fontSize: 13, color: '#B45309' },
   submitBar: { backgroundColor: '#fff', padding: 16, borderTopWidth: 1, borderTopColor: '#E5E7EB' },
-  primaryButton: {
-    backgroundColor: colors.primary,
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    borderRadius: 12,
-    alignItems: 'center',
-    minHeight: 48,
-    marginBottom: 0,
-  },
-  primaryButtonDisabled: { backgroundColor: '#E5E7EB' },
-  primaryButtonText: { color: '#fff', fontSize: 17, fontWeight: 'bold' },
   centeredContent: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 16 },
   successCard: { backgroundColor: '#fff', borderRadius: 16, padding: 24, alignItems: 'center', width: '100%', maxWidth: 340 },
   successIcon: { width: 64, height: 64, backgroundColor: colors.success, borderRadius: 32, justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
