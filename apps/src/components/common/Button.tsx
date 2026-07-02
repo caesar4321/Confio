@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { colors, spacing, radius, fontSize, fontWeight } from '../../config/theme';
 
-export type ButtonVariant = 'primary' | 'secondary' | 'danger';
+export type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'ghost';
 
 interface ButtonProps {
   title: string;
@@ -107,5 +107,10 @@ const variantStyles: Record<
     container: { backgroundColor: colors.danger },
     text: { color: colors.white },
     spinner: colors.white,
+  },
+  ghost: {
+    container: { backgroundColor: 'transparent' },
+    text: { color: colors.primaryDark },
+    spinner: colors.primaryDark,
   },
 };

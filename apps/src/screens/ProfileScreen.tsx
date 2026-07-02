@@ -18,6 +18,7 @@ import authService from '../services/authService';
 import { AnalyticsService } from '../services/analyticsService';
 import { StatusTierBadge, TierProgress } from '../components/StatusTierBadge';
 import { colors } from '../config/theme';
+import { Button } from '../components/common/Button';
 import { buildReferralShareMessage, normalizeInviteUsername } from '../utils/inviteLinks';
 
 // Utility function to format phone number with country code
@@ -811,9 +812,14 @@ export const ProfileScreen = () => {
         </View>
 
         {/* Sign Out Button */}
-        <TouchableOpacity style={styles.signOutButton} onPress={signOut}>
-          <Text style={styles.signOutText}>Cerrar Sesión</Text>
-        </TouchableOpacity>
+        <Button
+          title="Cerrar Sesión"
+          variant="ghost"
+          onPress={signOut}
+          accessibilityLabel="Cerrar sesión"
+          style={{ marginTop: 16, marginBottom: 32 }}
+          textStyle={{ color: '#EF4444', fontWeight: '500' }}
+        />
       </ScrollView>
       <ReferralInputModal
         visible={showReferralModal}
@@ -1309,16 +1315,5 @@ const styles = StyleSheet.create({
   legalSeparator: {
     color: '#E5E7EB',
     fontSize: 13,
-  },
-  signOutButton: {
-    marginTop: 16,
-    marginBottom: 32,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  signOutText: {
-    color: '#EF4444',
-    fontSize: 16,
-    fontWeight: '500',
   },
 }); 
