@@ -28,7 +28,12 @@ import { useAuth } from '../contexts/AuthContext';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { buildInviteLink } from '../utils/inviteLinks';
 import { AnalyticsService } from '../services/analyticsService';
-import { Financiera, USDC_ALGORAND_TAG, serviceBadges } from '../types/financiera';
+import {
+  Financiera,
+  USDC_ALGORAND_TAG,
+  localCurrencyShort,
+  serviceBadges,
+} from '../types/financiera';
 import {
   GET_FINANCIERAS,
   GET_FINANCIERA_COUNTRIES,
@@ -46,6 +51,9 @@ type LocationFilter = {
   city?: string;
   barrio?: string;
 };
+
+// Payout facet keys map 1:1 to Financiera boolean fields.
+type PayoutKey = 'cashUsd' | 'cashLocal' | 'digitalLocal';
 
 type LevelKey = 'state' | 'city' | 'neighborhood';
 
@@ -387,6 +395,10 @@ export const FinancierasScreen = () => {
   const [location, setLocation] = useState<LocationFilter>({});
   const [locationModal, setLocationModal] = useState(false);
   const [sortBy, setSortBy] = useState<'rating' | 'rate'>('rating');
+  // Facet chips: attention mode is one-of (local vs digital); payout methods
+  // are any-of. Both AND together, matching standard faceted filtering.
+  const [attentionFilter, setAttentionFilter] = useState<'local' | 'digital' | null>(null);
+  const [payoutFilters, setPayoutFilters] = useState<PayoutKey[]>([]);
 
   useEffect(() => {
     if (defaultCountryIso && !selectedCountryIso) {
@@ -466,14 +478,32 @@ export const FinancierasScreen = () => {
     }).catch(() => {});
   };
 
-  // Server handles location + sort; the search box filters the loaded page.
+  // Server handles location + sort; search and facet chips filter the loaded
+  // page client-side (fine at directory scale — one country fits in a page).
   const filtered = useMemo(() => {
+    let list = financieras;
     const q = search.trim().toLowerCase();
-    if (!q) return financieras;
-    return financieras.filter((f) =>
-      `${f.name} ${f.city} ${f.neighborhood} ${f.state}`.toLowerCase().includes(q),
-    );
-  }, [search, financieras]);
+    if (q) {
+      list = list.filter((f) =>
+        `${f.name} ${f.city} ${f.neighborhood} ${f.state}`.toLowerCase().includes(q),
+      );
+    }
+    if (attentionFilter) {
+      list = list.filter((f) =>
+        attentionFilter === 'local' ? f.hasPhysicalLocation : !f.hasPhysicalLocation,
+      );
+    }
+    if (payoutFilters.length > 0) {
+      list = list.filter((f) => payoutFilters.some((key) => f[key]));
+    }
+    return list;
+  }, [search, financieras, attentionFilter, payoutFilters]);
+
+  const filtersActive = attentionFilter != null || payoutFilters.length > 0;
+  const clearFacets = () => {
+    setAttentionFilter(null);
+    setPayoutFilters([]);
+  };
 
   const locationLabel = useMemo(() => {
     if (location.barrio) return location.barrio;
@@ -606,6 +636,59 @@ export const FinancierasScreen = () => {
               </View>
               <Text style={styles.resultCount}>{filtered.length}</Text>
             </View>
+
+            {/* Facet chips: attention mode + payout methods */}
+            <View style={styles.facetRow}>
+              {(
+                [
+                  { key: 'local', label: 'Local físico' },
+                  { key: 'digital', label: 'Atención digital' },
+                ] as const
+              ).map((a) => {
+                const active = attentionFilter === a.key;
+                return (
+                  <TouchableOpacity
+                    key={a.key}
+                    style={[styles.facetChip, active && styles.facetChipActive]}
+                    onPress={() => setAttentionFilter(active ? null : a.key)}
+                  >
+                    <Text style={[styles.facetChipText, active && styles.facetChipTextActive]}>
+                      {a.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+              {(
+                [
+                  { key: 'cashUsd' as PayoutKey, label: 'Efectivo USD' },
+                  {
+                    key: 'cashLocal' as PayoutKey,
+                    label: `Efectivo ${localCurrencyShort(selectedCountryIso)}`,
+                  },
+                  {
+                    key: 'digitalLocal' as PayoutKey,
+                    label: `${localCurrencyShort(selectedCountryIso)} digital`,
+                  },
+                ]
+              ).map((p) => {
+                const active = payoutFilters.includes(p.key);
+                return (
+                  <TouchableOpacity
+                    key={p.key}
+                    style={[styles.facetChip, active && styles.facetChipActive]}
+                    onPress={() =>
+                      setPayoutFilters((prev) =>
+                        active ? prev.filter((k) => k !== p.key) : [...prev, p.key],
+                      )
+                    }
+                  >
+                    <Text style={[styles.facetChipText, active && styles.facetChipTextActive]}>
+                      {p.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
           </View>
         }
         ListFooterComponent={
@@ -641,12 +724,28 @@ export const FinancierasScreen = () => {
             <View style={styles.empty}>
               <ActivityIndicator color={colors.primary} size="large" />
             </View>
+          ) : financieras.length > 0 && filtersActive ? (
+            // The country HAS listings — the facets just filtered them all out.
+            // Recruiting here would be wrong; offer to clear instead.
+            <View style={styles.empty}>
+              <Icon name="filter" size={40} color={colors.text.light} />
+              <Text style={styles.emptyTitle}>Sin resultados con estos filtros</Text>
+              <TouchableOpacity style={styles.emptyInviteBtn} onPress={clearFacets}>
+                <Text style={styles.emptyInviteText}>Limpiar filtros</Text>
+              </TouchableOpacity>
+            </View>
           ) : (
+            // A truly empty country is a recruitment surface, not a dead end.
             <View style={styles.empty}>
               <Icon name="map-pin" size={40} color={colors.text.light} />
-              <Text style={styles.emptyTitle}>Aún no hay financieras aquí</Text>
+              <Text style={styles.emptyTitle}>
+                {selectedCountryIso
+                  ? `Aún no hay financieras en ${countryNameFor(selectedCountryIso)}`
+                  : 'Aún no hay financieras aquí'}
+              </Text>
               <Text style={styles.emptyText}>
-                Prueba otra zona, o invita a una financiera de confianza a registrarse.
+                ¿Conoces una casa de cambio de confianza? Invítala — sus primeros
+                clientes ya están en Confío.
               </Text>
               <TouchableOpacity style={styles.emptyInviteBtn} onPress={inviteFinanciera}>
                 <Icon name="share-2" size={16} color="#fff" />
@@ -770,6 +869,22 @@ const styles = StyleSheet.create({
   sortChipActive: { backgroundColor: colors.primary },
   sortChipText: { fontSize: 12, fontWeight: '600', color: colors.text.secondary },
   sortChipTextActive: { color: '#fff' },
+
+  facetRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
+  facetChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 14,
+    backgroundColor: colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  facetChipActive: {
+    backgroundColor: colors.primaryLight,
+    borderColor: colors.primaryDark,
+  },
+  facetChipText: { fontSize: 12, fontWeight: '600', color: colors.text.secondary },
+  facetChipTextActive: { color: colors.primaryDark },
   resultCount: { fontSize: 12, color: colors.text.secondary },
 
   // Card (compact comparison row)
