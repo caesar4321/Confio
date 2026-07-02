@@ -16,6 +16,8 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList, RootStackParamList } from '../types/navigation';
 import { Header } from '../navigation/Header';
+import { colors } from '../config/theme';
+import { Button } from '../components/common/Button';
 import { useAccount } from '../contexts/AccountContext';
 import { useMutation, useQuery } from '@apollo/client';
 import { CREATE_BUSINESS, GET_USER_ACCOUNTS } from '../apollo/queries';
@@ -248,21 +250,13 @@ export const CreateBusinessScreen = () => {
       </View>
 
       <View style={styles.stepFooter}>
-        <TouchableOpacity
-          style={[
-            styles.continueButton,
-            !formData.businessType && styles.disabledButton
-          ]}
+        <Button
+          title="Continuar"
           onPress={handleNext}
           disabled={!formData.businessType}
-        >
-          <Text style={[
-            styles.continueButtonText,
-            !formData.businessType && styles.disabledButtonText
-          ]}>
-            Continuar
-          </Text>
-        </TouchableOpacity>
+          style={{ backgroundColor: !formData.businessType ? '#f3f4f6' : colors.primaryDark, borderRadius: 16 }}
+          textStyle={{ fontSize: 18, color: !formData.businessType ? '#9ca3af' : '#fff' }}
+        />
       </View>
     </View>
   );
@@ -349,27 +343,15 @@ export const CreateBusinessScreen = () => {
           >
             <Text style={styles.backButtonText}>Atrás</Text>
           </TouchableOpacity>
-                      <TouchableOpacity
-              style={[
-                styles.createButton,
-                (!formData.businessName || isCreating) && styles.disabledButton
-              ]}
-              onPress={handleCreateBusiness}
-              disabled={!formData.businessName || isCreating}
-            >
-              {isCreating ? (
-                <View style={styles.loadingContainer}>
-                  <ActivityIndicator size="small" color="#fff" style={styles.loadingSpinner} />
-                  <Text style={[styles.createButtonText, styles.disabledButtonText]}>
-                    Creando...
-                  </Text>
-                </View>
-              ) : (
-                <Text style={styles.createButtonText}>
-                  Crear Negocio
-                </Text>
-              )}
-            </TouchableOpacity>
+          <Button
+            title="Crear Negocio"
+            onPress={handleCreateBusiness}
+            loading={isCreating}
+            disabled={!formData.businessName}
+            accessibilityLabel="Crear negocio"
+            style={{ flex: 1, backgroundColor: !formData.businessName ? '#f3f4f6' : colors.primaryDark, borderRadius: 16 }}
+            textStyle={{ fontSize: 18, color: !formData.businessName ? '#9ca3af' : '#fff' }}
+          />
         </View>
       </View>
     </View>
@@ -527,23 +509,6 @@ const styles = StyleSheet.create({
     borderTopColor: '#e5e7eb',
     backgroundColor: '#fff',
   },
-  continueButton: {
-    backgroundColor: '#10b981',
-    borderRadius: 16,
-    paddingVertical: 18,
-    alignItems: 'center',
-  },
-  disabledButton: {
-    backgroundColor: '#f3f4f6',
-  },
-  continueButtonText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  disabledButtonText: {
-    color: '#9ca3af',
-  },
   formContainer: {
     paddingHorizontal: 20,
     paddingBottom: 20,
@@ -611,24 +576,4 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#374151',
   },
-  createButton: {
-    flex: 1,
-    backgroundColor: '#10b981',
-    borderRadius: 16,
-    paddingVertical: 18,
-    alignItems: 'center',
-  },
-  createButtonText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  loadingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  loadingSpinner: {
-    marginRight: 8,
-  },
-}); 
+});
