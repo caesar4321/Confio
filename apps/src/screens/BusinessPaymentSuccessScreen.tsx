@@ -18,6 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { colors } from '../config/theme';
+import { Button } from '../components/common/Button';
 import { useMutation } from '@apollo/client';
 import { GET_INVOICE } from '../apollo/queries';
 import { useAuth } from '../contexts/AuthContext';
@@ -369,33 +370,32 @@ export const BusinessPaymentSuccessScreen = () => {
             <Text style={styles.cardTitle}>Acciones Rápidas</Text>
 
             <View style={styles.actionsContainer}>
-              <TouchableOpacity
-                style={[styles.actionButton, { backgroundColor: '#F3F4F6' }]}
+              <Button
+                title="Compartir comprobante"
+                variant="secondary"
                 onPress={handleShareReceipt}
-              >
-                <Icon name="share-2" size={16} color="#374151" />
-                <Text style={[styles.actionButtonText, { color: '#374151' }]}>Compartir comprobante</Text>
-              </TouchableOpacity>
+                icon={<Icon name="share-2" size={16} color="#374151" />}
+                style={{ backgroundColor: '#F3F4F6', borderWidth: 0 }}
+              />
 
-              <TouchableOpacity
-                style={[styles.actionButton, { backgroundColor: '#F3F4F6' }]}
+              <Button
+                title="Ver detalles técnicos"
+                variant="secondary"
                 onPress={() => setShowTechnical(true)}
-              >
-                <Icon name="external-link" size={16} color="#374151" />
-                <Text style={[styles.actionButtonText, { color: '#374151' }]}>Ver detalles técnicos</Text>
-              </TouchableOpacity>
+                icon={<Icon name="external-link" size={16} color="#374151" />}
+                style={{ backgroundColor: '#F3F4F6', borderWidth: 0 }}
+              />
             </View>
           </View>
 
           {/* Continue Working */}
           <View style={styles.continueContainer}>
-            <TouchableOpacity
-              style={[styles.continueButton, { backgroundColor: isCUSD ? colors.primary : colors.secondary }]}
+            <Button
+              title="Nuevo Cobro"
               onPress={handleNewCharge}
-            >
-              <Icon name="plus" size={16} color="white" />
-              <Text style={styles.continueButtonText}>Nuevo Cobro</Text>
-            </TouchableOpacity>
+              icon={<Icon name="plus" size={16} color="white" />}
+              style={{ flex: 1, backgroundColor: isCUSD ? colors.primary : colors.secondary }}
+            />
 
             <TouchableOpacity style={styles.homeButton} onPress={handleGoHome}>
               <Icon name="home" size={16} color="#6B7280" />
@@ -736,19 +736,6 @@ const styles = StyleSheet.create({
   actionsContainer: {
     gap: 12,
   },
-  actionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    borderRadius: 12,
-    gap: 8,
-  },
-  actionButtonText: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: 'white',
-  },
   secondaryActionButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -767,20 +754,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     marginBottom: 24,
-  },
-  continueButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    borderRadius: 12,
-    gap: 8,
-  },
-  continueButtonText: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: 'white',
   },
   homeButton: {
     flex: 1,
