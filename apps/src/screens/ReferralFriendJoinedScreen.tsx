@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-nati
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, RouteProp, useRoute } from '@react-navigation/native';
 import { MainStackParamList } from '../types/navigation';
+import { Button } from '../components/common/Button';
 
 type ReferralFriendJoinedRouteProp = RouteProp<MainStackParamList, 'ReferralFriendJoined'>;
 
@@ -49,21 +50,23 @@ export const ReferralFriendJoinedScreen: React.FC = () => {
           </View>
 
           <View style={styles.actions}>
-            <TouchableOpacity
-              style={styles.primaryButton}
+            <Button
+              title="Guiar a mi referido paso a paso"
               onPress={() =>
                 navigation.navigate('ReferralActionPrompt', {
                   event: suggestedEvent,
                 })
               }
-            >
-              <Icon name="zap" size={18} color="#fff" />
-              <Text style={styles.primaryButtonText}>Guiar a mi referido paso a paso</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.secondaryButton} onPress={() => navigation.navigate('Achievements')}>
-              <Text style={styles.secondaryButtonText}>Ver requisitos del bono</Text>
-              <Icon name="chevron-right" size={18} color="#10B981" />
-            </TouchableOpacity>
+              icon={<Icon name="zap" size={18} color="#fff" />}
+            />
+            <Button
+              title="Ver requisitos del bono"
+              variant="secondary"
+              onPress={() => navigation.navigate('Achievements')}
+              icon={<Icon name="chevron-right" size={18} color="#10B981" />}
+              style={{ backgroundColor: '#ECFDF5', borderWidth: 0 }}
+              textStyle={{ color: '#10B981' }}
+            />
           </View>
         </View>
       </ScrollView>
@@ -143,33 +146,5 @@ const styles = StyleSheet.create({
   actions: {
     marginTop: 24,
     gap: 12,
-  },
-  primaryButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 14,
-    borderRadius: 14,
-    backgroundColor: '#10B981',
-  },
-  primaryButtonText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 15,
-  },
-  secondaryButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 12,
-    borderRadius: 12,
-    backgroundColor: '#ECFDF5',
-  },
-  secondaryButtonText: {
-    color: '#047857',
-    fontWeight: '600',
-    fontSize: 14,
   },
 });
