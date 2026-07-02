@@ -18,6 +18,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useMutation, useQuery } from '@apollo/client';
 import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
+import { Button } from '../components/common/Button';
 import { MainStackParamList } from '../types/navigation';
 import { CREATE_P2P_TRADE, GET_USER_BANK_ACCOUNTS, GET_MY_P2P_TRADES } from '../apollo/queries';
 import { useCurrency } from '../hooks/useCurrency';
@@ -342,18 +343,14 @@ export const TradeConfirmScreen: React.FC = () => {
 
       {/* Action Button */}
       <View style={styles.bottomButtonContainer}>
-        <TouchableOpacity
-          style={[styles.confirmButton, createTradeLoading && styles.confirmButtonDisabled]}
+        <Button
+          title="Confirmar y Comenzar"
           onPress={handleConfirmTrade}
-          disabled={createTradeLoading}
-          accessibilityRole="button"
+          loading={createTradeLoading}
           accessibilityLabel="Confirmar y comenzar intercambio"
-          accessibilityState={{ disabled: createTradeLoading }}
-        >
-          <Text style={styles.confirmButtonText}>
-            {createTradeLoading ? 'Creando intercambio...' : 'Confirmar y Comenzar'}
-          </Text>
-        </TouchableOpacity>
+          style={{ backgroundColor: colors.primary }}
+          textStyle={{ fontSize: 18 }}
+        />
       </View>
 
       {/* Payment Method Modal */}
@@ -673,20 +670,6 @@ const styles = StyleSheet.create({
     padding: 16,
     borderTopWidth: 1,
     borderTopColor: '#E5E7EB',
-  },
-  confirmButton: {
-    backgroundColor: colors.primary,
-    paddingVertical: 12,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  confirmButtonDisabled: {
-    backgroundColor: '#9CA3AF',
-  },
-  confirmButtonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
   },
   modalOverlay: {
     flex: 1,
