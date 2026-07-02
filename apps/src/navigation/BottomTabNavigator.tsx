@@ -134,6 +134,7 @@ export const BottomTabNavigator = () => {
             styles.headerIconButton,
             !Boolean(notificationPrefsData?.notificationPreferences?.pushAnnouncements) && styles.headerIconButtonActive,
           ]}
+          hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
         >
           <Icon
             name={!Boolean(notificationPrefsData?.notificationPreferences?.pushAnnouncements) ? 'volume-x' : 'bell-off'}

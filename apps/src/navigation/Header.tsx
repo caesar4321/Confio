@@ -64,9 +64,10 @@ export const Header: React.FC<HeaderProps> = ({
       >
       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
         {showBackButton && !isHomeScreen && (
-          <TouchableOpacity 
+          <TouchableOpacity
             onPress={() => { if (onBackPress) { onBackPress(); } else { navigation.goBack(); } }}
             style={{ marginRight: 16 }}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
             <Icon name="arrow-left" size={24} color={textColor} />
           </TouchableOpacity>
@@ -90,8 +91,9 @@ export const Header: React.FC<HeaderProps> = ({
               justifyContent: 'center',
               alignItems: 'center',
               position: 'relative',
-            }} 
+            }}
             onPress={onNotificationPress}
+            hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
           >
             <Icon name="bell" size={20} color="#fff" />
             {unreadNotifications > 0 && (
@@ -129,6 +131,7 @@ export const Header: React.FC<HeaderProps> = ({
                 position: 'relative',
               }}
               onPress={onMessagePress}
+              hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
             >
               <Icon name="inbox" size={20} color="#fff" />
               {unreadMessages > 0 && (
@@ -170,6 +173,7 @@ export const Header: React.FC<HeaderProps> = ({
               }
             }}
             activeOpacity={0.7}
+            hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
           >
             <Text style={{
               fontSize: 16,

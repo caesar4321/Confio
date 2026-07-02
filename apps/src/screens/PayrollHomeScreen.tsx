@@ -96,7 +96,7 @@ export const PayrollHomeScreen = () => {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
             <Icon name="chevron-left" size={24} color={colors.textFlat} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Nómina</Text>
@@ -115,7 +115,7 @@ export const PayrollHomeScreen = () => {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
             <Icon name="chevron-left" size={24} color={colors.textFlat} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Nómina</Text>
@@ -170,7 +170,7 @@ export const PayrollHomeScreen = () => {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
           <Icon name="chevron-left" size={24} color={colors.textFlat} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Nómina</Text>
