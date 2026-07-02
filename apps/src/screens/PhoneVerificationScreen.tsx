@@ -12,7 +12,6 @@ import {
   Modal,
   FlatList,
   ScrollView,
-  Button,
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
