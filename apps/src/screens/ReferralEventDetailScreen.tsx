@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-nati
 import Icon from 'react-native-vector-icons/Feather';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { MainStackParamList } from '../types/navigation';
+import { Button } from '../components/common/Button';
 
 type ReferralEventDetailRouteProp = RouteProp<MainStackParamList, 'ReferralEventDetail'>;
 
@@ -109,21 +110,23 @@ export const ReferralEventDetailScreen: React.FC = () => {
             </View>
           </View>
           <View style={styles.actions}>
-            <TouchableOpacity style={styles.primaryButton} onPress={() => navigation.navigate('Achievements')}>
-              <Icon name="share-2" size={18} color="#fff" />
-              <Text style={styles.primaryButtonText}>Compartir mi invitación</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.secondaryButton}
+            <Button
+              title="Compartir mi invitación"
+              onPress={() => navigation.navigate('Achievements')}
+              icon={<Icon name="share-2" size={18} color="#fff" />}
+            />
+            <Button
+              title="Ver pasos sugeridos"
+              variant="secondary"
               onPress={() =>
                 navigation.navigate('ReferralActionPrompt', {
                   event: route.params?.event,
                 })
               }
-            >
-              <Text style={styles.secondaryButtonText}>Ver pasos sugeridos</Text>
-              <Icon name="chevron-right" size={18} color="#10B981" />
-            </TouchableOpacity>
+              icon={<Icon name="chevron-right" size={18} color="#10B981" />}
+              style={{ backgroundColor: '#ECFDF5', borderWidth: 0 }}
+              textStyle={{ color: '#047857' }}
+            />
           </View>
         </View>
       </ScrollView>
@@ -209,34 +212,6 @@ const styles = StyleSheet.create({
   actions: {
     marginTop: 12,
     gap: 12,
-  },
-  primaryButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 14,
-    borderRadius: 14,
-    backgroundColor: '#10B981',
-  },
-  primaryButtonText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 15,
-  },
-  secondaryButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 12,
-    borderRadius: 12,
-    backgroundColor: '#ECFDF5',
-  },
-  secondaryButtonText: {
-    color: '#047857',
-    fontWeight: '600',
-    fontSize: 14,
   },
 });
 
