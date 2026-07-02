@@ -18,6 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { colors } from '../config/theme';
+import { Button } from '../components/common/Button';
 import { formatLocalDate, formatLocalTime } from '../utils/dateUtils';
 import { useAuth } from '../contexts/AuthContext';
 import { getSupportCopy } from '../utils/supportMessaging';
@@ -329,25 +330,21 @@ export const PaymentSuccessScreen = () => {
             <Text style={styles.sectionTitle}>Acciones Rápidas</Text>
 
             <View style={styles.actionsContent}>
-              <TouchableOpacity
-                style={[styles.actionButton, { backgroundColor: '#F3F4F6' }]}
+              <Button
+                title="Compartir comprobante"
+                variant="secondary"
                 onPress={handleShareReceipt}
-              >
-                <Icon name="share" size={16} color="#374151" />
-                <Text style={[styles.actionButtonText, { color: '#374151' }]}>
-                  Compartir comprobante
-                </Text>
-              </TouchableOpacity>
+                icon={<Icon name="share" size={16} color="#374151" />}
+                style={{ backgroundColor: '#F3F4F6', borderWidth: 0 }}
+              />
 
-              <TouchableOpacity
-                style={[styles.actionButton, { backgroundColor: '#F3F4F6' }]}
+              <Button
+                title="Ver detalles técnicos"
+                variant="secondary"
                 onPress={handleViewTechnicalDetails}
-              >
-                <Icon name="external-link" size={16} color="#374151" />
-                <Text style={[styles.actionButtonText, { color: '#374151' }]}>
-                  Ver detalles técnicos
-                </Text>
-              </TouchableOpacity>
+                icon={<Icon name="external-link" size={16} color="#374151" />}
+                style={{ backgroundColor: '#F3F4F6', borderWidth: 0 }}
+              />
             </View>
           </View>
 
@@ -821,19 +818,6 @@ const styles = StyleSheet.create({
   },
   actionsContent: {
     gap: 12,
-  },
-  actionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 12,
-    padding: 16,
-  },
-  actionButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#ffffff',
-    marginLeft: 8,
   },
   navigationContainer: {
     flexDirection: 'row',
