@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   TextInput,
   FlatList,
   Modal,
+  Alert,
   Linking,
   StatusBar,
   Share,
@@ -21,7 +22,7 @@ import { useQuery } from '@apollo/client';
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
 import { SHARE_LINKS } from '../config/shareLinks';
-import { getCountryByIso } from '../utils/countries';
+import { countries, Country, getCountryByIso } from '../utils/countries';
 import { useCountry } from '../contexts/CountryContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useNumberFormat } from '../utils/numberFormatting';
@@ -30,6 +31,7 @@ import { AnalyticsService } from '../services/analyticsService';
 import { Financiera, USDC_ALGORAND_TAG, serviceBadges } from '../types/financiera';
 import {
   GET_FINANCIERAS,
+  GET_FINANCIERA_COUNTRIES,
   GET_FINANCIERA_LOCATION_OPTIONS,
   GET_MY_FINANCIERAS,
 } from '../apollo/queries';
@@ -39,8 +41,6 @@ type NavProp = NativeStackNavigationProp<MainStackParamList>;
 const WHATSAPP_GREEN = '#25D366';
 const STAR_GOLD = '#F59E0B';
 
-// Location is always scoped to the user's country server-side; the filter only
-// cascades through the levels below it.
 type LocationFilter = {
   state?: string;
   city?: string;
@@ -68,6 +68,99 @@ const Stars = ({ rating, size = 14 }: { rating: number; size?: number }) => (
 const flagFor = (iso: string) => getCountryByIso(iso)?.[3] || '';
 const countryNameFor = (iso: string) => getCountryByIso(iso)?.[0] || iso;
 
+// The headline figure is always the USD value of what reviewers reported, so
+// the tag under it must describe the number, not the payout method list.
+const rateTag = (f: Financiera) => (f.cashUsd ? 'en efectivo' : 'equivalente en USD');
+
+const CountryPickerModal = ({
+  visible,
+  valueIso,
+  listingCounts,
+  onClose,
+  onSelect,
+}: {
+  visible: boolean;
+  valueIso: string;
+  listingCounts: Record<string, number>;
+  onClose: () => void;
+  onSelect: (c: Country) => void;
+}) => {
+  const [q, setQ] = useState('');
+  const data = useMemo(() => {
+    const query = q.trim().toLowerCase();
+    const base = query
+      ? countries.filter((c) => String(c[0]).toLowerCase().includes(query))
+      : countries;
+    // Countries that already have listings float to the top so users land on
+    // real content instead of wandering into empty countries. Stable sort
+    // keeps the alphabetical order within each group.
+    return [...base].sort(
+      (a, b) => (listingCounts[String(b[2])] || 0) - (listingCounts[String(a[2])] || 0),
+    );
+  }, [q, listingCounts]);
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.modalBackdrop}>
+        <View style={styles.modalSheet}>
+          <View style={styles.modalHandle} />
+          <View style={styles.modalHeaderRow}>
+            <Text style={styles.modalTitle}>País</Text>
+            <TouchableOpacity onPress={onClose} style={styles.modalIconBtn}>
+              <Icon name="x" size={22} color={colors.text.primary} />
+            </TouchableOpacity>
+          </View>
+          <View style={styles.modalSearchBox}>
+            <Icon name="search" size={18} color={colors.text.light} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Buscar país"
+              placeholderTextColor={colors.text.light}
+              value={q}
+              onChangeText={setQ}
+            />
+          </View>
+          <FlatList
+            data={data}
+            keyExtractor={(item) => String(item[2])}
+            style={{ maxHeight: 420 }}
+            initialNumToRender={20}
+            maxToRenderPerBatch={15}
+            windowSize={21}
+            keyboardShouldPersistTaps="handled"
+            renderItem={({ item }) => {
+              const selected = String(item[2]) === valueIso;
+              return (
+                <TouchableOpacity
+                  style={styles.optionRow}
+                  onPress={() => {
+                    onSelect(item);
+                    setQ('');
+                  }}
+                >
+                  <Text style={[styles.optionLabel, selected && styles.optionLabelSelected]}>
+                    {item[3]}  {item[0]}
+                  </Text>
+                  {selected ? (
+                    <Icon name="check" size={18} color={colors.primaryDark} />
+                  ) : listingCounts[String(item[2])] ? (
+                    <Text style={styles.optionCount}>
+                      {listingCounts[String(item[2])]}{' '}
+                      {listingCounts[String(item[2])] === 1 ? 'financiera' : 'financieras'}
+                    </Text>
+                  ) : (
+                    <Text style={styles.optionCode}>{item[1]}</Text>
+                  )}
+                </TouchableOpacity>
+              );
+            }}
+          />
+        </View>
+      </View>
+    </Modal>
+  );
+};
+
 // ---- Location filter modal --------------------------------------------------
 
 const LocationFilterModal = ({
@@ -92,7 +185,7 @@ const LocationFilterModal = ({
   const level: LevelKey = !draft.state ? 'state' : !draft.city ? 'city' : 'neighborhood';
 
   const { data, loading } = useQuery(GET_FINANCIERA_LOCATION_OPTIONS, {
-    variables: { level, state: draft.state, city: draft.city },
+    variables: { level, state: draft.state, city: draft.city, countryCode: countryIso },
     skip: !visible,
     fetchPolicy: 'cache-and-network',
   });
@@ -256,7 +349,7 @@ const FinancieraCard = ({
               : '—'}
           </Text>
           <Text style={styles.rateSub}>por 100 USDC</Text>
-          <Text style={styles.rateCashTag}>en efectivo</Text>
+          <Text style={styles.rateCashTag}>{rateTag(financiera)}</Text>
         </View>
       </View>
 
@@ -286,19 +379,27 @@ export const FinancierasScreen = () => {
   const navigation = useNavigation<NavProp>();
   const { userCountry } = useCountry();
   const { userProfile } = useAuth();
-  // Display only — the API scopes the directory to the JWT user's country.
-  const countryIso = userCountry ? String(userCountry[2]) : '';
+  const defaultCountryIso = userCountry ? String(userCountry[2]) : '';
 
   const [search, setSearch] = useState('');
+  const [selectedCountryIso, setSelectedCountryIso] = useState(defaultCountryIso);
+  const [countryModal, setCountryModal] = useState(false);
   const [location, setLocation] = useState<LocationFilter>({});
   const [locationModal, setLocationModal] = useState(false);
   const [sortBy, setSortBy] = useState<'rating' | 'rate'>('rating');
+
+  useEffect(() => {
+    if (defaultCountryIso && !selectedCountryIso) {
+      setSelectedCountryIso(defaultCountryIso);
+    }
+  }, [defaultCountryIso, selectedCountryIso]);
 
   const { data, loading, refetch, networkStatus } = useQuery(GET_FINANCIERAS, {
     variables: {
       state: location.state,
       city: location.city,
       neighborhood: location.barrio,
+      countryCode: selectedCountryIso || undefined,
       sortBy,
       limit: 100,
       offset: 0,
@@ -313,6 +414,21 @@ export const FinancierasScreen = () => {
   const { data: myData } = useQuery(GET_MY_FINANCIERAS, { fetchPolicy: 'cache-and-network' });
   const ownedCount = (myData?.myFinancieras || []).length;
 
+  // Which countries actually have listings — the picker pins them first so
+  // users don't wander into empty countries.
+  const { data: countryData } = useQuery(GET_FINANCIERA_COUNTRIES, {
+    fetchPolicy: 'cache-and-network',
+  });
+  const listingCounts: Record<string, number> = useMemo(() => {
+    const map: Record<string, number> = {};
+    (countryData?.financieraCountries || []).forEach(
+      (c: { countryCode: string; count: number }) => {
+        map[c.countryCode] = c.count;
+      },
+    );
+    return map;
+  }, [countryData]);
+
   const openWhatsApp = (f: Financiera) => {
     void AnalyticsService.logFunnelEvent(
       'financiera_whatsapp_tapped',
@@ -323,6 +439,19 @@ export const FinancierasScreen = () => {
       `Hola ${f.name}, te encontré en el directorio de Confío y quiero más información.`,
     );
     Linking.openURL(`https://wa.me/${f.whatsapp}?text=${text}`).catch(() => {});
+  };
+
+  // Friendly heads-up (not a scare screen): sets the "Confío only lists" frame
+  // at the exact moment of contact, when it actually matters.
+  const confirmWhatsApp = (f: Financiera) => {
+    Alert.alert(
+      `Contactar a ${f.name}`,
+      'Confío es un directorio informativo: el acuerdo es directamente entre tú y la financiera.\n\nConsejo: la primera vez, empieza con un monto pequeño.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Abrir WhatsApp', onPress: () => openWhatsApp(f) },
+      ],
+    );
   };
 
   // Growth loop: let users invite a financiera they already trust. The
@@ -350,8 +479,8 @@ export const FinancierasScreen = () => {
     if (location.barrio) return location.barrio;
     if (location.city) return location.city;
     if (location.state) return location.state;
-    return countryIso ? `Todo ${countryNameFor(countryIso)}` : 'Todas las zonas';
-  }, [location, countryIso]);
+    return selectedCountryIso ? `Todo ${countryNameFor(selectedCountryIso)}` : 'Todas las zonas';
+  }, [location, selectedCountryIso]);
 
   return (
     <View style={styles.container}>
@@ -371,9 +500,9 @@ export const FinancierasScreen = () => {
             </TouchableOpacity>
           </View>
           <Text style={styles.headerSubtitle}>
-            {countryIso ? `${flagFor(countryIso)} ` : ''}
-            Directorio de financieras locales verificadas
-            {countryIso ? ` de ${countryNameFor(countryIso)}` : ''}
+            {selectedCountryIso ? `${flagFor(selectedCountryIso)} ` : ''}
+            Financieras verificadas
+            {selectedCountryIso ? ` de ${countryNameFor(selectedCountryIso)}` : ''}
           </Text>
         </View>
       </SafeAreaView>
@@ -435,14 +564,22 @@ export const FinancierasScreen = () => {
               )}
             </View>
 
-            {/* Location pill */}
-            <TouchableOpacity style={styles.locationPill} onPress={() => setLocationModal(true)}>
-              <Icon name="map-pin" size={16} color={colors.primaryDark} />
-              <Text style={styles.locationPillText} numberOfLines={1}>
-                {locationLabel}
-              </Text>
-              <Icon name="chevron-down" size={16} color={colors.text.secondary} />
-            </TouchableOpacity>
+            <View style={styles.filterRow}>
+              <TouchableOpacity style={[styles.locationPill, styles.countryPill]} onPress={() => setCountryModal(true)}>
+                <Text style={styles.countryFlag}>{selectedCountryIso ? flagFor(selectedCountryIso) : ''}</Text>
+                <Text style={styles.locationPillText} numberOfLines={1}>
+                  {selectedCountryIso ? countryNameFor(selectedCountryIso) : 'País'}
+                </Text>
+                <Icon name="chevron-down" size={16} color={colors.text.secondary} />
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.locationPill, { flex: 1 }]} onPress={() => setLocationModal(true)}>
+                <Icon name="map-pin" size={16} color={colors.primaryDark} />
+                <Text style={styles.locationPillText} numberOfLines={1}>
+                  {locationLabel}
+                </Text>
+                <Icon name="chevron-down" size={16} color={colors.text.secondary} />
+              </TouchableOpacity>
+            </View>
 
             {/* Sort + result count */}
             <View style={styles.sortRow}>
@@ -496,7 +633,7 @@ export const FinancierasScreen = () => {
           <FinancieraCard
             financiera={item}
             onPress={() => navigation.navigate('FinancieraDetail', { financieraId: item.id })}
-            onWhatsApp={() => openWhatsApp(item)}
+            onWhatsApp={() => confirmWhatsApp(item)}
           />
         )}
         ListEmptyComponent={
@@ -526,11 +663,23 @@ export const FinancierasScreen = () => {
       <LocationFilterModal
         visible={locationModal}
         value={location}
-        countryIso={countryIso}
+        countryIso={selectedCountryIso}
         onClose={() => setLocationModal(false)}
         onApply={(next) => {
           setLocation(next);
           setLocationModal(false);
+        }}
+      />
+      <CountryPickerModal
+        visible={countryModal}
+        valueIso={selectedCountryIso}
+        listingCounts={listingCounts}
+        onClose={() => setCountryModal(false)}
+        onSelect={(country) => {
+          const nextIso = String(country[2]);
+          setSelectedCountryIso(nextIso);
+          setLocation({});
+          setCountryModal(false);
         }}
       />
     </View>
@@ -587,6 +736,7 @@ const styles = StyleSheet.create({
   searchInput: { flex: 1, fontSize: 15, color: colors.text.primary, paddingVertical: 0 },
 
   // Location pill
+  filterRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
   locationPill: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -596,9 +746,10 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     paddingHorizontal: 12,
     height: 44,
-    marginTop: 10,
     gap: 8,
   },
+  countryPill: { flexBasis: 136, flexGrow: 0, flexShrink: 0 },
+  countryFlag: { fontSize: 16 },
   locationPillText: { flex: 1, fontSize: 14, fontWeight: '600', color: colors.text.primary },
 
   // Sort + result count
@@ -741,6 +892,16 @@ const styles = StyleSheet.create({
   modalHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   modalIconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   modalTitle: { fontSize: 16, fontWeight: '700', color: colors.text.primary },
+  modalSearchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    height: 44,
+    gap: 8,
+    marginBottom: 8,
+  },
   modalLoading: { paddingVertical: 40, alignItems: 'center' },
   modalEmptyText: {
     paddingVertical: 32,
@@ -760,6 +921,8 @@ const styles = StyleSheet.create({
   },
   optionLabel: { fontSize: 15, color: colors.text.primary },
   optionLabelSelected: { fontWeight: '700', color: colors.primaryDark },
+  optionCode: { fontSize: 14, color: colors.text.light },
+  optionCount: { fontSize: 13, fontWeight: '700', color: colors.primaryDark },
   modalActions: { flexDirection: 'row', gap: 12, marginTop: 16 },
   modalClearBtn: {
     flex: 1,

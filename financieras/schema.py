@@ -4,8 +4,8 @@ GraphQL schema for the Financieras directory.
 Privacy: reviews are anonymous. FinancieraReviewType must never expose the
 reviewer relation — it exists only for moderation and rate-limiting.
 
-Country scoping: the directory always serves the requesting user's country
-(from their JWT-authenticated profile), never a client-supplied country.
+Country scoping: the directory defaults to the requesting user's phone country,
+but clients may request another supported country for browsing.
 """
 
 import logging
@@ -15,7 +15,7 @@ from decimal import Decimal, InvalidOperation
 
 import graphene
 import pycountry
-from django.db.models import Case, F, FloatField, Q, When
+from django.db.models import Case, Count, F, FloatField, Q, When
 from django.utils import timezone
 from graphene_django import DjangoObjectType
 
@@ -40,15 +40,27 @@ REVIEWABLE_TX_MAX_AGE = timedelta(days=90)
 
 
 class FinancieraReviewType(DjangoObjectType):
+    direction = graphene.String(description="'sent' if user sold USDC/cUSD, 'received' if user bought")
+
     class Meta:
         model = FinancieraReview
         # Deliberately excludes 'reviewer' to keep reviews anonymous.
         fields = ('id', 'rating', 'sent_token', 'sent_usdc', 'received_usd', 'comment', 'created_at')
 
+    def resolve_direction(self, info):
+        if self.usdc_withdrawal_id:
+            return 'sent'
+        if self.send_transaction_id and self.send_transaction:
+            return 'sent' if self.send_transaction.sender_user_id == self.reviewer_id else 'received'
+        return 'sent'
+
 
 class FinancieraType(DjangoObjectType):
     avg_rating = graphene.Float()
     review_count = graphene.Int()
+    rate_review_count = graphene.Int(
+        description='Sell-side reviews feeding the public rate; buy-side reviews count only for stars'
+    )
     avg_received_per_100 = graphene.Float(
         description=(
             'Median USD received per 100 USDC sent, derived from reviews; '
@@ -62,8 +74,10 @@ class FinancieraType(DjangoObjectType):
         model = Financiera
         fields = (
             'id', 'name', 'country_code', 'state', 'city', 'neighborhood',
-            'whatsapp', 'supports_usdc_algorand', 'helps_with_confio',
-            'home_service', 'open_weekends', 'is_active', 'created_at',
+            'whatsapp', 'supports_usdc_algorand', 'has_physical_location',
+            'cash_usd', 'cash_local', 'digital_local',
+            'helps_with_confio', 'home_service', 'open_weekends',
+            'is_active', 'created_at',
         )
 
     def resolve_avg_rating(self, info):
@@ -71,6 +85,9 @@ class FinancieraType(DjangoObjectType):
 
     def resolve_review_count(self, info):
         return self.review_count
+
+    def resolve_rate_review_count(self, info):
+        return self.rate_review_count
 
     def resolve_avg_received_per_100(self, info):
         return self.avg_received_per_100
@@ -109,6 +126,10 @@ def _collapse_ws(value):
     return ' '.join((value or '').split())
 
 
+def _has_payout_method(cash_usd, cash_local, digital_local):
+    return bool(cash_usd or cash_local or digital_local)
+
+
 def _adopt_existing_casing(value, country_code, field, **scope):
     """Converge free-text locations on the first writer's spelling.
 
@@ -134,14 +155,22 @@ class CountrySubdivisionType(graphene.ObjectType):
     name = graphene.String()
 
 
+class FinancieraCountryType(graphene.ObjectType):
+    """A country that currently has visible listings, for the country picker."""
+
+    country_code = graphene.String()
+    count = graphene.Int()
+
+
 class ReviewableUsdcSendType(graphene.ObjectType):
-    """A real dollar-stable outflow the user can attach a review to."""
+    """A real dollar-stable transfer the user can attach a review to."""
 
     id = graphene.ID()
-    kind = graphene.String(description="'send' (Confío send) or 'withdrawal' (external)")
+    kind = graphene.String(description="'send' (Confío transfer) or 'withdrawal' (external)")
+    direction = graphene.String(description="'sent' or 'received'")
     token = graphene.String(description="'USDC' or 'CUSD' (withdrawals are always USDC)")
     amount_usdc = graphene.Decimal()
-    destination = graphene.String(description='Recipient address, for recognition')
+    destination = graphene.String(description='Counterparty/address, for recognition')
     created_at = graphene.DateTime()
 
 
@@ -151,11 +180,14 @@ class Query(graphene.ObjectType):
         state=graphene.String(),
         city=graphene.String(),
         neighborhood=graphene.String(),
+        country_code=graphene.String(
+            description="Defaults to the user's phone country; override to browse another country"
+        ),
         search=graphene.String(),
         sort_by=graphene.String(default_value='rating', description="'rating' or 'rate'"),
         limit=graphene.Int(default_value=50),
         offset=graphene.Int(default_value=0),
-        description="Directory of financieras in the requesting user's country",
+        description="Directory of financieras in a supported country",
     )
     financiera = graphene.Field(FinancieraType, id=graphene.ID(required=True))
     my_financieras = graphene.List(FinancieraType)
@@ -178,18 +210,41 @@ class Query(graphene.ObjectType):
         ReviewableUsdcSendType,
         description='Recent confirmed USDC outflows not yet backing a review',
     )
+    financiera_countries = graphene.List(
+        FinancieraCountryType,
+        description='Countries with visible financieras and their listing counts, '
+                    'so the country picker can pin non-empty countries first',
+    )
+
+    def resolve_financiera_countries(self, info):
+        user = _require_user(info)
+        if not user:
+            return []
+        rows = (
+            Financiera.objects.visible()
+            .values('country_code')
+            .annotate(count=Count('id'))
+            .order_by('-count')
+        )
+        return [
+            FinancieraCountryType(country_code=r['country_code'], count=r['count'])
+            for r in rows
+        ]
 
     def resolve_financieras(
-        self, info, state=None, city=None, neighborhood=None, search=None,
+        self, info, state=None, city=None, neighborhood=None, country_code=None, search=None,
         sort_by='rating', limit=50, offset=0,
     ):
         user = _require_user(info)
-        if not user or not user.phone_country:
+        if not user:
+            return []
+        country = (country_code or '').upper().strip() or user.phone_country
+        if not country or country not in VALID_COUNTRY_CODES:
             return []
 
         qs = (
             Financiera.objects.visible()
-            .filter(country_code=user.phone_country)
+            .filter(country_code=country)
             .with_stats()
         )
         if state:
@@ -278,13 +333,17 @@ class Query(graphene.ObjectType):
         used_sends = FinancieraReview.objects.filter(
             send_transaction__isnull=False
         ).values_list('send_transaction_id', flat=True)
-        sends = SendTransaction.objects.filter(
-            sender_user=user,
-            token_type__in=REVIEWABLE_SEND_TOKENS,
-            status='CONFIRMED',
-            deleted_at__isnull=True,
-            created_at__gte=cutoff,
-        ).exclude(pk__in=used_sends).order_by('-created_at')[:20]
+        sends = (
+            SendTransaction.objects.filter(
+                Q(sender_user=user) | Q(recipient_user=user),
+                token_type__in=REVIEWABLE_SEND_TOKENS,
+                status='CONFIRMED',
+                deleted_at__isnull=True,
+                created_at__gte=cutoff,
+            )
+            .exclude(pk__in=used_sends)
+            .order_by('-created_at')[:20]
+        )
 
         used_withdrawals = FinancieraReview.objects.filter(
             usdc_withdrawal__isnull=False
@@ -297,13 +356,20 @@ class Query(graphene.ObjectType):
 
         items = [
             ReviewableUsdcSendType(
-                id=tx.pk, kind='send', token=tx.token_type, amount_usdc=tx.amount,
-                destination=tx.recipient_address or '', created_at=tx.created_at,
+                id=tx.pk,
+                kind='send',
+                direction='sent' if tx.sender_user_id == user.id else 'received',
+                token=tx.token_type,
+                amount_usdc=tx.amount,
+                destination=(
+                    tx.recipient_address if tx.sender_user_id == user.id else tx.sender_address
+                ) or '',
+                created_at=tx.created_at,
             )
             for tx in sends
         ] + [
             ReviewableUsdcSendType(
-                id=w.pk, kind='withdrawal', token='USDC', amount_usdc=w.amount,
+                id=w.pk, kind='withdrawal', direction='sent', token='USDC', amount_usdc=w.amount,
                 destination=w.destination_address or '', created_at=w.created_at,
             )
             for w in withdrawals
@@ -321,6 +387,10 @@ class RegisterFinanciera(graphene.Mutation):
         neighborhood = graphene.String()
         whatsapp = graphene.String(required=True, description='Digits-only E.164 without +')
         supports_usdc_algorand = graphene.Boolean(required=True)
+        has_physical_location = graphene.Boolean(default_value=True)
+        cash_usd = graphene.Boolean(default_value=True)
+        cash_local = graphene.Boolean(default_value=False)
+        digital_local = graphene.Boolean(default_value=False)
         helps_with_confio = graphene.Boolean(default_value=False)
         home_service = graphene.Boolean(default_value=False)
         open_weekends = graphene.Boolean(default_value=False)
@@ -332,7 +402,8 @@ class RegisterFinanciera(graphene.Mutation):
     def mutate(
         self, info, name, country_code, state, city, whatsapp,
         supports_usdc_algorand, neighborhood='', helps_with_confio=False,
-        home_service=False, open_weekends=False,
+        home_service=False, open_weekends=False, has_physical_location=True,
+        cash_usd=True, cash_local=False, digital_local=False,
     ):
         user = _require_user(info)
         if not user:
@@ -357,6 +428,11 @@ class RegisterFinanciera(graphene.Mutation):
         name = _collapse_ws(name)
         if not name:
             return RegisterFinanciera(success=False, error='El nombre es obligatorio.')
+        if not _has_payout_method(cash_usd, cash_local, digital_local):
+            return RegisterFinanciera(
+                success=False,
+                error='Selecciona al menos una forma de entrega.',
+            )
 
         # Estado/provincia must be an ISO 3166-2 subdivision when ISO covers the
         # country (it does for all of LATAM); free text only as a fallback for
@@ -398,6 +474,10 @@ class RegisterFinanciera(graphene.Mutation):
             neighborhood=neighborhood,
             whatsapp=whatsapp,
             supports_usdc_algorand=True,
+            has_physical_location=has_physical_location,
+            cash_usd=cash_usd,
+            cash_local=cash_local,
+            digital_local=digital_local,
             helps_with_confio=helps_with_confio,
             home_service=home_service,
             open_weekends=open_weekends,
@@ -431,6 +511,10 @@ class UpdateFinanciera(graphene.Mutation):
         city = graphene.String()
         neighborhood = graphene.String()
         whatsapp = graphene.String()
+        has_physical_location = graphene.Boolean()
+        cash_usd = graphene.Boolean()
+        cash_local = graphene.Boolean()
+        digital_local = graphene.Boolean()
         helps_with_confio = graphene.Boolean()
         home_service = graphene.Boolean()
         open_weekends = graphene.Boolean()
@@ -442,7 +526,8 @@ class UpdateFinanciera(graphene.Mutation):
     def mutate(
         self, info, financiera_id, name=None, state=None, city=None,
         neighborhood=None, whatsapp=None, helps_with_confio=None,
-        home_service=None, open_weekends=None,
+        home_service=None, open_weekends=None, has_physical_location=None,
+        cash_usd=None, cash_local=None, digital_local=None,
     ):
         financiera, error = _get_owned_financiera(info, financiera_id)
         if error:
@@ -487,6 +572,24 @@ class UpdateFinanciera(graphene.Mutation):
             if not (8 <= len(whatsapp) <= 15):
                 return UpdateFinanciera(success=False, error='Número de WhatsApp inválido.')
             financiera.whatsapp = whatsapp
+
+        if has_physical_location is not None:
+            financiera.has_physical_location = has_physical_location
+        if cash_usd is not None:
+            financiera.cash_usd = cash_usd
+        if cash_local is not None:
+            financiera.cash_local = cash_local
+        if digital_local is not None:
+            financiera.digital_local = digital_local
+        if not _has_payout_method(
+            financiera.cash_usd,
+            financiera.cash_local,
+            financiera.digital_local,
+        ):
+            return UpdateFinanciera(
+                success=False,
+                error='Selecciona al menos una forma de entrega.',
+            )
 
         if helps_with_confio is not None:
             financiera.helps_with_confio = helps_with_confio
@@ -554,33 +657,41 @@ REVIEWABLE_SEND_TOKENS = ('USDC', 'CUSD')
 def _resolve_backing_transaction(user, send_transaction_id, usdc_withdrawal_id):
     """Resolve and validate the transaction a review claims to be about.
 
-    Returns (send_tx, withdrawal, sent_amount, sent_token, error). Exactly one
-    reference is required; the transaction must be the user's own confirmed
-    dollar-stable outflow, recent enough to review, and not already backing
-    another review.
+    Returns (send_tx, withdrawal, sent_amount, sent_token, direction, error).
+    Exactly one reference is required; the transaction must be the user's own
+    confirmed dollar-stable transfer, recent enough to review, and not already
+    backing another review.
     """
     from send.models import SendTransaction
     from usdc_transactions.models import USDCWithdrawal
 
     if bool(send_transaction_id) == bool(usdc_withdrawal_id):
-        return None, None, None, None, 'Selecciona el envío que respalda tu reseña.'
+        return None, None, None, None, None, 'Selecciona la transacción que respalda tu reseña.'
 
     cutoff = timezone.now() - REVIEWABLE_TX_MAX_AGE
     if send_transaction_id:
         tx = SendTransaction.objects.filter(
             pk=send_transaction_id,
-            sender_user=user,
             token_type__in=REVIEWABLE_SEND_TOKENS,
             status='CONFIRMED',
             deleted_at__isnull=True,
+        ).filter(
+            Q(sender_user=user) | Q(recipient_user=user),
         ).first()
         if not tx:
-            return None, None, None, None, 'No encontramos ese envío en tu cuenta.'
+            return None, None, None, None, None, 'No encontramos esa transacción en tu cuenta.'
         if tx.created_at < cutoff:
-            return None, None, None, None, 'Ese envío es muy antiguo para reseñar (máx. 90 días).'
+            return None, None, None, None, None, 'Esa transacción es muy antigua para reseñar (máx. 90 días).'
         if FinancieraReview.objects.filter(send_transaction=tx).exists():
-            return None, None, None, None, 'Ese envío ya respalda otra reseña.'
-        return tx, None, tx.amount, tx.token_type, None
+            return None, None, None, None, None, 'Esa transacción ya respalda otra reseña.'
+        return (
+            tx,
+            None,
+            tx.amount,
+            tx.token_type,
+            'sent' if tx.sender_user_id == user.id else 'received',
+            None,
+        )
 
     withdrawal = USDCWithdrawal.objects.filter(
         pk=usdc_withdrawal_id,
@@ -588,17 +699,17 @@ def _resolve_backing_transaction(user, send_transaction_id, usdc_withdrawal_id):
         status='COMPLETED',
     ).first()
     if not withdrawal:
-        return None, None, None, None, 'No encontramos ese retiro de USDC en tu cuenta.'
+        return None, None, None, None, None, 'No encontramos ese retiro de USDC en tu cuenta.'
     if withdrawal.created_at < cutoff:
-        return None, None, None, None, 'Ese retiro es muy antiguo para reseñar (máx. 90 días).'
+        return None, None, None, None, None, 'Ese retiro es muy antiguo para reseñar (máx. 90 días).'
     if FinancieraReview.objects.filter(usdc_withdrawal=withdrawal).exists():
-        return None, None, None, None, 'Ese retiro ya respalda otra reseña.'
-    return None, withdrawal, withdrawal.amount, 'USDC', None
+        return None, None, None, None, None, 'Ese retiro ya respalda otra reseña.'
+    return None, withdrawal, withdrawal.amount, 'USDC', 'sent', None
 
 
 class SubmitFinancieraReview(graphene.Mutation):
-    """Reviews must be anchored to a real USDC-Algorand transaction. The sent
-    amount comes from that transaction, never from the client."""
+    """Reviews must be anchored to a real USDC-Algorand transaction. The
+    transaction amount comes from the server, never from the client."""
 
     class Arguments:
         financiera_id = graphene.ID(required=True)
@@ -638,7 +749,7 @@ class SubmitFinancieraReview(graphene.Mutation):
         if not (1 <= rating <= 5):
             return SubmitFinancieraReview(success=False, error='La calificación debe ser de 1 a 5.')
 
-        send_tx, withdrawal, sent, sent_token, error = _resolve_backing_transaction(
+        send_tx, withdrawal, sent, sent_token, direction, error = _resolve_backing_transaction(
             user, send_transaction_id, usdc_withdrawal_id
         )
         if error:
@@ -650,11 +761,13 @@ class SubmitFinancieraReview(graphene.Mutation):
             return SubmitFinancieraReview(success=False, error='Monto inválido.')
         if received <= 0:
             return SubmitFinancieraReview(success=False, error='El monto debe ser mayor a cero.')
-        # Hard plausibility gate: these amounts feed the public derived rate.
-        if received > sent * MAX_RECEIVED_RATIO:
+        # Hard plausibility gate for sell/outflow reviews. Buy-side reviews are
+        # valid reputation signals, but they do not feed the public cash-out
+        # rate because the user may pay more fiat than the USDC/cUSD received.
+        if direction == 'sent' and received > sent * MAX_RECEIVED_RATIO:
             return SubmitFinancieraReview(
                 success=False,
-                error='No puedes recibir más dólares de los USDC que enviaste. Revisa el monto.',
+                error='El monto no puede ser mayor que la transacción en USDC/cUSD. Revisa el monto.',
             )
         recent = FinancieraReview.objects.filter(
             financiera=financiera,

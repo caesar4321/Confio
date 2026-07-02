@@ -56,8 +56,14 @@ const Stars = ({ rating, size = 16 }: { rating: number; size?: number }) => (
 const formatDate = (iso: string) =>
   new Date(iso).toLocaleDateString('es', { day: 'numeric', month: 'short', year: 'numeric' });
 
+// The headline figure is always the USD value of what reviewers reported, so
+// the tag under it must describe the number, not the payout method list —
+// payout methods already live in the service badges.
+const rateTag = (f: Financiera) => (f.cashUsd ? 'en efectivo' : 'equivalente en USD');
+
 const ReviewRow = ({ review }: { review: FinancieraReview }) => {
   const { formatNumber } = useNumberFormat();
+  const isBuySide = review.direction === 'received';
   return (
     <View style={styles.reviewRow}>
       <View style={styles.reviewTop}>
@@ -66,11 +72,11 @@ const ReviewRow = ({ review }: { review: FinancieraReview }) => {
       </View>
       <View style={styles.reviewRateRow}>
         <Text style={styles.reviewRateText}>
-          Envié <Text style={styles.reviewRateStrong}>{formatNumber(parseFloat(review.sentUsdc), { maximumFractionDigits: 2 })} {tokenLabel(review.sentToken)}</Text>
+          {isBuySide ? 'Recibí' : 'Envié'} <Text style={styles.reviewRateStrong}>{formatNumber(parseFloat(review.sentUsdc), { maximumFractionDigits: 2 })} {tokenLabel(review.sentToken)}</Text>
         </Text>
         <Icon name="arrow-right" size={13} color={colors.text.light} />
         <Text style={styles.reviewRateText}>
-          Recibí <Text style={[styles.reviewRateStrong, { color: colors.primaryDark }]}>${formatNumber(parseFloat(review.receivedUsd), { maximumFractionDigits: 2 })}</Text>
+          {isBuySide ? 'Pagué' : 'Recibí'} <Text style={[styles.reviewRateStrong, { color: colors.primaryDark }]}>${formatNumber(parseFloat(review.receivedUsd), { maximumFractionDigits: 2 })}</Text>
         </Text>
       </View>
       {!!review.comment && <Text style={styles.reviewComment}>“{review.comment}”</Text>}
@@ -168,6 +174,19 @@ export const FinancieraDetailScreen = () => {
     Linking.openURL(`https://wa.me/${financiera.whatsapp}?text=${text}`).catch(() => {});
   };
 
+  // Friendly heads-up (not a scare screen): sets the "Confío only lists" frame
+  // at the exact moment of contact, when it actually matters.
+  const confirmWhatsApp = () => {
+    Alert.alert(
+      `Contactar a ${financiera.name}`,
+      'Confío es un directorio informativo: el acuerdo es directamente entre tú y la financiera.\n\nConsejo: la primera vez, empieza con un monto pequeño.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Abrir WhatsApp', onPress: openWhatsApp },
+      ],
+    );
+  };
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
@@ -235,12 +254,12 @@ export const FinancieraDetailScreen = () => {
               <Text style={[styles.rateValue, { color: colors.primaryDark }]}>
                 {per100 != null ? `$${formatNumber(per100, { maximumFractionDigits: 1 })}` : '—'}
               </Text>
-              <Text style={styles.rateCashTag}>en efectivo</Text>
+              <Text style={styles.rateCashTag}>{rateTag(financiera)}</Text>
             </View>
           </View>
           <Text style={styles.rateCaption}>
             {per100 != null
-              ? `Calculado con ${financiera.reviewCount} reseñas reales`
+              ? `Calculado con ${financiera.rateReviewCount ?? financiera.reviewCount} reseñas reales`
               : financiera.reviewCount > 0
                 ? 'Se mostrará con reseñas de al menos 3 usuarios distintos'
                 : 'Se calculará con las primeras reseñas'}
@@ -293,8 +312,10 @@ export const FinancieraDetailScreen = () => {
             <Text style={styles.safetyTitle}>Consejos de seguridad</Text>
           </View>
           {[
-            'Visita el local de la financiera o acuerda un punto público.',
-            'Nunca envíes USDC antes de tener el efectivo en mano o un acuerdo claro.',
+            financiera.hasPhysicalLocation
+              ? 'Si visitas el local, confirma que sea el mismo lugar indicado por la financiera.'
+              : 'Esta financiera atiende de forma digital, sin local físico. Guíate por sus reseñas recientes.',
+            'Nunca envíes USDC antes de tener el efectivo, la transferencia recibida o un acuerdo claro.',
             'La primera vez, empieza con un monto pequeño.',
             'Si algo no se siente bien, no continúes — y cuéntalo en una reseña.',
           ].map((tip, i) => (
@@ -309,8 +330,7 @@ export const FinancieraDetailScreen = () => {
           <Icon name="info" size={14} color={colors.accent} />
           <Text style={styles.disclaimerText}>
             Confío es un directorio informativo y no participa en los acuerdos entre tú y la
-            financiera. Verifica siempre con quién tratas; puedes visitar la financiera en
-            persona.
+            financiera. Verifica siempre con quién tratas y revisa sus reseñas antes de enviar.
           </Text>
         </View>
 
@@ -322,7 +342,7 @@ export const FinancieraDetailScreen = () => {
 
       {/* Sticky WhatsApp CTA */}
       <SafeAreaView edges={['bottom']} style={styles.footer}>
-        <TouchableOpacity style={styles.whatsappBtn} onPress={openWhatsApp}>
+        <TouchableOpacity style={styles.whatsappBtn} onPress={confirmWhatsApp}>
           <Icon name="message-circle" size={18} color="#fff" />
           <Text style={styles.whatsappText}>Contactar por WhatsApp</Text>
         </TouchableOpacity>

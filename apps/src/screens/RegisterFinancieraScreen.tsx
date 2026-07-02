@@ -23,7 +23,12 @@ import { colors } from '../config/theme';
 import { countries, Country, getCountryByIso } from '../utils/countries';
 import { useCountry } from '../contexts/CountryContext';
 import { useAuth } from '../contexts/AuthContext';
-import { FINANCIERA_SERVICES, MANDATORY_SERVICE_ID } from '../types/financiera';
+import {
+  FINANCIERA_SERVICES,
+  MANDATORY_SERVICE_ID,
+  PAYOUT_SERVICE_IDS,
+  financieraServiceLabel,
+} from '../types/financiera';
 import {
   GET_COUNTRY_SUBDIVISIONS,
   GET_FINANCIERA_LOCATION_OPTIONS,
@@ -244,11 +249,15 @@ export const RegisterFinancieraScreen = () => {
     edit
       ? [
           MANDATORY_SERVICE_ID,
+          ...(edit.hasPhysicalLocation ? ['physical_location'] : []),
+          ...(edit.cashUsd ? ['cash_usd'] : []),
+          ...(edit.cashLocal ? ['cash_local'] : []),
+          ...(edit.digitalLocal ? ['digital_local'] : []),
           ...(edit.helpsWithConfio ? ['help_confio'] : []),
           ...(edit.homeService ? ['home_service'] : []),
           ...(edit.openWeekends ? ['weekends'] : []),
         ]
-      : [],
+      : [MANDATORY_SERVICE_ID, 'physical_location', 'cash_usd'],
   );
   const [countryModal, setCountryModal] = useState(false);
   const [stateModal, setStateModal] = useState(false);
@@ -295,6 +304,7 @@ export const RegisterFinancieraScreen = () => {
   const submitting = registering || updating;
 
   const supportsUsdcAlgorand = services.includes(MANDATORY_SERVICE_ID);
+  const hasPayoutMethod = PAYOUT_SERVICE_IDS.some((id) => services.includes(id));
   const canSubmit =
     !!name.trim() &&
     !!country &&
@@ -302,6 +312,7 @@ export const RegisterFinancieraScreen = () => {
     !!city.trim() &&
     !!whatsapp.trim() &&
     supportsUsdcAlgorand &&
+    hasPayoutMethod &&
     !submitting;
 
   const submitRegistration = async () => {
@@ -320,6 +331,10 @@ export const RegisterFinancieraScreen = () => {
             city: city.trim(),
             neighborhood: barrio.trim(),
             whatsapp: fullWhatsapp,
+            hasPhysicalLocation: services.includes('physical_location'),
+            cashUsd: services.includes('cash_usd'),
+            cashLocal: services.includes('cash_local'),
+            digitalLocal: services.includes('digital_local'),
             helpsWithConfio: services.includes('help_confio'),
             homeService: services.includes('home_service'),
             openWeekends: services.includes('weekends'),
@@ -344,6 +359,10 @@ export const RegisterFinancieraScreen = () => {
           neighborhood: barrio.trim() || null,
           whatsapp: fullWhatsapp,
           supportsUsdcAlgorand: true,
+          hasPhysicalLocation: services.includes('physical_location'),
+          cashUsd: services.includes('cash_usd'),
+          cashLocal: services.includes('cash_local'),
+          digitalLocal: services.includes('digital_local'),
           helpsWithConfio: services.includes('help_confio'),
           homeService: services.includes('home_service'),
           openWeekends: services.includes('weekends'),
@@ -507,7 +526,7 @@ export const RegisterFinancieraScreen = () => {
                   {active && <Icon name="check" size={14} color="#fff" />}
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.serviceLabel}>{service.label}</Text>
+                  <Text style={styles.serviceLabel}>{financieraServiceLabel(service, countryIso)}</Text>
                   {isMandatory && (
                     <Text style={styles.serviceHint}>
                       Por ahora todas las financieras deben aceptar USDC por Algorand.
@@ -528,6 +547,14 @@ export const RegisterFinancieraScreen = () => {
               <Icon name="alert-circle" size={14} color={colors.warning.icon} />
               <Text style={styles.warningText}>
                 Para registrarte debes aceptar USDC por la red Algorand.
+              </Text>
+            </View>
+          )}
+          {!hasPayoutMethod && (
+            <View style={styles.warning}>
+              <Icon name="alert-circle" size={14} color={colors.warning.icon} />
+              <Text style={styles.warningText}>
+                Selecciona al menos una forma de entrega (efectivo o transferencia).
               </Text>
             </View>
           )}

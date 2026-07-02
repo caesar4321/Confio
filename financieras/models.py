@@ -1,10 +1,9 @@
 """
 Financieras directory models.
 
-Confío does NOT intermediate these exchanges. We only list local financieras
-(casas de cambio) with their WhatsApp, location and community ratings so users
-can convert USDC to physical USD cash with a counterparty they can verify and,
-if they want, visit in person.
+Confío does NOT intermediate these exchanges. We only list financieras and
+liquidity providers with their WhatsApp, service area and community ratings so
+users can convert USDC with a counterparty they can verify.
 
 Key invariants:
 - Registration requires the owner to have completed identity verification and
@@ -62,6 +61,10 @@ class Median(models.Aggregate):
 class FinancieraQuerySet(models.QuerySet):
     def with_stats(self):
         """Annotate listing stats so the directory can sort without N+1."""
+        rate_review_filter = models.Q(reviews__deleted_at__isnull=True) & (
+            models.Q(reviews__usdc_withdrawal__isnull=False)
+            | models.Q(reviews__send_transaction__sender_user=models.F('reviews__reviewer'))
+        )
         return self.annotate(
             annotated_avg_rating=Avg(
                 'reviews__rating', filter=models.Q(reviews__deleted_at__isnull=True)
@@ -72,11 +75,14 @@ class FinancieraQuerySet(models.QuerySet):
             annotated_distinct_reviewers=Count(
                 'reviews__reviewer',
                 distinct=True,
-                filter=models.Q(reviews__deleted_at__isnull=True),
+                filter=rate_review_filter,
+            ),
+            annotated_rate_review_count=Count(
+                'reviews', filter=rate_review_filter
             ),
             annotated_median_ratio=Median(
                 F('reviews__received_usd') / F('reviews__sent_usdc'),
-                filter=models.Q(reviews__deleted_at__isnull=True),
+                filter=rate_review_filter,
             ),
         )
 
@@ -85,7 +91,7 @@ class FinancieraQuerySet(models.QuerySet):
 
 
 class Financiera(SoftDeleteModel):
-    """A local money exchange business listed in the directory."""
+    """A money exchange business or liquidity provider listed in the directory."""
 
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -120,6 +126,22 @@ class Financiera(SoftDeleteModel):
     supports_usdc_algorand = models.BooleanField(
         default=False,
         help_text='Mandatory: accepts USDC over the Algorand network',
+    )
+    has_physical_location = models.BooleanField(
+        default=True,
+        help_text='Has a physical storefront/local users can visit',
+    )
+    cash_usd = models.BooleanField(
+        default=True,
+        help_text='Can deliver USD cash',
+    )
+    cash_local = models.BooleanField(
+        default=False,
+        help_text='Can deliver local currency in cash (Bs., COP, S/, ...)',
+    )
+    digital_local = models.BooleanField(
+        default=False,
+        help_text='Can deliver local currency digitally (bank transfer / pago móvil / Nequi / Yape ...)',
     )
     helps_with_confio = models.BooleanField(
         default=False, help_text='Helps newcomers use the Confío app'
@@ -179,11 +201,26 @@ class Financiera(SoftDeleteModel):
         annotated = getattr(self, 'annotated_distinct_reviewers', None)
         if annotated is not None:
             return annotated
-        return self.reviews.values('reviewer').distinct().count()
+        return self.reviews.filter(
+            models.Q(usdc_withdrawal__isnull=False)
+            | models.Q(send_transaction__sender_user=models.F('reviewer'))
+        ).values('reviewer').distinct().count()
+
+    @property
+    def rate_review_count(self):
+        """Sell-side reviews feeding the public rate. Buy-side reviews count
+        only toward stars, so captions must cite this number, not review_count."""
+        annotated = getattr(self, 'annotated_rate_review_count', None)
+        if annotated is not None:
+            return annotated
+        return self.reviews.filter(
+            models.Q(usdc_withdrawal__isnull=False)
+            | models.Q(send_transaction__sender_user=models.F('reviewer'))
+        ).count()
 
     @property
     def avg_received_per_100(self):
-        """Median USD received per 100 USDC sent, from reviews ("100 USDC → $98").
+        """Median USD received per 100 USDC sent, from sell/outflow reviews.
 
         None until MIN_DISTINCT_RATE_REVIEWERS distinct users have reviewed.
         Keeps its historical name because the mobile app queries
@@ -193,7 +230,11 @@ class Financiera(SoftDeleteModel):
             return None
         ratio = getattr(self, 'annotated_median_ratio', None)
         if ratio is None:
-            ratio = self.reviews.aggregate(
+            rate_reviews = self.reviews.filter(
+                models.Q(usdc_withdrawal__isnull=False)
+                | models.Q(send_transaction__sender_user=models.F('reviewer'))
+            )
+            ratio = rate_reviews.aggregate(
                 v=Median(F('received_usd') / F('sent_usdc'))
             )['v']
         if ratio is None:

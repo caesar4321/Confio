@@ -36,6 +36,7 @@ const STAR_GOLD = '#F59E0B';
 interface ReviewableSend {
   id: string;
   kind: 'send' | 'withdrawal';
+  direction: 'sent' | 'received';
   token: 'USDC' | 'CUSD';
   amountUsdc: string;
   destination: string;
@@ -79,18 +80,18 @@ const VerificationGate = ({ onBack, onVerify }: { onBack: () => void; onVerify: 
   </View>
 );
 
-// Reviews are anchored to real transactions: without a recent USDC send there
-// is nothing to review.
+// Reviews are anchored to real transactions: without a recent USDC/cUSD
+// transfer there is nothing to review.
 const NoSendsGate = ({ onBack }: { onBack: () => void }) => (
   <View style={styles.gate}>
     <View style={styles.gateIcon}>
       <Icon name="send" size={32} color={colors.primaryDark} />
     </View>
-    <Text style={styles.gateTitle}>Aún no tienes envíos para reseñar</Text>
+    <Text style={styles.gateTitle}>Aún no tienes transacciones para reseñar</Text>
     <Text style={styles.gateText}>
-      Las reseñas se conectan a un envío real de USDC o cUSD para que la información del
-      directorio sea confiable. Cuando hayas usado los servicios de la financiera, vuelve
-      aquí para contar tu experiencia.
+      Las reseñas se conectan a una transacción real de USDC o cUSD para que la información
+      del directorio sea confiable. Cuando hayas comprado o vendido con una financiera,
+      vuelve aquí para contar tu experiencia.
     </Text>
     <TouchableOpacity style={styles.gatePrimary} onPress={onBack}>
       <Text style={styles.gatePrimaryText}>Entendido</Text>
@@ -134,18 +135,21 @@ export const FinancieraReviewScreen = () => {
   const previewPer100 =
     sent > 0 && received > 0 ? Math.round((received / sent) * 100 * 10) / 10 : null;
 
-  // Soft typo guard; the API hard-rejects received > sent.
+  // Soft typo guard. The API hard-rejects fiat > USDC/cUSD only for sell-side reviews.
+  const isBuyingUsdc = selectedSend?.direction === 'received';
   const amountWarning =
     sent > 0 && received > 0
-      ? received > sent
-        ? `Enviaste ${formatNumber(sent, { maximumFractionDigits: 2 })} ${selectedSend ? tokenLabel(selectedSend.token) : 'USDC'} — no puedes haber recibido más dólares que eso.`
+      ? !isBuyingUsdc && received > sent
+        ? `La transacción fue de ${formatNumber(sent, { maximumFractionDigits: 2 })} ${selectedSend ? tokenLabel(selectedSend.token) : 'USDC'} — el monto en dólares no puede ser mayor.`
         : received < sent / 2
-        ? 'Eso es menos de la mitad de lo que enviaste. Revisa el monto.'
+        ? isBuyingUsdc
+          ? 'Eso es menos de la mitad de lo que recibiste. Revisa el monto.'
+          : 'Eso es menos de la mitad de lo que enviaste. Revisa el monto.'
         : null
       : null;
 
   const canSubmit =
-    !!selectedSend && rating > 0 && received > 0 && received <= sent && !submitting;
+    !!selectedSend && rating > 0 && received > 0 && (isBuyingUsdc || received <= sent) && !submitting;
 
   const submitReview = async () => {
     if (!selectedSend) return;
@@ -228,9 +232,9 @@ export const FinancieraReviewScreen = () => {
 
           {/* Backing transaction */}
           <View style={styles.card}>
-            <Text style={styles.label}>¿Cuál envío respalda tu reseña?</Text>
+            <Text style={styles.label}>¿Cuál transacción respalda tu reseña?</Text>
             <Text style={styles.sublabel}>
-              Tu reseña se conecta a un envío real para que las tasas sean confiables.
+              Tu reseña se conecta a una compra o venta real para que las tasas sean confiables.
             </Text>
             {reviewableSends.map((tx) => {
               const active = selectedSend?.id === tx.id && selectedSend?.kind === tx.kind;
@@ -249,7 +253,11 @@ export const FinancieraReviewScreen = () => {
                       {formatNumber(parseFloat(tx.amountUsdc), { maximumFractionDigits: 2 })} {tokenLabel(tx.token)}
                     </Text>
                     <Text style={styles.txMeta}>
-                      {formatDate(tx.createdAt)} · {tx.kind === 'withdrawal' ? 'a wallet externa' : 'envío Confío'}
+                      {formatDate(tx.createdAt)} · {tx.kind === 'withdrawal'
+                        ? 'retiro a wallet externa'
+                        : tx.direction === 'received'
+                          ? 'recibido en Confío'
+                          : 'enviado en Confío'}
                       {tx.destination ? ` · ${shortAddress(tx.destination)}` : ''}
                     </Text>
                   </View>
@@ -273,10 +281,12 @@ export const FinancieraReviewScreen = () => {
 
           {/* Received amount */}
           <View style={styles.card}>
-            <Text style={styles.label}>¿Cuánto recibiste en dólares (USD)?</Text>
+            <Text style={styles.label}>
+              {isBuyingUsdc ? '¿Cuánto pagaste en dólares (USD)?' : '¿Cuánto recibiste en dólares (USD)?'}
+            </Text>
             {selectedSend && (
               <Text style={styles.sublabel}>
-                Enviaste {formatNumber(sent, { maximumFractionDigits: 2 })} {tokenLabel(selectedSend.token)}
+                {isBuyingUsdc ? 'Recibiste' : 'Enviaste'} {formatNumber(sent, { maximumFractionDigits: 2 })} {tokenLabel(selectedSend.token)}
               </Text>
             )}
             <View style={styles.usdInputWrap}>
@@ -305,6 +315,7 @@ export const FinancieraReviewScreen = () => {
                   <Text style={styles.previewStrong}>
                     ${formatNumber(previewPer100, { maximumFractionDigits: 1 })}
                   </Text>
+                  {isBuyingUsdc ? ' pagados' : ' recibidos'}
                 </Text>
               </View>
             )}
@@ -328,8 +339,8 @@ export const FinancieraReviewScreen = () => {
           <View style={styles.anonNote}>
             <Icon name="eye-off" size={14} color={colors.text.secondary} />
             <Text style={styles.anonText}>
-              Tu reseña es anónima. Solo se muestra que proviene de un usuario verificado con un
-              envío real.
+              Tu reseña es anónima. Solo se muestra que proviene de un usuario verificado con una
+              transacción real.
             </Text>
           </View>
         </ScrollView>

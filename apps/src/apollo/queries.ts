@@ -4039,8 +4039,8 @@ export const GET_FINANCIERA_LOCATION_OPTIONS = gql`
 `;
 
 export const GET_FINANCIERAS = gql`
-  query GetFinancieras($state: String, $city: String, $neighborhood: String, $sortBy: String, $limit: Int, $offset: Int) {
-    financieras(state: $state, city: $city, neighborhood: $neighborhood, sortBy: $sortBy, limit: $limit, offset: $offset) {
+  query GetFinancieras($state: String, $city: String, $neighborhood: String, $countryCode: String, $sortBy: String, $limit: Int, $offset: Int) {
+    financieras(state: $state, city: $city, neighborhood: $neighborhood, countryCode: $countryCode, sortBy: $sortBy, limit: $limit, offset: $offset) {
       id
       name
       countryCode
@@ -4049,13 +4049,27 @@ export const GET_FINANCIERAS = gql`
       neighborhood
       whatsapp
       supportsUsdcAlgorand
+      hasPhysicalLocation
+      cashUsd
+      cashLocal
+      digitalLocal
       helpsWithConfio
       homeService
       openWeekends
       isVerified
       avgRating
       reviewCount
+      rateReviewCount
       avgReceivedPer100
+    }
+  }
+`;
+
+export const GET_FINANCIERA_COUNTRIES = gql`
+  query GetFinancieraCountries {
+    financieraCountries {
+      countryCode
+      count
     }
   }
 `;
@@ -4071,16 +4085,22 @@ export const GET_FINANCIERA = gql`
       neighborhood
       whatsapp
       supportsUsdcAlgorand
+      hasPhysicalLocation
+      cashUsd
+      cashLocal
+      digitalLocal
       helpsWithConfio
       homeService
       openWeekends
       isVerified
       avgRating
       reviewCount
+      rateReviewCount
       avgReceivedPer100
       reviews {
         id
         rating
+        direction
         sentToken
         sentUsdc
         receivedUsd
@@ -4100,6 +4120,10 @@ export const REGISTER_FINANCIERA = gql`
     $neighborhood: String
     $whatsapp: String!
     $supportsUsdcAlgorand: Boolean!
+    $hasPhysicalLocation: Boolean
+    $cashUsd: Boolean
+    $cashLocal: Boolean
+    $digitalLocal: Boolean
     $helpsWithConfio: Boolean
     $homeService: Boolean
     $openWeekends: Boolean
@@ -4112,6 +4136,10 @@ export const REGISTER_FINANCIERA = gql`
       neighborhood: $neighborhood
       whatsapp: $whatsapp
       supportsUsdcAlgorand: $supportsUsdcAlgorand
+      hasPhysicalLocation: $hasPhysicalLocation
+      cashUsd: $cashUsd
+      cashLocal: $cashLocal
+      digitalLocal: $digitalLocal
       helpsWithConfio: $helpsWithConfio
       homeService: $homeService
       openWeekends: $openWeekends
@@ -4156,6 +4184,7 @@ export const GET_MY_REVIEWABLE_USDC_SENDS = gql`
     myReviewableUsdcSends {
       id
       kind
+      direction
       token
       amountUsdc
       destination
@@ -4184,6 +4213,10 @@ export const GET_MY_FINANCIERAS = gql`
       neighborhood
       whatsapp
       supportsUsdcAlgorand
+      hasPhysicalLocation
+      cashUsd
+      cashLocal
+      digitalLocal
       helpsWithConfio
       homeService
       openWeekends
@@ -4191,6 +4224,7 @@ export const GET_MY_FINANCIERAS = gql`
       isVerified
       avgRating
       reviewCount
+      rateReviewCount
       avgReceivedPer100
     }
   }
@@ -4204,6 +4238,10 @@ export const UPDATE_FINANCIERA = gql`
     $city: String
     $neighborhood: String
     $whatsapp: String
+    $hasPhysicalLocation: Boolean
+    $cashUsd: Boolean
+    $cashLocal: Boolean
+    $digitalLocal: Boolean
     $helpsWithConfio: Boolean
     $homeService: Boolean
     $openWeekends: Boolean
@@ -4215,6 +4253,10 @@ export const UPDATE_FINANCIERA = gql`
       city: $city
       neighborhood: $neighborhood
       whatsapp: $whatsapp
+      hasPhysicalLocation: $hasPhysicalLocation
+      cashUsd: $cashUsd
+      cashLocal: $cashLocal
+      digitalLocal: $digitalLocal
       helpsWithConfio: $helpsWithConfio
       homeService: $homeService
       openWeekends: $openWeekends

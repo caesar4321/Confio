@@ -171,6 +171,10 @@ export type MainStackParamList = {
       city: string;
       neighborhood: string;
       whatsapp: string;
+      hasPhysicalLocation: boolean;
+      cashUsd: boolean;
+      cashLocal: boolean;
+      digitalLocal: boolean;
       helpsWithConfio: boolean;
       homeService: boolean;
       openWeekends: boolean;
