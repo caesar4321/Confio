@@ -21,6 +21,7 @@ import { useAccount } from '../contexts/AccountContext';
 import { getDiditResultSessionId, startDiditVerification } from '../services/diditService';
 import { AnalyticsService } from '../services/analyticsService';
 import { colors } from '../config/theme';
+import { Button } from '../components/common/Button';
 
 type NormalizedStatus = 'unverified' | 'pending' | 'verified' | 'rejected';
 
@@ -308,24 +309,14 @@ const VerificationScreen = () => {
           <Text style={styles.heroDescription}>{meta.description}</Text>
 
           <View style={styles.heroActions}>
-            <TouchableOpacity
-              style={[
-                styles.primaryButton,
-                (isBusy || effectiveStatus === 'verified') && styles.primaryButtonDisabled,
-              ]}
+            <Button
+              title={primaryActionLabel}
               onPress={handleStartDidit}
+              loading={isLaunchingDidit}
               disabled={isBusy || effectiveStatus === 'verified'}
-              activeOpacity={0.9}
-            >
-              {isLaunchingDidit ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <>
-                  <Icon name="arrow-up-right" size={18} color="#FFFFFF" />
-                  <Text style={styles.primaryButtonText}>{primaryActionLabel}</Text>
-                </>
-              )}
-            </TouchableOpacity>
+              icon={<Icon name="arrow-up-right" size={18} color="#FFFFFF" />}
+              textStyle={{ fontWeight: '700' }}
+            />
 
             <TouchableOpacity
               style={styles.secondaryButton}
@@ -487,24 +478,6 @@ const styles = StyleSheet.create({
   },
   heroActions: {
     gap: 12,
-  },
-  primaryButton: {
-    backgroundColor: colors.primaryDark,
-    borderRadius: 14,
-    paddingVertical: 15,
-    paddingHorizontal: 18,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-  },
-  primaryButtonDisabled: {
-    opacity: 0.6,
-  },
-  primaryButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '700',
   },
   secondaryButton: {
     backgroundColor: colors.surface,
