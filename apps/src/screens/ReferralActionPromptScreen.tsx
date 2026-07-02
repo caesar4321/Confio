@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-nati
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, NavigationProp, RouteProp, useRoute } from '@react-navigation/native';
 import { MainStackParamList } from '../types/navigation';
+import { Button } from '../components/common/Button';
 
 type ReferralActionRouteProp = RouteProp<MainStackParamList, 'ReferralActionPrompt'>;
 
@@ -74,10 +75,12 @@ export const ReferralActionPromptScreen: React.FC = () => {
       );
     }
     return (
-      <TouchableOpacity style={styles.primaryButton} onPress={nextSteps.action}>
-        <Text style={styles.primaryButtonText}>{nextSteps.ctaLabel}</Text>
-        <Icon name="chevron-right" size={18} color="#fff" />
-      </TouchableOpacity>
+      <Button
+        title={nextSteps.ctaLabel}
+        onPress={nextSteps.action}
+        icon={<Icon name="chevron-right" size={18} color="#fff" />}
+        style={{ marginTop: 24 }}
+      />
     );
   };
 
@@ -169,17 +172,6 @@ const styles = StyleSheet.create({
   stepNumberWrap: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#ECFDF5', justifyContent: 'center', alignItems: 'center' },
   stepNumber: { fontWeight: '600', color: '#047857' },
   stepText: { flex: 1, fontSize: 14, color: '#374151' },
-  primaryButton: {
-    marginTop: 24,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 14,
-    borderRadius: 14,
-    backgroundColor: '#10B981',
-  },
-  primaryButtonText: { color: '#fff', fontWeight: '600', fontSize: 15 },
   actionButtons: {
     marginTop: 24,
     flexDirection: 'column',
