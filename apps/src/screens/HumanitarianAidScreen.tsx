@@ -28,6 +28,7 @@ import {
 import { APPLY_HUMANITARIAN_VOLUNTEER } from '../apollo/mutations';
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
+import { Button } from '../components/common/Button';
 import { flagFromIso2 } from '../utils/humanitarianCountry';
 import algorandService from '../services/algorandService';
 import { biometricAuthService } from '../services/biometricAuthService';
@@ -569,9 +570,13 @@ export const HumanitarianAidScreen = () => {
               multiline
               placeholderTextColor="#94A3B8"
             />
-            <TouchableOpacity style={styles.primaryButton} onPress={onApply} disabled={applying}>
-              {applying ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryButtonText}>{volunteerCtaLabel}</Text>}
-            </TouchableOpacity>
+            <Button
+              title={volunteerCtaLabel}
+              onPress={onApply}
+              loading={applying}
+              style={{ backgroundColor: colors.secondary }}
+              textStyle={{ fontSize: 15, fontWeight: '800' }}
+            />
           </>
         )}
       </View>
@@ -857,6 +862,4 @@ const styles = StyleSheet.create({
   emptyText: { fontSize: 14, lineHeight: 20, color: colors.textSecondary },
   input: { backgroundColor: colors.background, borderWidth: 1, borderColor: colors.borderMedium, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 12, marginBottom: 10, fontSize: 15, color: colors.textFlat },
   textArea: { minHeight: 88, textAlignVertical: 'top' },
-  primaryButton: { height: 48, borderRadius: 12, backgroundColor: colors.secondary, alignItems: 'center', justifyContent: 'center' },
-  primaryButtonText: { color: colors.white, fontSize: 15, fontWeight: '800' },
 });
