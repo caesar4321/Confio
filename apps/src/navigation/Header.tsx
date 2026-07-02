@@ -68,6 +68,8 @@ export const Header: React.FC<HeaderProps> = ({
             onPress={() => { if (onBackPress) { onBackPress(); } else { navigation.goBack(); } }}
             style={{ marginRight: 16 }}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityRole="button"
+            accessibilityLabel="Volver"
           >
             <Icon name="arrow-left" size={24} color={textColor} />
           </TouchableOpacity>
@@ -94,6 +96,8 @@ export const Header: React.FC<HeaderProps> = ({
             }}
             onPress={onNotificationPress}
             hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+            accessibilityRole="button"
+            accessibilityLabel={unreadNotifications > 0 ? `Notificaciones, ${unreadNotifications} sin leer` : 'Notificaciones'}
           >
             <Icon name="bell" size={20} color="#fff" />
             {unreadNotifications > 0 && (
@@ -132,6 +136,8 @@ export const Header: React.FC<HeaderProps> = ({
               }}
               onPress={onMessagePress}
               hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+              accessibilityRole="button"
+              accessibilityLabel={unreadMessages > 0 ? `Mensajes, ${unreadMessages} sin leer` : 'Mensajes'}
             >
               <Icon name="inbox" size={20} color="#fff" />
               {unreadMessages > 0 && (
@@ -174,6 +180,8 @@ export const Header: React.FC<HeaderProps> = ({
             }}
             activeOpacity={0.7}
             hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+            accessibilityRole="button"
+            accessibilityLabel="Perfil y cuentas"
           >
             <Text style={{
               fontSize: 16,

@@ -340,6 +340,9 @@ export const SendToFriendScreen = () => {
             onPress={() => {
               handleSend();
             }}
+            accessibilityRole="button"
+            accessibilityLabel={`Enviar ${amount || ''} a ${friend.name}`}
+            accessibilityState={{ disabled: !amount || parseFloat(amount) < config.minSend || parseFloat(amount || '0') > availableBalance || isProcessing }}
           >
             <Text style={styles.confirmButtonText}>
               {isProcessing ? 'Procesando...' :

@@ -346,6 +346,9 @@ export const TradeConfirmScreen: React.FC = () => {
           style={[styles.confirmButton, createTradeLoading && styles.confirmButtonDisabled]}
           onPress={handleConfirmTrade}
           disabled={createTradeLoading}
+          accessibilityRole="button"
+          accessibilityLabel="Confirmar y comenzar intercambio"
+          accessibilityState={{ disabled: createTradeLoading }}
         >
           <Text style={styles.confirmButtonText}>
             {createTradeLoading ? 'Creando intercambio...' : 'Confirmar y Comenzar'}

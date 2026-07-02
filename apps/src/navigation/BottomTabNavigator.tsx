@@ -135,6 +135,8 @@ export const BottomTabNavigator = () => {
             !Boolean(notificationPrefsData?.notificationPreferences?.pushAnnouncements) && styles.headerIconButtonActive,
           ]}
           hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+          accessibilityRole="button"
+          accessibilityLabel={!Boolean(notificationPrefsData?.notificationPreferences?.pushAnnouncements) ? 'Activar anuncios' : 'Silenciar anuncios'}
         >
           <Icon
             name={!Boolean(notificationPrefsData?.notificationPreferences?.pushAnnouncements) ? 'volume-x' : 'bell-off'}

@@ -605,6 +605,9 @@ export const PaymentConfirmationScreen = () => {
               ]}
               onPress={handleConfirmPayment}
               disabled={!hasEnoughBalance || isProcessing}
+              accessibilityRole="button"
+              accessibilityLabel="Confirmar pago"
+              accessibilityState={{ disabled: !hasEnoughBalance || isProcessing }}
             >
               <Text style={styles.confirmButtonText}>
                 {isProcessing ? 'Procesando...' :

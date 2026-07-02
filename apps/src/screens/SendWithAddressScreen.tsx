@@ -376,6 +376,9 @@ export const SendWithAddressScreen = () => {
           ]}
           onPress={handleSend}
           disabled={isProcessing || !amount || !destination || parseFloat(amount || '0') > (tokenType === 'usdc' ? Math.max(availableBalance, availableCusdBalance) : availableBalance)}
+          accessibilityRole="button"
+          accessibilityLabel="Enviar"
+          accessibilityState={{ disabled: isProcessing || !amount || !destination }}
         >
           {isProcessing ? (
             <ActivityIndicator color="white" />

@@ -1242,6 +1242,8 @@ export const HomeScreen = () => {
                   onPress={toggleBalanceVisibility}
                   activeOpacity={0.7}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  accessibilityRole="button"
+                  accessibilityLabel={showBalance ? 'Ocultar saldo' : 'Mostrar saldo'}
                 >
                   <Icon name={showBalance ? 'eye' : 'eye-off'} size={18} color="#fff" />
                 </TouchableOpacity>
@@ -1252,6 +1254,8 @@ export const HomeScreen = () => {
                   onPress={() => setShowLocalCurrency(!showLocalCurrency)}
                   activeOpacity={0.7}
                   hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+                  accessibilityRole="button"
+                  accessibilityLabel={showLocalCurrency ? 'Mostrar en dólares' : `Mostrar en ${currency.name}`}
                 >
                   <Text style={styles.currencyToggleText}>
                     {showLocalCurrency ? currency.code : 'USD'}

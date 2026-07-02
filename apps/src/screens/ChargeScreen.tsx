@@ -578,6 +578,9 @@ const ChargeScreen = () => {
                       ]}
                       onPress={handleGenerateQR}
                       disabled={isLoading}
+                      accessibilityRole="button"
+                      accessibilityLabel="Generar código QR de cobro"
+                      accessibilityState={{ disabled: isLoading }}
                     >
                       <Text style={styles.generateButtonText}>
                         {isLoading ? 'Generando...' : 'Generar Código QR'}
