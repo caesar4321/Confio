@@ -32,6 +32,7 @@ import { useAccount } from '../contexts/AccountContext';
 import { biometricAuthService } from '../services/biometricAuthService';
 import LoadingOverlay from '../components/LoadingOverlay';
 import { colors } from '../config/theme';
+import { Button } from '../components/common/Button';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'PayrollTopUp'>;
 
@@ -361,15 +362,15 @@ const PayrollTopUpScreen = () => {
             <Text style={styles.cardHint}>Moveremos este monto desde la cuenta de negocio hacia la bóveda de nómina.</Text>
           </View>
 
-          <TouchableOpacity
-            style={[styles.primaryButton, (!isBusinessAccount || processing) && styles.primaryButtonDisabled]}
+          <Button
+            title="Agregar a bóveda"
             onPress={handleSubmit}
-            disabled={processing || !isBusinessAccount}
-            activeOpacity={0.9}
-          >
-            {processing ? <ActivityIndicator color="#fff" /> : <Icon name="arrow-up-right" size={16} color="#fff" />}
-            <Text style={styles.primaryButtonText}>{processing ? 'Enviando...' : 'Agregar a bóveda'}</Text>
-          </TouchableOpacity>
+            loading={processing}
+            disabled={!isBusinessAccount}
+            icon={<Icon name="arrow-up-right" size={16} color="#fff" />}
+            style={{ marginHorizontal: 16, marginTop: 18, backgroundColor: colors.primary }}
+            textStyle={{ fontWeight: '700' }}
+          />
 
           {!isBusinessAccount ? (
             <View style={styles.infoBox}>
@@ -488,23 +489,6 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 18,
     color: colors.textFlat,
-  },
-  primaryButton: {
-    marginHorizontal: 16,
-    marginTop: 18,
-    paddingVertical: 12,
-    borderRadius: 12,
-    backgroundColor: colors.primary,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  primaryButtonDisabled: { opacity: 0.6 },
-  primaryButtonText: {
-    color: '#fff',
-    fontWeight: '700',
-    fontSize: 16,
   },
   infoBox: {
     marginHorizontal: 16,
