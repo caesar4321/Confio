@@ -14,6 +14,7 @@ import 'moment/locale/es';
 import { contactService } from '../services/contactService';
 import { useAuth } from '../contexts/AuthContext';
 import { APP_LAYOUT } from '../config/layout';
+import { TransactionItemSkeleton } from '../components/SkeletonLoader';
 
 const REFERRAL_EVENT_TYPE_MAP: Record<string, string> = {
   REFERRAL_EVENT_TOP_UP: 'top_up',
@@ -1238,8 +1239,10 @@ export const NotificationScreen = () => {
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Notificaciones</Text>
         </View>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#34d399" />
+        <View style={{ paddingTop: 8 }}>
+          {Array.from({ length: 7 }).map((_, i) => (
+            <TransactionItemSkeleton key={i} />
+          ))}
         </View>
       </View>
     );

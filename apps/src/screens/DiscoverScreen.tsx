@@ -5,6 +5,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { NetworkStatus, useMutation, useQuery } from '@apollo/client';
 
 import { DiscoverFeed, DiscoverItem } from '../components/DiscoverFeed';
+import { OfferCardSkeleton } from '../components/SkeletonLoader';
 import { REACT_TO_MESSAGE_CONTENT } from '../apollo/mutations';
 import { GET_DISCOVER_FEED } from '../apollo/queries';
 import { MainStackParamList } from '../types/navigation';
@@ -110,9 +111,10 @@ export const DiscoverScreen = () => {
 
   if (loading && items.length === 0) {
     return (
-      <View style={styles.stateWrap}>
-        <ActivityIndicator size="small" color="#34d399" />
-        <Text style={styles.stateText}>Cargando Descubrir...</Text>
+      <View style={{ flex: 1, paddingTop: 12 }}>
+        {Array.from({ length: 3 }).map((_, i) => (
+          <OfferCardSkeleton key={i} />
+        ))}
       </View>
     );
   }

@@ -28,6 +28,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { buildInviteLink } from '../utils/inviteLinks';
 import { AnalyticsService } from '../services/analyticsService';
+import { OfferCardSkeleton } from '../components/SkeletonLoader';
 import {
   Financiera,
   USDC_ALGORAND_TAG,
@@ -721,8 +722,10 @@ export const FinancierasScreen = () => {
         )}
         ListEmptyComponent={
           loading ? (
-            <View style={styles.empty}>
-              <ActivityIndicator color={colors.primary} size="large" />
+            <View style={{ paddingTop: 8 }}>
+              {Array.from({ length: 4 }).map((_, i) => (
+                <OfferCardSkeleton key={i} />
+              ))}
             </View>
           ) : financieras.length > 0 && filtersActive ? (
             // The country HAS listings — the facets just filtered them all out.
