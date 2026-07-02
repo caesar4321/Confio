@@ -32,6 +32,7 @@ import { CameraRoll } from '@react-native-camera-roll/camera-roll';
 import { useRef } from 'react';
 import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
+import { InlineBanner } from '../components/common/InlineBanner';
 
 // Import currency icons
 const cUSDIcon = require('../assets/png/cUSD.png');
@@ -52,6 +53,8 @@ const ChargeScreen = () => {
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
   const [copied, setCopied] = useState(false);
+  const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
+  const dismissBanner = useCallback(() => setBanner(null), []);
   const [showQRCode, setShowQRCode] = useState(false);
   const [invoice, setInvoice] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -165,14 +168,15 @@ const ChargeScreen = () => {
   const handleGenerateQR = async () => {
 
     if (!amount || parseFloat(amount) <= 0) {
-      Alert.alert('Error', 'Por favor ingresa un monto válido', [{ text: 'Entendido' }]);
+      setBanner({ variant: 'error', message: 'Ingresa un monto válido para generar el código QR.' });
       return;
     }
 
     if (!activeAccount) {
-      Alert.alert('Error', 'No se encontró la cuenta activa', [{ text: 'Entendido' }]);
+      setBanner({ variant: 'error', message: 'No se encontró la cuenta activa. Cambia de cuenta e intenta de nuevo.' });
       return;
     }
+    setBanner(null);
 
 
     setIsLoading(true);
@@ -257,10 +261,10 @@ const ChargeScreen = () => {
         } catch (_) { }
       } else {
         const errors = data?.createInvoice?.errors || ['Error desconocido'];
-        Alert.alert('Error', errors.join(', '), [{ text: 'Entendido' }]);
+        setBanner({ variant: 'error', message: `No se pudo crear la factura: ${errors.join(', ')}` });
       }
     } catch (error) {
-      Alert.alert('Error', 'No se pudo crear la factura. Inténtalo de nuevo.', [{ text: 'Entendido' }]);
+      setBanner({ variant: 'error', message: 'No se pudo crear la factura. Revisa tu conexión e inténtalo de nuevo.' });
     } finally {
       setIsLoading(false);
     }
@@ -268,7 +272,7 @@ const ChargeScreen = () => {
 
   const handleCopy = (text: string) => {
     Clipboard.setString(text);
-    Alert.alert('Copiado', 'Enlace copiado al portapapeles', [{ text: 'Entendido' }]);
+    setBanner({ variant: 'success', message: 'Enlace copiado al portapapeles' });
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -296,8 +300,7 @@ const ChargeScreen = () => {
       } catch (error) {
       }
     } else {
-      // Fallback or alert
-      Alert.alert('Error', 'No hay enlace disponible');
+      setBanner({ variant: 'error', message: 'No hay enlace disponible para compartir.' });
     }
   };
 
@@ -308,9 +311,9 @@ const ChargeScreen = () => {
       if (!uri) return;
 
       await CameraRoll.save(uri, { type: 'photo' });
-      Alert.alert('Guardado', 'Código QR guardado en la galería', [{ text: 'Entendido' }]);
+      setBanner({ variant: 'success', message: 'Código QR guardado en la galería' });
     } catch (error) {
-      Alert.alert('Error', 'No se pudo guardar la imagen');
+      setBanner({ variant: 'error', message: 'No se pudo guardar la imagen. Verifica los permisos de la galería.' });
     }
   };
 
@@ -454,6 +457,14 @@ const ChargeScreen = () => {
 
         {/* Content */}
         <View style={styles.content}>
+          {banner && (
+            <InlineBanner
+              message={banner.message}
+              variant={banner.variant}
+              onDismiss={dismissBanner}
+              autoHideMs={banner.variant === 'success' ? 2500 : undefined}
+            />
+          )}
           {mode === 'cobrar' ? (
             <View style={styles.cobrarContent}>
               {!showQRCode ? (
