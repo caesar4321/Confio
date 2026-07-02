@@ -18,6 +18,7 @@ import { gql } from '@apollo/client';
 import Icon from 'react-native-vector-icons/Feather';
 import { countries, Country } from '../utils/countries';
 import { useAuth } from '../contexts/AuthContext';
+import { colors } from '../config/theme';
 
 const CHECK_REFERRAL_STATUS = gql`
   mutation CheckReferralStatus {
@@ -369,7 +370,7 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
                   <Text style={styles.countryName}>{item[0]}</Text>
                   <Text style={styles.countryCode}>{item[1]}</Text>
                   {selectedCountry[2] === item[2] && (
-                    <Icon name="check" size={20} color="#00BFA5" />
+                    <Icon name="check" size={20} color={colors.primaryDark} />
                   )}
                 </TouchableOpacity>
               )}
@@ -446,8 +447,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   typeButtonActive: {
-    backgroundColor: '#00BFA5',
-    borderColor: '#00BFA5',
+    backgroundColor: colors.primaryDark,
+    borderColor: colors.primaryDark,
   },
   typeButtonText: {
     fontSize: 14,
@@ -502,7 +503,7 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 16,
     borderRadius: 8,
-    backgroundColor: '#00BFA5',
+    backgroundColor: colors.primaryDark,
     alignItems: 'center',
   },
   submitButtonDisabled: {
@@ -597,7 +598,7 @@ const styles = StyleSheet.create({
     paddingRight: 4,
     fontSize: 16,
     fontWeight: '600',
-    color: '#00BFA5',
+    color: colors.primaryDark,
   },
   usernameInput: {
     flex: 1,
