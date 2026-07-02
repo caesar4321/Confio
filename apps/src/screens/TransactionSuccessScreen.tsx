@@ -11,6 +11,7 @@ import { getSupportCopy } from '../utils/supportMessaging';
 import ViewShot from 'react-native-view-shot';
 import RNShare from 'react-native-share';
 import { colors } from '../config/theme';
+import { Button } from '../components/common/Button';
 import { AnalyticsService } from '../services/analyticsService';
 import { StatusTierBadge } from '../components/StatusTierBadge';
 import { buildInviteLink, buildSendAndInviteShareMessage } from '../utils/inviteLinks';
@@ -586,51 +587,38 @@ export const TransactionSuccessScreen = () => {
 
             <View style={styles.actionsContent}>
               {transactionData.type === 'sent' && (
-                <TouchableOpacity
-                  style={[styles.actionButton, { backgroundColor: colors.primary }]}
+                <Button
+                  title={transactionData.recipientAddress && !transactionData.recipientPhone
+                    ? `Enviar de nuevo a ${transactionData.recipientAddress.slice(0, 6)}...${transactionData.recipientAddress.slice(-4)}`
+                    : `Enviar de nuevo a ${transactionData.recipient}`}
                   onPress={handleSendAgain}
-                >
-                  <Icon name="user" size={16} color="#ffffff" />
-                  <Text style={styles.actionButtonText}>
-                    {transactionData.recipientAddress && !transactionData.recipientPhone
-                      ? `Enviar de nuevo a ${transactionData.recipientAddress.slice(0, 6)}...${transactionData.recipientAddress.slice(-4)}`
-                      : `Enviar de nuevo a ${transactionData.recipient}`
-                    }
-                  </Text>
-                </TouchableOpacity>
+                  icon={<Icon name="user" size={16} color="#ffffff" />}
+                  style={{ backgroundColor: colors.primary }}
+                />
               )}
 
-
-
-              <TouchableOpacity
-                style={[styles.actionButton, { backgroundColor: '#10B981' }]}
+              <Button
+                title="Compartir comprobante"
                 onPress={handleShareScreenshot}
-              >
-                <Icon name="share-2" size={16} color="#ffffff" />
-                <Text style={styles.actionButtonText}>
-                  Compartir comprobante
-                </Text>
-              </TouchableOpacity>
+                icon={<Icon name="share-2" size={16} color="#ffffff" />}
+              />
 
-              <TouchableOpacity
-                style={[styles.actionButton, { backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0' }]}
+              <Button
+                title="Ver comprobante oficial"
+                variant="secondary"
                 onPress={handleShareReceipt}
-              >
-                <Icon name="file-text" size={16} color="#10B981" />
-                <Text style={[styles.actionButtonText, { color: '#10B981' }]}>
-                  Ver comprobante oficial
-                </Text>
-              </TouchableOpacity>
+                icon={<Icon name="file-text" size={16} color="#10B981" />}
+                style={{ backgroundColor: '#ECFDF5', borderColor: '#A7F3D0' }}
+                textStyle={{ color: '#10B981' }}
+              />
 
-              <TouchableOpacity
-                style={[styles.actionButton, { backgroundColor: '#F3F4F6' }]}
+              <Button
+                title="Ver detalles técnicos"
+                variant="secondary"
                 onPress={handleViewTechnicalDetails}
-              >
-                <Icon name="external-link" size={16} color="#374151" />
-                <Text style={[styles.actionButtonText, { color: '#374151' }]}>
-                  Ver detalles técnicos
-                </Text>
-              </TouchableOpacity>
+                icon={<Icon name="external-link" size={16} color="#374151" />}
+                style={{ backgroundColor: '#F3F4F6', borderWidth: 0 }}
+              />
             </View>
           </View>
 
@@ -1034,20 +1022,6 @@ const styles = StyleSheet.create({
   },
   actionsContent: {
     gap: 12,
-  },
-  actionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-  },
-  actionButtonText: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#ffffff',
-    marginLeft: 8,
   },
   navigationContainer: {
     flexDirection: 'row',
