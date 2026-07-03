@@ -21,6 +21,7 @@ import { ReferralInputModal } from '../components/ReferralInputModal';
 import { buildReferralShareMessage, normalizeInviteUsername } from '../utils/inviteLinks';
 import { AnalyticsService } from '../services/analyticsService';
 import { colors } from '../config/theme';
+import { Button } from '../components/common/Button';
 
 type Step = {
   title: string;
@@ -142,14 +143,21 @@ export const AchievementsScreen: React.FC = () => {
           </View>
 
           <View style={styles.heroActions}>
-            <TouchableOpacity style={styles.copyButton} onPress={handleCopy}>
-              <Icon name="copy" size={18} color={colors.primaryDark} />
-              <Text style={styles.copyButtonText}>Copiar usuario</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.shareButton} onPress={handleShare}>
-              <WhatsAppLogo width={18} height={18} style={{ marginRight: 8 }} />
-              <Text style={styles.shareButtonText}>Invitar por WhatsApp</Text>
-            </TouchableOpacity>
+            <Button
+              title="Copiar usuario"
+              variant="secondary"
+              onPress={handleCopy}
+              icon={<Icon name="copy" size={18} color={colors.primaryDark} />}
+              style={{ backgroundColor: colors.primarySoft, borderWidth: 0 }}
+              textStyle={{ color: colors.primaryDark, fontSize: 14 }}
+            />
+            <Button
+              title="Invitar por WhatsApp"
+              onPress={handleShare}
+              icon={<WhatsAppLogo width={18} height={18} />}
+              style={{ backgroundColor: colors.primaryDark, paddingHorizontal: 18 }}
+              textStyle={{ fontSize: 14 }}
+            />
           </View>
           {needsFriendlyUsername && (
             <TouchableOpacity style={styles.updateUsernameButton} onPress={() => navigation.navigate('UpdateUsername')}>
@@ -334,34 +342,6 @@ const styles = StyleSheet.create({
     marginTop: 24,
     gap: 12,
     flexWrap: 'wrap',
-  },
-  copyButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    backgroundColor: colors.primarySoft,
-    gap: 8,
-  },
-  copyButtonText: {
-    color: colors.primaryDark,
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  shareButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 18,
-    borderRadius: 12,
-    backgroundColor: colors.primaryDark,
-    gap: 8,
-  },
-  shareButtonText: {
-    color: colors.white,
-    fontWeight: '600',
-    fontSize: 14,
   },
   claimCard: {
     backgroundColor: colors.primarySoft,
