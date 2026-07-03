@@ -20,6 +20,7 @@ import { buildReferralShareMessage, normalizeInviteUsername } from '../utils/inv
 import { AnalyticsService } from '../services/analyticsService';
 import WhatsAppLogo from '../assets/svg/WhatsApp.svg';
 import { colors } from '../config/theme';
+import { Button } from '../components/common/Button';
 
 export const ConfioAddressScreen: React.FC = () => {
   const rootNavigation = useNavigation<NavigationProp<RootStackParamList>>();
@@ -125,14 +126,21 @@ export const ConfioAddressScreen: React.FC = () => {
             </TouchableOpacity>
           )}
           <View style={styles.usernameActions}>
-            <TouchableOpacity style={styles.copyButton} onPress={handleCopy}>
-              <Icon name="copy" size={16} color={colors.primaryDark} />
-              <Text style={styles.copyButtonText}>Copiar</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.shareButton} onPress={handleShare}>
-              <WhatsAppLogo width={18} height={18} style={{ marginRight: 4 }} />
-              <Text style={styles.shareButtonText}>Compartir por WhatsApp</Text>
-            </TouchableOpacity>
+            <Button
+              title="Copiar"
+              variant="secondary"
+              onPress={handleCopy}
+              icon={<Icon name="copy" size={16} color={colors.primaryDark} />}
+              style={{ flex: 1, backgroundColor: colors.primaryLight, borderWidth: 0 }}
+              textStyle={{ color: colors.primaryDark, fontSize: 14 }}
+            />
+            <Button
+              title="Compartir por WhatsApp"
+              onPress={handleShare}
+              icon={<WhatsAppLogo width={18} height={18} />}
+              style={{ flex: 1, backgroundColor: colors.primaryDark }}
+              textStyle={{ fontSize: 14 }}
+            />
           </View>
         </View>
 
@@ -286,36 +294,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: colors.primaryDark,
-  },
-  copyButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 12,
-    paddingVertical: 12,
-    backgroundColor: colors.primaryLight,
-    gap: 8,
-  },
-  copyButtonText: {
-    color: colors.primaryDark,
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  shareButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 12,
-    paddingVertical: 12,
-    backgroundColor: colors.primaryDark,
-    gap: 8,
-  },
-  shareButtonText: {
-    color: colors.white,
-    fontWeight: '600',
-    fontSize: 14,
   },
   sectionCard: {
     backgroundColor: colors.surface,
