@@ -28,6 +28,7 @@ import { useCountrySelection } from '../hooks/useCountrySelection';
 import { AuthStackParamList, MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
+import { InlineBanner } from '../components/common/InlineBanner';
 
 type PhoneVerificationScreenNavigationProp = CompositeNavigationProp<
   NativeStackNavigationProp<AuthStackParamList, 'PhoneVerification'>,
@@ -39,6 +40,8 @@ const PhoneVerificationScreen = () => {
   const { isAuthenticated, completePhoneVerification, userProfile, refreshProfile } = useAuth();
   const isProfileUpdateFlow = isAuthenticated && !!userProfile;
   const [phoneNumber, setPhoneNumber] = useState('');
+  const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
+  const dismissBanner = React.useCallback(() => setBanner(null), []);
   const { selectedCountry, showCountryModal, selectCountry, openCountryModal, closeCountryModal, setSelectedCountry } = useCountrySelection();
   const [verificationMethod, setVerificationMethod] = useState<'telegram' | 'sms' | null>(null);
   const [verificationCode, setVerificationCode] = useState<string[]>(['', '', '', '', '', '']);
@@ -201,7 +204,7 @@ const PhoneVerificationScreen = () => {
                 ]
               );
             } else {
-              Alert.alert('Error', updateData?.updatePhoneNumber?.error || 'Failed to update phone number');
+              setBanner({ variant: 'error', message: updateData?.updatePhoneNumber?.error || 'No se pudo actualizar el número de teléfono' });
             }
           } else {
             // Auth flow - phone is verified server-side. Hand off to
@@ -235,7 +238,7 @@ const PhoneVerificationScreen = () => {
               ]
             );
           } else {
-            Alert.alert('Error', errorMessage);
+            setBanner({ variant: 'error', message: errorMessage });
           }
         }
       } else if (verificationMethod === 'sms') {
@@ -260,7 +263,7 @@ const PhoneVerificationScreen = () => {
                 { text: 'Entendido', onPress: () => { refreshProfile('personal'); navigation.goBack(); } },
               ]);
             } else {
-              Alert.alert('Error', updateData?.updatePhoneNumber?.error || 'Failed to update phone number');
+              setBanner({ variant: 'error', message: updateData?.updatePhoneNumber?.error || 'No se pudo actualizar el número de teléfono' });
             }
           } else {
             // See sibling Telegram branch above for why we don't also
@@ -269,13 +272,13 @@ const PhoneVerificationScreen = () => {
             await completePhoneVerification();
           }
         } else {
-          Alert.alert('Error', data?.verifySmsCode?.error || 'Verification failed');
+          setBanner({ variant: 'error', message: data?.verifySmsCode?.error || 'No se pudo verificar el código' });
         }
       } else {
-        Alert.alert('Error', 'Invalid verification method');
+        setBanner({ variant: 'error', message: 'Método de verificación inválido' });
       }
     } catch (e) {
-      Alert.alert('Error', 'Network error');
+      setBanner({ variant: 'error', message: 'Error de conexión. Intenta de nuevo.' });
     }
   };
 
@@ -294,11 +297,11 @@ const PhoneVerificationScreen = () => {
           setCurrentScreen('code');
           return true;
         } else {
-          Alert.alert('Error', data?.initiateSmsVerification?.error || 'Failed to send SMS');
+          setBanner({ variant: 'error', message: data?.initiateSmsVerification?.error || 'No se pudo enviar el SMS' });
           return false;
         }
       } catch (e) {
-        Alert.alert('Error', 'Network error');
+        setBanner({ variant: 'error', message: 'Error de conexión. Intenta de nuevo.' });
         return false;
       }
     });
@@ -564,6 +567,14 @@ const PhoneVerificationScreen = () => {
             contentContainerStyle={{ flexGrow: 1 }}
             keyboardShouldPersistTaps="handled"
           >
+            {banner && (
+              <InlineBanner
+                message={banner.message}
+                variant={banner.variant}
+                onDismiss={dismissBanner}
+                style={{ marginHorizontal: 20, marginTop: 12 }}
+              />
+            )}
             {currentScreen === 'phone' && renderPhoneScreen()}
             {currentScreen === 'method' && renderVerificationMethodScreen()}
             {currentScreen === 'code' && renderVerificationCodeScreen()}
