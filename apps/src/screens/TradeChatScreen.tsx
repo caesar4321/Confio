@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -24,6 +24,7 @@ import { formatLocalDate, formatLocalTime } from '../utils/dateUtils';
 import { useMutation, useQuery, useApolloClient } from '@apollo/client';
 import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
+import { InlineBanner } from '../components/common/InlineBanner';
 import { MainStackParamList } from '../types/navigation';
 import { useCurrency } from '../hooks/useCurrency';
 import { useAuth } from '../contexts/AuthContext';
@@ -83,6 +84,8 @@ export const TradeChatScreen: React.FC = () => {
   // Busy overlay for critical actions
   const [busy, setBusy] = useState(false);
   const [busyText, setBusyText] = useState<string>('');
+  const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
+  const dismissBanner = useCallback(() => setBanner(null), []);
   // Dispute modal state (for seller and buyer)
   const [showDisputeModal, setShowDisputeModal] = useState(false);
   const [disputeReason, setDisputeReason] = useState('');
@@ -1232,14 +1235,12 @@ export const TradeChatScreen: React.FC = () => {
                 });
                 if (!data?.updateP2pTradeStatus?.success) {
                   const err = data?.updateP2pTradeStatus?.errors?.join(', ') || 'No se pudo eliminar la solicitud';
-                  Alert.alert('Error', err);
-                  return;
+                  setBanner({ variant: 'error', message: err });                  return;
                 }
                 Alert.alert('Solicitud eliminada', 'Se eliminó la solicitud y el chat.');
                 navigation.navigate('BottomTabs', { screen: 'Discover' });
               } catch (e) {
-                Alert.alert('Error', 'No se pudo eliminar la solicitud.');
-              }
+                setBanner({ variant: 'error', message: 'No se pudo eliminar la solicitud.' });              }
             });
           },
         },
@@ -1275,8 +1276,7 @@ export const TradeChatScreen: React.FC = () => {
 
 
       if (!paymentMethod) {
-        Alert.alert('Error', 'No se encontró el método de pago');
-        return;
+        setBanner({ variant: 'error', message: 'No se encontró el método de pago' });        return;
       }
 
       // Log all user's payment methods for debugging
@@ -1295,8 +1295,7 @@ export const TradeChatScreen: React.FC = () => {
       ) || [];
 
       if (matchingAccounts.length === 0) {
-        Alert.alert('Error', `No tienes configurado el método de pago: ${paymentMethod.displayName || paymentMethod.name}`);
-        return;
+        setBanner({ variant: 'error', message: `No tienes configurado el método de pago: ${paymentMethod.displayName || paymentMethod.name}` });        return;
       }
 
       // If multiple accounts exist for the same payment method, show selector
@@ -1315,8 +1314,7 @@ export const TradeChatScreen: React.FC = () => {
       });
 
     } catch (error) {
-      Alert.alert('Error', 'No se pudieron compartir los datos de pago');
-    }
+      setBanner({ variant: 'error', message: 'No se pudieron compartir los datos de pago' });    }
   };
 
   const sharePaymentDetailsWithAccount = async (userBankAccount: any) => {
@@ -1334,8 +1332,7 @@ export const TradeChatScreen: React.FC = () => {
 
       if (!updateData?.updateP2pTradeStatus?.success) {
         const errorMessage = updateData?.updateP2pTradeStatus?.errors?.join(', ') || 'Error al actualizar el estado';
-        Alert.alert('Error', errorMessage);
-        return;
+        setBanner({ variant: 'error', message: errorMessage });        return;
       }
 
       const paymentMethod = userBankAccount.paymentMethod;
@@ -1409,8 +1406,7 @@ export const TradeChatScreen: React.FC = () => {
       // Debug the current state after sharing payment details
 
     } catch (error) {
-      Alert.alert('Error', 'No se pudieron compartir los datos de pago');
-    }
+      setBanner({ variant: 'error', message: 'No se pudieron compartir los datos de pago' });    }
   };
 
   const confirmMarkAsPaid = async () => {
@@ -1435,8 +1431,7 @@ export const TradeChatScreen: React.FC = () => {
         try {
           const chain = await p2pSponsoredService.markAsPaid(String(tradeId), '');
           if (!chain.success) {
-            Alert.alert('Error', chain.error || 'Error on-chain al marcar como pagado');
-            throw new Error(chain.error || 'On-chain mark paid failed');
+            setBanner({ variant: 'error', message: chain.error || 'Error on-chain al marcar como pagado' });            throw new Error(chain.error || 'On-chain mark paid failed');
           }
         } catch (e) {
           throw e;
@@ -1464,13 +1459,11 @@ export const TradeChatScreen: React.FC = () => {
           setMessages(prev => [systemMessage, ...prev]);
         } else {
           const errorMessage = data?.confirmP2pTradeStep?.errors?.join(', ') || 'Error al actualizar el estado';
-          Alert.alert('Error', errorMessage);
-          throw new Error(errorMessage);
+          setBanner({ variant: 'error', message: errorMessage });          throw new Error(errorMessage);
         }
       });
     } catch (error) {
-      Alert.alert('Error', 'No se pudo actualizar el estado del intercambio. Por favor intenta de nuevo.');
-    }
+      setBanner({ variant: 'error', message: 'No se pudo actualizar el estado del intercambio. Por favor intenta de nuevo.' });    }
   };
 
   const handleReleaseFunds = () => {
@@ -1507,8 +1500,7 @@ export const TradeChatScreen: React.FC = () => {
           const { p2pSponsoredService } = await import('../services/p2pSponsoredService');
           const chain = await p2pSponsoredService.confirmReceived(String(tradeId));
           if (!chain.success) {
-            Alert.alert('Error', chain.error || 'Error on-chain al liberar fondos');
-            throw new Error(chain.error || 'On-chain confirm received failed');
+            setBanner({ variant: 'error', message: chain.error || 'Error on-chain al liberar fondos' });            throw new Error(chain.error || 'On-chain confirm received failed');
           }
         } catch (e) {
           throw e;
@@ -1593,13 +1585,11 @@ export const TradeChatScreen: React.FC = () => {
             } catch { }
           } else {
             const errorMessage = data?.confirmP2pTradeStep?.errors?.join(', ') || 'Error al liberar fondos';
-            Alert.alert('Error', errorMessage);
-            throw new Error(errorMessage);
+            setBanner({ variant: 'error', message: errorMessage });            throw new Error(errorMessage);
           }
         } else {
           const err = confirmData?.confirmP2pTradeStep?.errors?.join(', ') || 'Error al confirmar pago recibido';
-          Alert.alert('Error', err);
-          throw new Error(err);
+          setBanner({ variant: 'error', message: err });          throw new Error(err);
         }
       });
     } catch (e) {
@@ -1631,8 +1621,7 @@ export const TradeChatScreen: React.FC = () => {
       setDisputeReason('');
       Alert.alert('Disputa abierta', 'Se abrió la disputa. El equipo revisará el caso y podrás subir evidencia.');
     } catch (e) {
-      Alert.alert('Error', 'No se pudo abrir la disputa. Intenta de nuevo.');
-    }
+      setBanner({ variant: 'error', message: 'No se pudo abrir la disputa. Intenta de nuevo.' });    }
   };
 
   const handleSendMessage = async () => {
@@ -1656,13 +1645,11 @@ export const TradeChatScreen: React.FC = () => {
         sendTypingIndicator(false);
 
       } catch (error) {
-        Alert.alert('Error', 'No se pudo enviar el mensaje. Intenta de nuevo.');
-        // Restore message text if failed
+        setBanner({ variant: 'error', message: 'No se pudo enviar el mensaje. Intenta de nuevo.' });        // Restore message text if failed
         setMessage(messageContent);
       }
     } else if (!tradeId) {
-      Alert.alert('Error', 'ID de intercambio no encontrado.');
-    } else if (!isConnected) {
+      setBanner({ variant: 'error', message: 'ID de intercambio no encontrado.' });    } else if (!isConnected) {
       Alert.alert('Sin conexión', 'No hay conexión al chat. Intenta de nuevo.');
     }
   };
@@ -1798,8 +1785,7 @@ export const TradeChatScreen: React.FC = () => {
       );
       setEnablingTrade(false);
       if (res?.success) {
-        Alert.alert('Listo', 'Intercambio habilitado. El comprador ya puede pagar.');
-        // Set local flag and refetch server/on-chain state
+        setBanner({ variant: 'success', message: 'Intercambio habilitado. El comprador ya puede pagar.' });        // Set local flag and refetch server/on-chain state
         setEscrowEnabledLocal(true);
         try {
           await Promise.all([
@@ -2022,8 +2008,7 @@ export const TradeChatScreen: React.FC = () => {
                     Alert.alert('Intercambio cancelado', 'Fondos recuperados y chat cerrado.');
                     navigation.navigate('BottomTabs', { screen: 'Discover' });
                   } catch (e) {
-                    Alert.alert('Error', 'No se pudo cancelar y recuperar.');
-                  }
+                    setBanner({ variant: 'error', message: 'No se pudo cancelar y recuperar.' });                  }
                 }}
               >
                 <Text style={styles.abandonButtonText}>Cancelar y recuperar</Text>
@@ -2050,8 +2035,7 @@ export const TradeChatScreen: React.FC = () => {
                     Alert.alert('Cancelado', 'Tiempo agotado. Fondos recuperados y chat cerrado.');
                     navigation.navigate('BottomTabs', { screen: 'Discover' });
                   } catch (e) {
-                    Alert.alert('Error', 'No se pudo cancelar por tiempo agotado.');
-                  }
+                    setBanner({ variant: 'error', message: 'No se pudo cancelar por tiempo agotado.' });                  }
                 }}
               >
                 <Text style={styles.abandonButtonText}>Cancelar por tiempo agotado</Text>
@@ -2220,6 +2204,15 @@ export const TradeChatScreen: React.FC = () => {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={0}
       >
+        {banner && (
+          <InlineBanner
+            message={banner.message}
+            variant={banner.variant}
+            onDismiss={dismissBanner}
+            autoHideMs={banner.variant === 'success' ? 2500 : undefined}
+            style={{ marginHorizontal: 12, marginTop: 8, marginBottom: 0 }}
+          />
+        )}
         {/* Messages Area */}
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
           <View style={styles.messagesContainer}>
