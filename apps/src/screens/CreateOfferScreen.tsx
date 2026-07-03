@@ -26,6 +26,7 @@ import { useAccount } from '../contexts/AccountContext';
 import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { colors } from '../config/theme';
+import { InlineBanner } from '../components/common/InlineBanner';
 
 // Colors from the design
 type PaymentMethod = {
@@ -96,6 +97,8 @@ export const CreateOfferScreen = () => {
   const [tokenType, setTokenType] = useState<'cUSD' | 'CONFIO'>(
     editMode && offerData ? (offerData.tokenType === 'CUSD' ? 'cUSD' : offerData.tokenType) : 'cUSD'
   );
+  const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
+  const dismissBanner = React.useCallback(() => setBanner(null), []);
   const [rate, setRate] = useState(editMode && offerData ? offerData.rate.toString() : '');
   const [minAmount, setMinAmount] = useState(editMode && offerData ? offerData.minAmount.toString() : '');
   const [maxAmount, setMaxAmount] = useState(editMode && offerData ? offerData.maxAmount.toString() : '');
@@ -150,23 +153,23 @@ export const CreateOfferScreen = () => {
 
   const validateForm = () => {
     if (!rate || parseFloat(rate) <= 0) {
-      Alert.alert('Error', 'Por favor ingresa una tasa válida');
+      setBanner({ variant: 'error', message: 'Por favor ingresa una tasa válida' });
       return false;
     }
     if (!minAmount || parseFloat(minAmount) <= 0) {
-      Alert.alert('Error', 'Por favor ingresa un monto mínimo válido');
+      setBanner({ variant: 'error', message: 'Por favor ingresa un monto mínimo válido' });
       return false;
     }
     if (!maxAmount || parseFloat(maxAmount) <= 0) {
-      Alert.alert('Error', 'Por favor ingresa un monto máximo válido');
+      setBanner({ variant: 'error', message: 'Por favor ingresa un monto máximo válido' });
       return false;
     }
     if (parseFloat(minAmount) > parseFloat(maxAmount)) {
-      Alert.alert('Error', 'El monto mínimo no puede ser mayor al máximo');
+      setBanner({ variant: 'error', message: 'El monto mínimo no puede ser mayor al máximo' });
       return false;
     }
     if (selectedPaymentMethods.length === 0) {
-      Alert.alert('Error', 'Por favor selecciona al menos una forma de cobro');
+      setBanner({ variant: 'error', message: 'Por favor selecciona al menos una forma de cobro' });
       return false;
     }
     // Ensure only registered payment methods are selected
@@ -174,15 +177,15 @@ export const CreateOfferScreen = () => {
       registeredPaymentMethodIds.has(id)
     );
     if (selectedRegisteredMethods.length === 0) {
-      Alert.alert('Error', 'Debes seleccionar al menos una forma de cobro que tengas registrada');
+      setBanner({ variant: 'error', message: 'Debes seleccionar al menos una forma de cobro que tengas registrada' });
       return false;
     }
     if (selectedRegisteredMethods.length !== selectedPaymentMethods.length) {
-      Alert.alert('Error', 'Solo puedes incluir formas de cobro que tengas registradas');
+      setBanner({ variant: 'error', message: 'Solo puedes incluir formas de cobro que tengas registradas' });
       return false;
     }
     if (!selectedCountry) {
-      Alert.alert('Error', 'Por favor selecciona un país de operación');
+      setBanner({ variant: 'error', message: 'Por favor selecciona un país de operación' });
       return false;
     }
     return true;
@@ -220,7 +223,7 @@ export const CreateOfferScreen = () => {
           );
         } else {
           const errorMessage = data?.updateP2pOffer?.errors?.join(', ') || 'Error desconocido';
-          Alert.alert('Error', errorMessage);
+          setBanner({ variant: 'error', message: errorMessage });
         }
       } else {
         // Create new offer
@@ -261,11 +264,11 @@ export const CreateOfferScreen = () => {
           );
         } else {
           const errorMessage = data?.createP2pOffer?.errors?.join(', ') || 'Error desconocido';
-          Alert.alert('Error', errorMessage);
+          setBanner({ variant: 'error', message: errorMessage });
         }
       }
     } catch (error) {
-      Alert.alert('Error', `Ocurrió un error al ${editMode ? 'actualizar' : 'crear'} la oferta. Por favor intenta de nuevo.`);
+      setBanner({ variant: 'error', message: `Ocurrió un error al ${editMode ? 'actualizar' : 'crear'} la oferta. Por favor intenta de nuevo.` });
     }
   };
   
@@ -301,10 +304,10 @@ export const CreateOfferScreen = () => {
                   ]
                 );
               } else {
-                Alert.alert('Error', 'No se pudo eliminar la oferta');
+                setBanner({ variant: 'error', message: 'No se pudo eliminar la oferta' });
               }
             } catch (error) {
-              Alert.alert('Error', 'No se pudo eliminar la oferta');
+              setBanner({ variant: 'error', message: 'No se pudo eliminar la oferta' });
             }
           },
         },
@@ -328,6 +331,14 @@ export const CreateOfferScreen = () => {
       </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        {banner && (
+          <InlineBanner
+            message={banner.message}
+            variant={banner.variant}
+            onDismiss={dismissBanner}
+            style={{ marginTop: 12 }}
+          />
+        )}
         {/* Exchange Type */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Tipo de operación</Text>
