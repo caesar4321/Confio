@@ -15,6 +15,7 @@ import { formatNumber } from '../utils/numberFormatting';
 import { useCountry } from '../contexts/CountryContext';
 import { LoadingOverlay } from '../components/LoadingOverlay';
 import { colors } from '../config/theme';
+import { Button } from '../components/common/Button';
 
 type ConfioPresaleScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 type PresalePhaseCard = {
@@ -369,9 +370,9 @@ export const ConfioPresaleScreen = () => {
           </Text>
 
           {!isClaimsUnlocked && activePresaleData?.activePresalePhase ? (
-            <TouchableOpacity
-              style={[styles.ctaButton, busy && styles.ctaButtonDisabled]}
-              disabled={busy}
+            <Button
+              title="Participar en la Preventa"
+              loading={busy}
               onPress={async () => {
                 if (!checkEligibility()) return;
 
@@ -393,39 +394,30 @@ export const ConfioPresaleScreen = () => {
                   Alert.alert('No disponible', errorMessage);
                 }
               }}
-            >
-              {busy ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <>
-                  <Icon name="star" size={20} color="#fff" />
-                  <Text style={styles.ctaButtonText}>Participar en la Preventa</Text>
-                </>
-              )}
-            </TouchableOpacity>
+              icon={<Icon name="star" size={20} color="#fff" />}
+              style={{ backgroundColor: colors.secondary, borderRadius: 24, paddingHorizontal: 32, marginBottom: 16 }}
+              textStyle={{ fontWeight: 'bold' }}
+            />
           ) : (!isClaimsUnlocked ? (
-            <TouchableOpacity
-              style={styles.ctaButton}
+            <Button
+              title="Notificar"
               onPress={handleJoinWaitlist}
-            >
-              <Icon name="bell" size={20} color="#fff" />
-              <Text style={styles.ctaButtonText}>Notificar</Text>
-            </TouchableOpacity>
+              icon={<Icon name="bell" size={20} color="#fff" />}
+              style={{ backgroundColor: colors.secondary, borderRadius: 24, paddingHorizontal: 32, marginBottom: 16 }}
+              textStyle={{ fontWeight: 'bold' }}
+            />
           ) : null)}
 
           {isClaimsUnlocked && (
-            <TouchableOpacity
-              style={[
-                styles.ctaButton,
-                { backgroundColor: '#10b981', marginTop: 12 },
-                (busy || (claimable ?? 0) <= 0) && styles.ctaButtonDisabled,
-              ]}
+            <Button
+              title="Reclamar mis $CONFIO"
               onPress={async () => { await handleClaim(); refetchOnchainInfo && refetchOnchainInfo(); }}
-              disabled={busy || (claimable ?? 0) <= 0}
-            >
-              <Icon name="unlock" size={20} color="#fff" />
-              <Text style={styles.ctaButtonText}>Reclamar mis $CONFIO</Text>
-            </TouchableOpacity>
+              loading={busy}
+              disabled={(claimable ?? 0) <= 0}
+              icon={<Icon name="unlock" size={20} color="#fff" />}
+              style={{ borderRadius: 24, paddingHorizontal: 32, marginTop: 12, marginBottom: 16 }}
+              textStyle={{ fontWeight: 'bold' }}
+            />
           )}
 
           {isClaimsUnlocked && claimNotice ? (
@@ -743,24 +735,6 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     textAlign: 'center',
     lineHeight: 24,
-  },
-  ctaButton: {
-    flexDirection: 'row',
-    backgroundColor: colors.secondary,
-    paddingHorizontal: 32,
-    paddingVertical: 16,
-    borderRadius: 24,
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 16,
-  },
-  ctaButtonText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  ctaButtonDisabled: {
-    opacity: 0.6,
   },
   claimNoticeText: {
     marginTop: 8,
