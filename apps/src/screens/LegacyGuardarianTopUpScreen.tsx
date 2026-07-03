@@ -37,6 +37,7 @@ import { oauthStorage } from '../services/oauthStorageService';
 import { apolloClient } from '../apollo/client';
 import PreFlightModal from '../components/PreFlightModal';
 import { useBackupEnforcement } from '../hooks/useBackupEnforcement';
+import { Button } from '../components/common/Button';
 
 
 // GraphQL mutation for USDC opt-in
@@ -453,20 +454,26 @@ const TopUpScreen = () => {
         </View>
 
         {/* CTA Button */}
-        <TouchableOpacity
-          style={[styles.ctaButton, (!amount || loading) && styles.ctaButtonDisabled]}
+        <Button
+          title="Continuar con Guardarian"
           onPress={handleStartTopUp}
-          disabled={!amount || loading}
-        >
-          {loading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <>
-              <Text style={styles.ctaButtonText}>Continuar con Guardarian</Text>
-              <Icon name="arrow-right" size={20} color="#fff" />
-            </>
-          )}
-        </TouchableOpacity>
+          loading={loading}
+          disabled={!amount}
+          icon={<Icon name="arrow-right" size={20} color="#fff" />}
+          style={!amount
+            ? { backgroundColor: '#D1D5DB', borderRadius: 16, paddingHorizontal: 24 }
+            : {
+                backgroundColor: '#34D399',
+                borderRadius: 16,
+                paddingHorizontal: 24,
+                shadowColor: '#34D399',
+                shadowOpacity: 0.3,
+                shadowRadius: 12,
+                shadowOffset: { width: 0, height: 4 },
+                elevation: 4,
+              }}
+          textStyle={{ fontWeight: '700' }}
+        />
 
         <TouchableOpacity
           style={styles.supportButton}
@@ -772,30 +779,6 @@ const styles = StyleSheet.create({
   },
 
   // CTA Button
-  ctaButton: {
-    backgroundColor: '#34D399',
-    borderRadius: 16,
-    paddingVertical: 18,
-    paddingHorizontal: 24,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    shadowColor: '#34D399',
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
-  },
-  ctaButtonDisabled: {
-    backgroundColor: '#D1D5DB',
-    shadowOpacity: 0,
-  },
-  ctaButtonText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#fff',
-  },
 
   // Powered by Guardarian
   poweredByContainer: {
