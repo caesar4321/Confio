@@ -24,6 +24,7 @@ import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
+import { InlineBanner } from '../components/common/InlineBanner';
 import { MainStackParamList } from '../types/navigation';
 import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
 import { useQuery } from '@apollo/client';
@@ -81,6 +82,8 @@ export const ActiveTradeScreen: React.FC = () => {
 
   // All useState hooks must be called unconditionally
   const [activeTradeStep, setActiveTradeStep] = useState(1);
+  const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
+  const dismissBanner = React.useCallback(() => setBanner(null), []);
   const [timeRemaining, setTimeRemaining] = useState(900);
   const [spinAnim] = useState(new Animated.Value(0));
   const [showDisputeModal, setShowDisputeModal] = useState(false);
@@ -333,7 +336,7 @@ export const ActiveTradeScreen: React.FC = () => {
 
   const submitDispute = async () => {
     if (!disputeReason || disputeReason.trim().length < 10) {
-      Alert.alert('Error', 'Por favor proporciona una descripción detallada del problema (mínimo 10 caracteres).');
+      setBanner({ variant: 'error', message: 'Por favor proporciona una descripción detallada del problema (mínimo 10 caracteres).' });
       return;
     }
 
@@ -356,10 +359,10 @@ export const ActiveTradeScreen: React.FC = () => {
           ],
         );
       } else {
-        Alert.alert('Error', res.error || 'No se pudo iniciar la disputa.');
+        setBanner({ variant: 'error', message: res.error || 'No se pudo iniciar la disputa.' });
       }
     } catch (error) {
-      Alert.alert('Error', 'Ocurrió un error al iniciar la disputa. Por favor intenta de nuevo.');
+      setBanner({ variant: 'error', message: 'Ocurrió un error al iniciar la disputa. Por favor intenta de nuevo.' });
     } finally {
       setIsSubmittingDispute(false);
     }
@@ -372,7 +375,7 @@ export const ActiveTradeScreen: React.FC = () => {
       if (!uri) return;
       await handleSelectVideo(uri);
     } catch (e: any) {
-      Alert.alert('Error', 'No se pudo abrir la galería de videos.');
+      setBanner({ variant: 'error', message: 'No se pudo abrir la galería de videos.' });
     }
   };
 
@@ -388,7 +391,7 @@ export const ActiveTradeScreen: React.FC = () => {
       setShowEvidenceSheet(false);
       try { await refetch(); } catch { }
     } catch (e: any) {
-      Alert.alert('Error', e?.message || 'No se pudo subir la evidencia.');
+      setBanner({ variant: 'error', message: e?.message || 'No se pudo subir la evidencia.' });
     } finally {
       setIsUploadingEvidence(false);
     }
@@ -1224,7 +1227,7 @@ export const ActiveTradeScreen: React.FC = () => {
                       catch { Alert.alert('Error', 'No se pudo abrir Pera Explorer.'); }
                     } catch (e) {
                       Alert.alert('Error', 'No se pudo abrir Pera Explorer.');
-                    }
+                      }
                   }}
                 >
                   <Icon name="external-link" size={16} color="#fff" style={styles.explorerIcon} />
@@ -1288,6 +1291,16 @@ export const ActiveTradeScreen: React.FC = () => {
             </View>
           )}
         </View>
+
+        {banner && (
+          <InlineBanner
+            message={banner.message}
+            variant={banner.variant}
+            onDismiss={dismissBanner}
+            autoHideMs={banner.variant === 'success' ? 2500 : undefined}
+            style={{ marginHorizontal: 16, marginTop: 8, marginBottom: 0 }}
+          />
+        )}
 
         {trade.status !== 'DISPUTED' && (
           <TradeProgressBar currentStep={activeTradeStep} totalSteps={4} />
