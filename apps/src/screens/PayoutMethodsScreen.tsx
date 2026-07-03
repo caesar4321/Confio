@@ -26,6 +26,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { AddPayoutMethodModal } from '../components/AddPayoutMethodModal';
 import Svg, { Defs, LinearGradient, Stop, Rect, Circle } from 'react-native-svg';
 import { colors } from '../config/theme';
+import { InlineBanner } from '../components/common/InlineBanner';
 
 type PayoutMethodsNavigationProp = NativeStackNavigationProp<any>;
 
@@ -271,6 +272,8 @@ export const PayoutMethodsScreen = () => {
   const { activeAccount } = useAccount();
 
   const [showAddModal, setShowAddModal] = useState(false);
+  const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
+  const dismissBanner = React.useCallback(() => setBanner(null), []);
   const [editingPayoutMethod, setEditingPayoutMethod] = useState<SavedPayoutMethod | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -310,13 +313,13 @@ export const PayoutMethodsScreen = () => {
     try {
       const { data } = await setDefaultBankInfo({ variables: { bankInfoId } });
       if (data?.setDefaultBankInfo?.success) {
-        Alert.alert('Éxito', 'Cuenta bancaria marcada como predeterminada');
+        setBanner({ variant: 'success', message: 'Cuenta bancaria marcada como predeterminada' });
         refetchBankAccounts();
       } else {
-        Alert.alert('Error', data?.setDefaultBankInfo?.error || 'Error al marcar como predeterminada', [{ text: 'Entendido' }]);
+        setBanner({ variant: 'error', message: data?.setDefaultBankInfo?.error || 'No se pudo marcar como predeterminada' });
       }
     } catch {
-      Alert.alert('Error', 'Error de conexión', [{ text: 'Entendido' }]);
+      setBanner({ variant: 'error', message: 'Error de conexión. Intenta de nuevo.' });
     }
   };
 
@@ -333,13 +336,13 @@ export const PayoutMethodsScreen = () => {
             try {
               const { data } = await deleteBankInfo({ variables: { bankInfoId } });
               if (data?.deleteBankInfo?.success) {
-                Alert.alert('Éxito', 'Cuenta bancaria eliminada', [{ text: 'Entendido' }]);
+                setBanner({ variant: 'success', message: 'Cuenta bancaria eliminada' });
                 refetchBankAccounts();
               } else {
-                Alert.alert('Error', data?.deleteBankInfo?.error || 'Error al eliminar', [{ text: 'Entendido' }]);
+                setBanner({ variant: 'error', message: data?.deleteBankInfo?.error || 'No se pudo eliminar la cuenta' });
               }
             } catch {
-              Alert.alert('Error', 'Error de conexión', [{ text: 'Entendido' }]);
+              setBanner({ variant: 'error', message: 'Error de conexión. Intenta de nuevo.' });
             }
           },
         },
@@ -516,6 +519,15 @@ export const PayoutMethodsScreen = () => {
 
       {/* Content overlaps header by 16px for the "card peeking" effect */}
       <View style={styles.contentContainer}>
+        {banner && (
+          <InlineBanner
+            message={banner.message}
+            variant={banner.variant}
+            onDismiss={dismissBanner}
+            autoHideMs={banner.variant === 'success' ? 2500 : undefined}
+            style={{ marginHorizontal: 16, marginTop: 16, marginBottom: 0 }}
+          />
+        )}
         {renderContent()}
       </View>
 
