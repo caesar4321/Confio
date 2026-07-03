@@ -10,6 +10,7 @@ import { UPDATE_USER_PROFILE, UPDATE_USERNAME, GET_ME, GET_MY_PERSONAL_KYC_STATU
 import { getCountryByIso } from '../utils/countries';
 import { biometricAuthService } from '../services/biometricAuthService';
 import { colors } from '../config/theme';
+import { InlineBanner } from '../components/common/InlineBanner';
 import { APP_LAYOUT } from '../config/layout';
 
 // Colors from the design
@@ -36,6 +37,8 @@ export const EditProfileScreen = () => {
   const navigation = useNavigation<EditProfileScreenNavigationProp>();
 
   const [firstName, setFirstName] = useState('');
+  const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
+  const dismissBanner = React.useCallback(() => setBanner(null), []);
   const [lastName, setLastName] = useState('');
   const [username, setUsername] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -61,19 +64,19 @@ export const EditProfileScreen = () => {
 
   const handleSave = async () => {
     if (!firstName.trim()) {
-      Alert.alert('Error', 'El nombre es requerido');
+      setBanner({ variant: 'error', message: 'El nombre es requerido' });
       return;
     }
 
     if (!username.trim()) {
-      Alert.alert('Error', 'El nombre de usuario es requerido');
+      setBanner({ variant: 'error', message: 'El nombre de usuario es requerido' });
       return;
     }
 
     // Validate username format
     const usernameValidation = validateUsername(username);
     if (usernameValidation) {
-      Alert.alert('Error', usernameValidation);
+      setBanner({ variant: 'error', message: usernameValidation });
       return;
     }
 
@@ -136,11 +139,11 @@ export const EditProfileScreen = () => {
           );
         } else {
           const errorMessage = profileError || usernameErrorMsg || 'Error desconocido';
-          Alert.alert('Error', errorMessage);
+          setBanner({ variant: 'error', message: errorMessage });
         }
       }
     } catch (error) {
-      Alert.alert('Error', 'No se pudo actualizar el perfil. Inténtalo de nuevo.');
+      setBanner({ variant: 'error', message: 'No se pudo actualizar el perfil. Inténtalo de nuevo.' });
     } finally {
       setIsSaving(false);
     }
@@ -254,6 +257,13 @@ export const EditProfileScreen = () => {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
+        {banner && (
+          <InlineBanner
+            message={banner.message}
+            variant={banner.variant}
+            onDismiss={dismissBanner}
+          />
+        )}
         {isVerified && (
           <View style={styles.verifiedBanner}>
             <View style={styles.verifiedHeader}>
