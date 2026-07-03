@@ -75,6 +75,7 @@ const depositConfig = {
 
 import { AuthService } from '../services/authService';
 import { colors } from '../config/theme';
+import { Button } from '../components/common/Button';
 
 // ... (imports)
 
@@ -447,17 +448,6 @@ const DepositScreen = () => {
       backgroundColor: colors.primary + '20',
       borderRadius: 8,
     },
-    shareButton: {
-      backgroundColor: colors.accent,
-      paddingVertical: 12,
-      borderRadius: 8,
-      alignItems: 'center',
-    },
-    shareButtonText: {
-      color: '#ffffff',
-      fontSize: 16,
-      fontWeight: '500',
-    },
     instructionsCard: {
       backgroundColor: '#ffffff',
       borderRadius: 16,
@@ -707,9 +697,12 @@ const DepositScreen = () => {
                 </View>
               </View>
 
-              <TouchableOpacity style={[styles.shareButton, { backgroundColor: colors.primary }]} onPress={handleShare}>
-                <Text style={styles.shareButtonText}>Compartir dirección</Text>
-              </TouchableOpacity>
+              <Button
+                title="Compartir dirección"
+                onPress={handleShare}
+                style={{ backgroundColor: colors.primary, borderRadius: 8 }}
+                textStyle={{ fontWeight: '500' }}
+              />
             </View>
 
             {/* Instructions */}
