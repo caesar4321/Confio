@@ -152,6 +152,10 @@ export const UpdateUsernameScreen: React.FC = () => {
           style={[styles.headerButton, styles.saveButton, isSaving && styles.saveButtonDisabled]}
           onPress={handleSave}
           disabled={isSaving}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          accessibilityRole="button"
+          accessibilityLabel="Guardar usuario"
+          accessibilityState={{ disabled: isSaving, busy: isSaving }}
         >
           <Text style={styles.saveButtonText}>{isSaving ? 'Guardando…' : 'Guardar'}</Text>
         </TouchableOpacity>
