@@ -6,6 +6,7 @@ import { useQuery } from '@apollo/client';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { colors } from '../config/theme';
+import { Button } from '../components/common/Button';
 import { useCurrency } from '../hooks/useCurrency';
 import { MainStackParamList } from '../types/navigation';
 import { GET_STATS_SUMMARY } from '../apollo/queries';
@@ -262,13 +263,12 @@ export const ConfioTokenInfoScreen = () => {
           <Text style={styles.ctaSubtitle}>
             Gana más $CONFIO invitando amigos y guiándolos en su primera operación
           </Text>
-          <TouchableOpacity 
-            style={styles.ctaButton}
+          <Button
+            title="Ver programa de referidos"
             onPress={() => navigation.navigate('Achievements')}
-          >
-            <Text style={styles.ctaButtonText}>Ver programa de referidos</Text>
-            <Icon name="arrow-right" size={20} color="#fff" />
-          </TouchableOpacity>
+            icon={<Icon name="arrow-right" size={20} color="#fff" />}
+            style={{ backgroundColor: colors.primary, borderRadius: 24, paddingHorizontal: 24 }}
+          />
         </View>
 
         <View style={styles.bottomPadding} />
@@ -547,20 +547,6 @@ const styles = StyleSheet.create({
     color: '#4B5563',
     marginBottom: 20,
     textAlign: 'center',
-  },
-  ctaButton: {
-    flexDirection: 'row',
-    backgroundColor: colors.primary,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 24,
-    alignItems: 'center',
-    gap: 8,
-  },
-  ctaButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
   },
   bottomPadding: {
     height: 40,
