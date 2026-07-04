@@ -1,16 +1,22 @@
 import React, { useCallback, useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Linking, Platform, Alert, AppState, AppStateStatus, ScrollView } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { View, Text, StyleSheet, TouchableOpacity, Linking, Platform, Alert, AppState, AppStateStatus, ScrollView, StatusBar } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
+import MCIcon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
 import { RouteProp, useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { AuthStackParamList } from '../types/navigation';
 import { useAuth } from '../contexts/AuthContext';
 import { biometricAuthService } from '../services/biometricAuthService';
+import { Button } from '../components/common/Button';
+import { InlineBanner } from '../components/common/InlineBanner';
+import { colors } from '../config/theme';
 
 type BiometricRouteProp = RouteProp<AuthStackParamList, 'BiometricSetup'>;
 
 export const BiometricSetupScreen = () => {
   const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
   const route = useRoute<BiometricRouteProp>();
   const origin = route.params?.origin || 'login';
   const { completeBiometricAndEnter } = useAuth();
@@ -98,79 +104,7 @@ export const BiometricSetupScreen = () => {
     }
   }, [navigation, isProcessing]);
 
-  return (
-    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={handleBack} disabled={isProcessing} style={styles.backButton} accessibilityRole="button" accessibilityLabel="Volver">
-            <Icon name="arrow-left" size={22} color="#111827" />
-          </TouchableOpacity>
-          <Text style={styles.title}>Activa la seguridad</Text>
-          <View style={{ width: 22 }} />
-        </View>
-
-        <View style={styles.card}>
-          <View style={styles.iconBadge}>
-            <Icon name="shield" size={28} color="#10B981" />
-          </View>
-          <Text style={styles.heading}>Protege tus operaciones sensibles</Text>
-          <Text style={styles.body}>
-            {Platform.OS === 'ios'
-              ? 'Usaremos tu biometría (o tu código) para desbloquear Confío y confirmar envíos, pagos y otros movimientos críticos. Tus datos de seguridad nunca salen del dispositivo.'
-              : 'Usaremos tu huella digital (o tu PIN/Patrón) para desbloquear Confío y confirmar envíos, pagos y otros movimientos críticos. Tus datos de seguridad nunca salen del dispositivo.'
-            }
-          </Text>
-
-          <View style={styles.list}>
-            <View style={styles.listItem}>
-              <Icon name="check" size={16} color="#10B981" />
-              <Text style={styles.listText}>Evita accesos no autorizados si el teléfono cae en otras manos.</Text>
-            </View>
-            <View style={styles.listItem}>
-              <Icon name="check" size={16} color="#10B981" />
-              <Text style={styles.listText}>Confirma cada envío o pago con tu rostro o huella.</Text>
-            </View>
-            <View style={styles.listItem}>
-              <Icon name="check" size={16} color="#10B981" />
-              <Text style={styles.listText}>Configuras solo una vez; seguimos usando el sistema seguro del dispositivo.</Text>
-            </View>
-          </View>
-
-          {supportedHint && (
-            <Text style={styles.hint}>{supportedHint}</Text>
-          )}
-          {!supportedHint && (
-            <Text style={styles.hint}>
-              {Platform.OS === 'ios'
-                ? 'Si aún no tienes seguridad configurada, actívala en los ajustes del dispositivo y vuelve a intentar.'
-                : 'Si aún no tienes seguridad configurada, actívala en los ajustes del dispositivo y vuelve a intentar.'
-              }
-            </Text>
-          )}
-
-          {error && (
-            <View style={styles.errorBox}>
-              <Icon name="alert-triangle" size={16} color="#EF4444" />
-              <Text style={styles.errorText}>{error}</Text>
-            </View>
-          )}
-
-          <TouchableOpacity
-            style={[styles.primaryButton, isProcessing && styles.primaryButtonDisabled]}
-            onPress={handleActivate}
-            disabled={isProcessing}
-          >
-            {isProcessing ? (
-              <ActivityIndicator color="#ffffff" />
-            ) : (
-              <Text style={styles.primaryButtonText}>Activar ahora</Text>
-            )}
-          </TouchableOpacity>
-          <Text style={styles.caption}>Necesario para mantener segura tu cuenta y tus transacciones.</Text>
-          {showSettingsButton && (
-            <TouchableOpacity
-              style={styles.settingsButton}
-              onPress={async () => {
+  const handleOpenSettings = useCallback(async () => {
                 if (Platform.OS === 'android') {
                   // Show instructions first for Android
                   Alert.alert(
@@ -239,141 +173,216 @@ export const BiometricSetupScreen = () => {
                     ]
                   );
                 }
-              }}
-            >
-              <Text style={styles.settingsButtonText}>Abrir ajustes de seguridad</Text>
-            </TouchableOpacity>
-          )}
+  }, []);
+
+  return (
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
+
+      {/* Brand field: same grammar as the Auth screen — emerald gradient,
+          one cropped coin ring, hero mark. */}
+      <View style={[styles.brandField, { paddingTop: insets.top }]}>
+        <Svg style={StyleSheet.absoluteFill} width="100%" height="100%">
+          <Defs>
+            <SvgLinearGradient id="bioField" x1="0" y1="0" x2="1" y2="1">
+              <Stop offset="0" stopColor={colors.primary} />
+              <Stop offset="1" stopColor={colors.primaryDark} />
+            </SvgLinearGradient>
+          </Defs>
+          <Rect width="100%" height="100%" fill="url(#bioField)" />
+          <Circle cx="94%" cy="8%" r="120" stroke={colors.white} strokeWidth="28" strokeOpacity="0.10" fill="none" />
+        </Svg>
+        <TouchableOpacity
+          onPress={handleBack}
+          disabled={isProcessing}
+          style={styles.backButton}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          accessibilityRole="button"
+          accessibilityLabel="Volver"
+        >
+          <Icon name="arrow-left" size={22} color={colors.white} />
+        </TouchableOpacity>
+        <View style={styles.fieldContent}>
+          <View style={styles.heroBadge}>
+            <MCIcon name="fingerprint" size={44} color={colors.white} />
+          </View>
+          <Text style={styles.fieldTitle} accessibilityRole="header">Activa la seguridad</Text>
+          <Text style={styles.fieldSubtitle}>Tu huella o tu rostro es la llave</Text>
         </View>
+      </View>
+
+      {/* White sheet with the pitch and the action */}
+      <ScrollView style={styles.sheet} contentContainerStyle={styles.sheetContent} showsVerticalScrollIndicator={false}>
+        <Text style={styles.heading}>Protege tus operaciones sensibles</Text>
+        <Text style={styles.body}>
+          {Platform.OS === 'ios'
+            ? 'Usaremos tu biometría (o tu código) para desbloquear Confío y confirmar envíos, pagos y otros movimientos críticos. Tus datos de seguridad nunca salen del dispositivo.'
+            : 'Usaremos tu huella digital (o tu PIN/Patrón) para desbloquear Confío y confirmar envíos, pagos y otros movimientos críticos. Tus datos de seguridad nunca salen del dispositivo.'
+          }
+        </Text>
+
+        <View style={styles.list}>
+          <View style={styles.listItem}>
+            <View style={styles.listIcon}>
+              <Icon name="lock" size={16} color={colors.primaryDark} />
+            </View>
+            <Text style={styles.listText}>Evita accesos no autorizados si el teléfono cae en otras manos.</Text>
+          </View>
+          <View style={styles.listItem}>
+            <View style={styles.listIcon}>
+              <Icon name="send" size={16} color={colors.primaryDark} />
+            </View>
+            <Text style={styles.listText}>Confirma cada envío o pago con tu rostro o huella.</Text>
+          </View>
+          <View style={styles.listItem}>
+            <View style={styles.listIcon}>
+              <Icon name="check-circle" size={16} color={colors.primaryDark} />
+            </View>
+            <Text style={styles.listText}>Configuras solo una vez; seguimos usando el sistema seguro del dispositivo.</Text>
+          </View>
+        </View>
+
+        <Text style={styles.hint}>
+          {supportedHint ?? 'Si aún no tienes seguridad configurada, actívala en los ajustes del dispositivo y vuelve a intentar.'}
+        </Text>
+
+        {error && (
+          <InlineBanner
+            message={error}
+            variant="error"
+            onDismiss={() => setError(null)}
+            style={styles.banner}
+          />
+        )}
+
+        <Button
+          title="Activar ahora"
+          onPress={handleActivate}
+          loading={isProcessing}
+          disabled={isProcessing}
+        />
+        <Text style={styles.caption}>Necesario para mantener segura tu cuenta y tus transacciones.</Text>
+        {showSettingsButton && (
+          <Button
+            title="Abrir ajustes de seguridad"
+            variant="secondary"
+            onPress={handleOpenSettings}
+            style={styles.settingsButton}
+          />
+        )}
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: colors.primaryDark,
   },
-  scrollContent: {
-    flexGrow: 1,
-    paddingBottom: 24,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+  brandField: {
+    paddingBottom: 48,
+    overflow: 'hidden',
   },
   backButton: {
-    padding: 6,
+    padding: 10,
+    alignSelf: 'flex-start',
+    marginLeft: 6,
+    marginTop: 4,
   },
-  title: {
-    flex: 1,
-    textAlign: 'center',
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#111827',
+  fieldContent: {
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingBottom: 8,
   },
-  card: {
-    margin: 16,
-    padding: 20,
-    backgroundColor: '#ffffff',
-    borderRadius: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 3,
-  },
-  iconBadge: {
-    width: 56,
-    height: 56,
-    borderRadius: 16,
-    backgroundColor: '#ECFDF3',
+  heroBadge: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: 'rgba(255, 255, 255, 0.16)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.35)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
+    marginBottom: 14,
+  },
+  fieldTitle: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: colors.white,
+    textAlign: 'center',
+  },
+  fieldSubtitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.primaryLight,
+    marginTop: 6,
+    textAlign: 'center',
+  },
+  sheet: {
+    flex: 1,
+    backgroundColor: colors.background,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    marginTop: -28,
+  },
+  sheetContent: {
+    padding: 24,
+    paddingBottom: 40,
   },
   heading: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.dark,
     marginBottom: 8,
   },
   body: {
     fontSize: 15,
-    color: '#374151',
+    color: colors.gray700,
     lineHeight: 22,
-    marginBottom: 16,
+    marginBottom: 20,
   },
   list: {
-    gap: 10,
-    marginBottom: 16,
+    gap: 14,
+    marginBottom: 20,
   },
   listItem: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 8,
+    gap: 12,
+  },
+  listIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: colors.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   listText: {
     flex: 1,
     fontSize: 14,
-    color: '#374151',
+    color: colors.gray700,
     lineHeight: 20,
+    paddingTop: 6,
   },
   hint: {
     fontSize: 13,
-    color: '#6B7280',
-    marginBottom: 12,
+    color: colors.text.secondary,
+    lineHeight: 18,
+    marginBottom: 16,
   },
-  errorBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    padding: 10,
-    borderRadius: 10,
-    backgroundColor: '#FEF2F2',
-    marginBottom: 12,
-  },
-  errorText: {
-    flex: 1,
-    color: '#B91C1C',
-    fontSize: 13,
-  },
-  primaryButton: {
-    backgroundColor: '#10B981',
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  primaryButtonDisabled: {
-    opacity: 0.6,
-  },
-  primaryButtonText: {
-    color: '#ffffff',
-    fontWeight: '700',
-    fontSize: 15,
+  banner: {
+    marginBottom: 16,
   },
   caption: {
     textAlign: 'center',
     fontSize: 12,
-    color: '#6B7280',
+    color: colors.text.secondary,
+    marginTop: 10,
   },
   settingsButton: {
-    marginTop: 12,
-    alignSelf: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#CBD5E1',
-  },
-  settingsButtonText: {
-    color: '#0f172a',
-    fontWeight: '600',
-    fontSize: 13,
+    marginTop: 16,
   },
 });
 
