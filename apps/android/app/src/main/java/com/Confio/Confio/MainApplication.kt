@@ -16,79 +16,25 @@ import com.facebook.soloader.ExternalSoMapping
 import com.facebook.soloader.SoLoader
 import java.io.File
 
-// Manual imports for all packages
-import com.RNAppleAuthentication.AppleAuthenticationAndroidPackage
-import io.invertase.notifee.NotifeePackage
-import com.reactnativecommunity.cameraroll.CameraRollPackage
-import io.invertase.firebase.app.ReactNativeFirebaseAppPackage
-import io.invertase.firebase.auth.ReactNativeFirebaseAuthPackage
-import io.invertase.firebase.messaging.ReactNativeFirebaseMessagingPackage
-import io.invertase.firebase.analytics.ReactNativeFirebaseAnalyticsPackage
-import io.invertase.firebase.crashlytics.ReactNativeFirebaseCrashlyticsPackage
-import io.invertase.firebase.appcheck.ReactNativeFirebaseAppCheckPackage
-import com.reactnativegooglesignin.RNGoogleSigninPackage
-import org.linusu.RNGetRandomValuesPackage
-import com.oblador.keychain.KeychainPackage
-import com.swmansion.reanimated.ReanimatedPackage
-import com.th3rdwave.safeareacontext.SafeAreaContextPackage
-import com.swmansion.rnscreens.RNScreensPackage
-import com.horcrux.svg.SvgPackage
-import com.oblador.vectoricons.VectorIconsPackage
-import fr.greweb.reactnativeviewshot.RNViewShotPackage
-import com.mrousavy.camera.react.CameraPackage
-import com.worklets.WorkletsCorePackage
-import com.rt2zz.reactnativecontacts.ReactNativeContacts
-import com.learnium.RNDeviceInfo.RNDeviceInfo
+// Autolinked packages come from the generated PackageList; only packages
+// that CANNOT autolink are imported manually below.
+import com.facebook.react.PackageList
 import com.Confio.Confio.MediaPickerPackage
-import cl.json.RNSharePackage
 import com.sdkreactnative.SdkReactNativePackage
-import com.reactnativecommunity.clipboard.ClipboardPackage
-import com.imagepicker.ImagePickerPackage
-import com.gevorg.reactlibrary.RNQrGeneratorPackage
-
-import com.uerceg.play_install_referrer.PlayInstallReferrerPackage
 
 class MainApplication : Application(), ReactApplication {
 
   override val reactNativeHost: ReactNativeHost =
       object : DefaultReactNativeHost(this) {
         override fun getPackages(): List<ReactPackage> {
-          return listOf(
-            // Core React Native packages
-            com.facebook.react.shell.MainReactPackage(),
-            
-            // Manual package list
-            AppleAuthenticationAndroidPackage(),
-            NotifeePackage(),
-            CameraRollPackage(),
-            ReactNativeFirebaseAppPackage(),
-            ReactNativeFirebaseAuthPackage(),
-            ReactNativeFirebaseMessagingPackage(),
-            ReactNativeFirebaseAnalyticsPackage(),
-            ReactNativeFirebaseCrashlyticsPackage(),
-            ReactNativeFirebaseAppCheckPackage(),
-            RNGoogleSigninPackage(),
-            RNGetRandomValuesPackage(),
-            KeychainPackage(),
-            ReanimatedPackage(),
-            SafeAreaContextPackage(),
-            RNScreensPackage(),
-            SvgPackage(),
-            VectorIconsPackage(),
-            RNViewShotPackage(),
-            CameraPackage(),
-            WorkletsCorePackage(),
-            ReactNativeContacts(),
-            RNDeviceInfo(),
-            MediaPickerPackage(),
-            RNSharePackage(),
-            ClipboardPackage(),
-            ImagePickerPackage(),
-            RNQrGeneratorPackage(),
-            SdkReactNativePackage(),
-
-            PlayInstallReferrerPackage()
-          )
+          // PackageList includes MainReactPackage + every autolinked module
+          // (react-native.config.js governs exclusions).
+          return PackageList(this).packages.apply {
+            // Manual: local in-app package (not an npm module)
+            add(MediaPickerPackage())
+            // Manual: Didit SDK (custom maven repo; excluded from autolinking)
+            add(SdkReactNativePackage())
+          }
         }
 
         override fun getJSMainModuleName(): String = "index"

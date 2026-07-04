@@ -1,9 +1,17 @@
 pluginManagement {
+    includeBuild('../node_modules/@react-native/gradle-plugin')
     repositories {
         google()
         mavenCentral()
         gradlePluginPortal()
     }
+}
+plugins { id("com.facebook.react.settings") }
+
+// Autolinking: register every native module from `react-native config`
+// (re-enabled 2026-07; deliberate exclusions live in react-native.config.js).
+extensions.configure(com.facebook.react.ReactSettingsExtension) { ex ->
+    ex.autolinkLibrariesFromCommand()
 }
 
 dependencyResolutionManagement {
@@ -39,87 +47,5 @@ includeBuild('../node_modules/@react-native/gradle-plugin')
 rootProject.name = "Confio"
 include(":app")
 
-include ':invertase_react-native-apple-authentication'
-project(':invertase_react-native-apple-authentication').projectDir = new File(rootProject.projectDir, '../node_modules/@invertase/react-native-apple-authentication/android')
-
-include ':react-native-firebase_app'
-project(':react-native-firebase_app').projectDir = new File(rootProject.projectDir, '../node_modules/@react-native-firebase/app/android')
-
-include ':react-native-firebase_auth'
-project(':react-native-firebase_auth').projectDir = new File(rootProject.projectDir, '../node_modules/@react-native-firebase/auth/android')
-
-include ':react-native-google-signin_google-signin'
-project(':react-native-google-signin_google-signin').projectDir = new File(rootProject.projectDir, '../node_modules/@react-native-google-signin/google-signin/android')
-
-include ':react-native-get-random-values'
-project(':react-native-get-random-values').projectDir = new File(rootProject.projectDir, '../node_modules/react-native-get-random-values/android')
-
-include ':react-native-keychain'
-project(':react-native-keychain').projectDir = new File(rootProject.projectDir, '../node_modules/react-native-keychain/android')
-
-include ':react-native-vector-icons'
-project(':react-native-vector-icons').projectDir = new File(rootProject.projectDir, '../node_modules/react-native-vector-icons/android')
-
-include ':react-native-svg'
-project(':react-native-svg').projectDir = new File(rootProject.projectDir, '../node_modules/react-native-svg/android')
-
-include ':react-native-screens'
-project(':react-native-screens').projectDir = new File(rootProject.projectDir, '../node_modules/react-native-screens/android')
-
-include ':react-native-safe-area-context'
-project(':react-native-safe-area-context').projectDir = new File(rootProject.projectDir, '../node_modules/react-native-safe-area-context/android')
-
-include ':react-native-reanimated'
-project(':react-native-reanimated').projectDir = new File(rootProject.projectDir, '../node_modules/react-native-reanimated/android')
-
-include ':react-native-vision-camera'
-project(':react-native-vision-camera').projectDir = new File(rootProject.projectDir, '../node_modules/react-native-vision-camera/android')
-
-include ':react-native-worklets-core'
-project(':react-native-worklets-core').projectDir = new File(rootProject.projectDir, '../node_modules/react-native-worklets-core/android')
-
-include ':react-native-view-shot'
-project(':react-native-view-shot').projectDir = new File(rootProject.projectDir, '../node_modules/react-native-view-shot/android')
-
-include ':react-native-cameraroll'
-project(':react-native-cameraroll').projectDir = new File(rootProject.projectDir, '../node_modules/@react-native-camera-roll/camera-roll/android')
-
-include ':react-native-contacts'
-project(':react-native-contacts').projectDir = new File(rootProject.projectDir, '../node_modules/react-native-contacts/android')
-
-include ':@react-native-firebase_messaging'
-project(':@react-native-firebase_messaging').projectDir = new File(rootProject.projectDir, '../node_modules/@react-native-firebase/messaging/android')
-
-include ':react-native-device-info'
-project(':react-native-device-info').projectDir = new File(rootProject.projectDir, '../node_modules/react-native-device-info/android')
-
-include ':notifee_react-native'
-project(':notifee_react-native').projectDir = new File(rootProject.projectDir, '../node_modules/@notifee/react-native/android')
-
 include ':didit-sdk-react-native'
 project(':didit-sdk-react-native').projectDir = new File(rootProject.projectDir, '../node_modules/@didit-protocol/sdk-react-native/android')
-
-
-include ':react-native-play-install-referrer'
-project(':react-native-play-install-referrer').projectDir = new File(rootProject.projectDir, '../node_modules/react-native-play-install-referrer/android')
-
-include ':@react-native-firebase_analytics'
-project(':@react-native-firebase_analytics').projectDir = new File(rootProject.projectDir, '../node_modules/@react-native-firebase/analytics/android')
-
-include ':@react-native-firebase_crashlytics'
-project(':@react-native-firebase_crashlytics').projectDir = new File(rootProject.projectDir, '../node_modules/@react-native-firebase/crashlytics/android')
-
-include ':@react-native-firebase_appcheck'
-project(':@react-native-firebase_appcheck').projectDir = new File(rootProject.projectDir, '../node_modules/@react-native-firebase/app-check/android')
-
-include ':react-native-share'
-project(':react-native-share').projectDir = new File(rootProject.projectDir, '../node_modules/react-native-share/android')
-
-include ':react-native-clipboard_clipboard'
-project(':react-native-clipboard_clipboard').projectDir = new File(rootProject.projectDir, '../node_modules/@react-native-clipboard/clipboard/android')
-
-include ':react-native-image-picker'
-project(':react-native-image-picker').projectDir = new File(rootProject.projectDir, '../node_modules/react-native-image-picker/android')
-
-include ':rn-qr-generator'
-project(':rn-qr-generator').projectDir = new File(rootProject.projectDir, '../node_modules/rn-qr-generator/android')

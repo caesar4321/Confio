@@ -10,126 +10,21 @@ module.exports = {
     },
   },
   dependencies: {
-    // Enable all for iOS, disable all for Android
-    '@invertase/react-native-apple-authentication': {
-      platforms: {
-        android: null,
-        // ios: enabled (autolinking)
-      }
-    },
-    '@notifee/react-native': {
-      platforms: {
-        android: null,
-        // ios: enabled (autolinking)
-      }
-    },
-    '@react-native-camera-roll/camera-roll': {
-      platforms: {
-        android: null,
-        // ios: enabled (autolinking)
-      }
-    },
-    '@react-native-firebase/app': {
-      platforms: {
-        android: null,
-        // ios: enabled (autolinking)
-      }
-    },
-    '@react-native-firebase/auth': {
-      platforms: {
-        android: null,
-        // ios: enabled (autolinking)
-      }
-    },
-    '@react-native-firebase/messaging': {
-      platforms: {
-        android: null,
-        // ios: enabled (autolinking)
-      }
-    },
-    '@react-native-google-signin/google-signin': {
-      platforms: {
-        android: null,
-        // ios: enabled (autolinking)
-      }
-    },
-    'react-native-contacts': {
-      platforms: {
-        android: null,
-        // ios: enabled (autolinking)
-      }
-    },
-    'react-native-device-info': {
-      platforms: {
-        android: null,
-        // ios: enabled (autolinking)
-      }
-    },
-    'react-native-get-random-values': {
-      platforms: {
-        android: null,
-        // ios: enabled (autolinking)
-      }
-    },
-    'react-native-keychain': {
-      platforms: {
-        android: null,
-        // ios: enabled (autolinking)
-      }
-    },
-    'react-native-reanimated': {
-      platforms: {
-        android: null,
-        // ios: enabled (autolinking)
-      }
-    },
-    'react-native-safe-area-context': {
-      platforms: {
-        android: null,
-        // ios: enabled (autolinking)
-      }
-    },
-    'react-native-screens': {
-      platforms: {
-        android: null,
-        // ios: enabled (autolinking)
-      }
-    },
-    'react-native-svg': {
-      platforms: {
-        android: null,
-        // ios: enabled (autolinking)
-      }
-    },
-    'react-native-vector-icons': {
-      platforms: {
-        android: null,
-        // ios: enabled (autolinking)
-      }
-    },
-    'react-native-view-shot': {
-      platforms: {
-        android: null,
-        // ios: enabled (autolinking)
-      }
-    },
-    'react-native-vision-camera': {
-      platforms: {
-        android: null,
-        // ios: enabled (autolinking)
-      }
-    },
+    // Autolinking is ON for both platforms (re-enabled 2026-07 after the
+    // RN 0.7x-era bugs that forced manual Android linking were fixed).
+    // Only deliberate exclusions live here:
     'react-native-worklets-core': {
       platforms: {
-        android: null,
-        ios: null  // Disabled - only needed for Android frame processors
-      }
+        ios: null, // only needed for Android frame processors
+      },
     },
     '@didit-protocol/sdk-react-native': {
+      // Manual on both platforms: needs a custom maven repo on Android
+      // (settings.gradle) and a remote podspec on iOS (Podfile).
       platforms: {
         android: null,
-        ios: null
-      }
-    }
+        ios: null,
+      },
+    },
   },
 };
