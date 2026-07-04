@@ -17,6 +17,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQuery, useMutation } from '@apollo/client';
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
+import { InlineBanner } from '../components/common/InlineBanner';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { Financiera } from '../types/financiera';
 import {
@@ -108,6 +109,8 @@ const MyFinancieraCard = ({
 
 export const MyFinancierasScreen = () => {
   const navigation = useNavigation<NavProp>();
+  const [banner, setBanner] = React.useState<{ message: string; variant: 'error' | 'success' } | null>(null);
+  const dismissBanner = React.useCallback(() => setBanner(null), []);
 
   const { data, loading, refetch, networkStatus } = useQuery(GET_MY_FINANCIERAS, {
     fetchPolicy: 'cache-and-network',
@@ -129,10 +132,10 @@ export const MyFinancierasScreen = () => {
       .then((res) => {
         const payload = res.data?.setFinancieraActive;
         if (!payload?.success) {
-          Alert.alert('Error', payload?.error || 'No se pudo actualizar.');
+          setBanner({ variant: 'error', message: payload?.error || 'No se pudo actualizar.' });
         }
       })
-      .catch(() => Alert.alert('Error', 'No se pudo actualizar. Revisa tu conexión.'));
+      .catch(() => setBanner({ variant: 'error', message: 'No se pudo actualizar. Revisa tu conexión.' }));
   };
 
   const confirmDelete = (f: Financiera) => {
@@ -148,10 +151,10 @@ export const MyFinancierasScreen = () => {
             try {
               const res = await deleteMutation({ variables: { financieraId: f.id } });
               if (!res.data?.deleteFinanciera?.success) {
-                Alert.alert('Error', res.data?.deleteFinanciera?.error || 'No se pudo eliminar.');
+                setBanner({ variant: 'error', message: res.data?.deleteFinanciera?.error || 'No se pudo eliminar.' });
               }
             } catch {
-              Alert.alert('Error', 'No se pudo eliminar. Revisa tu conexión.');
+              setBanner({ variant: 'error', message: 'No se pudo eliminar. Revisa tu conexión.' });
             }
           },
         },
@@ -200,6 +203,14 @@ export const MyFinancierasScreen = () => {
         </View>
       </SafeAreaView>
 
+      {banner && (
+        <InlineBanner
+          message={banner.message}
+          variant={banner.variant}
+          onDismiss={dismissBanner}
+          style={{ marginHorizontal: 16, marginTop: 12, marginBottom: 0 }}
+        />
+      )}
       <FlatList
         data={financieras}
         keyExtractor={(item) => item.id}
