@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, RefreshControl, ScrollView, SafeAreaView, Platform, StatusBar } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, RefreshControl, ScrollView, Platform, StatusBar } from 'react-native';
+import { Header } from '../navigation/Header';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -199,18 +200,15 @@ const PayrollRunsHistoryScreen = () => {
   }, [navigation]);
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <View style={styles.safeArea}>
       <View style={styles.container}>
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-            <Icon name="arrow-left" size={22} color="#111827" />
-          </TouchableOpacity>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.title}>Corridas de Nómina</Text>
-            <Text style={styles.subtitle}>Historial de pagos programados</Text>
-          </View>
-        </View>
+        <Header
+          navigation={navigation as any}
+          title="Corridas de Nómina"
+          subtitle="Historial de pagos programados"
+          backgroundColor="#fff"
+          showBackButton
+        />
 
         {/* Filters */}
         <View style={styles.filtersWrapper}>
@@ -302,7 +300,7 @@ const PayrollRunsHistoryScreen = () => {
           }
         />
       </View>
-    </SafeAreaView>
+    </View>
   );
 };
 
@@ -314,31 +312,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F9FAFB'
-  },
-  header: {
-    paddingTop: 12,
-    paddingBottom: 16,
-    paddingHorizontal: 16,
-    marginTop: Platform.OS === 'android' ? APP_LAYOUT.topSafeArea + 10 : 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
-  },
-  backButton: {
-    padding: 8,
-    marginRight: 8,
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#111827'
-  },
-  subtitle: {
-    fontSize: 13,
-    color: '#6B7280',
-    marginTop: 2
   },
   filtersWrapper: {
     backgroundColor: '#fff',
