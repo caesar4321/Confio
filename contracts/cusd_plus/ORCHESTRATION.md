@@ -22,15 +22,26 @@ the same sponsorship philosophy, different mechanism).
 
 ### Ahorrar (cUSD → cUSD+)
 ```
-leg A (Algorand, atomic, user signs):  burn cUSD → USDC lands at user.algo
-                                       (sponsored group, as today)
-leg B (Algorand→bridge, user signs):   user.algo deposits USDC into Allbridge
-                                       Core, destination = user.bsc → USDT-BSC
-                                       arrives AT THE USER'S BSC ADDRESS
-leg C (BSC, user signs, gas-dusted):   approve + vault.subscribeAndMint(
-                                       usdtIn, minUsdyOut, user.bsc)
-                                       → USDY into vault → shares to user.bsc
+leg AB (Algorand, ONE atomic group,    [sponsor fee pay, cUSD axfer → app,
+        user signs):                    burn app call (inner tx: USDC → user),
+                                        USDC axfer → Allbridge, Allbridge
+                                        app call, destination = user.bsc]
+leg C  (BSC, user signs, gas-dusted):  approve + vault.subscribeAndMint(
+                                        usdtIn, minUsdyOut, user.bsc)
+                                        → USDY into vault → shares to user.bsc
 ```
+
+Leg AB is ONE group by design (Julian's correction — and VERIFIED against
+the deployed contract: `burn_for_collateral` uses relative indexing with no
+group-size cap, its own comment says "so burn can be embedded in larger
+atomic groups"; no contract change needed). Consequences:
+- USDC never rests at user.algo — it exists only inside group execution, so
+  there is no auto-swap race and no suppression flag;
+- the Allbridge receive floor sits in the same group, so an adverse pool
+  move fails the WHOLE group and the user still holds cUSD untouched —
+  "burned but not bridged" is not a reachable state;
+- the point of no return is the group commit, after which the value is
+  already in bridge flight toward the user's own BSC address.
 
 ### Retirar (cUSD+ → cUSD)
 ```
@@ -41,6 +52,13 @@ leg B' (BSC→bridge, user signs):       Allbridge deposit, destination =
 leg C' (Algorand):                     THE EXISTING USDC→cUSD auto-swap —
                                        already in production, unchanged
 ```
+
+EVM has no native tx grouping, so A' and B' are two signatures in the same
+foreground session; if interrupted between them, USDT rests at the user's
+own address and resume continues. (A v2 periphery "redeem-and-bridge"
+router contract could fuse them into one tx — transient in-contract flow,
+not custody — optional, not load-bearing.) USDC arriving at user.algo is
+leg C' doing its normal job: on Retirar the auto-swap IS the last leg.
 
 Cross-chain atomicity doesn't exist; the guarantee is the honest version:
 **each leg is atomic on its chain, every halt state leaves the value in the
@@ -63,15 +81,8 @@ Progress happens exactly like the existing USDC-ALG → cUSD auto-swap:
   what portion is through and what remains ("Convertimos $X de $Y; el resto
   sigue en tu billetera como cUSD").
 - **We don't cover anything.** If costs moved between legs, the user sees
-  the fresh number and decides: continue at today's cost, wait, or (Ahorrar
-  leg-B halt) swap the USDC back to cUSD 1:1 via the existing conversion and
-  forget the whole thing. Confío never eats a delta silently and never
-  proceeds on a stale quote.
-- **Auto-swap suppression flag**: during an Ahorrar in flight, USDC at
-  user.algo is leg-A output, NOT idle dust — the existing auto-swap must
-  check the in-flight conversion state or it will "helpfully" convert the
-  user's savings deposit back into cUSD. (Symmetrically, leg C' of Retirar
-  IS the auto-swap doing its normal job — no suppression there.)
+  the fresh number and decides: continue at today's cost or wait. Confío
+  never eats a delta silently and never proceeds on a stale quote.
 - Server-side celery only does what needs no keys: polling Allbridge
   transfer status, topping BNB gas dust when leg C is next, websocket
   events, reconciliation (§6), and nudging via push notification if a
@@ -102,8 +113,7 @@ $30K/$15K. Large conversions = visible partial fills by design.
 | Halt point | User now holds | Path forward (client modal offers it) |
 | --- | --- | --- |
 | Guard trips at quote | cUSD (untouched) | partial now, or wait |
-| Leg A unconfirmed | cUSD (group atomic) | clean retry |
-| After A, bridge cost jumped | USDC-ALG in own wallet | continue at fresh cost / wait / swap back to cUSD 1:1 |
+| Leg AB group fails (incl. Allbridge floor breached) | cUSD (group atomic — nothing happened) | clean retry at a fresh quote |
 | Bridge in flight / stuck | in-flight (Allbridge) | server polls status; > ~30 min → ops alert + honest "tardando más de lo normal"; Allbridge transfers resolve by retry/support, value not lost |
 | USDT arrived, app closed | USDT-BSC at user.bsc | next foreground: gas dust + leg C; push nudge after days |
 | Vault paused / IM down | USDT-BSC at user.bsc | retry on later foregrounds; oracle-time mint means waiting costs ~nothing in USD |
