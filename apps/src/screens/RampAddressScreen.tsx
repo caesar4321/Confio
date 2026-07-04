@@ -24,6 +24,7 @@ import { AnalyticsService } from '../services/analyticsService';
 import { getCountryByIso } from '../utils/countries';
 import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
+import { Header } from '../navigation/Header';
 
 type Navigation = NavigationProp<MainStackParamList>;
 type EconomicActivityOption = {
@@ -213,15 +214,15 @@ export const RampAddressScreen: React.FC = () => {
   const isButtonDisabled = isSaving || !hasChanges;
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <View style={styles.safeArea}>
       <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Icon name="arrow-left" size={20} color="#ffffff" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Dirección</Text>
-        <View style={styles.headerSpacer} />
-      </View>
+      <Header
+        navigation={navigation as any}
+        title="Dirección"
+        backgroundColor={colors.primaryDark}
+        isLight
+        showBackButton
+      />
 
       {savedSuccess && (
         <Animated.View style={[styles.successBanner, { opacity: successOpacity }]}>
@@ -452,7 +453,7 @@ export const RampAddressScreen: React.FC = () => {
           />
         </SafeAreaView>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 };
 
@@ -460,33 +461,6 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: colors.primaryDark,
-  },
-  backButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerTitle: {
-    flex: 1,
-    textAlign: 'center',
-    marginHorizontal: 12,
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#ffffff',
-  },
-  headerSpacer: {
-    width: 36,
   },
   successBanner: {
     flexDirection: 'row',
