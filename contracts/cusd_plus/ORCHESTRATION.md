@@ -151,6 +151,14 @@ standing scanner over all registered savings addresses (like the Algorand
 inbound scanner) — the address-array topic filter keeps it one RPC call
 regardless of watch-set size.
 
+The same single call extends to GM: every ERC-20 shares one Transfer
+event signature, and eth_getLogs' `address` field takes a CONTRACT array
+— so USDT plus 200+ tokenized stocks are one radar sweep (contract list =
+GM metadata, data not code). Contrast Algorand, where the inbound scan is
+per-asset; the unified EVM event log is a structural win for the stocks
+product. If public-node array limits ever bind, chunk the arrays or move
+to a keyed provider — no architecture change.
+
 ## 6. Build inventory — new vs reused
 
 **New builds** (the bulk is BSC-side client infrastructure):
