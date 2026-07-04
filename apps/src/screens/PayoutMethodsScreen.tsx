@@ -22,11 +22,13 @@ import {
   SET_DEFAULT_BANK_INFO,
 } from '../apollo/queries';
 import { useAccount } from '../contexts/AccountContext';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import MCIcon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { AddPayoutMethodModal } from '../components/AddPayoutMethodModal';
 import Svg, { Defs, LinearGradient, Stop, Rect, Circle } from 'react-native-svg';
 import { colors } from '../config/theme';
 import { InlineBanner } from '../components/common/InlineBanner';
+import { EmptyState } from '../components/EmptyState';
+import { Header } from '../navigation/Header';
 
 type PayoutMethodsNavigationProp = NativeStackNavigationProp<any>;
 
@@ -139,23 +141,6 @@ const SkeletonCard = () => {
   );
 };
 
-// ─── Header SVG Background ───────────────────────────────────────────────────
-
-const HeaderBackground = ({ height }: { height: number }) => (
-  <Svg width="100%" height={height} style={StyleSheet.absoluteFill}>
-    <Defs>
-      <LinearGradient id="headerGrad" x1="0" y1="0" x2="1" y2="1">
-        <Stop offset="0" stopColor="#34d399" stopOpacity="1" />
-        <Stop offset="1" stopColor="#6ee7b7" stopOpacity="1" />
-      </LinearGradient>
-    </Defs>
-    <Rect width="100%" height={height} fill="url(#headerGrad)" />
-    {/* Decorative circles */}
-    <Circle cx="90%" cy="20" r="80" fill="rgba(255,255,255,0.08)" />
-    <Circle cx="15%" cy="90%" r="50" fill="rgba(255,255,255,0.06)" />
-  </Svg>
-);
-
 // ─── Payout Method Card ───────────────────────────────────────────────────────
 
 const PayoutMethodCard = ({
@@ -170,9 +155,15 @@ const PayoutMethodCard = ({
   onDelete: () => void;
 }) => {
   const providerType = payoutMethod.paymentMethod?.providerType ?? 'DEFAULT';
-  const accentColor =
-    colors.providerColors[providerType as keyof typeof colors.providerColors] ??
-    colors.providerColors.DEFAULT;
+  // Provider accents from theme tokens. (colors.providerColors only holds
+  // ramp-provider brands, so the old lookup always came back undefined and
+  // the previous accent bars never actually rendered a color.)
+  const providerAccents: Record<string, string> = {
+    BANK: colors.accent,
+    DIGITAL_WALLET: colors.secondary,
+    MOBILE_PAYMENT: colors.primaryDark,
+  };
+  const accentColor = providerAccents[providerType] ?? colors.primaryDark;
 
   const providerLabel: Record<string, string> = {
     BANK: 'Banco',
@@ -181,16 +172,16 @@ const PayoutMethodCard = ({
   };
   const typeLabel = providerLabel[providerType] ?? 'Forma de cobro';
 
-  let flagEmoji =
+  const flagEmoji =
     payoutMethod.paymentMethod?.bank?.country?.flagEmoji ||
     payoutMethod.paymentMethod?.country?.flagEmoji ||
     payoutMethod.country?.flagEmoji;
 
-  if (!flagEmoji) {
-    if (providerType === 'DIGITAL_WALLET') flagEmoji = '💳';
-    else if (providerType === 'MOBILE_PAYMENT') flagEmoji = '📱';
-    else flagEmoji = '🏦';
-  }
+  const providerIcon: Record<string, string> = {
+    BANK: 'bank',
+    DIGITAL_WALLET: 'wallet',
+    MOBILE_PAYMENT: 'cellphone',
+  };
 
   const displayName =
     payoutMethod.fullBankName ||
@@ -206,13 +197,15 @@ const PayoutMethodCard = ({
 
   return (
     <View style={[styles.card, payoutMethod.isDefault && styles.cardDefault]}>
-      {/* Left accent bar */}
-      <View style={[styles.cardAccent, { backgroundColor: accentColor }]} />
+      {/* Provider identity as an icon chip (app grammar) — no accent rails */}
+      <View style={[styles.cardIconChip, { backgroundColor: accentColor + '18' }]}>
+        <MCIcon name={providerIcon[providerType] || 'bank'} size={20} color={accentColor} />
+      </View>
 
       <View style={styles.cardInner}>
         {/* Row 1: flag + name + verified + actions */}
         <View style={styles.cardRow}>
-          <Text style={styles.cardFlag}>{flagEmoji}</Text>
+          {flagEmoji ? <Text style={styles.cardFlag}>{flagEmoji}</Text> : null}
           <Text style={styles.cardBankName} numberOfLines={1} ellipsizeMode="tail">
             {displayName}
           </Text>
@@ -225,11 +218,11 @@ const PayoutMethodCard = ({
             </TouchableOpacity>
             {!payoutMethod.isDefault && (
               <TouchableOpacity onPress={onSetDefault} style={styles.actionBtn} accessibilityRole="button" accessibilityLabel="Marcar como predeterminada">
-                <Icon name="star" size={14} color={colors.warning} />
+                <Icon name="star" size={14} color={colors.warning.icon} />
               </TouchableOpacity>
             )}
             <TouchableOpacity onPress={onDelete} style={styles.actionBtn} accessibilityRole="button" accessibilityLabel="Eliminar forma de cobro">
-              <Icon name="trash-2" size={14} color={colors.error} />
+              <Icon name="trash-2" size={14} color={colors.error.icon} />
             </TouchableOpacity>
           </View>
         </View>
@@ -353,17 +346,14 @@ export const PayoutMethodsScreen = () => {
   // ── Permission denied ──
   if (!canManageBankAccounts) {
     return (
-      <SafeAreaView edges={['top']} style={styles.container}>
-        <View style={styles.headerWrap}>
-          <HeaderBackground height={120} />
-          <View style={[styles.headerContent, { paddingTop: 8 }]}>
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} accessibilityRole="button" accessibilityLabel="Volver">
-              <Icon name="arrow-left" size={22} color="white" />
-            </TouchableOpacity>
-            <Text style={styles.headerTitle}>Formas de cobro</Text>
-            <View style={{ width: 40 }} />
-          </View>
-        </View>
+      <View style={styles.container}>
+        <Header
+          navigation={navigation as any}
+          title="Formas de cobro"
+          backgroundColor={colors.primary}
+          isLight
+          showBackButton
+        />
         <View style={styles.permissionDeniedContainer}>
           <View style={styles.lockIconWrap}>
             <Icon name="lock" size={32} color={colors.text.light} />
@@ -377,12 +367,9 @@ export const PayoutMethodsScreen = () => {
             Si necesitas información sobre pagos, consulta con tu supervisor.
           </Text>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
-
-  // ── Main render ──
-  const HEADER_HEIGHT = 110;
 
   const renderContent = () => {
     if (bankAccountsLoading && !refreshing) {
@@ -397,44 +384,25 @@ export const PayoutMethodsScreen = () => {
 
     if (bankAccountsError) {
       return (
-        <View style={styles.errorContainer}>
-          <Icon name="wifi-off" size={48} color={colors.error} />
-          <Text style={styles.errorText}>No se pudieron cargar las formas de cobro</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={onRefresh}>
-            <Icon name="refresh-cw" size={16} color="white" />
-            <Text style={styles.retryText}>Reintentar</Text>
-          </TouchableOpacity>
-        </View>
+        <EmptyState
+          icon="wifi-off"
+          title="No se pudieron cargar las formas de cobro"
+          subtitle="Revisa tu conexión e intenta de nuevo."
+          actionLabel="Reintentar"
+          onAction={onRefresh}
+        />
       );
     }
 
     if (payoutMethods.length === 0) {
       return (
-        <View style={styles.emptyState}>
-          <Svg width={120} height={100} viewBox="0 0 120 100">
-            <Defs>
-              <LinearGradient id="emptyGrad" x1="0" y1="0" x2="1" y2="1">
-                <Stop offset="0" stopColor="#34d399" stopOpacity="0.25" />
-                <Stop offset="1" stopColor="#6ee7b7" stopOpacity="0.1" />
-              </LinearGradient>
-            </Defs>
-            <Rect x="10" y="20" width="100" height="65" rx="12" fill="url(#emptyGrad)" stroke="#34d399" strokeWidth="2" strokeOpacity="0.4" />
-            <Rect x="20" y="38" width="40" height="6" rx="3" fill="#34d399" fillOpacity="0.5" />
-            <Rect x="20" y="50" width="60" height="4" rx="2" fill="#34d399" fillOpacity="0.3" />
-            <Rect x="20" y="60" width="45" height="4" rx="2" fill="#34d399" fillOpacity="0.2" />
-            <Circle cx="88" cy="42" r="10" fill="#34d399" fillOpacity="0.15" stroke="#34d399" strokeWidth="1.5" strokeOpacity="0.5" />
-            <Rect x="83" y="41" width="10" height="2" rx="1" fill="#34d399" fillOpacity="0.6" />
-            <Rect x="87" y="37" width="2" height="10" rx="1" fill="#34d399" fillOpacity="0.6" />
-          </Svg>
-          <Text style={styles.emptyTitle}>Sin formas de cobro</Text>
-          <Text style={styles.emptyDescription}>
-            Agrega tu cuenta bancaria o billetera para recibir retiros y cobros en la app.
-          </Text>
-          <TouchableOpacity style={styles.addButton} onPress={handleAddNew}>
-            <Icon name="plus" size={18} color="white" />
-            <Text style={styles.addButtonText}>Agregar forma de cobro</Text>
-          </TouchableOpacity>
-        </View>
+        <EmptyState
+          icon="credit-card"
+          title="Sin formas de cobro"
+          subtitle="Agrega tu cuenta bancaria o billetera para recibir retiros y cobros en la app."
+          actionLabel="Agregar forma de cobro"
+          onAction={handleAddNew}
+        />
       );
     }
 
@@ -493,31 +461,45 @@ export const PayoutMethodsScreen = () => {
   };
 
   return (
-    <SafeAreaView edges={['top']} style={styles.container}>
-      {/* Header with gradient background + curved bottom */}
-      <View style={[styles.headerWrap, { height: HEADER_HEIGHT }]}>
-        <HeaderBackground height={HEADER_HEIGHT} />
-        <View style={[styles.headerContent, { paddingTop: 8 }]}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} accessibilityRole="button" accessibilityLabel="Volver">
-            <Icon name="arrow-left" size={22} color="white" />
-          </TouchableOpacity>
-          <View style={{ alignItems: 'center' }}>
-            <Text style={styles.headerTitle}>Formas de cobro</Text>
-            {!bankAccountsLoading && payoutMethods.length > 0 && (
-              <View style={styles.countBadge}>
-                <Text style={styles.countBadgeText}>
-                  {payoutMethods.length} {payoutMethods.length === 1 ? 'método' : 'métodos'}
-                </Text>
-              </View>
-            )}
-          </View>
+    <View style={styles.container}>
+      <Header
+        navigation={navigation as any}
+        title="Formas de cobro"
+        backgroundColor={colors.primary}
+        isLight
+        showBackButton
+        rightAccessory={(
           <TouchableOpacity onPress={handleAddNew} style={styles.addHeaderButton} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} accessibilityRole="button" accessibilityLabel="Agregar forma de cobro">
-            <Icon name="plus" size={22} color="white" />
+            <Icon name="plus" size={20} color={colors.white} />
           </TouchableOpacity>
+        )}
+      />
+
+      {/* Emerald brand field: lead with where the money lands. Padding on
+          fieldInner (Yoga absolute-child rule); vertical gradient meets the
+          flat nav header without a seam. */}
+      <View style={styles.brandField}>
+        <Svg style={StyleSheet.absoluteFill}>
+          <Defs>
+            <LinearGradient id="payoutField" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor={colors.primary} />
+              <Stop offset="1" stopColor={colors.primaryDark} />
+            </LinearGradient>
+          </Defs>
+          <Rect width="100%" height="100%" fill="url(#payoutField)" />
+          <Circle cx="105%" cy="18%" r="80" stroke={colors.white} strokeWidth="20" strokeOpacity="0.10" fill="none" />
+        </Svg>
+        <View style={styles.fieldInner}>
+          <Text style={styles.fieldEyebrow}>RETIROS Y COBROS</Text>
+          <Text style={styles.fieldTitle}>¿Dónde recibes tu dinero?</Text>
+          <Text style={styles.fieldSubtitle}>
+            {!bankAccountsLoading && payoutMethods.length > 0
+              ? `${payoutMethods.length} ${payoutMethods.length === 1 ? 'forma de cobro guardada' : 'formas de cobro guardadas'} · la predeterminada se usa al retirar`
+              : 'Guarda cuentas bancarias o billeteras para recibir retiros y cobros.'}
+          </Text>
         </View>
       </View>
 
-      {/* Content overlaps header by 16px for the "card peeking" effect */}
       <View style={styles.contentContainer}>
         {banner && (
           <InlineBanner
@@ -547,7 +529,7 @@ export const PayoutMethodsScreen = () => {
           editingPayoutMethod={editingPayoutMethod as any}
         />
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 };
 
@@ -557,27 +539,33 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
 
-  // ── Header ──
-  headerWrap: {
+  // ── Brand field ──
+  brandField: {
+    backgroundColor: colors.primary,
     overflow: 'hidden',
-    borderBottomLeftRadius: 28,
-    borderBottomRightRadius: 28,
   },
-  headerContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingBottom: 20,
-    flex: 1,
+  fieldInner: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 22,
   },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
+  fieldEyebrow: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 2,
+    color: colors.primaryLight,
+    marginBottom: 6,
+  },
+  fieldTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: colors.white,
+  },
+  fieldSubtitle: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: 'rgba(255, 255, 255, 0.85)',
+    marginTop: 6,
   },
   addHeaderButton: {
     width: 40,
@@ -587,28 +575,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  headerTitle: {
-    fontSize: 19,
-    fontWeight: 'bold',
-    color: 'white',
-  },
-  countBadge: {
-    marginTop: 3,
-    backgroundColor: 'rgba(255,255,255,0.25)',
-    paddingHorizontal: 10,
-    paddingVertical: 2,
-    borderRadius: 10,
-  },
-  countBadgeText: {
-    fontSize: 11,
-    color: 'white',
-    fontWeight: '600',
-  },
 
   // ── Content ──
   contentContainer: {
     flex: 1,
-    marginTop: -4, // slight overlap for seamless curve-to-content transition
   },
   listContent: {
     paddingTop: 16,
@@ -625,7 +595,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     ...Platform.select({
       ios: {
-        shadowColor: '#064e3b',
+        shadowColor: colors.primaryDeep,
         shadowOffset: { width: 0, height: 3 },
         shadowOpacity: 0.07,
         shadowRadius: 8,
@@ -637,8 +607,14 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: colors.primaryDark,
   },
-  cardAccent: {
-    width: 4,
+  cardIconChip: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+    marginLeft: 12,
   },
   cardInner: {
     flex: 1,
@@ -774,39 +750,6 @@ const styles = StyleSheet.create({
   },
 
   // ── Empty state ──
-  emptyState: {
-    alignItems: 'center',
-    paddingVertical: 60,
-    paddingHorizontal: 32,
-  },
-  emptyTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: colors.text.primary,
-    marginTop: 20,
-    marginBottom: 8,
-  },
-  emptyDescription: {
-    fontSize: 14,
-    color: colors.text.secondary,
-    textAlign: 'center',
-    lineHeight: 20,
-    marginBottom: 28,
-  },
-  addButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.primary,
-    paddingHorizontal: 24,
-    paddingVertical: 13,
-    borderRadius: 12,
-    gap: 8,
-  },
-  addButtonText: {
-    color: 'white',
-    fontWeight: '700',
-    fontSize: 15,
-  },
 
   // ── Add more ──
   addMoreButton: {
@@ -829,31 +772,6 @@ const styles = StyleSheet.create({
   },
 
   // ── Error ──
-  errorContainer: {
-    alignItems: 'center',
-    paddingVertical: 60,
-    paddingHorizontal: 32,
-  },
-  errorText: {
-    marginTop: 12,
-    marginBottom: 20,
-    color: colors.text.secondary,
-    textAlign: 'center',
-    fontSize: 15,
-  },
-  retryButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.primary,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 10,
-    gap: 8,
-  },
-  retryText: {
-    color: 'white',
-    fontWeight: '700',
-  },
 
   // ── Permission denied ──
   permissionDeniedContainer: {

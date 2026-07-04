@@ -26,6 +26,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
 import Svg, { Defs, LinearGradient, Stop, Rect, Circle } from 'react-native-svg';
 import { colors } from '../config/theme';
+import { InlineBanner } from './common/InlineBanner';
 
 // Colors matching app design
 const KOYWE_SUPPORTED_COUNTRY_CODES = ['AR', 'BR', 'CL', 'CO', 'MX', 'PE'];
@@ -284,6 +285,7 @@ export const AddPayoutMethodModal = ({
   const [showCountryPicker, setShowCountryPicker] = useState(false);
   const [showProviderBankPicker, setShowProviderBankPicker] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const resetRailSpecificFields = (
     currentData: {
@@ -799,20 +801,21 @@ export const AddPayoutMethodModal = ({
   }, [countryCode, methodCode, selectedPaymentMethod, serverFieldSchema]);
 
   const validateForm = () => {
+    setFormError(null);
     if (!selectedPaymentMethod) {
-      Alert.alert('Error', 'Por favor selecciona una forma de cobro', [{ text: 'Entendido' }]);
+      setFormError('Por favor selecciona una forma de cobro');
       return false;
     }
 
 
     if (!formData.accountHolderName.trim()) {
-      Alert.alert('Error', 'Por favor ingresa el nombre del titular', [{ text: 'Entendido' }]);
+      setFormError('Por favor ingresa el nombre del titular');
       return false;
     }
 
     // Validate required fields based on payment method
     if (fieldCopy.account.required && !formData.accountNumber.trim()) {
-      Alert.alert('Error', `Por favor ingresa ${fieldCopy.account.label.toLowerCase()}`, [{ text: 'Entendido' }]);
+      setFormError(`Por favor ingresa ${fieldCopy.account.label.toLowerCase()}`);
       return false;
     }
 
@@ -821,41 +824,41 @@ export const AddPayoutMethodModal = ({
       if (countryCode === 'AR' && methodCode === 'WIREAR') {
         const digitsOnly = accountNumberValue.replace(/\D/g, '');
         if (digitsOnly.length !== 22) {
-          Alert.alert('Error', 'El CBU o CVU debe tener exactamente 22 dígitos.', [{ text: 'Entendido' }]);
+          setFormError('El CBU o CVU debe tener exactamente 22 dígitos.');
           return false;
         }
       }
       if (fieldCopy.account.minLength && accountNumberValue.length < fieldCopy.account.minLength) {
-        Alert.alert('Error', `${fieldCopy.account.label} debe tener al menos ${fieldCopy.account.minLength} dígitos`, [{ text: 'Entendido' }]);
+        setFormError(`${fieldCopy.account.label} debe tener al menos ${fieldCopy.account.minLength} dígitos`);
         return false;
       }
       if (fieldCopy.account.maxLength && accountNumberValue.length > fieldCopy.account.maxLength) {
-        Alert.alert('Error', `${fieldCopy.account.label} debe tener máximo ${fieldCopy.account.maxLength} dígitos`, [{ text: 'Entendido' }]);
+        setFormError(`${fieldCopy.account.label} debe tener máximo ${fieldCopy.account.maxLength} dígitos`);
         return false;
       }
     }
 
     if (fieldCopy.phone.required && !formData.phoneNumber.trim()) {
-      Alert.alert('Error', 'Por favor ingresa el número de teléfono', [{ text: 'Entendido' }]);
+      setFormError('Por favor ingresa el número de teléfono');
       return false;
     }
 
     // For bank payments, validate ID requirements
     if (selectedPaymentMethod.bank?.country?.requiresIdentification && !formData.identificationNumber.trim()) {
-      Alert.alert('Error', `Por favor ingresa tu ${selectedPaymentMethod.bank.country.identificationName}`, [{ text: 'Entendido' }]);
+      setFormError(`Por favor ingresa tu ${selectedPaymentMethod.bank.country.identificationName}`);
       return false;
     }
 
     for (const field of providerFieldConfigs) {
       const value = formData.providerMetadata[field.key];
       if (field.required && !value?.trim()) {
-        Alert.alert('Error', `Por favor completa ${field.label.toLowerCase()}`, [{ text: 'Entendido' }]);
+        setFormError(`Por favor completa ${field.label.toLowerCase()}`);
         return false;
       }
     }
 
     if (accountTypeRequired && !String(formData.accountType || '').trim()) {
-      Alert.alert('Error', 'Por favor selecciona el tipo de cuenta', [{ text: 'Entendido' }]);
+      setFormError('Por favor selecciona el tipo de cuenta');
       return false;
     }
 
@@ -940,16 +943,13 @@ export const AddPayoutMethodModal = ({
           }
         }
 
-        Alert.alert(
-          'Éxito',
-          isEditing ? 'Forma de cobro actualizada' : 'Forma de cobro agregada',
-          [{ text: 'Entendido', onPress: onSuccess }]
-        );
+        // Frictionless: the new card on the list is the confirmation.
+        onSuccess();
       } else {
-        Alert.alert('Error', data?.error || 'Error al guardar la forma de cobro', [{ text: 'Entendido' }]);
+        setFormError(data?.error || 'Error al guardar la forma de cobro');
       }
     } catch (error) {
-      Alert.alert('Error', 'Error de conexión', [{ text: 'Entendido' }]);
+      setFormError('Error de conexión');
     } finally {
       setIsSubmitting(false);
     }
@@ -1184,13 +1184,13 @@ export const AddPayoutMethodModal = ({
       <View style={styles.headerWrap}>
         <Svg width="100%" height={70} style={StyleSheet.absoluteFill}>
           <Defs>
-            <LinearGradient id="hdrGrad" x1="0" y1="0" x2="1" y2="1">
-              <Stop offset="0" stopColor="#34d399" stopOpacity="1" />
-              <Stop offset="1" stopColor="#6ee7b7" stopOpacity="1" />
+            <LinearGradient id="hdrGrad" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor={colors.primary} />
+              <Stop offset="1" stopColor={colors.primaryDark} />
             </LinearGradient>
           </Defs>
           <Rect width="100%" height={70} fill="url(#hdrGrad)" />
-          <Circle cx="92%" cy="10" r="60" fill="rgba(255,255,255,0.07)" />
+          <Circle cx="94%" cy="6" r="52" stroke={colors.white} strokeWidth="14" strokeOpacity="0.10" fill="none" />
         </Svg>
         <View style={styles.headerContent}>
           <TouchableOpacity onPress={onClose} style={styles.closeButton} accessibilityRole="button" accessibilityLabel="Cerrar">
@@ -1485,6 +1485,14 @@ export const AddPayoutMethodModal = ({
 
       {/* ── Sticky save button ── */}
       <View style={styles.stickyFooter}>
+        {formError ? (
+          <InlineBanner
+            message={formError}
+            variant="error"
+            onDismiss={() => setFormError(null)}
+            style={{ marginBottom: 10 }}
+          />
+        ) : null}
         <TouchableOpacity
           onPress={handleSubmit}
           disabled={isSubmitting}
@@ -1571,7 +1579,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     ...Platform.select({
       ios: {
-        shadowColor: '#064e3b',
+        shadowColor: colors.primaryDeep,
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.06,
         shadowRadius: 6,
