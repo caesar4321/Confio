@@ -1,5 +1,5 @@
 import React, { useMemo, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, RefreshControl, SafeAreaView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, RefreshControl } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { RouteProp } from '@react-navigation/native';
@@ -7,6 +7,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQuery } from '@apollo/client';
 import { GET_PAYROLL_RUNS } from '../apollo/queries';
 import { MainStackParamList } from '../types/navigation';
+import { Header } from '../navigation/Header';
 
 type RouteProps = RouteProp<MainStackParamList, 'PayrollHistory'>;
 type NavigationProps = NativeStackNavigationProp<MainStackParamList, 'PayrollHistory'>;
@@ -73,18 +74,15 @@ const PayrollHistoryScreen = () => {
   }, []);
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <View style={styles.safeArea}>
       <View style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-            <Icon name="chevron-left" size={24} color="#111827" />
-          </TouchableOpacity>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.title}>Historial de nómina</Text>
-            <Text style={styles.subtitle}>{displayName || username ? `${displayName || ''} @${username || ''}` : ''}</Text>
-          </View>
-          <View style={{ width: 32 }} />
-        </View>
+        <Header
+          navigation={navigation as any}
+          title="Historial de nómina"
+          subtitle={displayName || username ? `${displayName || ''} @${username || ''}` : undefined}
+          backgroundColor="#fff"
+          showBackButton
+        />
 
         <FlatList
           data={history}
@@ -103,26 +101,13 @@ const PayrollHistoryScreen = () => {
           }
         />
       </View>
-    </SafeAreaView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#f8fafc' },
   container: { flex: 1, backgroundColor: '#f8fafc' },
-  header: {
-    paddingTop: 12,
-    paddingBottom: 12,
-    paddingHorizontal: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
-  },
-  backButton: { marginRight: 12, padding: 6 },
-  title: { fontSize: 18, fontWeight: '700', color: '#111827' },
-  subtitle: { fontSize: 13, color: '#6b7280', marginTop: 2 },
   listContent: { padding: 16, gap: 12 },
   row: {
     backgroundColor: '#fff',
