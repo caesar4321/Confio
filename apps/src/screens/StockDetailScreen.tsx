@@ -16,7 +16,7 @@ import {
   Image,
 } from 'react-native';
 import Svg, { Polyline } from 'react-native-svg';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Header } from '../navigation/Header';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -81,21 +81,15 @@ export const StockDetailScreen = () => {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
-      <SafeAreaView edges={['top']} style={{ backgroundColor: colors.primary }}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerIconBtn}>
-            <Icon name="arrow-left" size={24} color="#fff" />
-          </TouchableOpacity>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <TickerLogo ticker={stock.ticker} color={stock.color} logoUrl={stock.logoUrl} size={30} />
-            <View style={{ alignItems: 'center' }}>
-              <Text style={styles.headerTitle}>{stock.ticker}</Text>
-              <Text style={styles.headerSubtitle}>{stock.name}</Text>
-            </View>
-          </View>
-          <View style={styles.headerIconBtn} />
-        </View>
-      </SafeAreaView>
+      <Header
+        navigation={navigation as any}
+        title={stock.ticker}
+        subtitle={stock.name}
+        titleAccessory={<TickerLogo ticker={stock.ticker} color={stock.color} logoUrl={stock.logoUrl} size={30} />}
+        backgroundColor={colors.primary}
+        isLight
+        showBackButton
+      />
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {/* Price + chart */}
@@ -217,18 +211,6 @@ export const StockDetailScreen = () => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.neutral },
 
-  header: {
-    backgroundColor: colors.primary,
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  headerIconBtn: { padding: 6, width: 40, alignItems: 'center' },
-  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#fff' },
-  headerSubtitle: { fontSize: 12, color: '#fff', opacity: 0.85, marginTop: 1 },
 
   scrollContent: { padding: 16, paddingBottom: 40 },
 
