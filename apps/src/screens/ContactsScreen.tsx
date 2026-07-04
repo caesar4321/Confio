@@ -87,11 +87,11 @@ const EmployeeCard = memo(({ contact, onPress, onRemove, onCancelInvitation }: E
     >
       <View style={[
         styles.avatarContainer,
-        { backgroundColor: isInvitation ? '#fef3c7' : colors.primaryLight }
+        { backgroundColor: isInvitation ? colors.warning.background : colors.primaryLight }
       ]}>
         <Text style={[
           styles.avatarText,
-          { color: isInvitation ? '#f59e0b' : colors.primaryDark }
+          { color: isInvitation ? colors.warning.icon : colors.primaryDark }
         ]}>
           {contact.avatar}
         </Text>
@@ -187,7 +187,7 @@ const ContactCard = memo(({ contact, isOnConfio = false, onPress, onSendPress, o
         accessibilityRole="button"
         accessibilityLabel={`Enviar dinero a ${contact.name}`}
       >
-        <Icon name="send" size={20} color="#fff" />
+        <Icon name="send" size={18} color={colors.primaryDark} />
       </TouchableOpacity>
     ) : (
       <TouchableOpacity
@@ -199,8 +199,8 @@ const ContactCard = memo(({ contact, isOnConfio = false, onPress, onSendPress, o
         accessibilityRole="button"
         accessibilityLabel={`Enviar e invitar a ${contact.name}`}
       >
-        <Icon name="gift" size={16} color="#fff" style={{ marginRight: 6 }} />
-        <Text style={styles.inviteButtonText}>Enviar & Invitar</Text>
+        <Icon name="gift" size={15} color={colors.violet} style={{ marginRight: 6 }} />
+        <Text style={styles.inviteButtonText}>Invitar y enviar</Text>
       </TouchableOpacity>
     )}
   </TouchableOpacity>
@@ -275,14 +275,6 @@ export const ContactsScreen = () => {
   // Check if this is a business account or confirmed personal account
   const isBusinessAccount = activeAccount?.type === 'business';
   const isPersonalAccount = activeAccount?.type === 'personal';
-
-  // Debug logging for business account
-  React.useEffect(() => {
-    if (isBusinessAccount) {
-
-      // Log query status
-    }
-  }, [isBusinessAccount, activeAccount, employeesLoading, employeesError, employeesData, invitationsLoading, invitationsError, invitationsData]);
 
   // State for employee pagination
   const [employeesState, setEmployeesState] = useState({
@@ -1837,31 +1829,30 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#6b7280',
   },
+  // Row affordances are soft chips, not filled buttons: a list of dozens of
+  // people should read as people, not as a wall of CTAs. Color still carries
+  // the signal (emerald = send now, violet = invite funnel).
   sendButton: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors.primarySoft,
     padding: 12,
     borderRadius: 999,
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
   },
   inviteButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.violet,
-    paddingHorizontal: 16,
+    backgroundColor: colors.violetLight,
+    paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 999,
   },
   inviteButtonText: {
-    color: '#fff',
-    fontWeight: '500',
-    fontSize: 14,
+    color: colors.violet,
+    fontWeight: '600',
+    fontSize: 13,
   },
   employeeRole: {
     fontSize: 12,
-    color: '#10B981',
+    color: colors.primaryDark,
     marginTop: 2,
   },
   employeeActionContainer: {
