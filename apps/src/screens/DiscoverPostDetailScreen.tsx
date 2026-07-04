@@ -14,6 +14,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useMutation, useQuery } from '@apollo/client';
 import Icon from 'react-native-vector-icons/Feather';
+import { colors } from '../config/theme';
 
 import { Header } from '../navigation/Header';
 import { REACT_TO_MESSAGE_CONTENT } from '../apollo/mutations';
@@ -409,7 +410,7 @@ export default DiscoverPostDetailScreen;
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F4F6F8',
+    backgroundColor: colors.neutralDark,
   },
   content: {
     padding: 14,
@@ -598,7 +599,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   reactionButton: {
-    backgroundColor: '#F4F6F8',
+    backgroundColor: colors.neutralDark,
     borderRadius: 20,
     paddingHorizontal: 9,
     paddingVertical: 4,
@@ -607,9 +608,9 @@ const styles = StyleSheet.create({
     gap: 3,
   },
   reactionButtonActive: {
-    backgroundColor: '#E8F8F2',
+    backgroundColor: colors.primarySoft,
     borderWidth: 1,
-    borderColor: '#1DB587',
+    borderColor: colors.primary,
   },
   reactionEmoji: {
     fontSize: 13,
@@ -620,7 +621,7 @@ const styles = StyleSheet.create({
     color: '#666666',
   },
   addReactionButton: {
-    backgroundColor: '#F4F6F8',
+    backgroundColor: colors.neutralDark,
     borderRadius: 20,
     paddingHorizontal: 9,
     paddingVertical: 4,
@@ -653,7 +654,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   emojiOptionActive: {
-    backgroundColor: '#E8F8F2',
+    backgroundColor: colors.primarySoft,
   },
   emojiOptionText: {
     fontSize: 17,
