@@ -15,6 +15,9 @@ deposit-intent signal (decision 68e9cd45). No foundry/hardhat scaffold yet.
 | Clawback = app (contract controls reserve)            | Vault holds the USDY; shares burn to release it            |
 | 1 cUSD : 1 USDC fixed                                 | Invariant: vault USDY ≥ `usdyOwed()` — checked with `_assertFullyBacked` after **every** state change |
 | Sponsored group (user never pays fees)                | Relayer/treasury is `msg.sender`; `recipient` gets the shares (user never needs BNB) |
+| `pause`/`unpause` (admin)                             | OZ `Pausable` gating mint/redeem paths                     |
+| `freeze_address`/`unfreeze_address` (ASA freeze bit)  | `freezeAddress`/`unfreezeAddress` + `_update` hook: frozen addresses cannot transfer, receive, mint or redeem; yield still accrues (detain, not confiscate) |
+| No update handler → Beaker rejects UpdateApplication  | Non-upgradeable: no proxy, immutable wiring                |
 | Explicit state init in `@app.create` (the empty-bytes lesson) | All state set in constructor: `pPlus = 1e18`, `lastOraclePrice` from a live oracle read |
 
 ## Token & fee mechanics
@@ -27,8 +30,12 @@ deposit-intent signal (decision 68e9cd45). No foundry/hardhat scaffold yet.
   minted or transferred at accrual time; it appears as the gap between vault
   USDY and `usdyOwed()`. `collectFees` can withdraw **only** that surplus, so
   backing is ≥ 100% by construction, before and after every fee withdrawal.
-- **Soft transfer policy (decision C).** Plain ERC-20 on-chain; the app UI
-  doesn't surface transfers. No transfer hooks.
+- **Soft transfer policy (decision C), one hard control.** Plain ERC-20
+  on-chain; the app UI doesn't surface transfers. The single hard hook is
+  per-address freeze — beyond cUSD parity, it's self-defense: USDY is a
+  permissioned asset, and a sanctioned actor moving through the vault could
+  get the vault address itself blacklisted by Ondo, stranding every honest
+  holder. Surgical freeze protects the pool.
 - **Contract-automatic mint (decision D).** Two mint paths, both atomic with
   collateral custody: USDT → InstantManager `subscribe` → USDY → shares
   (primary), or direct USDY deposit (treasury bridge leg / IM outage

@@ -31,8 +31,14 @@ pragma solidity ^0.8.24;
  * by the treasury (collectFees). Backing can therefore never drop below 100%
  * of what holders are owed.
  *
- * TRANSFER POLICY (locked decision C): restriction is soft — plain ERC-20 on
- * chain, the app UI simply doesn't surface transfers. No hooks here.
+ * TRANSFER POLICY (locked decision C): day-to-day restriction is soft —
+ * plain ERC-20 on chain, the app UI simply doesn't surface transfers. The
+ * ONE hard control is per-address freeze (parity with cusd.py's
+ * freeze_address): a frozen address can neither transfer, receive, mint nor
+ * redeem. Rationale beyond parity: USDY is a permissioned asset — if a
+ * sanctioned actor moved through this vault, Ondo could blacklist the VAULT
+ * address and strand every honest holder. Surgical per-address freeze is how
+ * the pool protects itself.
  *
  * UPGRADEABILITY: none, on purpose. A proxy admin who can swap the
  * implementation can also swap the backing out; a non-upgradeable vault is
@@ -98,6 +104,11 @@ contract CusdPlusVault is ERC20, Ownable2Step, Pausable, ReentrancyGuard {
     /// keep working at the frozen pPlus) until resetOracleBaseline().
     bool public oracleGuardTripped;
 
+    /// Per-address freeze (cusd.py freeze_address parity). Frozen addresses
+    /// cannot transfer, receive, mint or redeem. Yield keeps accruing to
+    /// their shares — freeze detains funds, it does not confiscate them.
+    mapping(address => bool) public frozen;
+
     // ── Events ──────────────────────────────────────────────────────────
     event Accrued(uint256 oraclePrice, uint256 newPPlus);
     event OracleJumpGuard(uint256 lastPrice, uint256 newPrice);
@@ -105,6 +116,8 @@ contract CusdPlusVault is ERC20, Ownable2Step, Pausable, ReentrancyGuard {
     event Minted(address indexed recipient, uint256 shares, uint256 usdyIn, uint256 pPlusAt);
     event Redeemed(address indexed holder, address indexed to, uint256 shares, uint256 usdyOut, uint256 pPlusAt);
     event FeesCollected(address indexed to, uint256 usdyAmount, uint256 surplusBefore);
+    event AddressFrozen(address indexed target);
+    event AddressUnfrozen(address indexed target);
 
     constructor(
         address usdy,
@@ -266,6 +279,26 @@ contract CusdPlusVault is ERC20, Ownable2Step, Pausable, ReentrancyGuard {
 
     function pause() external onlyOwner { _pause(); }
     function unpause() external onlyOwner { _unpause(); }
+
+    // ═════════════════════════ Freeze (cusd.py parity) ══════════════════
+
+    function freezeAddress(address target) external onlyOwner {
+        require(target != address(this), "cannot freeze vault");
+        frozen[target] = true;
+        emit AddressFrozen(target);
+    }
+
+    function unfreezeAddress(address target) external onlyOwner {
+        frozen[target] = false;
+        emit AddressUnfrozen(target);
+    }
+
+    /// OZ v5 single choke point for mint/burn/transfer — the same property
+    /// cusd.py gets from the ASA freeze bit: one flag stops every movement.
+    function _update(address from, address to, uint256 value) internal override {
+        require(!frozen[from] && !frozen[to], "address frozen");
+        super._update(from, to, value);
+    }
 
     // ═════════════════════════ Views (public verifiability) ═════════════
     // These four back the ProtectedSavings "verify it yourself" links.
