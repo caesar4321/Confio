@@ -22,6 +22,7 @@ import { useQuery, useMutation } from '@apollo/client';
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
 import { InlineBanner } from '../components/common/InlineBanner';
+import { Header } from '../navigation/Header';
 import { getCountryByIso } from '../utils/countries';
 import { useNumberFormat } from '../utils/numberFormatting';
 import {
@@ -131,17 +132,13 @@ export const FinancieraDetailScreen = () => {
     return (
       <View style={styles.container}>
         <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
-        <SafeAreaView edges={['top']} style={{ backgroundColor: colors.primary }}>
-          <View style={styles.header}>
-            <View style={styles.headerTopRow}>
-              <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerIconBtn}>
-                <Icon name="arrow-left" size={24} color="#fff" />
-              </TouchableOpacity>
-              <Text style={styles.headerTitle}>Financiera</Text>
-              <View style={styles.headerIconBtn} />
-            </View>
-          </View>
-        </SafeAreaView>
+        <Header
+          navigation={navigation as any}
+          title="Financiera"
+          backgroundColor={colors.primary}
+          isLight
+          showBackButton
+        />
         <View style={styles.loadingBox}>
           <ActivityIndicator color={colors.primary} size="large" />
         </View>
@@ -193,21 +190,24 @@ export const FinancieraDetailScreen = () => {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
-      <SafeAreaView edges={['top']} style={{ backgroundColor: colors.primary }}>
-        <View style={styles.header}>
-          <View style={styles.headerTopRow}>
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerIconBtn}>
-              <Icon name="arrow-left" size={24} color="#fff" />
-            </TouchableOpacity>
-            <Text style={styles.headerTitle} numberOfLines={1}>
-              {financiera.name}
-            </Text>
-            <TouchableOpacity onPress={reportFinanciera} style={styles.headerIconBtn}>
-              <Icon name="flag" size={20} color="#fff" />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </SafeAreaView>
+      <Header
+        navigation={navigation as any}
+        title={financiera.name}
+        backgroundColor={colors.primary}
+        isLight
+        showBackButton
+        rightAccessory={(
+          <TouchableOpacity
+            onPress={reportFinanciera}
+            style={styles.headerIconBtn}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            accessibilityRole="button"
+            accessibilityLabel="Reportar financiera"
+          >
+            <Icon name="flag" size={20} color="#fff" />
+          </TouchableOpacity>
+        )}
+      />
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {banner && (
@@ -418,10 +418,7 @@ export const FinancieraDetailScreen = () => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.neutral },
 
-  header: { backgroundColor: colors.primary, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 16 },
-  headerTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   headerIconBtn: { padding: 6, width: 40, alignItems: 'center' },
-  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#fff', flex: 1, textAlign: 'center' },
 
   loadingBox: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
