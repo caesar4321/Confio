@@ -40,6 +40,7 @@ import { GET_MY_BALANCES } from '../apollo/queries';
 import { useAhorrosPortfolio } from '../hooks/useAhorrosPortfolio';
 import { useConvertQuote } from '../hooks/useConvertQuote';
 import { formatUsdDeltaAbs } from '../utils/savingsFormat';
+import { SuccessHero } from '../components/common/SuccessHero';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
@@ -97,16 +98,13 @@ export const ConvertAhorroScreen = () => {
         <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
         <SafeAreaView edges={['top']} style={{ backgroundColor: colors.primary }} />
         <View style={styles.successWrap}>
-          <View style={styles.successIcon}>
-            <Icon name="check" size={40} color="#fff" />
-          </View>
-          <Text style={styles.successTitle}>Tu ahorro empezó a crecer</Text>
-          <Text style={styles.successAmount}>{fmtUsd(quote.receiveUsd)}</Text>
-          <Text style={styles.successHint}>
-            {formatUsdDeltaAbs(dailyEstimate)
+          <SuccessHero
+            title="Tu ahorro empezó a crecer"
+            amount={fmtUsd(quote.receiveUsd)}
+            hint={formatUsdDeltaAbs(dailyEstimate)
               ? `Mañana habrás ganado ≈ ${formatUsdDeltaAbs(dailyEstimate)} — y así todos los días, sin hacer nada.`
               : 'Tu dinero genera rendimiento todos los días, sin hacer nada.'}
-          </Text>
+          />
           <TouchableOpacity
             style={styles.successCta}
             onPress={() => navigation.goBack()}
@@ -419,24 +417,6 @@ const styles = StyleSheet.create({
   },
 
   successWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
-  successIcon: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 24,
-  },
-  successTitle: { fontSize: 20, fontWeight: '700', color: colors.text.primary },
-  successAmount: { fontSize: 42, fontWeight: 'bold', color: colors.primaryDark, marginTop: 10 },
-  successHint: {
-    fontSize: 14,
-    color: colors.text.secondary,
-    textAlign: 'center',
-    marginTop: 14,
-    lineHeight: 20,
-  },
   successCta: {
     backgroundColor: colors.primary,
     borderRadius: 14,

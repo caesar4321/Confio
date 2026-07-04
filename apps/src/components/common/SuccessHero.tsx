@@ -14,6 +14,8 @@ interface SuccessHeroProps {
   tint?: string;
   /** Amount color; defaults to primaryDark (pair it with tint) */
   amountColor?: string;
+  /** Replaces the check circle (e.g. a TickerLogo on stock trades) */
+  icon?: React.ReactNode;
   /** Optional slot under the hint (badges, notices) */
   children?: React.ReactNode;
 }
@@ -24,11 +26,15 @@ interface SuccessHeroProps {
  * circle, short title, ONE big amount in primaryDark, one hint line.
  * Everything else on a success screen is secondary to these four things.
  */
-export const SuccessHero: React.FC<SuccessHeroProps> = ({ title, amount, hint, tint, amountColor, children }) => (
+export const SuccessHero: React.FC<SuccessHeroProps> = ({ title, amount, hint, tint, amountColor, icon, children }) => (
   <View style={styles.wrap}>
-    <View style={[styles.icon, tint ? { backgroundColor: tint } : null]}>
-      <Icon name="check" size={40} color={colors.white} />
-    </View>
+    {icon ? (
+      <View style={styles.customIcon}>{icon}</View>
+    ) : (
+      <View style={[styles.icon, tint ? { backgroundColor: tint } : null]}>
+        <Icon name="check" size={40} color={colors.white} />
+      </View>
+    )}
     <Text style={styles.title} accessibilityRole="header">{title}</Text>
     <Text style={[styles.amount, amountColor ? { color: amountColor } : null]}>{amount}</Text>
     {hint ? <Text style={styles.hint}>{hint}</Text> : null}
@@ -52,6 +58,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 24,
+  },
+  customIcon: {
+    marginBottom: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   title: {
     fontSize: 20,

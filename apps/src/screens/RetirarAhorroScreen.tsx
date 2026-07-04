@@ -29,6 +29,7 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
+import { SuccessHero } from '../components/common/SuccessHero';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useAhorrosPortfolio } from '../hooks/useAhorrosPortfolio';
 
@@ -81,15 +82,11 @@ export const RetirarAhorroScreen = () => {
         <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
         <SafeAreaView edges={['top']} style={{ backgroundColor: colors.primary }} />
         <View style={styles.successWrap}>
-          <View style={styles.successIcon}>
-            <Icon name="check" size={40} color="#fff" />
-          </View>
-          <Text style={styles.successTitle}>Listo — está en tu cUSD</Text>
-          <Text style={styles.successAmount}>{fmtUsd(quote.receiveUsd)}</Text>
-          <Text style={styles.successHint}>
-            Disponible al instante para enviar, pagar o retirar a tu banco. El resto de tu
-            ahorro sigue creciendo.
-          </Text>
+          <SuccessHero
+            title="Listo — está en tu cUSD"
+            amount={fmtUsd(quote.receiveUsd)}
+            hint="Disponible al instante para enviar, pagar o retirar a tu banco. El resto de tu ahorro sigue creciendo."
+          />
           <TouchableOpacity
             style={styles.successCta}
             onPress={() => navigation.goBack()}

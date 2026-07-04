@@ -29,6 +29,7 @@ import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
+import { SuccessHero } from '../components/common/SuccessHero';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useAhorrosPortfolio } from '../hooks/useAhorrosPortfolio';
 import { useGmMarket } from '../hooks/useGmMarket';
@@ -110,14 +111,11 @@ export const SellStockScreen = () => {
         <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
         <SafeAreaView edges={['top']} style={{ backgroundColor: colors.primary }} />
         <View style={styles.successWrap}>
-          <View style={styles.successIcon}>
-            <Icon name="check" size={40} color="#fff" />
-          </View>
-          <Text style={styles.successTitle}>Vendido</Text>
-          <Text style={styles.successAmount}>{fmtUsd(quote.receiveUsd)}</Text>
-          <Text style={styles.successHint}>
-            Ya está en tu ahorro (cUSD+) y sigue generando rendimiento desde ahora mismo.
-          </Text>
+          <SuccessHero
+            title="Vendido"
+            amount={fmtUsd(quote.receiveUsd)}
+            hint="Ya está en tu ahorro (cUSD+) y sigue generando rendimiento desde ahora mismo."
+          />
           <TouchableOpacity
             style={styles.successCta}
             onPress={() => navigation.goBack()}

@@ -20,6 +20,7 @@ import { gql } from '@apollo/client';
 import { useAuth } from '../contexts/AuthContext';
 import { getSupportCopy } from '../utils/supportMessaging';
 import { colors } from '../config/theme';
+import { ProcessingHero } from '../components/common/ProcessingHero';
 
 const BUILD_AUTO_SWAP_TRANSACTIONS = gql`
   mutation BuildAutoSwapTransactions($inputAssetType: String!, $amount: String!) {
@@ -819,168 +820,50 @@ export const TransactionProcessingScreen = () => {
   }, [currentStep, isComplete]);
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      {/* Processing Header */}
-      <View style={[styles.header, { backgroundColor: colors.primary, paddingTop: 8 }]}>
-        <View style={styles.headerContent}>
-          {/* Processing Animation */}
-          <View style={styles.processingCircle}>
-            {!isComplete ? (
-              <>
-                <Animated.View style={[styles.pulseCircle, { transform: [{ scale: pulseAnim }] }]} />
-                <Icon name="loader" size={48} color={colors.primary} style={styles.spinner} />
-              </>
-            ) : (
-              <Icon name="check-circle" size={48} color={colors.primary} />
-            )}
-          </View>
+    <View style={styles.container}>
+      <ProcessingHero
+        title={isComplete ? '¡Casi listo!' : transactionData.action}
+        amount={`$${transactionData.amount} ${transactionData.currency}`}
+        hint={transactionData.type === 'sent'
+          ? `Para ${transactionData.recipient}`
+          : `En ${transactionData.merchant}`}
+        complete={isComplete && transactionSuccess}
+      />
 
-          <Text style={styles.headerTitle}>
-            {isComplete ? '¡Casi listo!' : transactionData.action}
-          </Text>
-
-          <Text style={styles.headerAmount}>
-            ${transactionData.amount} {transactionData.currency}
-          </Text>
-
-          <Text style={styles.headerSubtitle}>
-            {transactionData.type === 'sent'
-              ? `Para ${transactionData.recipient}`
-              : `En ${transactionData.merchant}`
-            }
-          </Text>
-        </View>
-      </View>
-
-      {/* Processing Steps */}
-      <View style={styles.content}>
-        <View style={styles.stepsContainer}>
-          {processingSteps.map((step, index) => (
-            <View key={index} style={styles.stepRow}>
-              {/* Step Icon */}
-              {index === currentStep && !isComplete ? (
-                <Animated.View style={[
-                  styles.stepIcon,
+      {/* Current step: one quiet living line instead of the steps card */}
+      {!isComplete && (
+        <View style={styles.stepLine}>
+          <Text style={styles.stepText}>{processingSteps[currentStep].text}</Text>
+          <View style={styles.dotsContainer}>
+            {bounceAnims.map((anim, dotIndex) => (
+              <Animated.View
+                key={dotIndex}
+                style={[
+                  styles.dot,
                   {
-                    backgroundColor: index <= currentStep ? step.bgColor : '#F3F4F6',
-                    transform: [{ scale: pulseAnim }]
+                    transform: [{
+                      translateY: anim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0, -5]
+                      })
+                    }]
                   }
-                ]}>
-                  <Icon
-                    name={step.icon as any}
-                    size={24}
-                    color={index <= currentStep ? step.color : '#9CA3AF'}
-                  />
-                </Animated.View>
-              ) : (
-                <View style={[
-                  styles.stepIcon,
-                  {
-                    backgroundColor: index <= currentStep ? step.bgColor : '#F3F4F6'
-                  }
-                ]}>
-                  <Icon
-                    name={step.icon as any}
-                    size={24}
-                    color={index <= currentStep ? step.color : '#9CA3AF'}
-                  />
-                </View>
-              )}
-
-              {/* Step Text */}
-              <View style={styles.stepTextContainer}>
-                <Text style={[
-                  styles.stepText,
-                  { color: index <= currentStep ? colors.text.primary : '#9CA3AF' }
-                ]}>
-                  {step.text}
-                </Text>
-                {index === currentStep && !isComplete && (
-                  <View style={styles.dotsContainer}>
-                    {bounceAnims.map((anim, dotIndex) => (
-                      <Animated.View
-                        key={dotIndex}
-                        style={[
-                          styles.dot,
-                          {
-                            transform: [{
-                              translateY: anim.interpolate({
-                                inputRange: [0, 1],
-                                outputRange: [0, -8]
-                              })
-                            }]
-                          }
-                        ]}
-                      />
-                    ))}
-                  </View>
-                )}
-              </View>
-
-              {/* Checkmark */}
-              {index < currentStep && (
-                <Icon name="check-circle" size={20} color={colors.success} />
-              )}
-              {index === currentStep && isComplete && (
-                <Icon name="check-circle" size={20} color={colors.success} />
-              )}
-            </View>
-          ))}
-        </View>
-
-        {/* Progress Bar */}
-        <View style={styles.progressContainer}>
-          <View style={styles.progressBar}>
-            <View
-              style={[
-                styles.progressFill,
-                { width: `${((currentStep + 1) / processingSteps.length) * 100}%` }
-              ]}
-            />
-          </View>
-          <View style={styles.progressLabels}>
-            <Text style={styles.progressLabel}>0%</Text>
-            <Text style={styles.progressLabel}>50%</Text>
-            <Text style={styles.progressLabel}>100%</Text>
+                ]}
+              />
+            ))}
           </View>
         </View>
+      )}
 
-        {/* Security Message */}
-        <View style={styles.securityContainer}>
-          <View style={styles.securityContent}>
-            <Icon name="shield" size={20} color={colors.primary} />
-            <Text style={styles.securityText}>
-              <Text style={styles.securityBold}>Transacción segura</Text> • Protegido por blockchain
-            </Text>
-          </View>
-        </View>
+      <View style={{ flex: 1 }} />
 
-        {/* Processing Info */}
-        <View style={styles.infoContainer}>
-          <View style={styles.infoContent}>
-            <Icon name="clock" size={16} color={colors.primary} />
-            <View style={styles.infoTextContainer}>
-              <Text style={styles.infoTitle}>¿Sabías que...?</Text>
-              <Text style={styles.infoText}>
-                Confío cubre las comisiones de red para que puedas transferir dinero completamente gratis.
-                {supportCopy.processingLine}
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Completion message */}
-        {isComplete && (
-          <View style={styles.completionContainer}>
-            <View style={styles.completionContent}>
-              <Icon name="check-circle" size={32} color={colors.success} />
-              <Text style={styles.completionTitle}>¡Transacción completada!</Text>
-              <Text style={styles.completionText}>Redirigiendo a confirmación...</Text>
-            </View>
-          </View>
-        )}
+      <View style={styles.securityRow}>
+        <Icon name="shield" size={16} color={colors.primaryDark} />
+        <Text style={styles.securityText}>
+          Transacción segura · Confío cubre la comisión de red
+        </Text>
       </View>
-    </ScrollView>
+    </View>
   );
 };
 
@@ -989,204 +872,39 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  header: {
-    paddingBottom: 48,
-    paddingHorizontal: 16,
-  },
-  headerContent: {
-    alignItems: 'center',
-  },
-  processingCircle: {
-    width: 96,
-    height: 96,
-    backgroundColor: '#ffffff',
-    borderRadius: 48,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 24,
-    marginBottom: 24,
-    position: 'relative',
-  },
-  pulseCircle: {
-    position: 'absolute',
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    backgroundColor: colors.primary,
-    opacity: 0.2,
-  },
-  spinner: {
-    transform: [{ rotate: '0deg' }],
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#ffffff',
-    marginBottom: 8,
-  },
-  headerAmount: {
-    fontSize: 36,
-    fontWeight: 'bold',
-    color: '#ffffff',
-    marginBottom: 16,
-  },
-  headerSubtitle: {
-    fontSize: 18,
-    color: '#ffffff',
-    opacity: 0.9,
-  },
-  content: {
-    paddingHorizontal: 16,
-    marginTop: -32,
-    paddingBottom: 32,
-  },
-  stepsContainer: {
-    backgroundColor: '#ffffff',
-    borderRadius: 16,
-    padding: 32,
-    marginBottom: 24,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 2,
-      },
-    }),
-  },
-  stepRow: {
+  stepLine: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 24,
-  },
-  stepIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
     justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
-  },
-  stepTextContainer: {
-    flex: 1,
+    gap: 8,
+    marginTop: 4,
   },
   stepText: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '500',
+    color: colors.text.secondary,
   },
   dotsContainer: {
     flexDirection: 'row',
-    marginTop: 4,
+    alignItems: 'flex-end',
+    gap: 3,
   },
   dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
     backgroundColor: colors.primary,
-    marginRight: 4,
   },
-  progressContainer: {
-    marginBottom: 24,
-  },
-  progressBar: {
-    width: '100%',
-    height: 8,
-    backgroundColor: '#E5E7EB',
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: colors.primary,
-    borderRadius: 4,
-  },
-  progressLabels: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 8,
-  },
-  progressLabel: {
-    fontSize: 12,
-    color: '#6B7280',
-  },
-  securityContainer: {
-    backgroundColor: '#ffffff',
-    borderRadius: 16,
-    padding: 24,
-    marginBottom: 16,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 2,
-      },
-    }),
-  },
-  securityContent: {
+  securityRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 8,
+    paddingBottom: 48,
+    paddingHorizontal: 32,
   },
   securityText: {
-    fontSize: 14,
-    color: '#6B7280',
-    marginLeft: 8,
+    fontSize: 13,
+    color: colors.text.secondary,
   },
-  securityBold: {
-    fontWeight: '600',
-    color: colors.primary,
-  },
-  infoContainer: {
-    backgroundColor: '#D1FAE5',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
-  },
-  infoContent: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
-  infoTextContainer: {
-    flex: 1,
-    marginLeft: 8,
-  },
-  infoTitle: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#065F46',
-    marginBottom: 4,
-  },
-  infoText: {
-    fontSize: 12,
-    color: '#047857',
-    lineHeight: 16,
-  },
-  completionContainer: {
-    backgroundColor: '#D1FAE5',
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#A7F3D0',
-  },
-  completionContent: {
-    alignItems: 'center',
-  },
-  completionTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#065F46',
-    marginTop: 8,
-    marginBottom: 4,
-  },
-  completionText: {
-    fontSize: 12,
-    color: '#047857',
-  },
-}); 
+});

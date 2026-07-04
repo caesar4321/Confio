@@ -34,6 +34,7 @@ import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
+import { SuccessHero } from '../components/common/SuccessHero';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useAhorrosPortfolio } from '../hooks/useAhorrosPortfolio';
 import { useGmMarket } from '../hooks/useGmMarket';
@@ -118,15 +119,12 @@ export const BuyStockScreen = () => {
         <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
         <SafeAreaView edges={['top']} style={{ backgroundColor: colors.primary }} />
         <View style={styles.successWrap}>
-          <TickerLogo ticker={stock.ticker} color={stock.color} logoUrl={stock.logoUrl} size={72} />
-          <Text style={styles.successTitle}>Ya tienes {stock.ticker}</Text>
-          <Text style={styles.successAmount}>
-            ≈ {formatNumber(quote.tokensOut, { maximumFractionDigits: 4 })} {stock.ticker}
-          </Text>
-          <Text style={styles.successHint}>
-            Los dividendos se reinvierten automáticamente en el valor de tu posición. Puedes
-            vender cuando quieras.
-          </Text>
+          <SuccessHero
+            title={`Ya tienes ${stock.ticker}`}
+            amount={`≈ ${formatNumber(quote.tokensOut, { maximumFractionDigits: 4 })} ${stock.ticker}`}
+            hint="Los dividendos se reinvierten automáticamente en el valor de tu posición. Puedes vender cuando quieras."
+            icon={<TickerLogo ticker={stock.ticker} color={stock.color} logoUrl={stock.logoUrl} size={72} />}
+          />
           <TouchableOpacity
             style={styles.successCta}
             onPress={() => navigation.goBack()}

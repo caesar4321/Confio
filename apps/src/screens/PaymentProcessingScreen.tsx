@@ -17,6 +17,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 // GraphQL not used in WS-only flow
 import { colors } from '../config/theme';
+import { ProcessingHero } from '../components/common/ProcessingHero';
 // Removed GET_INVOICES and AccountManager in WS-only flow
 import { biometricAuthService } from '../services/biometricAuthService';
 import { useAuth } from '../contexts/AuthContext';
@@ -735,165 +736,44 @@ export const PaymentProcessingScreen = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        {/* Processing Header */}
-        <View style={[styles.header, { backgroundColor: colors.primary }]}>
-          <View style={styles.headerContent}>
-            {/* Processing Animation */}
-            <View style={styles.processingIcon}>
-              {!isComplete ? (
-                <>
-                  <Animated.View style={[styles.spinner, { transform: [{ rotate: spin }] }]}>
-                    <Icon name="loader" size={48} color={colors.primary} />
-                  </Animated.View>
-                  <Animated.View
-                    style={[
-                      styles.pulseEffect,
-                      {
-                        backgroundColor: colors.primary,
-                        opacity: 0.2,
-                        transform: [{ scale: pulseValue }]
-                      }
-                    ]}
-                  />
-                </>
-              ) : (
-                <Icon name="check-circle" size={48} color={colors.primary} />
-              )}
-            </View>
+      <ProcessingHero
+        title={isComplete ? '¡Casi listo!' : transactionData.action}
+        amount={`$${transactionData.amount} ${formatCurrency(transactionData.currency)}`}
+        hint={`En ${transactionData.merchant}`}
+        complete={isComplete}
+      />
 
-            <Text style={styles.headerTitle}>
-              {isComplete ? '¡Casi listo!' : transactionData.action}
-            </Text>
-
-            <Text style={styles.amountText}>
-              ${transactionData.amount} {formatCurrency(transactionData.currency)}
-            </Text>
-
-            <Text style={styles.merchantText}>
-              En {transactionData.merchant}
-            </Text>
+      {/* Current step: one quiet living line instead of the steps card */}
+      {!isComplete && !paymentError && (
+        <View style={styles.stepLine}>
+          <Text style={styles.stepText}>{processingSteps[currentStep].text}</Text>
+          <View style={styles.loadingDots}>
+            <View style={styles.dot} />
+            <View style={styles.dot} />
+            <View style={styles.dot} />
           </View>
         </View>
+      )}
 
-        {/* Processing Steps */}
-        <View style={styles.content}>
-          <View style={styles.stepsCard}>
-            <View style={styles.stepsContainer}>
-              {processingSteps.map((step, index) => (
-                <View key={index} style={styles.stepRow}>
-                  {/* Step Icon */}
-                  <View style={[
-                    styles.stepIcon,
-                    {
-                      backgroundColor: index <= currentStep ? step.bgColor : '#F3F4F6',
-                      transform: [{ scale: index === currentStep ? 1.1 : 1 }]
-                    }
-                  ]}>
-                    <Icon
-                      name={step.icon as any}
-                      size={24}
-                      color={index <= currentStep ? step.color : '#9CA3AF'}
-                    />
-                  </View>
-
-                  {/* Step Text */}
-                  <View style={styles.stepTextContainer}>
-                    <Text style={[
-                      styles.stepText,
-                      { color: index <= currentStep ? '#1F2937' : '#9CA3AF' }
-                    ]}>
-                      {step.text}
-                    </Text>
-                    {index === currentStep && !isComplete && (
-                      <View style={styles.loadingDots}>
-                        <View style={styles.dot} />
-                        <View style={styles.dot} />
-                        <View style={styles.dot} />
-                      </View>
-                    )}
-                  </View>
-
-                  {/* Checkmark */}
-                  {index < currentStep && (
-                    <Icon name="check-circle" size={20} color="#22C55E" />
-                  )}
-                  {index === currentStep && isComplete && (
-                    <Icon name="check-circle" size={20} color="#22C55E" />
-                  )}
-                </View>
-              ))}
-            </View>
-
-            {/* Progress Bar */}
-            <View style={styles.progressContainer}>
-              <View style={styles.progressBar}>
-                <View
-                  style={[
-                    styles.progressFill,
-                    {
-                      backgroundColor: colors.primary,
-                      width: `${((currentStep + 1) / processingSteps.length) * 100}%`
-                    }
-                  ]}
-                />
-              </View>
-              <View style={styles.progressLabels}>
-                <Text style={styles.progressLabel}>0%</Text>
-                <Text style={styles.progressLabel}>50%</Text>
-                <Text style={styles.progressLabel}>100%</Text>
-              </View>
-            </View>
+      {paymentError && (
+        <View style={styles.errorCard}>
+          <Icon name="alert-circle" size={20} color={colors.error.icon} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.errorTitle}>Error en el pago</Text>
+            <Text style={styles.errorText}>{paymentError}</Text>
+            <Text style={styles.errorSubtext}>Redirigiendo de vuelta...</Text>
           </View>
-
-          {/* Security Message */}
-          <View style={styles.securityCard}>
-            <View style={styles.securityContent}>
-              <Icon name="shield" size={20} color={colors.primary} />
-              <Text style={styles.securityText}>
-                <Text style={styles.securityBold}>Transacción segura</Text> • Protegido por blockchain
-              </Text>
-            </View>
-          </View>
-
-          {/* Processing Info */}
-          <View style={styles.infoCard}>
-            <View style={styles.infoContent}>
-              <Icon name="clock" size={16} color="#10B981" />
-              <View style={styles.infoTextContainer}>
-                <Text style={styles.infoTitle}>¿Sabías que...?</Text>
-                <Text style={styles.infoText}>
-                  Confío cubre las comisiones de red para que puedas transferir dinero completamente gratis.
-                  {supportCopy.processingLine}
-                </Text>
-              </View>
-            </View>
-          </View>
-
-          {/* Completion message */}
-          {isComplete && (
-            <View style={styles.completionCard}>
-              <View style={styles.completionContent}>
-                <Icon name="check-circle" size={32} color="#22C55E" />
-                <Text style={styles.completionTitle}>¡Transacción completada!</Text>
-                <Text style={styles.completionText}>Redirigiendo a confirmación...</Text>
-              </View>
-            </View>
-          )}
-
-          {/* Error message */}
-          {paymentError && (
-            <View style={styles.errorCard}>
-              <View style={styles.errorContent}>
-                <Icon name="alert-circle" size={32} color="#EF4444" />
-                <Text style={styles.errorTitle}>Error en el pago</Text>
-                <Text style={styles.errorText}>{paymentError}</Text>
-                <Text style={styles.errorSubtext}>Redirigiendo de vuelta...</Text>
-              </View>
-            </View>
-          )}
         </View>
-      </ScrollView>
+      )}
+
+      <View style={{ flex: 1 }} />
+
+      <View style={styles.securityRow}>
+        <Icon name="shield" size={16} color={colors.primaryDark} />
+        <Text style={styles.securityText}>
+          Transacción segura · Confío cubre la comisión de red
+        </Text>
+      </View>
     </SafeAreaView>
   );
 };
@@ -901,223 +781,70 @@ export const PaymentProcessingScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: colors.background,
   },
-  scrollView: {
-    flex: 1,
-  },
-  header: {
-    paddingTop: 48,
-    paddingBottom: 48,
-    paddingHorizontal: 16,
-  },
-  headerContent: {
-    alignItems: 'center',
-  },
-  processingIcon: {
-    width: 96,
-    height: 96,
-    backgroundColor: 'white',
-    borderRadius: 48,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 24,
-    position: 'relative',
-  },
-  spinner: {
-    position: 'absolute',
-  },
-  pulseEffect: {
-    position: 'absolute',
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: 'white',
-    marginBottom: 8,
-  },
-  amountText: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: 'white',
-    marginBottom: 16,
-  },
-  merchantText: {
-    fontSize: 18,
-    color: 'rgba(255,255,255,0.9)',
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: 16,
-    marginTop: -32,
-    paddingBottom: 40,
-  },
-  stepsCard: {
-    backgroundColor: 'white',
-    borderRadius: 16,
-    padding: 32,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  stepsContainer: {
-    gap: 24,
-  },
-  stepRow: {
+  stepLine: {
     flexDirection: 'row',
     alignItems: 'center',
-  },
-  stepIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
     justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
-  },
-  stepTextContainer: {
-    flex: 1,
+    gap: 8,
+    marginTop: 4,
   },
   stepText: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '500',
+    color: colors.text.secondary,
   },
   loadingDots: {
     flexDirection: 'row',
-    marginTop: 4,
-    gap: 4,
+    alignItems: 'center',
+    gap: 3,
   },
   dot: {
-    width: 8,
-    height: 8,
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
     backgroundColor: colors.primary,
-    borderRadius: 4,
-  },
-  progressContainer: {
-    marginTop: 32,
-  },
-  progressBar: {
-    width: '100%',
-    height: 8,
-    backgroundColor: '#E5E7EB',
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    borderRadius: 4,
-  },
-  progressLabels: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 8,
-  },
-  progressLabel: {
-    fontSize: 12,
-    color: '#6B7280',
-  },
-  securityCard: {
-    backgroundColor: 'white',
-    borderRadius: 16,
-    padding: 24,
-    marginTop: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  securityContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  securityText: {
-    fontSize: 14,
-    color: '#6B7280',
-    marginLeft: 8,
-  },
-  securityBold: {
-    fontWeight: '600',
-    color: '#10B981',
-  },
-  infoCard: {
-    backgroundColor: '#ECFDF5',
-    borderRadius: 16,
-    padding: 16,
-    marginTop: 16,
-  },
-  infoContent: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
-  infoTextContainer: {
-    flex: 1,
-    marginLeft: 8,
-  },
-  infoTitle: {
-    fontSize: 12,
-    color: '#065F46',
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  infoText: {
-    fontSize: 12,
-    color: '#047857',
-  },
-  completionCard: {
-    backgroundColor: '#F0FDF4',
-    borderRadius: 16,
-    padding: 16,
-    marginTop: 16,
-    borderWidth: 1,
-    borderColor: '#BBF7D0',
-  },
-  completionContent: {
-    alignItems: 'center',
-  },
-  completionTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#166534',
-    marginTop: 8,
-    marginBottom: 4,
-  },
-  completionText: {
-    fontSize: 12,
-    color: '#15803D',
   },
   errorCard: {
-    backgroundColor: '#FEF2F2',
-    borderRadius: 16,
-    padding: 16,
-    marginTop: 16,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginHorizontal: 24,
+    marginTop: 12,
+    backgroundColor: colors.error.background,
     borderWidth: 1,
-    borderColor: '#FECACA',
-  },
-  errorContent: {
-    alignItems: 'center',
+    borderColor: colors.error.border,
+    borderRadius: 12,
+    padding: 14,
   },
   errorTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#DC2626',
-    marginTop: 8,
-    marginBottom: 4,
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.error.text,
+    marginBottom: 2,
   },
   errorText: {
-    fontSize: 14,
-    color: '#DC2626',
-    textAlign: 'center',
-    marginBottom: 4,
+    fontSize: 13,
+    lineHeight: 18,
+    color: colors.error.text,
   },
   errorSubtext: {
     fontSize: 12,
-    color: '#EF4444',
+    color: colors.error.text,
+    opacity: 0.8,
+    marginTop: 4,
   },
-}); 
+  securityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingBottom: 24,
+    paddingHorizontal: 32,
+  },
+  securityText: {
+    fontSize: 13,
+    color: colors.text.secondary,
+  },
+});
