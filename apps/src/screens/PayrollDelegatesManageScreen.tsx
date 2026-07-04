@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useCallback, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, FlatList, Alert, ActivityIndicator, Modal, Image, Platform, StatusBar } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, Alert, ActivityIndicator, Modal, Image, Platform, StatusBar } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -13,6 +13,7 @@ import algorandService from '../services/algorandService';
 import { Buffer } from 'buffer';
 import { colors } from '../config/theme';
 import { InlineBanner } from '../components/common/InlineBanner';
+import { Header } from '../navigation/Header';
 import { APP_LAYOUT } from '../config/layout';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList>;
@@ -188,14 +189,13 @@ export const PayrollDelegatesManageScreen = () => {
   }, [employees]);
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Icon name="chevron-left" size={24} color={colors.textFlat} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Delegados</Text>
-        <View style={{ width: 32 }} />
-      </View>
+    <View style={styles.container}>
+      <Header
+        navigation={navigation as any}
+        title="Delegados"
+        backgroundColor="#fff"
+        showBackButton
+      />
 
       {banner && (
         <InlineBanner
@@ -297,34 +297,12 @@ export const PayrollDelegatesManageScreen = () => {
         }}
         contentContainerStyle={styles.listContent}
       />
-    </SafeAreaView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    marginTop: Platform.OS === 'android' ? APP_LAYOUT.topSafeArea + 10 : 0,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  backButton: {
-    width: 32,
-    height: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerTitle: {
-    flex: 1,
-    textAlign: 'center',
-    fontSize: 18,
-    color: colors.textFlat,
-    fontWeight: '600',
-  },
   infoCard: {
     flexDirection: 'row',
     alignItems: 'flex-start',
