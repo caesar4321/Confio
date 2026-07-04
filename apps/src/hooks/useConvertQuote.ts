@@ -3,21 +3,33 @@
 // (services/allbridgeQuote.ts, validated against the official SDK); the
 // SERVER owns only the guard threshold, Confío fee and kill switch.
 //
-// TODO(cusd+): replace PARAMS with the cusdPlusConvertParams GraphQL query
-// once the backend deploys — these constants mirror its schema defaults.
+// Guard params come from the server (cusdPlusConvertParams, live on prod
+// since 2026-07-04); the DEFAULTS below only cover loading/offline.
 
 import { useEffect, useRef, useState } from 'react';
+import { gql, useQuery } from '@apollo/client';
 import {
   BridgeDirection,
   getBridgeQuote,
   maxFillUnderThreshold,
 } from '../services/allbridgeQuote';
 
-const PARAMS = {
-  spreadThresholdPct: 0.5, // remote-config guard
+const GET_CONVERT_PARAMS = gql`
+  query CusdPlusConvertParams {
+    cusdPlusConvertParams {
+      spreadThresholdBps
+      confioFeeBps
+      minAmountUsd
+      paused
+    }
+  }
+`;
+
+const DEFAULTS = {
+  spreadThresholdPct: 0.5,
   confioFeeBps: 0, // open pricing decision — server-config, never hardcoded copy
   minAmountUsd: 1,
-  paused: false, // server kill switch
+  paused: false,
 };
 
 export type ConvertQuoteStatus =
@@ -56,6 +68,23 @@ export const useConvertQuote = (
 ): ConvertQuote => {
   const [quote, setQuote] = useState<ConvertQuote>(IDLE);
   const gen = useRef(0);
+
+  const { data: paramsData } = useQuery(GET_CONVERT_PARAMS, {
+    fetchPolicy: 'cache-and-network',
+  });
+  const server = paramsData?.cusdPlusConvertParams;
+  const PARAMS = {
+    spreadThresholdPct:
+      server?.spreadThresholdBps != null
+        ? server.spreadThresholdBps / 100
+        : DEFAULTS.spreadThresholdPct,
+    confioFeeBps: server?.confioFeeBps ?? DEFAULTS.confioFeeBps,
+    minAmountUsd: server?.minAmountUsd ?? DEFAULTS.minAmountUsd,
+    // Server kill switch stays authoritative in release builds; dev builds
+    // ignore it so the ready-state UI stays reviewable while the rails are
+    // still paused server-side (execution is a stub in dev anyway).
+    paused: __DEV__ ? false : server?.paused ?? DEFAULTS.paused,
+  };
 
   useEffect(() => {
     const g = ++gen.current;
@@ -116,7 +145,7 @@ export const useConvertQuote = (
       }
     }, DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [amountUsd, direction]);
+  }, [amountUsd, direction, PARAMS.spreadThresholdPct, PARAMS.confioFeeBps, PARAMS.minAmountUsd, PARAMS.paused]);
 
   return quote;
 };
