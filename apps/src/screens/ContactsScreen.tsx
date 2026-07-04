@@ -5,6 +5,7 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
 import { RouteSheet } from '../components/RouteSheet';
+import { AnalyticsService } from '../services/analyticsService';
 import Icon from 'react-native-vector-icons/Feather';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
@@ -614,9 +615,24 @@ export const ContactsScreen = () => {
     }, [hasContactPermission])
   );
 
+  const [showReceiveSelection, setShowReceiveSelection] = useState(false);
+
   const handleReceiveWithAddress = () => {
-    // Unified deposit screen — same address for all tokens, no selector needed
-    navigation.navigate('USDCDeposit');
+    setShowReceiveSelection(true);
+  };
+
+  // Demand probe (Julian, 2026-07-04): rails we do NOT support yet stay
+  // visible in the sheet. A tap IS the demand signal — logged to analytics
+  // before the user reads anything — and the alert routes real urgency to
+  // support. Zero backend, real numbers on which rail to build next.
+  const handleReceiveRailInterest = (rail: string, label: string) => {
+    setShowReceiveSelection(false);
+    AnalyticsService.logEvent('receive_rail_interest', { rail });
+    Alert.alert(
+      label,
+      'Aún no está disponible. Anotamos tu interés — y si lo necesitas pronto, ' +
+        'escríbenos al soporte y te avisamos primero.',
+    );
   };
 
   const handleSendWithAddress = () => {
@@ -1473,6 +1489,50 @@ export const ContactsScreen = () => {
           removeClippedSubviews={true}
         />
 
+        <RouteSheet
+          visible={showReceiveSelection}
+          title="¿Qué quieres recibir?"
+          onClose={() => setShowReceiveSelection(false)}
+          options={[
+            {
+              icon: 'dollar-sign',
+              image: cUSDLogo,
+              title: 'cUSD · USDC · CONFIO',
+              subtitle: 'Red Algorand · tu dirección de siempre',
+              onPress: () => {
+                setShowReceiveSelection(false);
+                navigation.navigate('USDCDeposit', {});
+              },
+            },
+            {
+              icon: 'download',
+              title: 'USDT · BNB Smart Chain (BEP-20)',
+              subtitle: 'Directo a tu ahorro (Confío Dollar+)',
+              onPress: () => {
+                setShowReceiveSelection(false);
+                navigation.navigate('ReceiveSavings');
+              },
+            },
+            {
+              icon: 'clock',
+              title: 'USDC · Ethereum',
+              subtitle: 'Aún no disponible · tócalo y te avisamos',
+              onPress: () => handleReceiveRailInterest('usdc_eth', 'USDC (Ethereum)'),
+            },
+            {
+              icon: 'clock',
+              title: 'USDT · Ethereum',
+              subtitle: 'Aún no disponible · tócalo y te avisamos',
+              onPress: () => handleReceiveRailInterest('usdt_eth', 'USDT (Ethereum)'),
+            },
+            {
+              icon: 'clock',
+              title: 'USDT · Tron (TRC-20)',
+              subtitle: 'Aún no disponible · tócalo y te avisamos',
+              onPress: () => handleReceiveRailInterest('usdt_tron', 'USDT (Tron)'),
+            },
+          ]}
+        />
         <RouteSheet
           visible={showSendTokenSelection}
           title="¿Qué moneda quieres enviar?"
