@@ -9,7 +9,7 @@ import {
   StatusBar,
   Alert,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Header } from '../navigation/Header';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { MainStackParamList } from '../types/navigation';
@@ -164,14 +164,15 @@ export const TraderRatingScreen: React.FC = () => {
 
   if (isSubmitted) {
     return (
-      <SafeAreaView style={styles.container}>
+      <View style={styles.container}>
         <StatusBar barStyle="dark-content" backgroundColor="#fff" />
-        <View style={styles.headerRow}>
-          <TouchableOpacity onPress={handleGoBack} style={styles.backButton}>
-            <Icon name="arrow-left" size={24} color="#374151" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Calificación Enviada</Text>
-        </View>
+        <Header
+          navigation={navigation as any}
+          title="Calificación Enviada"
+          backgroundColor="#fff"
+          showBackButton
+          onBackPress={handleGoBack}
+        />
         <View style={styles.centeredContent}>
           <View style={styles.successCard}>
             <View style={styles.successIcon}>
@@ -205,19 +206,20 @@ export const TraderRatingScreen: React.FC = () => {
             />
           </View>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
-      <View style={styles.headerRow}>
-        <TouchableOpacity onPress={handleGoBack} style={styles.backButton}>
-          <Icon name="arrow-left" size={24} color="#374151" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Calificar Intercambio</Text>
-      </View>
+      <Header
+        navigation={navigation as any}
+        title="Calificar Intercambio"
+        backgroundColor="#fff"
+        showBackButton
+        onBackPress={handleGoBack}
+      />
       <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 32 }}>
         {banner && (
           <InlineBanner
@@ -373,15 +375,12 @@ export const TraderRatingScreen: React.FC = () => {
           textStyle={{ fontSize: 17, fontWeight: 'bold' }}
         />
       </View>
-    </SafeAreaView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F9FAFB' },
-  headerRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8, backgroundColor: '#fff' },
-  backButton: { padding: 4, marginRight: 12 },
-  headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#1F2937' },
   content: { flex: 1 },
   traderCard: { backgroundColor: '#fff', borderRadius: 12, padding: 16, marginBottom: 16 },
   traderRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
