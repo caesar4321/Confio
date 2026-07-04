@@ -1603,10 +1603,11 @@ export const HomeScreen = () => {
                 </View>
               </Pressable>
 
-              {/* Ahorros e Inversiones — portfolio entry (personal accounts).
-                  Follows the wallet-row grammar (mark | name/symbol | amount)
-                  so it reads as a sibling of cUSD and CONFIO, not a menu item.
-                  Benefit-labeled here; the cUSD+/stocks brands live inside. */}
+              {/* Ahorro and Inversión as SEPARATE wallet rows (personal
+                  accounts): savings never goes down, stocks fluctuate — one
+                  combined number would let a red stock day drag the savings
+                  psychology down with it. Day change shows in USD (2 dp) and
+                  only when it rounds to ≥ $0.01 — never "+$0.00". */}
               {!activeAccount?.isEmployee && (
                 <Pressable
                   style={({ pressed }) => [
@@ -1620,13 +1621,61 @@ export const HomeScreen = () => {
                       <Image source={cUSDPlusLogo} style={styles.walletLogo} />
                     </View>
                     <View style={styles.walletInfo}>
-                      <Text style={styles.walletName}>Ahorros e Inversiones</Text>
-                      <Text style={styles.walletSymbol}>cUSD+ · Acciones de EE.UU.</Text>
+                      <Text style={styles.walletName}>Confío Dollar+</Text>
+                      <Text style={styles.walletSymbol}>cUSD+ · Ahorro</Text>
                     </View>
                     <View style={styles.walletBalanceContainer}>
-                      <Text style={styles.walletBalanceText}>
-                        {showBalance ? `$${formatFixedFloor(ahorrosPortfolio.totalUsd, 2)}` : '••••'}
-                      </Text>
+                      <View style={{ alignItems: 'flex-end' }}>
+                        <Text style={styles.walletBalanceText}>
+                          {showBalance ? `$${formatFixedFloor(ahorrosPortfolio.savings.balanceUsd, 2)}` : '••••'}
+                        </Text>
+                        {showBalance && ahorrosPortfolio.savings.earnedTodayUsd >= 0.005 && (
+                          <Text style={{ fontSize: 11, fontWeight: '600', color: '#059669', marginTop: 1 }}>
+                            hoy +${formatFixedFloor(ahorrosPortfolio.savings.earnedTodayUsd, 2)}
+                          </Text>
+                        )}
+                      </View>
+                      <Icon name="chevron-right" size={20} color="#9ca3af" />
+                    </View>
+                  </View>
+                </Pressable>
+              )}
+
+              {!activeAccount?.isEmployee && ahorrosPortfolio.stocks.enabled && (
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.walletCard,
+                    pressed && { opacity: 0.7 }
+                  ]}
+                  onPress={() => navigation.navigate('AccionesList')}
+                >
+                  <View style={styles.walletCardContent}>
+                    <View style={[styles.walletLogoContainer, { backgroundColor: '#1D4ED8', alignItems: 'center', justifyContent: 'center' }]}>
+                      <Icon name="bar-chart-2" size={20} color="#fff" />
+                    </View>
+                    <View style={styles.walletInfo}>
+                      <Text style={styles.walletName}>Acciones de EE.UU.</Text>
+                      <Text style={styles.walletSymbol}>Tesla, NVIDIA y más</Text>
+                    </View>
+                    <View style={styles.walletBalanceContainer}>
+                      <View style={{ alignItems: 'flex-end' }}>
+                        <Text style={styles.walletBalanceText}>
+                          {showBalance ? `$${formatFixedFloor(ahorrosPortfolio.stocks.totalUsd, 2)}` : '••••'}
+                        </Text>
+                        {showBalance && Math.abs(ahorrosPortfolio.stocks.earnedTodayUsd) >= 0.005 && (
+                          <Text
+                            style={{
+                              fontSize: 11,
+                              fontWeight: '600',
+                              marginTop: 1,
+                              color: ahorrosPortfolio.stocks.earnedTodayUsd >= 0 ? '#059669' : '#DC2626',
+                            }}
+                          >
+                            hoy {ahorrosPortfolio.stocks.earnedTodayUsd >= 0 ? '+' : '−'}$
+                            {formatFixedFloor(Math.abs(ahorrosPortfolio.stocks.earnedTodayUsd), 2)}
+                          </Text>
+                        )}
+                      </View>
                       <Icon name="chevron-right" size={20} color="#9ca3af" />
                     </View>
                   </View>

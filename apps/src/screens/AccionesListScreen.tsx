@@ -34,7 +34,7 @@ export const AccionesListScreen = () => {
   const navigation = useNavigation<NavProp>();
   const { formatNumber } = useNumberFormat();
   const { session, stocks } = useGmMarket();
-  const { savings } = useAhorrosPortfolio();
+  const { savings, stocks: myStocks } = useAhorrosPortfolio();
   const [search, setSearch] = useState('');
 
   const filtered = useMemo(() => {
@@ -119,20 +119,65 @@ export const AccionesListScreen = () => {
         windowSize={11}
         showsVerticalScrollIndicator={false}
         ListHeaderComponent={
-          <View style={styles.searchBox}>
-            <Icon name="search" size={18} color={colors.text.light} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Buscar por nombre o símbolo"
-              placeholderTextColor={colors.text.light}
-              value={search}
-              onChangeText={setSearch}
-              autoCapitalize="characters"
-            />
-            {search.length > 0 && (
-              <TouchableOpacity onPress={() => setSearch('')}>
-                <Icon name="x-circle" size={18} color={colors.text.light} />
-              </TouchableOpacity>
+          <View>
+            <View style={styles.searchBox}>
+              <Icon name="search" size={18} color={colors.text.light} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Buscar por nombre o símbolo"
+                placeholderTextColor={colors.text.light}
+                value={search}
+                onChangeText={setSearch}
+                autoCapitalize="characters"
+              />
+              {search.length > 0 && (
+                <TouchableOpacity onPress={() => setSearch('')}>
+                  <Icon name="x-circle" size={18} color={colors.text.light} />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* Mis acciones — the user's own positions come first (value in
+                USD + day %); the market list below is for discovery. Hidden
+                while searching so results stay clean. */}
+            {myStocks.positions.length > 0 && search.trim() === '' && (
+              <>
+                <Text style={styles.sectionLabel}>Mis acciones</Text>
+                {myStocks.positions.map((pos) => {
+                  const gm = stocks.find((g) => g.ticker === pos.ticker);
+                  const up = pos.dayChangePct >= 0;
+                  return (
+                    <TouchableOpacity
+                      key={pos.ticker}
+                      style={styles.row}
+                      activeOpacity={0.8}
+                      onPress={() => navigation.navigate('StockDetail', { ticker: pos.ticker })}
+                    >
+                      <TickerLogo
+                        ticker={pos.ticker}
+                        color={gm?.color || '#1D4ED8'}
+                        logoUrl={gm?.logoUrl}
+                        size={42}
+                      />
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.rowTicker}>{pos.ticker}</Text>
+                        <Text style={styles.rowName} numberOfLines={1}>
+                          {pos.name}
+                        </Text>
+                      </View>
+                      <View style={{ alignItems: 'flex-end' }}>
+                        <Text style={styles.rowPrice}>{fmtUsd(pos.valueUsd)}</Text>
+                        <Text style={[styles.rowChange, !up && styles.rowChangeDown]}>
+                          {up ? '▲' : '▼'}{' '}
+                          {formatNumber(Math.abs(pos.dayChangePct), { maximumFractionDigits: 2 })}%
+                          {' hoy'}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+                <Text style={styles.sectionLabel}>Todas las acciones</Text>
+              </>
             )}
           </View>
         }
@@ -201,6 +246,13 @@ const styles = StyleSheet.create({
   },
   searchInput: { flex: 1, fontSize: 15, color: colors.text.primary, padding: 0 },
 
+  sectionLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.text.secondary,
+    marginBottom: 8,
+    marginTop: 4,
+  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

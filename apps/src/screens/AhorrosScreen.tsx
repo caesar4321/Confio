@@ -83,6 +83,18 @@ export const AhorrosScreen = () => {
   const hasStocks = stocks.positions.length > 0;
   const hasAnything = portfolio.totalUsd > 0;
 
+  // Day/month ticker parts only when they round to >= $0.01 — a fresh $50
+  // saver earns fractions of a cent per day and "+$0.00" reads as broken.
+  const tickerParts: string[] = [];
+  if (Math.abs(portfolio.earnedTodayUsd) >= 0.005) {
+    tickerParts.push(
+      `Hoy ${portfolio.earnedTodayUsd >= 0 ? '+' : '\u2212'}$${Math.abs(portfolio.earnedTodayUsd).toFixed(2)}`,
+    );
+  }
+  if (portfolio.earnedMonthUsd >= 0.005) {
+    tickerParts.push(`Este mes +$${portfolio.earnedMonthUsd.toFixed(2)}`);
+  }
+
   const fmtUsd = (v: number, digits = 2) =>
     `$${formatNumber(v, { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
 
@@ -157,15 +169,22 @@ export const AhorrosScreen = () => {
           <View style={styles.hero}>
             <Text style={styles.heroLabel}>Valor total</Text>
             <Text style={styles.heroAmount}>{fmtUsd(portfolio.totalUsd)}</Text>
+            {/* Split line: savings never dips, stocks fluctuate — showing the
+                two parts keeps a red stock day from reading as "my savings
+                went down". Only shown when both exist. */}
+            {hasSavings && hasStocks && (
+              <Text style={styles.heroSplit}>
+                Ahorro {fmtUsd(savings.balanceUsd)}
+                {'   ·   '}Inversión {fmtUsd(stocks.totalUsd)}
+              </Text>
+            )}
             {hasAnything ? (
-              <View style={styles.heroTickerRow}>
-                <Icon name="trending-up" size={14} color="#fff" />
-                <Text style={styles.heroTicker}>
-                  Hoy {portfolio.earnedTodayUsd >= 0 ? '+' : ''}
-                  {fmtUsd(portfolio.earnedTodayUsd)}
-                  {'  ·  '}Este mes +{fmtUsd(portfolio.earnedMonthUsd)}
-                </Text>
-              </View>
+              tickerParts.length > 0 && (
+                <View style={styles.heroTickerRow}>
+                  <Icon name="trending-up" size={14} color="#fff" />
+                  <Text style={styles.heroTicker}>{tickerParts.join('  ·  ')}</Text>
+                </View>
+              )
             ) : (
               <Text style={styles.heroEmptyHint}>Tu dinero puede crecer mientras duerme</Text>
             )}
@@ -441,6 +460,7 @@ const styles = StyleSheet.create({
   hero: { alignItems: 'center', marginTop: 16 },
   heroLabel: { fontSize: 13, color: '#fff', opacity: 0.85 },
   heroAmount: { fontSize: 40, fontWeight: 'bold', color: '#fff', marginTop: 4 },
+  heroSplit: { fontSize: 13, color: '#fff', opacity: 0.9, marginTop: 6, fontWeight: '600' },
   heroTickerRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
   heroTicker: { fontSize: 13, color: '#fff', opacity: 0.9 },
   heroEmptyHint: { fontSize: 13, color: '#fff', opacity: 0.85, marginTop: 8 },
