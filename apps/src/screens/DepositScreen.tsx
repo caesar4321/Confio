@@ -398,20 +398,10 @@ const DepositScreen = () => {
     addressCard: {
       backgroundColor: '#ffffff',
       borderRadius: 16,
-      padding: 24,
+      padding: 20,
       marginHorizontal: 16,
-      marginBottom: 16,
-      ...Platform.select({
-        ios: {
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.1,
-          shadowRadius: 4,
-        },
-        android: {
-          elevation: 2,
-        },
-      }),
+      marginBottom: 12,
+      alignItems: 'center',
     },
     networkPill: {
       backgroundColor: '#FEF3C7',
@@ -431,14 +421,95 @@ const DepositScreen = () => {
     },
     explorerLinkText: { fontSize: 12, color: '#6B7280' },
     addressTitle: {
-      fontSize: 18,
-      fontWeight: 'bold',
+      fontSize: 16,
+      fontWeight: '700',
       color: colors.text.primary,
-      marginBottom: 16,
+      marginBottom: 12,
     },
+    addressMono: {
+      fontSize: 12,
+      color: colors.text.secondary,
+      textAlign: 'center',
+      marginTop: 12,
+      paddingHorizontal: 8,
+      fontFamily: technicalFontFamily,
+    },
+    btnRow: { flexDirection: 'row', gap: 10, marginTop: 14 },
+    copyBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      backgroundColor: colors.primary,
+      borderRadius: 12,
+      paddingHorizontal: 18,
+      paddingVertical: 11,
+    },
+    copyBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+    shareBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      borderWidth: 1.5,
+      borderColor: colors.primaryDark,
+      borderRadius: 12,
+      paddingHorizontal: 18,
+      paddingVertical: 11,
+    },
+    shareBtnText: { color: colors.primaryDark, fontSize: 14, fontWeight: '700' },
+    warnCard: {
+      flexDirection: 'row',
+      gap: 10,
+      backgroundColor: '#FEF3C7',
+      borderRadius: 12,
+      padding: 14,
+      marginHorizontal: 16,
+      marginTop: 16,
+      marginBottom: 12,
+    },
+    warnText: { flex: 1, fontSize: 13, color: '#92400E', lineHeight: 18 },
+    warnStrong: { fontWeight: '800' },
+    becomesCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      backgroundColor: '#ffffff',
+      borderRadius: 12,
+      padding: 14,
+      marginHorizontal: 16,
+      marginBottom: 12,
+    },
+    becomesLogo: { width: 30, height: 30, borderRadius: 15 },
+    becomesText: { flex: 1, fontSize: 13, color: colors.text.secondary, lineHeight: 18 },
+    stepsSectionTitle: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: colors.text.primary,
+      marginHorizontal: 16,
+      marginBottom: 10,
+      marginTop: 4,
+    },
+    stepCard: {
+      flexDirection: 'row',
+      gap: 12,
+      backgroundColor: '#ffffff',
+      borderRadius: 12,
+      padding: 14,
+      marginHorizontal: 16,
+      marginBottom: 8,
+    },
+    stepNum: {
+      width: 26,
+      height: 26,
+      borderRadius: 13,
+      backgroundColor: colors.primaryLight,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    stepNumText: { fontSize: 13, fontWeight: '800', color: colors.primaryDark },
+    stepCardTitle: { fontSize: 14, fontWeight: '600', color: colors.text.primary },
+    stepCardBody: { fontSize: 12, color: colors.text.secondary, marginTop: 2, lineHeight: 17 },
     qrContainer: {
       alignItems: 'center',
-      marginBottom: 24,
     },
     addressContainer: {
       marginBottom: 16,
@@ -656,26 +727,27 @@ const DepositScreen = () => {
           </View>
         ) : (
           <>
-            {/* Warning Section */}
-            <View style={styles.warningContainer}>
-              <Icon name="alert-triangle" size={20} color={colors.warning.icon} style={styles.warningIcon} />
-              <View style={styles.warningContent}>
-                <Text style={styles.warningTitle}>¡Importante!</Text>
-                <Text style={styles.warningText}>
-                  {config.warning}
-                </Text>
-              </View>
+            {/* Warning — ReceiveSavings grammar: borderless amber, inline
+                bold on the tokens that matter, no shouting title */}
+            <View style={styles.warnCard}>
+              <Icon name="alert-triangle" size={18} color="#B45309" />
+              <Text style={styles.warnText}>
+                Envía únicamente <Text style={styles.warnStrong}>cUSD, USDC o CONFIO</Text>{' '}
+                por la red <Text style={styles.warnStrong}>Algorand</Text>. El depósito de
+                cualquier otro activo o por otra red resultará en pérdida permanente de
+                los fondos.
+              </Text>
             </View>
 
-            {/* Auto-convert note */}
-            <View style={[styles.warningContainer, { backgroundColor: '#EBF5FF', borderColor: '#93C5FD' }]}>
-              <Icon name="refresh-cw" size={20} color="#2563EB" style={styles.warningIcon} />
-              <View style={styles.warningContent}>
-                <Text style={[styles.warningTitle, { color: '#1E40AF' }]}>Conversión automática</Text>
-                <Text style={[styles.warningText, { color: '#1E40AF' }]}>
-                  {config.autoConvertNote}
-                </Text>
-              </View>
+            {/* What it becomes — the becomesCard grammar (BSC sibling shows
+                cUSD+; here USDC auto-converts to Confío Dollar 1:1) */}
+            <View style={styles.becomesCard}>
+              <Image source={cUSDLogo} style={styles.becomesLogo} />
+              <Text style={styles.becomesText}>
+                Los depósitos de USDC se convierten automáticamente en{' '}
+                <Text style={styles.warnStrong}>Confío Dollar (cUSD)</Text> con respaldo
+                1:1.
+              </Text>
             </View>
 
             {/* Address Section */}
@@ -695,32 +767,29 @@ const DepositScreen = () => {
                 />
               </View>
 
-              {/* Address */}
-              <View style={styles.addressContainer}>
-                <Text style={styles.addressLabel}>Dirección de depósito:</Text>
-                <View style={styles.addressRow}>
-                  <Text style={styles.addressText}>{depositAddress}</Text>
-                  <TouchableOpacity
-                    onPress={handleCopy}
-                    style={[styles.copyButton, copied && styles.copiedButton]}
-                    accessibilityRole="button"
-                    accessibilityLabel="Copiar dirección"
-                  >
-                    <Icon
-                      name={copied ? "check" : "copy"}
-                      size={16}
-                      color={copied ? colors.primary : colors.text.secondary}
-                    />
-                  </TouchableOpacity>
-                </View>
+              <Text style={styles.addressMono}>{depositAddress}</Text>
+              <View style={styles.btnRow}>
+                <TouchableOpacity
+                  style={styles.copyBtn}
+                  onPress={handleCopy}
+                  activeOpacity={0.85}
+                  accessibilityRole="button"
+                  accessibilityLabel="Copiar dirección"
+                >
+                  <Icon name={copied ? 'check' : 'copy'} size={16} color="#fff" />
+                  <Text style={styles.copyBtnText}>{copied ? 'Copiada' : 'Copiar'}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.shareBtn}
+                  onPress={handleShare}
+                  activeOpacity={0.85}
+                  accessibilityRole="button"
+                  accessibilityLabel="Compartir dirección"
+                >
+                  <Icon name="share-2" size={16} color={colors.primaryDark} />
+                  <Text style={styles.shareBtnText}>Compartir</Text>
+                </TouchableOpacity>
               </View>
-
-              <Button
-                title="Compartir dirección"
-                onPress={handleShare}
-                style={{ backgroundColor: colors.primary, borderRadius: 8 }}
-                textStyle={{ fontWeight: '500' }}
-              />
               <TouchableOpacity
                 style={styles.explorerLink}
                 onPress={() => {
@@ -735,22 +804,19 @@ const DepositScreen = () => {
               </TouchableOpacity>
             </View>
 
-            {/* Instructions */}
-            <View style={styles.instructionsCard}>
-              <Text style={styles.instructionsTitle}>Pasos para depositar</Text>
-
-              {config.instructions.map((instruction, index) => (
-                <View key={index} style={styles.instructionStep}>
-                  <View style={[styles.stepNumber, { backgroundColor: colors.primary }]}>
-                    <Text style={styles.stepNumberText}>{instruction.step}</Text>
-                  </View>
-                  <View style={styles.stepContent}>
-                    <Text style={styles.stepTitle}>{instruction.title}</Text>
-                    <Text style={styles.stepDescription}>{instruction.description}</Text>
-                  </View>
+            {/* Instructions — per-step cards, the ReceiveSavings grammar */}
+            <Text style={styles.stepsSectionTitle}>Cómo enviar</Text>
+            {config.instructions.map((instruction, index) => (
+              <View key={index} style={styles.stepCard}>
+                <View style={styles.stepNum}>
+                  <Text style={styles.stepNumText}>{instruction.step}</Text>
                 </View>
-              ))}
-            </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.stepCardTitle}>{instruction.title}</Text>
+                  <Text style={styles.stepCardBody}>{instruction.description}</Text>
+                </View>
+              </View>
+            ))}
           </>
         )}
       </ScrollView>
