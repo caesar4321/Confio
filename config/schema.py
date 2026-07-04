@@ -42,6 +42,7 @@ class Mutation(
 	exchange_rates_schema.Mutation,
 	usdc_transactions_schema.Mutation,
 	financieras_schema.Mutation,
+	cusd_plus_schema.Mutation,
 	security_schema.Mutation,
 	presale_schema.PresaleMutations,
 	humanitarian_schema.HumanitarianMutations,

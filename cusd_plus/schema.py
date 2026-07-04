@@ -17,6 +17,7 @@
 #   switch. `paused` maps to the amber state in ConvertAhorroScreen.
 
 import graphene
+from django.utils import timezone
 
 
 class CusdPlusSummaryType(graphene.ObjectType):
@@ -58,6 +59,9 @@ class Query(graphene.ObjectType):
         offset=graphene.Int(default_value=0),
     )
     cusd_plus_convert_params = graphene.Field(CusdPlusConvertParamsType)
+    cusd_plus_conversions_in_flight = graphene.List(
+        graphene.NonNull(lambda: CusdPlusConversionType),
+    )
 
     def resolve_cusd_plus_summary(self, info):
         user = getattr(info.context, 'user', None)
@@ -81,6 +85,21 @@ class Query(graphene.ObjectType):
         # first); yield entries are weekly aggregates, never per-day spam.
         return []
 
+    def resolve_cusd_plus_conversions_in_flight(self, info):
+        from .models import CusdPlusConversion
+        user = getattr(info.context, 'user', None)
+        if not user or not user.is_authenticated:
+            return []
+        scope = _actor_filter(info)
+        if scope is None:
+            return []
+        lookup = {'is_deleted': False, 'status__in': CusdPlusConversion.IN_FLIGHT_STATUSES}
+        if scope['actor_type'] == 'business':
+            lookup['actor_business_id'] = scope['actor_business_id']
+        else:
+            lookup['actor_user'] = user
+        return [_serialize(c) for c in CusdPlusConversion.objects.filter(**lookup)[:20]]
+
     def resolve_cusd_plus_convert_params(self, info):
         user = getattr(info.context, 'user', None)
         if not user or not user.is_authenticated:
@@ -94,3 +113,148 @@ class Query(graphene.ObjectType):
             min_amount_usd=getattr(settings, 'CUSD_PLUS_MIN_CONVERT_USD', 1.0),
             paused=getattr(settings, 'CUSD_PLUS_CONVERSIONS_PAUSED', True),
         )
+
+
+# ── Conversion saga (server = observer; client signs every leg) ─────────
+
+class CusdPlusConversionType(graphene.ObjectType):
+    """One client-driven conversion saga row (ORCHESTRATION.md). The client
+    uses inFlight rows to resume the next leg on foreground."""
+    conversion_id = graphene.ID()
+    direction = graphene.String()
+    amount_usd = graphene.Float()
+    quoted_receive_usd = graphene.Float()
+    status = graphene.String()
+    src_tx_id = graphene.String()
+    dest_tx_hash = graphene.String()
+    user_bsc_address = graphene.String()
+    created_at = graphene.DateTime()
+
+
+def _serialize(conv):
+    return CusdPlusConversionType(
+        conversion_id=str(conv.internal_id),
+        direction=conv.direction,
+        amount_usd=float(conv.amount_usd),
+        quoted_receive_usd=float(conv.quoted_receive_usd),
+        status=conv.status,
+        src_tx_id=conv.src_tx_id,
+        dest_tx_hash=conv.dest_tx_hash,
+        user_bsc_address=conv.user_bsc_address,
+        created_at=conv.created_at,
+    )
+
+
+def _actor_filter(info):
+    """JWT-derived actor scoping (house rule: never client account ids)."""
+    from users.jwt_context import get_jwt_business_context_with_validation
+    jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+    if not jwt_context:
+        return None
+    if jwt_context['account_type'] == 'business' and jwt_context.get('business_id'):
+        return {'actor_business_id': jwt_context['business_id'], 'actor_type': 'business'}
+    return {'actor_user': info.context.user, 'actor_type': 'user'}
+
+
+class StartCusdPlusConversion(graphene.Mutation):
+    """Record an accepted quote. Nothing on chain yet — ABANDONED if the
+    user never signs (24h sweep)."""
+    class Arguments:
+        direction = graphene.String(required=True)
+        amount_usd = graphene.Float(required=True)
+        quoted_receive_usd = graphene.Float(required=True)
+        quoted_cost_pct = graphene.Float(required=True)
+        user_bsc_address = graphene.String(default_value='')
+        user_algo_address = graphene.String(default_value='')
+
+    conversion = graphene.Field(CusdPlusConversionType)
+    success = graphene.Boolean()
+    errors = graphene.List(graphene.String)
+
+    def mutate(self, info, direction, amount_usd, quoted_receive_usd,
+               quoted_cost_pct, user_bsc_address='', user_algo_address=''):
+        from .models import CusdPlusConversion
+        user = getattr(info.context, 'user', None)
+        if not user or not user.is_authenticated:
+            return StartCusdPlusConversion(success=False, errors=['auth required'])
+        if direction not in ('to_savings', 'from_savings'):
+            return StartCusdPlusConversion(success=False, errors=['bad direction'])
+        if amount_usd <= 0 or quoted_receive_usd <= 0:
+            return StartCusdPlusConversion(success=False, errors=['bad amount'])
+        scope = _actor_filter(info)
+        if scope is None:
+            return StartCusdPlusConversion(success=False, errors=['no access'])
+
+        conv = CusdPlusConversion.objects.create(
+            actor_user=user if scope['actor_type'] == 'user' else None,
+            actor_business_id=scope.get('actor_business_id'),
+            actor_type=scope['actor_type'],
+            actor_display_name=getattr(user, 'username', '') or '',
+            direction=direction,
+            amount_usd=amount_usd,
+            quoted_receive_usd=quoted_receive_usd,
+            quoted_cost_pct=quoted_cost_pct,
+            user_bsc_address=user_bsc_address,
+            user_algo_address=user_algo_address,
+        )
+        return StartCusdPlusConversion(conversion=_serialize(conv), success=True, errors=None)
+
+
+class AdvanceCusdPlusConversion(graphene.Mutation):
+    """Client reports a leg it signed. Transitions are monotonic and
+    validated; the bridge poller independently verifies SRC_COMMITTED ->
+    DEST_ARRIVED, so a lying client cannot fake delivery."""
+    class Arguments:
+        conversion_id = graphene.ID(required=True)
+        new_status = graphene.String(required=True)
+        tx_ref = graphene.String(default_value='')
+
+    conversion = graphene.Field(CusdPlusConversionType)
+    success = graphene.Boolean()
+    errors = graphene.List(graphene.String)
+
+    # Client may only claim these (poller/sweeper own the rest).
+    CLIENT_STATUSES = {'SRC_COMMITTED', 'COMPLETED'}
+
+    def mutate(self, info, conversion_id, new_status, tx_ref=''):
+        from .models import CusdPlusConversion
+        user = getattr(info.context, 'user', None)
+        if not user or not user.is_authenticated:
+            return AdvanceCusdPlusConversion(success=False, errors=['auth required'])
+        scope = _actor_filter(info)
+        if scope is None:
+            return AdvanceCusdPlusConversion(success=False, errors=['no access'])
+        if new_status not in AdvanceCusdPlusConversion.CLIENT_STATUSES:
+            return AdvanceCusdPlusConversion(success=False, errors=['status not client-reportable'])
+
+        lookup = {'internal_id': conversion_id, 'is_deleted': False}
+        if scope['actor_type'] == 'business':
+            lookup['actor_business_id'] = scope['actor_business_id']
+        else:
+            lookup['actor_user'] = user
+        conv = CusdPlusConversion.objects.filter(**lookup).first()
+        if conv is None:
+            return AdvanceCusdPlusConversion(success=False, errors=['not found'])
+        if not conv.can_transition(new_status):
+            return AdvanceCusdPlusConversion(
+                success=False, errors=[f'illegal transition {conv.status} -> {new_status}'],
+            )
+
+        conv.status = new_status
+        now = timezone.now()
+        update = ['status', 'updated_at']
+        if new_status == 'SRC_COMMITTED':
+            conv.src_tx_id = tx_ref or conv.src_tx_id
+            conv.src_committed_at = now
+            update += ['src_tx_id', 'src_committed_at']
+        elif new_status == 'COMPLETED':
+            conv.dest_tx_hash = tx_ref or conv.dest_tx_hash
+            conv.completed_at = now
+            update += ['dest_tx_hash', 'completed_at']
+        conv.save(update_fields=update)
+        return AdvanceCusdPlusConversion(conversion=_serialize(conv), success=True, errors=None)
+
+
+class Mutation(graphene.ObjectType):
+    start_cusd_plus_conversion = StartCusdPlusConversion.Field()
+    advance_cusd_plus_conversion = AdvanceCusdPlusConversion.Field()
