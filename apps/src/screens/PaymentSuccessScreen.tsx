@@ -18,7 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { colors } from '../config/theme';
-import { Button } from '../components/common/Button';
+import { SuccessHero } from '../components/common/SuccessHero';
 import { formatLocalDate, formatLocalTime } from '../utils/dateUtils';
 import { useAuth } from '../contexts/AuthContext';
 import { getSupportCopy } from '../utils/supportMessaging';
@@ -139,233 +139,94 @@ export const PaymentSuccessScreen = () => {
     (navigation as any).navigate('BottomTabs', { screen: 'Contacts' });
   };
 
+  const isPending = transactionData.status === 'SUBMITTED' || !transactionData.transactionHash;
+
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        {/* Success Header */}
-        <View style={[styles.header, { backgroundColor: colors.primary }]}>
-          <View style={styles.headerContent}>
-            {/* Success Animation */}
-            <View style={styles.successCircle}>
-              <Icon name="check-circle" size={48} color={colors.primary} />
-            </View>
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <SuccessHero
+          title="¡Pago realizado!"
+          amount={`$${transactionData.amount} ${formatCurrency(transactionData.currency)}`}
+          hint={`Pagado en ${transactionData.merchant}`}
+        />
 
-            <Text style={styles.headerTitle}>¡Pago realizado!</Text>
-
-            <Text style={styles.headerAmount}>
-              ${transactionData.amount} {formatCurrency(transactionData.currency)}
-            </Text>
-
-            <Text style={styles.headerSubtitle}>
-              Pagado en {transactionData.merchant}
+        {/* Compact receipt card: everything else is one quiet card. */}
+        <View style={styles.card}>
+          <View style={styles.row}>
+            <Text style={styles.rowLabel}>Comercio</Text>
+            <Text style={styles.rowValue} numberOfLines={1}>
+              {transactionData.location && transactionData.terminal
+                ? `${transactionData.merchant} · ${transactionData.location}`
+                : transactionData.merchant}
             </Text>
           </View>
+          <View style={styles.row}>
+            <Text style={styles.rowLabel}>Fecha</Text>
+            <Text style={styles.rowValue}>
+              {formatLocalDate(new Date().toISOString())} · {formatLocalTime(new Date().toISOString())}
+            </Text>
+          </View>
+          {(transactionData.transactionHash && transactionData.transactionHash !== 'pending') ? (
+            <View style={styles.row}>
+              <Text style={styles.rowLabel}>ID</Text>
+              <View style={styles.rowInline}>
+                <Text style={styles.rowMono}>#{transactionData.transactionHash.slice(0, 8)}</Text>
+                <TouchableOpacity onPress={handleCopy} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} accessibilityRole="button" accessibilityLabel="Copiar ID">
+                  <Icon name={copied ? 'check-circle' : 'copy'} size={15} color={colors.primaryDark} />
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            transactionData.internalId ? (
+              <View style={styles.row}>
+                <Text style={styles.rowLabel}>ID</Text>
+                <Text style={styles.rowMono}>#{String(transactionData.internalId).slice(-8).toUpperCase()}</Text>
+              </View>
+            ) : null
+          )}
+          <View style={styles.row}>
+            <Text style={styles.rowLabel}>Comisión</Text>
+            <Text style={[styles.rowValue, { color: colors.primaryDark, fontWeight: '600' }]}>
+              Gratis · cubierta por Confío
+            </Text>
+          </View>
+          <View style={[styles.row, styles.rowLast]}>
+            <Text style={styles.rowLabel}>Estado</Text>
+            <View style={styles.rowInline}>
+              <Icon
+                name={isPending ? 'clock' : 'check-circle'}
+                size={15}
+                color={isPending ? colors.warning.icon : colors.success}
+              />
+              <Text style={[styles.rowValue, { color: isPending ? colors.warning.icon : colors.success, fontWeight: '600' }]}>
+                {isPending ? 'Confirmando…' : 'Confirmado'}
+              </Text>
+            </View>
+          </View>
+          {transactionData.message ? (
+            <View style={styles.messageBox}>
+              <Text style={styles.messageLabel}>Descripción</Text>
+              <Text style={styles.messageText}>{transactionData.message}</Text>
+            </View>
+          ) : null}
         </View>
 
-        {/* Content */}
-        <View style={styles.content}>
-          {/* Payment Summary */}
-          <View style={styles.summaryContainer}>
-            <Text style={styles.sectionTitle}>Resumen de Pago</Text>
+        {/* Quiet secondary actions */}
+        <View style={styles.secondaryRow}>
+          <TouchableOpacity style={styles.secondaryBtn} onPress={handleShareReceipt} accessibilityRole="button" accessibilityLabel="Compartir comprobante">
+            <Icon name="share" size={16} color={colors.gray700} />
+            <Text style={styles.secondaryText}>Comprobante</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.secondaryBtn} onPress={handleViewTechnicalDetails} accessibilityRole="button" accessibilityLabel="Ver detalles técnicos">
+            <Icon name="external-link" size={16} color={colors.gray700} />
+            <Text style={styles.secondaryText}>Detalles</Text>
+          </TouchableOpacity>
+        </View>
 
-            <View style={styles.summaryContent}>
-              {/* Merchant Info */}
-              <View style={styles.participantRow}>
-                <View style={styles.participantAvatar}>
-                  <Text style={styles.participantInitial}>
-                    {transactionData.merchant?.charAt(0)}
-                  </Text>
-                </View>
-                <View style={styles.participantInfo}>
-                  <Text style={styles.participantName}>
-                    {transactionData.merchant}
-                  </Text>
-                  <Text style={styles.participantDetails}>
-                    {transactionData.location && transactionData.terminal
-                      ? `${transactionData.location} • ${transactionData.terminal}`
-                      : transactionData.address || 'Dirección no disponible'
-                    }
-                  </Text>
-                </View>
-                <View style={[styles.participantIcon, { backgroundColor: '#DBEAFE' }]}>
-                  <Icon name="send" size={14} color="#3B82F6" />
-                </View>
-              </View>
-
-              {/* Amount Breakdown */}
-              <View style={styles.amountBreakdown}>
-                <View style={styles.amountRow}>
-                  <Text style={styles.amountLabel}>Monto pagado</Text>
-                  <Text style={styles.amountValue}>
-                    ${transactionData.amount} {formatCurrency(transactionData.currency)}
-                  </Text>
-                </View>
-
-                <View style={styles.feeRow}>
-                  <Text style={styles.feeLabel}>Comisión de red</Text>
-                  <View style={styles.feeValue}>
-                    <Text style={styles.feeFree}>Gratis</Text>
-                    <Text style={styles.feeNote}>• Cubierto por Confío</Text>
-                  </View>
-                </View>
-
-                {/* Informational: Confío merchant fee (does not change payer total) */}
-                <View style={styles.feeRow}>
-                  <Text style={styles.feeLabel}>Comisión Confío (0.9%)</Text>
-                  <Text style={styles.amountValue}>
-                    {/* Show computed fee as reference for transparency */}
-                    {(() => {
-                      const amt = parseFloat(String(transactionData.amount || '0').replace(/[^0-9.\-]/g, '')) || 0;
-                      const fee = (amt * 0.009);
-                      return `-${fee.toFixed(2)} ${formatCurrency(transactionData.currency)}`;
-                    })()}
-                  </Text>
-                </View>
-
-                <View style={styles.divider} />
-                <View style={styles.totalRow}>
-                  <Text style={styles.totalLabel}>Total debitado</Text>
-                  <Text style={styles.totalValue}>
-                    {(() => {
-                      const amt = parseFloat(String(transactionData.amount || '0').replace(/[^0-9.\-]/g, '')) || 0;
-                      const fee = amt * 0.009;
-                      const sign = String(transactionData.amount || '').startsWith('-') ? '-' : '';
-                      const net = Math.max(0, amt - fee);
-                      return `${sign}${net.toFixed(2)} ${formatCurrency(transactionData.currency)}`;
-                    })()}
-                  </Text>
-                </View>
-              </View>
-
-              {/* Payment Details */}
-              <View style={styles.detailsContainer}>
-                <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Fecha y hora</Text>
-                  <Text style={styles.detailValue}>
-                    {formatLocalDate(new Date().toISOString())} • {formatLocalTime(new Date().toISOString())}
-                  </Text>
-                </View>
-
-                {(transactionData.transactionHash && transactionData.transactionHash !== 'pending') ? (
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>ID de Transacción</Text>
-                    <View style={styles.transactionIdContainer}>
-                      <Text style={styles.transactionId}>#{transactionData.transactionHash.slice(0, 8)}</Text>
-                      <TouchableOpacity onPress={handleCopy} style={styles.copyButton} accessibilityRole="button" accessibilityLabel="Copiar">
-                        {copied ? (
-                          <Icon name="check-circle" size={16} color={colors.accent} />
-                        ) : (
-                          <Icon name="copy" size={16} color={colors.accent} />
-                        )}
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                ) : (
-                  transactionData.internalId ? (
-                    <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>ID de Pago</Text>
-                      <View style={styles.transactionIdContainer}>
-                        <Text style={styles.transactionId}>#{String(transactionData.internalId).slice(-8).toUpperCase()}</Text>
-                      </View>
-                    </View>
-                  ) : null
-                )}
-
-                <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Estado</Text>
-                  <View style={styles.statusContainer}>
-                    {transactionData.status === 'SUBMITTED' || !transactionData.transactionHash ? (
-                      <>
-                        <Icon name="clock" size={16} color={'#d97706'} />
-                        <Text style={[styles.statusText, { color: '#d97706' }]}>Confirmando…</Text>
-                      </>
-                    ) : (
-                      <>
-                        <Icon name="check-circle" size={16} color={colors.success} />
-                        <Text style={styles.statusText}>Confirmado</Text>
-                      </>
-                    )}
-                  </View>
-                </View>
-
-                {transactionData.message && (
-                  <View style={styles.messageContainer}>
-                    <View style={styles.messageContent}>
-                      <Icon name="file-text" size={16} color={colors.accent} />
-                      <View style={styles.messageTextContainer}>
-                        <Text style={styles.messageLabel}>Descripción</Text>
-                        <Text style={styles.messageText}>{transactionData.message}</Text>
-                      </View>
-                    </View>
-                  </View>
-                )}
-              </View>
-            </View>
-          </View>
-
-          {/* Confío Value Proposition */}
-          <View style={styles.valueContainer}>
-            <Text style={styles.sectionTitle}>¿Por qué elegir Confío?</Text>
-
-            <View style={styles.valueContent}>
-              <View style={styles.valueRow}>
-                <Icon name="check-circle" size={20} color={colors.primary} />
-                <Text style={styles.valueTitle}>Pagos 100% gratuitos para clientes</Text>
-              </View>
-              <Text style={styles.valueDescription}>
-                Pagaste sin comisiones adicionales
-              </Text>
-              <View style={styles.valueHighlight}>
-                <Text style={styles.valueHighlightText}>
-                  💡 <Text style={styles.valueBold}>Confío: 0% para clientes, solo 0.9% para comerciantes</Text>{'\n'}
-                  vs. tarjetas tradicionales <Text style={styles.valueBold}>(2.5-3.5% para comerciantes)</Text>{'\n'}
-                  {supportCopy.ecosystemLine}
-                </Text>
-              </View>
-            </View>
-          </View>
-
-          {/* Quick Actions */}
-          <View style={styles.actionsContainer}>
-            <Text style={styles.sectionTitle}>Acciones Rápidas</Text>
-
-            <View style={styles.actionsContent}>
-              <Button
-                title="Compartir comprobante"
-                variant="secondary"
-                onPress={handleShareReceipt}
-                icon={<Icon name="share" size={16} color="#374151" />}
-                style={{ backgroundColor: '#F3F4F6', borderWidth: 0 }}
-              />
-
-              <Button
-                title="Ver detalles técnicos"
-                variant="secondary"
-                onPress={handleViewTechnicalDetails}
-                icon={<Icon name="external-link" size={16} color="#374151" />}
-                style={{ backgroundColor: '#F3F4F6', borderWidth: 0 }}
-              />
-            </View>
-          </View>
-
-          {/* Navigation */}
-          <View style={styles.navigationContainer}>
-            <TouchableOpacity
-              style={[styles.navButton, { backgroundColor: '#F3F4F6' }]}
-              onPress={handleGoHome}
-            >
-              <Icon name="home" size={16} color="#374151" />
-              <Text style={[styles.navButtonText, { color: '#374151' }]}>Ir al inicio</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.navButton, { backgroundColor: colors.secondary }]}
-              onPress={handleViewContacts}
-            >
-              <Icon name="user" size={16} color="#ffffff" />
-              <Text style={styles.navButtonText}>Ver contactos</Text>
-            </TouchableOpacity>
-          </View>
+        <View style={styles.ctaWrap}>
+          <TouchableOpacity style={styles.cta} onPress={handleGoHome} activeOpacity={0.85} accessibilityRole="button">
+            <Text style={styles.ctaText}>Listo</Text>
+          </TouchableOpacity>
         </View>
       </ScrollView>
 
@@ -381,7 +242,7 @@ export const PaymentSuccessScreen = () => {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Detalles técnicos</Text>
               <TouchableOpacity onPress={() => setShowTechnical(false)} style={{ padding: 8 }} accessibilityRole="button" accessibilityLabel="Cerrar">
-                <Icon name="x" size={20} color={colors.text} />
+                <Icon name="x" size={20} color={colors.text.primary} />
               </TouchableOpacity>
             </View>
             <View style={styles.modalBody}>
@@ -442,238 +303,107 @@ export const PaymentSuccessScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: colors.background,
   },
-  scrollView: {
-    flex: 1,
+  scrollContent: {
+    flexGrow: 1,
+    paddingBottom: 24,
   },
-  header: {
-    paddingBottom: 48,
+  // Compact receipt card
+  card: {
+    marginHorizontal: 24,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 16,
     paddingHorizontal: 16,
   },
-  headerContent: {
-    alignItems: 'center',
-  },
-  successCircle: {
-    width: 96,
-    height: 96,
-    backgroundColor: '#ffffff',
-    borderRadius: 48,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 24,
-    marginBottom: 24,
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#ffffff',
-    marginBottom: 8,
-  },
-  headerAmount: {
-    fontSize: 36,
-    fontWeight: 'bold',
-    color: '#ffffff',
-    marginBottom: 16,
-  },
-  headerSubtitle: {
-    fontSize: 18,
-    color: '#ffffff',
-    opacity: 0.9,
-  },
-  content: {
-    paddingHorizontal: 16,
-    marginTop: -32,
-    paddingBottom: 32,
-  },
-  summaryContainer: {
-    backgroundColor: '#ffffff',
-    borderRadius: 16,
-    padding: 24,
-    marginBottom: 24,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 2,
-      },
-    }),
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#1F2937',
-    marginBottom: 16,
-  },
-  summaryContent: {
-    gap: 16,
-  },
-  participantRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  participantAvatar: {
-    width: 48,
-    height: 48,
-    backgroundColor: '#F3F4F6',
-    borderRadius: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
-  },
-  participantInitial: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#6B7280',
-  },
-  participantInfo: {
-    flex: 1,
-  },
-  participantName: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#1F2937',
-  },
-  participantDetails: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  participantIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  amountBreakdown: {
-    backgroundColor: '#F9FAFB',
-    padding: 16,
-    borderRadius: 12,
-  },
-  amountRow: {
+  row: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
-  },
-  amountLabel: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  amountValue: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#1F2937',
-  },
-  feeRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  feeLabel: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  feeValue: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  feeFree: {
-    fontSize: 14,
-    color: '#10B981',
-    fontWeight: '500',
-    marginRight: 4,
-  },
-  feeNote: {
-    fontSize: 12,
-    color: '#6B7280',
-  },
-  divider: {
-    height: 1,
-    backgroundColor: '#E5E7EB',
-    marginVertical: 8,
-  },
-  totalRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  totalLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1F2937',
-  },
-  totalValue: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#1F2937',
-  },
-  detailsContainer: {
+    paddingVertical: 13,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
     gap: 12,
   },
-  detailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+  rowLast: {
+    borderBottomWidth: 0,
   },
-  detailLabel: {
+  rowLabel: {
     fontSize: 14,
-    color: '#6B7280',
+    color: colors.text.secondary,
   },
-  detailValue: {
+  rowValue: {
     fontSize: 14,
+    color: colors.text.primary,
     fontWeight: '500',
-    color: '#1F2937',
+    flexShrink: 1,
+    textAlign: 'right',
   },
-  transactionIdContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  transactionId: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#1F2937',
-    marginRight: 8,
-  },
-  copyButton: {
-    padding: 4,
-  },
-  statusContainer: {
+  rowInline: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 6,
   },
-  statusText: {
+  rowMono: {
     fontSize: 14,
-    fontWeight: '500',
-    color: '#10B981',
-    marginLeft: 4,
+    fontWeight: '600',
+    color: colors.text.primary,
   },
-  messageContainer: {
-    backgroundColor: '#F9FAFB',
-    borderRadius: 8,
+  messageBox: {
+    backgroundColor: colors.neutral,
+    borderRadius: 10,
     padding: 12,
-  },
-  messageContent: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
-  messageTextContainer: {
-    flex: 1,
-    marginLeft: 8,
+    marginBottom: 14,
   },
   messageLabel: {
     fontSize: 12,
-    color: '#6B7280',
+    color: colors.text.secondary,
     marginBottom: 2,
   },
   messageText: {
     fontSize: 14,
-    color: '#1F2937',
+    color: colors.text.primary,
+  },
+  // Quiet secondary actions
+  secondaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 28,
+    marginTop: 20,
+  },
+  secondaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+  },
+  secondaryText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.gray700,
+  },
+  // Primary CTA pill
+  ctaWrap: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    paddingTop: 28,
+    paddingHorizontal: 24,
+  },
+  cta: {
+    backgroundColor: colors.primary,
+    borderRadius: 14,
+    paddingVertical: 15,
+    paddingHorizontal: 40,
+    minWidth: 200,
+    alignItems: 'center',
+  },
+  ctaText: {
+    color: colors.white,
+    fontSize: 16,
+    fontWeight: '700',
   },
   // Modal styles
   modalOverlay: {
@@ -684,7 +414,7 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   modalContent: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.background,
     borderRadius: 16,
     width: '100%',
     maxWidth: 420,
@@ -696,12 +426,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
+    borderBottomColor: colors.border,
   },
   modalTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.dark,
   },
   modalBody: {
     padding: 16,
@@ -712,7 +442,7 @@ const styles = StyleSheet.create({
   modalSectionTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#374151',
+    color: colors.gray700,
     marginBottom: 8,
   },
   modalRow: {
@@ -723,12 +453,12 @@ const styles = StyleSheet.create({
   },
   modalLabel: {
     fontSize: 14,
-    color: '#6b7280',
+    color: colors.text.secondary,
   },
   modalValue: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#111827',
+    color: colors.dark,
     flexShrink: 1,
     textAlign: 'right',
     marginLeft: 12,
@@ -745,96 +475,6 @@ const styles = StyleSheet.create({
   explorerButtonText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#fff',
-  },
-  valueContainer: {
-    backgroundColor: '#ffffff',
-    borderRadius: 16,
-    padding: 24,
-    marginBottom: 24,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 2,
-      },
-    }),
-  },
-  valueContent: {
-    backgroundColor: '#ECFDF5', // emerald-50 equivalent
-    borderRadius: 12,
-    padding: 16,
-  },
-  valueRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  valueTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#065F46', // emerald-800 equivalent
-    marginLeft: 8,
-  },
-  valueDescription: {
-    fontSize: 14,
-    color: '#047857', // emerald-700 equivalent
-    marginBottom: 12,
-  },
-  valueHighlight: {
-    backgroundColor: '#D1FAE5', // emerald-100 equivalent
-    borderRadius: 8,
-    padding: 12,
-  },
-  valueHighlightText: {
-    fontSize: 12,
-    color: '#065F46', // emerald-800 equivalent
-    lineHeight: 18,
-  },
-  valueBold: {
-    fontWeight: '600',
-    color: '#065F46', // emerald-800 equivalent
-  },
-  actionsContainer: {
-    backgroundColor: '#ffffff',
-    borderRadius: 16,
-    padding: 24,
-    marginBottom: 24,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 2,
-      },
-    }),
-  },
-  actionsContent: {
-    gap: 12,
-  },
-  navigationContainer: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  navButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 12,
-    padding: 16,
-  },
-  navButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#ffffff',
-    marginLeft: 8,
+    color: colors.white,
   },
 });

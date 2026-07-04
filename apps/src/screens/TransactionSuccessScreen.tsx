@@ -11,7 +11,7 @@ import { getSupportCopy } from '../utils/supportMessaging';
 import ViewShot from 'react-native-view-shot';
 import RNShare from 'react-native-share';
 import { colors } from '../config/theme';
-import { Button } from '../components/common/Button';
+import { SuccessHero } from '../components/common/SuccessHero';
 import { AnalyticsService } from '../services/analyticsService';
 import { StatusTierBadge } from '../components/StatusTierBadge';
 import { buildInviteLink, buildSendAndInviteShareMessage } from '../utils/inviteLinks';
@@ -282,7 +282,7 @@ export const TransactionSuccessScreen = () => {
 
   const handleShareScreenshot = async () => {
     try {
-      if (!viewShotRef.current) return;
+      if (!viewShotRef.current?.capture) return;
       const uri = await viewShotRef.current.capture();
       if (!uri) return;
       const typeLabel = transactionData.type === 'payment' ? 'Pago' : 'Transferencia';
@@ -313,333 +313,169 @@ export const TransactionSuccessScreen = () => {
   const currentDate = new Date().toLocaleDateString('es-ES');
   const currentTime = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
 
+  const needsInvitation = transactionData.type === 'sent'
+    && !Boolean(transactionData.isOnConfio)
+    && Boolean(transactionData.recipientPhone);
+
+  const counterpartName = transactionData.type === 'sent'
+    ? transactionData.recipient
+    : transactionData.type === 'payment'
+      ? transactionData.merchant
+      : transactionData.sender;
+
   return (
     <>
-      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        {/* ViewShot captures hero + receipt card for the screenshot share */}
         <ViewShot ref={viewShotRef} options={{ format: 'jpg', quality: 0.9 }}>
-          {/* Success Header */}
-          <View style={[styles.header, { backgroundColor: colors.primary, paddingTop: 8 }]}>
-          <View style={styles.headerContent}>
-            {/* Success Animation */}
-            <View style={styles.successCircle}>
-              <Icon name="check-circle" size={48} color={colors.primary} />
-            </View>
-
-            <Text style={styles.headerTitle}>
-              {transactionData.type === 'sent' ? '¡Enviado con éxito!' :
+          <View style={{ backgroundColor: colors.background }}>
+            <SuccessHero
+              title={transactionData.type === 'sent' ? '¡Enviado con éxito!' :
                 transactionData.type === 'payment' ? '¡Pago realizado!' : '¡Recibido con éxito!'}
-            </Text>
-
-            <Text style={styles.headerAmount}>
-              ${transactionData.amount} {formatCurrency(transactionData.currency)}
-            </Text>
-
-            <Text style={styles.headerSubtitle}>
-              {transactionData.type === 'sent'
+              amount={`$${transactionData.amount} ${formatCurrency(transactionData.currency)}`}
+              hint={transactionData.type === 'sent'
                 ? `Enviado a ${transactionData.recipient}`
                 : transactionData.type === 'payment'
                   ? `Pagado a ${transactionData.merchant}`
-                  : `Recibido de ${transactionData.sender}`
-              }
-            </Text>
+                  : `Recibido de ${transactionData.sender}`}
+            />
 
-            {transactionData.type === 'sent' && !transactionData.isOnConfio && transactionData.recipientPhone && (
-              <View style={styles.invitationNotice}>
-                <Icon name="alert-triangle" size={16} color="#fff" style={{ marginRight: 6 }} />
-                <Text style={styles.invitationNoticeText}>Tu amigo tiene 7 días para reclamar</Text>
-              </View>
-            )}
-          </View>
-        </View>
-
-        {/* Content */}
-        <View style={styles.content}>
-          {/* Transaction Summary */}
-          <View style={styles.summaryContainer}>
-            <Text style={styles.sectionTitle}>Resumen de Transacción</Text>
-
-            <View style={styles.summaryContent}>
-              {/* Participant Info */}
-              <View style={styles.participantRow}>
-                <View style={styles.participantAvatar}>
-                  <Text style={styles.participantInitial}>
-                    {transactionData.type === 'sent'
-                      ? transactionData.recipient?.charAt(0)
-                      : transactionData.type === 'payment'
-                        ? transactionData.merchant?.charAt(0)
-                        : transactionData.sender?.charAt(0)
-                    }
-                  </Text>
-                </View>
-                <View style={styles.participantInfo}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
-                    <Text style={styles.participantName}>
-                      {transactionData.type === 'sent'
-                        ? transactionData.recipient
-                        : transactionData.type === 'payment'
-                          ? transactionData.merchant
-                          : transactionData.sender}
-                    </Text>
-                    {(() => {
-                      const isVerified = transactionData.type === 'sent'
-                        ? transactionData.recipientIsReferralVerified
-                        : transactionData.senderIsReferralVerified;
-                      const tier = transactionData.type === 'sent'
-                        ? transactionData.recipientStatusTier
-                        : transactionData.senderStatusTier;
-                      return (
-                        <>
-                          {isVerified && (
-                            <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: '#3B82F6', justifyContent: 'center', alignItems: 'center' }}>
-                              <Icon name="check" size={10} color="#fff" />
-                            </View>
-                          )}
-                          {tier && tier !== 'member' && (
-                            <StatusTierBadge tier={tier} compact />
-                          )}
-                        </>
-                      );
-                    })()}
-                  </View>
-                  {/* Show phone number for friend transactions, address for external wallets */}
-                  {transactionData.recipientPhone && transactionData.recipientPhone.trim() !== '' ? (
-                    <Text style={styles.participantDetails}>
-                      {transactionData.recipientPhone}
-                    </Text>
-                  ) : transactionData.recipientAddress ? (
-                    <Text style={styles.participantDetails}>
-                      {`${transactionData.recipientAddress.slice(0, 6)}...${transactionData.recipientAddress.slice(-6)}`}
-                    </Text>
-                  ) : null}
-                </View>
-                <View style={[styles.participantIcon, {
-                  backgroundColor: transactionData.type === 'received' ? '#D1FAE5' : '#DBEAFE',
-                }]}>
-                  <Icon
-                    name={transactionData.type === 'sent' || transactionData.type === 'payment' ? 'send' : 'arrow-down'}
-                    size={14}
-                    color={transactionData.type === 'received' ? '#10B981' : '#3B82F6'}
-                  />
-                </View>
-              </View>
-
-              {/* Amount Breakdown */}
-              <View style={styles.amountBreakdown}>
-                <View style={styles.amountRow}>
-                  <Text style={styles.amountLabel}>
-                    {transactionData.type === 'sent' ? 'Monto enviado' : 'Monto recibido'}
-                  </Text>
-                  <Text style={styles.amountValue}>
-                    ${transactionData.amount} {formatCurrency(transactionData.currency)}
-                  </Text>
-                </View>
-
-                <View style={styles.feeRow}>
-                  <Text style={styles.feeLabel}>Comisión de red</Text>
-                  <View style={styles.feeValue}>
-                    <Text style={styles.feeFree}>Gratis</Text>
-                    <Text style={styles.feeNote}>• Cubierto por Confío</Text>
-                  </View>
-                </View>
-
-                {transactionData.type === 'sent' && (
-                  <>
-                    <View style={styles.divider} />
-                    <View style={styles.totalRow}>
-                      <Text style={styles.totalLabel}>Total debitado</Text>
-                      <Text style={styles.totalValue}>
-                        ${transactionData.amount} {formatCurrency(transactionData.currency)}
-                      </Text>
-                    </View>
-                  </>
-                )}
-              </View>
-
-              {/* Transaction Details */}
-              <View style={styles.detailsContainer}>
-                <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Fecha y hora</Text>
-                  <Text style={styles.detailValue}>
-                    {currentDate} • {currentTime}
-                  </Text>
-                </View>
-
-                {transactionId && transactionId !== 'pendiente' && (
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>ID de Transacción</Text>
-                    <View style={styles.transactionIdContainer}>
-                      <Text style={styles.transactionId}>#{String(transactionId).toUpperCase().slice(0, 8)}</Text>
-                      <TouchableOpacity onPress={handleCopy} style={styles.copyButton} accessibilityRole="button" accessibilityLabel="Copiar">
-                        {copied ? (
-                          <Icon name="check-circle" size={16} color={colors.accent} />
-                        ) : (
-                          <Icon name="copy" size={16} color={colors.accent} />
+            {/* Compact receipt card */}
+            <View style={styles.card}>
+              <View style={styles.row}>
+                <Text style={styles.rowLabel}>
+                  {transactionData.type === 'received' ? 'De' : 'Para'}
+                </Text>
+                <View style={styles.rowInline}>
+                  <Text style={styles.rowValue} numberOfLines={1}>{counterpartName}</Text>
+                  {(() => {
+                    const isVerified = transactionData.type === 'sent'
+                      ? transactionData.recipientIsReferralVerified
+                      : transactionData.senderIsReferralVerified;
+                    const tier = transactionData.type === 'sent'
+                      ? transactionData.recipientStatusTier
+                      : transactionData.senderStatusTier;
+                    return (
+                      <>
+                        {isVerified && (
+                          <View style={styles.verifiedDot}>
+                            <Icon name="check" size={10} color={colors.white} />
+                          </View>
                         )}
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                )}
-
-                <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Estado</Text>
-                  <View style={styles.statusContainer}>
-                    {isConfirmed ? (
-                      <>
-                        <Icon name="check-circle" size={16} color={colors.success} />
-                        <Text style={styles.statusText}>Confirmado</Text>
+                        {tier && tier !== 'member' && (
+                          <StatusTierBadge tier={tier} compact />
+                        )}
                       </>
-                    ) : (
-                      <>
-                        <Icon name="clock" size={16} color={colors.warning} />
-                        <Text style={[styles.statusText, { color: colors.warning }]}>Confirmando…</Text>
-                      </>
-                    )}
-                  </View>
+                    );
+                  })()}
                 </View>
-
-                {transactionData.message && (
-                  <View style={styles.messageContainer}>
-                    <View style={styles.messageContent}>
-                      <Icon name="file-text" size={16} color={colors.accent} />
-                      <View style={styles.messageTextContainer}>
-                        <Text style={styles.messageLabel}>Mensaje</Text>
-                        <Text style={styles.messageText}>{transactionData.message}</Text>
-                      </View>
-                    </View>
-                  </View>
-                )}
               </View>
-            </View>
-          </View>
-        </View>
-        </ViewShot>
-
-        <View style={styles.content}>
-          {/* Remittance Invitation Section - Only for non-Confío friends with phone numbers */}
-          {(() => {
-            const isOnConfio = Boolean(transactionData.isOnConfio);
-            const hasPhone = Boolean(transactionData.recipientPhone);
-            return transactionData.type === 'sent' && !isOnConfio && hasPhone;
-          })() && (
-              <View style={[styles.remittanceContainer, styles.invitationCard]}>
-                <View style={styles.invitationHeader}>
-                  <Icon name="alert-circle" size={24} color="#ef4444" />
-                  <Text style={[styles.sectionTitle, styles.invitationCardTitle]}>¡Acción Requerida!</Text>
+              {(transactionData.recipientPhone && transactionData.recipientPhone.trim() !== '') ? (
+                <View style={styles.row}>
+                  <Text style={styles.rowLabel}>Teléfono</Text>
+                  <Text style={styles.rowValue}>{transactionData.recipientPhone}</Text>
                 </View>
-
-                <View style={styles.remittanceContent}>
-                  <Text style={[styles.remittanceCardText, { fontWeight: 'bold', color: '#dc2626' }]}>
-                    ⏰ Tu amigo tiene solo 7 días para reclamar el dinero o se perderá
+              ) : transactionData.recipientAddress ? (
+                <View style={styles.row}>
+                  <Text style={styles.rowLabel}>Dirección</Text>
+                  <Text style={styles.rowMono}>
+                    {`${transactionData.recipientAddress.slice(0, 6)}...${transactionData.recipientAddress.slice(-6)}`}
                   </Text>
-
-                  <View style={[styles.remittanceDetailsBox, { backgroundColor: '#fef2f2', borderColor: '#ef4444' }]}>
-                    <Text style={[styles.remittanceDetailsTitle, { color: '#dc2626' }]}>¡Avísale ahora mismo!</Text>
-                    <View style={styles.remittanceDetailRow}>
-                      <Text style={styles.remittanceDetailText}>1. Envíale un mensaje con el link de invitación</Text>
-                    </View>
-                    <View style={styles.remittanceDetailRow}>
-                      <Text style={styles.remittanceDetailText}>2. Ayúdale a crear su cuenta en Confío</Text>
-                    </View>
-                    <View style={styles.remittanceDetailRow}>
-                      <Text style={styles.remittanceDetailText}>3. Una vez registrado, recibirá el dinero al instante</Text>
-                    </View>
-                  </View>
-
-                  <TouchableOpacity
-                    style={styles.shareButton}
-                    onPress={handleShareInvitation}
-                  >
-                    <WhatsAppLogo width={20} height={20} style={{ marginRight: 8 }} />
-                    <Text style={styles.shareButtonText}>Compartir invitación por WhatsApp</Text>
-                  </TouchableOpacity>
                 </View>
+              ) : null}
+              <View style={styles.row}>
+                <Text style={styles.rowLabel}>Fecha</Text>
+                <Text style={styles.rowValue}>{currentDate} · {currentTime}</Text>
               </View>
-            )}
-
-          {/* Confío Value Proposition */}
-          <View style={styles.valueContainer}>
-            <Text style={styles.sectionTitle}>¿Por qué elegir Confío?</Text>
-
-            <View style={styles.valueContent}>
-              <View style={styles.valueRow}>
-                <Icon name="check-circle" size={20} color={colors.primary} />
-                <Text style={styles.valueTitle}>Transferencias 100% gratuitas</Text>
-              </View>
-              <Text style={styles.valueDescription}>
-                {transactionData.type === 'sent'
-                  ? 'Enviaste este dinero sin pagar comisiones'
-                  : 'Recibiste este dinero sin comisiones'
-                }
-              </Text>
-              <View style={styles.valueHighlight}>
-                <Text style={styles.valueHighlightText}>
-                  💡 <Text style={styles.valueBold}>Confío: 0% comisión</Text>{'\n'}
-                  vs. transferencias internacionales y remesadoras tradicionales <Text style={styles.valueBold}>(5%-20%)</Text>{'\n'}
-                  {supportCopy.transferLine}
+              {transactionId && transactionId !== 'pendiente' && (
+                <View style={styles.row}>
+                  <Text style={styles.rowLabel}>ID</Text>
+                  <View style={styles.rowInline}>
+                    <Text style={styles.rowMono}>#{String(transactionId).toUpperCase().slice(0, 8)}</Text>
+                    <TouchableOpacity onPress={handleCopy} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} accessibilityRole="button" accessibilityLabel="Copiar ID">
+                      <Icon name={copied ? 'check-circle' : 'copy'} size={15} color={colors.primaryDark} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+              <View style={styles.row}>
+                <Text style={styles.rowLabel}>Comisión</Text>
+                <Text style={[styles.rowValue, { color: colors.primaryDark, fontWeight: '600' }]}>
+                  Gratis · cubierta por Confío
                 </Text>
               </View>
+              <View style={[styles.row, styles.rowLast]}>
+                <Text style={styles.rowLabel}>Estado</Text>
+                <View style={styles.rowInline}>
+                  <Icon
+                    name={isConfirmed ? 'check-circle' : 'clock'}
+                    size={15}
+                    color={isConfirmed ? colors.success : colors.warning.icon}
+                  />
+                  <Text style={[styles.rowValue, { color: isConfirmed ? colors.success : colors.warning.icon, fontWeight: '600' }]}>
+                    {isConfirmed ? 'Confirmado' : 'Confirmando…'}
+                  </Text>
+                </View>
+              </View>
+              {transactionData.message ? (
+                <View style={styles.messageBox}>
+                  <Text style={styles.messageLabel}>Mensaje</Text>
+                  <Text style={styles.messageText}>{transactionData.message}</Text>
+                </View>
+              ) : null}
             </View>
           </View>
+        </ViewShot>
 
-          {/* Quick Actions */}
-          <View style={styles.actionsContainer}>
-            <Text style={styles.sectionTitle}>Acciones Rápidas</Text>
-
-            <View style={styles.actionsContent}>
-              {transactionData.type === 'sent' && (
-                <Button
-                  title={transactionData.recipientAddress && !transactionData.recipientPhone
-                    ? `Enviar de nuevo a ${transactionData.recipientAddress.slice(0, 6)}...${transactionData.recipientAddress.slice(-4)}`
-                    : `Enviar de nuevo a ${transactionData.recipient}`}
-                  onPress={handleSendAgain}
-                  icon={<Icon name="user" size={16} color="#ffffff" />}
-                  style={{ backgroundColor: colors.primary }}
-                />
-              )}
-
-              <Button
-                title="Compartir comprobante"
-                onPress={handleShareScreenshot}
-                icon={<Icon name="share-2" size={16} color="#ffffff" />}
-              />
-
-              <Button
-                title="Ver comprobante oficial"
-                variant="secondary"
-                onPress={handleShareReceipt}
-                icon={<Icon name="file-text" size={16} color="#10B981" />}
-                style={{ backgroundColor: '#ECFDF5', borderColor: '#A7F3D0' }}
-                textStyle={{ color: '#10B981' }}
-              />
-
-              <Button
-                title="Ver detalles técnicos"
-                variant="secondary"
-                onPress={handleViewTechnicalDetails}
-                icon={<Icon name="external-link" size={16} color="#374151" />}
-                style={{ backgroundColor: '#F3F4F6', borderWidth: 0 }}
-              />
+        {/* Invitation urgency — the one loud block, only when money can expire */}
+        {needsInvitation && (
+          <View style={styles.invitationCard}>
+            <View style={styles.invitationHeader}>
+              <Icon name="alert-circle" size={20} color={colors.danger} />
+              <Text style={styles.invitationTitle}>Tu amigo aún no está en Confío</Text>
             </View>
-          </View>
-
-          {/* Navigation */}
-          <View style={styles.navigationContainer}>
+            <Text style={styles.invitationText}>
+              Tiene 7 días para crear su cuenta y reclamar el dinero — avísale ahora
+              para que no se pierda.
+            </Text>
             <TouchableOpacity
-              style={[styles.navButton, { backgroundColor: '#F3F4F6' }]}
-              onPress={handleGoHome}
+              style={styles.shareButton}
+              onPress={handleShareInvitation}
+              accessibilityRole="button"
+              accessibilityLabel="Compartir invitación por WhatsApp"
             >
-              <Icon name="home" size={16} color="#374151" />
-              <Text style={[styles.navButtonText, { color: '#374151' }]}>Ir al inicio</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.navButton, { backgroundColor: colors.secondary }]}
-              onPress={handleViewContacts}
-            >
-              <Icon name="user" size={16} color="#ffffff" />
-              <Text style={styles.navButtonText}>Ver contactos</Text>
+              <WhatsAppLogo width={20} height={20} style={{ marginRight: 8 }} />
+              <Text style={styles.shareButtonText}>Avisar por WhatsApp</Text>
             </TouchableOpacity>
           </View>
+        )}
+
+        {/* Quiet secondary actions */}
+        <View style={styles.secondaryRow}>
+          {transactionData.type === 'sent' && (
+            <TouchableOpacity style={styles.secondaryBtn} onPress={handleSendAgain} accessibilityRole="button" accessibilityLabel={`Enviar de nuevo a ${counterpartName}`}>
+              <Icon name="refresh-cw" size={16} color={colors.gray700} />
+              <Text style={styles.secondaryText}>Reenviar</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity style={styles.secondaryBtn} onPress={handleShareScreenshot} accessibilityRole="button" accessibilityLabel="Compartir captura del comprobante">
+            <Icon name="share-2" size={16} color={colors.gray700} />
+            <Text style={styles.secondaryText}>Compartir</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.secondaryBtn} onPress={handleShareReceipt} accessibilityRole="button" accessibilityLabel="Ver comprobante oficial">
+            <Icon name="file-text" size={16} color={colors.gray700} />
+            <Text style={styles.secondaryText}>Comprobante</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.secondaryBtn} onPress={handleViewTechnicalDetails} accessibilityRole="button" accessibilityLabel="Ver detalles técnicos">
+            <Icon name="external-link" size={16} color={colors.gray700} />
+            <Text style={styles.secondaryText}>Detalles</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.ctaWrap}>
+          <TouchableOpacity style={styles.cta} onPress={handleGoHome} activeOpacity={0.85} accessibilityRole="button">
+            <Text style={styles.ctaText}>Listo</Text>
+          </TouchableOpacity>
         </View>
       </ScrollView>
 
@@ -709,339 +545,159 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  header: {
-    paddingBottom: 48,
-    paddingHorizontal: 16,
+  scrollContent: {
+    flexGrow: 1,
+    paddingBottom: 24,
   },
-  headerContent: {
-    alignItems: 'center',
-  },
-  successCircle: {
-    width: 96,
-    height: 96,
-    backgroundColor: '#ffffff',
-    borderRadius: 48,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 24,
-    marginBottom: 24,
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#ffffff',
-    marginBottom: 8,
-  },
-  headerAmount: {
-    fontSize: 36,
-    fontWeight: 'bold',
-    color: '#ffffff',
-    marginBottom: 16,
-  },
-  headerSubtitle: {
-    fontSize: 18,
-    color: '#ffffff',
-    opacity: 0.9,
-  },
-  invitationNotice: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 12,
-    backgroundColor: '#ef4444',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-  },
-  invitationNoticeText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  content: {
-    paddingHorizontal: 16,
-    marginTop: -32,
-    paddingBottom: 32,
-  },
-  summaryContainer: {
-    backgroundColor: '#ffffff',
+  // Compact receipt card (captured by ViewShot together with the hero)
+  card: {
+    marginHorizontal: 24,
+    borderWidth: 1,
+    borderColor: colors.border,
     borderRadius: 16,
-    padding: 24,
-    marginBottom: 24,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 2,
-      },
-    }),
+    paddingHorizontal: 16,
+    marginBottom: 4,
   },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: colors.text.primary,
-    marginBottom: 16,
-  },
-  summaryContent: {
-    gap: 16,
-  },
-  participantRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  participantAvatar: {
-    width: 48,
-    height: 48,
-    backgroundColor: '#F3F4F6',
-    borderRadius: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
-  },
-  participantInitial: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#6B7280',
-  },
-  participantInfo: {
-    flex: 1,
-  },
-  participantName: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: colors.text.primary,
-  },
-  participantDetails: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  participantIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  amountBreakdown: {
-    backgroundColor: '#F9FAFB',
-    padding: 16,
-    borderRadius: 12,
-  },
-  amountRow: {
+  row: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    paddingVertical: 13,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+    gap: 12,
   },
-  amountLabel: {
+  rowLast: {
+    borderBottomWidth: 0,
+  },
+  rowLabel: {
     fontSize: 14,
-    color: '#6B7280',
+    color: colors.text.secondary,
   },
-  amountValue: {
-    fontSize: 18,
-    fontWeight: 'bold',
+  rowValue: {
+    fontSize: 14,
     color: colors.text.primary,
-  },
-  feeRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  feeLabel: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  feeValue: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  feeFree: {
-    fontSize: 14,
-    color: colors.success,
     fontWeight: '500',
-    marginRight: 4,
+    flexShrink: 1,
+    textAlign: 'right',
   },
-  feeNote: {
-    fontSize: 12,
-    color: '#6B7280',
-  },
-  divider: {
-    height: 1,
-    backgroundColor: '#E5E7EB',
-    marginVertical: 8,
-  },
-  totalRow: {
+  rowInline: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 6,
+    flexShrink: 1,
   },
-  totalLabel: {
+  rowMono: {
     fontSize: 14,
     fontWeight: '600',
     color: colors.text.primary,
   },
-  totalValue: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: colors.text.primary,
-  },
-  detailsContainer: {
-    gap: 12,
-  },
-  detailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  detailLabel: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  detailValue: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: colors.text.primary,
-  },
-  transactionIdContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  transactionId: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: colors.text.primary,
-    marginRight: 8,
-  },
-  copyButton: {
-    padding: 4,
-  },
-  statusContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  statusText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: colors.success,
-    marginLeft: 4,
-  },
-  messageContainer: {
-    backgroundColor: '#DBEAFE',
-    padding: 12,
+  verifiedDot: {
+    width: 16,
+    height: 16,
     borderRadius: 8,
+    backgroundColor: colors.accent,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  messageContent: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
-  messageTextContainer: {
-    flex: 1,
-    marginLeft: 8,
+  messageBox: {
+    backgroundColor: colors.neutral,
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 14,
   },
   messageLabel: {
     fontSize: 12,
-    fontWeight: '600',
-    color: '#1E40AF',
-    marginBottom: 4,
+    color: colors.text.secondary,
+    marginBottom: 2,
   },
   messageText: {
     fontSize: 14,
-    color: '#1E3A8A',
+    color: colors.text.primary,
   },
-  valueContainer: {
-    backgroundColor: '#ffffff',
+  // Invitation urgency: deliberately the ONE loud block on the page —
+  // money genuinely expires if the recipient never claims it.
+  invitationCard: {
+    marginHorizontal: 24,
+    marginTop: 20,
+    backgroundColor: colors.error.background,
+    borderWidth: 1,
+    borderColor: colors.error.border,
     borderRadius: 16,
-    padding: 24,
-    marginBottom: 24,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 2,
-      },
-    }),
-  },
-  valueContent: {
-    backgroundColor: '#D1FAE5',
     padding: 16,
-    borderRadius: 12,
   },
-  valueRow: {
+  invitationHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
+    gap: 8,
+    marginBottom: 6,
   },
-  valueTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#065F46',
-    marginLeft: 8,
+  invitationTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.error.text,
+    flex: 1,
   },
-  valueDescription: {
-    fontSize: 14,
-    color: '#047857',
+  invitationText: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: colors.error.text,
     marginBottom: 12,
   },
-  valueHighlight: {
-    backgroundColor: '#A7F3D0',
-    padding: 12,
-    borderRadius: 8,
-  },
-  valueHighlightText: {
-    fontSize: 12,
-    color: '#065F46',
-    lineHeight: 16,
-  },
-  valueBold: {
-    fontWeight: 'bold',
-  },
-  actionsContainer: {
-    backgroundColor: '#ffffff',
-    borderRadius: 16,
-    padding: 24,
-    marginBottom: 24,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 2,
-      },
-    }),
-  },
-  actionsContent: {
-    gap: 12,
-  },
-  navigationContainer: {
-    flexDirection: 'row',
-    gap: 16,
-    marginBottom: 24,
-  },
-  navButton: {
-    flex: 1,
+  shareButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+    backgroundColor: '#25D366', // WhatsApp brand green (nominative use)
     borderRadius: 12,
+    paddingVertical: 13,
   },
-  navButtonText: {
+  shareButtonText: {
+    color: colors.white,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  // Quiet secondary actions
+  secondaryRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    columnGap: 24,
+    marginTop: 20,
+    paddingHorizontal: 16,
+  },
+  secondaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+  },
+  secondaryText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.gray700,
+  },
+  // Primary CTA pill
+  ctaWrap: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    paddingTop: 28,
+    paddingHorizontal: 24,
+  },
+  cta: {
+    backgroundColor: colors.primary,
+    borderRadius: 14,
+    paddingVertical: 15,
+    paddingHorizontal: 40,
+    minWidth: 200,
+    alignItems: 'center',
+  },
+  ctaText: {
+    color: colors.white,
     fontSize: 16,
-    fontWeight: '500',
-    color: '#ffffff',
-    marginLeft: 8,
+    fontWeight: '700',
   },
   // Modal styles
   modalOverlay: {
@@ -1052,7 +708,7 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   modalContent: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.background,
     borderRadius: 16,
     width: '100%',
     maxWidth: 420,
@@ -1064,12 +720,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
+    borderBottomColor: colors.border,
   },
   modalTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.dark,
   },
   modalBody: {
     padding: 16,
@@ -1080,7 +736,7 @@ const styles = StyleSheet.create({
   modalSectionTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#374151',
+    color: colors.gray700,
     marginBottom: 8,
   },
   modalRow: {
@@ -1091,12 +747,12 @@ const styles = StyleSheet.create({
   },
   modalLabel: {
     fontSize: 14,
-    color: '#6b7280',
+    color: colors.text.secondary,
   },
   modalValue: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#111827',
+    color: colors.dark,
     flexShrink: 1,
     textAlign: 'right',
     marginLeft: 12,
@@ -1113,85 +769,6 @@ const styles = StyleSheet.create({
   explorerButtonText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#fff',
+    color: colors.white,
   },
-  remittanceContainer: {
-    backgroundColor: '#ffffff',
-    borderRadius: 16,
-    padding: 24,
-    marginBottom: 24,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 2,
-      },
-    }),
-  },
-  invitationCard: {
-    backgroundColor: '#fef2f2',
-    borderColor: '#ef4444',
-    borderWidth: 2,
-  },
-  invitationHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  invitationCardTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#ef4444',
-    marginLeft: 12,
-    marginBottom: 0,
-  },
-  remittanceContent: {
-    gap: 16,
-  },
-  remittanceCardText: {
-    fontSize: 16,
-    color: '#1f2937',
-    marginBottom: 16,
-    lineHeight: 24,
-  },
-  remittanceDetailsBox: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#ef4444',
-    marginBottom: 16,
-  },
-  remittanceDetailsTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#dc2626',
-    marginBottom: 12,
-  },
-  remittanceDetailRow: {
-    marginBottom: 8,
-  },
-  remittanceDetailText: {
-    fontSize: 14,
-    color: '#1f2937',
-  },
-  shareButton: {
-    backgroundColor: '#25D366', // WhatsApp green
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 24,
-    borderRadius: 12,
-    marginTop: 4,
-  },
-  shareButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-}); 
+});
