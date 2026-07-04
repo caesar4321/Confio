@@ -199,7 +199,7 @@ export const AuthScreen = () => {
         ]}
       >
         <Text style={styles.title}>Bienvenido</Text>
-        <Text style={styles.subtitle}>La manera más fácil y segura de enviar, pagar, y ahorrar en dólares digitales</Text>
+        <Text style={styles.subtitle}>La manera más fácil y segura de enviar, pagar, ahorrar e invertir en dólares digitales</Text>
         <View style={styles.buttonGroup}>
           <TouchableOpacity
             style={styles.googleButton}
