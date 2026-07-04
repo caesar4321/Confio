@@ -723,10 +723,12 @@ export const ProfileScreen = () => {
             <TouchableOpacity
               style={styles.socialImageButton}
               onPress={() => handleSocialMediaPress('tiktok')}
+              accessibilityRole="link"
+              accessibilityLabel="TikTok de Julian Moon"
             >
               <Image
                 source={require('../assets/png/TikTok.png')}
-                style={[styles.socialButtonImage, styles.tiktokImage]}
+                style={styles.socialCircleImage}
                 resizeMode="contain"
               />
             </TouchableOpacity>
@@ -734,6 +736,8 @@ export const ProfileScreen = () => {
             <TouchableOpacity
               style={styles.socialImageButton}
               onPress={() => handleSocialMediaPress('instagram')}
+              accessibilityRole="link"
+              accessibilityLabel="Instagram de Julian Moon"
             >
               <Image
                 source={require('../assets/png/Instagram.png')}
@@ -745,10 +749,12 @@ export const ProfileScreen = () => {
             <TouchableOpacity
               style={styles.socialImageButton}
               onPress={() => handleSocialMediaPress('youtube')}
+              accessibilityRole="link"
+              accessibilityLabel="YouTube de Julian Moon"
             >
               <Image
                 source={require('../assets/png/YouTube.png')}
-                style={styles.socialButtonImage}
+                style={styles.socialCircleImage}
                 resizeMode="contain"
               />
             </TouchableOpacity>
@@ -772,7 +778,7 @@ export const ProfileScreen = () => {
               accessibilityRole="link"
               accessibilityLabel="Canal de WhatsApp de Julian Moon"
             >
-              <WhatsAppLogo width={53} height={53} />
+              <WhatsAppLogo width={42} height={42} />
             </TouchableOpacity>
           </View>
 
@@ -1259,20 +1265,22 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  // 5 × (56 + 8) = 320: fits the 328px content width of a 360dp screen.
+  // Assets are cropped full-bleed, so render size = visible size.
   socialImageButton: {
-    width: 69, // Fixed width for all buttons (53 + 16 padding)
-    height: 69, // Fixed height for all buttons
+    width: 56,
+    height: 56,
     justifyContent: 'center',
     alignItems: 'center',
     marginHorizontal: 4,
   },
   socialButtonImage: {
-    width: 53, // 2/3 of 80px for Instagram and YouTube
-    height: 53,
+    width: 38, // rounded squares (Instagram, Facebook)
+    height: 38,
   },
-  tiktokImage: {
-    width: 40, // Keep TikTok at original size
-    height: 40,
+  socialCircleImage: {
+    width: 42, // circles read smaller than squares at equal bounds
+    height: 42,
   },
   founderStory: {
     alignItems: 'center',
