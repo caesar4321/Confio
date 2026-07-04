@@ -273,18 +273,34 @@ export function getDerivedEvmWallet(): DerivedEvmWallet | null {
   return lastDerivedEvmWallet;
 }
 
-// The ADDRESS (never key material) also persists in the keychain so cold
-// starts can display it: the fast wallet paths reconstruct from the cached
-// ALGORAND seed, which by domain-separation design cannot produce the EVM
-// key — without this, every cold start would demand a re-login just to
-// SHOW the receive address. Semantics mirror the in-memory cache (last
-// derived account), just durable.
+// The ADDRESS (never key material) also persists in the keychain, PER
+// ACCOUNT, so cold starts can display it: the fast wallet paths
+// reconstruct from the cached ALGORAND seed, which by domain-separation
+// design cannot produce the EVM key. Addresses are immutable per account
+// (same inputs -> same address, forever); per-account storage just makes
+// the DISPLAY always match the ACTIVE account — a single "last derived"
+// slot could show a personal address while a business account is active.
 const EVM_ADDR_KEYCHAIN_SERVICE = 'confio_evm_address_v1';
 
-export async function getEvmAddressForDisplay(): Promise<string | null> {
-  if (lastDerivedEvmWallet) return lastDerivedEvmWallet.address;
+/** Same account-key grammar as useAccountManager: personal_0, business_<id>_0 */
+export function evmAccountKey(opts: {
+  accountType: 'personal' | 'business';
+  accountIndex: number;
+  businessId?: string;
+}): string {
+  return opts.accountType === 'business' && opts.businessId
+    ? `business_${opts.businessId}_${opts.accountIndex}`
+    : `${opts.accountType}_${opts.accountIndex}`;
+}
+
+const evmAddressMemory: Record<string, string> = {};
+
+export async function getEvmAddressForDisplay(accountKey: string): Promise<string | null> {
+  if (evmAddressMemory[accountKey]) return evmAddressMemory[accountKey];
   try {
-    const stored = await Keychain.getGenericPassword({ service: EVM_ADDR_KEYCHAIN_SERVICE });
+    const stored = await Keychain.getGenericPassword({
+      service: `${EVM_ADDR_KEYCHAIN_SERVICE}_${accountKey}`,
+    });
     return stored ? stored.password : null;
   } catch {
     return null;
@@ -345,9 +361,12 @@ export function deriveDeterministicAlgorandKey(opts: DeriveWalletOptions): Deriv
   // the Algorand key is derived.
   try {
     lastDerivedEvmWallet = deriveDeterministicEvmKey(opts);
-    // Persist the address (only) for cold-start display; fire-and-forget.
+    // Persist the address (only) for cold-start display, keyed by account;
+    // fire-and-forget.
+    const acctKey = evmAccountKey(opts);
+    evmAddressMemory[acctKey] = lastDerivedEvmWallet.address;
     Keychain.setGenericPassword('evm_address', lastDerivedEvmWallet.address, {
-      service: EVM_ADDR_KEYCHAIN_SERVICE,
+      service: `${EVM_ADDR_KEYCHAIN_SERVICE}_${acctKey}`,
     }).catch(() => {});
   } catch (e) {
     console.warn('[Derive] EVM sibling derivation failed (non-fatal):', e);

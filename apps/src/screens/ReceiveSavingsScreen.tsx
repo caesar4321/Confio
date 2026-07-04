@@ -30,7 +30,8 @@ import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import QRCode from 'react-native-qrcode-svg';
 import { colors } from '../config/theme';
-import { getEvmAddressForDisplay } from '../services/secureDeterministicWallet';
+import { getEvmAddressForDisplay, evmAccountKey } from '../services/secureDeterministicWallet';
+import { useAccountManager } from '../hooks/useAccountManager';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 
 const STEPS = [
@@ -57,15 +58,23 @@ export const ReceiveSavingsScreen = () => {
   const [copied, setCopied] = useState(false);
 
   // Derived at sign-in alongside the Algorand key (registered server-side);
-  // on cold starts the persisted address serves display. Real and
-  // user-controlled either way — never a placeholder.
+  // on cold starts the persisted address serves display. Resolved BY ACTIVE
+  // ACCOUNT — each account's address is immutable, and the screen always
+  // shows the active one. Real and user-controlled — never a placeholder.
+  const { activeAccount } = useAccountManager();
   const [address, setAddress] = useState<string | null>(null);
   const [resolving, setResolving] = useState(true);
   useEffect(() => {
-    getEvmAddressForDisplay()
+    if (!activeAccount) return;
+    const key = evmAccountKey({
+      accountType: (activeAccount.type === 'business' ? 'business' : 'personal'),
+      accountIndex: activeAccount.index ?? 0,
+      businessId: activeAccount.business?.id,
+    });
+    getEvmAddressForDisplay(key)
       .then((a) => setAddress(a))
       .finally(() => setResolving(false));
-  }, []);
+  }, [activeAccount]);
 
   const onCopy = async () => {
     if (!address) return;
