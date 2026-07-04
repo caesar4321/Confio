@@ -10,6 +10,7 @@ import { INVITE_EMPLOYEE, GET_CURRENT_BUSINESS_EMPLOYEES, GET_CURRENT_BUSINESS_I
 import { InviteEmployeeModal } from '../components/InviteEmployeeModal';
 import { getCountryByIso } from '../utils/countries';
 import { colors } from '../config/theme';
+import { InlineBanner } from '../components/common/InlineBanner';
 
 type EmployeesScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
@@ -72,6 +73,8 @@ export const EmployeesScreen = () => {
   const { activeAccount } = useAccount();
   const apolloClient = useApolloClient();
   const [showInviteModal, setShowInviteModal] = useState(false);
+  const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
+  const dismissBanner = React.useCallback(() => setBanner(null), []);
   const [searchTerm, setSearchTerm] = useState('');
 
   const isBusinessAccount = activeAccount?.type === 'business';
@@ -143,13 +146,13 @@ export const EmployeesScreen = () => {
       const success = result.data?.cancelInvitation?.success;
       const errorMsg = result.data?.cancelInvitation?.errors?.[0];
       if (!success) {
-        Alert.alert('Error', errorMsg || 'No se pudo cancelar la invitación', [{ text: 'Entendido' }]);
+        setBanner({ variant: 'error', message: errorMsg || 'No se pudo cancelar la invitación' });
         return;
       }
-      Alert.alert('Éxito', 'Invitación cancelada correctamente.', [{ text: 'Entendido' }]);
+      setBanner({ variant: 'success', message: 'Invitación cancelada correctamente.' });
       refetchInvitations();
     } catch (e) {
-      Alert.alert('Error', 'No se pudo cancelar la invitación', [{ text: 'Entendido' }]);
+      setBanner({ variant: 'error', message: 'No se pudo cancelar la invitación' });
     }
   };
 
@@ -214,6 +217,16 @@ export const EmployeesScreen = () => {
           onChangeText={setSearchTerm}
         />
       </View>
+
+      {banner && (
+        <InlineBanner
+          message={banner.message}
+          variant={banner.variant}
+          onDismiss={dismissBanner}
+          autoHideMs={banner.variant === 'success' ? 2500 : undefined}
+          style={{ marginHorizontal: 16, marginTop: 8, marginBottom: 0 }}
+        />
+      )}
 
       <SectionList
         sections={[
