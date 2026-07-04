@@ -12,6 +12,7 @@ import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
+import { InlineBanner } from '../components/common/InlineBanner';
 import { MainStackParamList } from '../types/navigation';
 import { useCurrency } from '../hooks/useCurrency';
 import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
@@ -33,6 +34,8 @@ export const TraderProfileScreen: React.FC = () => {
   const { profileData: authProfileData } = useAuth();
   const user = authProfileData?.userProfile;
   const [expandedOffers, setExpandedOffers] = React.useState<Record<string, boolean>>({});
+  const [banner, setBanner] = React.useState<{ message: string; variant: 'error' | 'success' } | null>(null);
+  const dismissBanner = React.useCallback(() => setBanner(null), []);
   const [isFavoriting, setIsFavoriting] = React.useState(false);
   const [isFavorite, setIsFavorite] = React.useState(false);
   
@@ -125,8 +128,7 @@ export const TraderProfileScreen: React.FC = () => {
       } else if (offer?.user?.id) {
         mutationVariables = { traderUserId: offer.user.id };
       } else {
-        Alert.alert('Error', 'No se pudo identificar al trader');
-        setIsFavorite(!newFavoriteStatus); // Revert on error
+        setBanner({ variant: 'error', message: 'No se pudo identificar al trader' });        setIsFavorite(!newFavoriteStatus); // Revert on error
         return;
       }
       
@@ -149,13 +151,11 @@ export const TraderProfileScreen: React.FC = () => {
         // Revert on failure
         setIsFavorite(!newFavoriteStatus);
         const message = data?.toggleFavoriteTrader?.message || 'No se pudo actualizar el favorito';
-        Alert.alert('Error', message);
-      }
+        setBanner({ variant: 'error', message: message });      }
     } catch (error) {
       // Revert on error
       setIsFavorite(!isFavorite);
-      Alert.alert('Error', 'Ocurrió un error al actualizar el favorito');
-    } finally {
+      setBanner({ variant: 'error', message: 'Ocurrió un error al actualizar el favorito' });    } finally {
       setIsFavoriting(false);
     }
   };
@@ -304,6 +304,14 @@ export const TraderProfileScreen: React.FC = () => {
       </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        {banner && (
+          <InlineBanner
+            message={banner.message}
+            variant={banner.variant}
+            onDismiss={dismissBanner}
+            style={{ marginTop: 12 }}
+          />
+        )}
         <View style={styles.detailsCard}>
           <View style={styles.profileHeader}>
             <View style={styles.profileAvatarContainer}>
