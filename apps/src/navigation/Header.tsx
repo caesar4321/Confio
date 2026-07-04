@@ -11,6 +11,10 @@ export const HEADER_HEIGHT = APP_LAYOUT.headerHeight;
 
 interface HeaderProps {
   title: string;
+  /** Optional second line under the title (e.g. "Historial de pagos programados"). */
+  subtitle?: string;
+  /** Optional node rendered before the title (e.g. a token/ticker logo). */
+  titleAccessory?: React.ReactNode;
   navigation: NavigationProp<RootStackParamList>;
   isHomeScreen?: boolean;
   onProfilePress?: () => void;
@@ -28,6 +32,8 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({
   title,
+  subtitle,
+  titleAccessory,
   navigation,
   isHomeScreen = false,
   onProfilePress,
@@ -74,13 +80,24 @@ export const Header: React.FC<HeaderProps> = ({
             <Icon name="arrow-left" size={24} color={textColor} />
           </TouchableOpacity>
         )}
-        <Text style={{ 
-          fontSize: 24, 
-          fontWeight: 'bold', 
-          color: textColor
-        }}>
-          {title}
-        </Text>
+        {titleAccessory ? <View style={{ marginRight: 8 }}>{titleAccessory}</View> : null}
+        <View style={{ flexShrink: 1 }}>
+          <Text
+            style={{
+              fontSize: subtitle ? 20 : 24,
+              fontWeight: 'bold',
+              color: textColor,
+            }}
+            numberOfLines={1}
+          >
+            {title}
+          </Text>
+          {subtitle ? (
+            <Text style={{ fontSize: 13, color: textColor, opacity: 0.7, marginTop: 2 }} numberOfLines={1}>
+              {subtitle}
+            </Text>
+          ) : null}
+        </View>
       </View>
       {isHomeScreen && (
         <View style={{ flexDirection: 'row', gap: 12 }}>
