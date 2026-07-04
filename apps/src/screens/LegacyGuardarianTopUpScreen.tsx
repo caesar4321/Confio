@@ -15,7 +15,7 @@ import {
   Image,
   StatusBar,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Header } from '../navigation/Header';
 import Icon from 'react-native-vector-icons/Feather';
 import { Linking } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
@@ -347,19 +347,23 @@ const TopUpScreen = () => {
   };
 
   return (
-    <SafeAreaView edges={['top']} style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Icon name="arrow-left" size={22} color="#111827" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Recargar con Guardarian</Text>
-        <TouchableOpacity
-          style={styles.historyButton}
-          onPress={() => navigation.navigate('RampHistory', { initialFilter: 'on_ramp' })}
-        >
-          <Text style={styles.historyButtonText}>Historial</Text>
-        </TouchableOpacity>
-      </View>
+    <View style={styles.container}>
+      <Header
+        navigation={navigation as any}
+        title="Recargar con Guardarian"
+        backgroundColor="#fff"
+        showBackButton
+        rightAccessory={(
+          <TouchableOpacity
+            style={styles.historyButton}
+            onPress={() => navigation.navigate('RampHistory', { initialFilter: 'on_ramp' })}
+            accessibilityRole="button"
+            accessibilityLabel="Ver historial de recargas"
+          >
+            <Text style={styles.historyButtonText}>Historial</Text>
+          </TouchableOpacity>
+        )}
+      />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* Hero Section */}
@@ -534,7 +538,7 @@ const TopUpScreen = () => {
         onCancel={() => setShowPreFlightModal(false)}
       />
       <BackupEnforcementModal />
-    </SafeAreaView>
+    </View>
   );
 };
 
@@ -542,27 +546,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F9FAFB',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 12,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
-  },
-  backButton: {
-    padding: 8,
-    marginRight: 8,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#111827',
-    flex: 1,
-    textAlign: 'center',
   },
   historyButton: {
     minWidth: 72,
