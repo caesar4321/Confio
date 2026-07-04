@@ -40,7 +40,9 @@ export interface AhorrosPortfolio {
     netApyPct: number;
     earnedTodayUsd: number;
     earnedMonthUsd: number;
-    entryCostPct: number; // conversion-leg estimate; server-quoted at convert time
+    // NOTE: no entryCostPct here on purpose — conversion cost is server-quoted
+    // in-flow (ConvertAhorro) and never printed in marketing copy. The stale
+    // Jupiter-era 0.15% figure lived here once; don't bring it back.
   };
   stocks: {
     enabled: boolean;
@@ -61,7 +63,6 @@ export const useAhorrosPortfolio = (): AhorrosPortfolio =>
       netApyPct: 3.0,
       earnedTodayUsd: 0,
       earnedMonthUsd: 0,
-      entryCostPct: 0.15,
     };
     const stocks = {
       // Visible during the design/dev phase; move to a server flag before

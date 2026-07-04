@@ -61,8 +61,8 @@ const EDUCATION_CARDS = [
     icon: 'percent',
     title: 'Sin comisiones ocultas',
     body:
-      'Entrar cuesta una conversión única (~0.15%). La tasa que ves ya ' +
-      'descuenta nuestra comisión — lo demás es tuyo, todos los días.',
+      'La tasa que ves ya descuenta nuestra comisión. Si un movimiento ' +
+      'tiene costo, lo ves antes de confirmar — nunca después.',
   },
 ] as const;
 
@@ -90,26 +90,30 @@ export const AhorrosScreen = () => {
   const [retirarSheet, setRetirarSheet] = useState(false);
 
   // ── Ahorrar sources ─────────────────────────────────────────────────────
+  // Bank first: new money onramps DIRECT to the savings chain (no conversion
+  // leg at all). Converting existing cUSD is for money already inside — a
+  // valid move, not the promoted entry. Costs are server-quoted in-flow,
+  // never printed here.
   const ahorrarOptions: RouteOption[] = [
+    {
+      icon: 'credit-card',
+      title: 'Recargar desde mi banco',
+      subtitle: 'Dinero nuevo llega directo a tu ahorro, sin conversión',
+      onPress: () => {
+        // TODO(cusd+): TopUp with destination=cusd_plus so Koywe delivers on
+        // the savings chain (USDT-BSC) — never onramp-then-bridge.
+        Alert.alert('Muy pronto', 'La recarga directa al ahorro abre en breve.');
+      },
+    },
     {
       icon: 'refresh-cw',
       title: 'Desde mi saldo cUSD',
       subtitle:
         cusdAvailable > 0
-          ? `${fmtUsd(cusdAvailable)} disponibles · costo de conversión ~0.7%`
+          ? `${fmtUsd(cusdAvailable)} disponibles · verás el costo antes de confirmar`
           : 'No tienes cUSD disponible ahora',
       disabled: cusdAvailable <= 0,
       onPress: () => navigation.navigate('ConvertAhorro'),
-    },
-    {
-      icon: 'credit-card',
-      title: 'Recargar desde mi banco',
-      subtitle: 'Directo a tu ahorro, sin costo de puente',
-      onPress: () => {
-        // TODO(cusd+): TopUp with destination=cusd_plus so Koywe delivers on
-        // the savings chain (USDT-Solana/BSC) — never onramp-then-bridge.
-        Alert.alert('Muy pronto', 'La recarga directa al ahorro abre en breve.');
-      },
     },
   ];
 
