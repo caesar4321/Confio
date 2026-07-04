@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Alert, Linking, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Camera, useCameraDevice, useCodeScanner } from 'react-native-vision-camera';
+import { launchImageLibrary } from 'react-native-image-picker';
+import RNQRGenerator from 'rn-qr-generator';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
@@ -57,21 +59,45 @@ export const AddressScannerModal: React.FC<AddressScannerModalProps> = ({ visibl
     })();
   }, [visible, onClose]);
 
+  const acceptValue = (value: string): boolean => {
+    const match = value.toUpperCase().match(ALGORAND_ADDRESS);
+    if (match && !handledRef.current) {
+      handledRef.current = true;
+      onScanned(match[0]);
+      onClose();
+      return true;
+    }
+    return false;
+  };
+
   const codeScanner = useCodeScanner({
     codeTypes: ['qr'],
     onCodeScanned: (codes) => {
       if (handledRef.current) return;
       const value = codes[0]?.value || '';
-      const match = value.toUpperCase().match(ALGORAND_ADDRESS);
-      if (match) {
-        handledRef.current = true;
-        onScanned(match[0]);
-        onClose();
-      } else if (value) {
+      if (!acceptValue(value) && value) {
         setBadCode(true);
       }
     },
   });
+
+  // Decode a QR from a photo (PHPicker / Android photo picker — no extra
+  // permissions needed on modern OS versions).
+  const handleGallery = async () => {
+    try {
+      const result = await launchImageLibrary({ mediaType: 'photo', selectionLimit: 1 });
+      const uri = result.assets?.[0]?.uri;
+      if (!uri) return; // user cancelled
+      const detected = await RNQRGenerator.detect({ uri });
+      const values = detected?.values || [];
+      for (const value of values) {
+        if (acceptValue(value)) return;
+      }
+      setBadCode(true);
+    } catch {
+      setBadCode(true);
+    }
+  };
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose} statusBarTranslucent>
@@ -99,7 +125,7 @@ export const AddressScannerModal: React.FC<AddressScannerModalProps> = ({ visibl
           <View style={styles.frame} />
           <Text style={styles.hint}>
             {badCode
-              ? 'Este código no contiene una dirección Algorand'
+              ? 'No se encontró una dirección Algorand en el código'
               : 'Apunta al código QR de la dirección'}
           </Text>
         </View>
@@ -111,6 +137,16 @@ export const AddressScannerModal: React.FC<AddressScannerModalProps> = ({ visibl
           accessibilityLabel="Cerrar escáner"
         >
           <Icon name="x" size={22} color={colors.white} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.galleryButton, { bottom: insets.bottom + 28 }]}
+          onPress={handleGallery}
+          accessibilityRole="button"
+          accessibilityLabel="Elegir un código QR desde la galería"
+        >
+          <Icon name="image" size={18} color={colors.white} />
+          <Text style={styles.galleryButtonText}>Galería</Text>
         </TouchableOpacity>
       </View>
     </Modal>
@@ -163,5 +199,21 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.45)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  galleryButton: {
+    position: 'absolute',
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 999,
+  },
+  galleryButtonText: {
+    color: colors.white,
+    fontSize: 15,
+    fontWeight: '600',
   },
 });

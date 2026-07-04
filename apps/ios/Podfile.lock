@@ -1532,6 +1532,30 @@ PODS:
     - React-Core
   - react-native-get-random-values (1.11.0):
     - React-Core
+  - react-native-image-picker (8.2.1):
+    - DoubleConversion
+    - glog
+    - hermes-engine
+    - RCT-Folly (= 2024.11.18.00)
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-hermes
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - Yoga
   - react-native-safe-area-context (5.4.1):
     - React-Core
   - react-native-view-shot (4.0.3):
@@ -1944,6 +1968,31 @@ PODS:
     - RNNotifee/NotifeeCore (= 9.1.8)
   - RNNotifee/NotifeeCore (9.1.8):
     - React-Core
+  - RNQrGenerator (2.0.0):
+    - DoubleConversion
+    - glog
+    - hermes-engine
+    - RCT-Folly (= 2024.11.18.00)
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-hermes
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - Yoga
+    - ZXingObjC
   - RNReanimated (3.18.0):
     - DoubleConversion
     - glog
@@ -2176,6 +2225,9 @@ PODS:
   - VisionCamera/React (4.7.1):
     - React-Core
   - Yoga (0.0.0)
+  - ZXingObjC (3.6.9):
+    - ZXingObjC/All (= 3.6.9)
+  - ZXingObjC/All (3.6.9)
 
 DEPENDENCIES:
   - boost (from `../node_modules/react-native/third-party-podspecs/boost.podspec`)
@@ -2222,6 +2274,7 @@ DEPENDENCIES:
   - "react-native-cameraroll (from `../node_modules/@react-native-camera-roll/camera-roll`)"
   - react-native-contacts (from `../node_modules/react-native-contacts`)
   - react-native-get-random-values (from `../node_modules/react-native-get-random-values`)
+  - react-native-image-picker (from `../node_modules/react-native-image-picker`)
   - react-native-safe-area-context (from `../node_modules/react-native-safe-area-context`)
   - react-native-view-shot (from `../node_modules/react-native-view-shot`)
   - React-NativeModulesApple (from `../node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios`)
@@ -2267,6 +2320,7 @@ DEPENDENCIES:
   - "RNGoogleSignin (from `../node_modules/@react-native-google-signin/google-signin`)"
   - RNKeychain (from `../node_modules/react-native-keychain`)
   - "RNNotifee (from `../node_modules/@notifee/react-native`)"
+  - RNQrGenerator (from `../node_modules/rn-qr-generator`)
   - RNReanimated (from `../node_modules/react-native-reanimated`)
   - RNScreens (from `../node_modules/react-native-screens`)
   - RNShare (from `../node_modules/react-native-share`)
@@ -2305,6 +2359,7 @@ SPEC REPOS:
     - PromisesSwift
     - RecaptchaInterop
     - SocketRocket
+    - ZXingObjC
 
 EXTERNAL SOURCES:
   boost:
@@ -2392,6 +2447,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native-contacts"
   react-native-get-random-values:
     :path: "../node_modules/react-native-get-random-values"
+  react-native-image-picker:
+    :path: "../node_modules/react-native-image-picker"
   react-native-safe-area-context:
     :path: "../node_modules/react-native-safe-area-context"
   react-native-view-shot:
@@ -2482,6 +2539,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native-keychain"
   RNNotifee:
     :path: "../node_modules/@notifee/react-native"
+  RNQrGenerator:
+    :path: "../node_modules/rn-qr-generator"
   RNReanimated:
     :path: "../node_modules/react-native-reanimated"
   RNScreens:
@@ -2567,6 +2626,7 @@ SPEC CHECKSUMS:
   react-native-cameraroll: 0c3468369abfd7fc451a894e6ff3e5a2091a4cf9
   react-native-contacts: f551920b74ebfc5f7f6df307495f085e504a4369
   react-native-get-random-values: d16467cf726c618e9c7a8c3c39c31faa2244bbba
+  react-native-image-picker: 95948cfcac306acef77a31d6e7de4edc78450ead
   react-native-safe-area-context: dde2052b903c11d677c320b599c3244021c34ce8
   react-native-view-shot: ba0ecb57bf0407e034cb39f4b6677743e2dcfa4a
   React-NativeModulesApple: 579cac2962d42ffee0d8aae48752f30c4e498bb9
@@ -2613,6 +2673,7 @@ SPEC CHECKSUMS:
   RNGoogleSignin: 607fe748d8ca0cf59614dc00771578b1b0e215e8
   RNKeychain: 2d50732463cf0e4bdc16f15ba2a265b4e4c5e17f
   RNNotifee: 5e3b271e8ea7456a36eec994085543c9adca9168
+  RNQrGenerator: 7690c01ad6764c11881344f6ecf595234b5c0aa3
   RNReanimated: 19d8e3e2f2d26a591d2a688ddd07c5b0addaacac
   RNScreens: 48d705e4f7a2e66c08cf552a4c57714d4a44d6f9
   RNShare: 0dac72e20459446eb729243e40d3ad7fc866a16b
@@ -2622,6 +2683,7 @@ SPEC CHECKSUMS:
   SocketRocket: d4aabe649be1e368d1318fdf28a022d714d65748
   VisionCamera: 9a8f98ae344fe5d148f84bb45829f9e4caab9d2f
   Yoga: b2eaabf17044cd4273a661b14eb83f9fd2c90491
+  ZXingObjC: 8898711ab495761b2dbbdec76d90164a6d7e14c5
 
 PODFILE CHECKSUM: 7b6ed7e70c3cbe474a65f3b9104bfbf8341f5b2e
 
