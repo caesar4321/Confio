@@ -24,6 +24,8 @@ import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import Icon from 'react-native-vector-icons/Feather';
 import MCIcon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
+import { colors } from '../config/theme';
 import InviteClaimBanner from '../components/InviteClaimBanner';
 import { HomeStatsSection } from '../components/HomeStatsSection';
 import * as Keychain from 'react-native-keychain';
@@ -1254,17 +1256,19 @@ export const HomeScreen = () => {
     <View style={styles.container}>
       {/* Skeleton overlay — rendered on top while loading, then removed */}
       {isLoading && (
-        <View style={[StyleSheet.absoluteFillObject, { zIndex: 1, backgroundColor: '#f9fafb' }]} pointerEvents="none">
+        <View style={[StyleSheet.absoluteFillObject, { zIndex: 1, backgroundColor: colors.neutral }]} pointerEvents="none">
           <View style={styles.balanceCard}>
-            <View style={styles.portfolioHeader}>
-              <View style={styles.portfolioTitleContainer}>
-                <Text style={styles.portfolioLabel}>Mi Saldo Total</Text>
-                <Text style={styles.portfolioSubLabel}>En Dólares</Text>
+            <View style={styles.balanceCardInner}>
+              <View style={styles.portfolioHeader}>
+                <View style={styles.portfolioTitleContainer}>
+                  <Text style={styles.portfolioLabel}>Mi Saldo Total</Text>
+                  <Text style={styles.portfolioSubLabel}>En Dólares</Text>
+                </View>
               </View>
-            </View>
-            <View style={styles.balanceContainer}>
-              <Text style={styles.currencySymbol}>$</Text>
-              <Text style={styles.balanceAmount}>••••••</Text>
+              <View style={styles.balanceContainer}>
+                <Text style={styles.currencySymbol}>$</Text>
+                <Text style={styles.balanceAmount}>••••••</Text>
+              </View>
             </View>
           </View>
           <View style={styles.walletsSection}>
@@ -1281,13 +1285,17 @@ export const HomeScreen = () => {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            tintColor="#fff"
-            colors={['#34d399']}
+            tintColor={colors.white}
+            colors={[colors.primary]}
           />
         }
         showsVerticalScrollIndicator={false}
       >
-        {/* Enhanced Balance Card Section */}
+        {/* Enhanced Balance Card Section — brand field: same gradient + coin
+            ring family as Auth/splash/Biometric. Vertical gradient so the top
+            edge is exactly colors.primary and meets the flat nav header with
+            no seam. Padding lives on the inner view, never on the SVG's
+            parent (Yoga insets absolute children by the parent's padding). */}
         <Animated.View
           style={[
             styles.balanceCard,
@@ -1297,6 +1305,17 @@ export const HomeScreen = () => {
             }
           ]}
         >
+          <Svg style={StyleSheet.absoluteFill}>
+            <Defs>
+              <SvgLinearGradient id="homeField" x1="0" y1="0" x2="0" y2="1">
+                <Stop offset="0" stopColor={colors.primary} />
+                <Stop offset="1" stopColor={colors.primaryDark} />
+              </SvgLinearGradient>
+            </Defs>
+            <Rect width="100%" height="100%" fill="url(#homeField)" />
+            <Circle cx="102%" cy="46%" r="80" stroke={colors.white} strokeWidth="20" strokeOpacity="0.10" fill="none" />
+          </Svg>
+          <View style={styles.balanceCardInner}>
           <View style={styles.portfolioHeader}>
             <View style={styles.portfolioTitleContainer}>
               <Text style={styles.portfolioLabel}>Mi Saldo Total</Text>
@@ -1351,6 +1370,7 @@ export const HomeScreen = () => {
               {displayedPortfolioBalance}
             </Text>
           </Animated.View>
+          </View>
         </Animated.View>
 
 
@@ -1732,14 +1752,19 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingBottom: 100,
   },
-  // Enhanced balance card styles
+  // Enhanced balance card styles. backgroundColor stays as the flat fallback
+  // (skeleton overlay reuses this style without the SVG); overflow hidden
+  // clips the gradient/ring to the rounded corners.
   balanceCard: {
-    backgroundColor: '#34d399',
+    backgroundColor: colors.primary,
+    borderBottomLeftRadius: 32,
+    borderBottomRightRadius: 32,
+    overflow: 'hidden',
+  },
+  balanceCardInner: {
     paddingTop: 20,
     paddingBottom: 30,
     paddingHorizontal: 20,
-    borderBottomLeftRadius: 32,
-    borderBottomRightRadius: 32,
   },
   portfolioHeader: {
     flexDirection: 'row',
