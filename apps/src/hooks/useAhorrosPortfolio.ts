@@ -89,9 +89,14 @@ export const useAhorrosPortfolio = (): AhorrosPortfolio => {
   // avoids flash-hiding the hub); authoritative once it does. The server
   // rejects ineligible deposits regardless of what the UI shows.
   const savingsEnabled: boolean = flagsData?.cusdPlusSummary?.savingsEnabled ?? true;
-  // Stocks: dark-launch + geo flag. DEMO builds stay visible until the
-  // server answers so design review keeps working.
-  const stocksEnabled: boolean = flagsData?.cusdPlusSummary?.stocksEnabled ?? DEMO;
+  // Stocks: the server's stocksEnabled = geo AND the dark-launch flag
+  // (CUSD_PLUS_STOCKS_ENABLED, False until the demand signal). In DEMO
+  // builds the surfaces must stay reviewable, so apply GEO ONLY (via
+  // savingsEnabled — same eligibility list) and ignore dark-launch;
+  // outside DEMO the server flag is authoritative.
+  const stocksEnabled: boolean = DEMO
+    ? (flagsData?.cusdPlusSummary?.savingsEnabled ?? true)
+    : (flagsData?.cusdPlusSummary?.stocksEnabled ?? false);
 
   return useMemo(() => {
     const savings = DEMO
