@@ -1968,30 +1968,8 @@ PODS:
     - RNNotifee/NotifeeCore (= 9.1.8)
   - RNNotifee/NotifeeCore (9.1.8):
     - React-Core
-  - RNQrGenerator (2.0.0):
-    - DoubleConversion
-    - glog
-    - hermes-engine
-    - RCT-Folly (= 2024.11.18.00)
-    - RCTRequired
-    - RCTTypeSafety
-    - React-Core
-    - React-debug
-    - React-Fabric
-    - React-featureflags
-    - React-graphics
-    - React-hermes
-    - React-ImageManager
-    - React-jsi
-    - React-NativeModulesApple
-    - React-RCTFabric
-    - React-renderercss
-    - React-rendererdebug
-    - React-utils
-    - ReactCodegen
-    - ReactCommon/turbomodule/bridging
-    - ReactCommon/turbomodule/core
-    - Yoga
+  - RNQrGenerator (1.4.6):
+    - React
     - ZXingObjC
   - RNReanimated (3.18.0):
     - DoubleConversion
@@ -2673,7 +2651,7 @@ SPEC CHECKSUMS:
   RNGoogleSignin: 607fe748d8ca0cf59614dc00771578b1b0e215e8
   RNKeychain: 2d50732463cf0e4bdc16f15ba2a265b4e4c5e17f
   RNNotifee: 5e3b271e8ea7456a36eec994085543c9adca9168
-  RNQrGenerator: 7690c01ad6764c11881344f6ecf595234b5c0aa3
+  RNQrGenerator: af2f0888eb81b8ff99517a3929d6399444dcc56d
   RNReanimated: 19d8e3e2f2d26a591d2a688ddd07c5b0addaacac
   RNScreens: 48d705e4f7a2e66c08cf552a4c57714d4a44d6f9
   RNShare: 0dac72e20459446eb729243e40d3ad7fc866a16b

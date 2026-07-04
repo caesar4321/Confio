@@ -197,8 +197,13 @@ export const ScanScreen = () => {
     if (isProcessing) return;
     try {
       const result = await launchImageLibrary({ mediaType: 'photo', selectionLimit: 1 });
+      if (result.didCancel) return;
+      if (result.errorCode) {
+        Alert.alert('No se pudo abrir la galería', result.errorMessage || result.errorCode, [{ text: 'Entendido' }]);
+        return;
+      }
       const uri = result.assets?.[0]?.uri;
-      if (!uri) return; // user cancelled
+      if (!uri) return;
       const detected = await RNQRGenerator.detect({ uri });
       const value = detected?.values?.[0];
       if (value) {
@@ -206,8 +211,18 @@ export const ScanScreen = () => {
       } else {
         Alert.alert('Sin código QR', 'No se encontró un código QR en la imagen.', [{ text: 'Entendido' }]);
       }
-    } catch {
-      Alert.alert('Sin código QR', 'No se pudo leer un código QR de la imagen.', [{ text: 'Entendido' }]);
+    } catch (e: any) {
+      const msg = String(e?.message || e);
+      if (msg.includes('undefined') || msg.includes('null')) {
+        // Native module missing from this binary — needs a full rebuild.
+        Alert.alert(
+          'Función no disponible',
+          'Esta versión de la app no incluye el módulo de galería. Reinstala o reconstruye la app.',
+          [{ text: 'Entendido' }],
+        );
+      } else {
+        Alert.alert('Sin código QR', 'No se pudo leer un código QR de la imagen.', [{ text: 'Entendido' }]);
+      }
     }
   }, [isProcessing]);
 

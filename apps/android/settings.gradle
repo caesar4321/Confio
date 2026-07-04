@@ -117,3 +117,9 @@ project(':react-native-share').projectDir = new File(rootProject.projectDir, '..
 
 include ':react-native-clipboard_clipboard'
 project(':react-native-clipboard_clipboard').projectDir = new File(rootProject.projectDir, '../node_modules/@react-native-clipboard/clipboard/android')
+
+include ':react-native-image-picker'
+project(':react-native-image-picker').projectDir = new File(rootProject.projectDir, '../node_modules/react-native-image-picker/android')
+
+include ':rn-qr-generator'
+project(':rn-qr-generator').projectDir = new File(rootProject.projectDir, '../node_modules/rn-qr-generator/android')

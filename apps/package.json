@@ -71,7 +71,7 @@
     "react-native-vision-camera": "^4.7.1",
     "react-native-worklets-core": "^1.6.2",
     "readable-stream": "^4.7.0",
-    "rn-qr-generator": "^2.0.0",
+    "rn-qr-generator": "1.4.6",
     "rxjs": "^7.8.2",
     "text-encoding": "^0.7.0",
     "text-encoding-polyfill": "^0.6.7"

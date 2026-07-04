@@ -43,6 +43,8 @@ import com.Confio.Confio.MediaPickerPackage
 import cl.json.RNSharePackage
 import com.sdkreactnative.SdkReactNativePackage
 import com.reactnativecommunity.clipboard.ClipboardPackage
+import com.imagepicker.ImagePickerPackage
+import com.gevorg.reactlibrary.RNQrGeneratorPackage
 
 import com.uerceg.play_install_referrer.PlayInstallReferrerPackage
 
@@ -81,6 +83,8 @@ class MainApplication : Application(), ReactApplication {
             MediaPickerPackage(),
             RNSharePackage(),
             ClipboardPackage(),
+            ImagePickerPackage(),
+            RNQrGeneratorPackage(),
             SdkReactNativePackage(),
 
             PlayInstallReferrerPackage()

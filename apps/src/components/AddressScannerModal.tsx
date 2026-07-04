@@ -86,16 +86,32 @@ export const AddressScannerModal: React.FC<AddressScannerModalProps> = ({ visibl
   const handleGallery = async () => {
     try {
       const result = await launchImageLibrary({ mediaType: 'photo', selectionLimit: 1 });
+      if (result.didCancel) return;
+      if (result.errorCode) {
+        Alert.alert('No se pudo abrir la galería', result.errorMessage || result.errorCode);
+        return;
+      }
       const uri = result.assets?.[0]?.uri;
-      if (!uri) return; // user cancelled
+      if (!uri) return;
       const detected = await RNQRGenerator.detect({ uri });
       const values = detected?.values || [];
       for (const value of values) {
         if (acceptValue(value)) return;
       }
       setBadCode(true);
-    } catch {
-      setBadCode(true);
+    } catch (e: any) {
+      // A TypeError here means the native module isn't in this binary yet
+      // (app needs a full rebuild after adding the dependency) — say so
+      // loudly instead of failing silently.
+      const msg = String(e?.message || e);
+      if (msg.includes('undefined') || msg.includes('null')) {
+        Alert.alert(
+          'Función no disponible',
+          'Esta versión de la app no incluye el módulo de galería. Reinstala o reconstruye la app.',
+        );
+      } else {
+        setBadCode(true);
+      }
     }
   };
 
