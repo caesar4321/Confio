@@ -1603,11 +1603,15 @@ export const HomeScreen = () => {
                 </View>
               </Pressable>
 
-              {/* Ahorro and Inversión as SEPARATE rows under their OWN section
-                  header — two-world IA: "Mis Billeteras" is money you use,
-                  this group is money that grows. Split rows because savings
-                  never goes down while stocks fluctuate — one combined number
-                  would let a red stock day drag the savings psychology down.
+              {/* Ahorro and Inversión under their OWN section header —
+                  two-world IA: "Mis Billeteras" is money you use, this group
+                  is money that grows. The home stays 3 rows (agreed cap) for
+                  everyone WITHOUT stock positions; the Acciones row only
+                  exists once the user actually holds stocks — then it's their
+                  money, not a promo, and it must be separate because savings
+                  never goes down while stocks fluctuate (a combined number
+                  would let a red stock day drag the savings psychology down).
+                  Stocks discovery lives inside the hub, not on the home.
                   Day change shows in USD (2 dp) and only when it rounds to
                   ≥ $0.01 — never "+$0.00". */}
               {!activeAccount?.isEmployee && (
@@ -1648,7 +1652,9 @@ export const HomeScreen = () => {
                 </Pressable>
               )}
 
-              {!activeAccount?.isEmployee && ahorrosPortfolio.stocks.enabled && (
+              {!activeAccount?.isEmployee &&
+                ahorrosPortfolio.stocks.enabled &&
+                ahorrosPortfolio.stocks.totalUsd > 0 && (
                 <Pressable
                   style={({ pressed }) => [
                     styles.walletCard,
