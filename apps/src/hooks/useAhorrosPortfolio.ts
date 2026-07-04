@@ -56,26 +56,84 @@ export interface AhorrosPortfolio {
   earnedMonthUsd: number;
 }
 
+// DEV ONLY: true renders realistic sample data so every rich state is
+// reviewable (hero split line, hoy/mes ticker, positions, movements).
+// false renders the real launch-day empty states. Delete this whole demo
+// branch when the backend lands.
+const DEMO = true;
+
 export const useAhorrosPortfolio = (): AhorrosPortfolio =>
   useMemo(() => {
-    const savings = {
-      balanceUsd: 0,
-      netApyPct: 3.0,
-      earnedTodayUsd: 0,
-      earnedMonthUsd: 0,
-    };
+    const savings = DEMO
+      ? {
+          balanceUsd: 1250.4,
+          netApyPct: 3.0,
+          earnedTodayUsd: 0.1,
+          earnedMonthUsd: 2.05,
+        }
+      : {
+          balanceUsd: 0,
+          netApyPct: 3.0,
+          earnedTodayUsd: 0,
+          earnedMonthUsd: 0,
+        };
+    const positions: StockPosition[] = DEMO
+      ? [
+          { ticker: 'TSLA', name: 'Tesla', valueUsd: 180.5, dayChangePct: 2.14 },
+          { ticker: 'NVDA', name: 'NVIDIA', valueUsd: 95.2, dayChangePct: -1.32 },
+        ]
+      : [];
     const stocks = {
       // Visible during the design/dev phase; move to a server flag before
       // release so launch stays gated on the demand signal.
       enabled: true,
-      totalUsd: 0,
-      earnedTodayUsd: 0,
-      positions: [] as StockPosition[],
+      totalUsd: positions.reduce((sum, p) => sum + p.valueUsd, 0),
+      earnedTodayUsd: DEMO ? 2.53 : 0,
+      positions,
     };
+    const movements: AhorroMovement[] = DEMO
+      ? [
+          {
+            id: 'm1',
+            type: 'yield',
+            title: 'Rendimiento de la semana',
+            amountUsd: 0.68,
+            createdAt: '2026-06-29T12:00:00Z',
+          },
+          {
+            id: 'm2',
+            type: 'buy',
+            title: 'Compraste TSLA',
+            amountUsd: -150,
+            createdAt: '2026-06-27T15:30:00Z',
+          },
+          {
+            id: 'm3',
+            type: 'deposit',
+            title: 'Ahorraste',
+            amountUsd: 500,
+            createdAt: '2026-06-25T09:10:00Z',
+          },
+          {
+            id: 'm4',
+            type: 'withdraw',
+            title: 'Retiraste a cUSD',
+            amountUsd: -80,
+            createdAt: '2026-06-20T18:45:00Z',
+          },
+          {
+            id: 'm5',
+            type: 'deposit',
+            title: 'Ahorraste',
+            amountUsd: 900,
+            createdAt: '2026-06-15T11:00:00Z',
+          },
+        ]
+      : [];
     return {
       savings,
       stocks,
-      movements: [] as AhorroMovement[],
+      movements,
       totalUsd: savings.balanceUsd + stocks.totalUsd,
       earnedTodayUsd: savings.earnedTodayUsd + stocks.earnedTodayUsd,
       earnedMonthUsd: savings.earnedMonthUsd,
