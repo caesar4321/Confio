@@ -5,8 +5,8 @@ Each document is a dictionary with sections, where each section has a title and 
 
 TERMS = {
     'title': 'Términos de Servicio',
-    'version': '1.2.0',
-    'last_updated': '2026-03-19',
+    'version': '1.3.0',
+    'last_updated': '2026-07-04',
     'is_legally_binding': True,
     'sections': [
         {
@@ -19,7 +19,9 @@ TERMS = {
                 {'term': 'Confío', 'definition': 'La plataforma y servicios proporcionados por Confío.'},
                 {'term': 'Usuario', 'definition': 'Cualquier persona que utilice nuestros servicios.'},
                 {'term': 'Servicios', 'definition': 'Incluye la billetera, transferencias y cualquier otra funcionalidad ofrecida por Confío.'},
-                {'term': 'Monedas', 'definition': 'Incluye cUSD, CONFIO y cualquier otra moneda soportada.'}
+                {'term': 'Monedas', 'definition': 'Incluye cUSD, CONFIO y cualquier otra moneda soportada.'},
+                {'term': 'cUSD+', 'definition': 'Token que representa cUSD depositado en la función de ahorro con rendimiento, respaldado 1:1 por USDY de Ondo Finance.'},
+                {'term': 'Acciones tokenizadas', 'definition': 'Tokens emitidos por terceros que representan exposición 1:1 a acciones reales de empresas de los Estados Unidos.'}
             ]
         },
         {
@@ -49,36 +51,61 @@ TERMS = {
             ]
         },
         {
-            'title': '6. Limitaciones de Responsabilidad',
+            'title': '6. Ahorro con Rendimiento (cUSD+)',
+            'content': [
+                'Al usar la función de ahorro, su cUSD se convierte en cUSD+, un token respaldado 1:1 por USDY de Ondo Finance, un activo garantizado por bonos del Tesoro de los Estados Unidos y emitido por terceros.',
+                'El rendimiento es variable, se genera a través de USDY y puede cambiar día a día. No es una tasa fija, no está garantizado y puede diferir del mostrado en la app.',
+                'cUSD+ no es una cuenta de ahorro bancaria ni un depósito. No está protegido por seguros de depósito (como FDIC) ni por fondos de garantía estatales.',
+                'La conversión entre cUSD y cUSD+ depende de contratos inteligentes y de emisores o proveedores terceros; en condiciones excepcionales de mercado o técnicas, los retiros podrían demorarse o verse afectados.',
+                'Existen riesgos técnicos y de terceros, incluyendo errores en contratos inteligentes, cambios regulatorios y riesgo del emisor del activo de respaldo. En casos extremos puede perder parte o la totalidad del valor depositado.',
+                'Las tasas mostradas ya descuentan la comisión de Confío; cualquier costo adicional de una operación se muestra antes de confirmarla.'
+            ]
+        },
+        {
+            'title': '7. Acciones de EE.UU. (Acciones Tokenizadas)',
+            'content': [
+                'La función de acciones da acceso a acciones tokenizadas respaldadas 1:1 por acciones reales de empresas de los Estados Unidos, emitidas por terceros (Ondo Finance).',
+                'Las acciones tokenizadas representan exposición económica al precio de la acción subyacente y no otorgan derechos directos de accionista, como el voto. Los dividendos se reinvierten automáticamente.',
+                'El valor de las acciones puede subir o bajar. Puede perder parte o la totalidad de lo invertido. Rendimientos pasados no garantizan resultados futuros.',
+                'Confío no ofrece asesoría financiera ni recomendaciones de inversión. Usted decide qué, cuándo y cuánto comprar o vender bajo su propio criterio.',
+                'Precios, horarios de mercado, liquidez y ejecución dependen de mercados y proveedores terceros y pueden diferir de lo mostrado en la app en tiempo real.',
+                'La disponibilidad de esta función depende de su jurisdicción, del emisor y de requisitos regulatorios; podemos limitarla o suspenderla cuando sea necesario.'
+            ]
+        },
+        {
+            'title': '8. Limitaciones de Responsabilidad',
             'content': [
                 'Pérdidas debido a errores del usuario',
                 'Problemas de conectividad',
                 'Fluctuaciones en el valor de las monedas',
+                'Variaciones de rendimiento o de precio en cUSD+, USDY o acciones tokenizadas',
+                'Actos u omisiones de emisores o proveedores terceros de los activos subyacentes',
                 'Acciones de terceros'
             ]
         },
         {
-            'title': '7. Restricciones Geográficas',
+            'title': '9. Restricciones Geográficas',
             'content': [
                 'La participación en la preventa de monedas y ciertos servicios financieros de Confío está estrictamente prohibida para:',
                 'Residentes o ciudadanos de los Estados Unidos de América (US)',
-                'Residentes o ciudadanos de Corea del Sur (KR)'
+                'Residentes o ciudadanos de Corea del Sur (KR)',
+                'Estas restricciones aplican también al ahorro con rendimiento (cUSD+) y a las acciones tokenizadas, cuya disponibilidad puede variar según su jurisdicción.'
             ]
         },
         {
-            'title': '8. Cumplimiento del Usuario',
+            'title': '10. Cumplimiento del Usuario',
             'content': [
-                'Usted es responsable de verificar que el uso de Confío y la compra de $CONFIO estén permitidos en su jurisdicción.',
-                'Podemos rechazar, limitar o cancelar acceso a servicios o a la preventa si detectamos restricciones regulatorias, sanciones, fraude, suplantación o incumplimiento de estos términos.',
+                'Usted es responsable de verificar que el uso de Confío, la compra de $CONFIO y el uso de las funciones de ahorro e inversión estén permitidos en su jurisdicción.',
+                'Podemos rechazar, limitar o cancelar acceso a servicios, a la preventa o a las funciones de ahorro e inversión si detectamos restricciones regulatorias, sanciones, fraude, suplantación o incumplimiento de estos términos.',
                 'Podemos solicitar verificaciones adicionales de identidad, origen de fondos o residencia antes o después de permitir el uso de ciertas funciones.'
             ]
         },
         {
-            'title': '9. Modificaciones',
+            'title': '11. Modificaciones',
             'content': 'Nos reservamos el derecho de modificar estos términos en cualquier momento. Los cambios entrarán en vigor al publicarlos en nuestro sitio web.'
         },
         {
-            'title': '10. Contacto',
+            'title': '12. Contacto',
             'content': {
                 'email': 'legal@confio.lat',
                 'telegram': 'https://t.me/confio4world'
