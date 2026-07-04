@@ -1680,20 +1680,6 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 2,
   },
-  headerContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  backButton: {
-    marginRight: 12,
-    padding: 4,
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#1F2937',
-  },
   progressBarContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2098,28 +2084,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  headerSpacer: {
-    flex: 1,
-  },
   menuButton: {
     padding: 8,
     marginLeft: 8,
-  },
-  disputedBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FEE2E2',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#FECACA',
-  },
-  disputedBadgeText: {
-    color: '#DC2626',
-    fontSize: 12,
-    fontWeight: '600',
-    marginLeft: 4,
   },
   disputeBanner: {
     backgroundColor: '#F0FDF9',
