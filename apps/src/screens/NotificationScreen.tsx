@@ -15,6 +15,7 @@ import { contactService } from '../services/contactService';
 import { useAuth } from '../contexts/AuthContext';
 import { APP_LAYOUT } from '../config/layout';
 import { TransactionItemSkeleton } from '../components/SkeletonLoader';
+import { InlineBanner } from '../components/common/InlineBanner';
 
 const REFERRAL_EVENT_TYPE_MAP: Record<string, string> = {
   REFERRAL_EVENT_TOP_UP: 'top_up',
@@ -120,6 +121,8 @@ interface Notification {
 export const NotificationScreen = () => {
   const navigation = useNavigation<NotificationScreenNavigationProp>();
   const [refreshing, setRefreshing] = useState(false);
+  const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
+  const dismissBanner = useCallback(() => setBanner(null), []);
   const { isAuthenticated, isLoading: authLoading, accountContextTick, userProfile, profileData } = useAuth();
   const canQueryNotifications = isAuthenticated && !authLoading;
 
@@ -923,9 +926,9 @@ export const NotificationScreen = () => {
   const handleMarkAllAsRead = useCallback(async () => {
     try {
       await markAllRead();
-      Alert.alert('Éxito', 'Todas las notificaciones han sido marcadas como leídas');
+      setBanner({ variant: 'success', message: 'Todas las notificaciones han sido marcadas como leídas' });
     } catch (error) {
-      Alert.alert('Error', 'No se pudieron marcar las notificaciones como leídas');
+      setBanner({ variant: 'error', message: 'No se pudieron marcar las notificaciones como leídas' });
     }
   }, [markAllRead]);
 
@@ -1283,6 +1286,16 @@ export const NotificationScreen = () => {
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Notificaciones</Text>
       </View>
+
+      {banner && (
+        <InlineBanner
+          message={banner.message}
+          variant={banner.variant}
+          onDismiss={dismissBanner}
+          autoHideMs={banner.variant === 'success' ? 2500 : undefined}
+          style={{ marginHorizontal: 16, marginTop: 8, marginBottom: 0 }}
+        />
+      )}
 
       {/* Notifications List */}
       <FlatList
