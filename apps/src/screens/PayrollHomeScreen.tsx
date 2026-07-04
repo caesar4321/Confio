@@ -1,5 +1,5 @@
 import React, { useMemo, useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, ScrollView, ActivityIndicator, Image, RefreshControl, Platform, StatusBar } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Image, RefreshControl, Platform, StatusBar } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -9,6 +9,7 @@ import { GET_PAYROLL_RECIPIENTS, GET_PAYROLL_VAULT_BALANCE, GET_CURRENT_BUSINESS
 import { usePayrollDelegates } from '../hooks/usePayrollDelegates';
 import { useAccount } from '../contexts/AccountContext';
 import { colors } from '../config/theme';
+import { Header } from '../navigation/Header';
 import { APP_LAYOUT } from '../config/layout';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList>;
@@ -94,33 +95,31 @@ export const PayrollHomeScreen = () => {
 
   if (!isBusinessAccount) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
-            <Icon name="chevron-left" size={24} color={colors.textFlat} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Nómina</Text>
-          <View style={{ width: 32 }} />
-        </View>
+      <View style={styles.container}>
+        <Header
+          navigation={navigation as any}
+          title="Nómina"
+          backgroundColor="#fff"
+          showBackButton
+        />
         <View style={styles.centerContent}>
           <Icon name="briefcase" size={48} color={colors.muted} />
           <Text style={styles.emptyTitle}>Solo para cuentas de negocio</Text>
           <Text style={styles.emptySubtitle}>Cambia a tu cuenta de negocio para usar nómina.</Text>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
   if (!isActivated) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
-            <Icon name="chevron-left" size={24} color={colors.textFlat} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Nómina</Text>
-          <View style={{ width: 32 }} />
-        </View>
+      <View style={styles.container}>
+        <Header
+          navigation={navigation as any}
+          title="Nómina"
+          backgroundColor="#fff"
+          showBackButton
+        />
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           refreshControl={
@@ -162,20 +161,19 @@ export const PayrollHomeScreen = () => {
             </TouchableOpacity>
           </View>
         </ScrollView>
-      </SafeAreaView>
+      </View>
     );
   }
 
   // Activated state
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
-          <Icon name="chevron-left" size={24} color={colors.textFlat} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Nómina</Text>
-        <View style={{ width: 32 }} />
-      </View>
+    <View style={styles.container}>
+      <Header
+        navigation={navigation as any}
+        title="Nómina"
+        backgroundColor="#fff"
+        showBackButton
+      />
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         refreshControl={
@@ -270,34 +268,12 @@ export const PayrollHomeScreen = () => {
           <Icon name="chevron-right" size={18} color={colors.muted} />
         </TouchableOpacity>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    marginTop: Platform.OS === 'android' ? APP_LAYOUT.topSafeArea + 10 : 0,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  backButton: {
-    width: 32,
-    height: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerTitle: {
-    flex: 1,
-    textAlign: 'center',
-    fontSize: 18,
-    color: colors.textFlat,
-    fontWeight: '600',
-  },
   scrollContent: {
     padding: 16,
     gap: 16,
