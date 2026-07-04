@@ -115,7 +115,7 @@ const CountryPickerModal = ({
           <View style={styles.modalHandle} />
           <View style={styles.modalHeaderRow}>
             <Text style={styles.modalTitle}>País</Text>
-            <TouchableOpacity onPress={onClose} style={styles.modalIconBtn}>
+            <TouchableOpacity onPress={onClose} style={styles.modalIconBtn} accessibilityRole="button" accessibilityLabel="Cerrar">
               <Icon name="x" size={22} color={colors.text.primary} />
             </TouchableOpacity>
           </View>
@@ -223,14 +223,14 @@ const LocationFilterModal = ({
           <View style={styles.modalHandle} />
           <View style={styles.modalHeaderRow}>
             {level !== 'state' ? (
-              <TouchableOpacity onPress={stepBack} style={styles.modalIconBtn}>
+              <TouchableOpacity onPress={stepBack} style={styles.modalIconBtn} accessibilityRole="button" accessibilityLabel="Volver al nivel anterior">
                 <Icon name="chevron-left" size={22} color={colors.text.primary} />
               </TouchableOpacity>
             ) : (
               <View style={styles.modalIconBtn} />
             )}
             <Text style={styles.modalTitle}>{title}</Text>
-            <TouchableOpacity onPress={onClose} style={styles.modalIconBtn}>
+            <TouchableOpacity onPress={onClose} style={styles.modalIconBtn} accessibilityRole="button" accessibilityLabel="Cerrar">
               <Icon name="x" size={22} color={colors.text.primary} />
             </TouchableOpacity>
           </View>
@@ -519,13 +519,15 @@ export const FinancierasScreen = () => {
       <SafeAreaView edges={['top']} style={{ backgroundColor: colors.primary }}>
         <View style={styles.header}>
           <View style={styles.headerTopRow}>
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerIconBtn}>
+            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerIconBtn} accessibilityRole="button" accessibilityLabel="Volver">
               <Icon name="arrow-left" size={24} color="#fff" />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Financieras</Text>
             <TouchableOpacity
               onPress={() => navigation.navigate('RegisterFinanciera')}
               style={styles.headerIconBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Registrar financiera"
             >
               <Icon name="plus" size={24} color="#fff" />
             </TouchableOpacity>
@@ -589,7 +591,7 @@ export const FinancierasScreen = () => {
                 onChangeText={setSearch}
               />
               {search.length > 0 && (
-                <TouchableOpacity onPress={() => setSearch('')}>
+                <TouchableOpacity onPress={() => setSearch('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} accessibilityRole="button" accessibilityLabel="Borrar búsqueda">
                   <Icon name="x-circle" size={18} color={colors.text.light} />
                 </TouchableOpacity>
               )}
