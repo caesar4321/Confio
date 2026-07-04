@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { ApolloProvider } from '@apollo/client';
 import { NavigationContainer, NavigationContainerRef } from '@react-navigation/native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
@@ -23,6 +23,7 @@ import { initializeNotifee } from './services/notifeeConfig';
 import linking from './navigation/linking'; // Import linking config
 import { deepLinkHandler } from './utils/deepLinkHandler';
 import { PushNotificationProvider } from './hooks/usePushNotificationContext';
+import { BrandSplash } from './components/BrandSplash';
 import { logBreadcrumb } from './services/crashLog';
 // Dev: attach derivation verifier helper
 if (__DEV__) {
@@ -98,6 +99,9 @@ const Navigation: React.FC = () => {
 
 const AppContent: React.FC = () => {
   const previousScreenRef = useRef<string | undefined>(undefined);
+  // Stage two of the splash: native static splash → this JS brand motion.
+  // Mounts once per cold start; unmounts itself when the choreography ends.
+  const [splash, setSplash] = useState(true);
 
   useEffect(() => {
     console.log('[App] Bootstrapping messaging handlers before auth');
@@ -166,6 +170,7 @@ const AppContent: React.FC = () => {
           </AuthProvider>
         </NavigationContainer>
       </SafeAreaView>
+      {splash && <BrandSplash onDone={() => setSplash(false)} />}
     </SafeAreaProvider>
   );
 };
