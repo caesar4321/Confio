@@ -110,10 +110,10 @@ Two footnotes:
    arbitrary `to` addresses may also require registry checks — confirm
    whether USDY transfers out of the vault to non-whitelisted addresses are
    allowed, or whether `redeem`'s raw-USDY path must be treasury-only.
-6. **Relayer authz** — mint/redeem are currently permissionless (anyone
-   bringing collateral can mint; any holder can redeem). Decide whether v1
-   restricts callers to the Confío relayer set while the Algorand↔BSC
-   conversion orchestration matures, or ships open.
+6. ~~Relayer authz~~ — **RESOLVED: permissionless, like cusd.py.** The
+   conversion flow is user-driven end to end (see ORCHESTRATION.md): the
+   user's own BSC address is msg.sender for mint/redeem (Confío only
+   sponsors gas), so restricting callers would break the architecture.
 
 ## Deployment checklist (when ungated)
 

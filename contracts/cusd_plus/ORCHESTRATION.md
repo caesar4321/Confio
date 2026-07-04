@@ -1,179 +1,157 @@
 # cUSD ↔ cUSD+ conversion orchestration (Algorand ↔ BSC)
 
-The layer between the app's ConvertAhorro/RetirarAhorro screens and the two
-contracts (`cusd.py` on Algorand, `CusdPlusVault.sol` on BSC). Implementation
-lands in the `cusd_plus` Django app (models + celery) behind the existing
-GraphQL seam (`cusdPlusQuote` → execute mutation later).
+The layer between ConvertAhorro/RetirarAhorro and the two contracts
+(`cusd.py` on Algorand, `CusdPlusVault.sol` on BSC).
+
+**Philosophy (= cUSD's, non-negotiable): every leg is user-driven and
+user-signed. Funds only ever sit at the user's own addresses, inside the
+contracts, or in flight on the bridge. There is NO company treasury in the
+flow — Confío sponsors fees and observes, it never custodies.** An earlier
+draft routed value through treasury accounts; Julian rejected it.
 
 **Scope note:** this path exists ONLY for money already inside Confío.
-New money never bridges — direct ramps (Koywe → USDT-BSC → vault, and the
-reverse) are separate, simpler flows with no Allbridge leg.
+New money never bridges — direct ramps (Koywe ↔ USDT-BSC ↔ vault) are
+separate flows with no Allbridge leg.
 
-## 1. The legs
+## 1. The legs — all from/to the USER's addresses
+
+`user.algo` and `user.bsc` derive from the same Web3Auth seed
+(non-custodial). Confío's only financial role per leg: fee sponsorship
+(Algorand fee-pooled groups; on BSC, metered BNB gas dust sent to user.bsc —
+the same sponsorship philosophy, different mechanism).
 
 ### Ahorrar (cUSD → cUSD+)
 ```
-leg A (Algorand, atomic):  user cUSD burn → USDC released to treasury.algo
-                           (sponsored group; user signs, sponsor pays fees)
-leg B (Allbridge Core):    USDC-ALG → USDT-BSC to treasury.bsc
-leg C (BSC, atomic):       vault.subscribeAndMint(usdtIn, minUsdyOut, user.bsc)
-                           → IM subscribe → USDY into vault → shares to user
+leg A (Algorand, atomic, user signs):  burn cUSD → USDC lands at user.algo
+                                       (sponsored group, as today)
+leg B (Algorand→bridge, user signs):   user.algo deposits USDC into Allbridge
+                                       Core, destination = user.bsc → USDT-BSC
+                                       arrives AT THE USER'S BSC ADDRESS
+leg C (BSC, user signs, gas-dusted):   approve + vault.subscribeAndMint(
+                                       usdtIn, minUsdyOut, user.bsc)
+                                       → USDY into vault → shares to user.bsc
 ```
 
 ### Retirar (cUSD+ → cUSD)
 ```
-leg A' (BSC, atomic):      vault.redeemToUsdt(shares, minUsdtOut, treasury.bsc)
-leg B' (Allbridge Core):   USDT-BSC → USDC-ALG to treasury.algo
-leg C' (Algorand, atomic): cUSD mint_with_collateral (sponsored) → user
+leg A' (BSC, user signs, gas-dusted):  vault.redeemToUsdt(shares, minUsdtOut,
+                                       user.bsc) → USDT at user's address
+leg B' (BSC→bridge, user signs):       Allbridge deposit, destination =
+                                       user.algo → USDC-ALG arrives at user
+leg C' (Algorand):                     THE EXISTING USDC→cUSD auto-swap —
+                                       already in production, unchanged
 ```
 
-Cross-chain atomicity does not exist; what we guarantee instead:
-**each leg is atomic on its chain, and the saga is exactly-once, resumable,
-and can only halt in states where the user's value is parked in a treasury
-account with a recorded owner — never lost, never double-spent.**
-This is the honest version of the per-conversion chain (decision: the
-conversion drives the legs mechanically; no discretionary treasury
-management in the hot path).
+Cross-chain atomicity doesn't exist; the guarantee is the honest version:
+**each leg is atomic on its chain, every halt state leaves the value in the
+user's own wallet as a real asset (cUSD, USDC-ALG, USDT-BSC or cUSD+), and
+the client can always resume or the user can simply keep what they hold.**
+Worst case of an abandoned Ahorrar is the user owning USDC/USDT — never a
+limbo balance, never an IOU on Confío.
 
-Addresses: `user.bsc` is derived from the same Web3Auth seed as the user's
-Algorand key (non-custodial); the relayer pays all BSC gas. User signs leg
-A/C' (their Algorand side); the relayer executes B and the BSC legs.
+## 2. Client-driven resume (the auto-swap pattern, generalized)
 
-## 2. Saga state machine
+No server-side executor drives user funds — it can't; it doesn't hold keys.
+Progress happens exactly like the existing USDC-ALG → cUSD auto-swap:
 
-One `ConversionSaga` row per conversion. `conversion_id` (UUIDv7) is the
-idempotency key end-to-end: it goes in the Algorand group note, the
-Allbridge transfer memo lookup table, and the BSC tx metadata table.
+- On every app **re-foreground**, the client asks the server "any conversion
+  in flight?" and executes the next leg it can sign, after a fresh quote
+  check for that leg.
+- **The modal always says why**: "Continuando tu ahorro: tu dinero cruzó a
+  la red de ahorro, falta el último paso" — never a silent spinner, never
+  an unexplained popup. If a leg partially filled, the modal states plainly
+  what portion is through and what remains ("Convertimos $X de $Y; el resto
+  sigue en tu billetera como cUSD").
+- **We don't cover anything.** If costs moved between legs, the user sees
+  the fresh number and decides: continue at today's cost, wait, or (Ahorrar
+  leg-B halt) swap the USDC back to cUSD 1:1 via the existing conversion and
+  forget the whole thing. Confío never eats a delta silently and never
+  proceeds on a stale quote.
+- **Auto-swap suppression flag**: during an Ahorrar in flight, USDC at
+  user.algo is leg-A output, NOT idle dust — the existing auto-swap must
+  check the in-flight conversion state or it will "helpfully" convert the
+  user's savings deposit back into cUSD. (Symmetrically, leg C' of Retirar
+  IS the auto-swap doing its normal job — no suppression there.)
+- Server-side celery only does what needs no keys: polling Allbridge
+  transfer status, topping BNB gas dust when leg C is next, websocket
+  events, reconciliation (§6), and nudging via push notification if a
+  conversion sits half-done for days ("te falta un paso para que tu ahorro
+  gane rendimiento").
 
-```
-QUOTED ─▶ LEG_A_PENDING ─▶ LEG_A_DONE ─▶ LEG_B_PENDING ─▶ LEG_B_DONE
-   │            │                              │
-   ▼            ▼ (never confirmed)            ▼ (stuck > T_bridge)
- EXPIRED      ABORTED                     BRIDGE_STUCK ──(support/retry)──▶
-                                               
-LEG_B_DONE ─▶ LEG_C_PENDING ─▶ COMPLETED
-                   │
-                   ▼ (vault paused / frozen / IM down)
-              PARKED_DEST ──(retry loop)──▶ COMPLETED
-                   │
-                   ▼ (operator decision only)
-              REFUNDING ─▶ REFUNDED  (reverse the done legs)
-```
+## 3. Server's role (quotes, guard, observation — never custody)
 
-Rules:
-- Every leg executor is idempotent: before submitting, check for an existing
-  on-chain tx tagged with `conversion_id` (the pending-transfer check that
-  already hardened the cUSD↔USDC conversion flow). Crash + resume never
-  double-submits.
-- Transitions are monotonic; a celery beat sweeper re-drives any saga not in
-  a terminal state (COMPLETED / REFUNDED / EXPIRED / ABORTED-clean).
-- Value location is explicit per state: user wallet → treasury.algo →
-  bridge in flight → treasury.bsc → vault. Reconciliation (§6) audits it.
+1. **Quote** (`cusdPlusQuote`): Allbridge `getAmountToBeReceived`
+   (USDC-ALG → USDT-BSC, real pool math) + IM leg at oracle price + any
+   server-config Confío fee. TTL ~60s, foreground-only.
+2. **Spread guard** (remote config, ~0.5%): over threshold →
+   `maxFillUnderThreshold` binary search → PARTIAL quote ("convertimos
+   hasta $X ahora"), the amber state ConvertAhorroScreen renders. Partial
+   fills are first-class, not errors; the user re-taps later for the rest —
+   no auto-tranche loop racing the arbitrageurs.
+3. **Contract-side floors** are the real protection: `minUsdyOut` /
+   `minUsdtOut` on the vault, Allbridge's receive minimum on the bridge.
+   The client never signs a leg whose floor is below the quote the user
+   accepted.
 
-## 3. Quote & guard (before leg A commits anything)
+Pool reality (measured 2026-07): Allbridge's Algorand USDC pool ~$43.5K;
+2%+ impact near $20–25K. Liquidity is polled (token-info) with alerts at
+$30K/$15K. Large conversions = visible partial fills by design.
 
-Leg A is the point of no return (burn). Everything is validated before it:
+## 4. Failure map — value is always the user's, somewhere concrete
 
-1. **Compose the quote** server-side (`cusdPlusQuote`):
-   - Allbridge `getAmountToBeReceived` for USDC-ALG → USDT-BSC (real pool
-     math, includes their fee + price impact),
-   - IM leg at oracle price (no spread; slippage floor = minUsdyOut),
-   - our conversion fee if any (server-config).
-2. **Spread guard** (remote config, ~0.5%): if total cost exceeds the
-   threshold, run `maxFillUnderThreshold` (binary search on
-   getAmountToBeReceived) and return a PARTIAL quote: "convertimos hasta
-   $X ahora" — the amber paused/partial state ConvertAhorroScreen already
-   renders. Never reject outright when a partial fill fits.
-3. **Quote TTL ~60s**, foreground-triggered only (mobile constraint: the app
-   must be open; no background auto-conversions). Executing re-checks the
-   quote; drift beyond guard → back to step 1, user re-confirms. Only then
-   leg A.
-
-Pool reality check (measured 2026-07): the Allbridge Algorand USDC pool held
-~$43.5K — 2%+ impact around $20–25K. Consequences:
-- per-conversion cap = maxFillUnderThreshold result;
-- large conversions become **client-visible partial fills**, not silent
-  tranching — the user re-taps to continue once the pool re-arbs (tranches
-  need time between them; an auto-tranche loop would race the arbs and is
-  the infinite-loop bug we explicitly rejected);
-- pool liquidity is polled (token-info endpoint) and alerts fire under
-  $30K / $15K so we hear about droughts before users do.
-
-## 4. Allbridge leg specifics
-
-- Integration = Allbridge Core SDK (server-side) — quotes via
-  `getAmountToBeReceived`, transfer build + submit, then **poll transfer
-  status by tx id** until destination delivery; typical minutes, timeout
-  T_bridge (config, ~30 min) → BRIDGE_STUCK + ops alert (their transfers
-  don't silently die; stuck ones resolve via retry or support).
-- Destination gas: relayer keeps BNB float; Allbridge's destination-gas
-  feature optional, not load-bearing.
-- **Treasury-inventory fast path (optional v1.5, feature-flagged):** when
-  treasury.bsc already holds USDT float ≥ amount, skip leg B for the user's
-  saga (settle C immediately) and let a treasury-rebalance saga run leg B in
-  the background. Same mechanics, order swapped; the user-facing conversion
-  drops from minutes to seconds. The invariant audit (§6) treats owed-value
-  identically in both orders. This is float management, not discretion — the
-  rebalance saga is triggered mechanically by the float threshold.
-- Allbridge **Deposit Addresses** stays backlogged (no slippage protection,
-  no programmatic API yet); revisit when their partner reply lands.
-
-## 5. Failure & refund matrix
-
-| Failure point | Value sits in | Action |
+| Halt point | User now holds | Path forward (client modal offers it) |
 | --- | --- | --- |
-| Quote/guard fails | user wallet | nothing committed; show paused/partial state |
-| Leg A never confirms | user wallet | Algorand groups are atomic; ABORTED, clean |
-| After A, bridge quote now over guard | treasury.algo | hold ≤ T_park (1h) re-checking; then operator choice: proceed anyway (we eat the delta), keep holding, or refund-mint cUSD back to user (leg C' machinery) |
-| Bridge stuck | in flight | poll → retry/support; never re-send without status resolution (idempotency) |
-| Arrival shortfall vs quote | treasury.bsc | within guard: proceed (user got quoted net); beyond guard: ops review — the quote is the contract with the user |
-| IM down / vault paused | treasury.bsc | PARKED_DEST, retry loop; USDY mint price is oracle-time so parking costs the user nothing in USD terms |
-| User address frozen (vault) | treasury.bsc | compliance hold — value parked with recorded owner, resolved by the freeze process, not the saga |
-| Retirar mirror failures | symmetric | same table, reversed; leg A' is the point of no return |
+| Guard trips at quote | cUSD (untouched) | partial now, or wait |
+| Leg A unconfirmed | cUSD (group atomic) | clean retry |
+| After A, bridge cost jumped | USDC-ALG in own wallet | continue at fresh cost / wait / swap back to cUSD 1:1 |
+| Bridge in flight / stuck | in-flight (Allbridge) | server polls status; > ~30 min → ops alert + honest "tardando más de lo normal"; Allbridge transfers resolve by retry/support, value not lost |
+| USDT arrived, app closed | USDT-BSC at user.bsc | next foreground: gas dust + leg C; push nudge after days |
+| Vault paused / IM down | USDT-BSC at user.bsc | retry on later foregrounds; oracle-time mint means waiting costs ~nothing in USD |
+| user.bsc frozen (vault) | USDT-BSC at user.bsc | compliance process, not the conversion's problem |
+| Retirar legs | mirror of the above | leg C' is the existing auto-swap |
 
-Refunds reuse the opposite direction's leg executors — no bespoke refund
-code paths (fewer paths, fewer bugs).
+No REFUNDING machinery exists because there is nothing to refund FROM — the
+"refund" of every Ahorrar halt is that the user already holds the asset, and
+the swap-back-to-cUSD offer reuses the existing 1:1 conversion.
 
-## 6. Reconciliation & monitoring
+## 5. Reconciliation & monitoring
 
-- Hourly + daily invariant audit across chains:
-  `Σ cUSD burned − Σ cUSD re-minted == Σ value delivered to vault ± recorded
-  costs/fees` per saga and in aggregate; any unexplained residual pages ops.
-- Vault-side public invariant is monitored independently:
-  `backingRatioBps() ≥ 10000` (also feeds ProtectedSavings).
-- Dashboards: sagas by state + age, Allbridge pool depth, treasury floats
-  (algo USDC / bsc USDT / BNB gas), guard-trip rate, partial-fill rate.
-- Every state transition emits a websocket event → the app's processing
-  screen shows real progression, and a stuck saga shows an honest "tardando
-  más de lo normal" instead of a fake spinner.
+- Per-conversion ledger (server, observational): leg tx ids keyed by
+  `conversion_id` (UUIDv7, stamped in tx notes/metadata) — powers the
+  resume logic, the Movimientos history, and support.
+- Invariant audits: vault `backingRatioBps() ≥ 10000` (public, monitored);
+  per-conversion "value in vs shares out at oracle price" within quoted
+  costs — any residual pages ops.
+- Dashboards: conversions by state + age, Allbridge pool depth, gas-dust
+  spend, guard-trip and partial-fill rates.
+- Sponsorship accounting: BNB dust + Algorand fee pooling are Confío's only
+  costs in the flow, tracked like existing sponsored-tx accounting.
 
-## 7. UX honesty contract
+## 6. UX honesty contract
 
-- ConvertAhorro's processing phase maps to real states (A confirmed →
-  "asegurando tu tasa" → C done → success with actual received amount).
-- "Al instante" is only promised where it's true: Retirar → cUSD is instant
-  ONLY under the fast path (§4) or once C' lands; copy for the slow path is
-  "en unos minutos". No resting-order fictions (same rule as GM).
-- Partial fills are first-class UI, not an error.
+- Processing screens map to real leg states via websocket; a stuck bridge
+  shows "tardando más de lo normal", never a fake spinner.
+- "Al instante" is only promised where true (leg C' auto-swap is instant
+  once USDC lands; the full Ahorrar is "en unos minutos").
+- Partial fills and cost changes are always stated with numbers, before the
+  user signs the affected leg. We don't cover anything — and we don't hide
+  anything either.
 
-## 8. Open decisions
+## 7. Resolved (formerly "open") decisions
 
-1. **Fast-path float sizes** (launch config, not now): how much USDT to
-   pre-position in treasury.bsc (and USDC in treasury.algo). Bigger float =
-   conversions feel instant more often; cost = company capital parked on the
-   bridge-risk side. Tune after seeing real conversion volume.
-2. **Post-burn guard-trip policy** (launch config): when the bridge cost
-   jumps AFTER the user's cUSD is burned, in what order do we (a) absorb the
-   overage and proceed, (b) wait for the pool to normalize, (c) auto-refund
-   by re-minting cUSD. Proposed default: absorb-and-proceed under a small
-   cap; above it, hold ≤ 1h then auto-refund.
-3. **Relayer-only v1 (the one real decision):** vault mint/redeem is
-   currently permissionless. Proposal: restrict callers to the Confío
-   relayer wallets (= the saga executors' allowlist) at launch — every flow
-   passes through the saga, accounting stays airtight — and open it up via
-   upgrade once mature (pre-lockUpgrades). Trade-off: slightly weaker
-   decentralization story early on.
-4. **Not a decision — a trap note:** Retirar-to-bank must NEVER reuse this
-   saga (cUSD+ → saga → cUSD → off-ramp would re-cross Allbridge for
-   nothing). It is vault.redeemToUsdt → USDT-BSC → Koywe, full stop — the
-   direct rail that leads the Retirar sheet.
+1. ~~Treasury float sizing~~ — **dead: there is no treasury in the flow.**
+   (A user-visible "instant mode" would require custody; rejected.)
+2. ~~Post-burn cost-absorption policy~~ — **dead: we don't cover anything.**
+   Cost changes are re-presented to the user, who decides.
+3. ~~Relayer-only vault v1~~ — **dead: permissionless, like cusd.py.** The
+   user IS the caller (msg.sender = user.bsc, gas-dusted); locking the vault
+   to relayers would contradict the user-driven flow. README question 6
+   resolved accordingly.
+4. Route clarification (Julian): the full saga to cUSD is for users who
+   want cUSD **to use in-app** (send, pay, guardar) — it ends at cUSD.
+   Bank withdrawals from savings never ride it: that is
+   vault.redeemToUsdt → USDT-BSC → Koywe, the direct rail that leads the
+   Retirar sheet ("A mi banco" first).
+
+Remaining genuinely open: none at the orchestration level. Blockers are the
+Ondo onboarding answers (vault README) and Allbridge's partner reply.
