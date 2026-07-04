@@ -1715,6 +1715,17 @@ export const GET_RAMP_AVAILABILITY = gql`
   }
 `;
 
+// BSC (savings chain) address registration — best-effort after sign-in;
+// tolerated to fail against servers that predate the cUSD+ deploy.
+export const UPDATE_ACCOUNT_BSC_ADDRESS = gql`
+  mutation UpdateAccountBscAddress($bscAddress: String!) {
+    updateAccountBscAddress(bscAddress: $bscAddress) {
+      success
+      error
+    }
+  }
+`;
+
 export const GET_RAMP_QUOTE = gql`
   query GetRampQuote(
     $direction: String!

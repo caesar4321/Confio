@@ -787,10 +787,8 @@ export const HomeScreen = () => {
       title: 'Para ahorrar e invertir',
       subtitle: 'Gana rendimiento mientras decides · cUSD+',
       onPress: () => {
-        // TODO(cusd+): TopUp with destination=cusd_plus so Koywe delivers on
-        // the savings chain (USDT-BSC) — never onramp-then-bridge. Until the
-        // ramp param lands, route to the hub where saving from cUSD works.
-        navigation.navigate('Ahorros');
+        // Savings rail: Koywe delivers USDT-BSC to the user's own address.
+        navigation.navigate('TopUp', { destination: 'cusd_plus' });
       },
     },
   ];

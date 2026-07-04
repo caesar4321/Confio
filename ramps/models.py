@@ -159,6 +159,12 @@ class RampTransaction(models.Model):
     )
     actor_display_name = models.CharField(max_length=255, blank=True)
     actor_address = models.CharField(max_length=66, blank=True, default='')
+    destination = models.CharField(
+        max_length=12,
+        choices=[('cusd', 'cUSD (day-to-day, USDC-Algorand)'), ('cusd_plus', 'cUSD+ savings (USDT-BSC)')],
+        default='cusd',
+        help_text='Which product rail this ramp serves; decides token, network and delivery address',
+    )
 
     fiat_currency = models.CharField(max_length=20, blank=True)
     fiat_amount = models.DecimalField(max_digits=19, decimal_places=6, null=True, blank=True)

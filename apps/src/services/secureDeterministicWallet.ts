@@ -24,6 +24,7 @@ import { REPORT_BACKUP_STATUS } from '../apollo/queries';
 import { gql } from '@apollo/client';
 import { randomBytes } from '@noble/hashes/utils';
 import { CONFIO_DERIVATION_SPEC } from './derivationSpec';
+import { deriveDeterministicEvmKey, DerivedEvmWallet } from './evmWallet';
 import { base64ToBytes, bytesToBase64, stringToUtf8Bytes } from '../utils/encoding';
 import { AnalyticsService } from './analyticsService';
 import { softClearInternetCredentials } from '../utils/keychainInternetCredentials';
@@ -262,6 +263,16 @@ export function generateClientSalt(
  * - Domain separation prevents cross-chain attacks
  * - Versioned for future migration
  */
+// BSC (savings chain) sibling wallet — derived alongside the Algorand key
+// from the SAME inputs (confio/evm/v1 domain) and cached for the session.
+// authService registers the address server-side (UpdateAccountBscAddress);
+// the cUSD+ ramp and vault flows read it via getDerivedEvmWallet().
+let lastDerivedEvmWallet: DerivedEvmWallet | null = null;
+
+export function getDerivedEvmWallet(): DerivedEvmWallet | null {
+  return lastDerivedEvmWallet;
+}
+
 export function deriveDeterministicAlgorandKey(opts: DeriveWalletOptions): DerivedWallet {
   const { clientSalt, derivationPepper, provider, accountType, accountIndex, businessId } = opts;
 
@@ -310,6 +321,15 @@ export function deriveDeterministicAlgorandKey(opts: DeriveWalletOptions): Deriv
 
   // Generate ed25519 keypair for Algorand
   const keyPair = nacl.sign.keyPair.fromSeed(seed32);
+
+  // Savings-chain sibling: same inputs, evm/v1 domain. Cheap (one HKDF +
+  // one secp256k1 point) and keeps both addresses in lockstep everywhere
+  // the Algorand key is derived.
+  try {
+    lastDerivedEvmWallet = deriveDeterministicEvmKey(opts);
+  } catch (e) {
+    console.warn('[Derive] EVM sibling derivation failed (non-fatal):', e);
+  }
 
   // Encode Algorand address from public key (runtime require to avoid RN issues)
   const algosdk = require('algosdk');

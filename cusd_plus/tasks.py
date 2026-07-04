@@ -77,9 +77,21 @@ def monitor_bridge_arrivals():
         is_deleted=False,
     ).exclude(user_bsc_address='')[:500])
 
-    # Watch set: conversions now; ramp orders and registered savings
-    # addresses join here later (sources 2 and 3 above).
+    # Watch set: in-flight conversions + pending savings-rail Koywe orders
+    # (source 2 — Koywe delivers USDT-BSC to the user's own address);
+    # registered savings addresses join with external deposits (source 3).
     watch = {c.user_bsc_address.lower(): c for c in conversions}
+    try:
+        from ramps.models import RampTransaction
+        ramp_addrs = RampTransaction.objects.filter(
+            destination='cusd_plus',
+            direction='on_ramp',
+            status__in=('PENDING', 'PROCESSING'),
+        ).exclude(actor_address='').values_list('actor_address', flat=True)[:300]
+        for addr in ramp_addrs:
+            watch.setdefault(addr.lower(), None)  # None = ramp-only address
+    except Exception:  # noqa: BLE001
+        logger.exception('ramp watch-set union failed')
     if not watch:
         return  # idle: zero RPC calls
 
@@ -111,15 +123,23 @@ def monitor_bridge_arrivals():
     arrived: dict[str, dict] = {}
     for log in logs:
         to_addr = '0x' + log['topics'][2][-40:]
-        conv = watch.get(to_addr.lower())
+        key = to_addr.lower()
+        if key not in watch:
+            continue
+        conv = watch[key]
         if conv is None:
+            # Ramp-only address: Koywe delivery observed on-chain. Order
+            # status stays koywe_sync's job; this is chain-side visibility
+            # (and later the auto-mint trigger for source 3).
+            logger.info(
+                'USDT arrival at savings ramp address %s (%s)',
+                to_addr, log['transactionHash'],
+            )
             continue
         floor_units = int(float(conv.quoted_receive_usd) * 0.9 * 1e18)
         if int(log['data'], 16) >= floor_units:
-            arrived[to_addr.lower()] = log
+            arrived[key] = log
         else:
-            # Smaller than any plausible bridge delivery -> future external-
-            # deposit classification (source 3). Logged for visibility.
             logger.info(
                 'unmatched USDT arrival at watched address %s (%s) — external deposit path not built yet',
                 to_addr, log['transactionHash'],
@@ -127,6 +147,8 @@ def monitor_bridge_arrivals():
 
     now = timezone.now()
     for addr, conv in watch.items():
+        if conv is None:
+            continue
         log = arrived.get(addr)
         if log:
             conv.status = 'DEST_ARRIVED'

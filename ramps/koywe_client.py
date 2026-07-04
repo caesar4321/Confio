@@ -204,11 +204,13 @@ def _normalize_account_type(value: str | None) -> str | None:
 
 
 class KoyweClient:
-    def __init__(self):
+    def __init__(self, crypto_symbol: str | None = None):
         self.base_url = getattr(settings, 'KOYWE_API_URL', 'https://api.koywe.com').rstrip('/')
         self.client_id = getattr(settings, 'KOYWE_CLIENT_ID', '')
         self.secret = getattr(settings, 'KOYWE_SECRET', '')
-        self.crypto_symbol = getattr(settings, 'KOYWE_CRYPTO_SYMBOL', 'USDC Algorand')
+        # Per-instance override (cUSD+ savings rail uses 'USDT BSC'); the
+        # settings default remains the day-to-day cUSD rail.
+        self.crypto_symbol = crypto_symbol or getattr(settings, 'KOYWE_CRYPTO_SYMBOL', 'USDC Algorand')
         self.timeout = getattr(settings, 'KOYWE_TIMEOUT_SECONDS', 20)
         self.session = requests.Session()
         self.session.headers.update({

@@ -3253,6 +3253,55 @@ class UpdateBusiness(graphene.Mutation):
 			logger.error(f"Error updating business: {str(e)}")
 			return UpdateBusiness(success=False, error="Error interno del servidor")
 
+class UpdateAccountBscAddress(graphene.Mutation):
+    """Register the account's BSC (savings chain) address — the EVM sibling
+    of UpdateAccountAlgorandAddress. Client-derived (confio/evm/v1 domain);
+    the server cannot derive it (non-custodial). Needed by cUSD+ ramps
+    (Koywe USDT-BSC delivery) and the BSC inbound scanner."""
+    class Arguments:
+        bsc_address = graphene.String(required=True)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+
+    @classmethod
+    def mutate(cls, root, info, bsc_address):
+        import re as _re
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return UpdateAccountBscAddress(success=False, error="Authentication required")
+        addr = (bsc_address or '').strip()
+        if not _re.fullmatch(r'0x[0-9a-fA-F]{40}', addr):
+            return UpdateAccountBscAddress(success=False, error="Invalid BSC address")
+        from .jwt_context import get_jwt_business_context_with_validation
+        jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+        if not jwt_context:
+            return UpdateAccountBscAddress(success=False, error="Invalid account context")
+        account_type = jwt_context['account_type']
+        account_index = jwt_context['account_index']
+        business_id = jwt_context.get('business_id')
+        if account_type == 'business' and business_id:
+            account = Account.objects.filter(
+                business_id=business_id, account_type='business'
+            ).order_by('account_index').first()
+        else:
+            account = Account.objects.filter(
+                user=user, account_type=account_type, account_index=account_index
+            ).first()
+        if not account:
+            return UpdateAccountBscAddress(success=False, error="Cuenta no encontrada")
+        # Same immutability posture as the Algorand address: once set, a
+        # DIFFERENT address is refused (protects against wrong-seed clients).
+        if account.bsc_address and account.bsc_address.lower() != addr.lower():
+            return UpdateAccountBscAddress(
+                success=False,
+                error="Esta cuenta ya tiene una dirección BSC registrada distinta.",
+            )
+        account.bsc_address = addr
+        account.save(update_fields=['bsc_address'])
+        return UpdateAccountBscAddress(success=True, error=None)
+
+
 class UpdateAccountAlgorandAddress(graphene.Mutation):
     class Arguments:
         algorand_address = graphene.String(required=True)
@@ -5589,6 +5638,7 @@ class Mutation(EmployeeMutations, FunnelMutations, graphene.ObjectType):
     create_business = CreateBusiness.Field()
     update_business = UpdateBusiness.Field()
     update_account_algorand_address = UpdateAccountAlgorandAddress.Field()
+    update_account_bsc_address = UpdateAccountBscAddress.Field()
     
     # Bank info mutations
     create_bank_info = CreateBankInfo.Field()

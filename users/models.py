@@ -500,6 +500,11 @@ class Account(SoftDeleteModel):
         blank=True, null=True,
         help_text="Algorand address for this account"
     )
+    bsc_address = models.CharField(
+        max_length=42,  # 0x + 40 hex chars (EIP-55)
+        blank=True, null=True,
+        help_text="BSC (savings chain) address for this account — derived client-side from the same seed (confio/evm/v1)"
+    )
 
     # —————————————————————————————
     # audit‑style timestamps

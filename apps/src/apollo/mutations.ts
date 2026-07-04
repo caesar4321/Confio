@@ -29,6 +29,49 @@ export const APPLY_HUMANITARIAN_VOLUNTEER = gql`
   }
 `;
 
+// Savings-rail variant: separate document so the legacy flow keeps working
+// against servers that predate the cUSD+ deploy (an unknown argument would
+// invalidate the whole operation). Used ONLY when destination==='cusd_plus'.
+export const CREATE_RAMP_ORDER_SAVINGS = gql`
+  mutation CreateRampOrderSavings(
+    $direction: String!
+    $amount: String!
+    $countryCode: String
+    $fiatCurrency: String
+    $paymentMethodCode: String!
+    $bankInfoId: ID
+    $authEmail: String
+    $destination: String
+  ) {
+    createRampOrder(
+      direction: $direction
+      amount: $amount
+      countryCode: $countryCode
+      fiatCurrency: $fiatCurrency
+      paymentMethodCode: $paymentMethodCode
+      bankInfoId: $bankInfoId
+      authEmail: $authEmail
+      destination: $destination
+    ) {
+      success
+      error
+      orderId
+      direction
+      countryCode
+      fiatCurrency
+      paymentMethodCode
+      paymentMethodDisplay
+      amountIn
+      amountOut
+      totalChangeDisplay
+      rateDisplay
+      nextStep
+      nextActionUrl
+      paymentDetails
+    }
+  }
+`;
+
 export const CREATE_RAMP_ORDER = gql`
   mutation CreateRampOrder(
     $direction: String!

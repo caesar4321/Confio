@@ -115,9 +115,8 @@ export const AhorrosScreen = () => {
       title: 'Recargar desde mi banco',
       subtitle: 'Dinero nuevo llega directo a tu ahorro, sin conversión',
       onPress: () => {
-        // TODO(cusd+): TopUp with destination=cusd_plus so Koywe delivers on
-        // the savings chain (USDT-BSC) — never onramp-then-bridge.
-        Alert.alert('Muy pronto', 'La recarga directa al ahorro abre en breve.');
+        // Savings rail: Koywe delivers USDT-BSC to the user's own address.
+        navigation.navigate('TopUp', { destination: 'cusd_plus' });
       },
     },
     {

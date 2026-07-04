@@ -14,7 +14,7 @@ import {
   View,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useMutation, useQuery } from '@apollo/client';
 
@@ -37,7 +37,7 @@ import { RampActionBar } from '../components/ramps/RampActionBar';
 import { RampHero } from '../components/ramps/RampHero';
 import { RampReveal } from '../components/ramps/RampReveal';
 import { RampStepHeader } from '../components/ramps/RampStepHeader';
-import { CREATE_RAMP_ORDER } from '../apollo/mutations';
+import { CREATE_RAMP_ORDER, CREATE_RAMP_ORDER_SAVINGS } from '../apollo/mutations';
 import LegacyGuardarianTopUpScreen from './LegacyGuardarianTopUpScreen';
 import { useBackupEnforcement } from '../hooks/useBackupEnforcement';
 import { AnalyticsService } from '../services/analyticsService';
@@ -129,7 +129,15 @@ const TopUpScreen = () => {
     () => methods.find((method) => method.code === selectedMethodCode) || methods[0] || null,
     [methods, selectedMethodCode],
   );
-  const [createRampOrder] = useMutation(CREATE_RAMP_ORDER);
+  // Savings rail (cUSD+): Koywe delivers USDT-BSC straight to the user's
+  // own BSC address — new money never bridges. Fixed at mount via route
+  // param; the savings document carries the extra argument so the legacy
+  // flow stays compatible with pre-cUSD+ servers.
+  const route = useRoute<any>();
+  const isSavingsRail = route.params?.destination === 'cusd_plus';
+  const [createRampOrder] = useMutation(
+    isSavingsRail ? CREATE_RAMP_ORDER_SAVINGS : CREATE_RAMP_ORDER,
+  );
   const isVerified = useMemo(() => {
     const candidates = [
       personalKycData?.myPersonalKycStatus?.status,
@@ -225,6 +233,7 @@ const TopUpScreen = () => {
         fiatCurrency,
         paymentMethodCode: selectedMethod.code,
         authEmail: authEmailOverride || undefined,
+        ...(isSavingsRail ? { destination: 'cusd_plus' } : {}),
       },
     })
       .then(({ data }) => {

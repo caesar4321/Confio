@@ -852,6 +852,21 @@ class UpsertRampUserAddress(graphene.Mutation):
         return cls(success=True, error=None, ramp_address=ramp_address)
 
 
+def _get_bsc_usdt_balance(address: str) -> Decimal:
+    """USDT (18 decimals) balance at a BSC address via eth_call balanceOf."""
+    import requests as _requests
+    rpc = getattr(settings, 'CUSD_PLUS_BSC_RPC_URL', 'https://bsc-dataseed.bnbchain.org')
+    usdt = getattr(settings, 'CUSD_PLUS_USDT_BSC', '0x55d398326f99059fF775485246999027B3197955')
+    data = '0x70a08231' + address.lower().replace('0x', '').rjust(64, '0')
+    res = _requests.post(rpc, json={
+        'jsonrpc': '2.0', 'id': 1, 'method': 'eth_call',
+        'params': [{'to': usdt, 'data': data}, 'latest'],
+    }, timeout=15)
+    res.raise_for_status()
+    result = res.json().get('result') or '0x0'
+    return Decimal(int(result, 16)) / Decimal(10 ** 18)
+
+
 class CreateRampOrder(graphene.Mutation):
     class Arguments:
         direction = graphene.String(required=True)
@@ -861,10 +876,11 @@ class CreateRampOrder(graphene.Mutation):
         payment_method_code = graphene.String(required=True)
         bank_info_id = graphene.ID()
         auth_email = graphene.String()
+        destination = graphene.String(default_value='cusd', description="'cusd' (day-to-day) or 'cusd_plus' (savings: USDT-BSC to the account's BSC address)")
 
     Output = RampOrderType
 
-    def mutate(self, info, direction, amount, payment_method_code, country_code=None, fiat_currency=None, bank_info_id=None, auth_email=None):
+    def mutate(self, info, direction, amount, payment_method_code, country_code=None, fiat_currency=None, bank_info_id=None, auth_email=None, destination='cusd'):
         user = getattr(info.context, "user", None)
         if not (user and getattr(user, 'is_authenticated', False)):
             return RampOrderType(success=False, error='Authentication required')
@@ -886,6 +902,18 @@ class CreateRampOrder(graphene.Mutation):
         if not current_account:
             return RampOrderType(success=False, error='No active account available for ramp operations')
 
+        # cUSD+ savings rail (Koywe 'USDT BSC' delivered to the account's own
+        # BSC address). The address is client-derived and registered at
+        # sign-in (UpdateAccountBscAddress) — the server cannot derive it.
+        if destination not in ('cusd', 'cusd_plus'):
+            return RampOrderType(success=False, error='destination must be cusd or cusd_plus')
+        savings_rail = destination == 'cusd_plus'
+        if savings_rail and not getattr(current_account, 'bsc_address', None):
+            return RampOrderType(
+                success=False,
+                error='Tu cuenta de ahorro aún no está activada en este dispositivo. Actualiza la app e inicia sesión de nuevo.',
+            )
+
         wallet_upgrade_blocker = _get_wallet_upgrade_blocker(user=user, account=current_account)
         if wallet_upgrade_blocker:
             return RampOrderType(success=False, error=wallet_upgrade_blocker)
@@ -901,7 +929,7 @@ class CreateRampOrder(graphene.Mutation):
             if not bank_info:
                 return RampOrderType(success=False, error='Saved payout method not found for the active account')
 
-        client = KoyweClient()
+        client = KoyweClient(crypto_symbol='USDT BSC') if savings_rail else KoyweClient()
         if not client.is_configured:
             if getattr(settings, 'KOYWE_USE_MOCK_RAMP', False):
                 return CreateMockRampOrder().mutate(
@@ -916,20 +944,31 @@ class CreateRampOrder(graphene.Mutation):
 
         try:
             if normalized_direction == 'OFF_RAMP':
-                wallet_address = _get_koywe_destination_address(current_account=current_account)
-                available_cusd = _get_algorand_asset_balance(
-                    wallet_address,
-                    getattr(settings, 'ALGORAND_CUSD_ASSET_ID', None),
-                )
-                if available_cusd < decimal_amount:
-                    return RampOrderType(
-                        success=False,
-                        error=(
-                            f'No tienes suficiente cUSD para este retiro. '
-                            f'Disponible: {available_cusd:.6f} cUSD. '
-                            f'Requerido: {decimal_amount:.6f} cUSD.'
-                        ),
+                if savings_rail:
+                    available_usdt = _get_bsc_usdt_balance(current_account.bsc_address)
+                    if available_usdt < decimal_amount:
+                        return RampOrderType(
+                            success=False,
+                            error=(
+                                f'No tienes suficiente saldo disponible para este retiro. '
+                                f'Disponible: {available_usdt:.6f}. Requerido: {decimal_amount:.6f}.'
+                            ),
+                        )
+                else:
+                    wallet_address = _get_koywe_destination_address(current_account=current_account)
+                    available_cusd = _get_algorand_asset_balance(
+                        wallet_address,
+                        getattr(settings, 'ALGORAND_CUSD_ASSET_ID', None),
                     )
+                    if available_cusd < decimal_amount:
+                        return RampOrderType(
+                            success=False,
+                            error=(
+                                f'No tienes suficiente cUSD para este retiro. '
+                                f'Disponible: {available_cusd:.6f} cUSD. '
+                                f'Requerido: {decimal_amount:.6f} cUSD.'
+                            ),
+                        )
 
             koywe_email = _get_koywe_auth_email(
                 user=user,
@@ -962,7 +1001,8 @@ class CreateRampOrder(graphene.Mutation):
                 fiat_symbol=fiat_currency or _get_country_fiat_currency(resolved_country_code),
                 payment_method_code=payment_method_code,
                 email=koywe_email,
-                wallet_address=_get_koywe_destination_address(current_account=current_account),
+                wallet_address=(current_account.bsc_address if savings_rail
+                                else _get_koywe_destination_address(current_account=current_account)),
                 country_code=resolved_country_code,
                 bank_info=bank_info,
                 external_id=external_id,
@@ -996,8 +1036,9 @@ class CreateRampOrder(graphene.Mutation):
         actor_business = current_account.business if current_account.account_type == 'business' else None
         actor_type = 'business' if current_account.account_type == 'business' else 'user'
         actor_display_name = current_account.display_name or user.get_full_name() or user.username or ''
-        actor_address = current_account.algorand_address or ''
+        actor_address = (current_account.bsc_address if savings_rail else current_account.algorand_address) or ''
         upsert_koywe_ramp_transaction(
+            destination=destination,
             actor_user=user,
             actor_business=actor_business,
             actor_type=actor_type,

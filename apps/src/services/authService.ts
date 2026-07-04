@@ -21,6 +21,27 @@ import { AccountManager, AccountContext } from '../utils/accountManager';
 import { DeviceFingerprint } from '../utils/deviceFingerprint';
 import algorandService from './algorandService';
 
+// Best-effort registration of the BSC (savings chain) address derived
+// alongside the Algorand key. Tolerated to fail against servers that
+// predate the cUSD+ deploy — never blocks sign-in.
+async function registerBscAddressBestEffort() {
+  try {
+    const { getDerivedEvmWallet } = await import('./secureDeterministicWallet');
+    const evm = getDerivedEvmWallet();
+    if (!evm) return;
+    const { UPDATE_ACCOUNT_BSC_ADDRESS } = await import('../apollo/queries');
+    const { apolloClient } = await import('../apollo/client');
+    await apolloClient.mutate({
+      mutation: UPDATE_ACCOUNT_BSC_ADDRESS,
+      variables: { bscAddress: evm.address },
+    });
+    console.log('Registered BSC (savings) address');
+  } catch (e) {
+    console.log('BSC address registration skipped (non-fatal):', e);
+  }
+}
+
+
 const LEGACY_CONFIO_ASSET_ID = '3198568509';
 const MATERIAL_SPENDABLE_ALGO_MICROS = 100_000;
 const GOOGLE_DRIVE_APPDATA_SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
@@ -899,6 +920,7 @@ export class AuthService {
         const { UPDATE_ACCOUNT_ALGORAND_ADDRESS } = await import('../apollo/queries');
         const updRes = await apolloClient.mutate({ mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS, variables: { algorandAddress, isV2Wallet: driveSyncSucceeded } });
         console.log('Updated server with Algorand address');
+        registerBscAddressBestEffort();
         // If server prepared opt-in transactions (CONFIO/cUSD), sign and submit now
         try {
           const payload = updRes?.data?.updateAccountAlgorandAddress;
@@ -1232,6 +1254,7 @@ export class AuthService {
         const { UPDATE_ACCOUNT_ALGORAND_ADDRESS } = await import('../apollo/queries');
         const updRes = await apolloClient.mutate({ mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS, variables: { algorandAddress } });
         console.log('Updated server with Algorand address (Apple)');
+        registerBscAddressBestEffort();
         // If server prepared opt-in transactions (CONFIO/cUSD), sign and submit now
         try {
           const payload = updRes?.data?.updateAccountAlgorandAddress;

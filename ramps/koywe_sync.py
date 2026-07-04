@@ -468,6 +468,7 @@ def upsert_koywe_ramp_transaction(
     actor_display_name: str,
     actor_address: str,
     direction: str,
+    destination: str = 'cusd',
     country_code: str,
     fiat_currency: str,
     payment_method_code: str,
@@ -495,6 +496,7 @@ def upsert_koywe_ramp_transaction(
     ).first()
 
     defaults = {
+        'destination': destination,
         'provider': 'koywe',
         'direction': normalized_direction,
         'status': ramp_status,
