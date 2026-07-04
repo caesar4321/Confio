@@ -12,7 +12,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { AuthStackParamList } from '../types/navigation';
 import { useAuth } from '../contexts/AuthContext';
 
-import Svg, { Defs, Stop, RadialGradient, LinearGradient as SvgLinearGradient, Ellipse, Rect } from 'react-native-svg';
+import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
 import { colors } from '../config/theme';
 
 
@@ -158,78 +158,47 @@ export const AuthScreen = () => {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor={colors.primarySoft} />
-      {/* Fresh mint backdrop, all from theme.ts: primarySoft (emerald-50) fading
-          into white, plus one soft brand halo anchored to the logo. */}
-      <Svg style={StyleSheet.absoluteFill} width="100%" height="100%">
-        <Defs>
-          <SvgLinearGradient id="fresh" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor={colors.primarySoft} />
-            <Stop offset="0.6" stopColor={colors.background} />
-            <Stop offset="1" stopColor={colors.background} />
-          </SvgLinearGradient>
-          <RadialGradient id="halo" cx="50%" cy="30%" r="55%">
-            <Stop offset="0%" stopColor={colors.primary} stopOpacity="0.12" />
-            <Stop offset="60%" stopColor={colors.primary} stopOpacity="0.04" />
-            <Stop offset="100%" stopColor={colors.primary} stopOpacity="0" />
-          </RadialGradient>
-        </Defs>
-        <Rect width="100%" height="100%" fill="url(#fresh)" />
-        <Rect width="100%" height="100%" fill="url(#halo)" />
-      </Svg>
+      <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
+
+      {/* Brand field: the app's own grammar (emerald field + white sheet) at
+          full volume. One graphic motif — a giant coin ring cropped off-canvas —
+          not confetti. All colors from theme.ts. */}
+      <View style={styles.brandField}>
+        <Svg style={StyleSheet.absoluteFill} width="100%" height="100%">
+          <Defs>
+            <SvgLinearGradient id="field" x1="0" y1="0" x2="1" y2="1">
+              <Stop offset="0" stopColor={colors.primary} />
+              <Stop offset="1" stopColor={colors.primaryDark} />
+            </SvgLinearGradient>
+          </Defs>
+          <Rect width="100%" height="100%" fill="url(#field)" />
+          {/* Coin ring: money made geometric. Cropped top-right. */}
+          <Circle cx="92%" cy="6%" r="150" stroke={colors.white} strokeWidth="34" strokeOpacity="0.10" fill="none" />
+          <Circle cx="-4%" cy="102%" r="110" stroke={colors.white} strokeWidth="26" strokeOpacity="0.07" fill="none" />
+        </Svg>
+        <Animated.View style={[styles.brandContent, { opacity: enterAnim }]}>
+          <Image
+            source={require('../assets/png/CONFIO.png')}
+            style={styles.brandLogo}
+          />
+          <Text style={styles.wordmark} accessibilityRole="header">Confío</Text>
+          <Text style={styles.brandTagline}>DÓLARES DIGITALES</Text>
+        </Animated.View>
+      </View>
+
+      {/* White sheet rising over the field */}
       <Animated.View
         style={[
-          styles.contentWrapper,
+          styles.sheet,
           {
             opacity: enterAnim,
             transform: [{
-              translateY: enterAnim.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }),
+              translateY: enterAnim.interpolate({ inputRange: [0, 1], outputRange: [32, 0] }),
             }],
           },
         ]}
       >
-        {/* Glowing Logo */}
-        <View style={[styles.logoWrapper, { width: 160, height: 160, alignItems: 'center', justifyContent: 'center', position: 'relative' }]}>
-          <Svg
-            height="160"
-            width="160"
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              zIndex: 0,
-            }}
-          >
-            <Defs>
-              <RadialGradient
-                id="glow"
-                cx="80"
-                cy="80"
-                r="80"
-                gradientUnits="userSpaceOnUse"
-              >
-                <Stop offset="0%" stopColor={colors.primary} stopOpacity="0.30" />
-                <Stop offset="65%" stopColor={colors.primary} stopOpacity="0.10" />
-                <Stop offset="100%" stopColor={colors.primary} stopOpacity="0" />
-              </RadialGradient>
-            </Defs>
-            <Ellipse
-              cx="80"
-              cy="80"
-              rx="80"
-              ry="80"
-              fill="url(#glow)"
-            />
-          </Svg>
-          <Image
-            source={require('../assets/png/CONFIO.png')}
-            style={{ width: 96, height: 96, resizeMode: 'contain', zIndex: 1 }}
-          />
-        </View>
-
-        <Text style={styles.eyebrow}>DÓLARES DIGITALES</Text>
-        <Text style={styles.title} accessibilityRole="header">Bienvenido a Confío</Text>
-
+        <Text style={styles.title}>Bienvenido</Text>
         <Text style={styles.subtitle}>La manera más fácil y segura de enviar, pagar, y ahorrar en dólares digitales</Text>
         <View style={styles.buttonGroup}>
           <TouchableOpacity
@@ -279,75 +248,72 @@ export const AuthScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.primarySoft,
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: colors.primaryDark,
   },
-  contentWrapper: {
-    zIndex: 1,
+  // Top: emerald brand field with one cropped coin-ring motif.
+  brandField: {
+    flex: 1,
+    overflow: 'hidden',
+  },
+  brandContent: {
+    flex: 1,
     alignItems: 'center',
+    justifyContent: 'center',
     paddingHorizontal: 24,
-    width: '100%',
+    paddingBottom: 12,
   },
-  logoWrapper: {
+  brandLogo: {
+    width: 84,
+    height: 84,
+    resizeMode: 'contain',
     marginBottom: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
   },
-  logoGlowGradient: {
-    position: 'absolute',
-    width: 112,
-    height: 112,
-    borderRadius: 56,
-    opacity: 0.25,
-    alignSelf: 'center',
-    top: -8,
-    left: -8,
-    zIndex: 0,
-  },
-  logoCircle: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    // Soft glow/shadow
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 16,
-    elevation: 8, // for Android
-  },
-  logoText: {
-    color: colors.background,
-    fontSize: 48,
-    fontWeight: 'bold',
-  },
-  eyebrow: {
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 3,
-    color: colors.primaryDark,
+  wordmark: {
+    fontSize: 52,
+    fontWeight: '800',
+    color: colors.white,
+    letterSpacing: -1,
     textAlign: 'center',
-    marginBottom: 8,
+  },
+  brandTagline: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 2.5,
+    color: colors.primaryLight,
+    textAlign: 'center',
+    marginTop: 10,
+  },
+  // White sheet rising over the field, carrying the actions.
+  sheet: {
+    backgroundColor: colors.background,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    marginTop: -28,
+    paddingHorizontal: 24,
+    paddingTop: 32,
+    paddingBottom: 40,
+    alignItems: 'center',
+    shadowColor: colors.dark,
+    shadowOffset: { width: 0, height: -8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 20,
+    elevation: 12,
   },
   title: {
-    fontSize: 30,
+    fontSize: 26,
     fontWeight: 'bold',
     color: colors.dark,
     textAlign: 'center',
     marginBottom: 4,
   },
   subtitle: {
-    fontSize: 16,
+    fontSize: 15,
     color: colors.text.secondary,
     textAlign: 'center',
-    marginBottom: 36,
+    marginBottom: 28,
     marginTop: 6,
     maxWidth: 320,
-    lineHeight: 24,
+    lineHeight: 22,
   },
   buttonGroup: {
     width: '100%',
