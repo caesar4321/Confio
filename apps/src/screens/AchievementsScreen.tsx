@@ -58,9 +58,9 @@ export const AchievementsScreen: React.FC = () => {
         description: 'Al crear su cuenta usando tu enlace, queda asociado a tu invitación.',
       },
       {
-        title: 'Tu amigo carga 20 cUSD',
+        title: 'Tu amigo carga US$20',
         description:
-          'Con su primera recarga de al menos 20 cUSD se activan los US$5 en $CONFIO para los dos.',
+          'Con su primera recarga de al menos US$20 — a su cUSD o directo a su ahorro (cUSD+) — se activan los US$5 en $CONFIO para los dos.',
       },
       {
         title: '¡Ganen sin límites!',
@@ -256,8 +256,8 @@ export const AchievementsScreen: React.FC = () => {
             <View style={styles.criteriaNoteRow}>
               <Icon name="info" size={13} color={colors.text.secondary} />
               <Text style={styles.criteriaNote}>
-                Cuenta cualquier primera recarga o depósito de al menos 20 cUSD.
-                El bono se acredita en $CONFIO automáticamente.
+                Cuenta cualquier primera recarga, depósito o ahorro (cUSD+) de
+                al menos US$20. El bono se acredita en $CONFIO automáticamente.
               </Text>
             </View>
           </View>

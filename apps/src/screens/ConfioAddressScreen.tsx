@@ -217,6 +217,10 @@ export const ConfioAddressScreen: React.FC = () => {
                 <Icon name="download" size={14} color={colors.secondary} />
                 <Text style={styles.criteriaItem}>Primer depósito convertido a cUSD (≥ US$20)</Text>
               </View>
+              <View style={styles.criteriaRow}>
+                <Icon name="trending-up" size={14} color={colors.secondary} />
+                <Text style={styles.criteriaItem}>Primer ahorro en Confío Dollar+ (≥ US$20)</Text>
+              </View>
             </View>
             <Text style={styles.criteriaNote}>El bono se acredita en $CONFIO al equivalente a US$5.</Text>
           </View>

@@ -294,7 +294,7 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
 
               <View style={styles.infoBox}>
                 <Text style={styles.infoText}>
-                  💡 Ambos recibirán el equivalente a US$5 en $CONFIO cuando completes tu primera recarga de al menos 20 cUSD.
+                  💡 Ambos recibirán el equivalente a US$5 en $CONFIO cuando completes tu primera recarga o ahorro de al menos US$20.
                 </Text>
               </View>
 
