@@ -75,12 +75,6 @@ export interface AhorrosPortfolio {
   earnedMonthUsd: number;
 }
 
-// DEV ONLY: true renders realistic sample data so every rich state is
-// reviewable (hero split line, hoy/mes ticker, positions, movements).
-// false renders the real launch-day empty states. Delete this whole demo
-// branch when the backend lands.
-const DEMO = true;
-
 export const useAhorrosPortfolio = (): AhorrosPortfolio => {
   const { data: flagsData } = useQuery(GET_AHORRO_ELIGIBILITY, {
     fetchPolicy: 'cache-and-network',
@@ -89,82 +83,29 @@ export const useAhorrosPortfolio = (): AhorrosPortfolio => {
   // avoids flash-hiding the hub); authoritative once it does. The server
   // rejects ineligible deposits regardless of what the UI shows.
   const savingsEnabled: boolean = flagsData?.cusdPlusSummary?.savingsEnabled ?? true;
-  // Stocks: the server's stocksEnabled = geo AND the dark-launch flag
-  // (CUSD_PLUS_STOCKS_ENABLED, False until the demand signal). In DEMO
-  // builds the surfaces must stay reviewable, so apply GEO ONLY (via
-  // savingsEnabled — same eligibility list) and ignore dark-launch;
-  // outside DEMO the server flag is authoritative.
-  const stocksEnabled: boolean = DEMO
-    ? (flagsData?.cusdPlusSummary?.savingsEnabled ?? true)
-    : (flagsData?.cusdPlusSummary?.stocksEnabled ?? false);
+  // Stocks (Ondo GM): server flag = geo-eligible AND CUSD_PLUS_STOCKS_ENABLED.
+  // Fail-closed before the answer — an investment surface appearing beats
+  // one being yanked away from a blocked user.
+  const stocksEnabled: boolean = flagsData?.cusdPlusSummary?.stocksEnabled ?? false;
 
   return useMemo(() => {
-    const savings = DEMO
-      ? {
-          enabled: savingsEnabled,
-          balanceUsd: 1250.4,
-          netApyPct: 3.0,
-          earnedTodayUsd: 0.1,
-          earnedMonthUsd: 2.05,
-        }
-      : {
-          enabled: savingsEnabled,
-          balanceUsd: 0,
-          netApyPct: 3.0,
-          earnedTodayUsd: 0,
-          earnedMonthUsd: 0,
-        };
-    const positions: StockPosition[] = DEMO
-      ? [
-          { ticker: 'TSLA', name: 'Tesla', valueUsd: 180.5, dayChangePct: 2.14 },
-          { ticker: 'NVDA', name: 'NVIDIA', valueUsd: 95.2, dayChangePct: -1.32 },
-        ]
-      : [];
+    // Balances/movements are launch-day empty states until the cUSD+ vault
+    // ledger lands server-side (cusdPlusSummary/cusdPlusMovements stubs).
+    const savings = {
+      enabled: savingsEnabled,
+      balanceUsd: 0,
+      netApyPct: 3.0,
+      earnedTodayUsd: 0,
+      earnedMonthUsd: 0,
+    };
+    const positions: StockPosition[] = [];
     const stocks = {
       enabled: stocksEnabled,
       totalUsd: positions.reduce((sum, p) => sum + p.valueUsd, 0),
-      earnedTodayUsd: DEMO ? 2.53 : 0,
+      earnedTodayUsd: 0,
       positions,
     };
-    const movements: AhorroMovement[] = DEMO
-      ? [
-          {
-            id: 'm1',
-            type: 'yield',
-            title: 'Rendimiento de la semana',
-            amountUsd: 0.68,
-            createdAt: '2026-06-29T12:00:00Z',
-          },
-          {
-            id: 'm2',
-            type: 'buy',
-            title: 'Compraste TSLA',
-            amountUsd: -150,
-            createdAt: '2026-06-27T15:30:00Z',
-          },
-          {
-            id: 'm3',
-            type: 'deposit',
-            title: 'Ahorraste',
-            amountUsd: 500,
-            createdAt: '2026-06-25T09:10:00Z',
-          },
-          {
-            id: 'm4',
-            type: 'withdraw',
-            title: 'Retiraste a cUSD',
-            amountUsd: -80,
-            createdAt: '2026-06-20T18:45:00Z',
-          },
-          {
-            id: 'm5',
-            type: 'deposit',
-            title: 'Ahorraste',
-            amountUsd: 900,
-            createdAt: '2026-06-15T11:00:00Z',
-          },
-        ]
-      : [];
+    const movements: AhorroMovement[] = [];
     return {
       savings,
       stocks,
