@@ -342,6 +342,15 @@ export const AhorrosScreen = () => {
           </>
         )}
 
+        {/* Partnership: real logo, nominative use — Ondo is the issuer of both
+            USDY (savings backing) and the tokenized stocks, so this row
+            belongs to the product cards above it, not to the history. */}
+        <View style={styles.partnerRow}>
+          <Text style={styles.partnerText}>En alianza con</Text>
+          <Image source={OndoLogo} style={styles.partnerLogo} />
+          <Text style={styles.partnerBrand}>Ondo Finance</Text>
+        </View>
+
         {/* Movimientos — house pattern: history right under the balance
             cards. Bounded preview (recent few) so the sections below stay
             reachable; the unbounded list lives in AhorrosMovimientos. */}
@@ -372,14 +381,6 @@ export const AhorrosScreen = () => {
             ))}
           </View>
         )}
-
-        {/* Partnership: real logo, nominative use — Ondo is the issuer of both
-            USDY (savings backing) and the tokenized stocks. */}
-        <View style={styles.partnerRow}>
-          <Text style={styles.partnerText}>En alianza con</Text>
-          <Image source={OndoLogo} style={styles.partnerLogo} />
-          <Text style={styles.partnerBrand}>Ondo Finance</Text>
-        </View>
 
         {/* Education (savings-focused; stocks education lives in its flow) */}
         <Text style={styles.sectionTitle}>¿Cómo funciona?</Text>
