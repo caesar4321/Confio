@@ -37,9 +37,21 @@ export function HumanitarianHomeBanner({
   const goalReached = goal > 0 && donated >= goal;
   const fillWidth = goal > 0 ? Math.min(100, Math.max((donated / goal) * 100, donated > 0 ? 6 : 0)) : 0;
 
+  const donationsSuffix = donationCount > 0
+    ? `  ·  ${donationCount} ${donationCount === 1 ? 'donación' : 'donaciones'}`
+    : '';
+
   return (
-    <TouchableOpacity style={[styles.card, style]} onPress={onPress} activeOpacity={0.85}>
-      <Text style={styles.flag}>{flag}</Text>
+    <TouchableOpacity
+      style={[styles.card, style]}
+      onPress={onPress}
+      activeOpacity={0.85}
+      accessibilityRole="button"
+      accessibilityLabel={`Campaña humanitaria: ${campaign.title || 'Ayuda humanitaria directa'}`}
+    >
+      <View style={styles.flagWrap}>
+        <Text style={styles.flag}>{flag}</Text>
+      </View>
       <View style={styles.body}>
         <Text style={styles.title} numberOfLines={2}>
           {campaign.title || 'Ayuda humanitaria directa'}
@@ -51,12 +63,12 @@ export function HumanitarianHomeBanner({
             </View>
             <Text style={styles.meta} numberOfLines={1}>
               {goalReached ? '¡Meta superada!' : `${fmtWhole(donated)} / ${fmtWhole(goal)} cUSD`}
-              {donationCount > 0 ? `  ·  ❤ ${donationCount}` : ''}
+              {donationsSuffix}
             </Text>
           </>
         ) : (
           <Text style={styles.meta} numberOfLines={1}>
-            Dona cUSD para familias afectadas{donationCount > 0 ? `  ·  ❤ ${donationCount}` : ''}
+            Dona cUSD para familias afectadas{donationsSuffix}
           </Text>
         )}
       </View>
@@ -65,25 +77,34 @@ export function HumanitarianHomeBanner({
   );
 }
 
+// Styled as a sibling of Home's other promo cards (invite claim, payroll):
+// flat tinted fill + 1px border, radius 12, 40px icon square on the left.
+// Rose is the humanitarian category color, matching the slot's
+// color-per-category grammar (emerald = your money, violet = payroll).
 const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
+    backgroundColor: '#FFF1F2', // rose-50
+    borderRadius: 12,
     paddingVertical: 12,
-    paddingHorizontal: 14,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 4,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: '#FECDD3', // rose-200
   },
-  flag: { fontSize: 26 },
+  flagWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 14,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  flag: { fontSize: 22 },
   body: { flex: 1 },
-  title: { fontSize: 15, lineHeight: 20, fontWeight: '800', color: '#0F172A', marginBottom: 7 },
-  track: { height: 5, borderRadius: 3, backgroundColor: '#E5E7EB', overflow: 'hidden' },
-  fill: { height: '100%', borderRadius: 3, backgroundColor: '#10B981' },
-  meta: { fontSize: 12, color: '#64748B', marginTop: 6 },
+  title: { fontSize: 15, lineHeight: 20, fontWeight: '700', color: '#111827', marginBottom: 6 },
+  track: { height: 5, borderRadius: 3, backgroundColor: '#FFE4E6', overflow: 'hidden' },
+  fill: { height: '100%', borderRadius: 3, backgroundColor: '#F43F5E' }, // rose-500
+  meta: { fontSize: 12, color: '#6B7280', marginTop: 6 },
 });
