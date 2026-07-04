@@ -28,8 +28,12 @@ export const CONFIO_DERIVATION_SPEC = {
   // Info for KEK derivation
   kekInfo: 'confio/kek-info/v1',
   
+  // Info prefix for EVM key derivation (BSC — cUSD+ savings chain).
+  // Activated 2026-07-04 exactly as pre-planned below; a NEW key never
+  // affects existing Algorand addresses.
+  evmInfoPrefix: 'confio/evm/v1',
+
   // Future chain support - uncomment when implementing
-  // evmInfoPrefix: 'confio/evm/v1',  // For Ethereum, Polygon, BSC, etc.
   // arcInfoPrefix: 'confio/arc/v1',  // For Arc network
   // solanaInfoPrefix: 'confio/solana/v1',  // For Solana
   // cosmosInfoPrefix: 'confio/cosmos/v1',  // For Cosmos chains
