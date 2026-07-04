@@ -9,6 +9,7 @@ import { Header } from '../navigation/Header';
 import { useMutation, useQuery } from '@apollo/client';
 import { DELETE_PAYROLL_RECIPIENT } from '../apollo/mutations/payroll';
 import { Button } from '../components/common/Button';
+import { InlineBanner } from '../components/common/InlineBanner';
 import { GET_PAYROLL_RECIPIENTS, CREATE_PAYROLL_RUN, GET_PAYROLL_RUNS } from '../apollo/queries';
 
 type PayeeDetailNavigationProp = NativeStackNavigationProp<MainStackParamList, 'PayeeDetail'>;
@@ -33,6 +34,8 @@ export const PayeeDetailScreen = () => {
   });
   const { data: runsData } = useQuery(GET_PAYROLL_RUNS, { skip: !accountId });
   const [amount, setAmount] = React.useState('');
+  const [banner, setBanner] = React.useState<{ message: string; variant: 'error' | 'success' } | null>(null);
+  const dismissBanner = React.useCallback(() => setBanner(null), []);
   const [interval, setInterval] = React.useState<'semanal' | 'quincenal' | 'mensual'>('mensual');
   const [startDate, setStartDate] = React.useState('');
   const [isSubmitting, setIsSubmitting] = React.useState(false);
@@ -65,13 +68,13 @@ export const PayeeDetailScreen = () => {
             try {
               const res = await deleteRecipient({ variables: { recipientId } });
               if (!res.data?.deletePayrollRecipient?.success) {
-                Alert.alert('Error', res.data?.deletePayrollRecipient?.errors?.[0] || 'No se pudo eliminar');
+                setBanner({ variant: 'error', message: res.data?.deletePayrollRecipient?.errors?.[0] || 'No se pudo eliminar' });
               } else {
                 onDeleted?.();
                 navigation.goBack();
               }
             } catch (e) {
-              Alert.alert('Error', 'Ocurrió un error al eliminar');
+              setBanner({ variant: 'error', message: 'Ocurrió un error al eliminar' });
             }
           },
         },
@@ -162,7 +165,7 @@ export const PayeeDetailScreen = () => {
       });
       const payload = res.data?.createPayrollRun;
       if (!payload?.success) {
-        Alert.alert('Error', payload?.errors?.[0] || 'No se pudo crear la nómina.');
+        setBanner({ variant: 'error', message: payload?.errors?.[0] || 'No se pudo crear la nómina.' });
         return;
       }
       Alert.alert(
@@ -173,7 +176,7 @@ export const PayeeDetailScreen = () => {
         [{ text: 'Entendido', onPress: () => navigation.goBack() }],
       );
     } catch (e: any) {
-      Alert.alert('Error', e?.message || 'No se pudo crear la nómina.');
+      setBanner({ variant: 'error', message: e?.message || 'No se pudo crear la nómina.' });
     } finally {
       setIsSubmitting(false);
     }
@@ -190,6 +193,13 @@ export const PayeeDetailScreen = () => {
         showBackButton
       />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        {banner && (
+          <InlineBanner
+            message={banner.message}
+            variant={banner.variant}
+            onDismiss={dismissBanner}
+          />
+        )}
         <View style={styles.card}>
           <View style={styles.avatar}>
             <Text style={styles.avatarText}>{(displayName || username || 'D').charAt(0).toUpperCase()}</Text>
