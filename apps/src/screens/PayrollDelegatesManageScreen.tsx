@@ -12,6 +12,7 @@ import { biometricAuthService } from '../services/biometricAuthService';
 import algorandService from '../services/algorandService';
 import { Buffer } from 'buffer';
 import { colors } from '../config/theme';
+import { InlineBanner } from '../components/common/InlineBanner';
 import { APP_LAYOUT } from '../config/layout';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList>;
@@ -57,6 +58,8 @@ export const PayrollDelegatesManageScreen = () => {
   const { delegates, loading: delegatesLoading, refetch: refetchDelegates } = usePayrollDelegates();
   const [mutateDelegates, { loading: mutating }] = useMutation(SET_BUSINESS_DELEGATES_BY_EMPLOYEE);
   const [delegateMap, setDelegateMap] = useState<Record<string, boolean>>({});
+  const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
+  const dismissBanner = React.useCallback(() => setBanner(null), []);
   const [signingModalVisible, setSigningModalVisible] = useState(false);
 
   const employees = useMemo(() => data?.currentBusinessEmployees || [], [data]);
@@ -122,7 +125,7 @@ export const PayrollDelegatesManageScreen = () => {
     }
     const businessAddr = activeAccount?.algorandAddress || (activeAccount as any)?.address;
     if (!businessAddr) {
-      Alert.alert('Error', 'No se encontró la dirección de la cuenta de negocio.');
+      setBanner({ variant: 'error', message: 'No se encontró la dirección de la cuenta de negocio.' });
       return;
     }
     setSigningModalVisible(true);
@@ -140,7 +143,7 @@ export const PayrollDelegatesManageScreen = () => {
       const unsignedB64 = prepData?.unsignedTransactionB64;
       if (!prepData?.success || !unsignedB64) {
         const msg = prepData?.errors?.filter(Boolean).join('\n') || 'No se pudo preparar la delegación.';
-        Alert.alert('Error', msg);
+        setBanner({ variant: 'error', message: msg });
         return;
       }
       // Step 2: Sign transaction
@@ -159,7 +162,7 @@ export const PayrollDelegatesManageScreen = () => {
       const submitData = submitRes.data?.setBusinessDelegatesByEmployee;
       if (!submitData?.success) {
         const msg = submitData?.errors?.filter(Boolean).join('\n') || 'No se pudo actualizar la delegación.';
-        Alert.alert('Error', msg);
+        setBanner({ variant: 'error', message: msg });
         return;
       }
       setDelegateMap((prev) => ({ ...prev, [employeeId]: next }));
@@ -167,9 +170,9 @@ export const PayrollDelegatesManageScreen = () => {
       setTimeout(() => {
         refetchDelegates();
       }, 5000);
-      Alert.alert('Éxito', next ? `${name} ahora puede aprobar nómina.` : `Se revocó el permiso de ${name}.`);
+      setBanner({ variant: 'success', message: next ? `${name} ahora puede aprobar nómina.` : `Se revocó el permiso de ${name}.` });
     } catch (e: any) {
-      Alert.alert('Error', e?.message || 'No se pudo actualizar la delegación.');
+      setBanner({ variant: 'error', message: e?.message || 'No se pudo actualizar la delegación.' });
     } finally {
       setSigningModalVisible(false);
     }
@@ -193,6 +196,16 @@ export const PayrollDelegatesManageScreen = () => {
         <Text style={styles.headerTitle}>Delegados</Text>
         <View style={{ width: 32 }} />
       </View>
+
+      {banner && (
+        <InlineBanner
+          message={banner.message}
+          variant={banner.variant}
+          onDismiss={dismissBanner}
+          autoHideMs={banner.variant === 'success' ? 2500 : undefined}
+          style={{ marginHorizontal: 16, marginTop: 8, marginBottom: 0 }}
+        />
+      )}
 
       <View style={styles.infoCard}>
         <Icon name="info" size={16} color={colors.muted} />
