@@ -158,12 +158,22 @@ code paths (fewer paths, fewer bugs).
 
 ## 8. Open decisions
 
-1. Fast path float sizes + thresholds (treasury.bsc USDT, treasury.algo
-   USDC) — determines how often users see minutes vs seconds.
-2. T_park operator policy for guard-trips after burn (auto-refund vs hold).
-3. v1 caller restriction on the vault (README open question 6) interacts
-   here: if mint/redeem are relayer-only at launch, the saga executor set is
-   the allowlist.
-4. Whether Retirar-to-bank (direct off-ramp) shares leg A'/B' with this saga
-   or goes vault → USDT → Koywe without touching Algorand at all (it
-   should — that's the whole point of the direct rail).
+1. **Fast-path float sizes** (launch config, not now): how much USDT to
+   pre-position in treasury.bsc (and USDC in treasury.algo). Bigger float =
+   conversions feel instant more often; cost = company capital parked on the
+   bridge-risk side. Tune after seeing real conversion volume.
+2. **Post-burn guard-trip policy** (launch config): when the bridge cost
+   jumps AFTER the user's cUSD is burned, in what order do we (a) absorb the
+   overage and proceed, (b) wait for the pool to normalize, (c) auto-refund
+   by re-minting cUSD. Proposed default: absorb-and-proceed under a small
+   cap; above it, hold ≤ 1h then auto-refund.
+3. **Relayer-only v1 (the one real decision):** vault mint/redeem is
+   currently permissionless. Proposal: restrict callers to the Confío
+   relayer wallets (= the saga executors' allowlist) at launch — every flow
+   passes through the saga, accounting stays airtight — and open it up via
+   upgrade once mature (pre-lockUpgrades). Trade-off: slightly weaker
+   decentralization story early on.
+4. **Not a decision — a trap note:** Retirar-to-bank must NEVER reuse this
+   saga (cUSD+ → saga → cUSD → off-ramp would re-cross Allbridge for
+   nothing). It is vault.redeemToUsdt → USDT-BSC → Koywe, full stop — the
+   direct rail that leads the Retirar sheet.
