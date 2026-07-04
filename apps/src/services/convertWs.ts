@@ -79,7 +79,9 @@ export class ConvertWsSession {
         ws.onmessage = (ev) => {
           try {
             resolveOpen();
-            const msg = JSON.parse(ev.data);            if (msg.type === 'prepare_ready') {
+            const msg = JSON.parse(ev.data);            if (msg.type === 'prepare_savings_ready') {
+              this.resolve('prepare_savings', msg.pack);
+            } else if (msg.type === 'prepare_ready') {
               this.resolve('prepare', msg.pack);
             } else if (msg.type === 'submit_ok') {
               this.resolve('submit', msg);
@@ -102,6 +104,39 @@ export class ConvertWsSession {
   private rejectAll(err: any) {
     Object.keys(this.pendingRejectors).forEach((k) => this.pendingRejectors[k](err));
     this.pendingRejectors = {}; this.pendingResolvers = {};
+  }
+
+  /** Leg-AB (cUSD -> cUSD+): send the UNPOPULATED Allbridge tail; the server
+   * verifies (ORCHESTRATION §6), populates resources, composes the sponsored
+   * burn prefix and returns the pack with conversion_id. */
+  async prepareSavings(
+    args: { amount: string; tail: string[] },
+    timeoutMs = 12000,
+  ): Promise<any> {
+    await this.open();
+    if (!this.ws) throw new Error('not_open');
+    return new Promise((resolve, reject) => {
+      const t = setTimeout(() => {
+        if (this.pendingRejectors['prepare_savings']) {
+          this.pendingRejectors['prepare_savings'](new Error('prepare_savings_timeout'));
+          delete this.pendingRejectors['prepare_savings'];
+          delete this.pendingResolvers['prepare_savings'];
+        }
+      }, timeoutMs);
+      this.pendingResolvers['prepare_savings'] = (v: any) => {
+        clearTimeout(t);
+        resolve(v);
+      };
+      this.pendingRejectors['prepare_savings'] = (e: any) => {
+        clearTimeout(t);
+        reject(e);
+      };
+      this.ws!.send(JSON.stringify({
+        type: 'prepare_savings',
+        amount: args.amount,
+        tail: args.tail,
+      }));
+    });
   }
 
   async prepare(args: PrepareArgs, timeoutMs = 8000): Promise<PreparePack> {

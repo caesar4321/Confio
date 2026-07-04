@@ -171,6 +171,11 @@ def prepare_leg_ab(*, account, amount: Decimal, tail_b64: list) -> dict:
     )
 
     group = [sponsor_pay, cusd_transfer, burn_call] + tail
+    # TODO(ORCHESTRATION §6 addendum): before gid — simulate the FULL group
+    # (allow-unnamed-resources, empty sigs) and apply discovered resources to
+    # the three tail app-calls (pair-aware placement, port of the TS
+    # populateDepositResources). A tail-only simulate cannot work: the user
+    # holds no USDC until the burn's inner transfer runs.
     gid = transaction.calculate_group_id(group)
     for t in group:
         t.group = gid

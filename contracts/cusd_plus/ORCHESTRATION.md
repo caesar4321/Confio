@@ -190,6 +190,17 @@ py-algosdk and check):
 7. On success: create CusdPlusConversion (CREATED) server-side and return
    conversion_id in the pack so client Advance calls bind to it.
 
+**ORDERING ADDENDUM (2026-07-04, found during client assembly):** resource
+population must happen SERVER-SIDE, after composing the full group and
+before gid/signing. A standalone tail simulate fails — the user holds no
+USDC until the burn's inner transfer runs, so the bridge call only
+simulates inside the full [prefix + tail] group. prepare_leg_ab therefore:
+compose → algod simulate (allow-unnamed-resources, empty sigs) → apply
+resources to the three tail app-calls (pair-aware placement; port of
+populateDepositResources from allbridgeAlgorand.ts) → gid → sponsor-sign.
+The client sends an UNPOPULATED tail and stays thin. TODO in
+prepare_leg_ab.py marks where this lands.
+
 Client then: sign user txns → submit group → advanceCusdPlusConversion
 (SRC_COMMITTED, group txid) → resume machinery (§2) takes over.
 
