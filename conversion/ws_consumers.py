@@ -137,7 +137,6 @@ class ConvertSessionConsumer(AsyncJsonWebsocketConsumer):
         self._idle_task = asyncio.create_task(self._idle_close())
 
     @database_sync_to_async
-    @database_sync_to_async
     def _prepare_savings(self, amount: str, tail: list):
         from decimal import Decimal, InvalidOperation
         from users.jwt_context import get_jwt_business_context_with_validation
