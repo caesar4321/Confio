@@ -53,9 +53,8 @@ def monitor_bridge_arrivals():
     against the chain, never against a vendor API).
 
     Retirar rows advance via the existing blockchain-app inbound USDC
-    scanner (the auto-swap's own signal).
-    TODO(cusd+): call mark_retirar_arrival() from that scanner when it sees
-    a USDC credit for an address with a from_savings row in flight.
+    scanner (the auto-swap's own signal) — scan_inbound_deposits calls
+    mark_retirar_arrival() on every USDC credit (wired, blockchain/tasks.py).
     """
     from .models import CusdPlusConversion
 

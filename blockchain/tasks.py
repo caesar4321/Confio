@@ -520,6 +520,16 @@ def scan_inbound_deposits():
                 return
 
             if xaid == USDC_ID:
+                # cUSD+ Retirar: if this address has a from_savings conversion
+                # in flight, this USDC credit IS the bridge arrival (the same
+                # scanner event that feeds the auto-swap). Guarded so cusd_plus
+                # can never break the deposit scanner.
+                try:
+                    from cusd_plus.tasks import mark_retirar_arrival
+                    mark_retirar_arrival(to_addr or '', txid or '')
+                except Exception:
+                    logger.exception('cusd_plus retirar-arrival hook failed')
+
                 # Create DB deposit + notification
                 try:
                     if account.account_type == 'personal':
