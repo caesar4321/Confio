@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, FlatList, RefreshControl, Platform, StatusBar } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, RefreshControl, Platform, StatusBar } from 'react-native';
+import { Header } from '../navigation/Header';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -34,16 +35,24 @@ export const PayrollRecipientsManageScreen = () => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Icon name="chevron-left" size={24} color={colors.textFlat} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Destinatarios</Text>
-        <TouchableOpacity onPress={() => setShowAddModal(true)} style={styles.addButton}>
-          <Icon name="plus" size={20} color={colors.primary} />
-        </TouchableOpacity>
-      </View>
+    <View style={styles.container}>
+      <Header
+        navigation={navigation as any}
+        title="Destinatarios"
+        backgroundColor="#fff"
+        showBackButton
+        rightAccessory={(
+          <TouchableOpacity
+            onPress={() => setShowAddModal(true)}
+            style={styles.addButton}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            accessibilityRole="button"
+            accessibilityLabel="Agregar destinatario"
+          >
+            <Icon name="plus" size={20} color={colors.primary} />
+          </TouchableOpacity>
+        )}
+      />
 
       <View style={styles.infoCard}>
         <Icon name="info" size={16} color={colors.muted} />
@@ -129,34 +138,12 @@ export const PayrollRecipientsManageScreen = () => {
           refetch();
         }}
       />
-    </SafeAreaView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    marginTop: Platform.OS === 'android' ? APP_LAYOUT.topSafeArea + 10 : 0,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  backButton: {
-    width: 32,
-    height: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerTitle: {
-    flex: 1,
-    textAlign: 'center',
-    fontSize: 18,
-    color: colors.textFlat,
-    fontWeight: '600',
-  },
   addButton: {
     width: 32,
     height: 32,
