@@ -1,11 +1,13 @@
 import React from 'react';
-import { View, Text, ScrollView, StyleSheet, ActivityIndicator, Linking, TouchableOpacity } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, Linking, TouchableOpacity } from 'react-native';
 import { useQuery } from '@apollo/client';
 import gql from 'graphql-tag';
-import { useRoute, useNavigation } from '@react-navigation/native';
-import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useRoute, useNavigation, NavigationProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types/navigation';
 import { Header } from '../navigation/Header';
+import { SkeletonLoader } from '../components/SkeletonLoader';
+import { EmptyState } from '../components/EmptyState';
+import { colors } from '../config/theme';
 
 const GET_LEGAL_DOCUMENT = gql`
   query GetLegalDocument($docType: String!, $language: String) {
@@ -30,12 +32,19 @@ type LegalSection = {
 
 type ContentType = string | string[] | Record<string, any>;
 
+// Shown in the header before the server title arrives (and as fallback).
+const FALLBACK_TITLES: Record<RouteParams['docType'], string> = {
+  terms: 'Términos de Servicio',
+  privacy: 'Política de Privacidad',
+  deletion: 'Eliminación de Datos',
+};
+
 const LegalDocumentScreen = () => {
   const route = useRoute();
-  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const { docType } = route.params as RouteParams;
 
-  const { loading, error, data } = useQuery(GET_LEGAL_DOCUMENT, {
+  const { loading, error, data, refetch } = useQuery(GET_LEGAL_DOCUMENT, {
     variables: { docType, language: 'es' },
   });
 
@@ -58,28 +67,55 @@ const LegalDocumentScreen = () => {
 
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#007AFF" />
-        <Text style={styles.loadingText}>Cargando...</Text>
+      <View style={styles.container}>
+        <Header
+          title={FALLBACK_TITLES[docType]}
+          navigation={navigation}
+          backgroundColor={colors.background}
+          isLight={false}
+        />
+        <View style={styles.content}>
+          <SkeletonLoader width={180} height={12} style={{ marginBottom: 28 }} />
+          {[0, 1, 2].map((i) => (
+            <View key={i} style={{ marginBottom: 32 }}>
+              <SkeletonLoader width="55%" height={18} style={{ marginBottom: 14 }} />
+              <SkeletonLoader height={13} style={{ marginBottom: 9 }} />
+              <SkeletonLoader height={13} style={{ marginBottom: 9 }} />
+              <SkeletonLoader width="82%" height={13} />
+            </View>
+          ))}
+        </View>
       </View>
     );
   }
 
   if (error) {
     return (
-      <View style={styles.errorContainer}>
-        <Text style={styles.errorText}>Error: {error.message}</Text>
+      <View style={styles.container}>
+        <Header
+          title={FALLBACK_TITLES[docType]}
+          navigation={navigation}
+          backgroundColor={colors.background}
+          isLight={false}
+        />
+        <EmptyState
+          icon="file-text"
+          title="No pudimos cargar el documento"
+          subtitle="Revisa tu conexión e intenta de nuevo."
+          actionLabel="Reintentar"
+          onAction={() => refetch()}
+        />
       </View>
     );
   }
 
-  const { title, content, version, lastUpdated, language } = data.legalDocument;
+  const { title, content, version, lastUpdated } = data.legalDocument;
 
   const renderContent = (content: ContentType) => {
     if (typeof content === 'string') {
       if (content.includes('t.me/FansDeJulian') || content.includes('t.me/confio4world')) {
         return (
-          <TouchableOpacity onPress={handleTelegramPress}>
+          <TouchableOpacity onPress={handleTelegramPress} accessibilityRole="link" accessibilityLabel="Abrir canal de Telegram de Confío">
             <Text style={[styles.paragraph, styles.link]}>t.me/confio4world</Text>
           </TouchableOpacity>
         );
@@ -93,7 +129,7 @@ const LegalDocumentScreen = () => {
           <View style={styles.definitionsContainer}>
             {content.map((item: any, index: number) => (
               <View key={index} style={styles.definitionItem}>
-                <Text style={styles.termText}>{item.term}:</Text>
+                <Text style={styles.termText}>{item.term}</Text>
                 <Text style={styles.definitionText}>{item.definition}</Text>
               </View>
             ))}
@@ -119,11 +155,11 @@ const LegalDocumentScreen = () => {
         <View>
           {Object.entries(content).map(([key, value]) => (
             <View key={key} style={styles.contentSection}>
-              <Text style={styles.sectionTitle}>
+              <Text style={styles.subheading}>
                 {key.replace(/_/g, ' ').toUpperCase()}
               </Text>
               {key === 'telegram' ? (
-                <TouchableOpacity onPress={handleTelegramPress}>
+                <TouchableOpacity onPress={handleTelegramPress} accessibilityRole="link" accessibilityLabel="Abrir canal de Telegram de Confío">
                   <Text style={[styles.paragraph, styles.link]}>t.me/confio4world</Text>
                 </TouchableOpacity>
               ) : (
@@ -140,140 +176,125 @@ const LegalDocumentScreen = () => {
   // Parse the JSON strings in the content array
   const parsedSections = content.map((section: string) => JSON.parse(section) as LegalSection);
 
+  const updatedAt = new Date(lastUpdated).toLocaleDateString('es-ES', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+
   return (
     <View style={styles.container}>
-      <Header 
-        title={title}
+      <Header
+        title={title || FALLBACK_TITLES[docType]}
         navigation={navigation}
-        backgroundColor="#fff"
+        backgroundColor={colors.background}
         isLight={false}
       />
-      <ScrollView style={styles.scrollView}>
-        <View style={styles.metaContainer}>
-          <Text style={styles.metaText}>Versión: {version}</Text>
-          <Text style={styles.metaText}>
-            Última actualización: {new Date(lastUpdated).toLocaleDateString('es-ES')}
-          </Text>
-        </View>
-        <View style={styles.content}>
-          {parsedSections.map((section: LegalSection, index: number) => (
-            <View key={index} style={styles.section}>
-              <Text style={styles.sectionTitle}>{section.title}</Text>
-              {renderContent(section.content)}
-            </View>
-          ))}
-        </View>
+      <ScrollView style={styles.scrollView} contentContainerStyle={styles.content}>
+        <Text style={styles.meta}>
+          Versión {version} · Actualizado el {updatedAt}
+        </Text>
+        {parsedSections.map((section: LegalSection, index: number) => (
+          <View key={index} style={styles.section}>
+            <Text style={styles.sectionTitle} accessibilityRole="header">{section.title}</Text>
+            {renderContent(section.content)}
+          </View>
+        ))}
       </ScrollView>
     </View>
   );
 };
 
+// Legal text reads as a clean typographic document: white page, clear
+// hierarchy, no boxed sections. The only color is the brand accent on
+// bullets, links, and the definition rule.
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: colors.background,
   },
   scrollView: {
     flex: 1,
   },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 10,
-    fontSize: 16,
-    color: '#666',
-  },
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  errorText: {
-    color: '#dc3545',
-    fontSize: 16,
-    textAlign: 'center',
-  },
-  metaContainer: {
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  metaText: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 5,
-  },
   content: {
-    padding: 20,
+    paddingHorizontal: 24,
+    paddingTop: 20,
+    paddingBottom: 48,
+  },
+  meta: {
+    fontSize: 13,
+    color: colors.text.secondary,
+    marginBottom: 28,
   },
   section: {
-    marginBottom: 20,
-    padding: 15,
-    backgroundColor: '#f3f4f6',
-    borderRadius: 8,
+    marginBottom: 32,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#2c3e50',
+    fontSize: 17,
+    fontWeight: '700',
+    color: colors.dark,
     marginBottom: 10,
-    paddingBottom: 4,
-    borderBottomWidth: 1,
-    borderBottomColor: '#34D399',
+    lineHeight: 24,
+  },
+  subheading: {
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 1,
+    color: colors.text.secondary,
+    marginBottom: 6,
   },
   paragraph: {
-    fontSize: 16,
+    fontSize: 15,
     lineHeight: 24,
-    color: '#333',
+    color: colors.gray700,
     marginBottom: 10,
   },
   listContainer: {
-    marginVertical: 10,
+    marginBottom: 6,
   },
   listItem: {
     flexDirection: 'row',
     marginBottom: 8,
   },
   bulletPoint: {
-    fontSize: 16,
-    marginRight: 8,
-    color: '#34D399',
+    fontSize: 15,
+    lineHeight: 24,
+    marginRight: 10,
+    color: colors.primary,
   },
   listItemText: {
     flex: 1,
-    fontSize: 16,
+    fontSize: 15,
     lineHeight: 24,
-    color: '#333',
+    color: colors.gray700,
   },
   contentSection: {
-    marginVertical: 15,
+    marginBottom: 18,
   },
   link: {
-    color: '#34d399',
+    color: colors.primaryDark,
     textDecorationLine: 'underline',
   },
   definitionsContainer: {
-    marginVertical: 10,
+    marginBottom: 6,
   },
   definitionItem: {
-    marginBottom: 12,
+    marginBottom: 14,
   },
   termText: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '600',
-    color: '#2c3e50',
+    color: colors.dark,
     marginBottom: 4,
   },
   definitionText: {
-    fontSize: 16,
-    lineHeight: 24,
-    color: '#333',
-    paddingLeft: 8,
+    fontSize: 15,
+    lineHeight: 22,
+    color: colors.gray700,
+    paddingLeft: 12,
+    borderLeftWidth: 2,
+    borderLeftColor: colors.primaryLight,
   },
 });
 
-export default LegalDocumentScreen; 
+export default LegalDocumentScreen;
