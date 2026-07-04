@@ -38,7 +38,7 @@ import { colors } from '../config/theme';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { GET_MY_BALANCES } from '../apollo/queries';
 import { useAhorrosPortfolio } from '../hooks/useAhorrosPortfolio';
-import cUSDLogo from '../assets/png/cUSD.png';
+import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 
@@ -242,7 +242,7 @@ export const ConvertAhorroScreen = () => {
               </>
             ) : (
               <>
-                <Image source={cUSDLogo} style={styles.confirmLogo} />
+                <Image source={cUSDPlusLogo} style={styles.confirmLogo} />
                 <Text style={styles.confirmBtnText}>
                   {amount > 0 && canConfirm ? `Ahorrar ${fmtUsd(amount)}` : 'Ahorrar'}
                 </Text>

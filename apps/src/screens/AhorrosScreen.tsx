@@ -38,7 +38,7 @@ import { useAhorrosPortfolio } from '../hooks/useAhorrosPortfolio';
 import { RouteSheet, RouteOption } from '../components/RouteSheet';
 import { TickerLogo } from '../components/TickerLogo';
 import { useGmMarket } from '../hooks/useGmMarket';
-import cUSDLogo from '../assets/png/cUSD.png';
+import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import OndoLogo from '../assets/png/Ondo.png';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
@@ -174,10 +174,7 @@ export const AhorrosScreen = () => {
         <View style={styles.card}>
           <View style={styles.productRow}>
             <View style={styles.productLogoWrap}>
-              <Image source={cUSDLogo} style={styles.productLogo} />
-              <View style={styles.plusBadge}>
-                <Text style={styles.plusBadgeText}>+</Text>
-              </View>
+              <Image source={cUSDPlusLogo} style={styles.productLogo} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.productName}>Confío Dollar+</Text>
@@ -454,20 +451,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   productLogo: { width: 44, height: 44, borderRadius: 22 },
-  plusBadge: {
-    position: 'absolute',
-    right: -4,
-    bottom: -4,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: colors.primaryDark,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: '#fff',
-  },
-  plusBadgeText: { color: '#fff', fontSize: 13, fontWeight: 'bold', lineHeight: 15 },
   productName: { fontSize: 17, fontWeight: '700', color: colors.text.primary },
   productSymbol: { fontSize: 13, color: colors.text.secondary, marginTop: 1 },
   productValue: { fontSize: 17, fontWeight: '700', color: colors.text.primary },

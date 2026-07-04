@@ -20,6 +20,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuth, useAuthReady } from '../contexts/AuthContext';
 import { useHeader } from '../contexts/HeaderContext';
 import cUSDLogo from '../assets/png/cUSD.png';
+import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import Icon from 'react-native-vector-icons/Feather';
 import MCIcon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -1615,8 +1616,8 @@ export const HomeScreen = () => {
                   onPress={() => navigation.navigate('Ahorros')}
                 >
                   <View style={styles.walletCardContent}>
-                    <View style={[styles.walletLogoContainer, { backgroundColor: '#10B981' }]}>
-                      <Icon name="trending-up" size={22} color="#ffffff" />
+                    <View style={[styles.walletLogoContainer, { backgroundColor: '#ffffff' }]}>
+                      <Image source={cUSDPlusLogo} style={styles.walletLogo} />
                     </View>
                     <View style={styles.walletInfo}>
                       <Text style={styles.walletName}>Ahorros e Inversiones</Text>

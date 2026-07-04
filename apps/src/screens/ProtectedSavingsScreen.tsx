@@ -19,6 +19,7 @@ import { MainStackParamList } from '../types/navigation';
 import { GET_STATS_SUMMARY } from '../apollo/queries';
 import { CUSD_RESERVE_PERA_URL } from '../config/algorand';
 import cUSDLogo from '../assets/png/cUSD.png';
+import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import OndoLogo from '../assets/png/Ondo.png';
 
 const formatWhole = (n: number | null | undefined, sep: string) => {
@@ -66,7 +67,14 @@ export const ProtectedSavingsScreen = () => {
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* Hero */}
         <View style={styles.hero}>
-          <Image source={cUSDLogo} style={styles.heroLogo} resizeMode="contain" />
+          <View style={styles.heroLogoRow}>
+            <Image source={cUSDLogo} style={styles.heroLogo} resizeMode="contain" />
+            <Image
+              source={cUSDPlusLogo}
+              style={[styles.heroLogo, styles.heroLogoOverlap]}
+              resizeMode="contain"
+            />
+          </View>
           <Text style={styles.heroTitle}>Confío Dollar y Confío Dollar+</Text>
           <Text style={styles.heroSubtitle}>
             Tus dólares digitales, 100% respaldados y verificables en blockchain.
@@ -290,7 +298,9 @@ const styles = StyleSheet.create({
     paddingTop: 24,
     paddingBottom: 16,
   },
-  heroLogo: { width: 64, height: 64, marginBottom: 12 },
+  heroLogoRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  heroLogo: { width: 64, height: 64 },
+  heroLogoOverlap: { marginLeft: -14 },
   heroTitle: {
     fontSize: 22,
     fontWeight: '700',
