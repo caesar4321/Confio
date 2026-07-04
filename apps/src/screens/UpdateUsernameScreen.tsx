@@ -6,7 +6,6 @@ import {
   TextInput,
   TouchableOpacity,
   ScrollView,
-  Alert,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { Header } from '../navigation/Header';
@@ -17,6 +16,7 @@ import { UPDATE_USERNAME } from '../apollo/queries';
 import { MainStackParamList } from '../types/navigation';
 import { useAuth } from '../contexts/AuthContext';
 import { colors } from '../config/theme';
+import { InlineBanner } from '../components/common/InlineBanner';
 
 const normalizeChunk = (value: string) => {
   if (!value) return 'confio';
@@ -32,6 +32,8 @@ export const UpdateUsernameScreen: React.FC = () => {
   const currentUsername = userProfile?.username || '';
   const [username, setUsername] = useState(currentUsername);
   const [usernameError, setUsernameError] = useState<string | null>(null);
+  const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' | 'info' } | null>(null);
+  const dismissBanner = React.useCallback(() => setBanner(null), []);
   const [isSaving, setIsSaving] = useState(false);
   const [updateUsername] = useMutation(UPDATE_USERNAME);
 
@@ -105,7 +107,7 @@ export const UpdateUsernameScreen: React.FC = () => {
       return;
     }
     if (trimmed === currentUsername) {
-      Alert.alert('Sin cambios', 'Tu usuario ya está configurado con ese nombre.');
+      setBanner({ variant: 'info', message: 'Tu usuario ya está configurado con ese nombre.' });
       return;
     }
 
@@ -116,10 +118,10 @@ export const UpdateUsernameScreen: React.FC = () => {
         variables: { username: trimmed },
       });
       if (data?.updateUsername?.success) {
+        // No interrupting dialog: the updated @usuario on the previous
+        // screen is the confirmation.
         await refreshProfile('personal');
-        Alert.alert('Listo', 'Tu usuario se actualizó correctamente.', [
-          { text: 'Entendido', onPress: () => navigation.goBack() },
-        ]);
+        navigation.goBack();
       } else {
         const message = data?.updateUsername?.error || 'No se pudo actualizar el usuario. Intenta con otro nombre.';
         setUsernameError(message);
@@ -165,6 +167,14 @@ export const UpdateUsernameScreen: React.FC = () => {
       />
 
       <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        {banner && (
+          <InlineBanner
+            message={banner.message}
+            variant={banner.variant}
+            onDismiss={dismissBanner}
+            style={{ marginBottom: 0 }}
+          />
+        )}
         <View style={styles.infoCard}>
           <Text style={styles.infoTitle}>Tu usuario Confío</Text>
           <Text style={styles.infoDescription}>
@@ -187,7 +197,7 @@ export const UpdateUsernameScreen: React.FC = () => {
               value={username}
               onChangeText={(text) => {
                 setUsername(text);
-                setUsernameError(null);
+                setUsernameError(text.trim() ? validateUsername(text) : null);
               }}
               autoCapitalize="none"
               autoCorrect={false}
@@ -203,30 +213,33 @@ export const UpdateUsernameScreen: React.FC = () => {
             </Text>
           </View>
           {usernameError && <Text style={styles.errorText}>{usernameError}</Text>}
-        </View>
 
-        {suggestions.length > 0 && (
-          <View style={styles.suggestionsCard}>
-            <Text style={styles.suggestionsTitle}>Sugerencias rápidas</Text>
-            <View style={styles.suggestionsRow}>
-              {suggestions.slice(0, 6).map((suggestion) => (
-                <TouchableOpacity
-                  key={suggestion}
-                  style={styles.suggestionChip}
-                  onPress={() => handleSuggestionPress(suggestion)}
-                >
-                  <Text style={styles.suggestionText}>@{suggestion}</Text>
-                </TouchableOpacity>
-              ))}
+          {suggestions.length > 0 && (
+            <View style={styles.suggestionsBlock}>
+              <Text style={styles.suggestionsTitle}>Sugerencias rápidas</Text>
+              <View style={styles.suggestionsRow}>
+                {suggestions.slice(0, 6).map((suggestion) => (
+                  <TouchableOpacity
+                    key={suggestion}
+                    style={styles.suggestionChip}
+                    onPress={() => handleSuggestionPress(suggestion)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Usar ${suggestion}`}
+                  >
+                    <Text style={styles.suggestionText}>@{suggestion}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
             </View>
-          </View>
-        )}
+          )}
 
-        <View style={styles.tipsCard}>
-          <Text style={styles.tipsTitle}>Consejos</Text>
-          <Text style={styles.tipItem}>• Evita usuarios largos o difíciles de dictar.</Text>
-          <Text style={styles.tipItem}>• Usa tu nombre, apodo o negocio para que te recuerden fácilmente.</Text>
-          <Text style={styles.tipItem}>• El usuario se mostrará en tu perfil y en tus invitaciones.</Text>
+          <View style={styles.tipsRow}>
+            <Icon name="info" size={13} color={colors.text.secondary} />
+            <Text style={styles.tipItem}>
+              Usa tu nombre, apodo o negocio — corto y fácil de dictar. Se
+              mostrará en tu perfil y en tus invitaciones.
+            </Text>
+          </View>
         </View>
       </ScrollView>
     </View>
@@ -361,21 +374,14 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.danger,
   },
-  suggestionsCard: {
-    backgroundColor: colors.surface,
-    borderRadius: 16,
-    padding: 20,
-    gap: 12,
-    shadowColor: colors.shadowBase,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.05,
-    shadowRadius: 12,
-    elevation: 2,
+  suggestionsBlock: {
+    gap: 10,
+    marginTop: 4,
   },
   suggestionsTitle: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '600',
-    color: colors.textFlat,
+    color: colors.text.secondary,
   },
   suggestionsRow: {
     flexDirection: 'row',
@@ -392,26 +398,20 @@ const styles = StyleSheet.create({
     color: colors.primaryDark,
     fontWeight: '600',
   },
-  tipsCard: {
-    backgroundColor: colors.surface,
-    borderRadius: 16,
-    padding: 20,
+  tipsRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     gap: 8,
-    shadowColor: colors.shadowBase,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.05,
-    shadowRadius: 12,
-    elevation: 2,
-  },
-  tipsTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.textFlat,
+    marginTop: 8,
+    paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
   },
   tipItem: {
-    fontSize: 13,
+    flex: 1,
+    fontSize: 12,
     color: colors.textSecondary,
-    lineHeight: 19,
+    lineHeight: 17,
   },
 });
 
