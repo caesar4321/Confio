@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, Animated, Dimensions, Easing, ActivityIndicator, Alert, Platform, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Animated, Easing, ActivityIndicator, Alert, Platform, ScrollView } from 'react-native';
 import LoadingOverlay from '../components/LoadingOverlay';
 import { BackupConsentModal } from '../components/BackupConsentModal';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
@@ -12,10 +12,9 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { AuthStackParamList } from '../types/navigation';
 import { useAuth } from '../contexts/AuthContext';
 
-import Svg, { Defs, LinearGradient as SvgLinearGradient, Stop, Text as SvgText, RadialGradient, Ellipse } from 'react-native-svg';
+import Svg, { Defs, Stop, RadialGradient, Ellipse } from 'react-native-svg';
 import { colors } from '../config/theme';
 
-const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
 type NavigationProp = NativeStackNavigationProp<AuthStackParamList, 'Login'>;
 
@@ -148,16 +147,6 @@ export const AuthScreen = () => {
 
   return (
     <View style={styles.container}>
-      {/* Decorative Background Circles and Lines */}
-      <View style={styles.decorativeBg} pointerEvents="none">
-        <View style={styles.topLeftCircle} />
-        <View style={styles.bottomRightCircle} />
-        <View style={styles.dot1} />
-        <View style={styles.dot2} />
-        <View style={styles.dot3} />
-        <View style={styles.line1} />
-        <View style={styles.line2} />
-      </View>
       <View style={styles.contentWrapper}>
         {/* Glowing Logo with Gradient */}
         <View style={[styles.logoWrapper, { width: 160, height: 160, alignItems: 'center', justifyContent: 'center', position: 'relative' }]}>
@@ -179,8 +168,8 @@ export const AuthScreen = () => {
                 r="80"
                 gradientUnits="userSpaceOnUse"
               >
-                <Stop offset="0%" stopColor="#34D399" stopOpacity="0.7" />
-                <Stop offset="70%" stopColor="#34D399" stopOpacity="0.25" />
+                <Stop offset="0%" stopColor="#34D399" stopOpacity="0.22" />
+                <Stop offset="70%" stopColor="#34D399" stopOpacity="0.08" />
                 <Stop offset="100%" stopColor="#34D399" stopOpacity="0" />
               </RadialGradient>
             </Defs>
@@ -198,33 +187,15 @@ export const AuthScreen = () => {
           />
         </View>
 
-        {/* Gradient Title */}
-        <View style={{ alignItems: 'center', marginBottom: 4, width: '100%' }}>
-          <Svg height="44" width="100%" viewBox="0 0 320 44" style={{ alignSelf: 'center' }}>
-            <Defs>
-              <SvgLinearGradient id="grad" x1="0" y1="0" x2="1" y2="0">
-                <Stop offset="0" stopColor="#34D399" />
-                <Stop offset="1" stopColor="#8B5CF6" />
-              </SvgLinearGradient>
-            </Defs>
-            <SvgText
-              x="160"
-              y="32"
-              fontSize="28"
-              fontWeight="bold"
-              fill="url(#grad)"
-              textAnchor="middle"
-            >
-              Bienvenido a Confío
-            </SvgText>
-          </Svg>
-        </View>
+        <Text style={styles.title} accessibilityRole="header">Bienvenido a Confío</Text>
 
         <Text style={styles.subtitle}>La manera más fácil y segura de enviar, pagar, y ahorrar en dólares digitales</Text>
         <View style={styles.buttonGroup}>
           <TouchableOpacity
             style={styles.googleButton}
             onPress={handleGoogleSignInPress}
+            accessibilityRole="button"
+            accessibilityLabel="Continuar con Google"
           >
             <GoogleLogo width={24} height={24} style={{ marginRight: 8 }} />
             <Text style={styles.googleButtonText}>Continuar con Google</Text>
@@ -233,6 +204,8 @@ export const AuthScreen = () => {
             <TouchableOpacity
               style={styles.appleButton}
               onPress={handleAppleSignIn}
+              accessibilityRole="button"
+              accessibilityLabel="Continuar con Apple"
             >
               <AppleLogo width={24} height={24} style={{ marginRight: 8 }} fill="#fff" />
               <Text style={styles.appleButtonText}>Continuar con Apple</Text>
@@ -268,81 +241,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  decorativeBg: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 0,
-  },
-  topLeftCircle: {
-    position: 'absolute',
-    top: -80,
-    left: -80,
-    width: 220,
-    height: 220,
-    borderRadius: 110,
-    backgroundColor: colors.primary,
-    opacity: 0.10,
-  },
-  bottomRightCircle: {
-    position: 'absolute',
-    bottom: -120,
-    right: -120,
-    width: 320,
-    height: 320,
-    borderRadius: 160,
-    backgroundColor: colors.secondary,
-    opacity: 0.10,
-  },
-  dot1: {
-    position: 'absolute',
-    top: screenHeight * 0.25,
-    right: 48,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: colors.primary,
-  },
-  dot2: {
-    position: 'absolute',
-    top: screenHeight * 0.33,
-    left: 40,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: colors.secondary,
-    opacity: 0.2,
-  },
-  dot3: {
-    position: 'absolute',
-    bottom: screenHeight * 0.25,
-    left: screenWidth * 0.25,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: colors.primary,
-    opacity: 0.3,
-  },
-  line1: {
-    position: 'absolute',
-    top: screenHeight * 0.33,
-    right: screenWidth * 0.33,
-    width: 64,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.dark,
-    opacity: 0.10,
-    transform: [{ rotate: '45deg' }],
-  },
-  line2: {
-    position: 'absolute',
-    bottom: screenHeight * 0.33,
-    left: screenWidth * 0.33,
-    width: 80,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.primary,
-    opacity: 0.10,
-    transform: [{ rotate: '-45deg' }],
   },
   contentWrapper: {
     zIndex: 1,
@@ -389,19 +287,18 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     fontWeight: 'bold',
+    color: colors.dark,
     textAlign: 'center',
     marginBottom: 4,
   },
-  titleGradient: {
-    fontWeight: 'bold',
-  },
   subtitle: {
     fontSize: 16,
-    color: colors.dark,
+    color: colors.text.secondary,
     textAlign: 'center',
     marginBottom: 32,
     marginTop: 4,
     maxWidth: 320,
+    lineHeight: 24,
   },
   buttonGroup: {
     width: '100%',
