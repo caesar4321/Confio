@@ -586,6 +586,7 @@ class StatsSummaryType(graphene.ObjectType):
     users_new_7d = graphene.Int()
     protected_savings = graphene.Float()
     total_value_locked = graphene.Float()
+    usdy_reserve = graphene.Float()  # USDY backing cUSD+ (BSC vault); 0 until deployed
     circulating_cusd = graphene.Float()
     presale_cusd_raised = graphene.Float()
     presale_cusd_raised_7d = graphene.Float()
@@ -1481,7 +1482,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		from django.core.cache import cache
 
 		# Bump cache key version to invalidate old aggregation behavior
-		cache_key = 'stats_summary_v11'
+		cache_key = 'stats_summary_v12'
 		cached = cache.get(cache_key)
 		if cached:
 			return StatsSummaryType(**cached)
@@ -1560,6 +1561,9 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			'users_new_7d': users_new_7d,
 			'protected_savings': protected_savings,
 			'total_value_locked': total_value_locked,
+			# TODO(cusd+): read the vault's USDY balance (BSC) and fold its USD
+			# value into total_value_locked as well once the vault deploys.
+			'usdy_reserve': 0.0,
 			'circulating_cusd': circulating_cusd,
 			'presale_cusd_raised': float(presale_cusd_raised),
 			'presale_cusd_raised_7d': float(presale_cusd_raised_7d),

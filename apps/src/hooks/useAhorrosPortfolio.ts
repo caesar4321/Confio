@@ -4,7 +4,10 @@
 // number the hub (and the HomeScreen entry row) renders flows through this
 // hook so screens ship now and wire later without layout changes.
 //
-// When the backend lands, replace the memoized stub with a GraphQL query:
+// When the backend lands, replace the memoized stub with the GraphQL seam
+// already mounted server-side (cusd_plus/schema.py): cusdPlusSummary,
+// cusdPlusMovements(limit, offset), cusdPlusQuote(amountUsd, direction).
+// Notes:
 // - savings.netApyPct MUST be server-derived (USDY oracle gross × 0.85) —
 //   rates float with US Treasuries and are never hardcoded in copy.
 // - stocks.enabled becomes a remote flag (decision 2dcfada5: dark until the

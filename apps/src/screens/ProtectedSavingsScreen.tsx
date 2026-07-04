@@ -44,7 +44,9 @@ export const ProtectedSavingsScreen = () => {
   const s = data?.statsSummary;
   const tvl = s?.totalValueLocked ?? s?.protectedSavings;
   const tvlLabel = formatWhole(tvl, currency.thousandsSeparator);
-  // TODO(server): add usdyReserve to statsSummary (+ query) at cUSD+ launch;
+  // Server field statsSummary.usdyReserve EXISTS (users/schema.py, stub 0).
+  // TODO(deploy-order): add `usdyReserve` to GET_STATS_SUMMARY only AFTER the
+  // backend deploys — requesting an unknown field fails the whole query;
   // 0 is the honest present-tense value until the reserve exists.
   const usdyReserve = (s as any)?.usdyReserve ?? 0;
   const usdyLabel = formatWhole(usdyReserve, currency.thousandsSeparator);
