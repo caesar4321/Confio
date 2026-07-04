@@ -239,11 +239,25 @@ export const AhorrosScreen = () => {
             descuenta nuestra comisión
           </Text>
 
+          {/* Issuer geo-gate: entry hidden, exit always available. */}
+          {!savings.enabled && (
+            <View style={styles.geoNotice}>
+              <Icon name="globe" size={14} color={colors.text.secondary} />
+              <Text style={styles.geoNoticeText}>
+                El ahorro con rendimiento no está disponible en tu país por
+                requisitos del emisor (Ondo Finance). Si tienes saldo, siempre
+                puedes retirarlo.
+              </Text>
+            </View>
+          )}
+
           <View style={styles.ctaRow}>
-            <TouchableOpacity style={styles.ctaPrimary} onPress={() => setAhorrarSheet(true)} activeOpacity={0.85}>
-              <Icon name="arrow-down-circle" size={18} color="#fff" />
-              <Text style={styles.ctaPrimaryText}>Ahorrar</Text>
-            </TouchableOpacity>
+            {savings.enabled && (
+              <TouchableOpacity style={styles.ctaPrimary} onPress={() => setAhorrarSheet(true)} activeOpacity={0.85}>
+                <Icon name="arrow-down-circle" size={18} color="#fff" />
+                <Text style={styles.ctaPrimaryText}>Ahorrar</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               style={[styles.ctaSecondary, !hasSavings && styles.ctaDisabled]}
               onPress={() => setRetirarSheet(true)}
@@ -256,7 +270,7 @@ export const AhorrosScreen = () => {
             </TouchableOpacity>
           </View>
 
-          {cusdAvailable > 0 && !hasSavings && (
+          {savings.enabled && cusdAvailable > 0 && !hasSavings && (
             <View style={styles.availableRow}>
               <Icon name="info" size={13} color={colors.text.secondary} />
               <Text style={styles.availableText}>
@@ -533,6 +547,16 @@ const styles = StyleSheet.create({
 
   backedLine: { fontSize: 12, color: colors.text.secondary, marginTop: 12, lineHeight: 17 },
 
+  geoNotice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginTop: 14,
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: colors.neutralDark,
+  },
+  geoNoticeText: { flex: 1, fontSize: 12, lineHeight: 17, color: colors.text.secondary },
   ctaRow: { flexDirection: 'row', gap: 10, marginTop: 14 },
   ctaPrimary: {
     flex: 1,

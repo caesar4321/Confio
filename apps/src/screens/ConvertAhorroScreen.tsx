@@ -75,8 +75,11 @@ export const ConvertAhorroScreen = () => {
 
   const overBalance = amount > available;
   const belowMin = amount > 0 && amount < MIN_AMOUNT_USD;
+  // Issuer geo-gate (deposit-only screen): the server rejects ineligible
+  // to_savings conversions regardless; this keeps the UI honest.
+  const geoBlocked = !savings.enabled;
   const canConfirm =
-    amount >= MIN_AMOUNT_USD && !overBalance && quote.status === 'ready';
+    !geoBlocked && amount >= MIN_AMOUNT_USD && !overBalance && quote.status === 'ready';
 
   // First-year feel: what does this amount earn per day at the current rate?
   const dailyEstimate = (quote.receiveUsd * savings.netApyPct) / 100 / 365;
@@ -256,6 +259,12 @@ export const ConvertAhorroScreen = () => {
             )
           )}
 
+          {geoBlocked && (
+            <Text style={styles.hintError}>
+              El ahorro con rendimiento no está disponible en tu país por
+              requisitos del emisor (Ondo Finance).
+            </Text>
+          )}
           {belowMin && (
             <Text style={styles.hintError}>El monto mínimo es {fmtUsd(MIN_AMOUNT_USD)}.</Text>
           )}

@@ -26,7 +26,8 @@ class CusdPlusSummaryType(graphene.ObjectType):
     net_apy_pct = graphene.Float(description="Oracle gross minus Confío share; floats daily")
     earned_today_usd = graphene.Float()
     earned_month_usd = graphene.Float()
-    stocks_enabled = graphene.Boolean(description="Server flag gating the Ondo Stocks surfaces (geofence-aware)")
+    savings_enabled = graphene.Boolean(description="Issuer geo-eligibility (Ondo) by phone country; gates ENTRY only — exits are never gated")
+    stocks_enabled = graphene.Boolean(description="Server flag gating the Ondo Stocks surfaces (geofence-aware AND dark-launch flag)")
 
 
 class CusdPlusMovementType(graphene.ObjectType):
@@ -64,9 +65,12 @@ class Query(graphene.ObjectType):
     )
 
     def resolve_cusd_plus_summary(self, info):
+        from django.conf import settings
+        from .eligibility import is_ondo_eligible
         user = getattr(info.context, 'user', None)
         if not user or not user.is_authenticated:
             return None
+        eligible = is_ondo_eligible(user)
         # TODO(cusd+): position from the vault ledger for the JWT account;
         # net_apy_pct from the USDY oracle rate x (1 - CONFIO_YIELD_SHARE).
         return CusdPlusSummaryType(
@@ -74,7 +78,9 @@ class Query(graphene.ObjectType):
             net_apy_pct=0.0,
             earned_today_usd=0.0,
             earned_month_usd=0.0,
-            stocks_enabled=False,
+            savings_enabled=eligible,
+            # Dark until the demand signal (decision 2dcfada5) AND geo-eligible.
+            stocks_enabled=eligible and getattr(settings, 'CUSD_PLUS_STOCKS_ENABLED', False),
         )
 
     def resolve_cusd_plus_movements(self, info, limit=20, offset=0):
@@ -179,6 +185,12 @@ class StartCusdPlusConversion(graphene.Mutation):
             return StartCusdPlusConversion(success=False, errors=['auth required'])
         if direction not in ('to_savings', 'from_savings'):
             return StartCusdPlusConversion(success=False, errors=['bad direction'])
+        # Issuer geo-gate: entries only. from_savings must always work —
+        # a user who becomes ineligible can still exit their position.
+        if direction == 'to_savings':
+            from .eligibility import is_ondo_eligible, INELIGIBLE_MESSAGE
+            if not is_ondo_eligible(user):
+                return StartCusdPlusConversion(success=False, errors=[INELIGIBLE_MESSAGE])
         if amount_usd <= 0 or quoted_receive_usd <= 0:
             return StartCusdPlusConversion(success=False, errors=['bad amount'])
         scope = _actor_filter(info)

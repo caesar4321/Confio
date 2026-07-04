@@ -14,6 +14,21 @@
 //   demand signal), geofenced US/CA/BR + sanctions per Ondo partner terms.
 
 import { useMemo } from 'react';
+import { gql, useQuery } from '@apollo/client';
+
+// Issuer geo-eligibility (Ondo) — LIVE server flags, unlike the number stubs
+// below. savingsEnabled gates ENTRY surfaces only (Ahorrar CTA, Convert);
+// exits (Retirar) are never gated. Computed server-side from the user's
+// phone country (cusd_plus/eligibility.py); the deposit mutation enforces
+// it independently, so this flag is UX, not security.
+const GET_AHORRO_ELIGIBILITY = gql`
+  query AhorroEligibility {
+    cusdPlusSummary {
+      savingsEnabled
+      stocksEnabled
+    }
+  }
+`;
 
 export interface StockPosition {
   ticker: string;
@@ -39,6 +54,7 @@ export interface AhorroMovement {
 
 export interface AhorrosPortfolio {
   savings: {
+    enabled: boolean; // issuer geo-eligibility; gates entry surfaces only
     balanceUsd: number; // USD value only — share counts are never exposed
     netApyPct: number;
     earnedTodayUsd: number;
@@ -65,16 +81,29 @@ export interface AhorrosPortfolio {
 // branch when the backend lands.
 const DEMO = true;
 
-export const useAhorrosPortfolio = (): AhorrosPortfolio =>
-  useMemo(() => {
+export const useAhorrosPortfolio = (): AhorrosPortfolio => {
+  const { data: flagsData } = useQuery(GET_AHORRO_ELIGIBILITY, {
+    fetchPolicy: 'cache-and-network',
+  });
+  // Fail-open before the server answers (most users are eligible LATAM —
+  // avoids flash-hiding the hub); authoritative once it does. The server
+  // rejects ineligible deposits regardless of what the UI shows.
+  const savingsEnabled: boolean = flagsData?.cusdPlusSummary?.savingsEnabled ?? true;
+  // Stocks: dark-launch + geo flag. DEMO builds stay visible until the
+  // server answers so design review keeps working.
+  const stocksEnabled: boolean = flagsData?.cusdPlusSummary?.stocksEnabled ?? DEMO;
+
+  return useMemo(() => {
     const savings = DEMO
       ? {
+          enabled: savingsEnabled,
           balanceUsd: 1250.4,
           netApyPct: 3.0,
           earnedTodayUsd: 0.1,
           earnedMonthUsd: 2.05,
         }
       : {
+          enabled: savingsEnabled,
           balanceUsd: 0,
           netApyPct: 3.0,
           earnedTodayUsd: 0,
@@ -87,9 +116,7 @@ export const useAhorrosPortfolio = (): AhorrosPortfolio =>
         ]
       : [];
     const stocks = {
-      // Visible during the design/dev phase; move to a server flag before
-      // release so launch stays gated on the demand signal.
-      enabled: true,
+      enabled: stocksEnabled,
       totalUsd: positions.reduce((sum, p) => sum + p.valueUsd, 0),
       earnedTodayUsd: DEMO ? 2.53 : 0,
       positions,
@@ -141,4 +168,5 @@ export const useAhorrosPortfolio = (): AhorrosPortfolio =>
       earnedTodayUsd: savings.earnedTodayUsd + stocks.earnedTodayUsd,
       earnedMonthUsd: savings.earnedMonthUsd,
     };
-  }, []);
+  }, [savingsEnabled, stocksEnabled]);
+};

@@ -1611,7 +1611,11 @@ export const HomeScreen = () => {
                   ≥ $0.01 rule). On the home a red delta would read as "my
                   savings dropped". Principle: home shows calm balances, the
                   hub shows the living portfolio. */}
-              {!activeAccount?.isEmployee && (
+              {/* Issuer geo-gate: hide the entry where the feature isn't
+                  offered — but never hide it from someone holding a balance,
+                  who must always be able to reach Retirar. */}
+              {!activeAccount?.isEmployee &&
+                (ahorrosPortfolio.savings.enabled || ahorrosPortfolio.totalUsd > 0) && (
                 <Pressable
                   style={({ pressed }) => [
                     styles.walletCard,
