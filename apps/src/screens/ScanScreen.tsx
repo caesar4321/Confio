@@ -162,7 +162,7 @@ export const ScanScreen = () => {
       });
 
     } catch (error) {
-      Alert.alert('Error', 'Failed to process the QR code. Please try again.', [{ text: 'Entendido' }]);
+      Alert.alert('Error', 'No se pudo procesar el código QR. Intenta de nuevo.', [{ text: 'Entendido' }]);
     } finally {
       setIsProcessing(false);
       setScannedSuccessfully(false);
