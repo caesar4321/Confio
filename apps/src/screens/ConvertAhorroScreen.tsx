@@ -38,6 +38,7 @@ import { colors } from '../config/theme';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { GET_MY_BALANCES } from '../apollo/queries';
 import { useAhorrosPortfolio } from '../hooks/useAhorrosPortfolio';
+import { useConvertQuote } from '../hooks/useConvertQuote';
 import { formatUsdDeltaAbs } from '../utils/savingsFormat';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 
@@ -45,15 +46,6 @@ type NavProp = NativeStackNavigationProp<MainStackParamList>;
 
 const MIN_AMOUNT_USD = 1;
 
-// TODO(cusd+): replace with the backend quote endpoint. Returns the effective
-// conversion cost for this amount (bridge leg + acquisition), plus whether the
-// market-conditions guard is tripped (spread above remote-config threshold).
-const getQuote = (amountUsd: number) => ({
-  costPct: 0.7,
-  costUsd: amountUsd * 0.007,
-  receiveUsd: amountUsd * 0.993,
-  paused: false,
-});
 
 type Phase = 'input' | 'processing' | 'success';
 
@@ -75,14 +67,16 @@ export const ConvertAhorroScreen = () => {
     return Number.isFinite(v) ? v : 0;
   }, [raw]);
 
-  const quote = useMemo(() => getQuote(amount), [amount]);
+  // Live quote: client-side Allbridge pool math + server guard params.
+  const quote = useConvertQuote(amount);
 
   const fmtUsd = (v: number, digits = 2) =>
     `$${formatNumber(v, { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
 
   const overBalance = amount > available;
   const belowMin = amount > 0 && amount < MIN_AMOUNT_USD;
-  const canConfirm = amount >= MIN_AMOUNT_USD && !overBalance && !quote.paused;
+  const canConfirm =
+    amount >= MIN_AMOUNT_USD && !overBalance && quote.status === 'ready';
 
   // First-year feel: what does this amount earn per day at the current rate?
   const dailyEstimate = (quote.receiveUsd * savings.netApyPct) / 100 / 365;
@@ -176,9 +170,53 @@ export const ConvertAhorroScreen = () => {
             </View>
           </View>
 
-          {/* Quote preview — the honest receipt, live while typing */}
+          {/* Quote preview — the honest receipt, live while typing.
+              Every branch is a designed state: loading (real math takes a
+              beat), partial (pool fits only $X under the guard — first-class,
+              never an error), paused (guard tripped even for the minimum),
+              error (no network — never show a fabricated price). */}
           {amount > 0 && !belowMin && !overBalance && (
-            quote.paused ? (
+            quote.status === 'loading' ? (
+              <View style={styles.quoteCard}>
+                <View style={styles.quoteLoadingRow}>
+                  <ActivityIndicator size="small" color={colors.primaryDark} />
+                  <Text style={styles.quoteLoadingText}>Calculando el costo real…</Text>
+                </View>
+              </View>
+            ) : quote.status === 'error' ? (
+              <View style={styles.pausedCard}>
+                <Icon name="wifi-off" size={18} color="#B45309" />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.pausedTitle}>No pudimos calcular el costo</Text>
+                  <Text style={styles.pausedBody}>
+                    Revisa tu conexión — reintentamos automáticamente. Nunca te
+                    mostraremos un precio inventado.
+                  </Text>
+                </View>
+              </View>
+            ) : quote.status === 'partial' && quote.partialMaxUsd != null ? (
+              <View style={styles.pausedCard}>
+                <Icon name="scissors" size={18} color="#B45309" />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.pausedTitle}>
+                    Ahora mismo conviene convertir hasta {fmtUsd(quote.partialMaxUsd)}
+                  </Text>
+                  <Text style={styles.pausedBody}>
+                    Para montos mayores el costo sube por condiciones del mercado.
+                    Puedes convertir esta parte ahora y el resto más tarde.
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.partialCta}
+                    onPress={() => setRaw(String(quote.partialMaxUsd))}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.partialCtaText}>
+                      Usar {fmtUsd(quote.partialMaxUsd)}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : quote.status === 'paused' ? (
               // Not an error: a designed state. The guard skipped this window;
               // it retries automatically (foreground checks).
               <View style={styles.pausedCard}>
@@ -327,6 +365,17 @@ const styles = StyleSheet.create({
   },
   quoteEstimateText: { flex: 1, fontSize: 12, color: colors.primaryDark, fontWeight: '600' },
 
+  quoteLoadingRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  quoteLoadingText: { fontSize: 13, color: colors.text.secondary },
+  partialCta: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#B45309',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    marginTop: 10,
+  },
+  partialCtaText: { color: '#fff', fontSize: 13, fontWeight: '700' },
   pausedCard: {
     flexDirection: 'row',
     gap: 10,

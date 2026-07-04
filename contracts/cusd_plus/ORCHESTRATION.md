@@ -91,9 +91,12 @@ Progress happens exactly like the existing USDC-ALG → cUSD auto-swap:
 
 ## 3. Server's role (quotes, guard, observation — never custody)
 
-1. **Quote** (`cusdPlusQuote`): Allbridge `getAmountToBeReceived`
-   (USDC-ALG → USDT-BSC, real pool math) + IM leg at oracle price + any
-   server-config Confío fee. TTL ~60s, foreground-only.
+1. **Quote** — decision (b), IMPLEMENTED 2026-07-04: the client prices the
+   Allbridge leg itself with dependency-free ported pool math
+   (`apps/src/services/allbridgeQuote.ts`, validated to ≤ $1e-5 against the
+   official SDK — `apps/scripts/validate-allbridge-port.mts`); the server's
+   `cusdPlusConvertParams` supplies threshold/fee/kill-switch only. IM leg
+   is oracle-priced (no spread). TTL 30s snapshot cache, foreground-only.
 2. **Spread guard** (remote config, ~0.5%): over threshold →
    `maxFillUnderThreshold` binary search → PARTIAL quote ("convertimos
    hasta $X ahora"), the amber state ConvertAhorroScreen renders. Partial
