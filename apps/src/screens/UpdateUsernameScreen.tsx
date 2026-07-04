@@ -9,7 +9,7 @@ import {
   Alert,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Header } from '../navigation/Header';
 import { useNavigation } from '@react-navigation/native';
 import { NavigationProp } from '@react-navigation/native';
 import { useMutation } from '@apollo/client';
@@ -142,24 +142,27 @@ export const UpdateUsernameScreen: React.FC = () => {
   }, [currentUsername]);
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.headerButton} onPress={() => navigation.goBack()}>
-          <Icon name="arrow-left" size={20} color={colors.white} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Actualizar usuario</Text>
-        <TouchableOpacity
-          style={[styles.headerButton, styles.saveButton, isSaving && styles.saveButtonDisabled]}
-          onPress={handleSave}
-          disabled={isSaving}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          accessibilityRole="button"
-          accessibilityLabel="Guardar usuario"
-          accessibilityState={{ disabled: isSaving, busy: isSaving }}
-        >
-          <Text style={styles.saveButtonText}>{isSaving ? 'Guardando…' : 'Guardar'}</Text>
-        </TouchableOpacity>
-      </View>
+    <View style={styles.safeArea}>
+      <Header
+        navigation={navigation as any}
+        title="Actualizar usuario"
+        backgroundColor={colors.primaryDark}
+        isLight
+        showBackButton
+        rightAccessory={(
+          <TouchableOpacity
+            style={[styles.saveButton, isSaving && styles.saveButtonDisabled]}
+            onPress={handleSave}
+            disabled={isSaving}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityRole="button"
+            accessibilityLabel="Guardar usuario"
+            accessibilityState={{ disabled: isSaving, busy: isSaving }}
+          >
+            <Text style={styles.saveButtonText}>{isSaving ? 'Guardando…' : 'Guardar'}</Text>
+          </TouchableOpacity>
+        )}
+      />
 
       <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <View style={styles.infoCard}>
@@ -226,7 +229,7 @@ export const UpdateUsernameScreen: React.FC = () => {
           <Text style={styles.tipItem}>• El usuario se mostrará en tu perfil y en tus invitaciones.</Text>
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 };
 
@@ -235,26 +238,11 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: colors.primaryDark,
-  },
-  headerButton: {
-    padding: 8,
-    borderRadius: 8,
-  },
-  headerTitle: {
-    color: colors.white,
-    fontSize: 18,
-    fontWeight: '600',
-  },
   saveButton: {
     backgroundColor: colors.white,
     paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
   },
   saveButtonDisabled: {
     opacity: 0.5,
