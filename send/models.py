@@ -114,8 +114,8 @@ class SendTransaction(SoftDeleteModel):
     )
 
     # Blockchain addresses
-    sender_address = models.CharField(max_length=66)  # Sui addresses are 0x + 32 bytes (66 chars total)
-    recipient_address = models.CharField(max_length=66)  # Sui addresses are 0x + 32 bytes (66 chars total)
+    sender_address = models.CharField(max_length=66)  # Algorand addresses are 58 chars; 66 kept for legacy rows
+    recipient_address = models.CharField(max_length=66)  # Algorand addresses are 58 chars; 66 kept for legacy rows
 
     # Transaction details
     amount = models.DecimalField(max_digits=19, decimal_places=6)  # Support up to 9,999,999,999,999.999999
@@ -127,8 +127,8 @@ class SendTransaction(SoftDeleteModel):
         blank=True,
         null=True,
         unique=True,
-        help_text="Sui transaction digest (0x + 32 bytes, 66 hex characters total)"
-    )  # Sui transaction hash
+        help_text="Algorand transaction ID (52 chars; field kept at 66 for legacy rows)"
+    )  # Algorand transaction id
     error_message = models.TextField(blank=True)
     
     # Idempotency key for preventing duplicate transactions

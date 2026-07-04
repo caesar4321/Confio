@@ -211,7 +211,7 @@ class AccountAdmin(admin.ModelAdmin):
         if obj.algorand_address:
             return f"{obj.algorand_address[:10]}...{obj.algorand_address[-6:]}"
         return "No address"
-    algorand_address_short.short_description = "Sui Address"
+    algorand_address_short.short_description = "Algorand Address"
     
     def bank_accounts_count(self, obj):
         count = obj.bank_accounts.count()
