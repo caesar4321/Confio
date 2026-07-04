@@ -22,6 +22,7 @@ import { buildReferralShareMessage, normalizeInviteUsername } from '../utils/inv
 import { AnalyticsService } from '../services/analyticsService';
 import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
+import { Header } from '../navigation/Header';
 
 type Step = {
   title: string;
@@ -112,14 +113,14 @@ export const AchievementsScreen: React.FC = () => {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Icon name="arrow-left" size={20} color={colors.white} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Programa de referidos</Text>
-        <View style={styles.headerSpacer} />
-      </View>
+    <View style={styles.safeArea}>
+      <Header
+        navigation={navigation as any}
+        title="Programa de referidos"
+        backgroundColor={colors.primaryDark}
+        isLight
+        showBackButton
+      />
 
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
         <View style={styles.heroCard}>
@@ -244,7 +245,7 @@ export const AchievementsScreen: React.FC = () => {
         />
 
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 };
 
@@ -252,26 +253,6 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: colors.primaryDark,
-  },
-  backButton: {
-    padding: 8,
-    borderRadius: 8,
-  },
-  headerTitle: {
-    color: colors.white,
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  headerSpacer: {
-    width: 36,
   },
   container: {
     flex: 1,
