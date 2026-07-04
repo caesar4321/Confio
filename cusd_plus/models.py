@@ -86,6 +86,14 @@ class CusdPlusConversion(models.Model):
         max_length=88, blank=True,
         help_text='Final-leg tx (vault mint on BSC / auto-swap on ALG)',
     )
+    bridge_arrival_tx = models.CharField(
+        max_length=88, blank=True,
+        help_text='On-chain arrival tx at the user destination (chain-observed, not vendor-reported)',
+    )
+    dest_scan_from_block = models.BigIntegerField(
+        null=True, blank=True,
+        help_text='Destination-chain scan cursor set when monitoring starts',
+    )
 
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='CREATED')
     error_message = models.TextField(blank=True, null=True)

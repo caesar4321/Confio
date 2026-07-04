@@ -83,11 +83,13 @@ Progress happens exactly like the existing USDC-ALG → cUSD auto-swap:
 - **We don't cover anything.** If costs moved between legs, the user sees
   the fresh number and decides: continue at today's cost or wait. Confío
   never eats a delta silently and never proceeds on a stale quote.
-- Server-side celery only does what needs no keys: polling Allbridge
-  transfer status, topping BNB gas dust when leg C is next, websocket
-  events, reconciliation (§6 monitoring), and nudging via push notification if a
-  conversion sits half-done for days ("te falta un paso para que tu ahorro
-  gane rendimiento").
+- Server-side celery only does what needs no keys: watching OUR chains
+  for bridge arrivals (chain-first: a USDT Transfer to user.bsc on BNB, or
+  the USDC credit the existing inbound scanner already sees on Algorand —
+  the Allbridge indexer API is a support diagnostic only, never the truth;
+  a vendor outage must not fake a STUCK state), topping BNB gas dust when
+  leg C is next, websocket events, reconciliation (§6 monitoring), and
+  nudging via push if a conversion sits half-done for days.
 
 ## 3. Server's role (quotes, guard, observation — never custody)
 
@@ -117,7 +119,7 @@ $30K/$15K. Large conversions = visible partial fills by design.
 | --- | --- | --- |
 | Guard trips at quote | cUSD (untouched) | partial now, or wait |
 | Leg AB group fails (incl. Allbridge floor breached) | cUSD (group atomic — nothing happened) | clean retry at a fresh quote |
-| Bridge in flight / stuck | in-flight (Allbridge) | server polls status; > ~30 min → ops alert + honest "tardando más de lo normal"; Allbridge transfers resolve by retry/support, value not lost |
+| Bridge in flight / stuck | in-flight (Allbridge) | server watches the DESTINATION CHAIN for the arrival; > ~30 min of chain silence → STUCK + ops alert + honest "tardando más de lo normal" (Allbridge indexer consulted only as a support diagnostic); value not lost |
 | USDT arrived, app closed | USDT-BSC at user.bsc | next foreground: gas dust + leg C; push nudge after days |
 | Vault paused / IM down | USDT-BSC at user.bsc | retry on later foregrounds; oracle-time mint means waiting costs ~nothing in USD |
 | user.bsc frozen (vault) | USDT-BSC at user.bsc | compliance process, not the conversion's problem |
