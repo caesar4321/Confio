@@ -20,10 +20,14 @@ import {
   SEND_TEST_PUSH_NOTIFICATION,
 } from '../graphql/mutations/notifications';
 import { GET_NOTIFICATION_PREFERENCES } from '../graphql/queries/notifications';
+import { colors } from '../config/theme';
+import { InlineBanner } from '../components/common/InlineBanner';
 
 const NotificationSettingsScreen: React.FC = () => {
   const [systemNotificationsEnabled, setSystemNotificationsEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
+  const dismissBanner = React.useCallback(() => setBanner(null), []);
 
   const { data, loading: queryLoading, refetch } = useQuery(GET_NOTIFICATION_PREFERENCES);
   const [updatePreferences] = useMutation(UPDATE_NOTIFICATION_PREFERENCES);
@@ -46,7 +50,7 @@ const NotificationSettingsScreen: React.FC = () => {
       const granted = await messagingService.requestPermissions();
       if (granted) {
         setSystemNotificationsEnabled(true);
-        Alert.alert('Listo', 'Notificaciones activadas');
+        setBanner({ variant: 'success', message: 'Notificaciones activadas' });
       } else {
         Alert.alert(
           'Permiso denegado',
@@ -90,7 +94,7 @@ const NotificationSettingsScreen: React.FC = () => {
         },
       });
     } catch (error) {
-      Alert.alert('Error', 'No se pudieron actualizar tus preferencias. Intenta de nuevo.');
+      setBanner({ variant: 'error', message: 'No se pudieron actualizar tus preferencias. Intenta de nuevo.' });
     }
   };
 
@@ -98,12 +102,12 @@ const NotificationSettingsScreen: React.FC = () => {
     try {
       const result = await sendTestPush();
       if (result.data?.sendTestPushNotification?.success) {
-        Alert.alert('Listo', 'Notificación de prueba enviada');
+        setBanner({ variant: 'success', message: 'Notificación de prueba enviada' });
       } else {
-        Alert.alert('Error', 'No se pudo enviar la notificación de prueba');
+        setBanner({ variant: 'error', message: 'No se pudo enviar la notificación de prueba' });
       }
     } catch (error) {
-      Alert.alert('Error', 'No se pudo enviar la notificación de prueba');
+      setBanner({ variant: 'error', message: 'No se pudo enviar la notificación de prueba' });
     }
   };
 
@@ -138,9 +142,9 @@ const NotificationSettingsScreen: React.FC = () => {
           },
         },
       });
-      Alert.alert('Listo', 'Notificación local mostrada');
+      setBanner({ variant: 'success', message: 'Notificación local mostrada' });
     } catch (error) {
-      Alert.alert('Error', 'No se pudo mostrar la notificación local');
+      setBanner({ variant: 'error', message: 'No se pudo mostrar la notificación local' });
     }
   };
 
@@ -148,7 +152,7 @@ const NotificationSettingsScreen: React.FC = () => {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#6200EA" />
+          <ActivityIndicator size="large" color={colors.secondary} />
         </View>
       </SafeAreaView>
     );
@@ -157,10 +161,19 @@ const NotificationSettingsScreen: React.FC = () => {
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
+        {banner && (
+          <InlineBanner
+            message={banner.message}
+            variant={banner.variant}
+            onDismiss={dismissBanner}
+            autoHideMs={banner.variant === 'success' ? 2500 : undefined}
+            style={{ marginHorizontal: 16, marginTop: 12, marginBottom: 0 }}
+          />
+        )}
         <View style={styles.header}>
-          <Text style={styles.title}>Notification Settings</Text>
+          <Text style={styles.title}>Notificaciones</Text>
           <Text style={styles.subtitle}>
-            Manage how you receive notifications from Confío
+            Controla cómo recibes las notificaciones de Confío
           </Text>
         </View>
 
@@ -168,21 +181,21 @@ const NotificationSettingsScreen: React.FC = () => {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Icon name="bell" size={24} color="#333" />
-            <Text style={styles.sectionTitle}>System Notifications</Text>
+            <Text style={styles.sectionTitle}>Notificaciones del sistema</Text>
           </View>
           
           <View style={styles.settingRow}>
             <View style={styles.settingInfo}>
-              <Text style={styles.settingLabel}>Push Notifications</Text>
+              <Text style={styles.settingLabel}>Notificaciones push</Text>
               <Text style={styles.settingDescription}>
-                Receive notifications even when the app is closed
+                Recibe notificaciones aunque la app esté cerrada
               </Text>
             </View>
             <Switch
               value={systemNotificationsEnabled}
               onValueChange={handleSystemToggle}
-              trackColor={{ false: '#E0E0E0', true: '#B39DDB' }}
-              thumbColor={systemNotificationsEnabled ? '#6200EA' : '#f4f3f4'}
+              trackColor={{ false: '#E0E0E0', true: colors.violetLight }}
+              thumbColor={systemNotificationsEnabled ? colors.secondary : '#f4f3f4'}
             />
           </View>
         </View>
@@ -192,21 +205,21 @@ const NotificationSettingsScreen: React.FC = () => {
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Icon name="sliders" size={24} color="#333" />
-              <Text style={styles.sectionTitle}>Push Notification Categories</Text>
+              <Text style={styles.sectionTitle}>Categorías de notificaciones</Text>
             </View>
             
             <View style={styles.settingRow}>
               <View style={styles.settingInfo}>
-                <Text style={styles.settingLabel}>All Push Notifications</Text>
+                <Text style={styles.settingLabel}>Todas las notificaciones push</Text>
                 <Text style={styles.settingDescription}>
-                  Master switch for all push notifications
+                  Interruptor general para todas las notificaciones push
                 </Text>
               </View>
               <Switch
                 value={preferences.pushEnabled}
                 onValueChange={(value) => handlePreferenceToggle('pushEnabled', value)}
-                trackColor={{ false: '#E0E0E0', true: '#B39DDB' }}
-                thumbColor={preferences.pushEnabled ? '#6200EA' : '#f4f3f4'}
+                trackColor={{ false: '#E0E0E0', true: colors.violetLight }}
+                thumbColor={preferences.pushEnabled ? colors.secondary : '#f4f3f4'}
               />
             </View>
 
@@ -214,76 +227,76 @@ const NotificationSettingsScreen: React.FC = () => {
               <>
                 <View style={styles.settingRow}>
                   <View style={styles.settingInfo}>
-                    <Text style={styles.settingLabel}>Transactions</Text>
+                    <Text style={styles.settingLabel}>Transacciones</Text>
                     <Text style={styles.settingDescription}>
-                      Payments sent, received, and conversions
+                      Pagos enviados, recibidos y conversiones
                     </Text>
                   </View>
                   <Switch
                     value={preferences.pushTransactions}
                     onValueChange={(value) => handlePreferenceToggle('pushTransactions', value)}
-                    trackColor={{ false: '#E0E0E0', true: '#B39DDB' }}
-                    thumbColor={preferences.pushTransactions ? '#6200EA' : '#f4f3f4'}
+                    trackColor={{ false: '#E0E0E0', true: colors.violetLight }}
+                    thumbColor={preferences.pushTransactions ? colors.secondary : '#f4f3f4'}
                   />
                 </View>
 
                 <View style={styles.settingRow}>
                   <View style={styles.settingInfo}>
-                    <Text style={styles.settingLabel}>P2P Trading</Text>
+                    <Text style={styles.settingLabel}>Intercambio P2P</Text>
                     <Text style={styles.settingDescription}>
-                      Trade updates, offers, and disputes
+                      Actualizaciones de intercambios, ofertas y disputas
                     </Text>
                   </View>
                   <Switch
                     value={preferences.pushP2p}
                     onValueChange={(value) => handlePreferenceToggle('pushP2p', value)}
-                    trackColor={{ false: '#E0E0E0', true: '#B39DDB' }}
-                    thumbColor={preferences.pushP2p ? '#6200EA' : '#f4f3f4'}
+                    trackColor={{ false: '#E0E0E0', true: colors.violetLight }}
+                    thumbColor={preferences.pushP2p ? colors.secondary : '#f4f3f4'}
                   />
                 </View>
 
                 <View style={styles.settingRow}>
                   <View style={styles.settingInfo}>
-                    <Text style={styles.settingLabel}>Security Alerts</Text>
+                    <Text style={styles.settingLabel}>Alertas de seguridad</Text>
                     <Text style={styles.settingDescription}>
-                      Login attempts and security notifications
+                      Intentos de inicio de sesión y avisos de seguridad
                     </Text>
                   </View>
                   <Switch
                     value={preferences.pushSecurity}
                     onValueChange={(value) => handlePreferenceToggle('pushSecurity', value)}
-                    trackColor={{ false: '#E0E0E0', true: '#B39DDB' }}
-                    thumbColor={preferences.pushSecurity ? '#6200EA' : '#f4f3f4'}
+                    trackColor={{ false: '#E0E0E0', true: colors.violetLight }}
+                    thumbColor={preferences.pushSecurity ? colors.secondary : '#f4f3f4'}
                   />
                 </View>
 
                 <View style={styles.settingRow}>
                   <View style={styles.settingInfo}>
-                    <Text style={styles.settingLabel}>Promotions</Text>
+                    <Text style={styles.settingLabel}>Promociones</Text>
                     <Text style={styles.settingDescription}>
-                      Special offers and rewards
+                      Ofertas especiales y recompensas
                     </Text>
                   </View>
                   <Switch
                     value={preferences.pushPromotions}
                     onValueChange={(value) => handlePreferenceToggle('pushPromotions', value)}
-                    trackColor={{ false: '#E0E0E0', true: '#B39DDB' }}
-                    thumbColor={preferences.pushPromotions ? '#6200EA' : '#f4f3f4'}
+                    trackColor={{ false: '#E0E0E0', true: colors.violetLight }}
+                    thumbColor={preferences.pushPromotions ? colors.secondary : '#f4f3f4'}
                   />
                 </View>
 
                 <View style={styles.settingRow}>
                   <View style={styles.settingInfo}>
-                    <Text style={styles.settingLabel}>Announcements</Text>
+                    <Text style={styles.settingLabel}>Anuncios</Text>
                     <Text style={styles.settingDescription}>
-                      Platform updates and news
+                      Novedades y actualizaciones de Confío
                     </Text>
                   </View>
                   <Switch
                     value={preferences.pushAnnouncements}
                     onValueChange={(value) => handlePreferenceToggle('pushAnnouncements', value)}
-                    trackColor={{ false: '#E0E0E0', true: '#B39DDB' }}
-                    thumbColor={preferences.pushAnnouncements ? '#6200EA' : '#f4f3f4'}
+                    trackColor={{ false: '#E0E0E0', true: colors.violetLight }}
+                    thumbColor={preferences.pushAnnouncements ? colors.secondary : '#f4f3f4'}
                   />
                 </View>
               </>
@@ -295,21 +308,21 @@ const NotificationSettingsScreen: React.FC = () => {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Icon name="smartphone" size={24} color="#333" />
-            <Text style={styles.sectionTitle}>In-App Notifications</Text>
+            <Text style={styles.sectionTitle}>Notificaciones en la app</Text>
           </View>
           
           <View style={styles.settingRow}>
             <View style={styles.settingInfo}>
-              <Text style={styles.settingLabel}>All In-App Notifications</Text>
+              <Text style={styles.settingLabel}>Todas las notificaciones en la app</Text>
               <Text style={styles.settingDescription}>
-                Notifications shown while using the app
+                Notificaciones que se muestran mientras usas la app
               </Text>
             </View>
             <Switch
               value={preferences.inAppEnabled}
               onValueChange={(value) => handlePreferenceToggle('inAppEnabled', value)}
-              trackColor={{ false: '#E0E0E0', true: '#B39DDB' }}
-              thumbColor={preferences.inAppEnabled ? '#6200EA' : '#f4f3f4'}
+              trackColor={{ false: '#E0E0E0', true: colors.violetLight }}
+              thumbColor={preferences.inAppEnabled ? colors.secondary : '#f4f3f4'}
             />
           </View>
         </View>
@@ -323,16 +336,16 @@ const NotificationSettingsScreen: React.FC = () => {
                 onPress={handleSendTestNotification}
               >
                 <Icon name="send" size={20} color="#FFF" />
-                <Text style={styles.testButtonText}>Send Test Push Notification</Text>
+                <Text style={styles.testButtonText}>Enviar notificación de prueba</Text>
               </TouchableOpacity>
             )}
             
             <TouchableOpacity
-              style={[styles.testButton, { backgroundColor: '#3ADBBB', marginTop: 10 }]}
+              style={[styles.testButton, { backgroundColor: colors.primaryLight, marginTop: 10 }]}
               onPress={handleTestLocalNotification}
             >
               <Icon name="bell" size={20} color="#000" />
-              <Text style={[styles.testButtonText, { color: '#000' }]}>Test Local Notification</Text>
+              <Text style={[styles.testButtonText, { color: '#000' }]}>Probar notificación local</Text>
             </TouchableOpacity>
           </>
         )}
