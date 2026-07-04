@@ -180,11 +180,12 @@ export const BiometricSetupScreen = () => {
       <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
 
       {/* Brand field: same grammar as the Auth screen — emerald gradient,
-          one cropped coin ring, hero mark. */}
-      <View style={[styles.brandField, { paddingTop: insets.top }]}>
-        {/* absoluteFill only — width/height="100%" would resolve against the
-            content box and stop 48px short of the padded bottom, exposing the
-            flat container color as a hard seam. */}
+          one cropped coin ring, hero mark. The field itself carries NO
+          padding: Yoga sizes absolute children against the padding box, so
+          any padding here would leave uncovered strips of the flat container
+          color above/below the gradient (the hard seam we saw on device).
+          All spacing lives on the inner wrapper instead. */}
+      <View style={styles.brandField}>
         <Svg style={StyleSheet.absoluteFill}>
           <Defs>
             <SvgLinearGradient id="bioField" x1="0" y1="0" x2="1" y2="1">
@@ -195,22 +196,24 @@ export const BiometricSetupScreen = () => {
           <Rect width="100%" height="100%" fill="url(#bioField)" />
           <Circle cx="94%" cy="8%" r="120" stroke={colors.white} strokeWidth="28" strokeOpacity="0.10" fill="none" />
         </Svg>
-        <TouchableOpacity
-          onPress={handleBack}
-          disabled={isProcessing}
-          style={styles.backButton}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          accessibilityRole="button"
-          accessibilityLabel="Volver"
-        >
-          <Icon name="arrow-left" size={22} color={colors.white} />
-        </TouchableOpacity>
-        <View style={styles.fieldContent}>
-          <View style={styles.heroBadge}>
-            <MCIcon name="fingerprint" size={44} color={colors.white} />
+        <View style={[styles.fieldInner, { paddingTop: insets.top }]}>
+          <TouchableOpacity
+            onPress={handleBack}
+            disabled={isProcessing}
+            style={styles.backButton}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityRole="button"
+            accessibilityLabel="Volver"
+          >
+            <Icon name="arrow-left" size={22} color={colors.white} />
+          </TouchableOpacity>
+          <View style={styles.fieldContent}>
+            <View style={styles.heroBadge}>
+              <MCIcon name="fingerprint" size={44} color={colors.white} />
+            </View>
+            <Text style={styles.fieldTitle} accessibilityRole="header">Activa la seguridad</Text>
+            <Text style={styles.fieldSubtitle}>Tu huella o tu rostro es la llave</Text>
           </View>
-          <Text style={styles.fieldTitle} accessibilityRole="header">Activa la seguridad</Text>
-          <Text style={styles.fieldSubtitle}>Tu huella o tu rostro es la llave</Text>
         </View>
       </View>
 
@@ -284,8 +287,10 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primaryDark,
   },
   brandField: {
-    paddingBottom: 48,
     overflow: 'hidden',
+  },
+  fieldInner: {
+    paddingBottom: 48,
   },
   backButton: {
     padding: 10,
