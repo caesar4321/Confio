@@ -2,7 +2,12 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Dimensions, Alert, Platform, Linking, AppState, AppStateStatus } from 'react-native';
 import { Camera, useCameraDevice, useCodeScanner, CameraPermissionStatus } from 'react-native-vision-camera';
 import type { Code } from 'react-native-vision-camera';
+import { launchImageLibrary } from 'react-native-image-picker';
+import RNQRGenerator from 'rn-qr-generator';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
+import { colors } from '../config/theme';
+import { Button } from '../components/common/Button';
 import { useAccount } from '../contexts/AccountContext';
 import { useRoute, RouteProp, useNavigation, useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { BottomTabParamList } from '../types/navigation';
@@ -12,6 +17,7 @@ import { GET_INVOICE } from '../apollo/queries';
 type ScanScreenRouteProp = RouteProp<BottomTabParamList, 'Scan'>;
 
 export const ScanScreen = () => {
+  const insets = useSafeAreaInsets();
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [isFlashOn, setIsFlashOn] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -185,6 +191,26 @@ export const ScanScreen = () => {
     setIsFlashOn((current) => !current);
   }, []);
 
+  // Decode a payment QR from a saved photo (screenshot sent by WhatsApp is
+  // the common real-world case). Same pipeline as a live scan.
+  const handleGallery = useCallback(async () => {
+    if (isProcessing) return;
+    try {
+      const result = await launchImageLibrary({ mediaType: 'photo', selectionLimit: 1 });
+      const uri = result.assets?.[0]?.uri;
+      if (!uri) return; // user cancelled
+      const detected = await RNQRGenerator.detect({ uri });
+      const value = detected?.values?.[0];
+      if (value) {
+        handleQRCodeScanned(value);
+      } else {
+        Alert.alert('Sin código QR', 'No se encontró un código QR en la imagen.', [{ text: 'Entendido' }]);
+      }
+    } catch {
+      Alert.alert('Sin código QR', 'No se pudo leer un código QR de la imagen.', [{ text: 'Entendido' }]);
+    }
+  }, [isProcessing]);
+
   // Removed prewarm HEAD /health pings
 
   const handleClose = () => {
@@ -194,7 +220,8 @@ export const ScanScreen = () => {
   if (hasPermission === null) {
     return (
       <View style={styles.container}>
-        <Text style={styles.text}>Solicitando permiso de cámara...</Text>
+        <Icon name="camera" size={40} color={colors.text.light} />
+        <Text style={styles.text}>Solicitando permiso de cámara…</Text>
       </View>
     );
   }
@@ -202,10 +229,13 @@ export const ScanScreen = () => {
   if (hasPermission === false) {
     return (
       <View style={styles.container}>
+        <Icon name="camera-off" size={40} color={colors.text.light} />
         <Text style={styles.text}>Sin acceso a la cámara</Text>
-        <TouchableOpacity style={styles.button} onPress={checkPermission}>
-          <Text style={styles.buttonText}>Conceder permiso</Text>
-        </TouchableOpacity>
+        <Button
+          title="Conceder permiso"
+          onPress={checkPermission}
+          style={{ minWidth: 200 }}
+        />
       </View>
     );
   }
@@ -213,6 +243,7 @@ export const ScanScreen = () => {
   if (!device) {
     return (
       <View style={styles.container}>
+        <Icon name="camera-off" size={40} color={colors.text.light} />
         <Text style={styles.text}>No se encontró cámara</Text>
       </View>
     );
@@ -237,7 +268,7 @@ export const ScanScreen = () => {
       {/* Move overlay outside Camera component */}
       <View style={styles.overlayAbsolute}>
         {/* Top overlay area with integrated header */}
-        <View style={styles.topOverlay}>
+        <View style={[styles.topOverlay, { paddingTop: insets.top + 8 }]}>
           <View style={styles.headerControls}>
             <TouchableOpacity style={styles.closeButton} onPress={handleClose} accessibilityRole="button" accessibilityLabel="Cerrar escáner">
               <Icon name="x" size={24} color="#FFFFFF" />
@@ -265,7 +296,7 @@ export const ScanScreen = () => {
 
             {scannedSuccessfully && (
               <View style={styles.successOverlay}>
-                <Icon name="check-circle" size={60} color="#10B981" />
+                <Icon name="check-circle" size={60} color={colors.primaryDark} />
                 <Text style={styles.successText}>Código QR detectado</Text>
               </View>
             )}
@@ -274,16 +305,11 @@ export const ScanScreen = () => {
           <View style={styles.sideOverlay} />
         </View>
 
-        {/* Bottom overlay area */}
+        {/* Bottom overlay area: ONE instruction line + the two tools */}
         <View style={styles.bottomOverlay}>
-          {/* Scanning instruction */}
-          <View style={styles.scanInstruction}>
-            <Text style={styles.scanInstructionText}>Posiciona el código QR aquí</Text>
-          </View>
-
           <Text style={styles.instructions}>
             {isProcessing
-              ? 'Procesando código QR...'
+              ? 'Procesando código QR…'
               : isBusinessAccount
                 ? scanMode === 'cobrar'
                   ? 'Escanea el código QR del cliente para cobrar'
@@ -292,15 +318,14 @@ export const ScanScreen = () => {
             }
           </Text>
 
-          <TouchableOpacity style={styles.flashButton} onPress={toggleFlash} accessibilityRole="button" accessibilityLabel={isFlashOn ? "Apagar linterna" : "Encender linterna"}>
-            <Icon name={isFlashOn ? "zap-off" : "zap"} size={24} color="#FFFFFF" />
-          </TouchableOpacity>
-
-          {isProcessing && (
-            <View style={styles.loadingContainer}>
-              <Text style={styles.loadingText}>Procesando...</Text>
-            </View>
-          )}
+          <View style={styles.toolsRow}>
+            <TouchableOpacity style={styles.toolButton} onPress={toggleFlash} accessibilityRole="button" accessibilityLabel={isFlashOn ? "Apagar linterna" : "Encender linterna"}>
+              <Icon name={isFlashOn ? "zap-off" : "zap"} size={22} color={colors.white} />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.toolButton} onPress={handleGallery} accessibilityRole="button" accessibilityLabel="Elegir un código QR desde la galería">
+              <Icon name="image" size={22} color={colors.white} />
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     </View>
@@ -318,10 +343,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   camera: {
-    flex: 1,
-    width: '100%',
-  },
-  overlay: {
     flex: 1,
     width: '100%',
   },
@@ -358,7 +379,6 @@ const styles = StyleSheet.create({
     flex: 0.7,
     backgroundColor: 'rgba(0,0,0,0.7)',
     justifyContent: 'flex-start',
-    paddingTop: 50, // Account for status bar
   },
   headerControls: {
     padding: 16,
@@ -396,8 +416,8 @@ const styles = StyleSheet.create({
     height: 35,
     borderTopWidth: 4,
     borderLeftWidth: 4,
-    borderTopColor: '#00FF88',
-    borderLeftColor: '#00FF88',
+    borderTopColor: colors.primary,
+    borderLeftColor: colors.primary,
     top: -2,
     left: -2,
   },
@@ -407,8 +427,8 @@ const styles = StyleSheet.create({
     height: 35,
     borderTopWidth: 4,
     borderRightWidth: 4,
-    borderTopColor: '#00FF88',
-    borderRightColor: '#00FF88',
+    borderTopColor: colors.primary,
+    borderRightColor: colors.primary,
     top: -2,
     right: -2,
   },
@@ -418,8 +438,8 @@ const styles = StyleSheet.create({
     height: 35,
     borderBottomWidth: 4,
     borderLeftWidth: 4,
-    borderBottomColor: '#00FF88',
-    borderLeftColor: '#00FF88',
+    borderBottomColor: colors.primary,
+    borderLeftColor: colors.primary,
     bottom: -2,
     left: -2,
   },
@@ -429,32 +449,23 @@ const styles = StyleSheet.create({
     height: 35,
     borderBottomWidth: 4,
     borderRightWidth: 4,
-    borderBottomColor: '#00FF88',
-    borderRightColor: '#00FF88',
+    borderBottomColor: colors.primary,
+    borderRightColor: colors.primary,
     bottom: -2,
     right: -2,
   },
-  scanInstruction: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: 'rgba(0,0,0,0.8)',
-    borderRadius: 20,
-    marginBottom: 20,
+  toolsRow: {
+    flexDirection: 'row',
+    gap: 20,
+    marginTop: 20,
   },
-  scanInstructionText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '500',
-    textAlign: 'center',
-  },
-  flashButton: {
+  toolButton: {
     width: 48,
     height: 48,
     borderRadius: 24,
     backgroundColor: 'rgba(0,0,0,0.8)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 15,
   },
   instructions: {
     color: '#FFFFFF',
@@ -463,31 +474,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   text: {
-    color: '#FFFFFF',
+    color: colors.white,
     fontSize: 16,
     textAlign: 'center',
+    marginTop: 12,
     marginBottom: 16,
   },
-  button: {
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
-  },
-  buttonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-  },
-  loadingContainer: {
-    marginTop: 10,
-    padding: 10,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    borderRadius: 8,
-  },
-  loadingText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-  },
+
   successOverlay: {
     position: 'absolute',
     top: 0,
