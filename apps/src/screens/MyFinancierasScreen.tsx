@@ -10,7 +10,6 @@ import {
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -18,6 +17,7 @@ import { useQuery, useMutation } from '@apollo/client';
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
 import { InlineBanner } from '../components/common/InlineBanner';
+import { Header } from '../navigation/Header';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { Financiera } from '../types/financiera';
 import {
@@ -186,22 +186,24 @@ export const MyFinancierasScreen = () => {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
-      <SafeAreaView edges={['top']} style={{ backgroundColor: colors.primary }}>
-        <View style={styles.header}>
-          <View style={styles.headerTopRow}>
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerIconBtn}>
-              <Icon name="arrow-left" size={24} color="#fff" />
-            </TouchableOpacity>
-            <Text style={styles.headerTitle}>Mis financieras</Text>
-            <TouchableOpacity
-              onPress={() => navigation.navigate('RegisterFinanciera')}
-              style={styles.headerIconBtn}
-            >
-              <Icon name="plus" size={24} color="#fff" />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </SafeAreaView>
+      <Header
+        navigation={navigation as any}
+        title="Mis financieras"
+        backgroundColor={colors.primary}
+        isLight
+        showBackButton
+        rightAccessory={(
+          <TouchableOpacity
+            onPress={() => navigation.navigate('RegisterFinanciera')}
+            style={styles.headerIconBtn}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            accessibilityRole="button"
+            accessibilityLabel="Registrar financiera"
+          >
+            <Icon name="plus" size={24} color="#fff" />
+          </TouchableOpacity>
+        )}
+      />
 
       {banner && (
         <InlineBanner
@@ -268,10 +270,7 @@ export const MyFinancierasScreen = () => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.neutral },
 
-  header: { backgroundColor: colors.primary, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 16 },
-  headerTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   headerIconBtn: { padding: 6, width: 40, alignItems: 'center' },
-  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#fff' },
 
   listContent: { padding: 16, paddingBottom: 40 },
   hint: { fontSize: 12, color: colors.text.secondary, marginBottom: 4, lineHeight: 17 },
