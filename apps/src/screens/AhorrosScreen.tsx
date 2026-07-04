@@ -120,6 +120,12 @@ export const AhorrosScreen = () => {
       },
     },
     {
+      icon: 'download',
+      title: 'Recibir USDT (BEP-20)',
+      subtitle: 'Desde un exchange u otra billetera · directo a tu ahorro',
+      onPress: () => navigation.navigate('ReceiveSavings'),
+    },
+    {
       icon: 'refresh-cw',
       title: 'Desde mi saldo cUSD',
       subtitle:

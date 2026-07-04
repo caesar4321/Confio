@@ -22,6 +22,7 @@ import { AhorrosScreen } from '../screens/AhorrosScreen';
 import { ConvertAhorroScreen } from '../screens/ConvertAhorroScreen';
 import { RetirarAhorroScreen } from '../screens/RetirarAhorroScreen';
 import { AhorrosMovimientosScreen } from '../screens/AhorrosMovimientosScreen';
+import { ReceiveSavingsScreen } from '../screens/ReceiveSavingsScreen';
 import { AccionesListScreen } from '../screens/AccionesListScreen';
 import { StockDetailScreen } from '../screens/StockDetailScreen';
 import { BuyStockScreen } from '../screens/BuyStockScreen';
@@ -284,6 +285,13 @@ export const MainNavigator = () => {
         <Stack.Screen
           name="AhorrosMovimientos"
           component={AhorrosMovimientosScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="ReceiveSavings"
+          component={ReceiveSavingsScreen}
           options={{
             headerShown: false,
           }}
