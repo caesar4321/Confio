@@ -60,6 +60,23 @@ Wiring (USDY/USDT/IM/oracle) lives in implementation immutables, so an
 upgrade can re-wire if Ondo migrates its BNB contracts — the concrete
 scenario most likely to force an update.
 
+## Price updates: none needed (vs the Solana design)
+
+The Solana-era design required Confío to PUSH the USDY price on-chain (no
+readable oracle exists there), making us the price authority — ops burden
+plus a trust burden. On BSC the vault reads Ondo's RWADynamicOracle
+synchronously inside every interaction; `accrue()` is lazy and catches up
+the whole elapsed window in one step, so mints/redeems always settle at the
+live oracle price with no keeper required for correctness.
+
+Two footnotes:
+- **Optional keeper, recommended**: a daily cron calling `accrue()` keeps
+  the jump-guard window small (a >1-year dead period could make a legitimate
+  catch-up trip the 2% guard) and keeps server-side netApy/earnedToday
+  displays fresh. Hygiene, not correctness.
+- **If BNB has no RWADynamicOracle deployment** (open question 3), the
+  design regresses to a pushed-price model — confirm early in onboarding.
+
 ## Defensive details
 
 - **Oracle jump guard**: USDY's RWADynamicOracle is a deterministic accreting
@@ -110,6 +127,8 @@ scenario most likely to force an update.
       subsequent upgrade
 - [ ] Timelock on the owner before scale; `lockUpgrades()` at the proven-
       stable milestone (public announcement)
+- [ ] Daily keeper cron calling `accrue()` (guard hygiene + fresh display
+      data; not required for correctness)
 - [ ] Whitelist vault in OndoIDRegistry (Ondo onboarding)
 - [ ] Wire addresses into `cusd_plus/schema.py` resolvers + statsSummary
       `usdy_reserve`; flip ProtectedSavings BscScan links live
