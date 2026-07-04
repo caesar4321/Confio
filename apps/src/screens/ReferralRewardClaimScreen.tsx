@@ -313,7 +313,7 @@ export const ReferralRewardClaimScreen: React.FC = () => {
           <View style={styles.pendingSection}>
             <Text style={styles.pendingTitle}>Bonos en progreso</Text>
             <Text style={styles.pendingSubtitle}>
-              Completa tu primera transacción para desbloquear estos bonos.
+              Completa tu primera recarga de 20 cUSD para desbloquear estos bonos.
             </Text>
           </View>
         );
@@ -381,8 +381,8 @@ export const ReferralRewardClaimScreen: React.FC = () => {
         const otherUserDisplay = getUserDisplayName(otherUser);
 
         const requirementText = isReferrer
-          ? `Ayuda a ${otherUserDisplay} a completar su primera transacción válida para liberar el bono para ambos.`
-          : 'Completa tu primera transacción válida para desbloquear el bono.';
+          ? `Ayuda a ${otherUserDisplay} a completar su primera recarga de 20 cUSD para liberar el bono para ambos.`
+          : 'Completa tu primera recarga de al menos 20 cUSD para desbloquear el bono.';
 
         return (
           <TouchableOpacity

@@ -211,23 +211,11 @@ export const ConfioAddressScreen: React.FC = () => {
             <View style={styles.criteriaList}>
               <View style={styles.criteriaRow}>
                 <Icon name="dollar-sign" size={14} color={colors.secondary} />
-                <Text style={styles.criteriaItem}>Recarga de dólares digitales (US$20+)</Text>
+                <Text style={styles.criteriaItem}>Primera recarga de dólares digitales (US$20+)</Text>
               </View>
               <View style={styles.criteriaRow}>
                 <Icon name="download" size={14} color={colors.secondary} />
-                <Text style={styles.criteriaItem}>Depósito convertido a cUSD (≥ US$20)</Text>
-              </View>
-              <View style={styles.criteriaRow}>
-                <Icon name="send" size={14} color={colors.secondary} />
-                <Text style={styles.criteriaItem}>Primer envío dentro de Confío</Text>
-              </View>
-              <View style={styles.criteriaRow}>
-                <Icon name="shopping-bag" size={14} color={colors.secondary} />
-                <Text style={styles.criteriaItem}>Primer pago a comercio</Text>
-              </View>
-              <View style={styles.criteriaRow}>
-                <Icon name="repeat" size={14} color={colors.secondary} />
-                <Text style={styles.criteriaItem}>Primer trade P2P completado</Text>
+                <Text style={styles.criteriaItem}>Primer depósito convertido a cUSD (≥ US$20)</Text>
               </View>
             </View>
             <Text style={styles.criteriaNote}>El bono se acredita en $CONFIO al equivalente a US$5.</Text>

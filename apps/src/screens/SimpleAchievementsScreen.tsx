@@ -160,7 +160,7 @@ export const SimpleAchievementsScreen: React.FC<SimpleAchievementsScreenProps> =
       <View style={styles.referralCard}>
         <Text style={styles.referralTitle}>🚀 Multiplica tus ganancias</Text>
         <Text style={styles.referralDescription}>
-          Invita amigos y gana 4 $CONFIO cuando completen su primera transacción
+          Invita amigos y gana $CONFIO cuando completen su primera recarga (20 cUSD)
         </Text>
         <TouchableOpacity
           style={styles.referralButton}

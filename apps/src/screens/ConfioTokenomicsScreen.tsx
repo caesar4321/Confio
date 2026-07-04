@@ -57,7 +57,7 @@ export const ConfioTokenomicsScreen = () => {
       tokens: rewardsTokens,
       percentage: pct(rewardsTokens),
       description:
-        '0.74% (7.4M CONFIO) para “Invita y gana”. Pago inmediato on-chain en la primera transacción real ($5 + $5). El monto de tokens se calcula al precio de la fase vigente.',
+        '0.74% (7.4M CONFIO) para “Invita y gana”. Pago inmediato on-chain en la primera recarga real de 20 cUSD ($5 + $5). El monto de tokens se calcula al precio de la fase vigente.',
       color: colors.accent,
       icon: 'gift',
     },
@@ -239,7 +239,7 @@ export const ConfioTokenomicsScreen = () => {
               - Preventa: 74M CONFIO (7.4%) en 5 fases ($0.20–$1.00), desbloqueo total al cerrar fase 3 y lanzar en DEX.{'\n'}
               - Fundador y equipo: 90.36% como reserva típica de fundador para operar y expandir. Bloqueo total hasta fase 3/lanzamiento en DEX; luego se libera mes a mes durante 36 meses. Incluye 1% para equipo clave que se libera en partes iguales durante 24 meses tras lanzamiento en DEX.{'\n'}
               - Cultura LATAM: 1.5% de agradecimiento. Bloqueo total hasta fase 3/lanzamiento en DEX; luego liberado gradualmente en 3 meses.{'\n'}
-              - Recompensas: 7.4M CONFIO on-chain en la primera transacción real, calculadas al precio de la fase vigente.{'\n'}
+              - Recompensas: 7.4M CONFIO on-chain en la primera recarga real (≥ 20 cUSD), calculadas al precio de la fase vigente.{'\n'}
               - Sin VCs ni pools ocultos. Todo está documentado y visible.
             </Text>
             <TouchableOpacity
