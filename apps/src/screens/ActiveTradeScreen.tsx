@@ -25,6 +25,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
 import { InlineBanner } from '../components/common/InlineBanner';
+import { Header } from '../navigation/Header';
 import { MainStackParamList } from '../types/navigation';
 import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
 import { useQuery } from '@apollo/client';
@@ -268,14 +269,12 @@ export const ActiveTradeScreen: React.FC = () => {
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar barStyle="dark-content" backgroundColor="#fff" />
-        <View style={styles.header}>
-          <View style={styles.headerContent}>
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton} accessibilityRole="button" accessibilityLabel="Volver">
-              <Icon name="arrow-left" size={24} color="#374151" />
-            </TouchableOpacity>
-            <Text style={styles.headerTitle}>Cargando intercambio...</Text>
-          </View>
-        </View>
+        <Header
+          navigation={navigation as any}
+          title="Cargando intercambio..."
+          backgroundColor="#fff"
+          showBackButton
+        />
         <View style={styles.content}>
           <View style={styles.stepCard}>
             <View style={styles.loadingCard}>
@@ -294,14 +293,12 @@ export const ActiveTradeScreen: React.FC = () => {
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar barStyle="dark-content" backgroundColor="#fff" />
-        <View style={styles.header}>
-          <View style={styles.headerContent}>
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton} accessibilityRole="button" accessibilityLabel="Volver">
-              <Icon name="arrow-left" size={24} color="#374151" />
-            </TouchableOpacity>
-            <Text style={styles.headerTitle}>Error</Text>
-          </View>
-        </View>
+        <Header
+          navigation={navigation as any}
+          title="Error"
+          backgroundColor="#fff"
+          showBackButton
+        />
         <View style={styles.content}>
           <View style={styles.stepCard}>
             <Text style={styles.stepTitle}>Error al cargar el intercambio</Text>
@@ -1245,52 +1242,55 @@ export const ActiveTradeScreen: React.FC = () => {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
 
+      <Header
+        navigation={navigation as any}
+        title={trade.status === 'COMPLETED' ? 'Detalle del Intercambio' : 'Intercambio Activo'}
+        backgroundColor="#fff"
+        showBackButton
+        onBackPress={handleGoBack}
+        rightAccessory={(
+          <>
+            {trade.status !== 'COMPLETED' && trade.status !== 'CANCELLED' && trade.status !== 'EXPIRED' && trade.status !== 'DISPUTED' && (
+              <TouchableOpacity
+                style={styles.menuButton}
+                onPress={() => {
+                  Alert.alert(
+                    'Opciones del intercambio',
+                    '¿Qué deseas hacer?',
+                    [
+                      {
+                        text: 'Reportar problema',
+                        onPress: handleDisputeTrade,
+                      },
+                      {
+                        text: 'Abandonar intercambio',
+                        onPress: handleAbandonTrade,
+                        style: 'destructive',
+                      },
+                      {
+                        text: 'Cancelar',
+                        style: 'cancel',
+                      },
+                    ],
+                  );
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Abrir opciones del intercambio"
+              >
+                <Icon name="more-vertical" size={20} color="#374151" />
+              </TouchableOpacity>
+            )}
+            {trade.status === 'DISPUTED' && (
+              <View style={styles.disputedBadge}>
+                <Icon name="alert-triangle" size={14} color="#DC2626" />
+                <Text style={styles.disputedBadgeText}>En disputa</Text>
+              </View>
+            )}
+          </>
+        )}
+      />
+
       <View style={styles.header}>
-        <View style={styles.headerContent}>
-          <TouchableOpacity onPress={handleGoBack} style={styles.backButton} accessibilityRole="button" accessibilityLabel="Volver">
-            <Icon name="arrow-left" size={24} color="#374151" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>
-            {trade.status === 'COMPLETED' ? 'Detalle del Intercambio' : 'Intercambio Activo'}
-          </Text>
-          <View style={styles.headerSpacer} />
-          {trade.status !== 'COMPLETED' && trade.status !== 'CANCELLED' && trade.status !== 'EXPIRED' && trade.status !== 'DISPUTED' && (
-            <TouchableOpacity
-              style={styles.menuButton}
-              onPress={() => {
-                Alert.alert(
-                  'Opciones del intercambio',
-                  '¿Qué deseas hacer?',
-                  [
-                    {
-                      text: 'Reportar problema',
-                      onPress: handleDisputeTrade,
-                    },
-                    {
-                      text: 'Abandonar intercambio',
-                      onPress: handleAbandonTrade,
-                      style: 'destructive',
-                    },
-                    {
-                      text: 'Cancelar',
-                      style: 'cancel',
-                    },
-                  ],
-                );
-              }}
-              accessibilityRole="button"
-              accessibilityLabel="Abrir opciones del intercambio"
-            >
-              <Icon name="more-vertical" size={20} color="#374151" />
-            </TouchableOpacity>
-          )}
-          {trade.status === 'DISPUTED' && (
-            <View style={styles.disputedBadge}>
-              <Icon name="alert-triangle" size={14} color="#DC2626" />
-              <Text style={styles.disputedBadgeText}>En disputa</Text>
-            </View>
-          )}
-        </View>
 
         {banner && (
           <InlineBanner
