@@ -21,6 +21,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useMutation, useQuery } from '@apollo/client';
 import { UPDATE_BUSINESS, GET_USER_ACCOUNTS, GET_BUSINESS_KYC_STATUS } from '../apollo/queries';
 import { colors } from '../config/theme';
+import { InlineBanner } from '../components/common/InlineBanner';
 import { APP_LAYOUT } from '../config/layout';
 
 type EditBusinessScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
@@ -34,6 +35,8 @@ export const EditBusinessScreen = () => {
   const { data: accountsData, loading: accountsLoading } = useQuery(GET_USER_ACCOUNTS, { fetchPolicy: 'cache-and-network' });
 
   const [businessName, setBusinessName] = useState('');
+  const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
+  const dismissBanner = React.useCallback(() => setBanner(null), []);
   const [businessCategory, setBusinessCategory] = useState('');
   const [businessDescription, setBusinessDescription] = useState('');
   const [businessRegistrationNumber, setBusinessRegistrationNumber] = useState('');
@@ -131,17 +134,17 @@ export const EditBusinessScreen = () => {
       return;
     }
     if (!businessName.trim()) {
-      Alert.alert('Error', 'El nombre del negocio es requerido');
+      setBanner({ variant: 'error', message: 'El nombre del negocio es requerido' });
       return;
     }
 
     if (!businessCategory) {
-      Alert.alert('Error', 'La categoría del negocio es requerida');
+      setBanner({ variant: 'error', message: 'La categoría del negocio es requerida' });
       return;
     }
 
     if (!activeAccount?.business?.id) {
-      Alert.alert('Error', 'No se pudo identificar el negocio');
+      setBanner({ variant: 'error', message: 'No se pudo identificar el negocio' });
       return;
     }
 
@@ -174,10 +177,10 @@ export const EditBusinessScreen = () => {
         );
       } else {
         const error = result.data?.updateBusiness?.error || 'Error desconocido';
-        Alert.alert('Error', error);
+        setBanner({ variant: 'error', message: error });
       }
     } catch (error) {
-      Alert.alert('Error', 'No se pudo actualizar la información del negocio');
+      setBanner({ variant: 'error', message: 'No se pudo actualizar la información del negocio' });
     } finally {
       setIsLoading(false);
     }
@@ -252,6 +255,14 @@ export const EditBusinessScreen = () => {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+      {banner && (
+        <InlineBanner
+          message={banner.message}
+          variant={banner.variant}
+          onDismiss={dismissBanner}
+          style={{ marginHorizontal: 16, marginTop: 12 }}
+        />
+      )}
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
