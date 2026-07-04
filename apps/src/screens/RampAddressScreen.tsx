@@ -9,7 +9,6 @@ import {
   Modal,
   FlatList,
   ActivityIndicator,
-  Animated,
   StatusBar,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
@@ -24,6 +23,7 @@ import { AnalyticsService } from '../services/analyticsService';
 import { getCountryByIso } from '../utils/countries';
 import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
+import { InlineBanner } from '../components/common/InlineBanner';
 import { Header } from '../navigation/Header';
 
 type Navigation = NavigationProp<MainStackParamList>;
@@ -51,11 +51,6 @@ export const RampAddressScreen: React.FC = () => {
   const [authEmail, setAuthEmail] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  const [savedSuccess, setSavedSuccess] = useState(false);
-
-  const successOpacity = useRef(new Animated.Value(0)).current;
-  const successBannerAnimRef = useRef<Animated.CompositeAnimation | null>(null);
-  const isMountedRef = useRef(true);
 
   const rampAddress = data?.myRampAddress;
   const phoneCountryIso = String(userProfile?.phoneCountry || '').toUpperCase();
@@ -124,31 +119,6 @@ export const RampAddressScreen: React.FC = () => {
     shouldShowEconomicActivityField,
   ]);
 
-  useEffect(() => {
-    return () => {
-      isMountedRef.current = false;
-      successBannerAnimRef.current?.stop();
-      successOpacity.stopAnimation();
-    };
-  }, [successOpacity]);
-
-  const showSuccessBanner = () => {
-    setSavedSuccess(true);
-    successBannerAnimRef.current?.stop();
-    successBannerAnimRef.current = Animated.sequence([
-      Animated.timing(successOpacity, { toValue: 1, duration: 250, useNativeDriver: true }),
-      Animated.delay(2000),
-      Animated.timing(successOpacity, { toValue: 0, duration: 400, useNativeDriver: true }),
-    ]);
-    successBannerAnimRef.current.start(() => {
-      if (!isMountedRef.current) {
-        return;
-      }
-      setSavedSuccess(false);
-      navigation.goBack();
-    });
-  };
-
   const validate = () => {
     if (!addressStreet.trim()) return 'Ingresa tu dirección.';
     if (shouldShowAddressNeighborhoodField && !addressNeighborhood.trim()) return `Ingresa tu ${addressNeighborhoodLabel.toLowerCase()}.`;
@@ -201,7 +171,9 @@ export const RampAddressScreen: React.FC = () => {
         country: phoneCountryIso || '',
         has_auth_email: shouldShowAuthEmailField && Boolean(authEmail.trim()),
       });
-      showSuccessBanner();
+      // No interstitial: the saved address on the previous screen is the
+      // confirmation.
+      navigation.goBack();
     } catch (mutationError) {
       setError('No se pudo guardar tu dirección. Inténtalo nuevamente.');
     } finally {
@@ -224,18 +196,11 @@ export const RampAddressScreen: React.FC = () => {
         showBackButton
       />
 
-      {savedSuccess && (
-        <Animated.View style={[styles.successBanner, { opacity: successOpacity }]}>
-          <Icon name="check-circle" size={16} color={colors.successText} />
-          <Text style={styles.successBannerText}>Dirección guardada</Text>
-        </Animated.View>
-      )}
-
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <View style={styles.infoCard}>
           <View style={styles.infoRow}>
             <View style={styles.infoIconWrap}>
-              <Icon name="map-pin" size={15} color={colors.primaryDark} />
+              <Icon name="map-pin" size={16} color={colors.primaryDark} />
             </View>
             <Text style={styles.infoText}>
               La usamos para completar tus datos cuando un proveedor bancario la necesita para habilitar recargas y retiros.
@@ -348,6 +313,8 @@ export const RampAddressScreen: React.FC = () => {
                   setActivitySearch('');
                   setShowActivityPicker(true);
                 }}
+                accessibilityRole="button"
+                accessibilityLabel={economicActivity ? `Actividad económica: ${economicActivity}` : 'Seleccionar actividad económica'}
               >
                 <Icon name="briefcase" size={15} color={colors.textSecondary} style={styles.inputIcon} />
                 <Text
@@ -381,10 +348,12 @@ export const RampAddressScreen: React.FC = () => {
           ) : null}
 
           {error ? (
-            <View style={styles.errorBanner}>
-              <Icon name="alert-circle" size={14} color={colors.error.icon} />
-              <Text style={styles.errorText}>{error}</Text>
-            </View>
+            <InlineBanner
+              message={error}
+              variant="error"
+              onDismiss={() => setError(null)}
+              style={{ marginTop: 12, marginBottom: 0 }}
+            />
           ) : null}
 
           <Button
@@ -406,7 +375,7 @@ export const RampAddressScreen: React.FC = () => {
       >
         <SafeAreaView style={styles.modalSafeArea}>
           <View style={styles.modalHeader}>
-            <TouchableOpacity onPress={() => setShowActivityPicker(false)}>
+            <TouchableOpacity onPress={() => setShowActivityPicker(false)} accessibilityRole="button" accessibilityLabel="Cancelar">
               <Text style={styles.modalCancel}>Cancelar</Text>
             </TouchableOpacity>
             <Text style={styles.modalTitle}>Actividad económica</Text>
@@ -439,6 +408,9 @@ export const RampAddressScreen: React.FC = () => {
                     setError(null);
                     setShowActivityPicker(false);
                   }}
+                  accessibilityRole="button"
+                  accessibilityLabel={item.label}
+                  accessibilityState={{ selected: item.value === economicActivity }}
                 >
                   <Text style={styles.activityItemText}>{item.label}</Text>
                   {selected ? <Icon name="check" size={18} color={colors.primary} /> : null}
@@ -462,22 +434,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  successBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginHorizontal: 16,
-    marginBottom: 4,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    backgroundColor: colors.successLight,
-    borderRadius: 12,
-  },
-  successBannerText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.successText,
-  },
   content: {
     padding: 16,
     paddingBottom: 32,
@@ -494,7 +450,12 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   infoIconWrap: {
-    marginTop: 1,
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: colors.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   infoText: {
     flex: 1,
@@ -528,7 +489,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: colors.neutral,
     justifyContent: 'center',
     paddingHorizontal: 14,
   },
@@ -632,21 +593,6 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     color: colors.textSecondary,
     textAlign: 'center',
-  },
-  errorBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    backgroundColor: colors.errorLight,
-    borderRadius: 10,
-  },
-  errorText: {
-    flex: 1,
-    fontSize: 13,
-    color: colors.error.text,
   },
 });
 
