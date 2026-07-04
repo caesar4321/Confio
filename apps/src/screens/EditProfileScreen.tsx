@@ -111,19 +111,10 @@ export const EditProfileScreen = () => {
       const usernameErrorMsg = usernameResult.data?.updateUsername?.error;
 
       if (profileSuccess && usernameSuccess) {
-        Alert.alert(
-          'Éxito',
-          'Perfil actualizado correctamente',
-          [
-            {
-              text: 'Entendido',
-              onPress: () => {
-                refreshProfile('personal');
-                navigation.goBack();
-              }
-            }
-          ]
-        );
+        // No interrupting dialog: the updated profile on the previous screen
+        // IS the confirmation.
+        refreshProfile('personal');
+        navigation.goBack();
       } else {
         if (usernameErrorMsg && usernameErrorMsg.includes('ya está en uso')) {
           const suggestions = getUsernameSuggestions(username.trim());
@@ -186,15 +177,15 @@ export const EditProfileScreen = () => {
   };
 
   const getUsernameSuggestions = (baseUsername: string) => {
-    const suggestions = [
+    const year = new Date().getFullYear();
+    return [
       baseUsername + '123',
-      baseUsername + '_2024',
+      `${baseUsername}_${year}`,
       baseUsername + 'Real',
-      baseUsername + 'Official',
+      baseUsername + 'Oficial',
       baseUsername + 'VE',
-      baseUsername + 'Latam'
+      baseUsername + 'Latam',
     ];
-    return suggestions;
   };
 
   const handleUsernameChange = (text: string) => {
@@ -214,8 +205,8 @@ export const EditProfileScreen = () => {
       <View style={styles.container}>
         <Header
           navigation={navigation as any}
-          title="Cargando..."
-          backgroundColor="#34d399"
+          title="Editar Perfil"
+          backgroundColor={colors.primary}
           isLight
           showBackButton
           onBackPress={handleCancel}
@@ -238,7 +229,7 @@ export const EditProfileScreen = () => {
       <Header
         navigation={navigation as any}
         title="Editar Perfil"
-        backgroundColor="#34d399"
+        backgroundColor={colors.primary}
         isLight
         showBackButton
         onBackPress={handleCancel}
@@ -275,7 +266,7 @@ export const EditProfileScreen = () => {
         {isVerified && (
           <View style={styles.verifiedBanner}>
             <View style={styles.verifiedHeader}>
-              <Icon name="check-circle" size={20} color="#047857" />
+              <Icon name="check-circle" size={20} color={colors.successText} />
               <Text style={styles.verifiedBannerTitle}>Identidad Verificada</Text>
             </View>
             <Text style={styles.verifiedBannerText}>
@@ -296,14 +287,14 @@ export const EditProfileScreen = () => {
             value={firstName}
             onChangeText={setFirstName}
             placeholder="Ingresa tu nombre"
-            placeholderTextColor="#9CA3AF"
+            placeholderTextColor={colors.text.light}
             autoCapitalize="words"
             autoCorrect={false}
             editable={!isVerified}
           />
           {isVerified && (
             <Text style={styles.inputSubtext}>
-              <Icon name="lock" size={10} color="#6B7280" /> No editable por verificación de identidad
+              <Icon name="lock" size={10} color={colors.text.secondary} /> No editable por verificación de identidad
             </Text>
           )}
         </View>
@@ -315,14 +306,14 @@ export const EditProfileScreen = () => {
             value={lastName}
             onChangeText={setLastName}
             placeholder="Ingresa tu apellido"
-            placeholderTextColor="#9CA3AF"
+            placeholderTextColor={colors.text.light}
             autoCapitalize="words"
             autoCorrect={false}
             editable={!isVerified}
           />
           {isVerified && (
             <Text style={styles.inputSubtext}>
-              <Icon name="lock" size={10} color="#6B7280" /> No editable por verificación de identidad
+              <Icon name="lock" size={10} color={colors.text.secondary} /> No editable por verificación de identidad
             </Text>
           )}
         </View>
@@ -339,7 +330,7 @@ export const EditProfileScreen = () => {
               value={username}
               onChangeText={handleUsernameChange}
               placeholder="usuario"
-              placeholderTextColor="#9CA3AF"
+              placeholderTextColor={colors.text.light}
               autoCapitalize="none"
               autoCorrect={false}
               autoComplete="off"
@@ -368,7 +359,7 @@ export const EditProfileScreen = () => {
                   : 'No configurado'
                 }
               </Text>
-              <Icon name="chevron-right" size={20} color="#9CA3AF" />
+              <Icon name="chevron-right" size={20} color={colors.text.light} />
             </View>
           </TouchableOpacity>
           <Text style={styles.phoneInputSubtext}>
@@ -380,7 +371,7 @@ export const EditProfileScreen = () => {
         </View>
 
         <View style={styles.infoContainer}>
-          <Icon name="info" size={16} color="#6B7280" />
+          <Icon name="info" size={16} color={colors.text.secondary} />
           <Text style={styles.infoText}>
             Puedes cambiar tu nombre hasta que verifiques tu identidad. Una vez verificada, tu nombre legal no podrá ser modificado.
           </Text>
@@ -393,7 +384,7 @@ export const EditProfileScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: colors.background,
   },
   saveButton: {
     paddingHorizontal: 16,
@@ -405,7 +396,7 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   saveButtonText: {
-    color: '#fff',
+    color: colors.white,
     fontWeight: '600',
     fontSize: 14,
   },
@@ -419,7 +410,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     fontSize: 16,
-    color: '#6B7280',
+    color: colors.text.secondary,
   },
   scrollView: {
     flex: 1,
@@ -433,27 +424,27 @@ const styles = StyleSheet.create({
   inputLabel: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#1F2937',
+    color: colors.text.primary,
     marginBottom: 8,
   },
   textInput: {
     borderWidth: 1,
-    borderColor: '#D1D5DB',
+    borderColor: colors.borderMedium,
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 12,
     fontSize: 16,
-    color: '#1F2937',
-    backgroundColor: '#F9FAFB',
+    color: colors.text.primary,
+    backgroundColor: colors.neutral,
   },
   disabledInput: {
-    backgroundColor: '#E5E7EB',
-    color: '#6B7280',
-    borderColor: '#E5E7EB',
+    backgroundColor: colors.border,
+    color: colors.text.secondary,
+    borderColor: colors.border,
   },
   verifiedBanner: {
-    backgroundColor: '#ECFDF5',
-    borderColor: '#10B981',
+    backgroundColor: colors.primarySoft,
+    borderColor: colors.primaryDark,
     borderWidth: 1,
     borderRadius: 12,
     padding: 16,
@@ -467,30 +458,30 @@ const styles = StyleSheet.create({
   verifiedBannerTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#047857',
+    color: colors.successText,
     marginLeft: 8,
   },
   verifiedBannerText: {
     fontSize: 14,
-    color: '#065F46',
+    color: colors.primaryDeep,
     lineHeight: 20,
   },
   inputSubtext: {
     fontSize: 12,
-    color: '#6B7280',
+    color: colors.text.secondary,
     marginTop: 4,
   },
   usernameInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#D1D5DB',
+    borderColor: colors.borderMedium,
     borderRadius: 12,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: colors.neutral,
   },
   atSymbol: {
     fontSize: 16,
-    color: '#6B7280',
+    color: colors.text.secondary,
     paddingHorizontal: 16,
     paddingVertical: 12,
     fontWeight: '500',
@@ -500,22 +491,22 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingRight: 16,
     fontSize: 16,
-    color: '#1F2937',
+    color: colors.text.primary,
     backgroundColor: 'transparent',
   },
   usernameInputError: {
-    borderColor: '#EF4444',
+    borderColor: colors.danger,
   },
   errorText: {
     fontSize: 12,
-    color: '#EF4444',
+    color: colors.danger,
     marginTop: 4,
   },
   phoneInputContainer: {
     borderWidth: 1,
-    borderColor: '#D1D5DB',
+    borderColor: colors.borderMedium,
     borderRadius: 12,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: colors.neutral,
     marginBottom: 4,
   },
   phoneInputContent: {
@@ -527,18 +518,18 @@ const styles = StyleSheet.create({
   },
   phoneInputText: {
     fontSize: 16,
-    color: '#1F2937',
+    color: colors.text.primary,
     flex: 1,
   },
   phoneInputSubtext: {
     fontSize: 12,
-    color: '#6B7280',
+    color: colors.text.secondary,
     marginTop: 4,
   },
   infoContainer: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.neutralDark,
     padding: 16,
     borderRadius: 12,
     marginTop: 16,
@@ -546,7 +537,7 @@ const styles = StyleSheet.create({
   },
   infoText: {
     fontSize: 14,
-    color: '#6B7280',
+    color: colors.text.secondary,
     marginLeft: 8,
     flex: 1,
     lineHeight: 20,
