@@ -37,23 +37,12 @@ import { GET_MY_BALANCES } from '../apollo/queries';
 import { useAhorrosPortfolio } from '../hooks/useAhorrosPortfolio';
 import { RouteSheet, RouteOption } from '../components/RouteSheet';
 import { TickerLogo } from '../components/TickerLogo';
+import { MovementRow } from '../components/MovementRow';
 import { useGmMarket } from '../hooks/useGmMarket';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import OndoLogo from '../assets/png/Ondo.png';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
-
-
-const MOVEMENT_ICONS: Record<string, string> = {
-  deposit: 'arrow-down-circle',
-  withdraw: 'arrow-up-circle',
-  buy: 'shopping-cart',
-  sell: 'repeat',
-  yield: 'trending-up',
-};
-
-const formatMovementDate = (iso: string) =>
-  new Date(iso).toLocaleDateString('es', { day: 'numeric', month: 'short' });
 
 const EDUCATION_CARDS = [
   {
@@ -353,9 +342,22 @@ export const AhorrosScreen = () => {
           </>
         )}
 
-        {/* Movimientos — house pattern: history lives right under the
-            balance cards, like the cUSD and CONFIO account screens. */}
-        <Text style={styles.sectionTitle}>Movimientos</Text>
+        {/* Movimientos — house pattern: history right under the balance
+            cards. Bounded preview (recent few) so the sections below stay
+            reachable; the unbounded list lives in AhorrosMovimientos. */}
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionTitle}>Movimientos</Text>
+          {movements.length > 0 && (
+            <TouchableOpacity
+              style={styles.verTodosBtn}
+              onPress={() => navigation.navigate('AhorrosMovimientos')}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.verTodosText}>Ver todos</Text>
+              <Icon name="chevron-right" size={15} color={colors.primaryDark} />
+            </TouchableOpacity>
+          )}
+        </View>
         {movements.length === 0 ? (
           <View style={styles.movementsEmpty}>
             <Icon name="clock" size={22} color={colors.text.light} />
@@ -365,32 +367,8 @@ export const AhorrosScreen = () => {
           </View>
         ) : (
           <View style={styles.card}>
-            {movements.map((m, idx) => (
-              <View
-                key={m.id}
-                style={[styles.movementRow, idx > 0 && styles.movementRowBorder]}
-              >
-                <View style={styles.movementIcon}>
-                  <Icon
-                    name={MOVEMENT_ICONS[m.type] || 'circle'}
-                    size={16}
-                    color={colors.primaryDark}
-                  />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.movementTitle}>{m.title}</Text>
-                  <Text style={styles.movementDate}>{formatMovementDate(m.createdAt)}</Text>
-                </View>
-                <Text
-                  style={[
-                    styles.movementAmount,
-                    m.amountUsd < 0 && styles.movementAmountOut,
-                  ]}
-                >
-                  {m.amountUsd >= 0 ? '+' : '−'}$
-                  {Math.abs(m.amountUsd).toFixed(2)}
-                </Text>
-              </View>
+            {movements.slice(0, 4).map((m, idx) => (
+              <MovementRow key={m.id} movement={m} topBorder={idx > 0} />
             ))}
           </View>
         )}
@@ -624,25 +602,13 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 17,
   },
-  movementRow: {
+  verTodosBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingVertical: 10,
+    gap: 2,
+    marginBottom: 10,
   },
-  movementRowBorder: { borderTopWidth: 1, borderTopColor: '#F3F4F6' },
-  movementIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: colors.primaryLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  movementTitle: { fontSize: 14, fontWeight: '600', color: colors.text.primary },
-  movementDate: { fontSize: 11, color: colors.text.light, marginTop: 1 },
-  movementAmount: { fontSize: 14, fontWeight: '700', color: colors.primaryDark },
-  movementAmountOut: { color: colors.text.primary },
+  verTodosText: { fontSize: 13, fontWeight: '600', color: colors.primaryDark },
 
   partnerRow: {
     flexDirection: 'row',
