@@ -21,6 +21,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQuery, useMutation } from '@apollo/client';
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
+import { InlineBanner } from '../components/common/InlineBanner';
 import { getCountryByIso } from '../utils/countries';
 import { useNumberFormat } from '../utils/numberFormatting';
 import {
@@ -99,6 +100,8 @@ export const FinancieraDetailScreen = () => {
 
   const [reportMutation, { loading: reporting }] = useMutation(REPORT_FINANCIERA);
   const [reportModal, setReportModal] = useState(false);
+  const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
+  const dismissBanner = React.useCallback(() => setBanner(null), []);
   const [reportReason, setReportReason] = useState('');
 
   // Reports must carry substance the moderation team can act on; the API
@@ -117,10 +120,10 @@ export const FinancieraDetailScreen = () => {
         setReportReason('');
         Alert.alert('Gracias', 'Recibimos tu reporte. Nuestro equipo lo revisará pronto.');
       } else {
-        Alert.alert('Error', res.data?.reportFinanciera?.error || 'No se pudo enviar el reporte.');
+        setBanner({ variant: 'error', message: res.data?.reportFinanciera?.error || 'No se pudo enviar el reporte.' });
       }
     } catch {
-      Alert.alert('Error', 'No se pudo enviar el reporte. Intenta de nuevo.');
+      setBanner({ variant: 'error', message: 'No se pudo enviar el reporte. Intenta de nuevo.' });
     }
   };
 
@@ -207,6 +210,13 @@ export const FinancieraDetailScreen = () => {
       </SafeAreaView>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        {banner && (
+          <InlineBanner
+            message={banner.message}
+            variant={banner.variant}
+            onDismiss={dismissBanner}
+          />
+        )}
         {/* Identity */}
         <View style={styles.card}>
           <View style={styles.nameRow}>
