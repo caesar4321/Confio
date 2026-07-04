@@ -55,6 +55,23 @@ class ConvertSessionConsumer(AsyncJsonWebsocketConsumer):
         if t == "ping":
             await self.send_json({"type": "pong"})
             return
+        if t == "prepare_savings":
+            # Leg-AB (cUSD -> cUSD+): client sends its Allbridge tail; server
+            # verifies per ORCHESTRATION.md §6 and sponsor-signs the prefix.
+            try:
+                pack = await self._prepare_savings(
+                    amount=str(content.get("amount") or ""),
+                    tail=list(content.get("tail") or []),
+                )
+                if not pack.get("success"):
+                    await self.send_json({"type": "error", "message": pack.get("error", "prepare_savings_failed")})
+                else:
+                    await self.send_json({"type": "prepare_savings_ready", "pack": pack})
+            except Exception as e:
+                logger.exception("prepare_savings failed")
+                await self.send_json({"type": "error", "message": str(e) or "prepare_savings_exception"})
+            return
+
         if t == "prepare":
             direction = (content.get("direction") or "").strip().lower()
             amount = content.get("amount")
@@ -120,6 +137,43 @@ class ConvertSessionConsumer(AsyncJsonWebsocketConsumer):
         self._idle_task = asyncio.create_task(self._idle_close())
 
     @database_sync_to_async
+    @database_sync_to_async
+    def _prepare_savings(self, amount: str, tail: list):
+        from decimal import Decimal, InvalidOperation
+        from users.jwt_context import get_jwt_business_context_with_validation
+        from users.models import Account
+        from cusd_plus.prepare_leg_ab import prepare_leg_ab
+
+        user = self.scope.get("user")
+        if not (user and getattr(user, "is_authenticated", False)):
+            return {"success": False, "error": "auth_required"}
+        try:
+            amt = Decimal(amount)
+        except (InvalidOperation, TypeError):
+            return {"success": False, "error": "invalid_amount"}
+
+        meta = {}
+        if self._raw_token:
+            meta["HTTP_AUTHORIZATION"] = f"JWT {self._raw_token}"
+        info = _DummyInfo(context=_DummyRequest(user=user, meta=meta))
+        jwt_context = get_jwt_business_context_with_validation(info, required_permission='send_funds')
+        if not jwt_context:
+            return {"success": False, "error": "no_access"}
+        if jwt_context['account_type'] == 'business' and jwt_context.get('business_id'):
+            account = Account.objects.filter(
+                account_type='business',
+                account_index=jwt_context['account_index'],
+                business_id=jwt_context['business_id'],
+            ).first()
+        else:
+            account = user.accounts.filter(
+                account_type=jwt_context['account_type'],
+                account_index=jwt_context['account_index'],
+            ).first()
+        if not account:
+            return {"success": False, "error": "account_not_found"}
+        return prepare_leg_ab(account=account, amount=amt, tail_b64=tail)
+
     def _prepare(self, direction: str, amount: str, ramp_provider: str = "", provider_order_id: str = ""):
         from conversion.schema import ConvertUSDCToCUSD, ConvertCUSDToUSDC
         user = self.scope.get("user")
