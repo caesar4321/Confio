@@ -22,6 +22,7 @@ import { buildReferralShareMessage, normalizeInviteUsername } from '../utils/inv
 import { AnalyticsService } from '../services/analyticsService';
 import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
+import { InlineBanner } from '../components/common/InlineBanner';
 import { Header } from '../navigation/Header';
 
 type Step = {
@@ -41,6 +42,8 @@ export const AchievementsScreen: React.FC = () => {
     return false;
   }, [rawUsername]);
   const [showReferralModal, setShowReferralModal] = useState(false);
+  const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
+  const dismissBanner = React.useCallback(() => setBanner(null), []);
 
   const shareMessage = useMemo(() => {
     return buildReferralShareMessage(username || 'tuUsuario');
@@ -49,7 +52,7 @@ export const AchievementsScreen: React.FC = () => {
   const steps: Step[] = useMemo(
     () => [
       {
-        title: 'Compartí tu link',
+        title: 'Comparte tu link',
         description: 'Toca "Invitar por WhatsApp" y elige a tus amigos. El mensaje incluye tu link y la historia de Julian.',
       },
       {
@@ -57,9 +60,9 @@ export const AchievementsScreen: React.FC = () => {
         description: 'Al crear su cuenta usando tu enlace, queda asociado a tu invitación.',
       },
       {
-        title: 'Carga 20 cUSD y se activan los US$5 en $CONFIO',
+        title: 'Tu amigo carga 20 cUSD',
         description:
-          'Cuando tu amigo carga al menos 20 cUSD, se activan los US$5 en $CONFIO para los dos.',
+          'Con su primera recarga de al menos 20 cUSD se activan los US$5 en $CONFIO para los dos.',
       },
       {
         title: '¡Ganen sin límites!',
@@ -105,11 +108,11 @@ export const AchievementsScreen: React.FC = () => {
 
   const handleCopy = () => {
     if (!username) {
-      Alert.alert('Configura tu usuario', 'Actualiza tu perfil para crear un @usuario y comienza a invitar.');
+      setBanner({ variant: 'error', message: 'Actualiza tu perfil para crear un @usuario y comienza a invitar.' });
       return;
     }
     Clipboard.setString(username);
-    Alert.alert('Usuario copiado', 'Ya puedes pegar tu @usuario en WhatsApp o cualquier app.');
+    setBanner({ variant: 'success', message: 'Usuario copiado — pégalo en WhatsApp o cualquier app.' });
   };
 
   return (
@@ -123,13 +126,22 @@ export const AchievementsScreen: React.FC = () => {
       />
 
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+        {banner && (
+          <InlineBanner
+            message={banner.message}
+            variant={banner.variant}
+            onDismiss={dismissBanner}
+            autoHideMs={banner.variant === 'success' ? 2500 : undefined}
+            style={{ marginBottom: 0 }}
+          />
+        )}
         <View style={styles.heroCard}>
           <View style={styles.heroIconWrap}>
             <Icon name="gift" size={24} color={colors.primaryDark} />
           </View>
-          <Text style={styles.heroTitle}>Invitá a tus amigos a la red de confianza</Text>
+          <Text style={styles.heroTitle}>Invita a tus amigos a la red de confianza</Text>
           <Text style={styles.heroSubtitle}>
-            Compartí la historia de Julian y por qué nació Confío.{'\n'}
+            Comparte la historia de Julian y por qué nació Confío.{'\n'}
             Cuando tu amigo haga su primer depósito, ambos reciben US$5 en $CONFIO como bienvenida.
           </Text>
 
@@ -172,7 +184,7 @@ export const AchievementsScreen: React.FC = () => {
         <View style={styles.referrerCard}>
           <Text style={styles.referrerTitle}>¿Te invitó alguien?</Text>
           <Text style={styles.referrerSubtitle}>
-            Poné su @usuario o número así también recibe su regalo.
+            Pon su @usuario o número para que también reciba su regalo.
           </Text>
           <TouchableOpacity style={styles.referrerButton} onPress={() => setShowReferralModal(true)}>
             <Icon name="user-plus" size={18} color={colors.primaryDark} />
@@ -476,11 +488,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.neutral,
     borderRadius: 12,
     gap: 6,
-  },
-  criteriaTitle: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.gray700,
   },
   criteriaItem: {
     fontSize: 13,
