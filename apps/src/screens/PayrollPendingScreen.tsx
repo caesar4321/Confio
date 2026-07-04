@@ -13,6 +13,7 @@ import { useAccount } from '../contexts/AccountContext';
 import { biometricAuthService } from '../services/biometricAuthService';
 import LoadingOverlay from '../components/LoadingOverlay';
 import { colors } from '../config/theme';
+import { Header } from '../navigation/Header';
 import { APP_LAYOUT } from '../config/layout';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'PayrollPending'>;
@@ -167,19 +168,23 @@ export const PayrollPendingScreen = () => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Icon name="chevron-left" size={24} color={colors.textFlat} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Nómina pendiente</Text>
-        <TouchableOpacity
-          style={styles.historyButton}
-          onPress={() => navigation.navigate('PayrollRunsHistory')}
-        >
-          <Text style={styles.historyText}>Historial</Text>
-        </TouchableOpacity>
-      </View>
+    <View style={styles.container}>
+      <Header
+        navigation={navigation as any}
+        title="Nómina pendiente"
+        backgroundColor="#fff"
+        showBackButton
+        rightAccessory={(
+          <TouchableOpacity
+            style={styles.historyButton}
+            onPress={() => navigation.navigate('PayrollRunsHistory')}
+            accessibilityRole="button"
+            accessibilityLabel="Ver historial de nómina"
+          >
+            <Text style={styles.historyText}>Historial</Text>
+          </TouchableOpacity>
+        )}
+      />
 
       <View style={styles.balanceCard}>
         <View>
@@ -258,28 +263,12 @@ export const PayrollPendingScreen = () => {
       />
 
       <LoadingOverlay visible={isProcessing} message={processingMessage} />
-    </SafeAreaView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    marginTop: Platform.OS === 'android' ? APP_LAYOUT.topSafeArea + 10 : 0,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
-  },
-  backButton: {
-    width: 32,
-    height: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   historyButton: {
     paddingHorizontal: 10,
     paddingVertical: 6,
@@ -324,13 +313,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: colors.textFlat,
-  },
-  headerTitle: {
-    flex: 1,
-    textAlign: 'center',
-    fontSize: 18,
-    color: colors.textFlat,
-    fontWeight: '600',
   },
   listContent: {
     padding: 16,
