@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, Animated, Easing, ActivityIndicator, Alert, Platform, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Animated, Easing, ActivityIndicator, Alert, Platform, ScrollView, StatusBar } from 'react-native';
 import LoadingOverlay from '../components/LoadingOverlay';
 import { BackupConsentModal } from '../components/BackupConsentModal';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
@@ -12,7 +12,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { AuthStackParamList } from '../types/navigation';
 import { useAuth } from '../contexts/AuthContext';
 
-import Svg, { Defs, Stop, RadialGradient, Ellipse } from 'react-native-svg';
+import Svg, { Defs, Stop, RadialGradient, LinearGradient as SvgLinearGradient, Ellipse, Rect } from 'react-native-svg';
 import { colors } from '../config/theme';
 
 
@@ -25,6 +25,17 @@ export const AuthScreen = () => {
   const [loadingMessage, setLoadingMessage] = useState('');
   const [showBackupModal, setShowBackupModal] = useState(false);
   const rotateAnim = useRef(new Animated.Value(0)).current;
+  // Single restrained entrance: content fades up once on mount.
+  const enterAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.timing(enterAnim, {
+      toValue: 1,
+      duration: 600,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [enterAnim]);
 
   // Initialize auth service when component mounts
   useEffect(() => {
@@ -147,8 +158,37 @@ export const AuthScreen = () => {
 
   return (
     <View style={styles.container}>
-      <View style={styles.contentWrapper}>
-        {/* Glowing Logo with Gradient */}
+      <StatusBar barStyle="light-content" backgroundColor="#06110D" />
+      {/* Emerald-night backdrop: one vertical gradient + one aurora glow anchored
+          to the logo. Structural light, not confetti. */}
+      <Svg style={StyleSheet.absoluteFill} width="100%" height="100%">
+        <Defs>
+          <SvgLinearGradient id="night" x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0" stopColor="#06110D" />
+            <Stop offset="0.55" stopColor="#0A1F18" />
+            <Stop offset="1" stopColor="#06251A" />
+          </SvgLinearGradient>
+          <RadialGradient id="aurora" cx="50%" cy="30%" r="55%">
+            <Stop offset="0%" stopColor="#34D399" stopOpacity="0.16" />
+            <Stop offset="60%" stopColor="#34D399" stopOpacity="0.05" />
+            <Stop offset="100%" stopColor="#34D399" stopOpacity="0" />
+          </RadialGradient>
+        </Defs>
+        <Rect width="100%" height="100%" fill="url(#night)" />
+        <Rect width="100%" height="100%" fill="url(#aurora)" />
+      </Svg>
+      <Animated.View
+        style={[
+          styles.contentWrapper,
+          {
+            opacity: enterAnim,
+            transform: [{
+              translateY: enterAnim.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }),
+            }],
+          },
+        ]}
+      >
+        {/* Glowing Logo */}
         <View style={[styles.logoWrapper, { width: 160, height: 160, alignItems: 'center', justifyContent: 'center', position: 'relative' }]}>
           <Svg
             height="160"
@@ -168,8 +208,8 @@ export const AuthScreen = () => {
                 r="80"
                 gradientUnits="userSpaceOnUse"
               >
-                <Stop offset="0%" stopColor="#34D399" stopOpacity="0.22" />
-                <Stop offset="70%" stopColor="#34D399" stopOpacity="0.08" />
+                <Stop offset="0%" stopColor="#34D399" stopOpacity="0.45" />
+                <Stop offset="65%" stopColor="#34D399" stopOpacity="0.14" />
                 <Stop offset="100%" stopColor="#34D399" stopOpacity="0" />
               </RadialGradient>
             </Defs>
@@ -187,6 +227,7 @@ export const AuthScreen = () => {
           />
         </View>
 
+        <Text style={styles.eyebrow}>DÓLARES DIGITALES</Text>
         <Text style={styles.title} accessibilityRole="header">Bienvenido a Confío</Text>
 
         <Text style={styles.subtitle}>La manera más fácil y segura de enviar, pagar, y ahorrar en dólares digitales</Text>
@@ -207,7 +248,7 @@ export const AuthScreen = () => {
               accessibilityRole="button"
               accessibilityLabel="Continuar con Apple"
             >
-              <AppleLogo width={24} height={24} style={{ marginRight: 8 }} fill="#fff" />
+              <AppleLogo width={24} height={24} style={{ marginRight: 8 }} fill="#000" />
               <Text style={styles.appleButtonText}>Continuar con Apple</Text>
             </TouchableOpacity>
           )}
@@ -216,11 +257,11 @@ export const AuthScreen = () => {
           <Text style={styles.termsText}>Al continuar, aceptas</Text>
           <Text style={styles.termsLinks}>
             <Text style={styles.termsLink} onPress={() => handleLegalDocumentPress('terms')}>Términos de Servicio</Text>
-            <Text style={{ color: '#6B7280', fontWeight: 'normal' }}> y </Text>
+            <Text style={{ color: 'rgba(255,255,255,0.45)', fontWeight: 'normal' }}> y </Text>
             <Text style={styles.termsLink} onPress={() => handleLegalDocumentPress('privacy')}>Política de Privacidad</Text>
           </Text>
         </View>
-      </View>
+      </Animated.View>
 
       <LoadingOverlay visible={isLoading} message={loadingMessage} />
 
@@ -238,7 +279,7 @@ export const AuthScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: '#06110D', // matches the night gradient's top stop
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -284,19 +325,27 @@ const styles = StyleSheet.create({
     fontSize: 48,
     fontWeight: 'bold',
   },
+  eyebrow: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 3,
+    color: '#34D399',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
   title: {
-    fontSize: 28,
+    fontSize: 30,
     fontWeight: 'bold',
-    color: colors.dark,
+    color: '#FFFFFF',
     textAlign: 'center',
     marginBottom: 4,
   },
   subtitle: {
     fontSize: 16,
-    color: colors.text.secondary,
+    color: 'rgba(236, 253, 245, 0.72)', // emerald-tinted off-white
     textAlign: 'center',
-    marginBottom: 32,
-    marginTop: 4,
+    marginBottom: 36,
+    marginTop: 6,
     maxWidth: 320,
     lineHeight: 24,
   },
@@ -307,17 +356,12 @@ const styles = StyleSheet.create({
   googleButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.background,
-    borderColor: '#E5E7EB',
-    borderWidth: 1,
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
     borderRadius: 16,
-    paddingVertical: 14,
+    paddingVertical: 15,
     paddingHorizontal: 16,
     marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
   },
   googleButtonText: {
     color: colors.dark,
@@ -325,21 +369,19 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginLeft: 8,
   },
+  // Apple HIG: on dark backgrounds, use the white "Sign in with Apple" style.
   appleButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#000',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
     borderRadius: 16,
-    paddingVertical: 14,
+    paddingVertical: 15,
     paddingHorizontal: 16,
     marginBottom: 0,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
   },
   appleButtonText: {
-    color: '#ffffff',
+    color: '#111827',
     fontWeight: '500',
     fontSize: 16,
     marginLeft: 8,
@@ -349,7 +391,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   termsText: {
-    color: '#6B7280',
+    color: 'rgba(255,255,255,0.45)',
     fontSize: 14,
     marginBottom: 4,
   },
