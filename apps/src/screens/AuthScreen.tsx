@@ -158,24 +158,24 @@ export const AuthScreen = () => {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#06110D" />
-      {/* Emerald-night backdrop: one vertical gradient + one aurora glow anchored
-          to the logo. Structural light, not confetti. */}
+      <StatusBar barStyle="dark-content" backgroundColor={colors.primarySoft} />
+      {/* Fresh mint backdrop, all from theme.ts: primarySoft (emerald-50) fading
+          into white, plus one soft brand halo anchored to the logo. */}
       <Svg style={StyleSheet.absoluteFill} width="100%" height="100%">
         <Defs>
-          <SvgLinearGradient id="night" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor="#06110D" />
-            <Stop offset="0.55" stopColor="#0A1F18" />
-            <Stop offset="1" stopColor="#06251A" />
+          <SvgLinearGradient id="fresh" x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0" stopColor={colors.primarySoft} />
+            <Stop offset="0.6" stopColor={colors.background} />
+            <Stop offset="1" stopColor={colors.background} />
           </SvgLinearGradient>
-          <RadialGradient id="aurora" cx="50%" cy="30%" r="55%">
-            <Stop offset="0%" stopColor="#34D399" stopOpacity="0.16" />
-            <Stop offset="60%" stopColor="#34D399" stopOpacity="0.05" />
-            <Stop offset="100%" stopColor="#34D399" stopOpacity="0" />
+          <RadialGradient id="halo" cx="50%" cy="30%" r="55%">
+            <Stop offset="0%" stopColor={colors.primary} stopOpacity="0.12" />
+            <Stop offset="60%" stopColor={colors.primary} stopOpacity="0.04" />
+            <Stop offset="100%" stopColor={colors.primary} stopOpacity="0" />
           </RadialGradient>
         </Defs>
-        <Rect width="100%" height="100%" fill="url(#night)" />
-        <Rect width="100%" height="100%" fill="url(#aurora)" />
+        <Rect width="100%" height="100%" fill="url(#fresh)" />
+        <Rect width="100%" height="100%" fill="url(#halo)" />
       </Svg>
       <Animated.View
         style={[
@@ -208,9 +208,9 @@ export const AuthScreen = () => {
                 r="80"
                 gradientUnits="userSpaceOnUse"
               >
-                <Stop offset="0%" stopColor="#34D399" stopOpacity="0.45" />
-                <Stop offset="65%" stopColor="#34D399" stopOpacity="0.14" />
-                <Stop offset="100%" stopColor="#34D399" stopOpacity="0" />
+                <Stop offset="0%" stopColor={colors.primary} stopOpacity="0.30" />
+                <Stop offset="65%" stopColor={colors.primary} stopOpacity="0.10" />
+                <Stop offset="100%" stopColor={colors.primary} stopOpacity="0" />
               </RadialGradient>
             </Defs>
             <Ellipse
@@ -248,7 +248,7 @@ export const AuthScreen = () => {
               accessibilityRole="button"
               accessibilityLabel="Continuar con Apple"
             >
-              <AppleLogo width={24} height={24} style={{ marginRight: 8 }} fill="#000" />
+              <AppleLogo width={24} height={24} style={{ marginRight: 8 }} fill="#fff" />
               <Text style={styles.appleButtonText}>Continuar con Apple</Text>
             </TouchableOpacity>
           )}
@@ -257,7 +257,7 @@ export const AuthScreen = () => {
           <Text style={styles.termsText}>Al continuar, aceptas</Text>
           <Text style={styles.termsLinks}>
             <Text style={styles.termsLink} onPress={() => handleLegalDocumentPress('terms')}>Términos de Servicio</Text>
-            <Text style={{ color: 'rgba(255,255,255,0.45)', fontWeight: 'normal' }}> y </Text>
+            <Text style={{ color: colors.text.secondary, fontWeight: 'normal' }}> y </Text>
             <Text style={styles.termsLink} onPress={() => handleLegalDocumentPress('privacy')}>Política de Privacidad</Text>
           </Text>
         </View>
@@ -279,7 +279,7 @@ export const AuthScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#06110D', // matches the night gradient's top stop
+    backgroundColor: colors.primarySoft,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -329,20 +329,20 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     letterSpacing: 3,
-    color: '#34D399',
+    color: colors.primaryDark,
     textAlign: 'center',
     marginBottom: 8,
   },
   title: {
     fontSize: 30,
     fontWeight: 'bold',
-    color: '#FFFFFF',
+    color: colors.dark,
     textAlign: 'center',
     marginBottom: 4,
   },
   subtitle: {
     fontSize: 16,
-    color: 'rgba(236, 253, 245, 0.72)', // emerald-tinted off-white
+    color: colors.text.secondary,
     textAlign: 'center',
     marginBottom: 36,
     marginTop: 6,
@@ -357,11 +357,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.primaryLight,
     borderRadius: 16,
     paddingVertical: 15,
     paddingHorizontal: 16,
     marginBottom: 12,
+    shadowColor: colors.primaryDark,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 2,
   },
   googleButtonText: {
     color: colors.dark,
@@ -369,19 +376,24 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginLeft: 8,
   },
-  // Apple HIG: on dark backgrounds, use the white "Sign in with Apple" style.
+  // Apple HIG: standard black style on light surfaces.
   appleButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#000000',
     borderRadius: 16,
     paddingVertical: 15,
     paddingHorizontal: 16,
     marginBottom: 0,
+    shadowColor: colors.dark,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    elevation: 2,
   },
   appleButtonText: {
-    color: '#111827',
+    color: '#FFFFFF',
     fontWeight: '500',
     fontSize: 16,
     marginLeft: 8,
@@ -391,7 +403,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   termsText: {
-    color: 'rgba(255,255,255,0.45)',
+    color: colors.text.secondary,
     fontSize: 14,
     marginBottom: 4,
   },
