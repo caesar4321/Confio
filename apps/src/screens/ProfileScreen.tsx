@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, Linking
 import Clipboard from '@react-native-clipboard/clipboard';
 import Icon from 'react-native-vector-icons/Feather';
 import WhatsAppLogo from '../assets/svg/WhatsApp.svg';
+import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
 import { useAuth } from '../contexts/AuthContext';
 import { useAccount } from '../contexts/AccountContext';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -365,8 +366,22 @@ export const ProfileScreen = () => {
   return (
     <>
       <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
-        {/* Header Section */}
+        {/* Header Section — brand field: same vertical gradient + coin ring
+            family as Home; top edge is exactly colors.primary so it meets the
+            flat nav header without a seam. Padding lives on headerInner (Yoga
+            insets absolute children by the parent's padding). */}
         <View style={styles.header}>
+          <Svg style={StyleSheet.absoluteFill}>
+            <Defs>
+              <SvgLinearGradient id="profileField" x1="0" y1="0" x2="0" y2="1">
+                <Stop offset="0" stopColor={colors.primary} />
+                <Stop offset="1" stopColor={colors.primaryDark} />
+              </SvgLinearGradient>
+            </Defs>
+            <Rect width="100%" height="100%" fill="url(#profileField)" />
+            <Circle cx="104%" cy="26%" r="90" stroke={colors.white} strokeWidth="22" strokeOpacity="0.10" fill="none" />
+          </Svg>
+          <View style={styles.headerInner}>
           <View style={styles.profileInfo}>
             <TouchableOpacity
               style={[
@@ -424,6 +439,7 @@ export const ProfileScreen = () => {
               <Text style={styles.subtitle}>{displayInfo.subtitle}</Text>
             )}
           </View>
+          </View>
         </View>
 
         {/* Referral Program Card */}
@@ -431,12 +447,12 @@ export const ProfileScreen = () => {
           <View style={styles.referralCard}>
             <View style={styles.referralHeader}>
               <View style={styles.referralIconBadge}>
-                <Icon name="lock" size={20} color="#FFFFFF" />
+                <Icon name="gift" size={20} color={colors.white} />
               </View>
               <View style={styles.referralHeaderText}>
-                <Text style={styles.referralTitle}>Invitá a tus amigos a la red de confianza</Text>
+                <Text style={styles.referralTitle}>Invita a tus amigos a la red de confianza</Text>
                 <Text style={styles.referralSubtitle}>
-                  Compartí tu link con videos de Julian sobre por qué nació Confío. Ayudá a los tuyos a proteger sus ahorros; cuando hagan su primer depósito, ambos reciben US$5 en $CONFIO como bienvenida.
+                  Comparte tu link con videos de Julian sobre por qué nació Confío. Ayuda a los tuyos a proteger sus ahorros; cuando hagan su primer depósito, ambos reciben US$5 en $CONFIO como bienvenida.
                 </Text>
               </View>
             </View>
@@ -458,17 +474,18 @@ export const ProfileScreen = () => {
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
                 {referralStats.claimable > 0 ? (
-                  <Text style={{ marginRight: 8 }}>🟢</Text>
+                  <View style={[styles.referralStatusDot, { backgroundColor: colors.primaryDark }]} />
                 ) : referralStats.pending > 0 ? (
-                  <Text style={{ marginRight: 8 }}>🔴</Text>
+                  <View style={[styles.referralStatusDot, { backgroundColor: colors.warning.icon }]} />
                 ) : (
-                  <Icon name="unlock" size={16} color="#10b981" style={{ marginRight: 8 }} />
+                  <Icon name="unlock" size={16} color={colors.primaryDark} style={{ marginRight: 8 }} />
                 )}
 
                 <Text style={[
                   styles.referralClaimText,
-                  referralStats.claimable > 0 && { color: '#047857', fontWeight: '700' },
-                  referralStats.pending > 0 && { color: '#B91C1C' } // dark red
+                  referralStats.claimable > 0 && { color: colors.successText, fontWeight: '700' },
+                  // pending = waiting on the friend's deposit, not an error
+                  referralStats.pending > 0 && { color: colors.warning.text },
                 ]}>
                   {referralStats.claimable > 0
                     ? `${referralStats.claimable} $CONFIO Listos para Desbloquear`
@@ -505,14 +522,14 @@ export const ProfileScreen = () => {
                 onPress={() => navigation.navigate('Achievements')}
               >
                 <Icon name="user-plus" size={16} color="#047857" />
-                <Text style={styles.referralUpdateUsernameText}>¿Te invitó alguien? Poné su código</Text>
+                <Text style={styles.referralUpdateUsernameText}>¿Te invitó alguien? Pon su código</Text>
                 <Icon name="chevron-right" size={16} color="#047857" />
               </TouchableOpacity>
             )}
 
             <View style={styles.referralCriteria}>
               <Text style={styles.referralCriteriaTitle}>¿Cómo funciona?</Text>
-              <Text style={styles.referralCriteriaItem}>1. Compartí tu link por WhatsApp con la historia del fundador.</Text>
+              <Text style={styles.referralCriteriaItem}>1. Comparte tu link por WhatsApp con la historia del fundador.</Text>
               <Text style={styles.referralCriteriaItem}>2. Tu amigo se crea la cuenta y descubre Confío.</Text>
               <Text style={styles.referralCriteriaItem}>3. Carga al menos 20 cUSD y se activan los US$5 para los dos.</Text>
             </View>
@@ -521,7 +538,7 @@ export const ProfileScreen = () => {
             <View style={styles.referralCriteria}>
               <Text style={styles.referralCriteriaTitle}>🏅 Niveles y verificado</Text>
               <Text style={styles.referralCriteriaNote}>
-                Desbloqueá niveles invitando amigos que completen su primer depósito. La insignia de verificado (✓) la obtenés verificando tu cuenta.
+                Desbloquea niveles invitando amigos que completen su primer depósito. La insignia de verificado (✓) la obtienes verificando tu cuenta.
               </Text>
               <View style={{ gap: 8, marginTop: 10, backgroundColor: '#f9fafb', borderRadius: 10, padding: 12 }}>
                 {(() => {
@@ -869,11 +886,14 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   header: {
-    backgroundColor: '#34d399', // emerald-400
-    paddingBottom: 32,
-    paddingHorizontal: 20,
+    backgroundColor: colors.primary,
     borderBottomLeftRadius: 32,
     borderBottomRightRadius: 32,
+    overflow: 'hidden',
+  },
+  headerInner: {
+    paddingBottom: 32,
+    paddingHorizontal: 20,
   },
   profileInfo: {
     alignItems: 'center',
@@ -895,7 +915,7 @@ const styles = StyleSheet.create({
   avatarText: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: '#34d399',
+    color: colors.primary,
   },
   editIconContainer: {
     position: 'absolute',
@@ -1138,6 +1158,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     backgroundColor: '#ecfdf5',
     gap: 8,
+  },
+  referralStatusDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: 8,
   },
   referralClaimText: {
     flex: 1,
