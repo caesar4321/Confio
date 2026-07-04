@@ -35,6 +35,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { getSupportCopy } from '../utils/supportMessaging';
 import { colors } from '../config/theme';
 import { SkeletonLoader, TransactionItemSkeleton } from '../components/SkeletonLoader';
+import { InlineBanner } from '../components/common/InlineBanner';
 import { StatusTierBadge } from '../components/StatusTierBadge';
 import { buildInviteLink, buildSendAndInviteShareMessage } from '../utils/inviteLinks';
 import { technicalFontFamily } from '../utils/fontFamily';
@@ -225,6 +226,8 @@ export const TransactionDetailScreen = () => {
   const route = useRoute<TransactionDetailScreenRouteProp>();
   const insets = useSafeAreaInsets();
   const [copied, setCopied] = useState('');
+  const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
+  const dismissBanner = React.useCallback(() => setBanner(null), []);
   const [showBlockchainDetails, setShowBlockchainDetails] = useState(false);
   const [reclaimingInvite, setReclaimingInvite] = useState(false);
   const [reclaimedInviteTxid, setReclaimedInviteTxid] = useState('');
@@ -1805,7 +1808,7 @@ export const TransactionDetailScreen = () => {
 
   const handleCopy = (text: string, type: string) => {
     Clipboard.setString(text);
-    Alert.alert('Copiado', 'Dirección copiada al portapapeles');
+    // The inline "copied" checkmark next to the address is the feedback; no dialog needed.
     setCopied(type);
     setTimeout(() => setCopied(''), 2000);
   };
@@ -1926,6 +1929,14 @@ export const TransactionDetailScreen = () => {
 
       {/* Entire screen scrollable */}
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+        {banner && (
+          <InlineBanner
+            message={banner.message}
+            variant={banner.variant}
+            onDismiss={dismissBanner}
+            style={{ marginHorizontal: 16, marginTop: 8 }}
+          />
+        )}
         {/* Header */}
         <View style={[styles.header, { paddingTop: headerPaddingTop }]}>
           <View style={styles.headerTop}>
@@ -2720,7 +2731,7 @@ export const TransactionDetailScreen = () => {
                       });
                       await Share.share({ message: fallbackMessage });
                     } catch (_) { }
-                    Alert.alert('Error', 'No se pudo abrir WhatsApp.');
+                    setBanner({ variant: 'error', message: 'No se pudo abrir WhatsApp.' });
                   }
                 }}
               >
