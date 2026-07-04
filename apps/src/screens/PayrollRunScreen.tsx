@@ -10,6 +10,7 @@ import { biometricAuthService } from '../services/biometricAuthService';
 import LoadingOverlay from '../components/LoadingOverlay';
 import { APP_LAYOUT } from '../config/layout';
 import { Button } from '../components/common/Button';
+import { InlineBanner } from '../components/common/InlineBanner';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'PayrollRun'>;
 
@@ -29,6 +30,8 @@ export const PayrollRunScreen = () => {
   const recipients = useMemo(() => data?.payrollRecipients || [], [data]);
 
   const [amounts, setAmounts] = useState<Record<string, string>>({});
+  const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
+  const dismissBanner = React.useCallback(() => setBanner(null), []);
   const [schedule, setSchedule] = useState<ScheduleOption>('now');
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingMessage, setProcessingMessage] = useState('');
@@ -126,16 +129,24 @@ export const PayrollRunScreen = () => {
         ]);
         refetch();
       } else {
-        Alert.alert('Error', res.data?.createPayrollRun?.errors?.[0] || 'No se pudo crear la nómina');
+        setBanner({ variant: 'error', message: res.data?.createPayrollRun?.errors?.[0] || 'No se pudo crear la nómina' });
       }
     } catch (e: any) {
       setIsProcessing(false);
-      Alert.alert('Error', e?.message || 'Ocurrió un error al crear la nómina');
+      setBanner({ variant: 'error', message: e?.message || 'Ocurrió un error al crear la nómina' });
     }
   };
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      {banner && (
+        <InlineBanner
+          message={banner.message}
+          variant={banner.variant}
+          onDismiss={dismissBanner}
+          style={{ marginTop: 8 }}
+        />
+      )}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Icon name="chevron-left" size={22} color="#111827" />
