@@ -23,6 +23,8 @@ import { ConvertAhorroScreen } from '../screens/ConvertAhorroScreen';
 import { RetirarAhorroScreen } from '../screens/RetirarAhorroScreen';
 import { AccionesListScreen } from '../screens/AccionesListScreen';
 import { StockDetailScreen } from '../screens/StockDetailScreen';
+import { BuyStockScreen } from '../screens/BuyStockScreen';
+import { SellStockScreen } from '../screens/SellStockScreen';
 import { FinancierasScreen } from '../screens/FinancierasScreen';
 import { FinancieraDetailScreen } from '../screens/FinancieraDetailScreen';
 import { FinancieraReviewScreen } from '../screens/FinancieraReviewScreen';
@@ -288,6 +290,20 @@ export const MainNavigator = () => {
         <Stack.Screen
           name="StockDetail"
           component={StockDetailScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="BuyStock"
+          component={BuyStockScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="SellStock"
+          component={SellStockScreen}
           options={{
             headerShown: false,
           }}

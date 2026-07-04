@@ -13,7 +13,6 @@ import {
   TouchableOpacity,
   ScrollView,
   StatusBar,
-  Alert,
 } from 'react-native';
 import Svg, { Polyline } from 'react-native-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -74,16 +73,8 @@ export const StockDetailScreen = () => {
   const fmtUsd = (v: number) =>
     `$${formatNumber(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-  const onComprar = () => {
-    // TODO(gm): buy flow — USD amount from cUSD+ (sweep) → RFQ/attestation
-    // quote preview → confirm → atomic settle. Clone of the Convert pattern.
-    Alert.alert('Muy pronto', 'La compra de acciones abre en breve.');
-  };
-
-  const onVender = () => {
-    // TODO(gm): sell flow — proceeds land back in cUSD+ and keep earning.
-    Alert.alert('Muy pronto', 'La venta de acciones abre en breve.');
-  };
+  const onComprar = () => navigation.navigate('BuyStock', { ticker: stock.ticker });
+  const onVender = () => navigation.navigate('SellStock', { ticker: stock.ticker });
 
   return (
     <View style={styles.container}>
