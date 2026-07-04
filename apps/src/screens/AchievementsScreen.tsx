@@ -6,13 +6,12 @@ import {
   ScrollView,
   TouchableOpacity,
   Share,
-  Alert,
   Linking,
 } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 import Icon from 'react-native-vector-icons/Feather';
 import WhatsAppLogo from '../assets/svg/WhatsApp.svg';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
 import { useNavigation } from '@react-navigation/native';
 import { NavigationProp } from '@react-navigation/native';
 import { MainStackParamList } from '../types/navigation';
@@ -21,7 +20,6 @@ import { ReferralInputModal } from '../components/ReferralInputModal';
 import { buildReferralShareMessage, normalizeInviteUsername } from '../utils/inviteLinks';
 import { AnalyticsService } from '../services/analyticsService';
 import { colors } from '../config/theme';
-import { Button } from '../components/common/Button';
 import { InlineBanner } from '../components/common/InlineBanner';
 import { Header } from '../navigation/Header';
 
@@ -120,133 +118,148 @@ export const AchievementsScreen: React.FC = () => {
       <Header
         navigation={navigation as any}
         title="Programa de referidos"
-        backgroundColor={colors.primaryDark}
+        backgroundColor={colors.secondary}
         isLight
         showBackButton
       />
 
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-        {banner && (
-          <InlineBanner
-            message={banner.message}
-            variant={banner.variant}
-            onDismiss={dismissBanner}
-            autoHideMs={banner.variant === 'success' ? 2500 : undefined}
-            style={{ marginBottom: 0 }}
-          />
-        )}
-        <View style={styles.heroCard}>
-          <View style={styles.heroIconWrap}>
-            <Icon name="gift" size={24} color={colors.primaryDark} />
-          </View>
-          <Text style={styles.heroTitle}>Invita a tus amigos a la red de confianza</Text>
-          <Text style={styles.heroSubtitle}>
-            Comparte la historia de Julian y por qué nació Confío.{'\n'}
-            Cuando tu amigo haga su primer depósito, ambos reciben US$5 en $CONFIO como bienvenida.
-          </Text>
+        {/* Violet brand field: the $CONFIO instrument color, same gradient +
+            coin-ring grammar as Home/Profile/Auth. Vertical gradient so the
+            top edge meets the flat nav header without a seam; padding lives
+            on fieldInner (Yoga insets absolute children by parent padding). */}
+        <View style={styles.brandField}>
+          <Svg style={StyleSheet.absoluteFill}>
+            <Defs>
+              <SvgLinearGradient id="referralField" x1="0" y1="0" x2="0" y2="1">
+                <Stop offset="0" stopColor={colors.secondary} />
+                <Stop offset="1" stopColor={colors.secondaryDark} />
+              </SvgLinearGradient>
+            </Defs>
+            <Rect width="100%" height="100%" fill="url(#referralField)" />
+            <Circle cx="104%" cy="18%" r="100" stroke={colors.white} strokeWidth="24" strokeOpacity="0.10" fill="none" />
+          </Svg>
+          <View style={styles.fieldInner}>
+            <Text style={styles.fieldEyebrow}>US$5 PARA TI Y TU AMIGO</Text>
+            <Text style={styles.fieldTitle}>Invita a tus amigos a la red de confianza</Text>
+            <Text style={styles.fieldSubtitle}>
+              Comparte la historia de Julian y por qué nació Confío. Cuando tu
+              amigo haga su primer depósito, ambos reciben US$5 en $CONFIO.
+            </Text>
 
-          <View style={styles.usernamePill}>
-            <Text style={styles.usernameLabel}>Tu usuario</Text>
-            <Text style={styles.usernameValue}>{username || 'Configura tu @usuario'}</Text>
+            <View style={styles.usernameRow}>
+              <View style={styles.usernamePill}>
+                <Text style={styles.usernameLabel}>Tu usuario</Text>
+                <Text style={styles.usernameValue} numberOfLines={1}>
+                  {username || 'Configura tu @usuario'}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.copyChip}
+                onPress={handleCopy}
+                accessibilityRole="button"
+                accessibilityLabel="Copiar usuario"
+              >
+                <Icon name="copy" size={16} color={colors.white} />
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity
+              style={styles.whatsappButton}
+              onPress={handleShare}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel="Invitar por WhatsApp"
+            >
+              <WhatsAppLogo width={20} height={20} />
+              <Text style={styles.whatsappButtonText}>Invitar por WhatsApp</Text>
+            </TouchableOpacity>
+
             {needsFriendlyUsername && (
-              <Text style={styles.usernameHint}>
-                Crea un usuario corto y fácil de recordar antes de compartirlo.
-              </Text>
+              <TouchableOpacity
+                style={styles.updateUsernameLink}
+                onPress={() => navigation.navigate('UpdateUsername')}
+                accessibilityRole="button"
+                accessibilityLabel="Actualizar mi usuario"
+              >
+                <Icon name="edit-3" size={14} color={colors.violetLight} />
+                <Text style={styles.updateUsernameText}>
+                  Crea un usuario corto y fácil de recordar
+                </Text>
+                <Icon name="chevron-right" size={14} color={colors.violetLight} />
+              </TouchableOpacity>
             )}
           </View>
+        </View>
 
-          <View style={styles.heroActions}>
-            <Button
-              title="Copiar usuario"
-              variant="secondary"
-              onPress={handleCopy}
-              icon={<Icon name="copy" size={18} color={colors.primaryDark} />}
-              style={{ backgroundColor: colors.primarySoft, borderWidth: 0 }}
-              textStyle={{ color: colors.primaryDark, fontSize: 14 }}
+        {/* White content */}
+        <View style={styles.body}>
+          {banner && (
+            <InlineBanner
+              message={banner.message}
+              variant={banner.variant}
+              onDismiss={dismissBanner}
+              autoHideMs={banner.variant === 'success' ? 2500 : undefined}
+              style={{ marginBottom: 0 }}
             />
-            <Button
-              title="Invitar por WhatsApp"
-              onPress={handleShare}
-              icon={<WhatsAppLogo width={18} height={18} />}
-              style={{ backgroundColor: colors.primaryDark, paddingHorizontal: 18 }}
-              textStyle={{ fontSize: 14 }}
-            />
-          </View>
-          {needsFriendlyUsername && (
-            <TouchableOpacity style={styles.updateUsernameButton} onPress={() => navigation.navigate('UpdateUsername')}>
-              <Icon name="edit-3" size={16} color={colors.primaryDark} />
-              <Text style={styles.updateUsernameText}>Actualizar mi usuario</Text>
-              <Icon name="chevron-right" size={16} color={colors.primaryDark} />
-            </TouchableOpacity>
           )}
-        </View>
 
-        <View style={styles.referrerCard}>
-          <Text style={styles.referrerTitle}>¿Te invitó alguien?</Text>
-          <Text style={styles.referrerSubtitle}>
-            Pon su @usuario o número para que también reciba su regalo.
-          </Text>
-          <TouchableOpacity style={styles.referrerButton} onPress={() => setShowReferralModal(true)}>
-            <Icon name="user-plus" size={18} color={colors.primaryDark} />
-            <Text style={styles.referrerButtonText}>Registrar invitador</Text>
-            <Icon name="chevron-right" size={16} color={colors.primaryDark} />
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Cómo desbloquear los US$5</Text>
-          {steps.map((step, index) => (
-            <View key={step.title} style={styles.stepRow}>
-              <View style={styles.stepNumberWrap}>
-                <Text style={styles.stepNumber}>{index + 1}</Text>
-              </View>
-              <View style={styles.stepContent}>
-                <Text style={styles.stepTitle}>{step.title}</Text>
-                <Text style={styles.stepDescription}>{step.description}</Text>
-              </View>
-            </View>
-          ))}
-        </View>
-
-        <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Tips para compartir</Text>
-          <View style={styles.tipRow}>
-            <Icon name="send" size={18} color={colors.primaryDark} />
-            <Text style={styles.tipText}>Usa el botón de WhatsApp para enviar el link con la historia de Julian automáticamente.</Text>
-          </View>
-          <View style={styles.tipRow}>
-            <Icon name="check-circle" size={18} color={colors.primaryDark} />
-            <Text style={styles.tipText}>Asegúrate de que tu amigo descargue la App desde tu enlace.</Text>
-          </View>
-          <View style={styles.tipRow}>
-            <Icon name="zap" size={18} color={colors.primaryDark} />
-            <Text style={styles.tipText}>Ayúdalo a completar su recarga de 20 cUSD para liberar el bono.</Text>
-          </View>
-        </View>
-
-        <TouchableOpacity
-          style={styles.claimCard}
-          activeOpacity={0.8}
-          onPress={() => navigation.navigate('ReferralRewardClaim')}
-        >
-          <View style={styles.claimCardContent}>
+          {/* Claim entry — tinted promo card, Home promo grammar */}
+          <TouchableOpacity
+            style={styles.claimCard}
+            activeOpacity={0.8}
+            onPress={() => navigation.navigate('ReferralRewardClaim')}
+            accessibilityRole="button"
+            accessibilityLabel="Desbloquear recompensas"
+          >
             <View style={styles.claimIconWrap}>
-              <Icon name="unlock" size={20} color={colors.primaryDark} />
+              <Icon name="unlock" size={18} color={colors.secondary} />
             </View>
             <View style={styles.claimCardText}>
               <Text style={styles.claimCardTitle}>Desbloquear recompensas</Text>
               <Text style={styles.claimCardSubtitle}>Revisa si tienes $CONFIO listos para reclamar</Text>
             </View>
-            <Icon name="chevron-right" size={18} color={colors.primaryDark} />
-          </View>
-        </TouchableOpacity>
+            <Icon name="chevron-right" size={18} color={colors.secondary} />
+          </TouchableOpacity>
 
-        <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Operaciones que activan el bono</Text>
-          <View style={styles.criteria}>
-            <Text style={styles.criteriaItem}>• Primera recarga de al menos 20 cUSD</Text>
-            <Text style={styles.criteriaItem}>• Primer depósito convertido automáticamente a cUSD (≥ 20 cUSD)</Text>
-            <Text style={styles.criteriaNote}>El bono se acredita en $CONFIO automáticamente.</Text>
+          {/* Invited-by row */}
+          <TouchableOpacity
+            style={styles.invitedCard}
+            onPress={() => setShowReferralModal(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Registrar quién te invitó"
+          >
+            <View style={styles.invitedIconWrap}>
+              <Icon name="user-plus" size={18} color={colors.secondary} />
+            </View>
+            <View style={styles.claimCardText}>
+              <Text style={styles.claimCardTitle}>¿Te invitó alguien?</Text>
+              <Text style={styles.claimCardSubtitle}>Pon su @usuario para que también reciba su regalo</Text>
+            </View>
+            <Icon name="chevron-right" size={18} color={colors.text.light} />
+          </TouchableOpacity>
+
+          {/* How it works */}
+          <View style={styles.sectionCard}>
+            <Text style={styles.sectionTitle}>Cómo desbloquear los US$5</Text>
+            {steps.map((step, index) => (
+              <View key={step.title} style={[styles.stepRow, index === steps.length - 1 && { marginBottom: 0 }]}>
+                <View style={styles.stepNumberWrap}>
+                  <Text style={styles.stepNumber}>{index + 1}</Text>
+                </View>
+                <View style={styles.stepContent}>
+                  <Text style={styles.stepTitle}>{step.title}</Text>
+                  <Text style={styles.stepDescription}>{step.description}</Text>
+                </View>
+              </View>
+            ))}
+            <View style={styles.criteriaNoteRow}>
+              <Icon name="info" size={13} color={colors.text.secondary} />
+              <Text style={styles.criteriaNote}>
+                Cuenta cualquier primera recarga o depósito de al menos 20 cUSD.
+                El bono se acredita en $CONFIO automáticamente.
+              </Text>
+            </View>
           </View>
         </View>
 
@@ -255,7 +268,6 @@ export const AchievementsScreen: React.FC = () => {
           onClose={() => setShowReferralModal(false)}
           onSuccess={() => setShowReferralModal(false)}
         />
-
       </ScrollView>
     </View>
   );
@@ -270,89 +282,119 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    padding: 20,
     paddingBottom: 32,
-    gap: 16,
   },
-  heroCard: {
-    backgroundColor: colors.surface,
-    borderRadius: 16,
-    padding: 24,
-    shadowColor: colors.shadowBase,
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.06,
-    shadowRadius: 18,
-    elevation: 3,
+  brandField: {
+    backgroundColor: colors.secondary,
+    overflow: 'hidden',
   },
-  heroIconWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: colors.primarySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
+  fieldInner: {
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 28,
   },
-  heroTitle: {
-    fontSize: 24,
+  fieldEyebrow: {
+    fontSize: 11,
     fontWeight: '700',
-    color: colors.textFlat,
-    marginBottom: 12,
+    letterSpacing: 2,
+    color: colors.violetLight,
+    marginBottom: 8,
   },
-  heroSubtitle: {
-    fontSize: 15,
-    color: colors.textSecondary,
-    lineHeight: 22,
+  fieldTitle: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: colors.white,
+    lineHeight: 30,
+  },
+  fieldSubtitle: {
+    fontSize: 14,
+    lineHeight: 21,
+    color: 'rgba(255, 255, 255, 0.85)',
+    marginTop: 8,
+  },
+  usernameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 18,
   },
   usernamePill: {
-    marginTop: 20,
+    flex: 1,
     borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: colors.primaryMuted,
-    alignSelf: 'flex-start',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
   },
   usernameLabel: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
-    color: colors.primaryDark,
-    marginBottom: 2,
+    color: colors.violetLight,
+    marginBottom: 1,
   },
   usernameValue: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.primaryDark,
+    color: colors.white,
   },
-  usernameHint: {
-    marginTop: 6,
-    fontSize: 12,
-    color: colors.primaryDark,
-    lineHeight: 18,
+  copyChip: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-
-  heroActions: {
+  whatsappButton: {
     flexDirection: 'row',
-    marginTop: 24,
-    gap: 12,
-    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 14,
+    backgroundColor: colors.white,
+    borderRadius: 14,
+    paddingVertical: 15,
+  },
+  whatsappButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.dark,
+  },
+  updateUsernameLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 14,
+    paddingVertical: 4,
+  },
+  updateUsernameText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.violetLight,
+  },
+  body: {
+    padding: 20,
+    gap: 14,
   },
   claimCard: {
-    backgroundColor: colors.primarySoft,
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: colors.primaryLight,
-  },
-  claimCardContent: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+    backgroundColor: colors.violetLight,
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#DDD6FE', // violet-200, pairs with violetLight
   },
   claimIconWrap: {
     width: 40,
     height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.primaryLight,
+    borderRadius: 12,
+    backgroundColor: colors.background,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -362,91 +404,54 @@ const styles = StyleSheet.create({
   claimCardTitle: {
     fontSize: 15,
     fontWeight: '700',
-    color: colors.primaryDark,
+    color: colors.dark,
   },
   claimCardSubtitle: {
     fontSize: 13,
-    color: colors.textSecondary,
+    color: colors.text.secondary,
     marginTop: 2,
   },
-  referrerCard: {
-    backgroundColor: colors.surface,
-    borderRadius: 16,
-    padding: 20,
+  invitedCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 12,
-    shadowColor: colors.shadowBase,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.05,
-    shadowRadius: 14,
-    elevation: 2,
+    backgroundColor: colors.background,
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
-  referrerTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.textFlat,
-  },
-  referrerSubtitle: {
-    fontSize: 13,
-    color: colors.textSecondary,
-    lineHeight: 19,
-  },
-  referrerButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  invitedIconWrap: {
+    width: 40,
+    height: 40,
     borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    backgroundColor: colors.primarySoft,
-  },
-  referrerButtonText: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.primaryDark,
-  },
-  updateUsernameButton: {
-    flexDirection: 'row',
+    backgroundColor: colors.violetLight,
     alignItems: 'center',
-    gap: 8,
-    marginTop: 16,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    backgroundColor: colors.neutralDark,
-  },
-  updateUsernameText: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.primaryDark,
+    justifyContent: 'center',
   },
   sectionCard: {
-    backgroundColor: colors.surface,
+    backgroundColor: colors.background,
     borderRadius: 16,
     padding: 20,
-    shadowColor: colors.shadowBase,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.05,
-    shadowRadius: 14,
-    elevation: 2,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   sectionTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.textFlat,
+    color: colors.dark,
     marginBottom: 16,
   },
   stepRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: 14,
+    marginBottom: 16,
   },
   stepNumberWrap: {
     width: 28,
     height: 28,
-    borderRadius: 14,
-    backgroundColor: colors.primarySoft,
+    borderRadius: 9,
+    backgroundColor: colors.violetLight,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
@@ -454,7 +459,7 @@ const styles = StyleSheet.create({
   stepNumber: {
     fontSize: 14,
     fontWeight: '700',
-    color: colors.primaryDark,
+    color: colors.secondary,
   },
   stepContent: {
     flex: 1,
@@ -462,42 +467,28 @@ const styles = StyleSheet.create({
   stepTitle: {
     fontSize: 15,
     fontWeight: '600',
-    color: colors.textFlat,
-    marginBottom: 4,
+    color: colors.dark,
+    marginBottom: 3,
   },
   stepDescription: {
     fontSize: 13,
-    color: colors.textSecondary,
+    color: colors.text.secondary,
     lineHeight: 19,
   },
-  tipRow: {
+  criteriaNoteRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 12,
-    marginBottom: 12,
-  },
-  tipText: {
-    flex: 1,
-    fontSize: 13,
-    color: colors.textSecondary,
-    lineHeight: 19,
-  },
-  criteria: {
+    gap: 8,
     marginTop: 16,
-    padding: 14,
-    backgroundColor: colors.neutral,
-    borderRadius: 12,
-    gap: 6,
-  },
-  criteriaItem: {
-    fontSize: 13,
-    color: colors.textSecondary,
-    lineHeight: 18,
+    paddingTop: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
   },
   criteriaNote: {
-    marginTop: 6,
+    flex: 1,
     fontSize: 12,
-    color: colors.primaryDark,
+    lineHeight: 17,
+    color: colors.text.secondary,
   },
 });
 

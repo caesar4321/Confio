@@ -4,6 +4,7 @@ export const lightColors = {
   primaryLight: '#D1FAE5', // emerald-100
   primaryDark: '#10B981', // emerald-500
   secondary: '#8B5CF6', // violet-500
+  secondaryDark: '#7C3AED', // violet-600 — gradient partner of secondary (mirrors primary/primaryDark)
   secondaryText: '#8B5CF6',
   accent: '#3B82F6', // blue-500
   accentText: '#3B82F6',

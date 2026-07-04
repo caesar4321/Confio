@@ -10,6 +10,7 @@ import {
   Platform,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
+import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
 import { useNavigation, NavigationProp } from '@react-navigation/native';
 import { MainStackParamList } from '../types/navigation';
 import { useQuery, useMutation } from '@apollo/client';
@@ -292,23 +293,7 @@ export const ReferralRewardClaimScreen: React.FC = () => {
   const renderListItem = React.useCallback(
     ({ item }: { item: ListSection }) => {
       if (item.type === 'summary') {
-        return (
-          <View style={styles.summaryCard}>
-            <View style={styles.summaryIconRow}>
-              <View style={styles.summaryIconWrap}>
-                <Icon name="gift" size={20} color={colors.secondary} />
-              </View>
-              <Text style={styles.summaryLabel}>Listo para desbloquear</Text>
-            </View>
-            <Text style={styles.summaryValue}>
-              {item.totalClaimable.toFixed(2)} $CONFIO
-            </Text>
-            <Text style={styles.summarySubtext}>
-              Recompensas confirmadas on-chain. Firma para liberarlas en tu
-              billetera Confío.
-            </Text>
-          </View>
-        );
+        return null;
       }
 
       if (item.type === 'empty') {
@@ -341,8 +326,11 @@ export const ReferralRewardClaimScreen: React.FC = () => {
         const otherUser = isReferrer ? referral.referredUser : referral.referrerUser;
 
         return (
-          <View key={referral.id} style={[styles.rewardCard, styles.claimableCard]}>
+          <View key={referral.id} style={styles.rewardCard}>
             <View style={styles.rewardHeader}>
+              <View style={styles.rewardIconWrap}>
+                <Icon name="gift" size={18} color={colors.secondary} />
+              </View>
               <View style={styles.rewardHeaderText}>
                 <Text style={styles.rewardTitle}>
                   {amount.toFixed(2)} $CONFIO
@@ -399,10 +387,13 @@ export const ReferralRewardClaimScreen: React.FC = () => {
         return (
           <TouchableOpacity
             key={`pending-${referral.id}`}
-            style={[styles.rewardCard, styles.pendingCard]}
+            style={styles.rewardCard}
             activeOpacity={0.85}
             onPress={() => handlePendingPress(referral)}>
             <View style={styles.rewardHeader}>
+              <View style={[styles.rewardIconWrap, { backgroundColor: colors.warning.background }]}>
+                <Icon name="clock" size={18} color={colors.warning.icon} />
+              </View>
               <View style={styles.rewardHeaderText}>
                 <Text style={styles.rewardTitle}>
                   {amount.toFixed(2)} $CONFIO
@@ -451,10 +442,34 @@ export const ReferralRewardClaimScreen: React.FC = () => {
       <Header
         navigation={navigation as any}
         title="Desbloquear $CONFIO"
-        backgroundColor="#fff"
+        backgroundColor={colors.secondary}
+        isLight
         showBackButton
         onBackPress={handleBack}
       />
+
+      {/* Violet brand field: fixed above the list so the total stays visible
+          while scrolling. Same gradient + coin-ring grammar as the Programa
+          de referidos hero; padding on fieldInner (Yoga absolute-child rule). */}
+      <View style={styles.brandField}>
+        <Svg style={StyleSheet.absoluteFill}>
+          <Defs>
+            <SvgLinearGradient id="claimField" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor={colors.secondary} />
+              <Stop offset="1" stopColor={colors.secondaryDark} />
+            </SvgLinearGradient>
+          </Defs>
+          <Rect width="100%" height="100%" fill="url(#claimField)" />
+          <Circle cx="104%" cy="30%" r="80" stroke={colors.white} strokeWidth="20" strokeOpacity="0.10" fill="none" />
+        </Svg>
+        <View style={styles.fieldInner}>
+          <Text style={styles.fieldLabel}>LISTO PARA DESBLOQUEAR</Text>
+          <Text style={styles.fieldValue}>{totalClaimable.toFixed(2)} $CONFIO</Text>
+          <Text style={styles.fieldSubtext}>
+            Recompensas confirmadas on-chain. Firma para liberarlas en tu billetera.
+          </Text>
+        </View>
+      </View>
 
       {banner && (
         <InlineBanner
@@ -528,50 +543,32 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     alignItems: 'center',
   },
-  // $CONFIO surface: the instrument color is violet, not the generic blue
-  // accent (emerald = cUSD, violet = CONFIO — app-wide instrument grammar).
-  summaryCard: {
-    backgroundColor: colors.violetLight,
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#DDD6FE',
-    shadowColor: colors.shadowBase,
-    shadowOpacity: 0.05,
-    shadowOffset: { width: 0, height: 6 },
-    shadowRadius: 12,
-    elevation: 2,
+  brandField: {
+    backgroundColor: colors.secondary,
+    overflow: 'hidden',
   },
-  summaryIconRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 4,
+  fieldInner: {
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 22,
   },
-  summaryIconWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#DDD6FE',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  summaryLabel: {
-    color: colors.secondary,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  summaryValue: {
-    color: colors.textFlat,
-    fontSize: 30,
+  fieldLabel: {
+    fontSize: 11,
     fontWeight: '700',
-    marginVertical: 6,
+    letterSpacing: 2,
+    color: colors.violetLight,
+    marginBottom: 6,
   },
-  summarySubtext: {
-    color: colors.textSecondary,
-    fontSize: 14,
-    lineHeight: 20,
+  fieldValue: {
+    fontSize: 32,
+    fontWeight: '800',
+    color: colors.white,
+  },
+  fieldSubtext: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: 'rgba(255, 255, 255, 0.85)',
+    marginTop: 6,
   },
   rewardCard: {
     backgroundColor: colors.surface,
@@ -597,14 +594,13 @@ const styles = StyleSheet.create({
     flex: 1,
     flexShrink: 1,
   },
-  claimableCard: {
-    borderLeftWidth: 3,
-    borderLeftColor: colors.secondary,
-  },
-  pendingCard: {
-    borderLeftWidth: 3,
-    borderLeftColor: colors.warning.icon,
-    borderColor: colors.border,
+  rewardIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: colors.violetLight,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   pendingSection: {
     marginTop: 24,
