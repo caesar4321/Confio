@@ -63,18 +63,24 @@ export const ProtectedSavingsScreen = () => {
         {/* Hero */}
         <View style={styles.hero}>
           <Image source={cUSDLogo} style={styles.heroLogo} resizeMode="contain" />
-          <Text style={styles.heroTitle}>Confío Dollar (cUSD)</Text>
+          <Text style={styles.heroTitle}>Confío Dollar y Confío Dollar+</Text>
           <Text style={styles.heroSubtitle}>
-            Tu dólar digital, 100% respaldado en blockchain.
+            Tus dólares digitales, 100% respaldados y verificables en blockchain.
           </Text>
-          <View style={styles.heroStatPill}>
-            <Icon name="shield" size={14} color={colors.primary} />
-            <Text style={styles.heroStatText}>
-              {tvlLabel} USDC en reserva
-            </Text>
+          <View style={styles.heroPillsRow}>
+            <View style={styles.heroStatPill}>
+              <Icon name="shield" size={14} color={colors.primary} />
+              <Text style={styles.heroStatText}>
+                {tvlLabel} USDC en reserva
+              </Text>
+            </View>
+            <View style={styles.heroStatPill}>
+              <Icon name="trending-up" size={14} color={colors.primary} />
+              <Text style={styles.heroStatText}>USDY · Tesoro EE.UU.</Text>
+            </View>
           </View>
           <Text style={styles.heroFootnote}>
-            Respaldo hoy: USDC · Pronto también: USDY (bonos del Tesoro de EE.UU.)
+            cUSD: respaldado por USDC · cUSD+: respaldado por USDY
           </Text>
         </View>
 
@@ -82,17 +88,20 @@ export const ProtectedSavingsScreen = () => {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Icon name="help-circle" size={20} color={colors.primary} />
-            <Text style={styles.sectionTitle}>¿Qué es Confío Dollar?</Text>
+            <Text style={styles.sectionTitle}>¿Qué son cUSD y cUSD+?</Text>
           </View>
           <Text style={styles.sectionBody}>
-            Confío Dollar (cUSD) es nuestro dólar digital. Cada cUSD que ves
-            en la app tiene un respaldo equivalente en USDC dentro de una
-            reserva verificable en Algorand.
+            <Text style={styles.inlineEmphasis}>Confío Dollar (cUSD)</Text> es
+            tu dólar para usar: enviar, pagar, guardar. Cada cUSD tiene un
+            respaldo equivalente en USDC dentro de una reserva verificable:
+            $1 cUSD = $1 USD, hoy y siempre.
           </Text>
           <Text style={styles.sectionBody}>
-            Tus cUSD siguen siendo tuyos. La blockchain permite comprobar
-            públicamente que existe el respaldo, sin depender de la inflación
-            local: $1 cUSD = $1 USD, hoy y siempre.
+            <Text style={styles.inlineEmphasis}>Confío Dollar+ (cUSD+)</Text>{' '}
+            es tu dólar para ahorrar: está respaldado 1:1 por USDY, un token
+            garantizado por bonos del Tesoro de EE.UU., y genera rendimiento
+            todos los días. Ambos son tuyos — la blockchain permite comprobar
+            públicamente que el respaldo existe.
           </Text>
         </View>
 
@@ -136,6 +145,11 @@ export const ProtectedSavingsScreen = () => {
               <Icon name="external-link" size={13} color={colors.primary} />
               <Text style={styles.linkText}>Ver respaldo USDC</Text>
             </TouchableOpacity>
+            {/* TODO(cusd+): point at the cUSD+ reserve explorer URL at launch */}
+            <TouchableOpacity style={[styles.linkButton, styles.linkButtonDisabled]} disabled>
+              <Icon name="external-link" size={13} color="#9CA3AF" />
+              <Text style={[styles.linkText, styles.linkTextDisabled]}>Ver respaldo USDY</Text>
+            </TouchableOpacity>
           </View>
           <Text style={styles.tipText}>
             Tip: En Pera Explorer puedes ver la dirección de respaldo, el
@@ -159,7 +173,7 @@ export const ProtectedSavingsScreen = () => {
             <Icon name="plus" size={20} color="#9CA3AF" />
             <View style={[styles.yieldBadge, styles.yieldBadgeNext]}>
               <Text style={styles.yieldBadgeNext1}>cUSD+</Text>
-              <Text style={styles.yieldBadgeLabel}>PARA AHORRAR · PRÓXIMAMENTE</Text>
+              <Text style={styles.yieldBadgeLabel}>PARA AHORRAR · RENDIMIENTO DIARIO</Text>
             </View>
           </View>
 
@@ -211,7 +225,7 @@ export const ProtectedSavingsScreen = () => {
 
           <Text style={styles.disclaimer}>
             * Cifras ilustrativas: la tasa varía día a día con los bonos del
-            Tesoro y no es fija ni garantizada. El respaldo USDY será
+            Tesoro y no es fija ni garantizada. El respaldo USDY es
             verificable públicamente, igual que el de cUSD. Esto no constituye
             asesoría de inversión.
           </Text>
@@ -298,8 +312,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     lineHeight: 20,
   },
-  heroStatPill: {
+  heroPillsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 8,
     marginTop: 14,
+  },
+  heroStatPill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
