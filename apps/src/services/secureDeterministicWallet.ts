@@ -24,7 +24,7 @@ import { REPORT_BACKUP_STATUS } from '../apollo/queries';
 import { gql } from '@apollo/client';
 import { randomBytes } from '@noble/hashes/utils';
 import { CONFIO_DERIVATION_SPEC } from './derivationSpec';
-import { deriveDeterministicEvmKey, DerivedEvmWallet } from './evmWallet';
+import { deriveDeterministicEvmKey, deriveEvmKeyFromMasterSecret, DerivedEvmWallet } from './evmWallet';
 import { base64ToBytes, bytesToBase64, stringToUtf8Bytes } from '../utils/encoding';
 import { AnalyticsService } from './analyticsService';
 import { softClearInternetCredentials } from '../utils/keychainInternetCredentials';
@@ -295,6 +295,14 @@ export function evmAccountKey(opts: {
 
 const evmAddressMemory: Record<string, string> = {};
 
+function cacheAndPersistEvmWallet(acctKey: string, wallet: DerivedEvmWallet): void {
+  lastDerivedEvmWallet = wallet;
+  evmAddressMemory[acctKey] = wallet.address;
+  Keychain.setGenericPassword('evm_address', wallet.address, {
+    service: `${EVM_ADDR_KEYCHAIN_SERVICE}_${acctKey}`,
+  }).catch(() => {});
+}
+
 export async function getEvmAddressForDisplay(accountKey: string): Promise<string | null> {
   if (evmAddressMemory[accountKey]) return evmAddressMemory[accountKey];
   try {
@@ -360,14 +368,7 @@ export function deriveDeterministicAlgorandKey(opts: DeriveWalletOptions): Deriv
   // one secp256k1 point) and keeps both addresses in lockstep everywhere
   // the Algorand key is derived.
   try {
-    lastDerivedEvmWallet = deriveDeterministicEvmKey(opts);
-    // Persist the address (only) for cold-start display, keyed by account;
-    // fire-and-forget.
-    const acctKey = evmAccountKey(opts);
-    evmAddressMemory[acctKey] = lastDerivedEvmWallet.address;
-    Keychain.setGenericPassword('evm_address', lastDerivedEvmWallet.address, {
-      service: `${EVM_ADDR_KEYCHAIN_SERVICE}_${acctKey}`,
-    }).catch(() => {});
+    cacheAndPersistEvmWallet(evmAccountKey(opts), deriveDeterministicEvmKey(opts));
   } catch (e) {
     console.warn('[Derive] EVM sibling derivation failed (non-fatal):', e);
   }
@@ -1663,6 +1664,22 @@ export function deriveWalletV2(
   const address = algosdk.encodeAddress(keyPair.publicKey);
 
   console.log('[DeriveV2] Wallet derived:', address);
+
+  // Savings-chain sibling for V2: derived from the SAME master secret with
+  // the EVM domain — without this, V2 (current-architecture) users would
+  // never get a BSC address at all.
+  try {
+    cacheAndPersistEvmWallet(
+      evmAccountKey({
+        accountType: (opts.accountType === 'business' ? 'business' : 'personal'),
+        accountIndex: opts.accountIndex,
+        businessId: opts.businessId,
+      }),
+      deriveEvmKeyFromMasterSecret(clientSecret, opts),
+    );
+  } catch (e) {
+    console.warn('[DeriveV2] EVM sibling derivation failed (non-fatal):', e);
+  }
 
   return {
     address,

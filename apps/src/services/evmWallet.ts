@@ -65,6 +65,31 @@ export function deriveDeterministicEvmKey(opts: DeriveWalletOptions): DerivedEvm
   }
 }
 
+/** V2 (master-secret) sibling: same HKDF family as deriveWalletV2, with the
+ * EVM domain in the info string. Deterministic per master secret + account;
+ * recoverable wherever the master secret is (keychain + Drive backup). */
+export function deriveEvmKeyFromMasterSecret(
+  clientSecret: Uint8Array,
+  opts: { accountType: string; accountIndex: number; businessId?: string },
+): DerivedEvmWallet {
+  const saltInput = opts.businessId
+    ? `confio_v2_salt_${opts.accountType}_${opts.businessId}_${opts.accountIndex}`
+    : `confio_v2_salt_${opts.accountType}_${opts.accountIndex}`;
+  const salt = sha256(utf8ToBytes(saltInput));
+  for (let counter = 0; ; counter++) {
+    const info = utf8ToBytes(
+      `confio|v2|evm|${saltInput}` + (counter > 0 ? `|retry${counter}` : ''),
+    );
+    const candidate = hkdf(sha256, clientSecret, salt, info, 32);
+    if (isValidPrivKey(candidate)) {
+      return {
+        address: privKeyToAddress(candidate),
+        privKeyHex: bytesToHex(candidate),
+      };
+    }
+  }
+}
+
 const SECP256K1_N = BigInt(
   '0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141',
 );
