@@ -19,6 +19,7 @@ import { MainStackParamList } from '../types/navigation';
 import { GET_STATS_SUMMARY } from '../apollo/queries';
 import { CUSD_RESERVE_PERA_URL } from '../config/algorand';
 import cUSDLogo from '../assets/png/cUSD.png';
+import OndoLogo from '../assets/png/Ondo.png';
 
 const formatWhole = (n: number | null | undefined, sep: string) => {
   if (n == null) return '—';
@@ -73,7 +74,7 @@ export const ProtectedSavingsScreen = () => {
             </Text>
           </View>
           <Text style={styles.heroFootnote}>
-            Hoy: USDC · A futuro: mTBILL
+            Respaldo hoy: USDC · Pronto también: USDY (bonos del Tesoro de EE.UU.)
           </Text>
         </View>
 
@@ -142,60 +143,77 @@ export const ProtectedSavingsScreen = () => {
           </Text>
         </View>
 
-        {/* Yield roadmap */}
+        {/* Two dollars, two jobs — the real yield model (cUSD+ is a
+            separate opt-in product; cUSD reserves are NEVER invested) */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Icon name="trending-up" size={20} color={colors.primary} />
-            <Text style={styles.sectionTitle}>Rendimiento</Text>
+            <Text style={styles.sectionTitle}>Dos dólares, dos trabajos</Text>
           </View>
 
           <View style={styles.yieldBadgeRow}>
             <View style={styles.yieldBadge}>
-              <Text style={styles.yieldBadgeNow}>0%</Text>
-              <Text style={styles.yieldBadgeLabel}>HOY</Text>
+              <Text style={styles.yieldBadgeNow}>cUSD</Text>
+              <Text style={styles.yieldBadgeLabel}>PARA USAR · SIEMPRE $1</Text>
             </View>
-            <Icon name="arrow-right" size={20} color="#9CA3AF" />
+            <Icon name="plus" size={20} color="#9CA3AF" />
             <View style={[styles.yieldBadge, styles.yieldBadgeNext]}>
-              <Text style={styles.yieldBadgeNext1}>hasta 3%</Text>
-              <Text style={styles.yieldBadgeLabel}>ANUAL · PRÓXIMAMENTE</Text>
+              <Text style={styles.yieldBadgeNext1}>cUSD+</Text>
+              <Text style={styles.yieldBadgeLabel}>PARA AHORRAR · PRÓXIMAMENTE</Text>
             </View>
           </View>
 
           <Text style={styles.sectionBody}>
-            Hoy las reservas USDC no generan rendimiento para ti. Estamos
-            explorando un modelo donde las reservas se inviertan en
-            instrumentos institucionales conservadores (por ejemplo{' '}
-            <Text style={styles.inlineEmphasis}>mTBILL</Text>, que sigue los
-            bonos del Tesoro de EE.UU.), y una parte del rendimiento vuelva a
-            quienes mantienen cUSD en la app.
+            Las reservas USDC que respaldan tu cUSD{' '}
+            <Text style={styles.inlineEmphasis}>nunca se invierten</Text> — se
+            quedan 100% en USDC, verificables. El rendimiento vive en un
+            producto separado y opcional:{' '}
+            <Text style={styles.inlineEmphasis}>Confío Dollar+ (cUSD+)</Text>,
+            respaldado 1:1 por USDY, un token garantizado por bonos del Tesoro
+            de EE.UU.
           </Text>
 
           <View style={styles.splitCard}>
-            <Text style={styles.splitTitle}>Cómo se repartiría (ejemplo)</Text>
+            <Text style={styles.splitTitle}>Cómo funciona cUSD+ (ejemplo)</Text>
             <View style={styles.splitRow}>
               <View style={[styles.splitDot, { backgroundColor: '#9CA3AF' }]} />
-              <Text style={styles.splitLabel}>Rendimiento bruto de la reserva</Text>
-              <Text style={styles.splitValue}>~4%</Text>
+              <Text style={styles.splitLabel}>Rendimiento de los bonos del Tesoro</Text>
+              <Text style={styles.splitValue}>~3.5%</Text>
             </View>
             <View style={styles.splitRow}>
               <View style={[styles.splitDot, { backgroundColor: colors.violet }]} />
-              <Text style={styles.splitLabel}>Para sostener Confío</Text>
-              <Text style={styles.splitValue}>1%</Text>
+              <Text style={styles.splitLabel}>Comisión Confío (15% del rendimiento)</Text>
+              <Text style={styles.splitValue}>~0.5%</Text>
             </View>
             <View style={styles.splitRow}>
               <View style={[styles.splitDot, { backgroundColor: colors.primary }]} />
               <Text style={[styles.splitLabel, styles.splitLabelStrong]}>
-                Para ti, por mantener cUSD
+                Para ti, todos los días
               </Text>
-              <Text style={[styles.splitValue, styles.splitValueStrong]}>3%</Text>
+              <Text style={[styles.splitValue, styles.splitValueStrong]}>~3%</Text>
             </View>
           </View>
 
+          <View style={styles.partnerInline}>
+            <Text style={styles.partnerInlineText}>En alianza con</Text>
+            <Image source={OndoLogo} style={styles.partnerInlineLogo} />
+            <Text style={styles.partnerInlineBrand}>Ondo Finance</Text>
+          </View>
+
+          <TouchableOpacity
+            style={styles.ahorrosLink}
+            onPress={() => navigation.navigate('Ahorros')}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.ahorrosLinkText}>Conocer Ahorros e Inversiones</Text>
+            <Icon name="arrow-right" size={15} color={colors.primary} />
+          </TouchableOpacity>
+
           <Text style={styles.disclaimer}>
-            * Cifras ilustrativas. El modelo de rendimiento está en exploración
-            y aún no está activo. Las tasas reales dependerán de las
-            condiciones del mercado y la regulación local. Esto no constituye
-            una oferta de inversión.
+            * Cifras ilustrativas: la tasa varía día a día con los bonos del
+            Tesoro y no es fija ni garantizada. El respaldo USDY será
+            verificable públicamente, igual que el de cUSD. Esto no constituye
+            asesoría de inversión.
           </Text>
         </View>
 
@@ -449,6 +467,27 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     marginTop: 4,
   },
+  partnerInline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginBottom: 10,
+  },
+  partnerInlineText: { fontSize: 12, color: '#9CA3AF' },
+  partnerInlineLogo: { width: 15, height: 15, borderRadius: 4 },
+  partnerInlineBrand: { fontSize: 12, fontWeight: '700', color: '#6B7280' },
+  ahorrosLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#E8F7F0',
+    borderRadius: 10,
+    paddingVertical: 11,
+    marginBottom: 10,
+  },
+  ahorrosLinkText: { fontSize: 14, fontWeight: '700', color: colors.primary },
   ctaSection: {
     marginHorizontal: 16,
     marginBottom: 24,
