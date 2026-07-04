@@ -220,15 +220,15 @@ const PayoutMethodCard = ({
             <Icon name="check-circle" size={13} color={colors.success} style={styles.verifiedIcon} />
           )}
           <View style={styles.cardActions}>
-            <TouchableOpacity onPress={onEdit} style={styles.actionBtn}>
+            <TouchableOpacity onPress={onEdit} style={styles.actionBtn} accessibilityRole="button" accessibilityLabel="Editar forma de cobro">
               <Icon name="edit-2" size={14} color={colors.accent} />
             </TouchableOpacity>
             {!payoutMethod.isDefault && (
-              <TouchableOpacity onPress={onSetDefault} style={styles.actionBtn}>
+              <TouchableOpacity onPress={onSetDefault} style={styles.actionBtn} accessibilityRole="button" accessibilityLabel="Marcar como predeterminada">
                 <Icon name="star" size={14} color={colors.warning} />
               </TouchableOpacity>
             )}
-            <TouchableOpacity onPress={onDelete} style={styles.actionBtn}>
+            <TouchableOpacity onPress={onDelete} style={styles.actionBtn} accessibilityRole="button" accessibilityLabel="Eliminar forma de cobro">
               <Icon name="trash-2" size={14} color={colors.error} />
             </TouchableOpacity>
           </View>
@@ -357,7 +357,7 @@ export const PayoutMethodsScreen = () => {
         <View style={styles.headerWrap}>
           <HeaderBackground height={120} />
           <View style={[styles.headerContent, { paddingTop: 8 }]}>
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} accessibilityRole="button" accessibilityLabel="Volver">
               <Icon name="arrow-left" size={22} color="white" />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Formas de cobro</Text>
@@ -498,7 +498,7 @@ export const PayoutMethodsScreen = () => {
       <View style={[styles.headerWrap, { height: HEADER_HEIGHT }]}>
         <HeaderBackground height={HEADER_HEIGHT} />
         <View style={[styles.headerContent, { paddingTop: 8 }]}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} accessibilityRole="button" accessibilityLabel="Volver">
             <Icon name="arrow-left" size={22} color="white" />
           </TouchableOpacity>
           <View style={{ alignItems: 'center' }}>
@@ -511,7 +511,7 @@ export const PayoutMethodsScreen = () => {
               </View>
             )}
           </View>
-          <TouchableOpacity onPress={handleAddNew} style={styles.addHeaderButton}>
+          <TouchableOpacity onPress={handleAddNew} style={styles.addHeaderButton} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} accessibilityRole="button" accessibilityLabel="Agregar forma de cobro">
             <Icon name="plus" size={22} color="white" />
           </TouchableOpacity>
         </View>
