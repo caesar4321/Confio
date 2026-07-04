@@ -1,7 +1,6 @@
 import React from 'react';
 import {
   ActivityIndicator,
-  Alert,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -22,6 +21,7 @@ import { getDiditResultSessionId, startDiditVerification } from '../services/did
 import { AnalyticsService } from '../services/analyticsService';
 import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
+import { InlineBanner } from '../components/common/InlineBanner';
 
 type NormalizedStatus = 'unverified' | 'pending' | 'verified' | 'rejected';
 
@@ -148,7 +148,8 @@ const VerificationScreen = () => {
 
   const [isLaunchingDidit, setIsLaunchingDidit] = React.useState(false);
   const [isRefreshing, setIsRefreshing] = React.useState(false);
-  const [lastError, setLastError] = React.useState<string | null>(null);
+  const [banner, setBanner] = React.useState<{ message: string; variant: 'error' | 'success' | 'info' | 'warning' } | null>(null);
+  const dismissBanner = React.useCallback(() => setBanner(null), []);
   const [lastAttemptStatus, setLastAttemptStatus] = React.useState<'idle' | 'cancelled' | 'failed'>('idle');
 
   const personalStatus = normalizeStatus(personalKycData?.myPersonalKycStatus?.status || meData?.me?.verificationStatus);
@@ -207,18 +208,17 @@ const VerificationScreen = () => {
       };
       void AnalyticsService.logEvent('generate_lead', analyticsParams);
       void AnalyticsService.logEvent('didit_verified', analyticsParams);
-      Alert.alert('Verificación completa', detail || 'Tu identidad quedó verificada correctamente.');
+      setBanner({ variant: 'success', message: detail || 'Tu identidad quedó verificada correctamente.' });
     } else if (normalized === 'pending') {
-      Alert.alert('Verificación enviada', detail || 'Didit recibió tu sesión. Te avisaremos cuando termine la revisión.');
+      setBanner({ variant: 'info', message: detail || 'Didit recibió tu sesión. Te avisaremos cuando termine la revisión.' });
     } else if (normalized === 'rejected') {
-      Alert.alert('Verificación rechazada', detail || 'La sesión fue rechazada. Puedes intentar nuevamente.');
+      setBanner({ variant: 'error', message: detail || 'La sesión fue rechazada. Puedes intentar nuevamente.' });
     } else {
-      Alert.alert('Sesión iniciada', detail || 'La sesión se creó, pero Didit todavía no devolvió un resultado final.');
+      setBanner({ variant: 'info', message: detail || 'La sesión se creó, pero Didit todavía no devolvió un resultado final.' });
     }
   }, [refreshStatuses, syncDiditSession]);
 
   const handleStartDidit = React.useCallback(async () => {
-    setLastError(null);
     setLastAttemptStatus('idle');
     setIsLaunchingDidit(true);
 
@@ -235,7 +235,7 @@ const VerificationScreen = () => {
 
       if (sdkResultType === 'cancelled') {
         setLastAttemptStatus('cancelled');
-        setLastError('Cancelaste la verificación antes de terminarla.');
+        setBanner({ variant: 'warning', message: 'Cancelaste la verificación antes de terminarla.' });
         return;
       }
 
@@ -253,8 +253,7 @@ const VerificationScreen = () => {
     } catch (error: any) {
       const message = error?.message || 'No se pudo completar la verificación con Didit.';
       setLastAttemptStatus('failed');
-      setLastError(message);
-      Alert.alert('Error de verificación', message);
+      setBanner({ variant: 'error', message });
     } finally {
       setIsLaunchingDidit(false);
     }
@@ -293,6 +292,15 @@ const VerificationScreen = () => {
         contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={refreshStatuses} tintColor={colors.primaryDark} />}
       >
+        {banner && (
+          <InlineBanner
+            message={banner.message}
+            variant={banner.variant}
+            onDismiss={dismissBanner}
+            autoHideMs={banner.variant === 'success' ? 3500 : undefined}
+            style={{ marginBottom: 0 }}
+          />
+        )}
         <View style={styles.heroCard}>
           <View style={styles.heroHeader}>
             <View style={styles.heroBadge}>
@@ -314,33 +322,20 @@ const VerificationScreen = () => {
               onPress={handleStartDidit}
               loading={isLaunchingDidit}
               disabled={isBusy || effectiveStatus === 'verified'}
-              icon={<Icon name="arrow-up-right" size={18} color="#FFFFFF" />}
+              icon={<Icon name="arrow-up-right" size={18} color={colors.white} />}
               textStyle={{ fontWeight: '700' }}
             />
 
-            <TouchableOpacity
-              style={styles.secondaryButton}
+            <Button
+              title="Actualizar estado"
+              variant="secondary"
               onPress={refreshStatuses}
+              loading={isRefreshing}
               disabled={isBusy}
-              activeOpacity={0.9}
-            >
-              {isRefreshing ? (
-                <ActivityIndicator color={colors.primaryDark} />
-              ) : (
-                <>
-                  <Icon name="refresh-cw" size={18} color={colors.primaryDark} />
-                  <Text style={styles.secondaryButtonText}>Actualizar estado</Text>
-                </>
-              )}
-            </TouchableOpacity>
+              icon={<Icon name="refresh-cw" size={18} color={colors.primaryDark} />}
+            />
           </View>
 
-          {lastError ? (
-            <View style={styles.errorBox}>
-              <Icon name="alert-triangle" size={16} color={colors.danger} />
-              <Text style={styles.errorText}>{lastError}</Text>
-            </View>
-          ) : null}
         </View>
 
         <View style={styles.section}>
@@ -479,37 +474,6 @@ const styles = StyleSheet.create({
   heroActions: {
     gap: 12,
   },
-  secondaryButton: {
-    backgroundColor: colors.surface,
-    borderRadius: 14,
-    paddingVertical: 15,
-    paddingHorizontal: 18,
-    borderWidth: 1,
-    borderColor: colors.primaryLight,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-  },
-  secondaryButtonText: {
-    color: colors.primaryDark,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  errorBox: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-    backgroundColor: colors.dangerLight,
-    borderRadius: 12,
-    padding: 14,
-  },
-  errorText: {
-    flex: 1,
-    color: colors.danger,
-    fontSize: 14,
-    lineHeight: 20,
-  },
   section: {
     gap: 12,
   },
@@ -528,7 +492,7 @@ const styles = StyleSheet.create({
   },
   levelCardActive: {
     borderColor: colors.primaryLight,
-    backgroundColor: '#FCFFFE',
+    backgroundColor: colors.primarySoft,
   },
   levelHeader: {
     flexDirection: 'row',
