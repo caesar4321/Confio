@@ -79,19 +79,20 @@ export function HumanitarianHomeBanner({
 
 // Styled as a sibling of Home's other promo cards (invite claim, payroll):
 // flat tinted fill + 1px border, radius 12, 40px icon square on the left.
-// Rose is the humanitarian category color, matching the slot's
-// color-per-category grammar (emerald = your money, violet = payroll).
+// Sky blue is the humanitarian category color (UN/UNICEF convention — calm,
+// not alarming; rose was rejected for reading like the app's error state).
+// Slot grammar: emerald = your money, violet = payroll, sky = humanitarian.
 const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    backgroundColor: '#FFF1F2', // rose-50
+    backgroundColor: '#F0F9FF', // sky-50
     borderRadius: 12,
     paddingVertical: 12,
     paddingHorizontal: 12,
     borderWidth: 1,
-    borderColor: '#FECDD3', // rose-200
+    borderColor: '#BAE6FD', // sky-200
   },
   flagWrap: {
     width: 40,
@@ -104,7 +105,7 @@ const styles = StyleSheet.create({
   flag: { fontSize: 22 },
   body: { flex: 1 },
   title: { fontSize: 15, lineHeight: 20, fontWeight: '700', color: '#111827', marginBottom: 6 },
-  track: { height: 5, borderRadius: 3, backgroundColor: '#FFE4E6', overflow: 'hidden' },
-  fill: { height: '100%', borderRadius: 3, backgroundColor: '#F43F5E' }, // rose-500
+  track: { height: 5, borderRadius: 3, backgroundColor: '#E0F2FE', overflow: 'hidden' }, // sky-100
+  fill: { height: '100%', borderRadius: 3, backgroundColor: '#0EA5E9' }, // sky-500
   meta: { fontSize: 12, color: '#6B7280', marginTop: 6 },
 });
