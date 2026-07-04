@@ -1,0 +1,323 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+
+/**
+ * CusdPlusVault — Confío Dollar+ (cUSD+) on BSC.
+ *
+ * DESIGN DRAFT (uncompiled): the Solidity port of the architecture proven in
+ * contracts/cusd/cusd.py (Algorand). Same trust story, EVM grammar:
+ *
+ *   cusd.py (Algorand)                     This contract (BSC)
+ *   ───────────────────────────────────    ─────────────────────────────────
+ *   mint only inside an atomic group       mint only inside a function that
+ *   whose USDC axfer the contract          pulls/receives the USDY collateral
+ *   verifies at a fixed index              in the SAME transaction
+ *   ASA manager locked to zero             no owner/admin mint function
+ *                                          exists anywhere in the bytecode
+ *   clawback = app (contract controls      vault holds the USDY; shares are
+ *   reserve movements)                     burned to release it
+ *   1 cUSD : 1 USDC, fixed                 Σ cUSD+ value ≤ vault USDY value,
+ *                                          enforced on every state change
+ *
+ * TOKEN MODEL (locked decision A): cUSD+ is an ACCUMULATING SHARE. A share's
+ * USD price (`pPlus`, 1e18) starts at $1.00 and compounds at
+ * (1 − CONFIO_YIELD_SHARE) of USDY's own oracle appreciation. Share counts
+ * are an on-chain implementation detail — every Confío surface displays USD
+ * value only (shares × pPlus).
+ *
+ * FEE MODEL: Confío never mints itself anything. Because pPlus grows slower
+ * than USDY's price, the vault's USDY is progressively worth more than what
+ * is owed to holders; that surplus — and ONLY that surplus — is withdrawable
+ * by the treasury (collectFees). Backing can therefore never drop below 100%
+ * of what holders are owed.
+ *
+ * TRANSFER POLICY (locked decision C): restriction is soft — plain ERC-20 on
+ * chain, the app UI simply doesn't surface transfers. No hooks here.
+ *
+ * UPGRADEABILITY: none, on purpose. A proxy admin who can swap the
+ * implementation can also swap the backing out; a non-upgradeable vault is
+ * the EVM equivalent of cusd.py's zeroed ASA manager. Fee-share and token
+ * addresses are immutable; a parameter change means a new vault + migration.
+ *
+ * OPEN ITEMS before this leaves draft (tracked in README.md):
+ *  - IOndoInstantManager signatures are PROVISIONAL: align with the official
+ *    ABI from Ondo onboarding (BNB IM + USDT deposit support pending
+ *    Michael's confirmation). All IM touchpoints are isolated in
+ *    _imSubscribe/_imRedeem so only those two bodies change.
+ *  - USDY on BSC assumed ACCUMULATING (like Ethereum USDY, not rUSDY
+ *    rebasing) and 18 decimals; USDT on BSC is 18 decimals (unlike ETH).
+ *  - RWADynamicOracle address on BSC from onboarding docs.
+ */
+
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+
+/// Ondo's dynamic oracle: deterministic accreting USD price for USDY, 1e18.
+interface IRWADynamicOracle {
+    function getPrice() external view returns (uint256);
+}
+
+/// PROVISIONAL — replace with the official Instant Manager ABI at onboarding.
+interface IOndoInstantManager {
+    /// deposit stablecoin -> receive USDY at oracle price (no spread).
+    function subscribe(uint256 depositAmount, uint256 minimumRwaReceived) external;
+    /// burn USDY -> receive stablecoin at oracle price.
+    function redeem(uint256 rwaAmount, uint256 minimumTokenReceived) external;
+}
+
+contract CusdPlusVault is ERC20, Ownable2Step, Pausable, ReentrancyGuard {
+    using SafeERC20 for IERC20;
+
+    // ── Immutable wiring ────────────────────────────────────────────────
+    IERC20 public immutable USDY; // backing asset (accumulating, 1e18)
+    IERC20 public immutable USDT; // BSC USDT, 1e18 (Koywe rail in/out)
+    IOndoInstantManager public immutable INSTANT_MANAGER;
+    IRWADynamicOracle public immutable ORACLE;
+
+    /// Confío's share of USDY yield, bps (locked: 1500 = 15%). Immutable —
+    /// changing it requires a new vault, which is the point.
+    uint256 public immutable CONFIO_YIELD_SHARE_BPS;
+    uint256 private constant BPS = 10_000;
+    uint256 private constant WAD = 1e18;
+
+    /// Oracle sanity guard: a single accrual step moving more than this many
+    /// bps freezes accrual (skip + event) until the owner re-baselines. USDY
+    /// accretes a few bps/day; a 2% jump is a fault, not yield.
+    uint256 public constant MAX_ACCRUAL_JUMP_BPS = 200;
+
+    // ── Accrual state ───────────────────────────────────────────────────
+    /// cUSD+ share price in USD, 1e18. Starts at $1.00, only ever rises.
+    uint256 public pPlus;
+    /// Oracle price at the last completed accrual.
+    uint256 public lastOraclePrice;
+    /// Set when the jump guard trips; accrual stays frozen (mints/redeems
+    /// keep working at the frozen pPlus) until resetOracleBaseline().
+    bool public oracleGuardTripped;
+
+    // ── Events ──────────────────────────────────────────────────────────
+    event Accrued(uint256 oraclePrice, uint256 newPPlus);
+    event OracleJumpGuard(uint256 lastPrice, uint256 newPrice);
+    event OracleBaselineReset(uint256 oldPrice, uint256 newPrice);
+    event Minted(address indexed recipient, uint256 shares, uint256 usdyIn, uint256 pPlusAt);
+    event Redeemed(address indexed holder, address indexed to, uint256 shares, uint256 usdyOut, uint256 pPlusAt);
+    event FeesCollected(address indexed to, uint256 usdyAmount, uint256 surplusBefore);
+
+    constructor(
+        address usdy,
+        address usdt,
+        address instantManager,
+        address oracle,
+        uint256 confioYieldShareBps,
+        address treasury
+    ) ERC20("Confio Dollar+", "cUSD+") Ownable(treasury) {
+        require(confioYieldShareBps <= 3_000, "share too high"); // hard ceiling 30%
+        USDY = IERC20(usdy);
+        USDT = IERC20(usdt);
+        INSTANT_MANAGER = IOndoInstantManager(instantManager);
+        ORACLE = IRWADynamicOracle(oracle);
+        CONFIO_YIELD_SHARE_BPS = confioYieldShareBps;
+        pPlus = WAD; // $1.00 at genesis
+        lastOraclePrice = IRWADynamicOracle(oracle).getPrice();
+    }
+
+    // ═════════════════════════ Accrual ══════════════════════════════════
+    /// Lazy compounding on every interaction (Compound-style): pPlus grows by
+    /// (1 − fee share) of USDY's growth since the last accrual. The withheld
+    /// slice is never minted anywhere — it simply makes the vault's USDY
+    /// worth more than usdyOwed(), i.e. it becomes withdrawable surplus.
+    function accrue() public {
+        uint256 p = ORACLE.getPrice();
+        uint256 last = lastOraclePrice;
+        if (p == last || oracleGuardTripped) return;
+        // USDY's oracle curve is monotonically increasing by construction; a
+        // lower or wildly higher read is a fault. Freeze, don't revert —
+        // reverting here would brick mints and redeems.
+        if (p < last || ((p - last) * BPS) / last > MAX_ACCRUAL_JUMP_BPS) {
+            oracleGuardTripped = true;
+            emit OracleJumpGuard(last, p);
+            return;
+        }
+        // growthWad = p/last − 1, in WAD; keep (1 − share) of it.
+        uint256 growthWad = ((p - last) * WAD) / last;
+        uint256 keptWad = (growthWad * (BPS - CONFIO_YIELD_SHARE_BPS)) / BPS;
+        pPlus = (pPlus * (WAD + keptWad)) / WAD;
+        lastOraclePrice = p;
+        emit Accrued(p, pPlus);
+    }
+
+    /// After investigating an oracle fault, the owner re-baselines WITHOUT
+    /// granting holders the anomalous jump (yield during the frozen window is
+    /// forfeited to surplus — conservative by design).
+    function resetOracleBaseline() external onlyOwner {
+        uint256 p = ORACLE.getPrice();
+        emit OracleBaselineReset(lastOraclePrice, p);
+        lastOraclePrice = p;
+        oracleGuardTripped = false;
+    }
+
+    // ═════════════════════════ Mint paths ═══════════════════════════════
+    // There is deliberately NO other mint in this contract. Both paths take
+    // custody of the USDY inside the same transaction that mints — the EVM
+    // translation of cusd.py verifying the USDC axfer inside the atomic
+    // group. (Solidity's guarantee is even simpler: one tx, one revert scope.)
+
+    /// Primary rail: USDT (delivered by Koywe or bridged by treasury) →
+    /// InstantManager subscribe → USDY into vault → shares to recipient.
+    /// minUsdyOut is the slippage floor (IM's minimumRwaReceived).
+    function subscribeAndMint(uint256 usdtIn, uint256 minUsdyOut, address recipient)
+        external
+        nonReentrant
+        whenNotPaused
+        returns (uint256 sharesOut)
+    {
+        require(usdtIn > 0, "zero in");
+        accrue();
+        USDT.safeTransferFrom(msg.sender, address(this), usdtIn);
+        uint256 usdyOut = _imSubscribe(usdtIn, minUsdyOut);
+        sharesOut = _mintAgainstUsdy(usdyOut, recipient);
+    }
+
+    /// Secondary rail: caller already holds USDY (treasury bridge leg,
+    /// secondary-market acquisition during IM outages).
+    function depositAndMint(uint256 usdyIn, address recipient)
+        external
+        nonReentrant
+        whenNotPaused
+        returns (uint256 sharesOut)
+    {
+        require(usdyIn > 0, "zero in");
+        accrue();
+        USDY.safeTransferFrom(msg.sender, address(this), usdyIn);
+        sharesOut = _mintAgainstUsdy(usdyIn, recipient);
+    }
+
+    function _mintAgainstUsdy(uint256 usdyIn, address recipient) internal returns (uint256 sharesOut) {
+        uint256 p = ORACLE.getPrice();
+        // shares = USD value in / share price; floor rounding favors backing.
+        sharesOut = (usdyIn * p) / pPlus;
+        require(sharesOut > 0, "dust");
+        _mint(recipient, sharesOut);
+        _assertFullyBacked(p);
+        emit Minted(recipient, sharesOut, usdyIn, pPlus);
+    }
+
+    // ═════════════════════════ Redeem paths ═════════════════════════════
+
+    /// Burn shares, receive raw USDY (treasury/off-ramp plumbing).
+    function redeem(uint256 shares, address to)
+        external
+        nonReentrant
+        whenNotPaused
+        returns (uint256 usdyOut)
+    {
+        accrue();
+        uint256 p = ORACLE.getPrice();
+        usdyOut = (shares * pPlus) / p; // floor favors backing
+        require(usdyOut > 0, "dust");
+        _burn(msg.sender, shares);
+        USDY.safeTransfer(to, usdyOut);
+        _assertFullyBacked(p);
+        emit Redeemed(msg.sender, to, shares, usdyOut, pPlus);
+    }
+
+    /// Burn shares → IM redeem → USDT to `to` (the direct off-ramp rail:
+    /// cUSD+ → USDT-BSC → Koywe, no hop through cUSD/Algorand).
+    function redeemToUsdt(uint256 shares, uint256 minUsdtOut, address to)
+        external
+        nonReentrant
+        whenNotPaused
+        returns (uint256 usdtOut)
+    {
+        accrue();
+        uint256 p = ORACLE.getPrice();
+        uint256 usdyOut = (shares * pPlus) / p;
+        require(usdyOut > 0, "dust");
+        _burn(msg.sender, shares);
+        usdtOut = _imRedeem(usdyOut, minUsdtOut);
+        USDT.safeTransfer(to, usdtOut);
+        _assertFullyBacked(p);
+        emit Redeemed(msg.sender, to, shares, usdyOut, pPlus);
+    }
+
+    // ═════════════════════════ Fees ═════════════════════════════════════
+
+    /// Withdraw ONLY the surplus above 100% backing (cusd.py's rule that the
+    /// reserve is untouchable, expressed as an inequality instead of 1:1).
+    function collectFees(address to, uint256 usdyAmount) external onlyOwner nonReentrant {
+        accrue();
+        uint256 p = ORACLE.getPrice();
+        uint256 surplus = surplusUsdy(p);
+        require(usdyAmount <= surplus, "exceeds surplus");
+        USDY.safeTransfer(to, usdyAmount);
+        _assertFullyBacked(p);
+        emit FeesCollected(to, usdyAmount, surplus);
+    }
+
+    /// Rescue tokens sent by mistake. USDY is the backing and is NEVER
+    /// sweepable — not even by the owner.
+    function sweep(address token, address to, uint256 amount) external onlyOwner {
+        require(token != address(USDY), "backing is sacred");
+        IERC20(token).safeTransfer(to, amount);
+    }
+
+    function pause() external onlyOwner { _pause(); }
+    function unpause() external onlyOwner { _unpause(); }
+
+    // ═════════════════════════ Views (public verifiability) ═════════════
+    // These four back the ProtectedSavings "verify it yourself" links.
+
+    /// USDY the holders are collectively owed at oracle price `p`.
+    function usdyOwed(uint256 p) public view returns (uint256) {
+        return (totalSupply() * pPlus + (p - 1)) / p; // ceil — owe generously
+    }
+
+    /// Withdrawable surplus at oracle price `p` (0 if somehow underwater).
+    function surplusUsdy(uint256 p) public view returns (uint256) {
+        uint256 bal = USDY.balanceOf(address(this));
+        uint256 owed = usdyOwed(p);
+        return bal > owed ? bal - owed : 0;
+    }
+
+    /// Σ cUSD+ USD value (what the app shows as "cUSD+ en circulación").
+    function totalOwedUsd() external view returns (uint256) {
+        return (totalSupply() * pPlus) / WAD;
+    }
+
+    /// Backing ratio in bps (10_000 = exactly 100%). Public invariant:
+    /// this must never read below 10_000.
+    function backingRatioBps() external view returns (uint256) {
+        uint256 owed = usdyOwed(ORACLE.getPrice());
+        if (owed == 0) return BPS;
+        return (USDY.balanceOf(address(this)) * BPS) / owed;
+    }
+
+    // ═════════════════════════ Internals ════════════════════════════════
+
+    /// The invariant, checked after every state change (cusd.py asserts
+    /// everything; so do we): vault USDY ≥ USDY owed to holders.
+    function _assertFullyBacked(uint256 p) internal view {
+        require(USDY.balanceOf(address(this)) >= usdyOwed(p), "backing violated");
+    }
+
+    /// PROVISIONAL IM plumbing — the ONLY two bodies that change when the
+    /// official BNB Instant Manager ABI lands.
+    function _imSubscribe(uint256 usdtIn, uint256 minUsdyOut) internal returns (uint256 usdyOut) {
+        uint256 before = USDY.balanceOf(address(this));
+        USDT.forceApprove(address(INSTANT_MANAGER), usdtIn);
+        INSTANT_MANAGER.subscribe(usdtIn, minUsdyOut);
+        usdyOut = USDY.balanceOf(address(this)) - before;
+        require(usdyOut >= minUsdyOut, "im: insufficient out");
+    }
+
+    function _imRedeem(uint256 usdyIn, uint256 minUsdtOut) internal returns (uint256 usdtOut) {
+        uint256 before = USDT.balanceOf(address(this));
+        USDY.forceApprove(address(INSTANT_MANAGER), usdyIn);
+        INSTANT_MANAGER.redeem(usdyIn, minUsdtOut);
+        usdtOut = USDT.balanceOf(address(this)) - before;
+        require(usdtOut >= minUsdtOut, "im: insufficient out");
+    }
+}
