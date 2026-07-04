@@ -68,7 +68,9 @@ pragma solidity ^0.8.24;
 import {ERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
 import {Ownable2StepUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
-import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
+// Transient-storage guard (OZ 5.6 dropped the upgradeable variant): stateless,
+// so proxy-safe with no initializer. Requires Cancun opcodes — BSC has them.
+import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -90,7 +92,7 @@ contract CusdPlusVault is
     ERC20Upgradeable,
     Ownable2StepUpgradeable,
     PausableUpgradeable,
-    ReentrancyGuardUpgradeable,
+    ReentrancyGuardTransient,
     UUPSUpgradeable
 {
     using SafeERC20 for IERC20;
@@ -165,8 +167,6 @@ contract CusdPlusVault is
         __Ownable_init(treasury);
         __Ownable2Step_init();
         __Pausable_init();
-        __ReentrancyGuard_init();
-        __UUPSUpgradeable_init();
         pPlus = WAD; // $1.00 at genesis
         lastOraclePrice = ORACLE.getPrice();
     }

@@ -3,8 +3,15 @@
 Solidity port of the trust architecture proven in [`contracts/cusd/cusd.py`](../cusd/cusd.py)
 (Algorand), for Confío Dollar+ (cUSD+): the USDY-backed savings token.
 
-**Status: DRAFT, uncompiled.** The build behind it stays gated on the whale
-deposit-intent signal (decision 68e9cd45). No foundry/hardhat scaffold yet.
+**Status: COMPILED + TESTED** (build ungated by founder decision,
+2026-07-04). Foundry scaffold in this directory: solc 0.8.26, OZ 5.6.1
+(via npm; `npm install && npm run setup:forge-std`), 17 tests green
+including a fuzz over random op sequences asserting
+`backingRatioBps() ≥ 10000`. Mocks stand in for USDY/USDT/IM/oracle until
+Ondo onboarding answers land — the Solidity surface those answers touch is
+isolated in `_imSubscribe`/`_imRedeem`. Note: OZ 5.6 dropped
+ReentrancyGuardUpgradeable; the vault uses ReentrancyGuardTransient
+(stateless, proxy-safe; needs Cancun opcodes — BSC has them).
 
 ## Concept map: cusd.py → CusdPlusVault.sol
 
@@ -117,8 +124,9 @@ Two footnotes:
 
 ## Deployment checklist (when ungated)
 
-- [ ] Foundry scaffold + OZ pin; compile, fuzz the invariant
-      (`backingRatioBps() ≥ 10000` under arbitrary op sequences)
+- [x] Foundry scaffold + OZ pin; compile, fuzz the invariant
+      (`backingRatioBps() ≥ 10000` under arbitrary op sequences) — done
+      2026-07-04; deepen with stateful invariant handlers before deploy
 - [ ] Fill IM interface from official ABI; integration test on BSC testnet
       against real IM + oracle
 - [ ] External review of `accrue()` math (WAD/BPS rounding)

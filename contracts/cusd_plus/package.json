@@ -1,0 +1,12 @@
+{
+  "name": "cusd-plus-contracts",
+  "private": true,
+  "description": "cUSD+ vault (BSC) \u2014 foundry build deps",
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.0.2",
+    "@openzeppelin/contracts-upgradeable": "^5.0.2"
+  },
+  "scripts": {
+    "setup:forge-std": "mkdir -p lib && curl -sL https://github.com/foundry-rs/forge-std/archive/refs/tags/v1.9.7.tar.gz | tar xz -C lib && rm -rf lib/forge-std && mv lib/forge-std-1.9.7 lib/forge-std"
+  }
+}

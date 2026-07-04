@@ -1,0 +1,376 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+
+import {Test} from "forge-std/Test.sol";
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {CusdPlusVault, IRWADynamicOracle, IOndoInstantManager} from "../CusdPlusVault.sol";
+
+// ── Mocks ────────────────────────────────────────────────────────────────
+
+contract MockToken is ERC20 {
+    constructor(string memory n) ERC20(n, n) {}
+    function mint(address to, uint256 amt) external { _mint(to, amt); }
+}
+
+contract MockOracle is IRWADynamicOracle {
+    uint256 public price = 1e18;
+    function setPrice(uint256 p) external { price = p; }
+    function getPrice() external view returns (uint256) { return price; }
+}
+
+/// Swaps USDT <-> USDY at the oracle price, no spread (Instant Manager
+/// semantics). Pre-funded with both tokens in setUp.
+contract MockInstantManager is IOndoInstantManager {
+    MockToken public usdt;
+    MockToken public usdy;
+    MockOracle public oracle;
+
+    constructor(MockToken _usdt, MockToken _usdy, MockOracle _oracle) {
+        usdt = _usdt;
+        usdy = _usdy;
+        oracle = _oracle;
+    }
+
+    function subscribe(uint256 depositAmount, uint256 minimumRwaReceived) external {
+        usdt.transferFrom(msg.sender, address(this), depositAmount);
+        uint256 usdyOut = (depositAmount * 1e18) / oracle.price();
+        require(usdyOut >= minimumRwaReceived, "im slippage");
+        usdy.transfer(msg.sender, usdyOut);
+    }
+
+    function redeem(uint256 rwaAmount, uint256 minimumTokenReceived) external {
+        usdy.transferFrom(msg.sender, address(this), rwaAmount);
+        uint256 usdtOut = (rwaAmount * oracle.price()) / 1e18;
+        require(usdtOut >= minimumTokenReceived, "im slippage");
+        usdt.transfer(msg.sender, usdtOut);
+    }
+}
+
+contract BrickedVault is CusdPlusVault {
+    constructor(address a, address b, address c, address d, uint256 e)
+        CusdPlusVault(a, b, c, d, e) {}
+    function marker() external pure returns (uint256) { return 42; }
+}
+
+// ── Tests ────────────────────────────────────────────────────────────────
+
+contract CusdPlusVaultTest is Test {
+    MockToken usdt;
+    MockToken usdy;
+    MockOracle oracle;
+    MockInstantManager im;
+    CusdPlusVault vault; // via proxy
+
+    address treasury = makeAddr("treasury");
+    address user = makeAddr("user");
+    address user2 = makeAddr("user2");
+
+    uint256 constant WAD = 1e18;
+
+    function setUp() public {
+        usdt = new MockToken("USDT");
+        usdy = new MockToken("USDY");
+        oracle = new MockOracle();
+        im = new MockInstantManager(usdt, usdy, oracle);
+        usdt.mint(address(im), 100_000_000e18);
+        usdy.mint(address(im), 100_000_000e18);
+
+        CusdPlusVault impl = new CusdPlusVault(
+            address(usdy), address(usdt), address(im), address(oracle), 1500
+        );
+        ERC1967Proxy proxy = new ERC1967Proxy(
+            address(impl),
+            abi.encodeCall(CusdPlusVault.initialize, (treasury))
+        );
+        vault = CusdPlusVault(address(proxy));
+
+        usdt.mint(user, 1_000_000e18);
+        vm.prank(user);
+        usdt.approve(address(vault), type(uint256).max);
+    }
+
+    function _backed() internal view returns (bool) {
+        return vault.backingRatioBps() >= 10_000;
+    }
+
+    // ── Mint / redeem ────────────────────────────────────────────────
+
+    function test_subscribeAndMint_atPar() public {
+        vm.prank(user);
+        uint256 shares = vault.subscribeAndMint(1000e18, 990e18, user);
+        assertEq(shares, 1000e18, "1 USDT = 1 share at $1.00");
+        assertEq(vault.balanceOf(user), 1000e18);
+        assertEq(vault.totalOwedUsd(), 1000e18);
+        assertTrue(_backed());
+    }
+
+    function test_depositAndMint_directUsdy() public {
+        usdy.mint(user, 500e18);
+        vm.startPrank(user);
+        usdy.approve(address(vault), type(uint256).max);
+        uint256 shares = vault.depositAndMint(500e18, user);
+        vm.stopPrank();
+        assertEq(shares, 500e18);
+        assertTrue(_backed());
+    }
+
+    function test_redeem_roundTrip() public {
+        vm.startPrank(user);
+        uint256 shares = vault.subscribeAndMint(1000e18, 990e18, user);
+        uint256 usdyOut = vault.redeem(shares, user);
+        vm.stopPrank();
+        assertEq(vault.totalSupply(), 0);
+        assertApproxEqAbs(usdyOut, 1000e18, 2, "floor rounding only");
+        assertEq(usdy.balanceOf(user), usdyOut);
+    }
+
+    function test_redeemToUsdt() public {
+        vm.startPrank(user);
+        uint256 shares = vault.subscribeAndMint(1000e18, 990e18, user);
+        uint256 usdtOut = vault.redeemToUsdt(shares, 999e18, user2);
+        vm.stopPrank();
+        assertApproxEqAbs(usdtOut, 1000e18, 2);
+        assertEq(usdt.balanceOf(user2), usdtOut);
+        assertTrue(_backed());
+    }
+
+    function test_mint_slippageFloor_reverts() public {
+        oracle.setPrice(1.01e18); // 1000 USDT -> ~990 USDY
+        vm.prank(user);
+        vm.expectRevert();
+        vault.subscribeAndMint(1000e18, 995e18, user);
+    }
+
+    // ── Accrual & fee split ──────────────────────────────────────────
+
+    function test_accrue_keeps85pct() public {
+        vm.prank(user);
+        vault.subscribeAndMint(1000e18, 990e18, user);
+        oracle.setPrice(1.001e18); // +10 bps
+        vault.accrue();
+        // holders keep 8.5 bps of the 10
+        assertEq(vault.pPlus(), (WAD * (WAD + 0.00085e18)) / WAD);
+        assertTrue(_backed());
+    }
+
+    function test_feeSurplus_only_above_full_backing() public {
+        vm.prank(user);
+        vault.subscribeAndMint(100_000e18, 99_000e18, user);
+        oracle.setPrice(1.01e18); // +1% USDY yield
+        vault.accrue();
+
+        uint256 p = oracle.price();
+        uint256 surplus = vault.surplusUsdy(p);
+        assertGt(surplus, 0, "15pct of the yield must be withdrawable");
+
+        // more than surplus: rejected
+        vm.prank(treasury);
+        vm.expectRevert(bytes("exceeds surplus"));
+        vault.collectFees(treasury, surplus + 1);
+
+        // exact surplus: fine, and backing still >= 100%
+        vm.prank(treasury);
+        vault.collectFees(treasury, surplus);
+        assertEq(usdy.balanceOf(treasury), surplus);
+        assertTrue(_backed());
+    }
+
+    function test_userValue_grows_at_85pct_of_yield() public {
+        vm.prank(user);
+        vault.subscribeAndMint(1000e18, 990e18, user);
+        // One +1% step (single steps > 2% trip the jump guard by design —
+        // USDY moves a few bps/day; see test_jumpGuard_freezes_not_bricks).
+        oracle.setPrice(1.01e18);
+        vault.accrue();
+        uint256 valueUsd = (vault.balanceOf(user) * vault.pPlus()) / WAD;
+        assertEq(valueUsd, 1008.5e18, "user keeps 85% of 1% = 0.85%");
+    }
+
+    function test_multiStep_compounding_favors_backing() public {
+        vm.prank(user);
+        vault.subscribeAndMint(1000e18, 990e18, user);
+        // Four +1% steps = USDY +4.06%; per-step compounding gives holders
+        // (1.0085)^4 - 1 = 3.445%, a hair under 85% of the total 4.06% —
+        // the drift lands in surplus, never against backing.
+        uint256 price = WAD;
+        for (uint256 i = 0; i < 4; i++) {
+            price = (price * 101) / 100;
+            oracle.setPrice(price);
+            vault.accrue();
+        }
+        uint256 valueUsd = (vault.balanceOf(user) * vault.pPlus()) / WAD;
+        assertApproxEqRel(valueUsd, 1034.4e18, 0.001e18);
+        uint256 kept85OfTotal = 1000e18 + (1000e18 * (price - WAD) / WAD) * 8500 / 10_000;
+        assertLe(valueUsd, kept85OfTotal, "compounding drift must favor surplus");
+        assertGe(vault.backingRatioBps(), 10_000);
+    }
+
+    // ── Oracle jump guard ────────────────────────────────────────────
+
+    function test_jumpGuard_freezes_not_bricks() public {
+        vm.prank(user);
+        vault.subscribeAndMint(1000e18, 990e18, user);
+        uint256 pBefore = vault.pPlus();
+
+        oracle.setPrice(1.03e18); // +3% in one step: fault
+        vault.accrue();
+        assertTrue(vault.oracleGuardTripped());
+        assertEq(vault.pPlus(), pBefore, "no accrual on faulty read");
+
+        // mints/redeems keep working at the frozen price
+        vm.prank(user);
+        vault.subscribeAndMint(100e18, 90e18, user);
+        assertTrue(_backed());
+
+        vm.prank(treasury);
+        vault.resetOracleBaseline();
+        assertFalse(vault.oracleGuardTripped());
+        assertEq(vault.pPlus(), pBefore, "frozen-window yield goes to surplus");
+    }
+
+    function test_decreasingOracle_trips_guard() public {
+        oracle.setPrice(0.999e18);
+        vault.accrue();
+        assertTrue(vault.oracleGuardTripped());
+    }
+
+    // ── Freeze (cusd.py parity) ──────────────────────────────────────
+
+    function test_freeze_blocks_everything_detains_not_confiscates() public {
+        vm.prank(user);
+        vault.subscribeAndMint(1000e18, 990e18, user);
+
+        vm.prank(treasury);
+        vault.freezeAddress(user);
+
+        vm.prank(user);
+        vm.expectRevert(bytes("address frozen"));
+        vault.transfer(user2, 1e18);
+
+        vm.prank(user);
+        vm.expectRevert(bytes("address frozen"));
+        vault.redeem(1e18, user);
+
+        vm.prank(user);
+        vm.expectRevert(bytes("address frozen"));
+        vault.subscribeAndMint(1e18, 0, user);
+
+        // yield keeps accruing to frozen shares
+        oracle.setPrice(1.001e18);
+        vault.accrue();
+
+        vm.prank(treasury);
+        vault.unfreezeAddress(user);
+        vm.prank(user);
+        vault.transfer(user2, 1e18); // works again, value grown
+        assertTrue(_backed());
+    }
+
+    function test_cannot_freeze_vault_itself() public {
+        vm.prank(treasury);
+        vm.expectRevert(bytes("cannot freeze vault"));
+        vault.freezeAddress(address(vault));
+    }
+
+    // ── Pause ────────────────────────────────────────────────────────
+
+    function test_pause_blocks_mint_redeem_not_transfers() public {
+        vm.prank(user);
+        vault.subscribeAndMint(1000e18, 990e18, user);
+        vm.prank(treasury);
+        vault.pause();
+
+        vm.prank(user);
+        vm.expectRevert();
+        vault.subscribeAndMint(1e18, 0, user);
+        vm.prank(user);
+        vm.expectRevert();
+        vault.redeem(1e18, user);
+
+        // soft transfer policy: plain transfers unaffected by pause
+        vm.prank(user);
+        vault.transfer(user2, 1e18);
+    }
+
+    // ── Upgradeability posture ───────────────────────────────────────
+
+    function test_upgrade_then_lock_forever() public {
+        BrickedVault impl2 = new BrickedVault(
+            address(usdy), address(usdt), address(im), address(oracle), 1500
+        );
+
+        // non-owner cannot upgrade
+        vm.prank(user);
+        vm.expectRevert();
+        vault.upgradeToAndCall(address(impl2), "");
+
+        // owner can (maturation phase)
+        vm.prank(treasury);
+        vault.upgradeToAndCall(address(impl2), "");
+        assertEq(BrickedVault(address(vault)).marker(), 42);
+
+        // one-way lock
+        vm.prank(treasury);
+        vault.lockUpgrades();
+        vm.prank(treasury);
+        vm.expectRevert(bytes("upgrades locked forever"));
+        vault.upgradeToAndCall(address(impl2), "");
+    }
+
+    // ── Sweep ────────────────────────────────────────────────────────
+
+    function test_sweep_never_touches_backing() public {
+        vm.prank(user);
+        vault.subscribeAndMint(1000e18, 990e18, user);
+        vm.prank(treasury);
+        vm.expectRevert(bytes("backing is sacred"));
+        vault.sweep(address(usdy), treasury, 1);
+
+        MockToken stray = new MockToken("STRAY");
+        stray.mint(address(vault), 5e18);
+        vm.prank(treasury);
+        vault.sweep(address(stray), treasury, 5e18);
+        assertEq(stray.balanceOf(treasury), 5e18);
+    }
+
+    // ── Fuzz: the invariant under arbitrary op sequences ─────────────
+
+    function testFuzz_backingInvariant(uint256 seed) public {
+        uint256 state = seed;
+        for (uint256 i = 0; i < 24; i++) {
+            state = uint256(keccak256(abi.encode(state)));
+            uint256 op = state % 5;
+            uint256 amt = (state >> 8) % 50_000e18 + 1e18;
+
+            if (op == 0) {
+                vm.prank(user);
+                try vault.subscribeAndMint(amt, 0, user) {} catch {}
+            } else if (op == 1) {
+                uint256 bal = vault.balanceOf(user);
+                if (bal > 0) {
+                    vm.prank(user);
+                    try vault.redeem((amt % bal) + 1 > bal ? bal : (amt % bal) + 1, user) {} catch {}
+                }
+            } else if (op == 2) {
+                // yield drips a few bps
+                oracle.setPrice((oracle.price() * (10_000 + (state % 15))) / 10_000);
+                vault.accrue();
+            } else if (op == 3) {
+                uint256 s = vault.surplusUsdy(oracle.price());
+                if (s > 0) {
+                    vm.prank(treasury);
+                    try vault.collectFees(treasury, s) {} catch {}
+                }
+            } else {
+                uint256 bal = vault.balanceOf(user);
+                if (bal > 1e18) {
+                    vm.prank(user);
+                    try vault.redeemToUsdt(bal / 2, 0, user) {} catch {}
+                }
+            }
+            assertGe(vault.backingRatioBps(), 10_000, "INVARIANT BROKEN");
+        }
+    }
+}
