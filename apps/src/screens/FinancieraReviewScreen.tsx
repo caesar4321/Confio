@@ -271,7 +271,14 @@ export const FinancieraReviewScreen = () => {
             <Text style={styles.label}>¿Cómo fue tu experiencia?</Text>
             <View style={styles.starRow}>
               {[1, 2, 3, 4, 5].map((s) => (
-                <TouchableOpacity key={s} onPress={() => setRating(s)} style={styles.starBtn}>
+                <TouchableOpacity
+                  key={s}
+                  onPress={() => setRating(s)}
+                  style={styles.starBtn}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Calificar con ${s} ${s === 1 ? 'estrella' : 'estrellas'}`}
+                  accessibilityState={{ selected: rating >= s }}
+                >
                   <Icon name="star" size={36} color={rating >= s ? STAR_GOLD : '#E5E7EB'} />
                 </TouchableOpacity>
               ))}
@@ -364,7 +371,7 @@ export const FinancieraReviewScreen = () => {
 const Header = ({ title, onBack }: { title: string; onBack: () => void }) => (
   <SafeAreaView edges={['top']} style={{ backgroundColor: colors.primary }}>
     <View style={styles.header}>
-      <TouchableOpacity onPress={onBack} style={styles.headerIconBtn}>
+      <TouchableOpacity onPress={onBack} style={styles.headerIconBtn} accessibilityRole="button" accessibilityLabel="Volver">
         <Icon name="arrow-left" size={24} color="#fff" />
       </TouchableOpacity>
       <Text style={styles.headerTitle}>{title}</Text>

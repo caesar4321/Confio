@@ -58,11 +58,10 @@ export const ScanScreen = () => {
       setHasPermission(true);
     } else if (permission === 'denied') {
       Alert.alert(
-        'Camera Permission Required',
-        'Please enable camera access in your device settings to use the QR code scanner.',
+        'Permiso de cámara requerido',        'Activa el acceso a la cámara en la configuración de tu dispositivo para escanear códigos QR.',
         [
           { text: 'Cancelar', style: 'cancel' },
-          { text: 'Open Settings', onPress: openSettings }
+          { text: 'Abrir configuración', onPress: openSettings }
         ]
       );
       setHasPermission(false);
@@ -112,8 +111,8 @@ export const ScanScreen = () => {
 
     if (!validMatch || !validMatch[1]) {
       Alert.alert(
-        'Invalid QR Code',
-        'This QR code is not a valid Confío payment code.',
+        'Código QR inválido',
+        'Este código QR no es un código de pago válido de Confío.',
         [{ text: 'Entendido', style: 'default' }]
       );
       setScannedSuccessfully(false);
@@ -132,7 +131,7 @@ export const ScanScreen = () => {
       });
 
       if (!invoiceData?.getInvoice?.success) {
-        const errors = invoiceData?.getInvoice?.errors || ['Invoice not found'];
+        const errors = invoiceData?.getInvoice?.errors || ['Factura no encontrada'];
         Alert.alert('Error', errors.join(', '), [{ text: 'Entendido' }]);
         return;
       }
@@ -144,14 +143,14 @@ export const ScanScreen = () => {
       // 2. Invoice hasn't expired (server checks isExpired)
       // 3. Invoice is still in PENDING status
       if (invoice.isExpired) {
-        Alert.alert('Invoice Expired', 'This payment request has expired.', [{ text: 'Entendido' }]);
+        Alert.alert('Factura expirada', 'Esta solicitud de pago ha expirado.', [{ text: 'Entendido' }]);
         return;
       }
 
       // Client-side validations:
       // 1. User isn't paying their own invoice
       if (invoice.createdByUser?.id === activeAccount?.id) {
-        Alert.alert('Cannot Pay Own Invoice', 'You cannot pay your own invoice.', [{ text: 'Entendido' }]);
+        Alert.alert('Aviso', 'No puedes pagar tu propia factura.', [{ text: 'Entendido' }]);
         setScannedSuccessfully(false);
         return;
       }
@@ -195,7 +194,7 @@ export const ScanScreen = () => {
   if (hasPermission === null) {
     return (
       <View style={styles.container}>
-        <Text style={styles.text}>Requesting camera permission...</Text>
+        <Text style={styles.text}>Solicitando permiso de cámara...</Text>
       </View>
     );
   }
@@ -203,9 +202,9 @@ export const ScanScreen = () => {
   if (hasPermission === false) {
     return (
       <View style={styles.container}>
-        <Text style={styles.text}>No access to camera</Text>
+        <Text style={styles.text}>Sin acceso a la cámara</Text>
         <TouchableOpacity style={styles.button} onPress={checkPermission}>
-          <Text style={styles.buttonText}>Grant Permission</Text>
+          <Text style={styles.buttonText}>Conceder permiso</Text>
         </TouchableOpacity>
       </View>
     );
@@ -214,7 +213,7 @@ export const ScanScreen = () => {
   if (!device) {
     return (
       <View style={styles.container}>
-        <Text style={styles.text}>No camera device found</Text>
+        <Text style={styles.text}>No se encontró cámara</Text>
       </View>
     );
   }
@@ -240,7 +239,7 @@ export const ScanScreen = () => {
         {/* Top overlay area with integrated header */}
         <View style={styles.topOverlay}>
           <View style={styles.headerControls}>
-            <TouchableOpacity style={styles.closeButton} onPress={handleClose}>
+            <TouchableOpacity style={styles.closeButton} onPress={handleClose} accessibilityRole="button" accessibilityLabel="Cerrar escáner">
               <Icon name="x" size={24} color="#FFFFFF" />
             </TouchableOpacity>
             {isBusinessAccount && scanMode && (
@@ -293,7 +292,7 @@ export const ScanScreen = () => {
             }
           </Text>
 
-          <TouchableOpacity style={styles.flashButton} onPress={toggleFlash}>
+          <TouchableOpacity style={styles.flashButton} onPress={toggleFlash} accessibilityRole="button" accessibilityLabel={isFlashOn ? "Apagar linterna" : "Encender linterna"}>
             <Icon name={isFlashOn ? "zap-off" : "zap"} size={24} color="#FFFFFF" />
           </TouchableOpacity>
 

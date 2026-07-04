@@ -114,7 +114,7 @@ export const VerifyTransactionScreen = () => {
         return (
             <View style={styles.container}>
                 <View style={styles.header}>
-                    <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
+                    <TouchableOpacity onPress={handleClose} style={styles.closeButton} accessibilityRole="button" accessibilityLabel="Cerrar">
                         <Icon name="x" size={24} color={colors.text} />
                     </TouchableOpacity>
                     <Text style={styles.headerTitle}>Verificación</Text>
@@ -140,7 +140,7 @@ export const VerifyTransactionScreen = () => {
     return (
         <View style={styles.container}>
             <View style={styles.header}>
-                <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
+                <TouchableOpacity onPress={handleClose} style={styles.closeButton} accessibilityRole="button" accessibilityLabel="Cerrar">
                     <Icon name="x" size={24} color={colors.text} />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>Resultado de Verificación</Text>
