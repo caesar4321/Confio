@@ -24,6 +24,8 @@ import {
 import algorandService from '../services/algorandService';
 import { useAuth } from '../contexts/AuthContext';
 import LoadingOverlay from '../components/LoadingOverlay';
+import { EmptyState } from '../components/EmptyState';
+import { InlineBanner } from '../components/common/InlineBanner';
 import { colors } from '../config/theme';
 
 type UserInfo = {
@@ -62,6 +64,8 @@ export const ReferralRewardClaimScreen: React.FC = () => {
   const [prepareClaim] = useMutation(PREPARE_REFERRAL_REWARD_CLAIM);
   const [submitClaim] = useMutation(SUBMIT_REFERRAL_REWARD_CLAIM);
   const [busyId, setBusyId] = React.useState<string | null>(null);
+  const [banner, setBanner] = React.useState<{ message: string; variant: 'error' | 'success' } | null>(null);
+  const dismissBanner = React.useCallback(() => setBanner(null), []);
   const [loadingMessage, setLoadingMessage] = React.useState<string>('');
   const [loadingMore, setLoadingMore] = React.useState(false);
   const [hasMore, setHasMore] = React.useState(true);
@@ -270,13 +274,13 @@ export const ReferralRewardClaimScreen: React.FC = () => {
           );
         }
 
-        Alert.alert('¡Listo!', 'Tus $CONFIO fueron desbloqueados con éxito.');
+        setBanner({ variant: 'success', message: 'Tus $CONFIO fueron desbloqueados con éxito.' });
         setHasMore(true);
         await refetch({ first: PAGE_SIZE, offset: 0 });
       } catch (err: any) {
         const message =
           err?.message || 'Ocurrió un error al desbloquear la recompensa.';
-        Alert.alert('Error', message);
+        setBanner({ variant: 'error', message });
       } finally {
         setLoadingMessage('');
         setBusyId(null);
@@ -292,7 +296,7 @@ export const ReferralRewardClaimScreen: React.FC = () => {
           <View style={styles.summaryCard}>
             <View style={styles.summaryIconRow}>
               <View style={styles.summaryIconWrap}>
-                <Icon name="gift" size={20} color={colors.primaryDark} />
+                <Icon name="gift" size={20} color={colors.secondary} />
               </View>
               <Text style={styles.summaryLabel}>Listo para desbloquear</Text>
             </View>
@@ -309,21 +313,13 @@ export const ReferralRewardClaimScreen: React.FC = () => {
 
       if (item.type === 'empty') {
         return (
-          <View style={styles.emptyState}>
-            <Icon name="gift" size={32} color={colors.textSecondary} />
-            <Text style={styles.emptyTitle}>Sin recompensas pendientes</Text>
-            <Text style={styles.emptySubtitle}>
-              Si completaste una misión, asegúrate de iniciar sesión con la
-              cuenta que ganó el bono o inténtalo más tarde.
-            </Text>
-            <TouchableOpacity
-              style={styles.emptyButton}
-              onPress={() => navigation.navigate('ConfioAddress')}
-            >
-              <Icon name="share-2" size={16} color={colors.white} />
-              <Text style={styles.emptyButtonText}>Invitar amigos</Text>
-            </TouchableOpacity>
-          </View>
+          <EmptyState
+            icon="gift"
+            title="Sin recompensas pendientes"
+            subtitle="Invita a un amigo y, cuando haga su primer depósito, ambos reciben $CONFIO."
+            actionLabel="Invitar amigos"
+            onAction={() => navigation.navigate('ConfioAddress')}
+          />
         );
       }
 
@@ -417,7 +413,7 @@ export const ReferralRewardClaimScreen: React.FC = () => {
                 </Text>
               </View>
               <View style={styles.pendingBadge}>
-                <Icon name="clock" size={14} color={colors.accent} />
+                <Icon name="clock" size={14} color={colors.warning.icon} />
                 <Text style={styles.pendingBadgeText}>Pendiente</Text>
               </View>
             </View>
@@ -436,7 +432,7 @@ export const ReferralRewardClaimScreen: React.FC = () => {
             </View>
             <View style={styles.pendingHint}>
               <Text style={styles.pendingHintText}>Ver guía</Text>
-              <Icon name="chevron-right" size={16} color={colors.accent} />
+              <Icon name="chevron-right" size={16} color={colors.secondary} />
             </View>
           </TouchableOpacity>
         );
@@ -460,24 +456,31 @@ export const ReferralRewardClaimScreen: React.FC = () => {
         onBackPress={handleBack}
       />
 
+      {banner && (
+        <InlineBanner
+          message={banner.message}
+          variant={banner.variant}
+          onDismiss={dismissBanner}
+          autoHideMs={banner.variant === 'success' ? 3000 : undefined}
+          style={{ marginHorizontal: 20, marginTop: 12, marginBottom: 0 }}
+        />
+      )}
+
       {loading ? (
         <View style={styles.loadingState}>
-          <ActivityIndicator size="large" color={colors.accent} />
+          <ActivityIndicator size="large" color={colors.secondary} />
           <Text style={styles.loadingText}>
             Buscando recompensas disponibles...
           </Text>
         </View>
       ) : error ? (
-        <View style={styles.errorState}>
-          <Icon name="alert-circle" size={32} color={colors.error.icon} />
-          <Text style={styles.errorTitle}>No pudimos cargar tus bonos</Text>
-          <Text style={styles.errorSubtitle}>
-            {error.message || 'Intenta de nuevo en unos segundos.'}
-          </Text>
-          <TouchableOpacity style={styles.retryButton} onPress={() => refetch()}>
-            <Text style={styles.retryButtonText}>Reintentar</Text>
-          </TouchableOpacity>
-        </View>
+        <EmptyState
+          icon="alert-circle"
+          title="No pudimos cargar tus bonos"
+          subtitle="Revisa tu conexión e intenta de nuevo."
+          actionLabel="Reintentar"
+          onAction={() => refetch()}
+        />
       ) : (
         <FlatList
           data={listData}
@@ -525,13 +528,15 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     alignItems: 'center',
   },
+  // $CONFIO surface: the instrument color is violet, not the generic blue
+  // accent (emerald = cUSD, violet = CONFIO — app-wide instrument grammar).
   summaryCard: {
-    backgroundColor: colors.primarySoft,
+    backgroundColor: colors.violetLight,
     borderRadius: 16,
     padding: 20,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: colors.primaryLight,
+    borderColor: '#DDD6FE',
     shadowColor: colors.shadowBase,
     shadowOpacity: 0.05,
     shadowOffset: { width: 0, height: 6 },
@@ -548,12 +553,12 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: colors.primaryLight,
+    backgroundColor: '#DDD6FE',
     alignItems: 'center',
     justifyContent: 'center',
   },
   summaryLabel: {
-    color: colors.primaryDark,
+    color: colors.secondary,
     fontSize: 14,
     fontWeight: '600',
   },
@@ -567,44 +572,6 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontSize: 14,
     lineHeight: 20,
-  },
-  emptyState: {
-    marginTop: 40,
-    alignItems: 'center',
-    paddingHorizontal: 16,
-  },
-  emptyTitle: {
-    color: colors.textFlat,
-    fontSize: 18,
-    fontWeight: '600',
-    marginTop: 12,
-  },
-  emptySubtitle: {
-    color: colors.textSecondary,
-    textAlign: 'center',
-    marginTop: 8,
-    lineHeight: 20,
-  },
-  emptyButton: {
-    marginTop: 24,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: colors.primaryDark,
-    paddingVertical: 14,
-    paddingHorizontal: 24,
-    borderRadius: 12,
-    shadowColor: colors.primaryDark,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  emptyButtonText: {
-    color: colors.white,
-    fontWeight: '700',
-    fontSize: 15,
   },
   rewardCard: {
     backgroundColor: colors.surface,
@@ -632,11 +599,11 @@ const styles = StyleSheet.create({
   },
   claimableCard: {
     borderLeftWidth: 3,
-    borderLeftColor: colors.primaryDark,
+    borderLeftColor: colors.secondary,
   },
   pendingCard: {
     borderLeftWidth: 3,
-    borderLeftColor: colors.accent,
+    borderLeftColor: colors.warning.icon,
     borderColor: colors.border,
   },
   pendingSection: {
@@ -659,11 +626,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
-    backgroundColor: colors.accentSoft,
+    backgroundColor: colors.warning.background,
   },
   pendingBadgeText: {
     marginLeft: 6,
-    color: colors.accent,
+    color: colors.warning.text,
     fontWeight: '600',
     fontSize: 13,
   },
@@ -677,7 +644,7 @@ const styles = StyleSheet.create({
   pendingHintText: {
     fontSize: 13,
     fontWeight: '600',
-    color: colors.accent,
+    color: colors.secondary,
   },
   rewardTitle: {
     color: colors.textFlat,
@@ -688,7 +655,6 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontSize: 13,
     marginTop: 2,
-    textTransform: 'capitalize',
   },
   rewardMetaRow: {
     flexDirection: 'row',
@@ -715,7 +681,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   claimButton: {
-    backgroundColor: colors.accent,
+    backgroundColor: colors.secondary,
     paddingHorizontal: 18,
     paddingVertical: 10,
     borderRadius: 16,
@@ -729,34 +695,6 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontWeight: '600',
     marginLeft: 6,
-  },
-  errorState: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 32,
-  },
-  errorTitle: {
-    color: colors.textFlat,
-    fontSize: 18,
-    fontWeight: '600',
-    marginTop: 12,
-  },
-  errorSubtitle: {
-    color: colors.textSecondary,
-    textAlign: 'center',
-    marginTop: 6,
-    marginBottom: 16,
-  },
-  retryButton: {
-    backgroundColor: colors.accent,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 12,
-  },
-  retryButtonText: {
-    color: colors.white,
-    fontWeight: '600',
   },
 });
 
