@@ -37,10 +37,10 @@ export const AccionesListScreen = () => {
   const { savings, stocks: myStocks } = useAhorrosPortfolio();
   const [search, setSearch] = useState('');
 
-  // Every row carries BOTH numbers so their meaning never shifts: right side
-  // is always market data (price + day %), and a "Tienes $X" line under the
-  // name is always present — $0.00 included — so there is no ambiguity about
-  // which number is mine. Held stocks sort first.
+  // Every row carries BOTH numbers with the app-wide hierarchy: the big
+  // right-side number is always MY balance ($0.00 included, gray), exactly
+  // like the home wallet rows; market price + day % are the small secondary
+  // line beneath it. Held stocks sort first.
   const positionByTicker = useMemo(() => {
     const map: Record<string, number> = {};
     myStocks.positions.forEach((p) => {
@@ -79,15 +79,18 @@ export const AccionesListScreen = () => {
           <Text style={styles.rowName} numberOfLines={1}>
             {item.name}
           </Text>
-          <Text style={[styles.rowPosition, positionValue > 0 && styles.rowPositionHeld]}>
-            Tienes {fmtUsd(positionValue)}
-          </Text>
         </View>
         <View style={{ alignItems: 'flex-end' }}>
-          <Text style={styles.rowPrice}>{fmtUsd(item.priceUsd)}</Text>
-          <Text style={[styles.rowChange, !up && styles.rowChangeDown]}>
-            {up ? '▲' : '▼'} {formatNumber(Math.abs(item.dayChangePct), { maximumFractionDigits: 2 })}%
+          <Text style={[styles.rowHolding, positionValue <= 0 && styles.rowHoldingZero]}>
+            {fmtUsd(positionValue)}
           </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <Text style={styles.rowMarketPrice}>{fmtUsd(item.priceUsd)}</Text>
+            <Text style={[styles.rowChange, !up && styles.rowChangeDown]}>
+              {up ? '▲' : '▼'}{' '}
+              {formatNumber(Math.abs(item.dayChangePct), { maximumFractionDigits: 2 })}%
+            </Text>
+          </View>
         </View>
       </TouchableOpacity>
     );
@@ -233,8 +236,6 @@ const styles = StyleSheet.create({
     padding: 14,
     marginBottom: 8,
   },
-  rowPosition: { fontSize: 11, color: colors.text.light, marginTop: 2 },
-  rowPositionHeld: { color: colors.primaryDark, fontWeight: '700' },
   tickerCircle: {
     width: 42,
     height: 42,
@@ -245,7 +246,9 @@ const styles = StyleSheet.create({
   tickerCircleText: { color: '#fff', fontSize: 11, fontWeight: '800' },
   rowTicker: { fontSize: 15, fontWeight: '700', color: colors.text.primary },
   rowName: { fontSize: 12, color: colors.text.secondary, marginTop: 1 },
-  rowPrice: { fontSize: 15, fontWeight: '700', color: colors.text.primary },
+  rowHolding: { fontSize: 15, fontWeight: '700', color: colors.text.primary },
+  rowHoldingZero: { color: colors.text.light, fontWeight: '500' },
+  rowMarketPrice: { fontSize: 12, color: colors.text.secondary },
   rowChange: { fontSize: 12, fontWeight: '700', color: colors.primaryDark, marginTop: 1 },
   rowChangeDown: { color: '#DC2626' },
 
