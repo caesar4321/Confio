@@ -2222,7 +2222,9 @@ export const AccountDetailScreen = () => {
                     <View style={styles.confioPresaleInfo}>
                       <Text style={styles.confioPresaleTitle}>Utilidad, gobernanza y cómo obtenerla</Text>
                       <Text style={styles.confioPresaleDescription}>
-                        Descubre el valor de la moneda en el ecosistema
+                        La moneda de la comunidad detrás de Confío: dólares para
+                        usar todos los días, ahorro con rendimiento y acciones de
+                        EE.UU.
                       </Text>
                     </View>
                   </View>

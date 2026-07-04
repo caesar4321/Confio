@@ -92,7 +92,7 @@ export const ConfioTokenInfoScreen = () => {
       label: 'Ahorros Protegidos',
       value: `${formatWholeNumber(s?.totalValueLocked ?? s?.protectedSavings ?? 0)} cUSD`,
       growth: liveLabel,
-      description: 'USDC de respaldo que protege los cUSD de los usuarios.',
+      description: 'Reservas verificables que respaldan tus dólares: USDC para cUSD (siempre $1) y USDY para cUSD+ (tu ahorro con rendimiento).',
       route: 'ProtectedSavings',
     },
     {
@@ -244,8 +244,8 @@ export const ConfioTokenInfoScreen = () => {
           <View style={styles.timelineItem}>
             <View style={styles.timelineDot} />
             <View style={styles.timelineContent}>
-              <Text style={styles.timelineDate}>Q3 2026 · 💎</Text>
-              <Text style={styles.timelineText}>Segunda preventa de $CONFIO durante el crecimiento en Argentina.</Text>
+              <Text style={styles.timelineDate}>Q3 2026 · 🤝</Text>
+              <Text style={styles.timelineText}>Alianza con Ondo Finance: ahorro con rendimiento (Confío Dollar+) y acciones de EE.UU. dentro de Confío.</Text>
             </View>
           </View>
           <View style={styles.timelineItem}>
