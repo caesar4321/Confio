@@ -133,22 +133,24 @@ export const AhorrosScreen = () => {
   ];
 
   // ── Retirar destinations ────────────────────────────────────────────────
+  // Mirrors the Ahorrar sheet: the outside world (bank, direct rail — no
+  // conversion hop) leads; the in-app destination comes second.
   const retirarOptions: RouteOption[] = [
-    {
-      icon: 'dollar-sign',
-      title: 'A mi saldo cUSD',
-      subtitle: 'Para enviar, pagar o guardar · al instante',
-      onPress: () => navigation.navigate('RetirarAhorro'),
-    },
     {
       icon: 'home',
       title: 'A mi banco',
-      subtitle: 'Retiro directo desde tu ahorro',
+      subtitle: 'Directo desde tu ahorro, sin conversión',
       onPress: () => {
         // TODO(cusd+): direct off-ramp from the savings chain via Koywe —
         // skips the double hop through cUSD/Algorand.
         Alert.alert('Muy pronto', 'El retiro a tu banco abre en breve.');
       },
+    },
+    {
+      icon: 'dollar-sign',
+      title: 'A mi saldo cUSD',
+      subtitle: 'Para enviar, pagar o guardar · al instante',
+      onPress: () => navigation.navigate('RetirarAhorro'),
     },
   ];
 
