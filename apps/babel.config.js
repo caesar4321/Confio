@@ -69,6 +69,13 @@ module.exports = function babelConfig(api) {
       }],
       // Reanimated must be last
       'react-native-reanimated/plugin'
-    ]
+    ],
+    env: {
+      // Jest runs on Node, which can't execute untransformed `await import()`
+      // without --experimental-vm-modules. Metro handles these itself.
+      test: {
+        plugins: ['@babel/plugin-transform-dynamic-import'],
+      },
+    },
   };
 };

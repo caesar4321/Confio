@@ -1124,7 +1124,18 @@ export async function restoreFromBackup(
 export async function getOrCreateMasterSecret(
   userSub: string,
   accessToken?: string,
-  options?: { allowGenerate?: boolean; provider?: 'google' | 'apple'; expectedAddress?: string | null; requireCloudSync?: boolean }
+  options?: {
+    allowGenerate?: boolean;
+    provider?: 'google' | 'apple';
+    expectedAddress?: string | null;
+    requireCloudSync?: boolean;
+    /**
+     * Reports whether the Drive backup upload in this call actually completed.
+     * Never called when no accessToken is provided or when the fast path
+     * returns without touching Drive — callers must default to "not synced".
+     */
+    onCloudSyncResult?: (synced: boolean) => void;
+  }
 ): Promise<Uint8Array> {
   if (!userSub) {
     throw new Error('[MasterSecret] User Sub (OAuth ID) is required to secure the master secret.');
@@ -1198,8 +1209,17 @@ export async function getOrCreateMasterSecret(
         // same bytes with a new IV. On a slow network that costs 8–16 Drive
         // API calls per login and is what made "Verificando seguridad del
         // dispositivo..." appear stuck. Return the verified secret directly.
-        console.log('[MasterSecret] Local secret matches server address. Skipping Drive scan.');
-        return localSecret;
+        //
+        // NEVER take this shortcut when the caller demands a real upload
+        // (requireCloudSync, e.g. enableDriveBackup): returning here used to
+        // skip Section 4 entirely, so "backup verified" was reported to the
+        // server while the user's Drive stayed empty — an unrecoverable
+        // lockout once the local Keystore was wiped (user 10090).
+        if (!options?.requireCloudSync) {
+          console.log('[MasterSecret] Local secret matches server address. Skipping Drive scan.');
+          return localSecret;
+        }
+        console.log('[MasterSecret] Local secret matches server address but cloud sync is required. Continuing to Drive backup.');
       }
     }
 
@@ -1439,6 +1459,7 @@ export async function getOrCreateMasterSecret(
 
         await saveManifest(googleDriveStorage, accessToken, manifest);
         console.log(`[MasterSecret] Encrypted Backup Synced (ID: ${finalId})`);
+        options?.onCloudSyncResult?.(true);
 
         // Drive Backup Report
         reportBackupStatus('google_drive').catch(e => console.warn('[BackupHealth] Drive backup report failed', e));
@@ -1446,6 +1467,7 @@ export async function getOrCreateMasterSecret(
       } catch (syncErr: any) {
         AnalyticsService.logBackupFailed('google_drive', syncErr?.message || 'Unknown sync error');
         console.warn('[MasterSecret] Sync failed:', syncErr);
+        options?.onCloudSyncResult?.(false);
         if (options?.requireCloudSync) {
           throw syncErr;
         }

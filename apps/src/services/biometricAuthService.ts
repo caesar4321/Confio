@@ -71,7 +71,7 @@ class BiometricAuthService {
         service: BIOMETRIC_PREFS_SERVICE,
         username: BIOMETRIC_PREFS_USERNAME,
       });
-      return !!pref && pref.password === 'enabled';
+      return !!pref && pref.password.startsWith('enabled');
     } catch (error) {
       console.error('[BiometricAuthService] Failed to read biometric preference:', error);
       return false;
@@ -80,15 +80,18 @@ class BiometricAuthService {
 
   /**
    * Persist the user's preference (enabled/disabled) without auth prompts.
+   * `mode` records which gate the guard secret was stored under so later
+   * prompts request matching authenticators ('enabled' keeps backward compat
+   * with entries written before the passcode fallback existed).
    */
-  private async setPreference(enabled: boolean): Promise<void> {
+  private async setPreference(enabled: boolean, mode: 'biometric' | 'passcode' = 'biometric'): Promise<void> {
     if (!enabled) {
       await Keychain.resetGenericPassword({ service: BIOMETRIC_PREFS_SERVICE });
       return;
     }
     await Keychain.setGenericPassword(
       BIOMETRIC_PREFS_USERNAME,
-      'enabled',
+      mode === 'passcode' ? 'enabled:passcode' : 'enabled',
       {
         service: BIOMETRIC_PREFS_SERVICE,
         accessible: Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK,
@@ -97,13 +100,29 @@ class BiometricAuthService {
   }
 
   /**
+   * Access control matching how the guard secret was actually stored.
+   */
+  private async getConfiguredAccessControl(): Promise<Keychain.ACCESS_CONTROL> {
+    try {
+      const pref = await Keychain.getGenericPassword({
+        service: BIOMETRIC_PREFS_SERVICE,
+        username: BIOMETRIC_PREFS_USERNAME,
+      });
+      if (pref && pref.password === 'enabled:passcode') {
+        return Keychain.ACCESS_CONTROL.DEVICE_PASSCODE;
+      }
+    } catch (error) {
+      console.warn('[BiometricAuthService] Failed to read gate mode preference:', error);
+    }
+    const biometryType = await Keychain.getSupportedBiometryType();
+    return this.getAccessControlForCurrentDevice(biometryType);
+  }
+
+  /**
    * Store a guard secret that can only be unlocked with biometrics (no passcode fallback).
    */
-  private async storeBiometricSecret(): Promise<boolean> {
+  private async storeBiometricSecret(accessControl: Keychain.ACCESS_CONTROL): Promise<boolean> {
     try {
-      const biometryType = await Keychain.getSupportedBiometryType();
-      const accessControl = this.getAccessControlForCurrentDevice(biometryType);
-
       // Clear any prior key. On Android, an existing key bound to a previous
       // biometric enrollment set will be invalidated as soon as the user
       // enrolls a new biometric, and subsequent get/set calls throw
@@ -136,26 +155,49 @@ class BiometricAuthService {
   }
 
   /**
+   * Store the guard secret under the given policy and verify it with a prompt.
+   */
+  private async storeAndVerify(accessControl: Keychain.ACCESS_CONTROL): Promise<boolean> {
+    const stored = await this.storeBiometricSecret(accessControl);
+    if (!stored) return false;
+    return this.authenticate('Activa la protección biométrica', true, true, accessControl);
+  }
+
+  /**
    * Enable biometric protection (requires a successful biometric prompt).
    */
   async enable(): Promise<boolean> {
     const supported = await this.isSupported();
     if (!supported) return false;
 
-    // Check current secret; if missing, create one under biometric-only policy
-    const stored = await this.storeBiometricSecret();
-    if (!stored) {
-      return false;
+    const biometryType = await Keychain.getSupportedBiometryType();
+    const primaryAccessControl = this.getAccessControlForCurrentDevice(biometryType);
+
+    let verified = await this.storeAndVerify(primaryAccessControl);
+
+    // Android fallback: weak (Class 2) fingerprint sensors — common on
+    // Xiaomi/MIUI — can pass the biometric prompt but can NEVER unlock a
+    // user-auth-bound Keystore key (platform rule: only device credential or
+    // strong biometrics do). The biometric-bound attempt then always fails
+    // even though the user "authenticated". Retry with a pure
+    // device-credential (PIN/pattern) gate, which works on every device.
+    let mode: 'biometric' | 'passcode' = 'biometric';
+    if (
+      !verified &&
+      Platform.OS === 'android' &&
+      primaryAccessControl !== Keychain.ACCESS_CONTROL.DEVICE_PASSCODE
+    ) {
+      console.warn('[BiometricAuthService] Biometric-bound enable failed; retrying with device credential gate.');
+      verified = await this.storeAndVerify(Keychain.ACCESS_CONTROL.DEVICE_PASSCODE);
+      mode = 'passcode';
     }
 
-    // Verify immediately to ensure biometric prompt works and no passcode fallback is offered
-    const verified = await this.authenticate('Activa la protección biométrica', true, true);
     if (!verified) {
       await this.disable();
       return false;
     }
 
-    await this.setPreference(true);
+    await this.setPreference(true, mode);
     return true;
   }
 
@@ -178,7 +220,12 @@ class BiometricAuthService {
   /**
    * Require biometric authentication. Returns true when passed or not enabled.
    */
-  async authenticate(reason?: string, forcePrompt = false, failIfUnsupported = false): Promise<boolean> {
+  async authenticate(
+    reason?: string,
+    forcePrompt = false,
+    failIfUnsupported = false,
+    accessControlOverride?: Keychain.ACCESS_CONTROL,
+  ): Promise<boolean> {
     this.lastError = null;
     this.lastLockout = false;
     // Debounce: prevent multiple simultaneous authentication prompts
@@ -207,8 +254,9 @@ class BiometricAuthService {
     try {
       this.isAuthenticating = true;
       this.lastAuthenticationTime = Date.now();
-      const biometryType = await Keychain.getSupportedBiometryType();
-      const accessControl = this.getAccessControlForCurrentDevice(biometryType);
+      // Prompt authenticators must match how the guard secret was stored: a
+      // passcode-fallback gate would never be unlocked by a fingerprint scan.
+      const accessControl = accessControlOverride ?? await this.getConfiguredAccessControl();
 
       const authResult = await Keychain.getGenericPassword({
         service: BIOMETRIC_SECRET_SERVICE,

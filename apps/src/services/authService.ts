@@ -92,6 +92,18 @@ export class AccountDeactivatedError extends Error {
   }
 }
 
+/**
+ * True when a Drive recovery attempt failed because Drive could not be READ
+ * (auth/permission/network), as opposed to Drive being readable but holding
+ * no matching backup. The two cases need different user guidance.
+ */
+function isDriveReadFailure(error: any): boolean {
+  if (!error) return false;
+  if (error.name === 'GoogleDriveStorageError') return true;
+  const message = String(error.message || '');
+  return /network request failed|timeout|timed out/i.test(message);
+}
+
 
 export class AuthService {
   private static instance: AuthService;
@@ -805,9 +817,12 @@ export class AuthService {
             allowGenerate: allowV2SecretGeneration,
             provider: 'google',
             expectedAddress: serverAlgorandAddress,
+            // Token presence is not proof of upload: the sync can fail (or be
+            // skipped by the verified-local fast path) and the server must not
+            // be told the backup is verified in that case.
+            onCloudSyncResult: (synced) => { driveSyncSucceeded = synced; },
           });
           console.log('[AuthService] ✅ V2 Master Secret verified/restored.');
-          driveSyncSucceeded = !!tokenForDrive;
         } catch (v2Err) {
           console.error('[AuthService] ⚠️ Failed to verify/restore V2 Master Secret:', v2Err);
           if (!allowV2SecretGeneration) {
@@ -822,11 +837,17 @@ export class AuthService {
                 allowGenerate: false,
                 provider: 'google',
                 expectedAddress: serverAlgorandAddress,
+                onCloudSyncResult: (synced) => { driveSyncSucceeded = synced; },
               });
               console.log('[AuthService] ✅ Google V2 wallet recovered from Drive.');
-              driveSyncSucceeded = true;
-            } catch (driveRecoveryErr) {
+            } catch (driveRecoveryErr: any) {
               console.error('[AuthService] Failed to recover Google V2 wallet from Drive:', driveRecoveryErr);
+              // A Drive API/permission/network failure is NOT "backup missing":
+              // telling the user to try another Google account sends them away
+              // from the account that actually holds their backup.
+              if (isDriveReadFailure(driveRecoveryErr)) {
+                throw new Error('No pudimos leer tu Google Drive para buscar tu respaldo. Revisa tu conexión e inténtalo de nuevo con la misma cuenta de Google.');
+              }
               throw new Error('No encontramos el respaldo correcto en ese Google Drive. Intenta con la cuenta de Google que usaste para el respaldo o contáctanos para ayudarte.');
             }
           } else {
@@ -1179,8 +1200,11 @@ export class AuthService {
                 expectedAddress: serverAlgorandAddress,
               });
               console.log('[AuthService] Apple V2 wallet recovered from Google Drive.');
-            } catch (driveRecoveryErr) {
+            } catch (driveRecoveryErr: any) {
               console.error('[AuthService] Failed to recover Apple V2 wallet from Drive:', driveRecoveryErr);
+              if (isDriveReadFailure(driveRecoveryErr)) {
+                throw new Error('No pudimos leer tu Google Drive para buscar tu respaldo. Revisa tu conexión e inténtalo de nuevo con la misma cuenta de Google.');
+              }
               throw new Error('No encontramos el respaldo correcto en ese Google Drive. Intenta con la cuenta de Google que usaste para el respaldo o contáctanos para ayudarte.');
             }
           }
