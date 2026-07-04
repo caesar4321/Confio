@@ -264,7 +264,7 @@ export const SendWithAddressScreen = () => {
         <SafeAreaView edges={['top']} style={{ backgroundColor: config.color }}>
           <View style={[styles.header, { backgroundColor: config.color, paddingTop: 8 }]}>
             <View style={styles.headerContent}>
-              <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+              <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton} accessibilityRole="button" accessibilityLabel="Volver">
                 <Icon name="arrow-left" size={24} color="#ffffff" />
               </TouchableOpacity>
               <Text style={styles.headerTitle}>Enviar {config.name}</Text>

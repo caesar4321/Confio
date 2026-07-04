@@ -377,7 +377,7 @@ export const EditBusinessScreen = () => {
               <TouchableOpacity
                 onPress={() => setShowCategoryPicker(false)}
                 style={styles.modalCloseButton}
-              >
+               accessibilityRole="button" accessibilityLabel="Cerrar">
                 <Icon name="x" size={24} color="#6B7280" />
               </TouchableOpacity>
             </View>

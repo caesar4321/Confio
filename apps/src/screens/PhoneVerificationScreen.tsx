@@ -346,7 +346,7 @@ const PhoneVerificationScreen = () => {
               navigation.navigate('Login');
             }
           }}
-        >
+         accessibilityRole="button" accessibilityLabel="Volver">
           <Feather name="arrow-left" size={24} color={colors.dark} />
         </TouchableOpacity>
 

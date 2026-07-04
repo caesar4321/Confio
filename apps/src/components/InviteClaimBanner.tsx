@@ -90,7 +90,7 @@ export const InviteClaimBanner: React.FC<Props> = ({ amountMicros, assetId, onPr
           </TouchableOpacity>
         </View>
 
-        <TouchableOpacity onPress={onDismiss} hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}>
+        <TouchableOpacity onPress={onDismiss} hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }} accessibilityRole="button" accessibilityLabel="Cerrar">
           <Icon name="x" size={18} color={token.fg} />
         </TouchableOpacity>
 

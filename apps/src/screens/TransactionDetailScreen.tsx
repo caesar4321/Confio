@@ -1940,7 +1940,7 @@ export const TransactionDetailScreen = () => {
         {/* Header */}
         <View style={[styles.header, { paddingTop: headerPaddingTop }]}>
           <View style={styles.headerTop}>
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerButton}>
+            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerButton} accessibilityRole="button" accessibilityLabel="Volver">
               <Icon name="arrow-left" size={24} color="#fff" />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Detalle de Transacción</Text>
@@ -2932,7 +2932,7 @@ export const TransactionDetailScreen = () => {
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Detalles técnicos</Text>
-              <TouchableOpacity onPress={() => setShowBlockchainDetails(false)} style={styles.headerButton}>
+              <TouchableOpacity onPress={() => setShowBlockchainDetails(false)} style={styles.headerButton} accessibilityRole="button" accessibilityLabel="Cerrar">
                 <Icon name="x" size={20} color={colors.dark} />
               </TouchableOpacity>
             </View>

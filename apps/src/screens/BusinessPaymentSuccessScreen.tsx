@@ -447,7 +447,7 @@ export const BusinessPaymentSuccessScreen = () => {
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Detalles técnicos</Text>
-              <TouchableOpacity onPress={() => setShowTechnical(false)} style={{ padding: 8 }}>
+              <TouchableOpacity onPress={() => setShowTechnical(false)} style={{ padding: 8 }} accessibilityRole="button" accessibilityLabel="Cerrar">
                 <Icon name="x" size={20} color="#111827" />
               </TouchableOpacity>
             </View>

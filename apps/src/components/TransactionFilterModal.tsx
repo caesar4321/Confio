@@ -164,7 +164,7 @@ export const TransactionFilterModal = ({
         <View style={styles.modalContent}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Filtrar transacciones</Text>
-            <TouchableOpacity onPress={onClose}>
+            <TouchableOpacity onPress={onClose} accessibilityRole="button" accessibilityLabel="Cerrar">
               <Icon name="x" size={24} color="#6B7280" />
             </TouchableOpacity>
           </View>

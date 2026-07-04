@@ -228,7 +228,7 @@ export const PayrollRunDetailScreen = () => {
         )}
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton} accessibilityRole="button" accessibilityLabel="Volver">
             <Icon name="arrow-left" size={22} color="#111827" />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>

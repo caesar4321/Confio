@@ -380,7 +380,7 @@ export const TradeConfirmScreen: React.FC = () => {
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Seleccionar forma de cobro</Text>
-              <TouchableOpacity onPress={() => setShowPaymentModal(false)}>
+              <TouchableOpacity onPress={() => setShowPaymentModal(false)} accessibilityRole="button" accessibilityLabel="Cerrar">
                 <Icon name="x" size={24} color="#6B7280" />
               </TouchableOpacity>
             </View>

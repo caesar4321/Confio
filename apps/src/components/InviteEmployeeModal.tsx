@@ -202,7 +202,7 @@ export const InviteEmployeeModal: React.FC<InviteEmployeeModalProps> = ({
         <View style={styles.content}>
           <View style={styles.header}>
             <Text style={styles.title}>Invitar Empleado</Text>
-            <TouchableOpacity style={styles.closeButton} onPress={onClose}>
+            <TouchableOpacity style={styles.closeButton} onPress={onClose} accessibilityRole="button" accessibilityLabel="Cerrar">
               <Icon name="x" size={20} color="#666" />
             </TouchableOpacity>
           </View>
@@ -351,7 +351,7 @@ export const InviteEmployeeModal: React.FC<InviteEmployeeModalProps> = ({
           <View style={styles.countryModalContent}>
             <View style={styles.countryModalHeader}>
               <Text style={styles.countryModalTitle}>Selecciona un país</Text>
-              <TouchableOpacity onPress={() => setShowCountryPicker(false)}>
+              <TouchableOpacity onPress={() => setShowCountryPicker(false)} accessibilityRole="button" accessibilityLabel="Cerrar">
                 <Icon name="x" size={24} color="#666" />
               </TouchableOpacity>
             </View>

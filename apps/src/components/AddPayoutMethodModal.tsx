@@ -1193,7 +1193,7 @@ export const AddPayoutMethodModal = ({
           <Circle cx="92%" cy="10" r="60" fill="rgba(255,255,255,0.07)" />
         </Svg>
         <View style={styles.headerContent}>
-          <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+          <TouchableOpacity onPress={onClose} style={styles.closeButton} accessibilityRole="button" accessibilityLabel="Cerrar">
             <Icon name="x" size={22} color="white" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>

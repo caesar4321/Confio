@@ -103,7 +103,7 @@ export const AccionesListScreen = () => {
       <SafeAreaView edges={['top']} style={{ backgroundColor: colors.primary }}>
         <View style={styles.header}>
           <View style={styles.headerTopRow}>
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerIconBtn}>
+            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerIconBtn} accessibilityRole="button" accessibilityLabel="Volver">
               <Icon name="arrow-left" size={24} color="#fff" />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Acciones de EE.UU.</Text>

@@ -742,7 +742,7 @@ const styles = StyleSheet.create({
       <SafeAreaView edges={['top']} style={{ backgroundColor: showWithdrawSection ? colors.secondary : (isUSDCToCUSD ? colors.primary : colors.accent) }}>
       <View style={[styles.header, { backgroundColor: showWithdrawSection ? colors.secondary : (isUSDCToCUSD ? colors.primary : colors.accent) }]}>
         <View style={styles.headerContent}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton} accessibilityRole="button" accessibilityLabel="Volver">
             <Icon name="arrow-left" size={24} color="#ffffff" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Gestionar USDC</Text>

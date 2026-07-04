@@ -373,7 +373,7 @@ export const FinancieraDetailScreen = () => {
             <View style={styles.modalHandle} />
             <View style={styles.modalHeaderRow}>
               <Text style={styles.modalTitle}>Reportar financiera</Text>
-              <TouchableOpacity onPress={() => setReportModal(false)} style={styles.modalIconBtn}>
+              <TouchableOpacity onPress={() => setReportModal(false)} style={styles.modalIconBtn} accessibilityRole="button" accessibilityLabel="Cerrar">
                 <Icon name="x" size={22} color={colors.text.primary} />
               </TouchableOpacity>
             </View>

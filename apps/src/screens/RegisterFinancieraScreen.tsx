@@ -66,7 +66,7 @@ const CountryPickerModal = ({
           <View style={styles.modalHandle} />
           <View style={styles.modalHeaderRow}>
             <Text style={styles.modalTitle}>Selecciona el país</Text>
-            <TouchableOpacity onPress={onClose} style={styles.modalIconBtn}>
+            <TouchableOpacity onPress={onClose} style={styles.modalIconBtn} accessibilityRole="button" accessibilityLabel="Cerrar">
               <Icon name="x" size={22} color={colors.text.primary} />
             </TouchableOpacity>
           </View>
@@ -135,7 +135,7 @@ const StatePickerModal = ({
           <View style={styles.modalHandle} />
           <View style={styles.modalHeaderRow}>
             <Text style={styles.modalTitle}>Estado / Provincia</Text>
-            <TouchableOpacity onPress={onClose} style={styles.modalIconBtn}>
+            <TouchableOpacity onPress={onClose} style={styles.modalIconBtn} accessibilityRole="button" accessibilityLabel="Cerrar">
               <Icon name="x" size={22} color={colors.text.primary} />
             </TouchableOpacity>
           </View>

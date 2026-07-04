@@ -344,7 +344,7 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
               <TouchableOpacity
                 style={styles.pickerCloseButton}
                 onPress={() => setShowCountryPicker(false)}
-              >
+               accessibilityRole="button" accessibilityLabel="Cerrar">
                 <Icon name="x" size={24} color="#6B7280" />
               </TouchableOpacity>
             </View>

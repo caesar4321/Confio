@@ -117,7 +117,7 @@ export const PayrollRecipientModal: React.FC<Props> = ({ visible, onClose, onCha
         <View style={styles.card}>
           <View style={styles.header}>
             <Text style={styles.title}>Destinatarios de nómina</Text>
-            <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
+            <TouchableOpacity onPress={onClose} style={styles.closeBtn} accessibilityRole="button" accessibilityLabel="Cerrar">
               <Icon name="x" size={20} color="#666" />
             </TouchableOpacity>
           </View>

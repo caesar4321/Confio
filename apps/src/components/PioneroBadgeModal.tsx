@@ -41,9 +41,9 @@ export const PioneroBadgeModal: React.FC<PioneroBadgeModalProps> = ({
         style={styles.modalOverlay} 
         activeOpacity={1} 
         onPress={onClose}
-      >
+       accessibilityRole="button" accessibilityLabel="Cerrar">
         <View style={styles.modalContent} onStartShouldSetResponder={() => true}>
-          <TouchableOpacity style={styles.closeButton} onPress={onClose}>
+          <TouchableOpacity style={styles.closeButton} onPress={onClose} accessibilityRole="button" accessibilityLabel="Cerrar">
             <Icon name="x" size={24} color="#666" />
           </TouchableOpacity>
           
