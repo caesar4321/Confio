@@ -14,6 +14,7 @@ import { useNumberFormat } from '../utils/numberFormatting';
 import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
 import { InlineBanner } from '../components/common/InlineBanner';
+import { AddressScannerModal } from '../components/AddressScannerModal';
 
 type TokenType = 'cusd' | 'confio' | 'usdc';
 
@@ -64,6 +65,7 @@ export const SendWithAddressScreen = () => {
   const [destination, setDestination] = useState(prefilledAddress);
   const [showError, setShowError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [showScanner, setShowScanner] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const navLock = React.useRef(false);
   const [prepared, setPrepared] = useState<any | null>(null);
@@ -391,6 +393,14 @@ export const SendWithAddressScreen = () => {
                 <Icon name="clipboard" size={15} color={colors.primaryDark} />
                 <Text style={styles.pasteButtonText}>Pegar</Text>
               </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.scanButton}
+                onPress={() => setShowScanner(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Escanear código QR de la dirección"
+              >
+                <Icon name="camera" size={18} color={colors.primaryDark} />
+              </TouchableOpacity>
             </View>
             {destination.length === 0 ? (
               <Text style={styles.addressHelp}>
@@ -432,6 +442,11 @@ export const SendWithAddressScreen = () => {
         />
       </View>
 
+      <AddressScannerModal
+        visible={showScanner}
+        onClose={() => setShowScanner(false)}
+        onScanned={(address) => setDestination(address)}
+      />
     </View>
   );
 };
@@ -615,6 +630,14 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: colors.primaryDark,
+  },
+  scanButton: {
+    backgroundColor: colors.primarySoft,
+    paddingHorizontal: 13,
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   addressHelp: {
     fontSize: 12,
