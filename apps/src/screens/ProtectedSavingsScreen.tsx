@@ -43,6 +43,10 @@ export const ProtectedSavingsScreen = () => {
   const s = data?.statsSummary;
   const tvl = s?.totalValueLocked ?? s?.protectedSavings;
   const tvlLabel = formatWhole(tvl, currency.thousandsSeparator);
+  // TODO(server): add usdyReserve to statsSummary (+ query) at cUSD+ launch;
+  // 0 is the honest present-tense value until the reserve exists.
+  const usdyReserve = (s as any)?.usdyReserve ?? 0;
+  const usdyLabel = formatWhole(usdyReserve, currency.thousandsSeparator);
 
   const openUrl = (url?: string | null) => {
     if (!url) return;
@@ -76,11 +80,13 @@ export const ProtectedSavingsScreen = () => {
             </View>
             <View style={styles.heroStatPill}>
               <Icon name="trending-up" size={14} color={colors.primary} />
-              <Text style={styles.heroStatText}>USDY · Tesoro EE.UU.</Text>
+              <Text style={styles.heroStatText}>
+                {usdyLabel} USDY en reserva
+              </Text>
             </View>
           </View>
           <Text style={styles.heroFootnote}>
-            cUSD: respaldado por USDC · cUSD+: respaldado por USDY
+            cUSD: respaldado por USDC · cUSD+: respaldado por USDY (Tesoro EE.UU.)
           </Text>
         </View>
 
@@ -112,11 +118,12 @@ export const ProtectedSavingsScreen = () => {
             <Text style={styles.sectionTitle}>Reserva 100% verificable</Text>
           </View>
           <Text style={styles.sectionBody}>
-            No tienes que confiar en nuestra palabra. Las reservas USDC que
-            respaldan cada cUSD se pueden verificar públicamente en{' '}
-            <Text style={styles.inlineEmphasis}>Pera Explorer</Text>, el
-            visualizador oficial de la red Algorand. Cualquier persona en el
-            mundo puede consultar los saldos en tiempo real.
+            No tienes que confiar en nuestra palabra. El respaldo de cUSD se
+            verifica en <Text style={styles.inlineEmphasis}>Pera Explorer</Text>{' '}
+            (red Algorand) y el de cUSD+ en{' '}
+            <Text style={styles.inlineEmphasis}>BscScan</Text> (red BNB Chain).
+            Cualquier persona en el mundo puede consultar los saldos en tiempo
+            real.
           </Text>
           <View style={styles.linksRow}>
             <TouchableOpacity
@@ -145,15 +152,20 @@ export const ProtectedSavingsScreen = () => {
               <Icon name="external-link" size={13} color={colors.primary} />
               <Text style={styles.linkText}>Ver respaldo USDC</Text>
             </TouchableOpacity>
-            {/* TODO(cusd+): point at the cUSD+ reserve explorer URL at launch */}
+            {/* TODO(cusd+): BscScan URLs at deploy — cUSD+ token page and the
+                USDY reserve address holdings */}
+            <TouchableOpacity style={[styles.linkButton, styles.linkButtonDisabled]} disabled>
+              <Icon name="external-link" size={13} color="#9CA3AF" />
+              <Text style={[styles.linkText, styles.linkTextDisabled]}>Ver cUSD+ en circulación</Text>
+            </TouchableOpacity>
             <TouchableOpacity style={[styles.linkButton, styles.linkButtonDisabled]} disabled>
               <Icon name="external-link" size={13} color="#9CA3AF" />
               <Text style={[styles.linkText, styles.linkTextDisabled]}>Ver respaldo USDY</Text>
             </TouchableOpacity>
           </View>
           <Text style={styles.tipText}>
-            Tip: En Pera Explorer puedes ver la dirección de respaldo, el
-            balance USDC y cada transacción que entra o sale.
+            Tip: En cada explorador puedes ver la dirección de respaldo, su
+            balance y cada transacción que entra o sale.
           </Text>
         </View>
 
@@ -168,12 +180,14 @@ export const ProtectedSavingsScreen = () => {
           <View style={styles.yieldBadgeRow}>
             <View style={styles.yieldBadge}>
               <Text style={styles.yieldBadgeNow}>cUSD</Text>
-              <Text style={styles.yieldBadgeLabel}>PARA USAR · SIEMPRE $1</Text>
+              <Text style={styles.yieldBadgeLabel}>PARA USAR</Text>
+              <Text style={styles.yieldBadgeSub}>siempre $1</Text>
             </View>
             <Icon name="plus" size={20} color="#9CA3AF" />
             <View style={[styles.yieldBadge, styles.yieldBadgeNext]}>
               <Text style={styles.yieldBadgeNext1}>cUSD+</Text>
-              <Text style={styles.yieldBadgeLabel}>PARA AHORRAR · RENDIMIENTO DIARIO</Text>
+              <Text style={styles.yieldBadgeLabel}>PARA AHORRAR</Text>
+              <Text style={styles.yieldBadgeSub}>rendimiento diario</Text>
             </View>
           </View>
 
@@ -231,27 +245,6 @@ export const ProtectedSavingsScreen = () => {
           </Text>
         </View>
 
-        {/* Community power */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Icon name="users" size={20} color={colors.primary} />
-            <Text style={styles.sectionTitle}>
-              Más fuerza, mejores condiciones
-            </Text>
-          </View>
-          <Text style={styles.sectionBody}>
-            Cuanto más grande sea la reserva USDC respaldando a cUSD, más
-            fuerza tiene Confío para negociar con nuestros socios financieros:
-            mejores tasas, comisiones más bajas y condiciones más favorables
-            para toda la comunidad latina.
-          </Text>
-          <Text style={styles.sectionBody}>
-            Cada cUSD que tienes en la app suma. Recargar es un acto de
-            comunidad: te protege de la inflación local y nos hace más fuertes
-            a todos.
-          </Text>
-        </View>
-
         {/* CTA */}
         <View style={styles.ctaSection}>
           <TouchableOpacity
@@ -263,7 +256,7 @@ export const ProtectedSavingsScreen = () => {
             <Text style={styles.ctaText}>Recargar</Text>
           </TouchableOpacity>
           <Text style={styles.ctaHint}>
-            Convierte tu moneda local en cUSD y únete a la reserva.
+            Convierte tu moneda local en dólares digitales respaldados.
           </Text>
         </View>
 
@@ -408,12 +401,12 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   yieldBadge: {
+    flex: 1,
     alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 10,
     borderRadius: 10,
     backgroundColor: '#F3F4F6',
-    minWidth: 90,
   },
   yieldBadgeNext: {
     backgroundColor: '#E8F7F0',
@@ -427,6 +420,11 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '800',
     color: colors.primary,
+  },
+  yieldBadgeSub: {
+    fontSize: 10,
+    color: '#6B7280',
+    marginTop: 1,
   },
   yieldBadgeLabel: {
     fontSize: 9,
