@@ -896,9 +896,9 @@ const styles = StyleSheet.create({
                     placeholder="Dirección USDC en red de Algorand"
                     style={styles.addressInputField}
                   />
-                  <TouchableOpacity style={styles.walletButton}>
+                  <View style={styles.walletButton} accessible={false}>
                     <Icon name="credit-card" size={20} color={colors.accent} />
-                  </TouchableOpacity>
+                  </View>
                 </View>
                 <Text style={styles.inputHelper}>
                   Solo direcciones USDC válidas en red de Algorand
@@ -1053,9 +1053,9 @@ const styles = StyleSheet.create({
                       placeholder="Dirección USDC en red de Algorand"
                       style={styles.addressInputField}
                     />
-                    <TouchableOpacity style={styles.walletButton}>
+                    <View style={styles.walletButton} accessible={false}>
                       <Icon name="credit-card" size={20} color={colors.accent} />
-                    </TouchableOpacity>
+                    </View>
                   </View>
                   <Text style={styles.inputHelper}>
                     Solo direcciones USDC válidas en red de Algorand

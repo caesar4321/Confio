@@ -38,7 +38,7 @@ export const RampHero = ({
         <View style={styles.decorCircleLarge} />
         <View style={styles.decorCircleSmall} />
         <View style={[styles.heroPadding, { paddingTop: Math.max(insets.top, 12) + 12 }]}>
-          <TouchableOpacity onPress={onBack} style={styles.backButton}>
+          <TouchableOpacity onPress={onBack} style={styles.backButton} accessibilityRole="button" accessibilityLabel="Volver">
             <Icon name="arrow-left" size={20} color="#ffffff" />
           </TouchableOpacity>
           <Text style={styles.eyebrow}>{eyebrow}</Text>

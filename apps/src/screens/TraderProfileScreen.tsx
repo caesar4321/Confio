@@ -322,10 +322,12 @@ export const TraderProfileScreen: React.FC = () => {
                 <Text style={styles.profileName}>{profileData?.name || 'Usuario'}</Text>
                 {profileData?.verified && <Icon name="shield" size={20} color={colors.accent} style={{marginLeft: 8}} />}
                 {user && (
-                  <TouchableOpacity 
+                  <TouchableOpacity
                     style={styles.favoriteButton}
                     onPress={handleToggleFavorite}
                     disabled={isFavoriting}
+                    accessibilityRole="button"
+                    accessibilityLabel={isFavorite ? "Quitar de favoritos" : "Agregar a favoritos"}
                   >
                     <Icon 
                       name="star" 

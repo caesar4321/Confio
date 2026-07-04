@@ -159,7 +159,7 @@ export const AccionesListScreen = () => {
                 autoCapitalize="characters"
               />
               {search.length > 0 && (
-                <TouchableOpacity onPress={() => setSearch('')}>
+                <TouchableOpacity onPress={() => setSearch('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} accessibilityRole="button" accessibilityLabel="Borrar búsqueda">
                   <Icon name="x-circle" size={18} color={colors.text.light} />
                 </TouchableOpacity>
               )}

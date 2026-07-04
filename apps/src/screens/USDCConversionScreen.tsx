@@ -472,6 +472,8 @@ export const USDCConversionScreen = () => {
               style={styles.switchButton}
               onPress={switchDirection}
               disabled={isProcessing}
+              accessibilityRole="button"
+              accessibilityLabel="Invertir dirección de conversión"
             >
               <Icon name="refresh-cw" size={20} color={colors.accent} />
             </TouchableOpacity>

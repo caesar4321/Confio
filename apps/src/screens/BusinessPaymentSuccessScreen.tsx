@@ -352,7 +352,7 @@ export const BusinessPaymentSuccessScreen = () => {
                     <Text style={styles.transactionId}>
                       #{paymentData.internalId?.slice(-8)?.toUpperCase() || 'N/A'}
                     </Text>
-                    <TouchableOpacity onPress={handleCopy} style={styles.copyButton}>
+                    <TouchableOpacity onPress={handleCopy} style={styles.copyButton} accessibilityRole="button" accessibilityLabel="Copiar">
                       {copied ? (
                         <Icon name="check" size={16} color={colors.accent} />
                       ) : (

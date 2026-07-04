@@ -62,6 +62,8 @@ const StarRating = ({ rating, onRatingChange, size = 'medium' }: { rating: numbe
           key={star}
           onPress={() => onRatingChange(star)}
           style={{ marginHorizontal: 2 }}
+          accessibilityRole="button"
+          accessibilityLabel={"Calificar con " + star + (star === 1 ? " estrella" : " estrellas")}
         >
           <Icon
             name="star"

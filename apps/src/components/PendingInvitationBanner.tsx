@@ -93,6 +93,8 @@ export const PendingInvitationBanner = () => {
         <TouchableOpacity
           style={styles.acceptButton}
           onPress={() => handleAccept(invitation)}
+          accessibilityRole="button"
+          accessibilityLabel="Aceptar invitación"
         >
           <Icon name="check" size={16} color="#fff" />
         </TouchableOpacity>

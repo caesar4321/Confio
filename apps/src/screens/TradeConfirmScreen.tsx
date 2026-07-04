@@ -242,7 +242,7 @@ export const TradeConfirmScreen: React.FC = () => {
 
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={handleBack} style={styles.backButton}>
+        <TouchableOpacity onPress={handleBack} style={styles.backButton} accessibilityRole="button" accessibilityLabel="Volver">
           <Icon name="arrow-left" size={24} color="#374151" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Confirmar Intercambio</Text>

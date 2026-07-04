@@ -223,7 +223,7 @@ export const FloatingActionButton: React.FC<FloatingActionButtonProps> = ({
         </Animated.View>
 
         {/* Main FAB */}
-        <TouchableOpacity onPress={toggleExpanded} activeOpacity={0.8}>
+        <TouchableOpacity onPress={toggleExpanded} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Acciones rápidas">
           <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
             <View style={styles.fab}>
               <Svg height="100%" width="100%" style={StyleSheet.absoluteFillObject}>

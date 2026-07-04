@@ -623,7 +623,7 @@ export const CreateOfferScreen = () => {
       >
         <View style={styles.modalContainer}>
           <View style={styles.modalHeader}>
-            <TouchableOpacity onPress={closeCountryModal}>
+            <TouchableOpacity onPress={closeCountryModal} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} accessibilityRole="button" accessibilityLabel="Cerrar">
               <Icon name="x" size={24} color="#1F2937" />
             </TouchableOpacity>
             <Text style={styles.modalTitle}>Seleccionar País</Text>

@@ -61,7 +61,7 @@ const EmployeeCard = memo(({ employee, onPress, onActions }: any) => {
         <Text style={styles.employeeRole}>{getRoleLabel(employee?.role)}</Text>
         <Text style={styles.employeePhone}>{formatPhoneNumber(employee?.user?.phoneNumber, employee?.user?.phoneCountry)}</Text>
       </View>
-      <TouchableOpacity style={styles.moreButton} onPress={() => onActions(employee)}>
+      <TouchableOpacity style={styles.moreButton} onPress={() => onActions(employee)} accessibilityRole="button" accessibilityLabel="Acciones del empleado">
         <Icon name="more-vertical" size={20} color="#6b7280" />
       </TouchableOpacity>
     </TouchableOpacity>

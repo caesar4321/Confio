@@ -431,7 +431,7 @@ export const PaymentConfirmationScreen = () => {
         {/* Header */}
         <View style={[styles.header, { backgroundColor: colors.primary }]}>
           <View style={styles.headerContent}>
-            <TouchableOpacity onPress={handleCancel} style={styles.backButton}>
+            <TouchableOpacity onPress={handleCancel} style={styles.backButton} accessibilityRole="button" accessibilityLabel="Volver">
               <Icon name="arrow-left" size={24} color="white" />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Confirmar Pago</Text>

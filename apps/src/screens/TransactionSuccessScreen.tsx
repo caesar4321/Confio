@@ -469,7 +469,7 @@ export const TransactionSuccessScreen = () => {
                     <Text style={styles.detailLabel}>ID de Transacción</Text>
                     <View style={styles.transactionIdContainer}>
                       <Text style={styles.transactionId}>#{String(transactionId).toUpperCase().slice(0, 8)}</Text>
-                      <TouchableOpacity onPress={handleCopy} style={styles.copyButton}>
+                      <TouchableOpacity onPress={handleCopy} style={styles.copyButton} accessibilityRole="button" accessibilityLabel="Copiar">
                         {copied ? (
                           <Icon name="check-circle" size={16} color={colors.accent} />
                         ) : (

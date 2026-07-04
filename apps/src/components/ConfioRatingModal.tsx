@@ -156,7 +156,7 @@ export const ConfioRatingModal: React.FC<ConfioRatingModalProps> = ({ visible, o
                             <Text style={styles.title}>¿Cómo ha sido tu experiencia con Confío hasta ahora?</Text>
                             <View style={styles.starsRow}>
                                 {[1, 2, 3, 4, 5].map(n => (
-                                    <TouchableOpacity key={n} onPress={() => setStars(n)} hitSlop={8}>
+                                    <TouchableOpacity key={n} onPress={() => setStars(n)} hitSlop={8} accessibilityRole="button" accessibilityLabel={"Calificar con " + n + (n === 1 ? " estrella" : " estrellas")}>
                                         <Icon
                                             name={n <= stars ? 'star' : 'star-outline'}
                                             size={40}

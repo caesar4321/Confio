@@ -360,7 +360,7 @@ export const PayrollSetupWizard = () => {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={handleBack} style={styles.backButton}>
+        <TouchableOpacity onPress={handleBack} style={styles.backButton} accessibilityRole="button" accessibilityLabel={step === 1 ? "Cancelar configuración" : "Paso anterior"}>
           <Icon name={step === 1 ? 'x' : 'chevron-left'} size={24} color={colors.textFlat} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Configurar nómina</Text>

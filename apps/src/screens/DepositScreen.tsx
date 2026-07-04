@@ -683,6 +683,8 @@ const DepositScreen = () => {
                   <TouchableOpacity
                     onPress={handleCopy}
                     style={[styles.copyButton, copied && styles.copiedButton]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Copiar dirección"
                   >
                     <Icon
                       name={copied ? "check" : "copy"}

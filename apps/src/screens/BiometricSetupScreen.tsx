@@ -102,7 +102,7 @@ export const BiometricSetupScreen = () => {
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={handleBack} disabled={isProcessing} style={styles.backButton}>
+          <TouchableOpacity onPress={handleBack} disabled={isProcessing} style={styles.backButton} accessibilityRole="button" accessibilityLabel="Volver">
             <Icon name="arrow-left" size={22} color="#111827" />
           </TouchableOpacity>
           <Text style={styles.title}>Activa la seguridad</Text>
