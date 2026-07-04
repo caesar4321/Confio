@@ -46,6 +46,9 @@ const MIN_AMOUNT_USD = 1;
 
 // TODO(gm): RFQ/attestation soft quote via backend proxy.
 const getStockQuote = (amountUsd: number, priceUsd: number) => {
+  // STUB, NOT PRICING — real cost = Ondo GM fee (schedule unknown until
+  // onboarding) + Confío markup (server-config). The split is an open
+  // pricing decision; do not anchor on 0.3%.
   const costPct = 0.3;
   const costUsd = amountUsd * (costPct / 100);
   const netUsd = amountUsd - costUsd;
