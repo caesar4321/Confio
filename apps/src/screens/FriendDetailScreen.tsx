@@ -16,6 +16,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { MainStackParamList } from '../types/navigation';
+import { RouteSheet } from '../components/RouteSheet';
 import { Header } from '../navigation/Header';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
@@ -723,56 +724,27 @@ export function FriendDetailScreen() {
         </View>
       </ScrollView>
       
-      {/* Token Selection Modal */}
-      <Modal
+      <RouteSheet
         visible={showTokenSelection}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowTokenSelection(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Elige el token a enviar</Text>
-              <TouchableOpacity onPress={() => setShowTokenSelection(false)}>
-                <Icon name="x" size={24} color="#6b7280" />
-              </TouchableOpacity>
-            </View>
-            
-            <TouchableOpacity 
-              style={styles.tokenOption}
-              onPress={() => handleTokenSelect('cusd')}
-            >
-              <View style={styles.tokenInfo}>
-                <Image source={cUSDLogo} style={styles.tokenLogo} />
-                <View style={styles.tokenDetails}>
-                  <Text style={styles.tokenName}>Confío Dollar</Text>
-                  <Text style={styles.tokenSymbol}>$cUSD</Text>
-                  <Text style={styles.tokenDescription}>
-                    Moneda estable para pagos diarios
-                  </Text>
-                </View>
-              </View>
-            </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={styles.tokenOption}
-              onPress={() => handleTokenSelect('confio')}
-            >
-              <View style={styles.tokenInfo}>
-                <Image source={CONFIOLogo} style={styles.tokenLogo} />
-                <View style={styles.tokenDetails}>
-                  <Text style={styles.tokenName}>Confío</Text>
-                  <Text style={styles.tokenSymbol}>$CONFIO</Text>
-                  <Text style={styles.tokenDescription}>
-                    Moneda de gobernanza y utilidad
-                  </Text>
-                </View>
-              </View>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+        title="¿Qué moneda quieres enviar?"
+        onClose={() => setShowTokenSelection(false)}
+        options={[
+          {
+            icon: 'dollar-sign',
+            image: cUSDLogo,
+            title: 'Confío Dollar · $cUSD',
+            subtitle: 'Moneda estable para pagos diarios',
+            onPress: () => handleTokenSelect('cusd'),
+          },
+          {
+            icon: 'zap',
+            image: CONFIOLogo,
+            title: 'Confío · $CONFIO',
+            subtitle: 'Moneda de gobernanza y utilidad',
+            onPress: () => handleTokenSelect('confio'),
+          },
+        ]}
+      />
 
       {/* Transaction Filter Modal */}
       <TransactionFilterModal

@@ -18,6 +18,11 @@ import { USDCHistoryScreen } from '../screens/USDCHistoryScreen';
 import { USDCConversionScreen } from '../screens/USDCConversionScreen';
 import TopUpScreen from '../screens/TopUpScreen';
 import { SellScreen } from '../screens/SellScreen';
+import { AhorrosScreen } from '../screens/AhorrosScreen';
+import { ConvertAhorroScreen } from '../screens/ConvertAhorroScreen';
+import { RetirarAhorroScreen } from '../screens/RetirarAhorroScreen';
+import { AccionesListScreen } from '../screens/AccionesListScreen';
+import { StockDetailScreen } from '../screens/StockDetailScreen';
 import { FinancierasScreen } from '../screens/FinancierasScreen';
 import { FinancieraDetailScreen } from '../screens/FinancieraDetailScreen';
 import { FinancieraReviewScreen } from '../screens/FinancieraReviewScreen';
@@ -248,6 +253,41 @@ export const MainNavigator = () => {
         <Stack.Screen
           name="Sell"
           component={SellScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="Ahorros"
+          component={AhorrosScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="ConvertAhorro"
+          component={ConvertAhorroScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="RetirarAhorro"
+          component={RetirarAhorroScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="AccionesList"
+          component={AccionesListScreen}
+          options={{
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="StockDetail"
+          component={StockDetailScreen}
           options={{
             headerShown: false,
           }}

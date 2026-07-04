@@ -45,8 +45,10 @@ import {
 } from '../apollo/queries';
 import { REFRESH_ACCOUNT_BALANCE, SET_REFERRER } from '../apollo/mutations';
 import { HumanitarianHomeBanner } from '../components/HumanitarianHomeBanner';
+import { RouteSheet, RouteOption } from '../components/RouteSheet';
 import { useCountry } from '../contexts/CountryContext';
 import { isRampBlockedCountry } from '../config/env';
+import { useAhorrosPortfolio } from '../hooks/useAhorrosPortfolio';
 import { useCurrency } from '../hooks/useCurrency';
 import { useSelectedCountryRate } from '../hooks/useExchangeRate';
 import { inviteSendService } from '../services/inviteSendService';
@@ -192,6 +194,9 @@ export const HomeScreen = () => {
     skip: !isAuthReady,
   });
   const [refreshAccountBalance] = useMutation(REFRESH_ACCOUNT_BALANCE);
+  // Ahorros e Inversiones portfolio total for the wallet-row entry (stubbed
+  // until the cUSD+/stocks backend lands; single wiring point in the hook).
+  const ahorrosPortfolio = useAhorrosPortfolio();
   const [checkReferralStatus, { data: referralStatusData }] = useMutation(CHECK_REFERRAL_STATUS);
   const [setReferrerMutation] = useMutation(SET_REFERRER);
 
@@ -760,6 +765,60 @@ export const HomeScreen = () => {
     [rampCountryCode, navigation],
   );
 
+  // World pickers: Recargar/Retirar route money between the two settlement
+  // worlds — spend (cUSD · Algorand) vs grow (cUSD+ · savings chain). Two
+  // doors teach the split; more doors teach confusion. Employees skip these
+  // (savings is a personal-account feature).
+  const [rechargeSheetVisible, setRechargeSheetVisible] = useState(false);
+  const [withdrawSheetVisible, setWithdrawSheetVisible] = useState(false);
+
+  const rechargeOptions: RouteOption[] = [
+    {
+      icon: 'dollar-sign',
+      title: 'Para usar día a día',
+      subtitle: 'Enviar, pagar y comprar CONFIO · cUSD',
+      onPress: () => navigateToRampOrEfectivo('TopUp'),
+    },
+    {
+      icon: 'trending-up',
+      title: 'Para ahorrar e invertir',
+      subtitle: 'Gana rendimiento mientras decides · cUSD+',
+      onPress: () => {
+        // TODO(cusd+): TopUp with destination=cusd_plus so Koywe delivers on
+        // the savings chain (USDT-BSC) — never onramp-then-bridge. Until the
+        // ramp param lands, route to the hub where saving from cUSD works.
+        navigation.navigate('Ahorros');
+      },
+    },
+  ];
+
+  // Both options land in the user's bank — the differentiator is where the
+  // money sits NOW, so subtitles show live balances instead of destinations.
+  const withdrawOptions: RouteOption[] = [
+    {
+      icon: 'dollar-sign',
+      title: 'Desde mi cUSD',
+      subtitle: `$${formatFixedFloor(cUSDBalance, 2)} disponibles`,
+      disabled: cUSDBalance <= 0,
+      onPress: () => navigateToRampOrEfectivo('Sell'),
+    },
+    {
+      icon: 'trending-up',
+      title: 'Desde mis ahorros',
+      subtitle:
+        ahorrosPortfolio.totalUsd > 0
+          ? `$${formatFixedFloor(ahorrosPortfolio.totalUsd, 2)} en Confío Dollar+`
+          : 'Aún no tienes ahorros',
+      disabled: ahorrosPortfolio.totalUsd <= 0,
+      onPress: () => {
+        // TODO(cusd+): direct off-ramp from the savings chain — cUSD+ →
+        // USDY redeem → USDT-BSC → Koywe sell (all 8 fiats confirmed).
+        // Never hops through cUSD/Algorand: saves the user ~0.65%.
+        Alert.alert('Muy pronto', 'El retiro directo desde tu ahorro abre en breve.');
+      },
+    },
+  ];
+
   // Quick actions configuration - filter based on permissions
   const quickActionsData: QuickAction[] = [
     {
@@ -899,14 +958,14 @@ export const HomeScreen = () => {
         label: 'Recargar',
         icon: 'dollar-sign',
         color: '#3b82f6',
-        route: () => navigateToRampOrEfectivo('TopUp'),
+        route: () => setRechargeSheetVisible(true),
       },
       {
         id: 'withdraw',
         label: 'Retirar',
         icon: 'bank',
         color: '#F59E0B',
-        route: () => navigateToRampOrEfectivo('Sell'),
+        route: () => setWithdrawSheetVisible(true),
       },
       {
         id: 'efectivo',
@@ -1542,6 +1601,36 @@ export const HomeScreen = () => {
                   </View>
                 </View>
               </Pressable>
+
+              {/* Ahorros e Inversiones — portfolio entry (personal accounts).
+                  Follows the wallet-row grammar (mark | name/symbol | amount)
+                  so it reads as a sibling of cUSD and CONFIO, not a menu item.
+                  Benefit-labeled here; the cUSD+/stocks brands live inside. */}
+              {!activeAccount?.isEmployee && (
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.walletCard,
+                    pressed && { opacity: 0.7 }
+                  ]}
+                  onPress={() => navigation.navigate('Ahorros')}
+                >
+                  <View style={styles.walletCardContent}>
+                    <View style={[styles.walletLogoContainer, { backgroundColor: '#10B981' }]}>
+                      <Icon name="trending-up" size={22} color="#ffffff" />
+                    </View>
+                    <View style={styles.walletInfo}>
+                      <Text style={styles.walletName}>Ahorros e Inversiones</Text>
+                      <Text style={styles.walletSymbol}>cUSD+ · Acciones de EE.UU.</Text>
+                    </View>
+                    <View style={styles.walletBalanceContainer}>
+                      <Text style={styles.walletBalanceText}>
+                        {showBalance ? `$${formatFixedFloor(ahorrosPortfolio.totalUsd, 2)}` : '••••'}
+                      </Text>
+                      <Icon name="chevron-right" size={20} color="#9ca3af" />
+                    </View>
+                  </View>
+                </Pressable>
+              )}
             </Animated.View>
           )}
         </View>
@@ -1555,6 +1644,19 @@ export const HomeScreen = () => {
           </View>
         )}
       </ScrollView>
+
+      <RouteSheet
+        visible={rechargeSheetVisible}
+        title="¿Para qué es esta recarga?"
+        options={rechargeOptions}
+        onClose={() => setRechargeSheetVisible(false)}
+      />
+      <RouteSheet
+        visible={withdrawSheetVisible}
+        title="¿Desde dónde quieres retirar?"
+        options={withdrawOptions}
+        onClose={() => setWithdrawSheetVisible(false)}
+      />
 
       {/* Profile Menu */}
       <ProfileMenu

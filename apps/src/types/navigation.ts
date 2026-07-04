@@ -158,6 +158,11 @@ export type MainStackParamList = {
   };
   TopUp: undefined;
   Sell: undefined;
+  Ahorros: undefined;
+  ConvertAhorro: undefined;
+  RetirarAhorro: undefined;
+  AccionesList: undefined;
+  StockDetail: { ticker: string };
   Financieras: undefined;
   FinancieraDetail: { financieraId: string };
   FinancieraReview: { financieraId: string };

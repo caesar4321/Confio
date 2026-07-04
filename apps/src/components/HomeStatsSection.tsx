@@ -95,7 +95,12 @@ export const HomeStatsSection: React.FC<HomeStatsSectionProps> = ({ refreshNonce
         value: fmt(tvl),
         unit: 'cUSD',
         label: 'Ahorros',
-        descriptor: 'USDC',
+        // Backing tickers for both products: cUSD (USDC 1:1) and cUSD+ (USDY,
+        // US Treasuries). The "what is USDY" education lives in the Ahorros
+        // hub — the tile only names the assets. TODO(cusd+): server must fold
+        // the USDY reserve value into totalValueLocked, and ProtectedSavings
+        // must add the USDY reserve row, once cUSD+ is live.
+        descriptor: 'USDC · USDY',
         onPress: () => navigation.navigate('ProtectedSavings'),
       },
       {

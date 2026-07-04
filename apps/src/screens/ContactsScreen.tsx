@@ -4,6 +4,7 @@ import Contacts from 'react-native-contacts';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
+import { RouteSheet } from '../components/RouteSheet';
 import Icon from 'react-native-vector-icons/Feather';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
@@ -836,156 +837,6 @@ export const ContactsScreen = () => {
   }, [isBusinessAccount, refetchEmployees, refetchInvitations]);
 
 
-  const SendTokenSelectionModal = () => (
-    <Modal
-      visible={showSendTokenSelection}
-      transparent
-      animationType="fade"
-      onRequestClose={() => setShowSendTokenSelection(false)}
-    >
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Selecciona la moneda</Text>
-            <TouchableOpacity
-              onPress={() => setShowSendTokenSelection(false)}
-              accessibilityRole="button"
-              accessibilityLabel="Cerrar selección de moneda"
-            >
-              <Icon name="x" size={24} color="#6B7280" />
-            </TouchableOpacity>
-          </View>
-          <Text style={styles.modalSubtitle}>¿Qué moneda quieres enviar?</Text>
-          <View style={styles.tokenOptions}>
-            <TouchableOpacity
-              style={styles.tokenOption}
-              onPress={() => handleSendTokenSelection('cusd')}
-              accessibilityRole="button"
-              accessibilityLabel="Seleccionar Confío Dollar para enviar"
-            >
-              <View style={styles.tokenInfo}>
-                <Image source={cUSDLogo} style={styles.tokenLogo} />
-                <View style={styles.tokenDetails}>
-                  <Text style={styles.tokenName}>Confío Dollar</Text>
-                  <Text style={styles.tokenSymbol}>$cUSD</Text>
-                  <Text style={styles.tokenDescription}>Moneda estable para pagos diarios</Text>
-                </View>
-              </View>
-              <Icon name="chevron-right" size={20} color="#6B7280" />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.tokenOption}
-              onPress={() => handleSendTokenSelection('usdc')}
-              accessibilityRole="button"
-              accessibilityLabel="Seleccionar USDC para enviar"
-            >
-              <View style={styles.tokenInfo}>
-                <Image source={USDCLogo} style={styles.tokenLogo} />
-                <View style={styles.tokenDetails}>
-                  <Text style={styles.tokenName}>USD Coin</Text>
-                  <Text style={styles.tokenSymbol}>USDC</Text>
-                  <Text style={styles.tokenDescription}>Stablecoin en la red de Algorand</Text>
-                </View>
-              </View>
-              <Icon name="chevron-right" size={20} color="#6B7280" />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.tokenOption}
-              onPress={() => handleSendTokenSelection('confio')}
-              accessibilityRole="button"
-              accessibilityLabel="Seleccionar Confío para enviar"
-            >
-              <View style={styles.tokenInfo}>
-                <Image source={CONFIOLogo} style={styles.tokenLogo} />
-                <View style={styles.tokenDetails}>
-                  <Text style={styles.tokenName}>Confío</Text>
-                  <Text style={styles.tokenSymbol}>$CONFIO</Text>
-                  <Text style={styles.tokenDescription}>Moneda de gobernanza y utilidad</Text>
-                </View>
-              </View>
-              <Icon name="chevron-right" size={20} color="#6B7280" />
-            </TouchableOpacity>
-          </View>
-          <TouchableOpacity
-            style={styles.cancelButton}
-            onPress={() => setShowSendTokenSelection(false)}
-            accessibilityRole="button"
-            accessibilityLabel="Cerrar selección de moneda"
-          >
-            <Text style={styles.cancelButtonText}>Cancelar</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
-  );
-
-  const FriendTokenSelectionModal = () => (
-    <Modal
-      visible={showFriendTokenSelection}
-      transparent
-      animationType="fade"
-      onRequestClose={() => setShowFriendTokenSelection(false)}
-    >
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Selecciona la moneda</Text>
-            <TouchableOpacity
-              onPress={() => setShowFriendTokenSelection(false)}
-              accessibilityRole="button"
-              accessibilityLabel="Cerrar selección de moneda"
-            >
-              <Icon name="x" size={24} color="#6B7280" />
-            </TouchableOpacity>
-          </View>
-          <Text style={styles.modalSubtitle}>¿Qué moneda quieres enviar a {selectedFriend?.name}?</Text>
-          <View style={styles.tokenOptions}>
-            <TouchableOpacity
-              style={styles.tokenOption}
-              onPress={() => handleFriendTokenSelection('cusd')}
-              accessibilityRole="button"
-              accessibilityLabel={`Seleccionar Confío Dollar para enviar a ${selectedFriend?.name || 'este contacto'}`}
-            >
-              <View style={styles.tokenInfo}>
-                <Image source={cUSDLogo} style={styles.tokenLogo} />
-                <View style={styles.tokenDetails}>
-                  <Text style={styles.tokenName}>Confío Dollar</Text>
-                  <Text style={styles.tokenSymbol}>$cUSD</Text>
-                  <Text style={styles.tokenDescription}>Moneda estable para pagos diarios</Text>
-                </View>
-              </View>
-              <Icon name="chevron-right" size={20} color="#6B7280" />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.tokenOption}
-              onPress={() => handleFriendTokenSelection('confio')}
-              accessibilityRole="button"
-              accessibilityLabel={`Seleccionar Confío para enviar a ${selectedFriend?.name || 'este contacto'}`}
-            >
-              <View style={styles.tokenInfo}>
-                <Image source={CONFIOLogo} style={styles.tokenLogo} />
-                <View style={styles.tokenDetails}>
-                  <Text style={styles.tokenName}>Confío</Text>
-                  <Text style={styles.tokenSymbol}>$CONFIO</Text>
-                  <Text style={styles.tokenDescription}>Moneda de gobernanza y utilidad</Text>
-                </View>
-              </View>
-              <Icon name="chevron-right" size={20} color="#6B7280" />
-            </TouchableOpacity>
-          </View>
-          <TouchableOpacity
-            style={styles.cancelButton}
-            onPress={() => setShowFriendTokenSelection(false)}
-            accessibilityRole="button"
-            accessibilityLabel="Cerrar selección de moneda"
-          >
-            <Text style={styles.cancelButtonText}>Cancelar</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
-  );
-
   // Prepare sections for SectionList
   const sections = useMemo(() => {
     // For business accounts, show employees section (but not for employees themselves)
@@ -1622,8 +1473,55 @@ export const ContactsScreen = () => {
           removeClippedSubviews={true}
         />
 
-        <SendTokenSelectionModal />
-        <FriendTokenSelectionModal />
+        <RouteSheet
+          visible={showSendTokenSelection}
+          title="¿Qué moneda quieres enviar?"
+          onClose={() => setShowSendTokenSelection(false)}
+          options={[
+            {
+              icon: 'dollar-sign',
+              image: cUSDLogo,
+              title: 'Confío Dollar · $cUSD',
+              subtitle: 'Moneda estable para pagos diarios',
+              onPress: () => handleSendTokenSelection('cusd'),
+            },
+            {
+              icon: 'dollar-sign',
+              image: USDCLogo,
+              title: 'USD Coin · USDC',
+              subtitle: 'Stablecoin en la red de Algorand',
+              onPress: () => handleSendTokenSelection('usdc'),
+            },
+            {
+              icon: 'zap',
+              image: CONFIOLogo,
+              title: 'Confío · $CONFIO',
+              subtitle: 'Moneda de gobernanza y utilidad',
+              onPress: () => handleSendTokenSelection('confio'),
+            },
+          ]}
+        />
+        <RouteSheet
+          visible={showFriendTokenSelection}
+          title={`¿Qué moneda quieres enviar a ${selectedFriend?.name || 'tu contacto'}?`}
+          onClose={() => setShowFriendTokenSelection(false)}
+          options={[
+            {
+              icon: 'dollar-sign',
+              image: cUSDLogo,
+              title: 'Confío Dollar · $cUSD',
+              subtitle: 'Moneda estable para pagos diarios',
+              onPress: () => handleFriendTokenSelection('cusd'),
+            },
+            {
+              icon: 'zap',
+              image: CONFIOLogo,
+              title: 'Confío · $CONFIO',
+              subtitle: 'Moneda de gobernanza y utilidad',
+              onPress: () => handleFriendTokenSelection('confio'),
+            },
+          ]}
+        />
       </View>
 
       {/* Beautiful Contact Permission Modal */}
