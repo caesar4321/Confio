@@ -1946,6 +1946,8 @@ export const TransactionDetailScreen = () => {
             <Text style={styles.headerTitle}>Detalle de Transacción</Text>
             <TouchableOpacity
               style={styles.headerButton}
+              accessibilityRole="button"
+              accessibilityLabel="Ver comprobante"
               onPress={() => {
                 navigation.navigate('TransactionReceipt', {
                   transaction: {
@@ -2062,6 +2064,8 @@ export const TransactionDetailScreen = () => {
                       <TouchableOpacity
                         onPress={() => handleCopy(currentTx.sourceAddress || currentTx.fromAddress, 'from')}
                         style={styles.copyButton}
+                        accessibilityRole="button"
+                        accessibilityLabel="Copiar dirección de origen"
                       >
                         {copied === 'from' ? (
                           <Icon name="check" size={16} color={colors.accent} />
@@ -2086,6 +2090,8 @@ export const TransactionDetailScreen = () => {
                       <TouchableOpacity
                         onPress={() => handleCopy(currentTx.destinationAddress || currentTx.toAddress, 'to')}
                         style={styles.copyButton}
+                        accessibilityRole="button"
+                        accessibilityLabel="Copiar dirección de destino"
                       >
                         {copied === 'to' ? (
                           <Icon name="check" size={16} color={colors.accent} />
@@ -2187,6 +2193,8 @@ export const TransactionDetailScreen = () => {
                           'from'
                         )}
                         style={styles.copyButton}
+                        accessibilityRole="button"
+                        accessibilityLabel="Copiar datos del remitente"
                       >
                         {copied === 'from' ? (
                           <Icon name="check" size={16} color={colors.accent} />
@@ -2267,6 +2275,8 @@ export const TransactionDetailScreen = () => {
                           'to'
                         )}
                         style={styles.copyButton}
+                        accessibilityRole="button"
+                        accessibilityLabel="Copiar datos del destinatario"
                       >
                         {copied === 'to' ? (
                           <Icon name="check" size={16} color={colors.accent} />

@@ -1913,7 +1913,7 @@ export const TradeChatScreen: React.FC = () => {
       {/* Header */}
       <View style={[styles.headerRow, { paddingTop: 12 }]}>
         {/* Left: Back Button */}
-        <TouchableOpacity onPress={handleGoBack} style={styles.backButton}>
+        <TouchableOpacity onPress={handleGoBack} style={styles.backButton} accessibilityRole="button" accessibilityLabel="Volver">
           <Icon name="arrow-left" size={24} color="#374151" />
         </TouchableOpacity>
 
@@ -2297,6 +2297,8 @@ export const TradeChatScreen: React.FC = () => {
                     onPress={handleSharePaymentDetails}
                     onLongPress={() => Alert.alert('Compartir Datos de Pago', 'Comparte los datos de tu método de pago seleccionado con el comprador')}
                     style={styles.sharePaymentButton}
+                    accessibilityRole="button"
+                    accessibilityLabel="Compartir datos de pago"
                   >
                     <Icon name="credit-card" size={20} color={colors.primary} />
                   </TouchableOpacity>
@@ -2306,6 +2308,8 @@ export const TradeChatScreen: React.FC = () => {
                 {/* Request Payment Details Button - Only show for buyer in step 1 */}
                 {computedTradeType === 'buy' && currentTradeStep === 1 && (
                   <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel="Solicitar datos de pago"
                     onPress={() => {
                       Alert.alert(
                         'Solicitar Datos de Pago',
@@ -2352,6 +2356,9 @@ export const TradeChatScreen: React.FC = () => {
                   onPress={handleSendMessage}
                   disabled={!message.trim() || sendingMessage}
                   style={[styles.sendButton, (!message.trim() || sendingMessage) && styles.sendButtonDisabled]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Enviar mensaje"
+                  accessibilityState={{ disabled: !message.trim() || sendingMessage }}
                 >
                   <Icon
                     name={sendingMessage ? "loader" : "send"}
