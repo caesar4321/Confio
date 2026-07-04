@@ -27,6 +27,7 @@ import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { colors } from '../config/theme';
 import { InlineBanner } from '../components/common/InlineBanner';
+import { Header } from '../navigation/Header';
 
 // Colors from the design
 type PaymentMethod = {
@@ -316,19 +317,14 @@ export const CreateOfferScreen = () => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Icon name="arrow-left" size={24} color="#1F2937" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>{editMode ? 'Editar Oferta' : 'Crear Oferta'}</Text>
-        <View style={styles.placeholder} />
-      </View>
+      <Header
+        navigation={navigation as any}
+        title={editMode ? 'Editar Oferta' : 'Crear Oferta'}
+        backgroundColor="#fff"
+        showBackButton
+      />
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {banner && (
@@ -656,7 +652,7 @@ export const CreateOfferScreen = () => {
           />
         </View>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 };
 
@@ -705,24 +701,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
-  },
-  backButton: {
-    padding: 8,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#1F2937',
   },
   placeholder: {
     width: 40,
