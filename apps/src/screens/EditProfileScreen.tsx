@@ -11,6 +11,7 @@ import { getCountryByIso } from '../utils/countries';
 import { biometricAuthService } from '../services/biometricAuthService';
 import { colors } from '../config/theme';
 import { InlineBanner } from '../components/common/InlineBanner';
+import { Header } from '../navigation/Header';
 import { APP_LAYOUT } from '../config/layout';
 
 // Colors from the design
@@ -211,13 +212,14 @@ export const EditProfileScreen = () => {
   if (isUserProfileLoading) {
     return (
       <View style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={handleCancel}>
-            <Icon name="arrow-left" size={24} color="#fff" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Cargando...</Text>
-          <View style={styles.placeholder} />
-        </View>
+        <Header
+          navigation={navigation as any}
+          title="Cargando..."
+          backgroundColor="#34d399"
+          isLight
+          showBackButton
+          onBackPress={handleCancel}
+        />
         <View style={styles.loadingContainer}>
           <Text style={styles.loadingText}>Cargando perfil...</Text>
         </View>
@@ -233,22 +235,28 @@ export const EditProfileScreen = () => {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={handleCancel}>
-          <Icon name="arrow-left" size={24} color="#fff" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Editar Perfil</Text>
-        <TouchableOpacity
-          style={[styles.saveButton, isSaving && styles.saveButtonDisabled]}
-          onPress={handleSave}
-          disabled={isSaving}
-        >
-          <Text style={styles.saveButtonText}>
-            {isSaving ? 'Guardando...' : 'Guardar'}
-          </Text>
-        </TouchableOpacity>
-      </View>
+      <Header
+        navigation={navigation as any}
+        title="Editar Perfil"
+        backgroundColor="#34d399"
+        isLight
+        showBackButton
+        onBackPress={handleCancel}
+        rightAccessory={(
+          <TouchableOpacity
+            style={[styles.saveButton, isSaving && styles.saveButtonDisabled]}
+            onPress={handleSave}
+            disabled={isSaving}
+            accessibilityRole="button"
+            accessibilityLabel="Guardar perfil"
+            accessibilityState={{ disabled: isSaving, busy: isSaving }}
+          >
+            <Text style={styles.saveButtonText}>
+              {isSaving ? 'Guardando...' : 'Guardar'}
+            </Text>
+          </TouchableOpacity>
+        )}
+      />
 
       {/* Form */}
       <ScrollView
@@ -386,23 +394,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
-  },
-  header: {
-    backgroundColor: '#34d399', // emerald-400
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: Platform.OS === 'ios' ? APP_LAYOUT.topSafeArea : APP_LAYOUT.topSafeArea + 8,
-    paddingBottom: 16,
-  },
-  backButton: {
-    padding: 8,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#fff',
   },
   saveButton: {
     paddingHorizontal: 16,
