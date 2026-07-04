@@ -7,6 +7,7 @@ import { RouteProp } from '@react-navigation/native';
 import { useMutation } from '@apollo/client';
 import { MainStackParamList } from '../types/navigation';
 import { Header } from '../navigation/Header';
+import { InlineBanner } from '../components/common/InlineBanner';
 import { UPDATE_BUSINESS_EMPLOYEE, GET_CURRENT_BUSINESS_EMPLOYEES } from '../apollo/queries';
 
 type EmployeeEditNavigationProp = NativeStackNavigationProp<MainStackParamList>;
@@ -30,6 +31,8 @@ export const EmployeeEditScreen = () => {
   const initialActive = useMemo(() => (isActive ?? employeeData?.isActive ?? true), [isActive, employeeData?.isActive]);
 
   const [selectedRole, setSelectedRole] = useState(initialRole);
+  const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
+  const dismissBanner = React.useCallback(() => setBanner(null), []);
   const [active, setActive] = useState<boolean>(initialActive);
   const isOwner = initialRole === 'owner';
 
@@ -65,10 +68,10 @@ export const EmployeeEditScreen = () => {
           { text: 'Entendido', onPress: () => navigation.goBack() },
         ]);
       } else {
-        Alert.alert('Error', data?.updateBusinessEmployee?.errors?.[0] || 'No se pudo actualizar al empleado');
+        setBanner({ variant: 'error', message: data?.updateBusinessEmployee?.errors?.[0] || 'No se pudo actualizar al empleado' });
       }
     } catch (err) {
-      Alert.alert('Error', 'Ocurrió un error al actualizar al empleado');
+      setBanner({ variant: 'error', message: 'Ocurrió un error al actualizar al empleado' });
     }
   };
 
@@ -83,6 +86,13 @@ export const EmployeeEditScreen = () => {
       />
 
       <View style={styles.content}>
+        {banner && (
+          <InlineBanner
+            message={banner.message}
+            variant={banner.variant}
+            onDismiss={dismissBanner}
+          />
+        )}
         <Text style={styles.label}>Empleado</Text>
         <Text style={styles.value}>{employeeName}</Text>
 
