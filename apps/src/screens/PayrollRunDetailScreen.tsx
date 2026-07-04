@@ -19,6 +19,7 @@ import { MainStackParamList } from '../types/navigation';
 import { TransactionReceiptView } from '../components/TransactionReceiptView';
 import { PayrollRunReceiptView } from '../components/PayrollRunReceiptView';
 import { Button } from '../components/common/Button';
+import { InlineBanner } from '../components/common/InlineBanner';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'PayrollRunDetail'>;
 type RouteProps = RouteProp<MainStackParamList, 'PayrollRunDetail'>;
@@ -74,6 +75,8 @@ export const PayrollRunDetailScreen = () => {
   const route = useRoute<RouteProps>();
   const run = route.params?.run as any;
   const [capturingIndex, setCapturingIndex] = useState<number | null>(null);
+  const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
+  const dismissBanner = React.useCallback(() => setBanner(null), []);
   const [capturingFullRun, setCapturingFullRun] = useState(false);
   const receiptRefs = useRef<{ [key: number]: ViewShot | null }>({});
   const fullRunRef = useRef<ViewShot>(null);
@@ -108,7 +111,7 @@ export const PayrollRunDetailScreen = () => {
       await new Promise(resolve => setTimeout(resolve, 100));
 
       if (!fullRunRef.current) {
-        Alert.alert('Error', 'El comprobante no está listo para exportar.', [{ text: 'Entendido' }]);
+        setBanner({ variant: 'error', message: 'El comprobante no está listo para exportar.' });
         setCapturingFullRun(false);
         return;
       }
@@ -142,13 +145,13 @@ export const PayrollRunDetailScreen = () => {
                 });
               } catch (error) {
               }
-              setCapturingFullRun(false);
+        setCapturingFullRun(false);
             },
           },
         ]
       );
     } catch (e: any) {
-      Alert.alert('Error', 'No se pudo guardar el comprobante. Verifica los permisos de galería.', [{ text: 'Entendido' }]);
+      setBanner({ variant: 'error', message: 'No se pudo guardar el comprobante. Verifica los permisos de galería.' });
       setCapturingFullRun(false);
     }
   };
@@ -167,7 +170,7 @@ export const PayrollRunDetailScreen = () => {
 
       const ref = receiptRefs.current[idx];
       if (!ref) {
-        Alert.alert('Error', 'El comprobante no está listo para exportar.', [{ text: 'Entendido' }]);
+        setBanner({ variant: 'error', message: 'El comprobante no está listo para exportar.' });
         setCapturingIndex(null);
         return;
       }
@@ -201,13 +204,13 @@ export const PayrollRunDetailScreen = () => {
                 });
               } catch (error) {
               }
-              setCapturingIndex(null);
+        setCapturingIndex(null);
             },
           },
         ]
       );
     } catch (e: any) {
-      Alert.alert('Error', 'No se pudo guardar el comprobante. Verifica los permisos de galería.');
+      setBanner({ variant: 'error', message: 'No se pudo guardar el comprobante. Verifica los permisos de galería.' });
       setCapturingIndex(null);
     }
   };
@@ -215,6 +218,14 @@ export const PayrollRunDetailScreen = () => {
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.content}>
+        {banner && (
+          <InlineBanner
+            message={banner.message}
+            variant={banner.variant}
+            onDismiss={dismissBanner}
+            autoHideMs={banner.variant === 'success' ? 2500 : undefined}
+          />
+        )}
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
