@@ -23,6 +23,7 @@ import { colors } from '../config/theme';
 import { countries, Country, getCountryByIso } from '../utils/countries';
 import { useCountry } from '../contexts/CountryContext';
 import { useAuth } from '../contexts/AuthContext';
+import { Header as AppHeader } from '../navigation/Header';
 import {
   FINANCIERA_SERVICES,
   MANDATORY_SERVICE_ID,
@@ -612,32 +613,21 @@ export const RegisterFinancieraScreen = () => {
   );
 };
 
+// Thin wrapper over the app-wide Header so both render branches share one call site.
 const Header = ({ title, onBack }: { title: string; onBack: () => void }) => (
-  <SafeAreaView edges={['top']} style={{ backgroundColor: colors.primary }}>
-    <View style={styles.header}>
-      <TouchableOpacity onPress={onBack} style={styles.headerIconBtn}>
-        <Icon name="arrow-left" size={24} color="#fff" />
-      </TouchableOpacity>
-      <Text style={styles.headerTitle}>{title}</Text>
-      <View style={styles.headerIconBtn} />
-    </View>
-  </SafeAreaView>
+  <AppHeader
+    navigation={undefined as any}
+    title={title}
+    backgroundColor={colors.primary}
+    isLight
+    showBackButton
+    onBackPress={onBack}
+  />
 );
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.neutral },
 
-  header: {
-    backgroundColor: colors.primary,
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  headerIconBtn: { padding: 6, width: 40, alignItems: 'center' },
-  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#fff' },
 
   scrollContent: { padding: 16, paddingBottom: 24 },
 
