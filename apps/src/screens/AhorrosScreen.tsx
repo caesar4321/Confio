@@ -43,6 +43,18 @@ import OndoLogo from '../assets/png/Ondo.png';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 
+
+const MOVEMENT_ICONS: Record<string, string> = {
+  deposit: 'arrow-down-circle',
+  withdraw: 'arrow-up-circle',
+  buy: 'shopping-cart',
+  sell: 'repeat',
+  yield: 'trending-up',
+};
+
+const formatMovementDate = (iso: string) =>
+  new Date(iso).toLocaleDateString('es', { day: 'numeric', month: 'short' });
+
 const EDUCATION_CARDS = [
   {
     icon: 'shield',
@@ -71,7 +83,7 @@ export const AhorrosScreen = () => {
   const portfolio = useAhorrosPortfolio();
   const { stocks: gmStocks } = useGmMarket();
   const featuredTickers = gmStocks.slice(0, 5);
-  const { savings, stocks } = portfolio;
+  const { savings, stocks, movements } = portfolio;
 
   const { data: balancesData } = useQuery(GET_MY_BALANCES, {
     fetchPolicy: 'cache-and-network',
@@ -341,6 +353,48 @@ export const AhorrosScreen = () => {
           </>
         )}
 
+        {/* Movimientos — house pattern: history lives right under the
+            balance cards, like the cUSD and CONFIO account screens. */}
+        <Text style={styles.sectionTitle}>Movimientos</Text>
+        {movements.length === 0 ? (
+          <View style={styles.movementsEmpty}>
+            <Icon name="clock" size={22} color={colors.text.light} />
+            <Text style={styles.movementsEmptyText}>
+              Aquí verás tus ahorros, retiros, compras y el rendimiento que ganas.
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.card}>
+            {movements.map((m, idx) => (
+              <View
+                key={m.id}
+                style={[styles.movementRow, idx > 0 && styles.movementRowBorder]}
+              >
+                <View style={styles.movementIcon}>
+                  <Icon
+                    name={MOVEMENT_ICONS[m.type] || 'circle'}
+                    size={16}
+                    color={colors.primaryDark}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.movementTitle}>{m.title}</Text>
+                  <Text style={styles.movementDate}>{formatMovementDate(m.createdAt)}</Text>
+                </View>
+                <Text
+                  style={[
+                    styles.movementAmount,
+                    m.amountUsd < 0 && styles.movementAmountOut,
+                  ]}
+                >
+                  {m.amountUsd >= 0 ? '+' : '−'}$
+                  {Math.abs(m.amountUsd).toFixed(2)}
+                </Text>
+              </View>
+            ))}
+          </View>
+        )}
+
         {/* Partnership: real logo, nominative use — Ondo is the issuer of both
             USDY (savings backing) and the tokenized stocks. */}
         <View style={styles.partnerRow}>
@@ -555,6 +609,40 @@ const styles = StyleSheet.create({
   positionName: { fontSize: 11, color: colors.text.secondary },
   positionValue: { fontSize: 14, fontWeight: '700', color: colors.text.primary },
   positionChange: { fontSize: 11, fontWeight: '600', color: colors.primaryDark },
+
+  movementsEmpty: {
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    padding: 20,
+    marginBottom: 16,
+    gap: 8,
+  },
+  movementsEmptyText: {
+    fontSize: 12,
+    color: colors.text.secondary,
+    textAlign: 'center',
+    lineHeight: 17,
+  },
+  movementRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 10,
+  },
+  movementRowBorder: { borderTopWidth: 1, borderTopColor: '#F3F4F6' },
+  movementIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  movementTitle: { fontSize: 14, fontWeight: '600', color: colors.text.primary },
+  movementDate: { fontSize: 11, color: colors.text.light, marginTop: 1 },
+  movementAmount: { fontSize: 14, fontWeight: '700', color: colors.primaryDark },
+  movementAmountOut: { color: colors.text.primary },
 
   partnerRow: {
     flexDirection: 'row',

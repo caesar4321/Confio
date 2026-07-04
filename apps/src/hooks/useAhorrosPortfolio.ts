@@ -19,6 +19,21 @@ export interface StockPosition {
   dayChangePct: number;
 }
 
+export type AhorroMovementType =
+  | 'deposit' // Ahorraste (cUSD → cUSD+ or ramp-in)
+  | 'withdraw' // Retiraste (→ cUSD or bank)
+  | 'buy' // Compraste una acción (from cUSD+)
+  | 'sell' // Vendiste una acción (back to cUSD+)
+  | 'yield'; // weekly/monthly yield summary row (never per-day spam)
+
+export interface AhorroMovement {
+  id: string;
+  type: AhorroMovementType;
+  title: string; // e.g. 'Ahorraste', 'Compraste TSLA'
+  amountUsd: number; // signed: deposits/sell/yield positive into savings
+  createdAt: string; // ISO
+}
+
 export interface AhorrosPortfolio {
   savings: {
     balanceUsd: number; // USD value only — share counts are never exposed
@@ -33,6 +48,7 @@ export interface AhorrosPortfolio {
     earnedTodayUsd: number;
     positions: StockPosition[];
   };
+  movements: AhorroMovement[];
   totalUsd: number;
   earnedTodayUsd: number;
   earnedMonthUsd: number;
@@ -58,6 +74,7 @@ export const useAhorrosPortfolio = (): AhorrosPortfolio =>
     return {
       savings,
       stocks,
+      movements: [] as AhorroMovement[],
       totalUsd: savings.balanceUsd + stocks.totalUsd,
       earnedTodayUsd: savings.earnedTodayUsd + stocks.earnedTodayUsd,
       earnedMonthUsd: savings.earnedMonthUsd,
