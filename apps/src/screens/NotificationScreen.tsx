@@ -16,6 +16,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { APP_LAYOUT } from '../config/layout';
 import { TransactionItemSkeleton } from '../components/SkeletonLoader';
 import { InlineBanner } from '../components/common/InlineBanner';
+import { Header } from '../navigation/Header';
 
 const REFERRAL_EVENT_TYPE_MAP: Record<string, string> = {
   REFERRAL_EVENT_TOP_UP: 'top_up',
@@ -1233,15 +1234,13 @@ export const NotificationScreen = () => {
   if ((loading || authLoading || !canQueryNotifications) && notifications.length === 0) {
     return (
       <View style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => navigation.goBack()}
-          >
-            <Icon name="arrow-left" size={20} color="#fff" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Notificaciones</Text>
-        </View>
+        <Header
+          navigation={navigation as any}
+          title="Notificaciones"
+          backgroundColor="#34d399"
+          isLight
+          showBackButton
+        />
         <View style={{ paddingTop: 8 }}>
           {Array.from({ length: 7 }).map((_, i) => (
             <TransactionItemSkeleton key={i} />
@@ -1254,15 +1253,13 @@ export const NotificationScreen = () => {
   if (error) {
     return (
       <View style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => navigation.goBack()}
-          >
-            <Icon name="arrow-left" size={20} color="#fff" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Notificaciones</Text>
-        </View>
+        <Header
+          navigation={navigation as any}
+          title="Notificaciones"
+          backgroundColor="#34d399"
+          isLight
+          showBackButton
+        />
         <View style={styles.errorContainer}>
           <Icon name="alert-circle" size={48} color="#EF4444" />
           <Text style={styles.errorText}>Error al cargar notificaciones</Text>
@@ -1276,16 +1273,13 @@ export const NotificationScreen = () => {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Icon name="arrow-left" size={20} color="#fff" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Notificaciones</Text>
-      </View>
+      <Header
+        navigation={navigation as any}
+        title="Notificaciones"
+        backgroundColor="#34d399"
+        isLight
+        showBackButton
+      />
 
       {banner && (
         <InlineBanner
@@ -1338,28 +1332,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
-  },
-  header: {
-    backgroundColor: '#34d399',
-    paddingTop: Platform.OS === 'ios' ? APP_LAYOUT.topSafeArea : APP_LAYOUT.topSafeArea + 8,
-    paddingBottom: 16,
-    paddingHorizontal: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#fff',
   },
   loadingContainer: {
     flex: 1,
