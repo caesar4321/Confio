@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { colors } from '../config/theme';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { NetworkStatus, useMutation, useQuery } from '@apollo/client';
@@ -146,21 +147,6 @@ export default DiscoverScreen;
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F4F6F8',
-  },
-  stateWrap: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 48,
-    backgroundColor: '#F4F6F8',
-  },
-  stateText: {
-    marginTop: 8,
-    fontSize: 13,
-    lineHeight: 19,
-    color: '#6B7280',
-    textAlign: 'center',
+    backgroundColor: colors.neutral,
   },
 });

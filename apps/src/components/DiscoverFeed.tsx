@@ -10,9 +10,9 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { ResponsiveImage } from './ResponsiveImage';
+import { EmptyState } from './EmptyState';
+import { colors } from '../config/theme';
 
-const tealGreen = '#1DB587';
-const tealLight = '#E8F8F2';
 const emojiOptions = ['🔥', '🙌', '😍', '🤯', '💡', '😎', '💪', '👀', '😢', '❤️'];
 
 export type DiscoverReaction = {
@@ -143,6 +143,9 @@ export function DiscoverFeed({
                   }
                 }}
                 style={[styles.reactionButton, active && styles.reactionButtonActive]}
+                accessibilityRole="button"
+                accessibilityLabel={`Reaccionar con ${emoji}, ${count} ${count === 1 ? 'reacción' : 'reacciones'}`}
+                accessibilityState={{ selected: active }}
               >
                 <Text style={styles.reactionEmoji}>{emoji}</Text>
                 <Text style={styles.reactionCount}>{count}</Text>
@@ -154,6 +157,8 @@ export function DiscoverFeed({
             <Pressable
               onPress={() => setShowEmojiPicker(showEmojiPicker === item.id ? null : item.id)}
               style={styles.addReactionButton}
+              accessibilityRole="button"
+              accessibilityLabel="Agregar una reacción"
             >
               <Text style={styles.addReactionText}>+ 😊</Text>
             </Pressable>
@@ -174,6 +179,8 @@ export function DiscoverFeed({
                     }
                   }}
                   style={[styles.emojiOption, active && styles.emojiOptionActive]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Reaccionar con ${emoji}`}
                 >
                   <Text style={styles.emojiOptionText}>{emoji}</Text>
                 </Pressable>
@@ -193,8 +200,15 @@ export function DiscoverFeed({
       contentContainerStyle={styles.content}
       refreshControl={
         onRefresh ? (
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={tealGreen} />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
         ) : undefined
+      }
+      ListEmptyComponent={
+        <EmptyState
+          icon="compass"
+          title="Nada por aquí todavía"
+          subtitle="Vuelve pronto — aquí publicamos novedades de Confío y la comunidad."
+        />
       }
       onEndReachedThreshold={0.35}
       onEndReached={() => {
@@ -205,7 +219,7 @@ export function DiscoverFeed({
       ListFooterComponent={
         loadingMore ? (
           <View style={styles.footerLoader}>
-            <ActivityIndicator size="small" color={tealGreen} />
+            <ActivityIndicator size="small" color={colors.primary} />
           </View>
         ) : null
       }
@@ -215,17 +229,18 @@ export function DiscoverFeed({
 
 const styles = StyleSheet.create({
   content: {
-    paddingHorizontal: 14,
+    paddingHorizontal: 16,
     paddingTop: 14,
     paddingBottom: 28,
+    flexGrow: 1,
   },
   card: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.background,
     borderRadius: 16,
-    paddingHorizontal: 14,
+    paddingHorizontal: 16,
     paddingTop: 14,
-    paddingBottom: 10,
-    marginBottom: 10,
+    paddingBottom: 12,
+    marginBottom: 12,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.06,
@@ -252,27 +267,27 @@ const styles = StyleSheet.create({
   },
   timeText: {
     fontSize: 11,
-    color: '#AAAAAA',
+    color: colors.text.light,
   },
   cardTitle: {
     marginBottom: 5,
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '700',
-    lineHeight: 19,
-    color: '#111111',
+    lineHeight: 21,
+    color: colors.dark,
   },
   cardBody: {
     marginBottom: 10,
-    fontSize: 13,
-    lineHeight: 20,
-    color: '#555555',
+    fontSize: 14,
+    lineHeight: 21,
+    color: colors.gray700,
   },
   videoPanel: {
     height: 112,
     borderRadius: 14,
     marginBottom: 10,
     overflow: 'hidden',
-    backgroundColor: '#111827',
+    backgroundColor: colors.dark,
     position: 'relative',
   },
   videoPanelGlowOne: {
@@ -291,7 +306,7 @@ const styles = StyleSheet.create({
     width: 110,
     height: 110,
     borderRadius: 55,
-    backgroundColor: 'rgba(29,181,135,0.20)',
+    backgroundColor: 'rgba(52, 211, 153, 0.20)', // colors.primary glow
   },
   videoPanelTopRow: {
     paddingHorizontal: 12,
@@ -351,7 +366,7 @@ const styles = StyleSheet.create({
     width: '100%',
     borderRadius: 12,
     marginTop: 12,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: colors.border,
   },
   reactionRow: {
     flexDirection: 'row',
@@ -363,16 +378,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
-    backgroundColor: '#F4F6F8',
+    backgroundColor: colors.neutralDark,
     borderRadius: 20,
-    paddingHorizontal: 9,
-    paddingVertical: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
     borderWidth: 1.5,
     borderColor: 'transparent',
   },
   reactionButtonActive: {
-    backgroundColor: tealLight,
-    borderColor: tealGreen,
+    backgroundColor: colors.primarySoft,
+    borderColor: colors.primary,
   },
   reactionEmoji: {
     fontSize: 13,
@@ -380,17 +395,17 @@ const styles = StyleSheet.create({
   reactionCount: {
     fontSize: 11,
     fontWeight: '600',
-    color: '#666666',
+    color: colors.text.secondary,
   },
   addReactionButton: {
-    backgroundColor: '#F4F6F8',
+    backgroundColor: colors.neutralDark,
     borderRadius: 20,
-    paddingHorizontal: 9,
-    paddingVertical: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
   },
   addReactionText: {
     fontSize: 12,
-    color: '#888888',
+    color: colors.text.secondary,
   },
   emojiPicker: {
     marginTop: 8,
@@ -399,8 +414,8 @@ const styles = StyleSheet.create({
     gap: 4,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#EAEAEA',
-    backgroundColor: '#FFFFFF',
+    borderColor: colors.border,
+    backgroundColor: colors.background,
     padding: 8,
   },
   emojiOption: {
@@ -411,7 +426,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   emojiOptionActive: {
-    backgroundColor: tealLight,
+    backgroundColor: colors.primarySoft,
   },
   emojiOptionText: {
     fontSize: 17,
