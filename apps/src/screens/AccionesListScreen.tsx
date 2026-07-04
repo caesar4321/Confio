@@ -37,19 +37,36 @@ export const AccionesListScreen = () => {
   const { savings, stocks: myStocks } = useAhorrosPortfolio();
   const [search, setSearch] = useState('');
 
+  // Every row carries BOTH numbers so their meaning never shifts: right side
+  // is always market data (price + day %), and a "Tienes $X" line under the
+  // name is always present — $0.00 included — so there is no ambiguity about
+  // which number is mine. Held stocks sort first.
+  const positionByTicker = useMemo(() => {
+    const map: Record<string, number> = {};
+    myStocks.positions.forEach((p) => {
+      map[p.ticker] = p.valueUsd;
+    });
+    return map;
+  }, [myStocks.positions]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return stocks;
-    return stocks.filter(
-      (s) => s.ticker.toLowerCase().includes(q) || s.name.toLowerCase().includes(q),
-    );
-  }, [search, stocks]);
+    const base = q
+      ? stocks.filter(
+          (s) => s.ticker.toLowerCase().includes(q) || s.name.toLowerCase().includes(q),
+        )
+      : stocks;
+    const held = base.filter((s) => (positionByTicker[s.ticker] || 0) > 0);
+    const rest = base.filter((s) => !((positionByTicker[s.ticker] || 0) > 0));
+    return [...held, ...rest];
+  }, [search, stocks, positionByTicker]);
 
   const fmtUsd = (v: number) =>
     `$${formatNumber(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   const renderRow = ({ item }: { item: GmStock }) => {
     const up = item.dayChangePct >= 0;
+    const positionValue = positionByTicker[item.ticker] || 0;
     return (
       <TouchableOpacity
         style={styles.row}
@@ -61,6 +78,9 @@ export const AccionesListScreen = () => {
           <Text style={styles.rowTicker}>{item.ticker}</Text>
           <Text style={styles.rowName} numberOfLines={1}>
             {item.name}
+          </Text>
+          <Text style={[styles.rowPosition, positionValue > 0 && styles.rowPositionHeld]}>
+            Tienes {fmtUsd(positionValue)}
           </Text>
         </View>
         <View style={{ alignItems: 'flex-end' }}>
@@ -137,48 +157,6 @@ export const AccionesListScreen = () => {
               )}
             </View>
 
-            {/* Mis acciones — the user's own positions come first (value in
-                USD + day %); the market list below is for discovery. Hidden
-                while searching so results stay clean. */}
-            {myStocks.positions.length > 0 && search.trim() === '' && (
-              <>
-                <Text style={styles.sectionLabel}>Mis acciones</Text>
-                {myStocks.positions.map((pos) => {
-                  const gm = stocks.find((g) => g.ticker === pos.ticker);
-                  const up = pos.dayChangePct >= 0;
-                  return (
-                    <TouchableOpacity
-                      key={pos.ticker}
-                      style={styles.row}
-                      activeOpacity={0.8}
-                      onPress={() => navigation.navigate('StockDetail', { ticker: pos.ticker })}
-                    >
-                      <TickerLogo
-                        ticker={pos.ticker}
-                        color={gm?.color || '#1D4ED8'}
-                        logoUrl={gm?.logoUrl}
-                        size={42}
-                      />
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.rowTicker}>{pos.ticker}</Text>
-                        <Text style={styles.rowName} numberOfLines={1}>
-                          {pos.name}
-                        </Text>
-                      </View>
-                      <View style={{ alignItems: 'flex-end' }}>
-                        <Text style={styles.rowPrice}>{fmtUsd(pos.valueUsd)}</Text>
-                        <Text style={[styles.rowChange, !up && styles.rowChangeDown]}>
-                          {up ? '▲' : '▼'}{' '}
-                          {formatNumber(Math.abs(pos.dayChangePct), { maximumFractionDigits: 2 })}%
-                          {' hoy'}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
-                <Text style={styles.sectionLabel}>Todas las acciones</Text>
-              </>
-            )}
           </View>
         }
         ListEmptyComponent={
@@ -246,13 +224,6 @@ const styles = StyleSheet.create({
   },
   searchInput: { flex: 1, fontSize: 15, color: colors.text.primary, padding: 0 },
 
-  sectionLabel: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.text.secondary,
-    marginBottom: 8,
-    marginTop: 4,
-  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -262,6 +233,8 @@ const styles = StyleSheet.create({
     padding: 14,
     marginBottom: 8,
   },
+  rowPosition: { fontSize: 11, color: colors.text.light, marginTop: 2 },
+  rowPositionHeld: { color: colors.primaryDark, fontWeight: '700' },
   tickerCircle: {
     width: 42,
     height: 42,
