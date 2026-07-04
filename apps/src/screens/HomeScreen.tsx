@@ -233,6 +233,16 @@ export const HomeScreen = () => {
   const [presaleDismissed, setPresaleDismissed] = useState(false);
   const showPayrollCard = (isBusinessAccount || isEmployeeDelegate || isPersonalAccount) && pendingPayrollCount > 0;
 
+  // F-005: single promo slot. Only the highest-priority pending item renders on Home,
+  // instead of stacking every banner between the balance and the quick actions.
+  // Priority: user's unclaimed money > payroll needing signatures > unclaimed presale tokens > campaigns.
+  const homePromo: 'inviteClaim' | 'payroll' | 'presaleClaim' | 'humanitarian' | null =
+    showInviteClaimCard ? 'inviteClaim'
+      : showPayrollCard ? 'payroll'
+        : (isPresaleClaimsUnlocked && !presaleDismissed) ? 'presaleClaim'
+          : activeHumanitarianCampaign ? 'humanitarian'
+            : null;
+
   // Hunting ReadableNativeArray.getString crash: confirm we reach Home mount,
   // and timestamp it relative to any subsequent crash in Crashlytics.
   useEffect(() => {
@@ -1284,7 +1294,7 @@ export const HomeScreen = () => {
         </Animated.View>
 
 
-        {showInviteClaimCard && (
+        {homePromo === 'inviteClaim' && (
           <View style={styles.inviteClaimCard}>
             <View style={styles.inviteClaimHeader}>
               <View style={styles.inviteClaimBadge}>
@@ -1310,7 +1320,7 @@ export const HomeScreen = () => {
         )}
 
         {/* Payroll quick action */}
-        {showPayrollCard && (
+        {homePromo === 'payroll' && (
           <TouchableOpacity
             style={[styles.payrollCard, { marginHorizontal: 16, marginBottom: 12 }]}
             onPress={() => navigation.navigate('PayrollPending')}
@@ -1331,7 +1341,7 @@ export const HomeScreen = () => {
           </TouchableOpacity>
         )}
 
-        {activeHumanitarianCampaign && (
+        {homePromo === 'humanitarian' && activeHumanitarianCampaign && (
           <HumanitarianHomeBanner
             campaign={activeHumanitarianCampaign}
             onPress={() => navigation.navigate('HumanitarianAid', { slug: activeHumanitarianCampaign.slug })}
@@ -1339,8 +1349,8 @@ export const HomeScreen = () => {
           />
         )}
 
-        {/* CONFIO Presale Banner - Show claims unlocked (green) or presale active (purple) */}
-        {isPresaleClaimsUnlocked && !presaleDismissed && (
+        {/* CONFIO Presale Banner - claims unlocked */}
+        {homePromo === 'presaleClaim' && (
           <Animated.View
             style={[
               styles.presaleBanner,
@@ -1357,7 +1367,7 @@ export const HomeScreen = () => {
             <View style={styles.presaleBannerContent}>
               <View style={styles.presaleBannerLeft}>
                 <View style={[styles.presaleBadge, { backgroundColor: '#10b981' }]}>
-                  <Text style={styles.presaleBadgeText}>🔓 RECLAMO</Text>
+                  <Text style={styles.presaleBadgeText}>RECLAMO</Text>
                 </View>
                 <Text style={styles.presaleBannerTitle}>¡Reclama tus $CONFIO!</Text>
                 <Text style={styles.presaleBannerSubtitle}>
