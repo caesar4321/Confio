@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, TextInput, Alert, ActivityIndicator, Platform } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { Buffer } from 'buffer';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
@@ -17,6 +16,7 @@ import { LoadingOverlay } from '../components/LoadingOverlay';
 import algorandService from '../services/algorandService';
 import { biometricAuthService } from '../services/biometricAuthService';
 import { colors } from '../config/theme';
+import { Header } from '../navigation/Header';
 import { useBackupEnforcement } from '../hooks/useBackupEnforcement';
 
 type ConfioPresaleParticipateScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
@@ -280,34 +280,34 @@ export const ConfioPresaleParticipateScreen = () => {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
+      <View style={styles.container}>
         <BackupEnforcementModal />
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-            <Icon name="arrow-left" size={24} color="#fff" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Convertir a $CONFIO</Text>
-          <View style={styles.headerSpacer} />
-        </View>
+        <Header
+          navigation={navigation as any}
+          title="Convertir a $CONFIO"
+          backgroundColor={colors.secondary}
+          isLight
+          showBackButton
+        />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={colors.secondary} />
           <Text style={styles.loadingText}>Cargando datos de preventa...</Text>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
   if (error || !presale) {
     return (
-      <SafeAreaView style={styles.container}>
+      <View style={styles.container}>
         <BackupEnforcementModal />
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-            <Icon name="arrow-left" size={24} color="#fff" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Convertir a $CONFIO</Text>
-          <View style={styles.headerSpacer} />
-        </View>
+        <Header
+          navigation={navigation as any}
+          title="Convertir a $CONFIO"
+          backgroundColor={colors.secondary}
+          isLight
+          showBackButton
+        />
         <View style={styles.errorContainer}>
           <Icon name="alert-circle" size={48} color={colors.secondary} />
           <Text style={styles.errorText}>No hay preventa activa en este momento</Text>
@@ -315,12 +315,12 @@ export const ConfioPresaleParticipateScreen = () => {
             <Text style={styles.retryButtonText}>Reintentar</Text>
           </TouchableOpacity>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       <BackupEnforcementModal />
       <LoadingOverlay visible={initializing || busy} message={loadingMessage || (busy ? 'Procesando intercambio...' : 'Preparando preventa...')} />
       {busy && (
@@ -328,13 +328,13 @@ export const ConfioPresaleParticipateScreen = () => {
           <ActivityIndicator size="large" color="#fff" />
         </View>
       )}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Icon name="arrow-left" size={24} color="#fff" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Convertir a $CONFIO</Text>
-        <View style={styles.headerSpacer} />
-      </View>
+      <Header
+        navigation={navigation as any}
+        title="Convertir a $CONFIO"
+        backgroundColor={colors.secondary}
+        isLight
+        showBackButton
+      />
 
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         {/* Hero Section */}
@@ -580,7 +580,7 @@ export const ConfioPresaleParticipateScreen = () => {
           navigation.navigate('BottomTabs', { screen: 'Home' });
         }}
       />
-    </SafeAreaView>
+    </View>
   );
 };
 
@@ -588,26 +588,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
-  },
-  header: {
-    backgroundColor: colors.secondary,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 12,
-    paddingBottom: 20,
-    paddingHorizontal: 20,
-  },
-  backButton: {
-    padding: 8,
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  headerSpacer: {
-    width: 40,
   },
   overlay: {
     position: 'absolute',
