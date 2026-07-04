@@ -17,6 +17,7 @@ import { getCountryByIso } from '../utils/countries';
 import { useMutation } from '@apollo/client';
 import { REMOVE_BUSINESS_EMPLOYEE, GET_CURRENT_BUSINESS_EMPLOYEES } from '../apollo/queries';
 import { colors } from '../config/theme';
+import { InlineBanner } from '../components/common/InlineBanner';
 
 // Color palette
 type EmployeeDetailScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
@@ -73,6 +74,8 @@ export const EmployeeDetailScreen = () => {
   } = route.params;
 
   const [showActions, setShowActions] = useState(false);
+  const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
+  const dismissBanner = React.useCallback(() => setBanner(null), []);
   const [removeEmployee, { loading: removing }] = useMutation(REMOVE_BUSINESS_EMPLOYEE, {
     refetchQueries: [{ query: GET_CURRENT_BUSINESS_EMPLOYEES, variables: { includeInactive: false, first: 50 } }],
     awaitRefetchQueries: true,
@@ -161,14 +164,14 @@ export const EmployeeDetailScreen = () => {
                 variables: { input: { employeeId } },
               });
               if (!res.data?.removeBusinessEmployee?.success) {
-                Alert.alert('Error', res.data?.removeBusinessEmployee?.errors?.[0] || 'No se pudo remover al empleado');
+                setBanner({ variant: 'error', message: res.data?.removeBusinessEmployee?.errors?.[0] || 'No se pudo remover al empleado' });
                 return;
               }
               Alert.alert('Empleado removido', `${employeeName} ha sido removido.`, [
                 { text: 'Entendido', onPress: () => navigation.goBack() },
               ]);
             } catch (e) {
-              Alert.alert('Error', 'Ocurrió un error al remover al empleado');
+              setBanner({ variant: 'error', message: 'Ocurrió un error al remover al empleado' });
             }
           }
         }
@@ -198,6 +201,14 @@ export const EmployeeDetailScreen = () => {
       />
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        {banner && (
+          <InlineBanner
+            message={banner.message}
+            variant={banner.variant}
+            onDismiss={dismissBanner}
+            style={{ marginTop: 12 }}
+          />
+        )}
         {/* Employee Header */}
         <View style={styles.employeeHeader}>
           <View style={styles.avatarContainer}>
