@@ -46,26 +46,42 @@ def _address_topic(address: str) -> str:
 
 @shared_task(name='cusd_plus.monitor_bridge_arrivals')
 def monitor_bridge_arrivals():
-    """Chain-first bridge watcher. For Ahorrar rows in flight, scan BNB for
-    a USDT Transfer to the user's own address since the row's cursor block;
-    arrival (>= 90% of the quoted receive, partial-tolerant) advances to
-    DEST_ARRIVED and triggers gas dusting. Prolonged silence -> STUCK (time
-    against the chain, never against a vendor API).
+    """BSC USDT inbound scanner — the BNB sibling of blockchain.scan_inbound_deposits.
 
-    Retirar rows advance via the existing blockchain-app inbound USDC
-    scanner (the auto-swap's own signal) — scan_inbound_deposits calls
-    mark_retirar_arrival() on every USDC credit (wired, blockchain/tasks.py).
+    ONE batched eth_getLogs per run (topics accept an ADDRESS ARRAY, so cost
+    does not grow with the watch set) over a global cursor, then classify
+    each arrival at a watched user.bsc address:
+
+      1. in-flight conversion for that address  -> bridge arrival (leg B done)
+      2. TODO(ramps): pending Koywe order with destination=cusd_plus
+         -> ramp delivery (watch-set source joins when the ramp param ships)
+      3. TODO(external deposits — Julian, 2026-07-04): anything else is an
+         EXTERNAL USDT-BSC deposit. These must become first-class: the
+         crypto-native/no-Koywe onramp is "send USDT (BEP-20) to your
+         address, it becomes savings" — WITHOUT this, those users would be
+         forced through USDC-ALG + the thin Allbridge pool for no reason.
+         Needs: user.bsc registration on Account (savings activation),
+         deposit record + notification, auto-mint prompt on foreground
+         (the auto-swap pattern, gas-dusted). Until then unmatched arrivals
+         are logged for visibility.
+
+    STUCK is judged by chain silence only — never by a vendor API.
     """
+    from django.core.cache import cache
     from .models import CusdPlusConversion
 
     timeout = timedelta(minutes=getattr(settings, 'CUSD_PLUS_BRIDGE_TIMEOUT_MIN', 30))
-    rows = CusdPlusConversion.objects.filter(
+    conversions = list(CusdPlusConversion.objects.filter(
         direction='to_savings',
         status__in=('SRC_COMMITTED', 'STUCK'),
         is_deleted=False,
-    ).exclude(user_bsc_address='')[:200]
-    if not rows:
-        return
+    ).exclude(user_bsc_address='')[:500])
+
+    # Watch set: conversions now; ramp orders and registered savings
+    # addresses join here later (sources 2 and 3 above).
+    watch = {c.user_bsc_address.lower(): c for c in conversions}
+    if not watch:
+        return  # idle: zero RPC calls
 
     try:
         latest_block = int(_rpc('eth_blockNumber', []), 16)
@@ -73,63 +89,70 @@ def monitor_bridge_arrivals():
         logger.warning('bsc blockNumber failed: %s', exc)
         return
 
-    for conv in rows:
-        # First sighting: pin the cursor to the current tip. The source leg
-        # was seconds-to-minutes ago; the bridge takes ~60s, so the arrival
-        # is always at or after this cursor.
-        if conv.dest_scan_from_block is None:
-            conv.dest_scan_from_block = max(latest_block - 400, 0)  # ~small safety window
-            conv.save(update_fields=['dest_scan_from_block', 'updated_at'])
+    # Global cursor with a rewind margin (the Algorand scanner pattern);
+    # idempotency comes from monotonic status transitions.
+    rewind = int(getattr(settings, 'CUSD_PLUS_BSC_SCAN_REWIND_BLOCKS', 100))
+    from_block = cache.get('cusd_plus_bsc_scan_cursor') or max(latest_block - 1200, 0)
+    from_block = max(int(from_block) - rewind, 0)
 
-        try:
-            logs = _rpc('eth_getLogs', [{
-                'fromBlock': hex(conv.dest_scan_from_block),
-                'toBlock': hex(latest_block),
-                'address': USDT_BSC,
-                'topics': [TRANSFER_TOPIC, None, _address_topic(conv.user_bsc_address)],
-            }])
-        except Exception as exc:  # noqa: BLE001
-            logger.warning('bsc getLogs failed for %s: %s', conv.internal_id, exc)
+    try:
+        logs = _rpc('eth_getLogs', [{
+            'fromBlock': hex(from_block),
+            'toBlock': hex(latest_block),
+            'address': USDT_BSC,
+            # ONE call for the whole watch set: topic2 as an OR-array
+            'topics': [TRANSFER_TOPIC, None, [_address_topic(a) for a in watch]],
+        }])
+    except Exception as exc:  # noqa: BLE001
+        logger.warning('bsc getLogs failed: %s', exc)
+        return
+    cache.set('cusd_plus_bsc_scan_cursor', latest_block, None)
+
+    arrived: dict[str, dict] = {}
+    for log in logs:
+        to_addr = '0x' + log['topics'][2][-40:]
+        conv = watch.get(to_addr.lower())
+        if conv is None:
             continue
-
         floor_units = int(float(conv.quoted_receive_usd) * 0.9 * 1e18)
-        arrival = next(
-            (l for l in logs if int(l['data'], 16) >= floor_units),
-            None,
-        )
+        if int(log['data'], 16) >= floor_units:
+            arrived[to_addr.lower()] = log
+        else:
+            # Smaller than any plausible bridge delivery -> future external-
+            # deposit classification (source 3). Logged for visibility.
+            logger.info(
+                'unmatched USDT arrival at watched address %s (%s) — external deposit path not built yet',
+                to_addr, log['transactionHash'],
+            )
 
-        if arrival:
+    now = timezone.now()
+    for addr, conv in watch.items():
+        log = arrived.get(addr)
+        if log:
             conv.status = 'DEST_ARRIVED'
-            conv.dest_arrived_at = timezone.now()
-            conv.bridge_arrival_tx = arrival['transactionHash']
+            conv.dest_arrived_at = now
+            conv.bridge_arrival_tx = log['transactionHash']
             conv.save(update_fields=[
                 'status', 'dest_arrived_at', 'bridge_arrival_tx', 'updated_at',
             ])
             logger.info(
                 'conversion %s: USDT arrived on BNB (%s)',
-                conv.internal_id, arrival['transactionHash'],
+                conv.internal_id, log['transactionHash'],
             )
             check_gas_dust.delay(str(conv.internal_id))
-            # TODO(cusd+): websocket event + push nudge if the app is closed
-            # ("te falta un paso para que tu ahorro gane rendimiento").
-        else:
-            # Advance the cursor so scans stay narrow (small overlap for
-            # reorg safety).
-            conv.dest_scan_from_block = max(latest_block - 50, conv.dest_scan_from_block)
-            fields = ['dest_scan_from_block', 'updated_at']
-            if (
-                conv.status == 'SRC_COMMITTED'
-                and conv.src_committed_at
-                and timezone.now() - conv.src_committed_at > timeout
-            ):
-                conv.status = 'STUCK'
-                fields.append('status')
-                logger.error(
-                    'conversion %s STUCK: no USDT arrival on BNB after %s (src tx %s). '
-                    'Support diagnostic: allbridge_diagnose("%s")',
-                    conv.internal_id, timeout, conv.src_tx_id, conv.internal_id,
-                )
-            conv.save(update_fields=fields)
+            # TODO(cusd+): websocket event + push nudge if the app is closed.
+        elif (
+            conv.status == 'SRC_COMMITTED'
+            and conv.src_committed_at
+            and now - conv.src_committed_at > timeout
+        ):
+            conv.status = 'STUCK'
+            conv.save(update_fields=['status', 'updated_at'])
+            logger.error(
+                'conversion %s STUCK: no USDT arrival on BNB after %s (src tx %s). '
+                'Support diagnostic: allbridge_diagnose("%s")',
+                conv.internal_id, timeout, conv.src_tx_id, conv.internal_id,
+            )
 
 
 def mark_retirar_arrival(algo_address: str, txid: str) -> bool:

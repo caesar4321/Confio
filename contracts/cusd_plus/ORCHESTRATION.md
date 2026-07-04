@@ -129,7 +129,29 @@ No REFUNDING machinery exists because there is nothing to refund FROM — the
 "refund" of every Ahorrar halt is that the user already holds the asset, and
 the swap-back-to-cUSD offer reuses the existing 1:1 conversion.
 
-## 5. Build inventory — new vs reused
+## 5. BSC inbound: three sources, one scanner
+
+USDT arriving at user.bsc has three producers, all watched by the same
+batched scanner (one eth_getLogs per 30s over the whole watch set):
+
+1. **Conversion** (leg B delivery) — matches an in-flight row; advances it.
+2. **Koywe ramp** with destination=cusd_plus — matches a pending ramp
+   order once the destination param ships.
+3. **External deposit** (Julian, 2026-07-04): crypto-native users and
+   no-Koywe countries onramp by sending USDT (BEP-20) straight to their
+   address — WITHOUT this rail they would be forced through USDC-ALG and
+   the thin Allbridge pool for no reason. Semantics: user.bsc is the
+   savings-chain address, so an external arrival IS a savings deposit —
+   the client auto-mint prompt on foreground is the auto-swap pattern
+   generalized (gas-dusted, user signs subscribeAndMint). Needs user.bsc
+   registration on the Account at savings activation + deposit records.
+
+Consequence: user.bsc is a PUBLIC receive address, so the watcher is a
+standing scanner over all registered savings addresses (like the Algorand
+inbound scanner) — the address-array topic filter keeps it one RPC call
+regardless of watch-set size.
+
+## 6. Build inventory — new vs reused
 
 **New builds** (the bulk is BSC-side client infrastructure):
 - EVM key derivation from the Web3Auth seed + BSC tx signing in the app
@@ -148,7 +170,7 @@ the swap-back-to-cUSD offer reuses the existing 1:1 conversion.
 - The USDC→cUSD auto-swap — Retirar leg C' ONLY; the rest of Retirar is new
 - Push notification + websocket plumbing, Koywe ramps (separate direct flows)
 
-## 6. Reconciliation & monitoring
+## 7. Reconciliation & monitoring
 
 - Per-conversion ledger (server, observational): leg tx ids keyed by
   `conversion_id` (UUIDv7, stamped in tx notes/metadata) — powers the
@@ -161,7 +183,7 @@ the swap-back-to-cUSD offer reuses the existing 1:1 conversion.
 - Sponsorship accounting: BNB dust + Algorand fee pooling are Confío's only
   costs in the flow, tracked like existing sponsored-tx accounting.
 
-## 7. UX honesty contract
+## 8. UX honesty contract
 
 - Processing screens map to real leg states via websocket; a stuck bridge
   shows "tardando más de lo normal", never a fake spinner.
@@ -171,7 +193,7 @@ the swap-back-to-cUSD offer reuses the existing 1:1 conversion.
   user signs the affected leg. We don't cover anything — and we don't hide
   anything either.
 
-## 8. Resolved (formerly "open") decisions
+## 9. Resolved (formerly "open") decisions
 
 1. ~~Treasury float sizing~~ — **dead: there is no treasury in the flow.**
    (A user-visible "instant mode" would require custody; rejected.)
