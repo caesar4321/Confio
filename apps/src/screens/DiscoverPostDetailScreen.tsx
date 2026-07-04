@@ -21,6 +21,7 @@ import { REACT_TO_MESSAGE_CONTENT } from '../apollo/mutations';
 import { GET_DISCOVER_POST } from '../apollo/queries';
 import { MainStackParamList } from '../types/navigation';
 import { ResponsiveImage } from '../components/ResponsiveImage';
+import { EmptyState } from '../components/EmptyState';
 import { trackContentPlatformClick } from '../services/contentClickTrackingService';
 
 type Navigation = NativeStackNavigationProp<MainStackParamList>;
@@ -214,15 +215,15 @@ export const DiscoverPostDetailScreen = () => {
     return (
       <View style={styles.container}>
         <Header
-          title="Detalle"
+          title="Publicación"
           navigation={navigation as any}
           onBackPress={() => navigation.goBack()}
-          backgroundColor="#FFFFFF"
+          backgroundColor={colors.background}
           isLight={false}
         />
         <View style={styles.stateWrap}>
-          <ActivityIndicator size="small" color="#34d399" />
-          <Text style={styles.stateText}>Cargando detalle...</Text>
+          <ActivityIndicator size="small" color={colors.primary} />
+          <Text style={styles.stateText}>Cargando publicación…</Text>
         </View>
       </View>
     );
@@ -232,15 +233,19 @@ export const DiscoverPostDetailScreen = () => {
     return (
       <View style={styles.container}>
         <Header
-          title="Detalle"
+          title="Publicación"
           navigation={navigation as any}
           onBackPress={() => navigation.goBack()}
-          backgroundColor="#FFFFFF"
+          backgroundColor={colors.background}
           isLight={false}
         />
-        <View style={styles.stateWrap}>
-          <Text style={styles.stateTitle}>No se encontró la publicación</Text>
-        </View>
+        <EmptyState
+          icon="file-text"
+          title="No se encontró la publicación"
+          subtitle="Puede que haya sido eliminada o que el enlace ya no exista."
+          actionLabel="Volver"
+          onAction={() => navigation.goBack()}
+        />
       </View>
     );
   }
@@ -254,10 +259,10 @@ export const DiscoverPostDetailScreen = () => {
   return (
     <View style={styles.container}>
       <Header
-        title="Detalle"
+        title="Publicación"
         navigation={navigation as any}
         onBackPress={() => navigation.goBack()}
-        backgroundColor="#FFFFFF"
+        backgroundColor={colors.background}
         isLight={false}
       />
       <ScrollView contentContainerStyle={styles.content}>
@@ -338,6 +343,8 @@ export const DiscoverPostDetailScreen = () => {
                     styles.videoPlatformButton,
                     { backgroundColor: platformButtonStyles[platform].bg },
                   ]}
+                  accessibilityRole="link"
+                  accessibilityLabel={`Abrir en ${platform}`}
                 >
                   <View style={styles.videoPlatformButtonInner}>
                     <Text
@@ -365,6 +372,9 @@ export const DiscoverPostDetailScreen = () => {
                     void handleReact(emoji);
                   }}
                   style={[styles.reactionButton, active && styles.reactionButtonActive]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Reaccionar con ${emoji}, ${count} ${count === 1 ? 'reacción' : 'reacciones'}`}
+                  accessibilityState={{ selected: active }}
                 >
                   <Text style={styles.reactionEmoji}>{emoji}</Text>
                   <Text style={styles.reactionCount}>{count}</Text>
@@ -375,6 +385,8 @@ export const DiscoverPostDetailScreen = () => {
               <Pressable
                 onPress={() => setShowEmojiPicker((current) => !current)}
                 style={styles.addReactionButton}
+                accessibilityRole="button"
+                accessibilityLabel="Agregar una reacción"
               >
                 <Text style={styles.addReactionText}>+ 😊</Text>
               </Pressable>
@@ -392,6 +404,8 @@ export const DiscoverPostDetailScreen = () => {
                       void handleReact(emoji);
                     }}
                     style={[styles.emojiOption, active && styles.emojiOptionActive]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Reaccionar con ${emoji}`}
                   >
                     <Text style={styles.emojiOptionText}>{emoji}</Text>
                   </Pressable>
@@ -417,7 +431,7 @@ const styles = StyleSheet.create({
     paddingBottom: 28,
   },
   card: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.background,
     borderRadius: 18,
     padding: 16,
     shadowColor: '#000000',
@@ -444,48 +458,48 @@ const styles = StyleSheet.create({
   },
   timeText: {
     fontSize: 11,
-    color: '#AAAAAA',
+    color: colors.text.light,
   },
   title: {
     fontSize: 20,
     lineHeight: 26,
     fontWeight: '700',
-    color: '#111111',
+    color: colors.dark,
     marginBottom: 10,
   },
   body: {
     fontSize: 15,
     lineHeight: 24,
-    color: '#475467',
+    color: colors.gray700,
     marginBottom: 14,
   },
   sectionTitle: {
     fontSize: 17,
     lineHeight: 24,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.dark,
     marginTop: 8,
     marginBottom: 12,
   },
   inlineLink: {
-    color: '#2563EB',
+    color: colors.accent,
     fontWeight: '600',
   },
   quoteBlock: {
     borderLeftWidth: 3,
-    borderLeftColor: '#D0D5DD',
+    borderLeftColor: colors.borderMedium,
     paddingLeft: 14,
     marginBottom: 14,
   },
   quoteText: {
     fontSize: 15,
     lineHeight: 24,
-    color: '#344054',
+    color: colors.gray700,
     fontStyle: 'italic',
     marginBottom: 0,
   },
   quoteInlineLink: {
-    color: '#1D4ED8',
+    color: colors.accent,
   },
   blocksWrap: {
     marginTop: 2,
@@ -495,7 +509,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     marginTop: 16,
     overflow: 'hidden',
-    backgroundColor: '#111827',
+    backgroundColor: colors.dark,
     position: 'relative',
   },
   videoPanelGlowOne: {
@@ -514,7 +528,7 @@ const styles = StyleSheet.create({
     width: 152,
     height: 152,
     borderRadius: 76,
-    backgroundColor: 'rgba(29,181,135,0.18)',
+    backgroundColor: 'rgba(52, 211, 153, 0.18)', // colors.primary glow
   },
   videoPanelTopRow: {
     paddingHorizontal: 16,
@@ -569,7 +583,7 @@ const styles = StyleSheet.create({
     width: '100%',
     borderRadius: 14,
     marginTop: 16,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: colors.border,
   },
   videoPlatformsRow: {
     flexDirection: 'row',
@@ -618,7 +632,7 @@ const styles = StyleSheet.create({
   reactionCount: {
     fontSize: 11,
     fontWeight: '600',
-    color: '#666666',
+    color: colors.text.secondary,
   },
   addReactionButton: {
     backgroundColor: colors.neutralDark,
@@ -628,14 +642,14 @@ const styles = StyleSheet.create({
   },
   addReactionText: {
     fontSize: 12,
-    color: '#888888',
+    color: colors.text.secondary,
   },
   emojiPicker: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.background,
     borderRadius: 12,
     padding: 8,
     borderWidth: 1,
-    borderColor: '#EAEAEA',
+    borderColor: colors.border,
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 4,
@@ -665,16 +679,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 24,
   },
-  stateTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#111827',
-  },
   stateText: {
     marginTop: 8,
     fontSize: 13,
     lineHeight: 19,
-    color: '#6B7280',
+    color: colors.text.secondary,
     textAlign: 'center',
   },
 });
