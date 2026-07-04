@@ -4,6 +4,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, NavigationProp, RouteProp, useRoute } from '@react-navigation/native';
 import { MainStackParamList } from '../types/navigation';
 import { Button } from '../components/common/Button';
+import { Header } from '../navigation/Header';
 
 type ReferralActionRouteProp = RouteProp<MainStackParamList, 'ReferralActionPrompt'>;
 
@@ -86,12 +87,12 @@ export const ReferralActionPromptScreen: React.FC = () => {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Icon name="arrow-left" size={20} color="#111827" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Acción requerida</Text>
-      </View>
+      <Header
+        navigation={navigation as any}
+        title="Acción requerida"
+        backgroundColor="#F3F4F6"
+        showBackButton
+      />
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.card}>
           <Text style={styles.eyebrow}>Activa tu bono</Text>
@@ -128,20 +129,6 @@ export const ReferralActionPromptScreen: React.FC = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F3F4F6' },
-  header: {
-    paddingTop: 56,
-    paddingHorizontal: 20,
-    paddingBottom: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  backButton: {},
-  headerTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#111827',
-  },
   content: { padding: 20, paddingTop: 12 },
   card: { backgroundColor: '#fff', borderRadius: 24, padding: 24, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.08, shadowRadius: 20 },
   eyebrow: { fontSize: 12, fontWeight: '600', color: '#10B981', textTransform: 'uppercase', marginBottom: 8 },
