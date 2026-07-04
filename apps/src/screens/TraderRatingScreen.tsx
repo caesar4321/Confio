@@ -15,6 +15,7 @@ import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
+import { InlineBanner } from '../components/common/InlineBanner';
 import { useMutation } from '@apollo/client';
 import { RATE_P2P_TRADE, GET_MY_P2P_TRADES } from '../apollo/queries';
 import { useAccount } from '../contexts/AccountContext';
@@ -82,6 +83,8 @@ export const TraderRatingScreen: React.FC = () => {
   const tradeDetails = route.params?.tradeDetails;
 
   const [overallRating, setOverallRating] = useState(0);
+  const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
+  const dismissBanner = React.useCallback(() => setBanner(null), []);
   const [communicationRating, setCommunicationRating] = useState(0);
   const [speedRating, setSpeedRating] = useState(0);
   const [reliabilityRating, setReliabilityRating] = useState(0);
@@ -99,12 +102,12 @@ export const TraderRatingScreen: React.FC = () => {
 
   const handleSubmitRating = async () => {
     if (overallRating === 0) {
-      Alert.alert('Error', 'Por favor selecciona una calificación general');
+      setBanner({ variant: 'error', message: 'Por favor selecciona una calificación general' });
       return;
     }
 
     if (!tradeId) {
-      Alert.alert('Error', 'No se encontró el ID del intercambio');
+      setBanner({ variant: 'error', message: 'No se encontró el ID del intercambio' });
       return;
     }
 
@@ -137,10 +140,10 @@ export const TraderRatingScreen: React.FC = () => {
         setIsSubmitted(true);
       } else {
         const errors = result.data?.rateP2pTrade?.errors || ['Error desconocido'];
-        Alert.alert('Error', errors.join('\n'));
+        setBanner({ variant: 'error', message: errors.join('\n') });
       }
     } catch (error) {
-      Alert.alert('Error', 'No se pudo enviar la calificación. Por favor intenta de nuevo.');
+      setBanner({ variant: 'error', message: 'No se pudo enviar la calificación. Por favor intenta de nuevo.' });
     }
   };
 
@@ -216,6 +219,14 @@ export const TraderRatingScreen: React.FC = () => {
         <Text style={styles.headerTitle}>Calificar Intercambio</Text>
       </View>
       <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 32 }}>
+        {banner && (
+          <InlineBanner
+            message={banner.message}
+            variant={banner.variant}
+            onDismiss={dismissBanner}
+            style={{ marginTop: 12 }}
+          />
+        )}
         {/* Trader Info */}
         <View style={styles.traderCard}>
           <View style={styles.traderRow}>
