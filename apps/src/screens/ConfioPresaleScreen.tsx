@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, Image, Alert, ActivityIndicator } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { Buffer } from 'buffer';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
@@ -16,6 +15,7 @@ import { useCountry } from '../contexts/CountryContext';
 import { LoadingOverlay } from '../components/LoadingOverlay';
 import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
+import { Header } from '../navigation/Header';
 
 type ConfioPresaleScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 type PresalePhaseCard = {
@@ -172,32 +172,32 @@ export const ConfioPresaleScreen = () => {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-            <Icon name="arrow-left" size={24} color="#fff" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Preventa $CONFIO</Text>
-          <View style={styles.headerSpacer} />
-        </View>
+      <View style={styles.container}>
+        <Header
+          navigation={navigation as any}
+          title="Preventa $CONFIO"
+          backgroundColor={colors.secondary}
+          isLight
+          showBackButton
+        />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={colors.secondary} />
           <Text style={styles.loadingText}>Cargando fases de preventa...</Text>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
   if (error || !data?.allPresalePhases || data.allPresalePhases.length === 0) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-            <Icon name="arrow-left" size={24} color="#fff" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Preventa $CONFIO</Text>
-          <View style={styles.headerSpacer} />
-        </View>
+      <View style={styles.container}>
+        <Header
+          navigation={navigation as any}
+          title="Preventa $CONFIO"
+          backgroundColor={colors.secondary}
+          isLight
+          showBackButton
+        />
         <View style={styles.errorContainer}>
           <Icon name="alert-circle" size={48} color={colors.secondary} />
           <Text style={styles.errorText}>No se pudieron cargar las fases de preventa</Text>
@@ -205,19 +205,19 @@ export const ConfioPresaleScreen = () => {
             <Text style={styles.errorButtonText}>Volver</Text>
           </TouchableOpacity>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Icon name="arrow-left" size={24} color="#fff" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Preventa $CONFIO</Text>
-        <View style={styles.headerSpacer} />
-      </View>
+    <View style={styles.container}>
+      <Header
+        navigation={navigation as any}
+        title="Preventa $CONFIO"
+        backgroundColor={colors.secondary}
+        isLight
+        showBackButton
+      />
 
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         <LoadingOverlay visible={busy} message="Procesando reclamo..." />
@@ -446,7 +446,7 @@ export const ConfioPresaleScreen = () => {
 
         <View style={styles.bottomPadding} />
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 };
 
@@ -454,26 +454,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
-  },
-  header: {
-    backgroundColor: colors.secondary,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 12,
-    paddingBottom: 20,
-    paddingHorizontal: 20,
-  },
-  backButton: {
-    padding: 8,
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  headerSpacer: {
-    width: 40,
   },
   overlay: {
     position: 'absolute',
