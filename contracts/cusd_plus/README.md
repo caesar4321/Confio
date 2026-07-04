@@ -11,14 +11,15 @@ deposit-intent signal (decision 68e9cd45). No foundry/hardhat scaffold yet.
 | cusd.py (Algorand)                                    | CusdPlusVault.sol (BSC)                                   |
 | ----------------------------------------------------- | --------------------------------------------------------- |
 | Mint only inside atomic group; contract verifies the USDC axfer at a fixed group index | Mint only inside `subscribeAndMint`/`depositAndMint`, which take custody of the collateral in the same tx (single revert scope) |
-| ASA manager permanently zero (nobody can mint outside the contract) | No admin/owner mint exists in the bytecode; non-upgradeable (no proxy admin who could swap the backing out) |
+| ASA manager permanently zero (nobody can mint outside the contract) | No admin/owner mint exists in the bytecode |
 | Clawback = app (contract controls reserve)            | Vault holds the USDY; shares burn to release it            |
 | 1 cUSD : 1 USDC fixed                                 | Invariant: vault USDY ≥ `usdyOwed()` — checked with `_assertFullyBacked` after **every** state change |
 | Sponsored group (user never pays fees)                | Relayer/treasury is `msg.sender`; `recipient` gets the shares (user never needs BNB) |
 | `pause`/`unpause` (admin)                             | OZ `Pausable` gating mint/redeem paths                     |
 | `freeze_address`/`unfreeze_address` (ASA freeze bit)  | `freezeAddress`/`unfreezeAddress` + `_update` hook: frozen addresses cannot transfer, receive, mint or redeem; yield still accrues (detain, not confiscate) |
-| No update handler → Beaker rejects UpdateApplication  | Non-upgradeable: no proxy, immutable wiring                |
-| Explicit state init in `@app.create` (the empty-bytes lesson) | All state set in constructor: `pPlus = 1e18`, `lastOraclePrice` from a live oracle read |
+| `@app.update`: admin updates allowed during maturation, "change to Reject() when stable" (and cUSD **has** been updated several times in production) | UUPS upgrade gated to owner + irreversible `lockUpgrades()` — the recompile-to-Reject milestone as a one-way on-chain switch |
+| `@app.delete`: permanently `Reject()`                 | No selfdestruct/delete path exists                         |
+| Explicit state init in `@app.create` (the empty-bytes lesson) | All proxy state set in `initialize()`: `pPlus = 1e18`, `lastOraclePrice` from a live oracle read; implementation locks itself with `_disableInitializers()` |
 
 ## Token & fee mechanics
 
@@ -40,6 +41,24 @@ deposit-intent signal (decision 68e9cd45). No foundry/hardhat scaffold yet.
   collateral custody: USDT → InstantManager `subscribe` → USDY → shares
   (primary), or direct USDY deposit (treasury bridge leg / IM outage
   fallback). Both honor a caller-supplied slippage floor.
+
+## Upgradeability posture (corrected after review)
+
+The first draft claimed day-one immutability; Julian's review corrected it:
+cUSD itself ships admin-updatable and has needed several production updates.
+The vault mirrors the real cUSD lifecycle, not the idealized one:
+
+1. **Maturation**: UUPS upgrades gated to the treasury multisig (add a
+   timelock before scale). Early versions integrate a not-yet-final Instant
+   Manager ABI — a bug escape hatch is a user protection here, not a rug
+   vector, and it's the same authority users already accept on cUSD.
+2. **Lock**: `lockUpgrades()` is a one-way switch; after it, upgrades are
+   impossible forever and publicly verifiable as such — strictly better than
+   cUSD's "recompile update() to Reject()" which itself requires an update.
+
+Wiring (USDY/USDT/IM/oracle) lives in implementation immutables, so an
+upgrade can re-wire if Ondo migrates its BNB contracts — the concrete
+scenario most likely to force an update.
 
 ## Defensive details
 
@@ -86,7 +105,11 @@ deposit-intent signal (decision 68e9cd45). No foundry/hardhat scaffold yet.
 - [ ] Fill IM interface from official ABI; integration test on BSC testnet
       against real IM + oracle
 - [ ] External review of `accrue()` math (WAD/BPS rounding)
-- [ ] Deploy with `CONFIO_YIELD_SHARE_BPS = 1500`, owner = treasury multisig
+- [ ] Deploy implementation + ERC1967 proxy; `initialize(treasury multisig)`;
+      `CONFIO_YIELD_SHARE_BPS = 1500`; storage-layout checks in CI for every
+      subsequent upgrade
+- [ ] Timelock on the owner before scale; `lockUpgrades()` at the proven-
+      stable milestone (public announcement)
 - [ ] Whitelist vault in OndoIDRegistry (Ondo onboarding)
 - [ ] Wire addresses into `cusd_plus/schema.py` resolvers + statsSummary
       `usdy_reserve`; flip ProtectedSavings BscScan links live

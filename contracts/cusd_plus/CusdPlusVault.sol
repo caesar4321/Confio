@@ -40,10 +40,20 @@ pragma solidity ^0.8.24;
  * address and strand every honest holder. Surgical per-address freeze is how
  * the pool protects itself.
  *
- * UPGRADEABILITY: none, on purpose. A proxy admin who can swap the
- * implementation can also swap the backing out; a non-upgradeable vault is
- * the EVM equivalent of cusd.py's zeroed ASA manager. Fee-share and token
- * addresses are immutable; a parameter change means a new vault + migration.
+ * UPGRADEABILITY: UUPS, owner-gated, WITH AN IRREVERSIBLE LOCK — mirroring
+ * what cusd.py actually ships: its @app.update allows admin updates during
+ * maturation ("Once ... verified stable in production: Change this to return
+ * Reject() and compile!"), and cUSD has in fact been updated several times.
+ * Early vault versions integrate a not-yet-final Instant Manager ABI;
+ * day-one immutability would strand funds behind the first bug. The honest
+ * promise instead: upgradeable by the treasury multisig while maturing (put
+ * a timelock on the owner before scale), then lockUpgrades() — a one-way,
+ * publicly verifiable switch, cleaner than cUSD's recompile-to-Reject —
+ * makes the vault permanently immutable. There is no delete/selfdestruct
+ * (parity with cusd.py's permanent Reject on delete). Wiring addresses are
+ * implementation immutables: an upgrade deploys a new implementation whose
+ * constructor re-wires IM/oracle — exactly the escape hatch needed if Ondo
+ * migrates its BNB contracts.
  *
  * OPEN ITEMS before this leaves draft (tracked in README.md):
  *  - IOndoInstantManager signatures are PROVISIONAL: align with the official
@@ -55,12 +65,13 @@ pragma solidity ^0.8.24;
  *  - RWADynamicOracle address on BSC from onboarding docs.
  */
 
-import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {ERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
+import {Ownable2StepUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
+import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
-import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /// Ondo's dynamic oracle: deterministic accreting USD price for USDY, 1e18.
 interface IRWADynamicOracle {
@@ -75,7 +86,13 @@ interface IOndoInstantManager {
     function redeem(uint256 rwaAmount, uint256 minimumTokenReceived) external;
 }
 
-contract CusdPlusVault is ERC20, Ownable2Step, Pausable, ReentrancyGuard {
+contract CusdPlusVault is
+    ERC20Upgradeable,
+    Ownable2StepUpgradeable,
+    PausableUpgradeable,
+    ReentrancyGuardUpgradeable,
+    UUPSUpgradeable
+{
     using SafeERC20 for IERC20;
 
     // ── Immutable wiring ────────────────────────────────────────────────
@@ -104,6 +121,10 @@ contract CusdPlusVault is ERC20, Ownable2Step, Pausable, ReentrancyGuard {
     /// keep working at the frozen pPlus) until resetOracleBaseline().
     bool public oracleGuardTripped;
 
+    /// One-way switch: once true, _authorizeUpgrade reverts forever. The
+    /// on-chain equivalent of recompiling cusd.py's update() to Reject().
+    bool public upgradesLocked;
+
     /// Per-address freeze (cusd.py freeze_address parity). Frozen addresses
     /// cannot transfer, receive, mint or redeem. Yield keeps accruing to
     /// their shares — freeze detains funds, it does not confiscate them.
@@ -116,25 +137,51 @@ contract CusdPlusVault is ERC20, Ownable2Step, Pausable, ReentrancyGuard {
     event Minted(address indexed recipient, uint256 shares, uint256 usdyIn, uint256 pPlusAt);
     event Redeemed(address indexed holder, address indexed to, uint256 shares, uint256 usdyOut, uint256 pPlusAt);
     event FeesCollected(address indexed to, uint256 usdyAmount, uint256 surplusBefore);
+    event UpgradesLockedForever();
     event AddressFrozen(address indexed target);
     event AddressUnfrozen(address indexed target);
 
+    /// Implementation constructor: wiring lives in implementation-level
+    /// immutables (cheap reads; an upgrade = new implementation with new
+    /// wiring). The proxy's state is set in initialize().
     constructor(
         address usdy,
         address usdt,
         address instantManager,
         address oracle,
-        uint256 confioYieldShareBps,
-        address treasury
-    ) ERC20("Confio Dollar+", "cUSD+") Ownable(treasury) {
+        uint256 confioYieldShareBps
+    ) {
         require(confioYieldShareBps <= 3_000, "share too high"); // hard ceiling 30%
         USDY = IERC20(usdy);
         USDT = IERC20(usdt);
         INSTANT_MANAGER = IOndoInstantManager(instantManager);
         ORACLE = IRWADynamicOracle(oracle);
         CONFIO_YIELD_SHARE_BPS = confioYieldShareBps;
+        _disableInitializers(); // implementation is never used directly
+    }
+
+    function initialize(address treasury) external initializer {
+        __ERC20_init("Confio Dollar+", "cUSD+");
+        __Ownable_init(treasury);
+        __Ownable2Step_init();
+        __Pausable_init();
+        __ReentrancyGuard_init();
+        __UUPSUpgradeable_init();
         pPlus = WAD; // $1.00 at genesis
-        lastOraclePrice = IRWADynamicOracle(oracle).getPrice();
+        lastOraclePrice = ORACLE.getPrice();
+    }
+
+    /// cusd.py's update(): Assert(sender == admin) — here onlyOwner, plus the
+    /// one-way lock. After lockUpgrades() this vault is permanently immutable.
+    function _authorizeUpgrade(address) internal view override onlyOwner {
+        require(!upgradesLocked, "upgrades locked forever");
+    }
+
+    /// Irreversible. Call when the vault has proven itself in production —
+    /// the same milestone cusd.py marks with "change update() to Reject()".
+    function lockUpgrades() external onlyOwner {
+        upgradesLocked = true;
+        emit UpgradesLockedForever();
     }
 
     // ═════════════════════════ Accrual ══════════════════════════════════
