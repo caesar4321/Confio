@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   TextInput,
   Alert,
   ActivityIndicator,
@@ -33,6 +32,7 @@ import { biometricAuthService } from '../services/biometricAuthService';
 import LoadingOverlay from '../components/LoadingOverlay';
 import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
+import { Header } from '../navigation/Header';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'PayrollTopUp'>;
 
@@ -305,7 +305,13 @@ const PayrollTopUpScreen = () => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
+      <Header
+        navigation={navigation as any}
+        title="Fondear nómina"
+        backgroundColor="#fff"
+        showBackButton
+      />
       <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
         <ScrollView
           contentContainerStyle={styles.scrollContent}
@@ -324,13 +330,6 @@ const PayrollTopUpScreen = () => {
             />
           }
         >
-          <View style={styles.header}>
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-              <Icon name="chevron-left" size={24} color={colors.textFlat} />
-            </TouchableOpacity>
-            <Text style={styles.headerTitle}>Fondear nómina</Text>
-            <View style={{ width: 32 }} />
-          </View>
 
           <View style={styles.card}>
             <Text style={styles.cardLabel}>Saldo en bóveda</Text>
@@ -409,33 +408,12 @@ const PayrollTopUpScreen = () => {
       </TouchableWithoutFeedback>
 
       <LoadingOverlay visible={processing} message={processingMessage} />
-    </SafeAreaView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  backButton: {
-    width: 32,
-    height: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerTitle: {
-    flex: 1,
-    textAlign: 'center',
-    fontSize: 18,
-    color: colors.textFlat,
-    fontWeight: '600',
-  },
   card: {
     marginHorizontal: 16,
     marginTop: 12,
