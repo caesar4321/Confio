@@ -11,6 +11,7 @@ import LoadingOverlay from '../components/LoadingOverlay';
 import { APP_LAYOUT } from '../config/layout';
 import { Button } from '../components/common/Button';
 import { InlineBanner } from '../components/common/InlineBanner';
+import { Header } from '../navigation/Header';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'PayrollRun'>;
 
@@ -138,7 +139,14 @@ export const PayrollRunScreen = () => {
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <View style={styles.container}>
+    <Header
+      navigation={navigation as any}
+      title="Nueva nómina"
+      backgroundColor="#fff"
+      showBackButton
+    />
+    <ScrollView contentContainerStyle={styles.content}>
       {banner && (
         <InlineBanner
           message={banner.message}
@@ -147,12 +155,6 @@ export const PayrollRunScreen = () => {
           style={{ marginTop: 8 }}
         />
       )}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Icon name="chevron-left" size={22} color="#111827" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Nueva nómina</Text>
-      </View>
 
       <View style={styles.tokenBadge}>
         <Image source={require('../assets/png/cUSD.png')} style={styles.tokenLogo} />
@@ -235,20 +237,13 @@ export const PayrollRunScreen = () => {
 
       <LoadingOverlay visible={isProcessing} message={processingMessage} />
     </ScrollView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   content: { padding: 16, paddingBottom: 32 },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-    marginTop: Platform.OS === 'android' ? APP_LAYOUT.topSafeArea + 10 : 0
-  },
-  backButton: { padding: 6 },
-  headerTitle: { flex: 1, textAlign: 'center', fontSize: 18, fontWeight: '700', color: '#111827', marginRight: 24 },
   tokenBadge: {
     flexDirection: 'row',
     alignItems: 'center',
