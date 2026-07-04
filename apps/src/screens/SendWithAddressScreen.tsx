@@ -9,9 +9,11 @@ import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import USDCLogo from '../assets/png/USDC.png';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Clipboard from '@react-native-clipboard/clipboard';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
+import { InlineBanner } from '../components/common/InlineBanner';
 
 type TokenType = 'cusd' | 'confio' | 'usdc';
 
@@ -60,7 +62,6 @@ export const SendWithAddressScreen = () => {
 
   const [amount, setAmount] = useState(prefilledAmount);
   const [destination, setDestination] = useState(prefilledAddress);
-  const [showSuccess, setShowSuccess] = useState(false);
   const [showError, setShowError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -131,6 +132,24 @@ export const SendWithAddressScreen = () => {
   }, [floorToDecimals]);
 
   const handleQuickAmount = (val: string) => setAmount(val);
+
+  const maxSendable = tokenType === 'usdc'
+    ? Math.max(availableBalance, availableCusdBalance)
+    : availableBalance;
+
+  const handleMax = () => {
+    const floored = floorToDecimals(maxSendable, 2);
+    if (floored > 0) setAmount(String(floored));
+  };
+
+  const handlePaste = async () => {
+    try {
+      const text = await Clipboard.getString();
+      if (text) setDestination(text.trim());
+    } catch { }
+  };
+
+  const isValidAddress = destination.length === 58 && /^[A-Z2-7]{58}$/.test(destination);
 
   // Background preflight via WS when valid Algorand address and amount provided
   useEffect(() => {
@@ -259,27 +278,22 @@ export const SendWithAddressScreen = () => {
 
   return (
     <View style={styles.container}>
-      <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
-        {/* Header */}
-        <SafeAreaView edges={['top']} style={{ backgroundColor: config.color }}>
-          <View style={[styles.header, { backgroundColor: config.color, paddingTop: 8 }]}>
-            <View style={styles.headerContent}>
-              <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton} accessibilityRole="button" accessibilityLabel="Volver">
-                <Icon name="arrow-left" size={24} color="#ffffff" />
-              </TouchableOpacity>
-              <Text style={styles.headerTitle}>Enviar {config.name}</Text>
-              <View style={styles.placeholder} />
-            </View>
-            <View style={styles.headerInfo}>
-              <View style={styles.logoContainer}>
-                <Image source={config.logo} style={styles.logo} />
-              </View>
-              <Text style={styles.headerSubtitle}>{config.fullName}</Text>
-              <Text style={styles.headerDescription}>{config.description}</Text>
-            </View>
+      {/* Compact instrument header — this is a task screen; the color and
+          logo badge carry the instrument, the form gets the space. */}
+      <SafeAreaView edges={['top']} style={{ backgroundColor: config.color }}>
+        <View style={[styles.header, { backgroundColor: config.color }]}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton} accessibilityRole="button" accessibilityLabel="Volver">
+            <Icon name="arrow-left" size={24} color={colors.white} />
+          </TouchableOpacity>
+          <View style={styles.headerCenter}>
+            <Image source={config.logo} style={styles.headerLogo} />
+            <Text style={styles.headerTitle}>Enviar {config.name}</Text>
           </View>
-        </SafeAreaView>
+          <View style={styles.placeholder} />
+        </View>
+      </SafeAreaView>
 
+      <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
         {/* Available Balance */}
         <View style={styles.balanceCard}>
           <Text style={styles.balanceLabel}>Saldo disponible</Text>
@@ -296,14 +310,20 @@ export const SendWithAddressScreen = () => {
         </View>
 
         {tokenType === 'usdc' && (
-          <View style={styles.warningContainer}>
-            <Icon name="info" size={20} color="#2563EB" style={styles.warningIcon} />
-            <View style={styles.warningContent}>
-              <Text style={styles.warningText}>
-                Tu saldo se muestra en cUSD. Al enviar, tus cUSD se convertirán automáticamente a USDC y se enviarán a la dirección destino.
-              </Text>
-            </View>
-          </View>
+          <InlineBanner
+            variant="info"
+            message="Tu saldo se muestra en cUSD. Al enviar, tus cUSD se convertirán automáticamente a USDC y se enviarán a la dirección destino."
+            style={{ marginHorizontal: 16, marginTop: 16 }}
+          />
+        )}
+
+        {showError && (
+          <InlineBanner
+            message={errorMessage}
+            variant="error"
+            onDismiss={() => setShowError(false)}
+            style={{ marginHorizontal: 16, marginTop: 16 }}
+          />
         )}
 
         {/* Send Form */}
@@ -333,26 +353,59 @@ export const SendWithAddressScreen = () => {
                 key={val}
                 style={styles.quickAmountButton}
                 onPress={() => handleQuickAmount(val)}
+                accessibilityRole="button"
+                accessibilityLabel={`Enviar ${val}`}
               >
                 <Text style={styles.quickAmountText}>{val}</Text>
               </TouchableOpacity>
             ))}
+            <TouchableOpacity
+              style={styles.quickAmountButton}
+              onPress={handleMax}
+              accessibilityRole="button"
+              accessibilityLabel="Enviar el máximo disponible"
+            >
+              <Text style={[styles.quickAmountText, styles.maxText]}>MAX</Text>
+            </TouchableOpacity>
           </View>
 
           {/* Address Input */}
           <View style={styles.inputContainer}>
             <Text style={styles.inputLabel}>Dirección Algorand</Text>
-            <TextInput
-              style={styles.addressField}
-              value={destination}
-              onChangeText={setDestination}
-              placeholder="0x..."
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            <Text style={styles.addressHelp}>
-              Ingresa la dirección Algorand del destinatario (58 caracteres)
-            </Text>
+            <View style={styles.addressRow}>
+              <TextInput
+                style={styles.addressField}
+                value={destination}
+                onChangeText={setDestination}
+                placeholder="Dirección de 58 caracteres"
+                placeholderTextColor={colors.text.light}
+                autoCapitalize="characters"
+                autoCorrect={false}
+              />
+              <TouchableOpacity
+                style={styles.pasteButton}
+                onPress={handlePaste}
+                accessibilityRole="button"
+                accessibilityLabel="Pegar dirección del portapapeles"
+              >
+                <Icon name="clipboard" size={15} color={colors.primaryDark} />
+                <Text style={styles.pasteButtonText}>Pegar</Text>
+              </TouchableOpacity>
+            </View>
+            {destination.length === 0 ? (
+              <Text style={styles.addressHelp}>
+                Pega o escanea la dirección Algorand del destinatario (58 caracteres, A–Z y 2–7)
+              </Text>
+            ) : isValidAddress ? (
+              <View style={styles.addressValidRow}>
+                <Icon name="check-circle" size={13} color={colors.success} />
+                <Text style={styles.addressValidText}>Dirección válida</Text>
+              </View>
+            ) : (
+              <Text style={styles.addressHelp}>
+                {destination.length}/58 caracteres · solo A–Z y 2–7
+              </Text>
+            )}
           </View>
 
           {/* Fee Info - Now shows sponsored */}
@@ -379,45 +432,6 @@ export const SendWithAddressScreen = () => {
         />
       </View>
 
-      {/* Success Modal */}
-      {showSuccess && (
-        <View style={styles.overlay}>
-          <View style={styles.modal}>
-            <View style={[styles.iconContainer, { backgroundColor: config.color + '20' }]}>
-              <Icon name="check-circle" size={48} color={config.color} />
-            </View>
-            <Text style={styles.modalTitle}>¡Enviado!</Text>
-            <Text style={styles.modalMessage}>
-              Se enviaron {amount} {config.name} exitosamente
-            </Text>
-            <TouchableOpacity
-              style={[styles.modalButton, { backgroundColor: config.color }]}
-              onPress={() => (navigation as any).navigate('Home')}
-            >
-              <Text style={styles.modalButtonText}>Listo</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-
-      {/* Error Modal */}
-      {showError && (
-        <View style={styles.overlay}>
-          <View style={styles.modal}>
-            <View style={[styles.iconContainer, { backgroundColor: '#FEE2E2' }]}>
-              <Icon name="alert-circle" size={48} color="#EF4444" />
-            </View>
-            <Text style={styles.modalTitle}>Error</Text>
-            <Text style={styles.modalMessage}>{errorMessage}</Text>
-            <TouchableOpacity
-              style={[styles.modalButton, { backgroundColor: '#EF4444' }]}
-              onPress={() => setShowError(false)}
-            >
-              <Text style={styles.modalButtonText}>Cerrar</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
     </View>
   );
 };
@@ -434,58 +448,38 @@ const styles = StyleSheet.create({
     paddingBottom: 100,
   },
   header: {
-    paddingBottom: 32,
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
-  },
-  headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    marginBottom: 24,
+    paddingTop: 8,
+    paddingBottom: 14,
   },
   backButton: {
     padding: 8,
   },
+  headerCenter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  headerLogo: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+  },
   headerTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#ffffff',
+    color: colors.white,
   },
   placeholder: {
     width: 40,
   },
-  headerInfo: {
-    alignItems: 'center',
-  },
-  logoContainer: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 12,
-  },
-  logo: {
-    width: 48,
-    height: 48,
-  },
-  headerSubtitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#ffffff',
-    marginBottom: 4,
-  },
-  headerDescription: {
-    fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.8)',
-  },
   balanceCard: {
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.background,
     marginHorizontal: 16,
-    marginTop: -16,
+    marginTop: 16,
     borderRadius: 16,
     padding: 20,
     alignItems: 'center',
@@ -594,7 +588,13 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: colors.text.primary,
   },
+  addressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   addressField: {
+    flex: 1,
     backgroundColor: colors.neutralDark,
     borderRadius: 12,
     paddingHorizontal: 16,
@@ -602,10 +602,39 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.text.primary,
   },
+  pasteButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: colors.primarySoft,
+    paddingHorizontal: 14,
+    paddingVertical: 16,
+    borderRadius: 12,
+  },
+  pasteButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.primaryDark,
+  },
   addressHelp: {
     fontSize: 12,
     color: colors.text.secondary,
     marginTop: 6,
+  },
+  addressValidRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 6,
+  },
+  addressValidText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.success,
+  },
+  maxText: {
+    color: colors.primaryDark,
+    fontWeight: '700',
   },
   feeInfo: {
     flexDirection: 'row',
@@ -626,13 +655,13 @@ const styles = StyleSheet.create({
   feeAmount: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.primary,
+    color: colors.primaryDark,
     marginRight: 8,
   },
   sponsoredBadge: {
     fontSize: 12,
-    color: colors.primary,
-    backgroundColor: colors.primary + '20',
+    color: colors.primaryDark,
+    backgroundColor: colors.primarySoft,
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 12,
@@ -647,74 +676,5 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     borderTopWidth: 1,
     borderTopColor: colors.neutralDark,
-  },
-  overlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modal: {
-    backgroundColor: '#ffffff',
-    borderRadius: 20,
-    padding: 32,
-    width: '85%',
-    alignItems: 'center',
-  },
-  iconContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 20,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: colors.text.primary,
-    marginBottom: 8,
-  },
-  modalMessage: {
-    fontSize: 14,
-    color: colors.text.secondary,
-    textAlign: 'center',
-    marginBottom: 24,
-  },
-  modalButton: {
-    paddingHorizontal: 32,
-    paddingVertical: 12,
-    borderRadius: 8,
-  },
-  modalButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#ffffff',
-  },
-  warningContainer: {
-    backgroundColor: '#EBF5FF',
-    borderColor: '#93C5FD',
-    borderWidth: 1,
-    marginHorizontal: 16,
-    marginTop: 16,
-    padding: 16,
-    borderRadius: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  warningIcon: {
-    marginRight: 12,
-  },
-  warningContent: {
-    flex: 1,
-  },
-  warningText: {
-    color: '#1E40AF',
-    fontSize: 14,
-    lineHeight: 20,
   },
 });
