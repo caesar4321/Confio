@@ -11,6 +11,7 @@ import { useAccount } from '../contexts/AccountContext';
 import { useAlgorand } from '../hooks/useAlgorand';
 import { biometricAuthService } from '../services/biometricAuthService';
 import { colors } from '../config/theme';
+import { InlineBanner } from '../components/common/InlineBanner';
 import { APP_LAYOUT } from '../config/layout';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList>;
@@ -30,6 +31,8 @@ export const PayrollSetupWizard = () => {
   const { activeAccount } = useAccount();
   const { signTransactions } = useAlgorand();
   const [step, setStep] = useState(1);
+  const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
+  const dismissBanner = React.useCallback(() => setBanner(null), []);
   const [selectedRecipients, setSelectedRecipients] = useState<Set<string>>(new Set());
   const [selectedDelegates, setSelectedDelegates] = useState<Set<string>>(new Set());
   const [activating, setActivating] = useState(false);
@@ -186,10 +189,10 @@ export const PayrollSetupWizard = () => {
           ]
         );
       } else {
-        Alert.alert('Error', res?.errors?.[0] || 'No se pudo activar nómina.');
+        setBanner({ variant: 'error', message: res?.errors?.[0] || 'No se pudo activar nómina.' });
       }
     } catch (e: any) {
-      Alert.alert('Error', e?.message || 'No se pudo activar nómina.');
+      setBanner({ variant: 'error', message: e?.message || 'No se pudo activar nómina.' });
     } finally {
       setActivating(false);
     }
@@ -371,6 +374,15 @@ export const PayrollSetupWizard = () => {
       </View>
 
       <Text style={styles.progressText}>Paso {step} de 3</Text>
+
+      {banner && (
+        <InlineBanner
+          message={banner.message}
+          variant={banner.variant}
+          onDismiss={dismissBanner}
+          style={{ marginHorizontal: 16, marginTop: 8, marginBottom: 0 }}
+        />
+      )}
 
       {step === 1 && renderStep1()}
       {step === 2 && renderStep2()}
