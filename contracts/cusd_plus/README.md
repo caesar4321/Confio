@@ -100,6 +100,22 @@ Two footnotes:
   read < 10000), `surplusUsdy()`, plus the USDY balance of the vault address
   directly on BscScan.
 
+## ConfioStockRouter — GM trades with an explicit fee
+
+`ConfioStockRouter.sol` is the sweep-model trade path: `buyWithSavings`
+(pull cUSD+ shares → vault.redeemToUsdt → fee slice to treasury → GM
+settle → stock to user) and `sellToSavings` (stock → GM settle → fee →
+vault.subscribeAndMint back to the user — proceeds literally keep
+earning). Confío's fee is an EXPLICIT on-chain USDT transfer, never a
+price markup, so "Sin comisiones ocultas" is contract-enforced; the rate
+is owner-settable under a 1% hard cap (launch config after Ondo's GM fee
+schedule — no number is anchored in code, default 0). The router never
+holds funds at rest and is replace-by-redeploy (stateless, unlike the
+vault). GM touchpoints are provisional and isolated in `_gmBuy/_gmSell`.
+7 tests cover fee exactness, reinvest round trip, cap/authz, zero-fee
+pass-through, slippage floors, pause, and frozen-user rejection — the
+vault backing invariant holds through trades.
+
 ## Open questions (blockers before implementation)
 
 1. **Instant Manager ABI on BNB** — `IOndoInstantManager` here is
@@ -121,6 +137,11 @@ Two footnotes:
    conversion flow is user-driven end to end (see ORCHESTRATION.md): the
    user's own BSC address is msg.sender for mint/redeem (Confío only
    sponsors gas), so restricting callers would break the architecture.
+
+7. **GM settlement on BNB** — official settle contract ABI + attestation
+   format (pattern C), and whether payment is USDT or USDY on BNB (if
+   USDY-direct, the router skips the redeemToUsdt hop — cheaper). Also the
+   partner fee schedule, which decides `stockFeeBps`.
 
 ## Deployment checklist (when ungated)
 

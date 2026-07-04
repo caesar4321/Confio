@@ -50,6 +50,7 @@ class CusdPlusConvertParamsType(graphene.ObjectType):
     confio_fee_bps = graphene.Int(description="Confío conversion fee — open pricing decision, 0 until set")
     min_amount_usd = graphene.Float()
     paused = graphene.Boolean(description="Kill switch: pause all conversions regardless of cost")
+    gm_trade_fee_bps = graphene.Int(description="Stock trade fee for quote display; the router's on-chain stockFeeBps is authoritative")
 
 
 class Query(graphene.ObjectType):
@@ -118,6 +119,9 @@ class Query(graphene.ObjectType):
             confio_fee_bps=getattr(settings, 'CUSD_PLUS_CONVERT_FEE_BPS', 0),
             min_amount_usd=getattr(settings, 'CUSD_PLUS_MIN_CONVERT_USD', 1.0),
             paused=getattr(settings, 'CUSD_PLUS_CONVERSIONS_PAUSED', True),
+            # Launch config, set together with router.setStockFeeBps once
+            # Ondo's GM fee schedule is known — open pricing decision.
+            gm_trade_fee_bps=getattr(settings, 'CUSD_PLUS_GM_TRADE_FEE_BPS', 0),
         )
 
 
