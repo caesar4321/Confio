@@ -22,6 +22,7 @@ import { useMutation, useQuery } from '@apollo/client';
 import { UPDATE_BUSINESS, GET_USER_ACCOUNTS, GET_BUSINESS_KYC_STATUS } from '../apollo/queries';
 import { colors } from '../config/theme';
 import { InlineBanner } from '../components/common/InlineBanner';
+import { Header } from '../navigation/Header';
 import { APP_LAYOUT } from '../config/layout';
 
 type EditBusinessScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
@@ -206,13 +207,13 @@ export const EditBusinessScreen = () => {
   if (isBusinessVerified) {
     return (
       <View style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-            <Icon name="arrow-left" size={24} color="#fff" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Editar Negocio</Text>
-          <View style={styles.placeholder} />
-        </View>
+        <Header
+          navigation={navigation as any}
+          title="Editar Negocio"
+          backgroundColor={colors.primary}
+          isLight
+          showBackButton
+        />
 
         <View style={{ padding: 16, alignItems: 'center' }}>
           <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: colors.success, justifyContent: 'center', alignItems: 'center', marginBottom: 12 }}>
@@ -254,7 +255,15 @@ export const EditBusinessScreen = () => {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+    <View style={styles.container}>
+      <Header
+        navigation={navigation as any}
+        title="Editar Negocio"
+        backgroundColor={colors.primary}
+        isLight
+        showBackButton
+      />
+    <ScrollView contentContainerStyle={styles.scrollContent}>
       {banner && (
         <InlineBanner
           message={banner.message}
@@ -263,18 +272,6 @@ export const EditBusinessScreen = () => {
           style={{ marginHorizontal: 16, marginTop: 12 }}
         />
       )}
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Icon name="arrow-left" size={24} color="#fff" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Editar Negocio</Text>
-        <View style={styles.placeholder} />
-      </View>
-
       {/* Avatar Section */}
       <View style={styles.avatarSection}>
         <View style={styles.avatarContainer}>
@@ -412,6 +409,7 @@ export const EditBusinessScreen = () => {
         </View>
       </Modal>
     </ScrollView>
+    </View>
   );
 };
 
@@ -422,31 +420,6 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-  },
-  header: {
-    backgroundColor: colors.primary,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: Platform.OS === 'ios' ? APP_LAYOUT.topSafeArea : APP_LAYOUT.topSafeArea + 8,
-    paddingBottom: 16,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  placeholder: {
-    width: 40,
   },
   avatarSection: {
     alignItems: 'center',
