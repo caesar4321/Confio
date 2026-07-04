@@ -198,7 +198,6 @@ export const AuthScreen = () => {
           },
         ]}
       >
-        <Text style={styles.title}>Bienvenido</Text>
         <Text style={styles.subtitle}>La manera más fácil y segura de enviar, pagar, ahorrar e invertir en dólares digitales</Text>
         <View style={styles.buttonGroup}>
           <TouchableOpacity
@@ -299,21 +298,16 @@ const styles = StyleSheet.create({
     shadowRadius: 20,
     elevation: 12,
   },
-  title: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    color: colors.dark,
-    textAlign: 'center',
-    marginBottom: 4,
-  },
+  // Sheet lead: the value prop carries the welcome slot on its own —
+  // the brand field above already does the greeting.
   subtitle: {
-    fontSize: 15,
-    color: colors.text.secondary,
+    fontSize: 17,
+    fontWeight: '500',
+    color: colors.gray700,
     textAlign: 'center',
     marginBottom: 28,
-    marginTop: 6,
     maxWidth: 320,
-    lineHeight: 22,
+    lineHeight: 25,
   },
   buttonGroup: {
     width: '100%',
