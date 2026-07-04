@@ -4,6 +4,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, RouteProp, useRoute } from '@react-navigation/native';
 import { MainStackParamList } from '../types/navigation';
 import { Button } from '../components/common/Button';
+import { Header } from '../navigation/Header';
 
 type ReferralFriendJoinedRouteProp = RouteProp<MainStackParamList, 'ReferralFriendJoined'>;
 
@@ -15,12 +16,12 @@ export const ReferralFriendJoinedScreen: React.FC = () => {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Icon name="arrow-left" size={20} color="#111827" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Referidos</Text>
-      </View>
+      <Header
+        navigation={navigation as any}
+        title="Referidos"
+        backgroundColor="#F3F4F6"
+        showBackButton
+      />
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.card}>
           <Text style={styles.eyebrow}>Referidos Confío</Text>
@@ -76,21 +77,7 @@ export const ReferralFriendJoinedScreen: React.FC = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F3F4F6' },
-  header: {
-    paddingTop: 56,
-    paddingHorizontal: 20,
-    paddingBottom: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  headerTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#111827',
-  },
   content: { padding: 20, paddingTop: 12 },
-  backButton: {},
   card: {
     backgroundColor: '#fff',
     borderRadius: 24,
