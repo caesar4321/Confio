@@ -44,9 +44,8 @@ export const ProtectedSavingsScreen = () => {
   const s = data?.statsSummary;
   const tvl = s?.totalValueLocked ?? s?.protectedSavings;
   const tvlLabel = formatWhole(tvl, currency.thousandsSeparator);
-  // Server field statsSummary.usdyReserve EXISTS (users/schema.py, stub 0).
-  // TODO(deploy-order): add `usdyReserve` to GET_STATS_SUMMARY only AFTER the
-  // backend deploys — requesting an unknown field fails the whole query;
+  // statsSummary.usdyReserve is live (deployed 2026-07-04; 0 until the BSC
+  // vault ships and the server folds its USDY balance in);
   // 0 is the honest present-tense value until the reserve exists.
   const usdyReserve = (s as any)?.usdyReserve ?? 0;
   const usdyLabel = formatWhole(usdyReserve, currency.thousandsSeparator);

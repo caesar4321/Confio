@@ -8,6 +8,7 @@ export const GET_STATS_SUMMARY = gql`
       usersNew7d
       protectedSavings
       totalValueLocked
+      usdyReserve
       presaleCusdRaised
       presaleCusdRaised7d
       statsSource
