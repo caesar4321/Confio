@@ -5,7 +5,7 @@ Each document is a dictionary with sections, where each section has a title and 
 
 TERMS = {
     'title': 'Términos de Servicio',
-    'version': '1.3.0',
+    'version': '1.3.1',
     'last_updated': '2026-07-04',
     'is_legally_binding': True,
     'sections': [
@@ -85,12 +85,19 @@ TERMS = {
         },
         {
             'title': '9. Restricciones Geográficas',
-            'content': [
-                'La participación en la preventa de monedas y ciertos servicios financieros de Confío está estrictamente prohibida para:',
-                'Residentes o ciudadanos de los Estados Unidos de América (US)',
-                'Residentes o ciudadanos de Corea del Sur (KR)',
-                'Estas restricciones aplican también al ahorro con rendimiento (cUSD+) y a las acciones tokenizadas, cuya disponibilidad puede variar según su jurisdicción.'
-            ]
+            'content': {
+                'preventa_de_$confio': [
+                    'La participación en la preventa de monedas y ciertos servicios financieros de Confío está estrictamente prohibida para:',
+                    'Residentes o ciudadanos de los Estados Unidos de América (US)',
+                    'Residentes o ciudadanos de Corea del Sur (KR)'
+                ],
+                'ahorro_con_rendimiento_y_acciones': [
+                    'cUSD+ (USDY) y las acciones tokenizadas son emitidos por Ondo Finance y están sujetos, además, a las reglas de elegibilidad del emisor.',
+                    'Estas funciones no están disponibles para personas ubicadas o residentes en: Estados Unidos, Canadá, Afganistán, Bielorrusia, Corea del Norte, Cuba, Irán, Libia, Myanmar, Rusia, Siria, Somalia, Sudán, Sudán del Sur, ni en las regiones ocupadas de Ucrania (Crimea, Donetsk, Luhansk, Jersón, Zaporiyia y Sebastopol).',
+                    'En ciertas jurisdicciones solo están disponibles para inversionistas calificados o profesionales según la ley local, incluyendo Brasil, el Espacio Económico Europeo, el Reino Unido, Suiza, Hong Kong, Singapur y Malasia.',
+                    'La lista de jurisdicciones del emisor puede cambiar; la versión vigente está publicada en docs.ondo.finance. Podemos bloquear, limitar o suspender estas funciones para cumplir con esos requisitos.'
+                ]
+            }
         },
         {
             'title': '10. Cumplimiento del Usuario',
