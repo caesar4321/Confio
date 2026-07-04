@@ -1,6 +1,5 @@
 import React from 'react';
 import {
-  SafeAreaView,
   View,
   Text,
   StyleSheet,
@@ -15,7 +14,7 @@ import { useNavigation, NavigationProp } from '@react-navigation/native';
 import { MainStackParamList } from '../types/navigation';
 import { useQuery, useMutation } from '@apollo/client';
 import { Buffer } from 'buffer';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Header } from '../navigation/Header';
 
 import { GET_MY_REFERRALS } from '../apollo/queries';
 import {
@@ -55,7 +54,6 @@ export const ReferralRewardClaimScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp<MainStackParamList>>();
   const { userProfile } = useAuth();
   const currentUserId = userProfile?.id ? String(userProfile.id) : null;
-  const insets = useSafeAreaInsets();
   const PAGE_SIZE = 20;
   const { data, loading, error, refetch, fetchMore } = useQuery(GET_MY_REFERRALS, {
     fetchPolicy: 'cache-and-network',
@@ -450,18 +448,17 @@ export const ReferralRewardClaimScreen: React.FC = () => {
   );
 
 
-  const headerPaddingTop = Platform.OS === 'android' ? insets.top + 12 : 12;
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       <LoadingOverlay visible={!!loadingMessage} message={loadingMessage} />
-      <View style={[styles.header, { paddingTop: headerPaddingTop }]}>
-        <TouchableOpacity onPress={handleBack} style={styles.backButton}>
-          <Icon name="arrow-left" size={22} color={colors.textFlat} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Desbloquear $CONFIO</Text>
-        <View style={styles.headerSpacer} />
-      </View>
+      <Header
+        navigation={navigation as any}
+        title="Desbloquear $CONFIO"
+        backgroundColor="#fff"
+        showBackButton
+        onBackPress={handleBack}
+      />
 
       {loading ? (
         <View style={styles.loadingState}>
@@ -503,7 +500,7 @@ export const ReferralRewardClaimScreen: React.FC = () => {
           }
         />
       )}
-    </SafeAreaView>
+    </View>
   );
 };
 
@@ -511,27 +508,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    backgroundColor: colors.background,
-  },
-  backButton: {
-    padding: 6,
-  },
-  headerTitle: {
-    color: colors.textFlat,
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  headerSpacer: {
-    width: 32,
   },
   loadingState: {
     flex: 1,
