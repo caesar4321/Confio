@@ -1,9 +1,11 @@
 
 import React from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView, useWindowDimensions } from 'react-native';
-// Use MaterialCommunityIcons for cloud-lock icon (now linked in iOS Info.plist)
+import { View, Text, StyleSheet, Modal, ScrollView, useWindowDimensions } from 'react-native';
+// MaterialCommunityIcons for the cloud-lock mark (linked in iOS Info.plist)
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Button } from './common/Button';
+import { colors } from '../config/theme';
 
 interface BackupConsentModalProps {
     visible: boolean;
@@ -43,32 +45,38 @@ export const BackupConsentModal: React.FC<BackupConsentModalProps> = ({ visible,
                         nestedScrollEnabled
                     >
                         <View style={styles.iconContainer}>
-                            <Icon name="cloud-lock-outline" size={64} color="#4F46E5" />
+                            <Icon name="cloud-lock-outline" size={44} color={colors.primaryDark} />
                         </View>
 
-                        <Text style={styles.modalTitle}>Protección de Activos</Text>
+                        <Text style={styles.modalTitle} accessibilityRole="header">Protege tu billetera</Text>
 
                         <Text style={styles.modalText}>
-                            Para asegurar que <Text style={styles.bold}>nunca pierdas tu dinero</Text>, Confío guardará una copia cifrada de tu llave maestra en tu <Text style={styles.bold}>Google Drive personal</Text>.
+                            Para que <Text style={styles.bold}>nunca pierdas tu dinero</Text>, Confío guardará una copia cifrada de tu llave maestra en tu <Text style={styles.bold}>Google Drive personal</Text>.
                         </Text>
 
                         <View style={styles.bulletPoints}>
                             <View style={styles.bulletRow}>
-                                <Icon name="check-circle" size={20} color="#10B981" style={styles.bulletIcon} />
-                                <Text style={styles.bulletText}>Solo TÚ tienes acceso con tu cuenta Google.</Text>
+                                <View style={styles.bulletChip}>
+                                    <Icon name="lock-outline" size={16} color={colors.primaryDark} />
+                                </View>
+                                <Text style={styles.bulletText}>Solo tú tienes acceso, con tu cuenta de Google.</Text>
                             </View>
                             <View style={styles.bulletRow}>
-                                <Icon name="check-circle" size={20} color="#10B981" style={styles.bulletIcon} />
+                                <View style={styles.bulletChip}>
+                                    <Icon name="backup-restore" size={16} color={colors.primaryDark} />
+                                </View>
                                 <Text style={styles.bulletText}>Recupera tu billetera automáticamente si cambias de teléfono.</Text>
                             </View>
                             <View style={styles.bulletRow}>
-                                <Icon name="shield-check" size={20} color="#10B981" style={styles.bulletIcon} />
+                                <View style={styles.bulletChip}>
+                                    <Icon name="shield-check-outline" size={16} color={colors.primaryDark} />
+                                </View>
                                 <Text style={styles.bulletText}>Sin contraseñas extra que recordar.</Text>
                             </View>
                         </View>
 
                         <View style={styles.warningContainer}>
-                            <Icon name="alert-circle-outline" size={20} color="#F59E0B" />
+                            <Icon name="information-outline" size={18} color={colors.warning.icon} />
                             <Text style={styles.warningText}>
                                 Verás una solicitud de permiso para acceder a "configuración de la aplicación". Es 100% privado.
                             </Text>
@@ -76,12 +84,10 @@ export const BackupConsentModal: React.FC<BackupConsentModalProps> = ({ visible,
                     </ScrollView>
 
                     <View style={styles.footer}>
-                        <TouchableOpacity
-                            style={[styles.button, styles.buttonContinue]}
+                        <Button
+                            title="Proteger y continuar"
                             onPress={onContinue}
-                        >
-                            <Text style={styles.textStyle}>Proteger y Continuar</Text>
-                        </TouchableOpacity>
+                        />
                     </View>
                 </View>
             </View>
@@ -100,16 +106,16 @@ const styles = StyleSheet.create({
     modalView: {
         width: '100%',
         maxWidth: 360,
-        backgroundColor: 'white',
+        backgroundColor: colors.background,
         borderRadius: 24,
-        shadowColor: '#000',
+        shadowColor: colors.dark,
         shadowOffset: {
             width: 0,
-            height: 2,
+            height: 8,
         },
-        shadowOpacity: 0.25,
-        shadowRadius: 4,
-        elevation: 5,
+        shadowOpacity: 0.18,
+        shadowRadius: 24,
+        elevation: 8,
         overflow: 'hidden',
     },
     scrollView: {
@@ -122,81 +128,75 @@ const styles = StyleSheet.create({
     },
     iconContainer: {
         marginBottom: 16,
-        backgroundColor: '#EEF2FF',
-        padding: 16,
-        borderRadius: 50,
-        height: 96, // Fixed height to prevent shift
-        width: 96,  // Fixed width to prevent shift
+        backgroundColor: colors.primarySoft,
+        borderWidth: 1,
+        borderColor: colors.primaryLight,
+        borderRadius: 44,
+        height: 88, // Fixed size to prevent shift
+        width: 88,
         alignItems: 'center',
         justifyContent: 'center',
     },
     modalTitle: {
         fontSize: 22,
-        fontWeight: '800', // Extra bold
-        color: '#111827',
+        fontWeight: '800',
+        color: colors.dark,
         marginBottom: 12,
         textAlign: 'center',
     },
     modalText: {
         marginBottom: 20,
         textAlign: 'center',
-        color: '#4B5563',
-        fontSize: 16,
-        lineHeight: 24,
+        color: colors.gray700,
+        fontSize: 15,
+        lineHeight: 23,
     },
     bold: {
         fontWeight: '700',
-        color: '#1F2937',
+        color: colors.dark,
     },
     bulletPoints: {
         width: '100%',
         marginBottom: 20,
+        gap: 12,
     },
     bulletRow: {
         flexDirection: 'row',
         alignItems: 'flex-start',
-        marginBottom: 10,
-        minHeight: 40,
+        gap: 12,
     },
-    bulletIcon: {
-        marginRight: 10,
-        marginTop: 2,
+    bulletChip: {
+        width: 32,
+        height: 32,
+        borderRadius: 10,
+        backgroundColor: colors.primarySoft,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     bulletText: {
         flex: 1,
         fontSize: 14,
-        color: '#374151',
+        color: colors.gray700,
         lineHeight: 20,
+        paddingTop: 6, // optically centers single lines against the 32px chip
     },
     warningContainer: {
         flexDirection: 'row',
-        backgroundColor: '#FFFBEB',
+        backgroundColor: colors.warning.background,
+        borderWidth: 1,
+        borderColor: colors.warning.border,
         padding: 12,
         borderRadius: 12,
-        marginBottom: 24,
+        marginBottom: 8,
         width: '100%',
-        minHeight: 60,
         alignItems: 'flex-start',
+        gap: 10,
     },
     warningText: {
         flex: 1,
-        marginLeft: 10,
-        color: '#92400E',
+        color: colors.warning.text,
         fontSize: 13,
         lineHeight: 18,
-    },
-    button: {
-        borderRadius: 16,
-        minHeight: 56, // Changed from fixed height
-        paddingVertical: 12,
-        paddingHorizontal: 16,
-        justifyContent: 'center',
-        width: '100%',
-        alignItems: 'center',
-    },
-    buttonContinue: {
-        backgroundColor: '#4F46E5', // Indigo-600
-        elevation: 2,
     },
     footer: {
         width: '100%',
@@ -204,13 +204,7 @@ const styles = StyleSheet.create({
         paddingTop: 12,
         paddingBottom: 20,
         borderTopWidth: StyleSheet.hairlineWidth,
-        borderTopColor: '#E5E7EB',
-        backgroundColor: '#FFFFFF',
-    },
-    textStyle: {
-        color: 'white',
-        fontWeight: 'bold',
-        textAlign: 'center',
-        fontSize: 16,
+        borderTopColor: colors.border,
+        backgroundColor: colors.background,
     },
 });
