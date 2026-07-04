@@ -142,7 +142,7 @@ export function BrandSplash({ onDone }: { onDone: () => void }) {
           ]}
         >
           <Text style={styles.wordmark}>Confío</Text>
-          <Text style={styles.eyebrow}>DÓLARES DIGITALES</Text>
+          <Text style={styles.eyebrow}>CONFIANZA PARA AMÉRICA LATINA</Text>
         </Animated.View>
       </View>
     </Animated.View>

@@ -182,7 +182,7 @@ export const AuthScreen = () => {
             style={styles.brandLogo}
           />
           <Text style={styles.wordmark} accessibilityRole="header">Confío</Text>
-          <Text style={styles.brandTagline}>DÓLARES DIGITALES</Text>
+          <Text style={styles.brandTagline}>CONFIANZA PARA AMÉRICA LATINA</Text>
         </Animated.View>
       </View>
 
