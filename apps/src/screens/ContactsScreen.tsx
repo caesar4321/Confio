@@ -1515,15 +1515,10 @@ export const ContactsScreen = () => {
             },
             {
               icon: 'clock',
-              title: 'USDC · Ethereum',
+              title: 'USDC · USDT · Ethereum (ERC-20)',
               subtitle: 'Aún no disponible · tócalo y te avisamos',
-              onPress: () => handleReceiveRailInterest('usdc_eth', 'USDC (Ethereum)'),
-            },
-            {
-              icon: 'clock',
-              title: 'USDT · Ethereum',
-              subtitle: 'Aún no disponible · tócalo y te avisamos',
-              onPress: () => handleReceiveRailInterest('usdt_eth', 'USDT (Ethereum)'),
+              onPress: () =>
+                handleReceiveRailInterest('eth_erc20', 'USDC / USDT (Ethereum)'),
             },
             {
               icon: 'clock',
