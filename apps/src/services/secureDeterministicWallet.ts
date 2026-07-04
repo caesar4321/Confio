@@ -273,6 +273,24 @@ export function getDerivedEvmWallet(): DerivedEvmWallet | null {
   return lastDerivedEvmWallet;
 }
 
+// The ADDRESS (never key material) also persists in the keychain so cold
+// starts can display it: the fast wallet paths reconstruct from the cached
+// ALGORAND seed, which by domain-separation design cannot produce the EVM
+// key — without this, every cold start would demand a re-login just to
+// SHOW the receive address. Semantics mirror the in-memory cache (last
+// derived account), just durable.
+const EVM_ADDR_KEYCHAIN_SERVICE = 'confio_evm_address_v1';
+
+export async function getEvmAddressForDisplay(): Promise<string | null> {
+  if (lastDerivedEvmWallet) return lastDerivedEvmWallet.address;
+  try {
+    const stored = await Keychain.getGenericPassword({ service: EVM_ADDR_KEYCHAIN_SERVICE });
+    return stored ? stored.password : null;
+  } catch {
+    return null;
+  }
+}
+
 export function deriveDeterministicAlgorandKey(opts: DeriveWalletOptions): DerivedWallet {
   const { clientSalt, derivationPepper, provider, accountType, accountIndex, businessId } = opts;
 
@@ -327,6 +345,10 @@ export function deriveDeterministicAlgorandKey(opts: DeriveWalletOptions): Deriv
   // the Algorand key is derived.
   try {
     lastDerivedEvmWallet = deriveDeterministicEvmKey(opts);
+    // Persist the address (only) for cold-start display; fire-and-forget.
+    Keychain.setGenericPassword('evm_address', lastDerivedEvmWallet.address, {
+      service: EVM_ADDR_KEYCHAIN_SERVICE,
+    }).catch(() => {});
   } catch (e) {
     console.warn('[Derive] EVM sibling derivation failed (non-fatal):', e);
   }

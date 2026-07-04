@@ -12,7 +12,7 @@
 // asset opt-ins — but the wrong-network warning matters MORE: USDT exists
 // on many chains and a TRC-20/ERC-20 send to this address is unrecoverable.
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -30,7 +30,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import QRCode from 'react-native-qrcode-svg';
 import { colors } from '../config/theme';
-import { getDerivedEvmWallet } from '../services/secureDeterministicWallet';
+import { getEvmAddressForDisplay } from '../services/secureDeterministicWallet';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 
 const STEPS = [
@@ -56,9 +56,16 @@ export const ReceiveSavingsScreen = () => {
   const navigation = useNavigation();
   const [copied, setCopied] = useState(false);
 
-  // Derived and cached at sign-in alongside the Algorand key; registered
-  // server-side. Same inputs on any device -> same address.
-  const address = useMemo(() => getDerivedEvmWallet()?.address ?? null, []);
+  // Derived at sign-in alongside the Algorand key (registered server-side);
+  // on cold starts the persisted address serves display. Real and
+  // user-controlled either way — never a placeholder.
+  const [address, setAddress] = useState<string | null>(null);
+  const [resolving, setResolving] = useState(true);
+  useEffect(() => {
+    getEvmAddressForDisplay()
+      .then((a) => setAddress(a))
+      .finally(() => setResolving(false));
+  }, []);
 
   const onCopy = async () => {
     if (!address) return;
@@ -95,7 +102,7 @@ export const ReceiveSavingsScreen = () => {
       </SafeAreaView>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {address ? (
+        {resolving ? null : address ? (
           <>
             {/* Address card: QR + copy — the DepositScreen grammar */}
             <View style={styles.qrCard}>
