@@ -1603,11 +1603,18 @@ export const HomeScreen = () => {
                 </View>
               </Pressable>
 
-              {/* Ahorro and Inversión as SEPARATE wallet rows (personal
-                  accounts): savings never goes down, stocks fluctuate — one
-                  combined number would let a red stock day drag the savings
-                  psychology down with it. Day change shows in USD (2 dp) and
-                  only when it rounds to ≥ $0.01 — never "+$0.00". */}
+              {/* Ahorro and Inversión as SEPARATE rows under their OWN section
+                  header — two-world IA: "Mis Billeteras" is money you use,
+                  this group is money that grows. Split rows because savings
+                  never goes down while stocks fluctuate — one combined number
+                  would let a red stock day drag the savings psychology down.
+                  Day change shows in USD (2 dp) and only when it rounds to
+                  ≥ $0.01 — never "+$0.00". */}
+              {!activeAccount?.isEmployee && (
+                <Text style={[styles.walletsTitle, { marginTop: 24 }]}>
+                  Ahorros e Inversiones
+                </Text>
+              )}
               {!activeAccount?.isEmployee && (
                 <Pressable
                   style={({ pressed }) => [
