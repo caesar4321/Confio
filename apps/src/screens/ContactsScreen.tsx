@@ -17,6 +17,7 @@ import { useAccount } from '../contexts/AccountContext';
 import { INVITE_EMPLOYEE, GET_CURRENT_BUSINESS_EMPLOYEES, GET_CURRENT_BUSINESS_INVITATIONS, CANCEL_INVITATION, GET_PENDING_PAYROLL_ITEMS } from '../apollo/queries';
 import { getCountryByIso } from '../utils/countries';
 import { colors } from '../config/theme';
+import { InlineBanner } from '../components/common/InlineBanner';
 import { getTierNameColor, getTierMeta } from '../components/StatusTierBadge';
 
 // Utility function to format phone number with country code
@@ -260,6 +261,8 @@ export const ContactsScreen = () => {
   const navigation = useNavigation<ContactsScreenNavigationProp>();
   const apolloClient = useApolloClient();
   const [searchTerm, setSearchTerm] = useState('');
+  const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
+  const dismissBanner = useCallback(() => setBanner(null), []);
 
   // Test users mutation
 
@@ -760,14 +763,14 @@ export const ContactsScreen = () => {
       });
 
       if (result.data?.cancelInvitation?.success) {
-        Alert.alert('Éxito', 'Invitación cancelada correctamente.');
+        setBanner({ variant: 'success', message: 'Invitación cancelada correctamente.' });
         // Refresh invitations
         refetchInvitations();
       } else {
-        Alert.alert('Error', result.data?.cancelInvitation?.errors?.[0] || 'Error al cancelar la invitación');
+        setBanner({ variant: 'error', message: result.data?.cancelInvitation?.errors?.[0] || 'No se pudo cancelar la invitación' });
       }
     } catch (error) {
-      Alert.alert('Error', 'No se pudo cancelar la invitación. Intenta de nuevo.');
+      setBanner({ variant: 'error', message: 'No se pudo cancelar la invitación. Intenta de nuevo.' });
     }
   }, [cancelInvitation, refetchInvitations]);
 
@@ -1573,6 +1576,16 @@ export const ContactsScreen = () => {
 
           {/* Test user creation button removed */}
         </View>
+
+        {banner && (
+          <InlineBanner
+            message={banner.message}
+            variant={banner.variant}
+            onDismiss={dismissBanner}
+            autoHideMs={banner.variant === 'success' ? 2500 : undefined}
+            style={{ marginHorizontal: 16, marginTop: 8, marginBottom: 0 }}
+          />
+        )}
 
         <SectionList
           sections={sections}
