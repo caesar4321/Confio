@@ -23,6 +23,7 @@ import {
   Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Header } from '../navigation/Header';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -132,22 +133,15 @@ export const SellStockScreen = () => {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
-      <SafeAreaView edges={['top']} style={{ backgroundColor: colors.primary }}>
-        <View style={styles.header}>
-          <TouchableOpacity
-            onPress={() => navigation.goBack()}
-            style={styles.headerIconBtn}
-            disabled={phase === 'processing'}
-          >
-            <Icon name="arrow-left" size={24} color="#fff" />
-          </TouchableOpacity>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <TickerLogo ticker={stock.ticker} color={stock.color} logoUrl={stock.logoUrl} size={26} />
-            <Text style={styles.headerTitle}>Vender {stock.ticker}</Text>
-          </View>
-          <View style={styles.headerIconBtn} />
-        </View>
-      </SafeAreaView>
+      <Header
+        navigation={navigation as any}
+        title={`Vender ${stock.ticker}`}
+        titleAccessory={<TickerLogo ticker={stock.ticker} color={stock.color} logoUrl={stock.logoUrl} size={26} />}
+        backgroundColor={colors.primary}
+        isLight
+        showBackButton
+        onBackPress={() => { if (phase !== 'processing') navigation.goBack(); }}
+      />
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
@@ -266,17 +260,6 @@ export const SellStockScreen = () => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.neutral },
 
-  header: {
-    backgroundColor: colors.primary,
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  headerIconBtn: { padding: 6, width: 40, alignItems: 'center' },
-  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#fff' },
 
   scrollContent: { padding: 16, paddingBottom: 32, flexGrow: 1 },
 
