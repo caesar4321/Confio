@@ -38,6 +38,7 @@ import { colors } from '../config/theme';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { GET_MY_BALANCES } from '../apollo/queries';
 import { useAhorrosPortfolio } from '../hooks/useAhorrosPortfolio';
+import { formatUsdDeltaAbs } from '../utils/savingsFormat';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
@@ -105,8 +106,9 @@ export const ConvertAhorroScreen = () => {
           <Text style={styles.successTitle}>Tu ahorro empezó a crecer</Text>
           <Text style={styles.successAmount}>{fmtUsd(quote.receiveUsd)}</Text>
           <Text style={styles.successHint}>
-            Mañana habrás ganado ≈ {fmtUsd(dailyEstimate, dailyEstimate < 0.01 ? 4 : 2)} — y así
-            todos los días, sin hacer nada.
+            {formatUsdDeltaAbs(dailyEstimate)
+              ? `Mañana habrás ganado ≈ ${formatUsdDeltaAbs(dailyEstimate)} — y así todos los días, sin hacer nada.`
+              : 'Tu dinero genera rendimiento todos los días, sin hacer nada.'}
           </Text>
           <TouchableOpacity
             style={styles.successCta}
@@ -203,12 +205,11 @@ export const ConvertAhorroScreen = () => {
                   <Text style={styles.quoteLabelStrong}>Recibirás en tu ahorro</Text>
                   <Text style={styles.quoteValueStrong}>≈ {fmtUsd(quote.receiveUsd)}</Text>
                 </View>
-                {dailyEstimate > 0 && (
+                {formatUsdDeltaAbs(dailyEstimate) != null && (
                   <View style={styles.quoteEstimateRow}>
                     <Icon name="trending-up" size={13} color={colors.primaryDark} />
                     <Text style={styles.quoteEstimateText}>
-                      Ganarás ≈ {fmtUsd(dailyEstimate, dailyEstimate < 0.01 ? 4 : 2)} al día a la
-                      tasa actual (~
+                      Ganarás ≈ {formatUsdDeltaAbs(dailyEstimate)} al día a la tasa actual (~
                       {formatNumber(savings.netApyPct, { maximumFractionDigits: 1 })}% anual)
                     </Text>
                   </View>

@@ -35,6 +35,7 @@ import { colors } from '../config/theme';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { GET_MY_BALANCES } from '../apollo/queries';
 import { useAhorrosPortfolio } from '../hooks/useAhorrosPortfolio';
+import { formatUsdDeltaAbs } from '../utils/savingsFormat';
 import { RouteSheet, RouteOption } from '../components/RouteSheet';
 import { TickerLogo } from '../components/TickerLogo';
 import { MovementRow } from '../components/MovementRow';
@@ -83,17 +84,19 @@ export const AhorrosScreen = () => {
   const hasStocks = stocks.positions.length > 0;
   const hasAnything = portfolio.totalUsd > 0;
 
-  // Day/month ticker parts only when they round to >= $0.01 — a fresh $50
-  // saver earns fractions of a cent per day and "+$0.00" reads as broken.
+  // Adaptive precision (2 dp, 3 dp under 1¢) so small savers still see the
+  // daily tick; below display resolution the part is omitted entirely —
+  // "+$0.00" reads as broken.
   const tickerParts: string[] = [];
-  if (Math.abs(portfolio.earnedTodayUsd) >= 0.005) {
-    tickerParts.push(
-      `Hoy ${portfolio.earnedTodayUsd >= 0 ? '+' : '\u2212'}$${Math.abs(portfolio.earnedTodayUsd).toFixed(2)}`,
-    );
+  const hoyDelta = formatUsdDeltaAbs(portfolio.earnedTodayUsd);
+  if (hoyDelta) {
+    tickerParts.push(`Hoy ${portfolio.earnedTodayUsd >= 0 ? '+' : '\u2212'}${hoyDelta}`);
   }
-  if (portfolio.earnedMonthUsd >= 0.005) {
-    tickerParts.push(`Este mes +$${portfolio.earnedMonthUsd.toFixed(2)}`);
+  const mesDelta = formatUsdDeltaAbs(portfolio.earnedMonthUsd);
+  if (mesDelta && portfolio.earnedMonthUsd > 0) {
+    tickerParts.push(`Este mes +${mesDelta}`);
   }
+  const savingsHoy = formatUsdDeltaAbs(savings.earnedTodayUsd);
 
   const fmtUsd = (v: number, digits = 2) =>
     `$${formatNumber(v, { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
@@ -207,9 +210,9 @@ export const AhorrosScreen = () => {
             {hasSavings ? (
               <View style={{ alignItems: 'flex-end' }}>
                 <Text style={styles.productValue}>{fmtUsd(savings.balanceUsd)}</Text>
-                <Text style={styles.productDayChange}>
-                  hoy +{fmtUsd(savings.earnedTodayUsd)}
-                </Text>
+                {savingsHoy && (
+                  <Text style={styles.productDayChange}>hoy +{savingsHoy}</Text>
+                )}
               </View>
             ) : (
               <View style={styles.ratePill}>

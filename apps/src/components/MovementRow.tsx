@@ -7,6 +7,7 @@ import { View, Text, StyleSheet } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
 import { AhorroMovement } from '../hooks/useAhorrosPortfolio';
+import { formatUsdDeltaAbs } from '../utils/savingsFormat';
 
 const MOVEMENT_ICONS: Record<string, string> = {
   deposit: 'arrow-down-circle',
@@ -38,7 +39,8 @@ export const MovementRow = ({ movement: m, topBorder }: Props) => (
       <Text style={styles.date}>{formatMovementDate(m.createdAt)}</Text>
     </View>
     <Text style={[styles.amount, m.amountUsd < 0 && styles.amountOut]}>
-      {m.amountUsd >= 0 ? '+' : '−'}${Math.abs(m.amountUsd).toFixed(2)}
+      {m.amountUsd >= 0 ? '+' : '−'}
+      {formatUsdDeltaAbs(m.amountUsd) ?? '$0.00'}
     </Text>
   </View>
 );
