@@ -9,6 +9,7 @@ import { formatNumber } from '../utils/numberFormatting';
 import { useCountry } from '../contexts/CountryContext';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import { colors } from '../config/theme';
+import { Header } from '../navigation/Header';
 
 type ConfioTokenomicsScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
@@ -114,14 +115,14 @@ export const ConfioTokenomicsScreen = () => {
   ];
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Icon name="arrow-left" size={24} color="#fff" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Distribución $CONFIO</Text>
-        <View style={styles.headerSpacer} />
-      </View>
+    <View style={styles.container}>
+      <Header
+        navigation={navigation as any}
+        title="Distribución $CONFIO"
+        backgroundColor={colors.secondary}
+        isLight
+        showBackButton
+      />
 
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         {/* Hero Section */}
@@ -257,7 +258,7 @@ export const ConfioTokenomicsScreen = () => {
 
         <View style={styles.bottomPadding} />
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 };
 
@@ -265,26 +266,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
-  },
-  header: {
-    backgroundColor: colors.secondary,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 12,
-    paddingBottom: 20,
-    paddingHorizontal: 20,
-  },
-  backButton: {
-    padding: 8,
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  headerSpacer: {
-    width: 40,
   },
   scrollView: {
     flex: 1,
