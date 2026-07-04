@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView, Image, ActivityIndicator, Share } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView, Image, ActivityIndicator, Share, Linking } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -413,6 +413,23 @@ const DepositScreen = () => {
         },
       }),
     },
+    networkPill: {
+      backgroundColor: '#FEF3C7',
+      borderRadius: 12,
+      paddingHorizontal: 12,
+      paddingVertical: 5,
+      alignSelf: 'center',
+      marginBottom: 12,
+    },
+    networkPillText: { fontSize: 12, fontWeight: '700', color: '#92400E' },
+    explorerLink: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 4,
+      marginTop: 12,
+    },
+    explorerLinkText: { fontSize: 12, color: '#6B7280' },
     addressTitle: {
       fontSize: 18,
       fontWeight: 'bold',
@@ -664,6 +681,9 @@ const DepositScreen = () => {
             {/* Address Section */}
             <View style={styles.addressCard}>
               <Text style={styles.addressTitle}>Tu dirección de depósito</Text>
+              <View style={styles.networkPill}>
+                <Text style={styles.networkPillText}>Red: Algorand</Text>
+              </View>
 
               {/* QR Code */}
               <View style={styles.qrContainer}>
@@ -701,6 +721,18 @@ const DepositScreen = () => {
                 style={{ backgroundColor: colors.primary, borderRadius: 8 }}
                 textStyle={{ fontWeight: '500' }}
               />
+              <TouchableOpacity
+                style={styles.explorerLink}
+                onPress={() => {
+                  const base = __DEV__
+                    ? 'https://testnet.explorer.perawallet.app'
+                    : 'https://explorer.perawallet.app';
+                  Linking.openURL(`${base}/address/${depositAddress}/`);
+                }}
+              >
+                <Text style={styles.explorerLinkText}>Ver en Pera Explorer</Text>
+                <Icon name="external-link" size={12} color="#6B7280" />
+              </TouchableOpacity>
             </View>
 
             {/* Instructions */}

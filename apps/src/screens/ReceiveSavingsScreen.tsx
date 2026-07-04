@@ -22,6 +22,7 @@ import {
   StatusBar,
   Image,
   Linking,
+  Share,
 } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -66,6 +67,20 @@ export const ReceiveSavingsScreen = () => {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  // Sharing the address by WhatsApp IS the LATAM flow (DepositScreen parity).
+  // The message carries the network warning — it will be read outside the app.
+  const onShare = async () => {
+    if (!address) return;
+    try {
+      await Share.share({
+        title: 'Dirección de ahorro Confío',
+        message:
+          `Esta es mi dirección para recibir USDT en Confío:\n${address}\n\n` +
+          'Importante: solo USDT por la red BNB Smart Chain (BEP-20).',
+      });
+    } catch {}
+  };
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
@@ -84,6 +99,7 @@ export const ReceiveSavingsScreen = () => {
           <>
             {/* Address card: QR + copy — the DepositScreen grammar */}
             <View style={styles.qrCard}>
+              <Text style={styles.qrCardTitle}>Tu dirección de ahorro</Text>
               <View style={styles.networkPill}>
                 <Text style={styles.networkPillText}>Red: BNB Smart Chain (BEP-20)</Text>
               </View>
@@ -91,12 +107,18 @@ export const ReceiveSavingsScreen = () => {
                 <QRCode value={address} size={180} />
               </View>
               <Text style={styles.address}>{address}</Text>
-              <TouchableOpacity style={styles.copyBtn} onPress={onCopy} activeOpacity={0.85}>
-                <Icon name={copied ? 'check' : 'copy'} size={16} color="#fff" />
-                <Text style={styles.copyBtnText}>
-                  {copied ? 'Copiada' : 'Copiar dirección'}
-                </Text>
-              </TouchableOpacity>
+              <View style={styles.btnRow}>
+                <TouchableOpacity style={styles.copyBtn} onPress={onCopy} activeOpacity={0.85}>
+                  <Icon name={copied ? 'check' : 'copy'} size={16} color="#fff" />
+                  <Text style={styles.copyBtnText}>
+                    {copied ? 'Copiada' : 'Copiar'}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.shareBtn} onPress={onShare} activeOpacity={0.85}>
+                  <Icon name="share-2" size={16} color={colors.primaryDark} />
+                  <Text style={styles.shareBtnText}>Compartir</Text>
+                </TouchableOpacity>
+              </View>
               <TouchableOpacity
                 style={styles.scanLink}
                 onPress={() => Linking.openURL(`https://bscscan.com/address/${address}`)}
@@ -198,6 +220,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     fontFamily: 'monospace' as any,
   },
+  qrCardTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.text.primary,
+    marginBottom: 12,
+  },
+  btnRow: { flexDirection: 'row', gap: 10, marginTop: 14 },
+  shareBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1.5,
+    borderColor: colors.primaryDark,
+    borderRadius: 12,
+    paddingHorizontal: 18,
+    paddingVertical: 11,
+  },
+  shareBtnText: { color: colors.primaryDark, fontSize: 14, fontWeight: '700' },
   copyBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -206,7 +246,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 18,
     paddingVertical: 11,
-    marginTop: 14,
   },
   copyBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
   scanLink: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 12 },
