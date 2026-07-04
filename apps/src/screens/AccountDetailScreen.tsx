@@ -1667,7 +1667,12 @@ export const AccountDetailScreen = () => {
               <Text style={styles.exchangeModalTitle}>
                 Conversión {conversionDirection === 'usdc_to_cusd' ? 'USDC → cUSD' : 'cUSD → USDC'}
               </Text>
-              <TouchableOpacity onPress={() => setShowExchangeModal(false)}>
+              <TouchableOpacity
+                onPress={() => setShowExchangeModal(false)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                accessibilityRole="button"
+                accessibilityLabel="Cerrar"
+              >
                 <Icon name="x" size={24} color="#6b7280" />
               </TouchableOpacity>
             </View>
@@ -2114,7 +2119,13 @@ export const AccountDetailScreen = () => {
               <View style={styles.usdcSection}>
                 <View style={styles.sectionHeaderContainer}>
                   <Text style={styles.sectionTitle}>Gestión Avanzada</Text>
-                  <TouchableOpacity style={styles.helpButton} onPress={() => setShowHelpModal(true)}>
+                  <TouchableOpacity
+                    style={styles.helpButton}
+                    onPress={() => setShowHelpModal(true)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Ayuda sobre USDC"
+                  >
                     <Icon name="help-circle" size={18} color="#6b7280" />
                   </TouchableOpacity>
                 </View>
@@ -2184,6 +2195,9 @@ export const AccountDetailScreen = () => {
                     <TouchableOpacity
                       style={styles.usdcMoreButton}
                       onPress={() => setShowMoreOptionsModal(true)}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      accessibilityRole="button"
+                      accessibilityLabel="Más opciones de USDC"
                     >
                       <Icon name="more-horizontal" size={20} color="#6b7280" />
                     </TouchableOpacity>
