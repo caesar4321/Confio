@@ -19,6 +19,7 @@ import { useMutation, useQuery } from '@apollo/client';
 import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
+import { InlineBanner } from '../components/common/InlineBanner';
 import { MainStackParamList } from '../types/navigation';
 import { CREATE_P2P_TRADE, GET_USER_BANK_ACCOUNTS, GET_MY_P2P_TRADES } from '../apollo/queries';
 import { useCurrency } from '../hooks/useCurrency';
@@ -68,6 +69,8 @@ export const TradeConfirmScreen: React.FC = () => {
   });
 
   const [amount, setAmount] = useState('');
+  const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
+  const dismissBanner = React.useCallback(() => setBanner(null), []);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(offer.paymentMethods[0] || null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -128,13 +131,13 @@ export const TradeConfirmScreen: React.FC = () => {
 
   const handleConfirmTrade = async () => {
     if (!amount || !selectedPaymentMethod) {
-      Alert.alert('Error', 'Por favor completa todos los campos');
+      setBanner({ variant: 'error', message: 'Por favor completa todos los campos' });
       return;
     }
 
     const cryptoAmount = parseFloat(amount);
     if (isNaN(cryptoAmount) || cryptoAmount <= 0) {
-      Alert.alert('Error', 'Por favor ingresa un monto válido');
+      setBanner({ variant: 'error', message: 'Por favor ingresa un monto válido' });
       return;
     }
 
@@ -206,10 +209,10 @@ export const TradeConfirmScreen: React.FC = () => {
         });
       } else {
         const errorMessage = data?.createP2pTrade?.errors?.join(', ') || 'Error desconocido';
-        Alert.alert('Error', errorMessage);
+        setBanner({ variant: 'error', message: errorMessage });
       }
     } catch (error) {
-      Alert.alert('Error', 'Ocurrió un error al crear el intercambio. Por favor intenta de nuevo.');
+      setBanner({ variant: 'error', message: 'Ocurrió un error al crear el intercambio. Por favor intenta de nuevo.' });
     }
   };
 
@@ -247,6 +250,14 @@ export const TradeConfirmScreen: React.FC = () => {
       </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        {banner && (
+          <InlineBanner
+            message={banner.message}
+            variant={banner.variant}
+            onDismiss={dismissBanner}
+            style={{ marginTop: 12 }}
+          />
+        )}
         {/* Trade Summary */}
         <View style={styles.summaryCard}>
           <Text style={styles.summaryTitle}>Resumen del intercambio</Text>
