@@ -8,7 +8,7 @@ import {
   Linking,
   Image,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Header } from '../navigation/Header';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -55,14 +55,14 @@ export const ProtectedSavingsScreen = () => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Icon name="arrow-left" size={24} color="#fff" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Ahorros Protegidos</Text>
-        <View style={styles.headerSpacer} />
-      </View>
+    <View style={styles.container}>
+      <Header
+        navigation={navigation as any}
+        title="Ahorros Protegidos"
+        backgroundColor={colors.primary}
+        isLight
+        showBackButton
+      />
 
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* Hero */}
@@ -297,7 +297,7 @@ export const ProtectedSavingsScreen = () => {
 
         <View style={styles.bottomPadding} />
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 };
 
@@ -306,18 +306,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#fff',
   },
-  header: {
-    backgroundColor: colors.primary,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 12,
-    paddingBottom: 20,
-    paddingHorizontal: 20,
-  },
-  backButton: { padding: 8 },
-  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#fff' },
-  headerSpacer: { width: 40 },
   scroll: { flex: 1 },
   hero: {
     alignItems: 'center',
