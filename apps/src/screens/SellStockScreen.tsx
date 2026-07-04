@@ -30,6 +30,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
 import { SuccessHero } from '../components/common/SuccessHero';
+import { ReceiptCard } from '../components/common/ReceiptCard';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useAhorrosPortfolio } from '../hooks/useAhorrosPortfolio';
 import { useGmMarket } from '../hooks/useGmMarket';
@@ -115,6 +116,16 @@ export const SellStockScreen = () => {
             title="Vendido"
             amount={fmtUsd(quote.receiveUsd)}
             hint="Ya está en tu ahorro (cUSD+) y sigue generando rendimiento desde ahora mismo."
+          />
+          <ReceiptCard
+            style={{ marginTop: 4 }}
+            items={[
+              { label: 'Vendiste', value: fmtUsd(amount) },
+              { label: 'Costo de operación', value: `${fmtUsd(quote.costUsd)} (${quote.costPct.toFixed(2)}%)` },
+              { label: 'Recibido en tu ahorro', value: fmtUsd(quote.receiveUsd), color: colors.primaryDark },
+              { label: 'Fecha', value: `${new Date().toLocaleDateString('es-ES')} · ${new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}` },
+              { label: 'Estado', value: 'Completado', color: colors.success, icon: 'check-circle' },
+            ]}
           />
           <TouchableOpacity
             style={styles.successCta}

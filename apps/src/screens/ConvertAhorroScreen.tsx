@@ -41,6 +41,7 @@ import { useAhorrosPortfolio } from '../hooks/useAhorrosPortfolio';
 import { useConvertQuote } from '../hooks/useConvertQuote';
 import { formatUsdDeltaAbs } from '../utils/savingsFormat';
 import { SuccessHero } from '../components/common/SuccessHero';
+import { ReceiptCard } from '../components/common/ReceiptCard';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
@@ -104,6 +105,16 @@ export const ConvertAhorroScreen = () => {
             hint={formatUsdDeltaAbs(dailyEstimate)
               ? `Mañana habrás ganado ≈ ${formatUsdDeltaAbs(dailyEstimate)} — y así todos los días, sin hacer nada.`
               : 'Tu dinero genera rendimiento todos los días, sin hacer nada.'}
+          />
+          <ReceiptCard
+            style={{ marginTop: 4 }}
+            items={[
+              { label: 'Convertiste', value: `${fmtUsd(amount)} cUSD` },
+              { label: 'Costo de conversión', value: `${fmtUsd(quote.costUsd)} (${quote.costPct.toFixed(2)}%)` },
+              { label: 'Recibido en tu ahorro', value: fmtUsd(quote.receiveUsd), color: colors.primaryDark },
+              { label: 'Fecha', value: `${new Date().toLocaleDateString('es-ES')} · ${new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}` },
+              { label: 'Estado', value: 'Completado', color: colors.success, icon: 'check-circle' },
+            ]}
           />
           <TouchableOpacity
             style={styles.successCta}

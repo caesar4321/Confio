@@ -35,6 +35,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
 import { SuccessHero } from '../components/common/SuccessHero';
+import { ReceiptCard } from '../components/common/ReceiptCard';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useAhorrosPortfolio } from '../hooks/useAhorrosPortfolio';
 import { useGmMarket } from '../hooks/useGmMarket';
@@ -124,6 +125,16 @@ export const BuyStockScreen = () => {
             amount={`≈ ${formatNumber(quote.tokensOut, { maximumFractionDigits: 4 })} ${stock.ticker}`}
             hint="Los dividendos se reinvierten automáticamente en el valor de tu posición. Puedes vender cuando quieras."
             icon={<TickerLogo ticker={stock.ticker} color={stock.color} logoUrl={stock.logoUrl} size={72} />}
+          />
+          <ReceiptCard
+            style={{ marginTop: 4 }}
+            items={[
+              { label: 'Invertiste desde tu ahorro', value: fmtUsd(amount) },
+              { label: 'Costo de operación', value: `${fmtUsd(quote.costUsd)} (${quote.costPct.toFixed(2)}%)` },
+              { label: 'Recibiste', value: `≈ ${formatNumber(quote.tokensOut, { maximumFractionDigits: 4 })} ${stock.ticker}`, color: colors.primaryDark },
+              { label: 'Fecha', value: `${new Date().toLocaleDateString('es-ES')} · ${new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}` },
+              { label: 'Estado', value: 'Completado', color: colors.success, icon: 'check-circle' },
+            ]}
           />
           <TouchableOpacity
             style={styles.successCta}
