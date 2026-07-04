@@ -12,6 +12,7 @@ import {
   StatusBar,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
+import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NavigationProp, useNavigation } from '@react-navigation/native';
 import { useMutation, useQuery } from '@apollo/client';
@@ -187,40 +188,47 @@ export const RampAddressScreen: React.FC = () => {
 
   return (
     <View style={styles.safeArea}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
+      <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
       <Header
         navigation={navigation as any}
-        title="Dirección"
-        backgroundColor={colors.primaryDark}
+        title="Recargas y retiros"
+        backgroundColor={colors.primary}
         isLight
         showBackButton
       />
 
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <View style={styles.infoCard}>
-          <View style={styles.infoRow}>
-            <View style={styles.infoIconWrap}>
-              <Icon name="map-pin" size={16} color={colors.primaryDark} />
+        {/* Emerald brand field: this is a money-rails screen. Lead with the
+            payoff, not the chore — vertical gradient meets the flat nav
+            header seamlessly; padding on fieldInner (Yoga rule). */}
+        <View style={styles.brandField}>
+          <Svg style={StyleSheet.absoluteFill}>
+            <Defs>
+              <SvgLinearGradient id="rampField" x1="0" y1="0" x2="0" y2="1">
+                <Stop offset="0" stopColor={colors.primary} />
+                <Stop offset="1" stopColor={colors.primaryDark} />
+              </SvgLinearGradient>
+            </Defs>
+            <Rect width="100%" height="100%" fill="url(#rampField)" />
+            <Circle cx="105%" cy="16%" r="90" stroke={colors.white} strokeWidth="22" strokeOpacity="0.10" fill="none" />
+          </Svg>
+          <View style={styles.fieldInner}>
+            <Text style={styles.fieldEyebrow}>RECARGAS Y RETIROS</Text>
+            <Text style={styles.fieldTitle}>Conecta tu banco a Confío</Text>
+            <Text style={styles.fieldSubtitle}>
+              Los proveedores bancarios necesitan estos datos para habilitar
+              recargas y retiros. Los completas una sola vez.
+            </Text>
+            <View style={styles.fieldTrustRow}>
+              <Icon name="lock" size={13} color={colors.primaryLight} />
+              <Text style={styles.fieldTrustText}>
+                Solo se comparten con el proveedor cuando tú inicias una operación
+              </Text>
             </View>
-            <Text style={styles.infoText}>
-              La usamos para completar tus datos cuando un proveedor bancario la necesita para habilitar recargas y retiros.
-            </Text>
           </View>
-          <Text style={styles.infoHint}>
-            El país se toma automáticamente desde el país de tu número de teléfono.
-          </Text>
-          {shouldShowAuthEmailField ? (
-            <Text style={styles.infoHint}>
-              Como tu cuenta usa Apple private relay, aquí puedes guardar el email real donde quieres recibir códigos de PSE en Colombia.
-            </Text>
-          ) : null}
-          {shouldShowEconomicActivityField ? (
-            <Text style={styles.infoHint}>
-              Koywe requiere tu actividad económica real para cumplir con requisitos regulatorios.
-            </Text>
-          ) : null}
         </View>
 
+        <View style={styles.body}>
         <View style={styles.formCard}>
           <Text style={[styles.label, styles.labelFirst]}>País</Text>
           <View style={styles.readOnlyField}>
@@ -233,6 +241,9 @@ export const RampAddressScreen: React.FC = () => {
               </View>
             )}
           </View>
+          <Text style={styles.fieldHelp}>
+            Se toma automáticamente del país de tu número de teléfono.
+          </Text>
 
           <Text style={styles.label}>Dirección</Text>
           <View style={styles.inputWrapper}>
@@ -325,6 +336,9 @@ export const RampAddressScreen: React.FC = () => {
                 </Text>
                 <Icon name="chevron-down" size={16} color={colors.textSecondary} />
               </TouchableOpacity>
+              <Text style={styles.fieldHelp}>
+                Koywe la requiere para cumplir requisitos regulatorios.
+              </Text>
             </>
           ) : null}
 
@@ -344,6 +358,10 @@ export const RampAddressScreen: React.FC = () => {
                   keyboardType="email-address"
                 />
               </View>
+              <Text style={styles.fieldHelp}>
+                Tu cuenta usa Apple private relay; aquí va el email real donde
+                recibirás los códigos de PSE.
+              </Text>
             </>
           ) : null}
 
@@ -364,6 +382,7 @@ export const RampAddressScreen: React.FC = () => {
             style={{ marginTop: 20, backgroundColor: colors.primary }}
             textStyle={{ fontWeight: '700' }}
           />
+        </View>
         </View>
       </ScrollView>
 
@@ -435,39 +454,56 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   content: {
-    padding: 16,
     paddingBottom: 32,
-    gap: 16,
   },
-  infoCard: {
-    backgroundColor: colors.surface,
-    borderRadius: 16,
+  brandField: {
+    backgroundColor: colors.primary,
+    overflow: 'hidden',
+  },
+  fieldInner: {
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 24,
+  },
+  fieldEyebrow: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 2,
+    color: colors.primaryLight,
+    marginBottom: 8,
+  },
+  fieldTitle: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: colors.white,
+    lineHeight: 30,
+  },
+  fieldSubtitle: {
+    fontSize: 14,
+    lineHeight: 21,
+    color: 'rgba(255, 255, 255, 0.85)',
+    marginTop: 8,
+  },
+  fieldTrustRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    marginTop: 14,
+  },
+  fieldTrustText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.primaryLight,
+  },
+  body: {
     padding: 16,
   },
-  infoRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-  },
-  infoIconWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
-    backgroundColor: colors.primarySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  infoText: {
-    flex: 1,
-    fontSize: 14,
-    lineHeight: 20,
-    color: colors.textFlat,
-  },
-  infoHint: {
-    marginTop: 10,
-    fontSize: 13,
-    lineHeight: 18,
+  fieldHelp: {
+    fontSize: 12,
+    lineHeight: 17,
     color: colors.textSecondary,
+    marginTop: 6,
   },
   formCard: {
     backgroundColor: colors.surface,
