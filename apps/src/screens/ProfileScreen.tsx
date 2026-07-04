@@ -728,7 +728,7 @@ export const ProfileScreen = () => {
             >
               <Image
                 source={require('../assets/png/TikTok.png')}
-                style={styles.socialCircleImage}
+                style={styles.socialButtonImage}
                 resizeMode="contain"
               />
             </TouchableOpacity>
@@ -754,7 +754,7 @@ export const ProfileScreen = () => {
             >
               <Image
                 source={require('../assets/png/YouTube.png')}
-                style={styles.socialCircleImage}
+                style={styles.socialButtonImage}
                 resizeMode="contain"
               />
             </TouchableOpacity>
@@ -778,7 +778,9 @@ export const ProfileScreen = () => {
               accessibilityRole="link"
               accessibilityLabel="Canal de WhatsApp de Julian Moon"
             >
-              <WhatsAppLogo width={42} height={42} />
+              {/* Bubble fills only 86% of the SVG viewBox (baked-in shadow
+                  margin), so 47 renders a 40px bubble like the others. */}
+              <WhatsAppLogo width={47} height={47} />
             </TouchableOpacity>
           </View>
 
@@ -1275,12 +1277,8 @@ const styles = StyleSheet.create({
     marginHorizontal: 4,
   },
   socialButtonImage: {
-    width: 38, // rounded squares (Instagram, Facebook)
-    height: 38,
-  },
-  socialCircleImage: {
-    width: 42, // circles read smaller than squares at equal bounds
-    height: 42,
+    width: 40, // uniform: all PNGs are cropped full-bleed, so 40 = 40 visible
+    height: 40,
   },
   founderStory: {
     alignItems: 'center',
