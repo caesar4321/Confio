@@ -76,6 +76,7 @@ const depositConfig = {
 import { AuthService } from '../services/authService';
 import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
+import { Header } from '../navigation/Header';
 
 // ... (imports)
 
@@ -573,18 +574,13 @@ const DepositScreen = () => {
 
   return (
     <View style={styles.container}>
-      {/* Fixed back-button bar */}
-      <SafeAreaView edges={['top']} style={{ backgroundColor: colors.primary }}>
-        <View style={[styles.header, { backgroundColor: colors.primary, paddingBottom: 12 }]}>
-          <View style={styles.headerContent}>
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-              <Icon name="arrow-left" size={24} color="#ffffff" />
-            </TouchableOpacity>
-            <Text style={styles.headerTitle}>Depositar</Text>
-            <View style={styles.placeholder} />
-          </View>
-        </View>
-      </SafeAreaView>
+      <Header
+        navigation={navigation as any}
+        title="Depositar"
+        backgroundColor={colors.primary}
+        isLight
+        showBackButton
+      />
 
       <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
         {/* Hero section */}
