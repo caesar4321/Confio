@@ -1603,22 +1603,14 @@ export const HomeScreen = () => {
                 </View>
               </Pressable>
 
-              {/* Ahorro and Inversión under their OWN section header —
-                  two-world IA: "Mis Billeteras" is money you use, this group
-                  is money that grows. The home stays 3 rows (agreed cap) for
-                  everyone WITHOUT stock positions; the Acciones row only
-                  exists once the user actually holds stocks — then it's their
-                  money, not a promo, and it must be separate because savings
-                  never goes down while stocks fluctuate (a combined number
-                  would let a red stock day drag the savings psychology down).
-                  Stocks discovery lives inside the hub, not on the home.
-                  Day change shows in USD (2 dp) and only when it rounds to
-                  ≥ $0.01 — never "+$0.00". */}
-              {!activeAccount?.isEmployee && (
-                <Text style={[styles.walletsTitle, { marginTop: 24 }]}>
-                  Ahorros e Inversiones
-                </Text>
-              )}
+              {/* Ahorros e Inversiones — ONE calm entry (the agreed 3-row
+                  home). Combined total, and deliberately NO day-change here:
+                  deltas, the savings/stocks split, and red days live inside
+                  the hub, which answers "why did it move?" in the same glance
+                  (hero split line + per-product cards + hoy lines with the
+                  ≥ $0.01 rule). On the home a red delta would read as "my
+                  savings dropped". Principle: home shows calm balances, the
+                  hub shows the living portfolio. */}
               {!activeAccount?.isEmployee && (
                 <Pressable
                   style={({ pressed }) => [
@@ -1632,63 +1624,17 @@ export const HomeScreen = () => {
                       <Image source={cUSDPlusLogo} style={styles.walletLogo} />
                     </View>
                     <View style={styles.walletInfo}>
-                      <Text style={styles.walletName}>Confío Dollar+</Text>
-                      <Text style={styles.walletSymbol}>cUSD+ · Ahorro</Text>
+                      <Text style={styles.walletName}>Ahorros e Inversiones</Text>
+                      <Text style={styles.walletSymbol}>
+                        {ahorrosPortfolio.stocks.enabled
+                          ? 'cUSD+ · Acciones de EE.UU.'
+                          : 'cUSD+ · Ahorro que rinde'}
+                      </Text>
                     </View>
                     <View style={styles.walletBalanceContainer}>
-                      <View style={{ alignItems: 'flex-end' }}>
-                        <Text style={styles.walletBalanceText}>
-                          {showBalance ? `$${formatFixedFloor(ahorrosPortfolio.savings.balanceUsd, 2)}` : '••••'}
-                        </Text>
-                        {showBalance && ahorrosPortfolio.savings.earnedTodayUsd >= 0.005 && (
-                          <Text style={{ fontSize: 11, fontWeight: '600', color: '#059669', marginTop: 1 }}>
-                            hoy +${formatFixedFloor(ahorrosPortfolio.savings.earnedTodayUsd, 2)}
-                          </Text>
-                        )}
-                      </View>
-                      <Icon name="chevron-right" size={20} color="#9ca3af" />
-                    </View>
-                  </View>
-                </Pressable>
-              )}
-
-              {!activeAccount?.isEmployee &&
-                ahorrosPortfolio.stocks.enabled &&
-                ahorrosPortfolio.stocks.totalUsd > 0 && (
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.walletCard,
-                    pressed && { opacity: 0.7 }
-                  ]}
-                  onPress={() => navigation.navigate('AccionesList')}
-                >
-                  <View style={styles.walletCardContent}>
-                    <View style={[styles.walletLogoContainer, { backgroundColor: '#1D4ED8', alignItems: 'center', justifyContent: 'center' }]}>
-                      <Icon name="bar-chart-2" size={20} color="#fff" />
-                    </View>
-                    <View style={styles.walletInfo}>
-                      <Text style={styles.walletName}>Acciones de EE.UU.</Text>
-                      <Text style={styles.walletSymbol}>Tesla, NVIDIA y más</Text>
-                    </View>
-                    <View style={styles.walletBalanceContainer}>
-                      <View style={{ alignItems: 'flex-end' }}>
-                        <Text style={styles.walletBalanceText}>
-                          {showBalance ? `$${formatFixedFloor(ahorrosPortfolio.stocks.totalUsd, 2)}` : '••••'}
-                        </Text>
-                        {showBalance && Math.abs(ahorrosPortfolio.stocks.earnedTodayUsd) >= 0.005 && (
-                          <Text
-                            style={{
-                              fontSize: 11,
-                              fontWeight: '600',
-                              marginTop: 1,
-                              color: ahorrosPortfolio.stocks.earnedTodayUsd >= 0 ? '#059669' : '#DC2626',
-                            }}
-                          >
-                            hoy {ahorrosPortfolio.stocks.earnedTodayUsd >= 0 ? '+' : '−'}$
-                            {formatFixedFloor(Math.abs(ahorrosPortfolio.stocks.earnedTodayUsd), 2)}
-                          </Text>
-                        )}
-                      </View>
+                      <Text style={styles.walletBalanceText}>
+                        {showBalance ? `$${formatFixedFloor(ahorrosPortfolio.totalUsd, 2)}` : '••••'}
+                      </Text>
                       <Icon name="chevron-right" size={20} color="#9ca3af" />
                     </View>
                   </View>
