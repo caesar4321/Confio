@@ -13,7 +13,7 @@ import {
     Image,
     StatusBar,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Header } from '../navigation/Header';
 import Clipboard from '@react-native-clipboard/clipboard';
 import Icon from 'react-native-vector-icons/Feather';
 import MCIcon from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -243,13 +243,13 @@ export const SellScreen = () => {
 
     if (orderCreated) {
         return (
-            <SafeAreaView edges={['top']} style={styles.container}>
-                <View style={styles.header}>
-                    <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-                        <Icon name="x" size={24} color="#111827" />
-                    </TouchableOpacity>
-                    <Text style={styles.headerTitle}>Orden Creada</Text>
-                </View>
+            <View style={styles.container}>
+                <Header
+                    navigation={navigation as any}
+                    title="Orden Creada"
+                    backgroundColor="#fff"
+                    showBackButton
+                />
 
                 <ScrollView contentContainerStyle={styles.content}>
                     <View style={styles.successIconContainer}>
@@ -287,24 +287,28 @@ export const SellScreen = () => {
                         <Icon name="arrow-right" size={20} color="#fff" />
                     </TouchableOpacity>
                 </ScrollView>
-            </SafeAreaView>
+            </View>
         );
     }
 
     return (
-        <SafeAreaView edges={['top']} style={styles.container}>
-            <View style={styles.header}>
-                <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-                    <Icon name="arrow-left" size={24} color="#111827" />
-                </TouchableOpacity>
-                <Text style={styles.headerTitle}>Retirar USDC a banco</Text>
-                <TouchableOpacity
-                    style={styles.historyButton}
-                    onPress={() => navigation.navigate('RampHistory', { initialFilter: 'off_ramp' })}
-                >
-                    <Text style={styles.historyButtonText}>Historial</Text>
-                </TouchableOpacity>
-            </View>
+        <View style={styles.container}>
+            <Header
+                navigation={navigation as any}
+                title="Retirar USDC a banco"
+                backgroundColor="#fff"
+                showBackButton
+                rightAccessory={(
+                    <TouchableOpacity
+                        style={styles.historyButton}
+                        onPress={() => navigation.navigate('RampHistory', { initialFilter: 'off_ramp' })}
+                        accessibilityRole="button"
+                        accessibilityLabel="Ver historial de retiros"
+                    >
+                        <Text style={styles.historyButtonText}>Historial</Text>
+                    </TouchableOpacity>
+                )}
+            />
 
             <ScrollView contentContainerStyle={styles.content}>
                 <View style={styles.heroSection}>
@@ -442,7 +446,7 @@ export const SellScreen = () => {
                     setAwaitingGuardarianReturn(false);
                 }}
             />
-        </SafeAreaView>
+        </View>
     );
 };
 
@@ -450,27 +454,6 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: '#F9FAFB',
-    },
-    header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingHorizontal: 16,
-        paddingTop: 12,
-        paddingBottom: 12,
-        backgroundColor: '#fff',
-        borderBottomWidth: 1,
-        borderBottomColor: '#F3F4F6',
-    },
-    backButton: {
-        padding: 8,
-        marginRight: 8,
-    },
-    headerTitle: {
-        fontSize: 18,
-        fontWeight: '700',
-        color: '#111827',
-        flex: 1,
-        textAlign: 'center',
     },
     historyButton: {
         minWidth: 72,
