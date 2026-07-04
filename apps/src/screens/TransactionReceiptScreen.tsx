@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  SafeAreaView,
   ScrollView,
   Alert,
   Platform,
@@ -20,6 +19,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { TransactionReceiptView } from '../components/TransactionReceiptView';
 import { APP_LAYOUT } from '../config/layout';
 import { colors } from '../config/theme';
+import { Header } from '../navigation/Header';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'TransactionReceipt'>;
 type RouteProps = RouteProp<MainStackParamList, 'TransactionReceipt'>;
@@ -234,16 +234,24 @@ export const TransactionReceiptScreen = () => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Icon name="arrow-left" size={22} color={colors.textFlat} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>{getHeaderTitle()}</Text>
-        <TouchableOpacity style={styles.downloadButton} onPress={handleExportPDF}>
-          <Icon name="download" size={20} color={colors.primaryDark} />
-        </TouchableOpacity>
-      </View>
+    <View style={styles.container}>
+      <Header
+        navigation={navigation as any}
+        title={getHeaderTitle()}
+        backgroundColor={colors.white}
+        showBackButton
+        rightAccessory={(
+          <TouchableOpacity
+            style={styles.downloadButton}
+            onPress={handleExportPDF}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityRole="button"
+            accessibilityLabel="Descargar comprobante"
+          >
+            <Icon name="download" size={20} color={colors.primaryDark} />
+          </TouchableOpacity>
+        )}
+      />
 
       <ScrollView contentContainerStyle={styles.content}>
         <ViewShot ref={viewShotRef} options={{ format: 'jpg', quality: 0.9 }}>
@@ -273,7 +281,7 @@ export const TransactionReceiptScreen = () => {
           <Text style={styles.exportButtonText}>Descargar comprobante</Text>
         </TouchableOpacity>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 };
 
@@ -281,27 +289,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.neutral,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    marginTop: Platform.OS === 'android' ? APP_LAYOUT.topSafeArea + 10 : 0,
-    backgroundColor: colors.white,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.neutralDark,
-  },
-  backButton: {
-    padding: 8,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.textFlat,
-    flex: 1,
-    marginLeft: 8,
   },
   downloadButton: {
     padding: 8,
