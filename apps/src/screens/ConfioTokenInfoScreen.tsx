@@ -221,28 +221,28 @@ export const ConfioTokenInfoScreen = () => {
           <Text style={styles.timelineTitle}>Roadmap 2025-2026</Text>
         <View style={styles.timeline}>
           <View style={styles.timelineItem}>
-            <View style={[styles.timelineDot, styles.timelineDotActive]} />
+            <View style={[styles.timelineDot, styles.timelineDotCompleted]} />
             <View style={styles.timelineContent}>
               <Text style={styles.timelineDate}>Q4 2025 · 🇻🇪</Text>
               <Text style={styles.timelineText}>Lanzamiento en Venezuela: P2P completo. Fundador pivotó el primer mercado principal hacia Argentina tras rechazo de entrada en Venezuela.</Text>
             </View>
           </View>
           <View style={styles.timelineItem}>
-            <View style={styles.timelineDot} />
+            <View style={[styles.timelineDot, styles.timelineDotCompleted]} />
             <View style={styles.timelineContent}>
               <Text style={styles.timelineDate}>Q1 2026 · 🚀</Text>
               <Text style={styles.timelineText}>Alianzas Onramp, recargas automáticas y primera preventa oficial de $CONFIO.</Text>
             </View>
           </View>
           <View style={styles.timelineItem}>
-            <View style={styles.timelineDot} />
+            <View style={[styles.timelineDot, styles.timelineDotCompleted]} />
             <View style={styles.timelineContent}>
               <Text style={styles.timelineDate}>Q2 2026 · 🇦🇷</Text>
               <Text style={styles.timelineText}>Lanzamiento en Argentina con métodos de pago locales.</Text>
             </View>
           </View>
           <View style={styles.timelineItem}>
-            <View style={styles.timelineDot} />
+            <View style={[styles.timelineDot, styles.timelineDotActive]} />
             <View style={styles.timelineContent}>
               <Text style={styles.timelineDate}>Q3 2026 · 🤝</Text>
               <Text style={styles.timelineText}>Alianza con Ondo Finance: ahorro con rendimiento (Confío Dollar+) y acciones de EE.UU. dentro de Confío.</Text>
