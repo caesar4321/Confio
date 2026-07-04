@@ -32,6 +32,7 @@ import { RampReveal } from '../components/ramps/RampReveal';
 import { formatRampMoney } from '../hooks/useRampQuoteFlow';
 import { buildRampInstructionView } from '../utils/rampInstructions';
 import { colors } from '../config/theme';
+import { InlineBanner } from '../components/common/InlineBanner';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList, 'RampInstructions'>;
 type RouteProps = RouteProp<MainStackParamList, 'RampInstructions'>;
@@ -147,6 +148,8 @@ export const RampInstructionsScreen = () => {
     paymentDetails,
   } = route.params;
   const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
+  const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
+  const dismissBanner = React.useCallback(() => setBanner(null), []);
   const qrCaptureRef = useRef<ViewShot | null>(null);
 
   const { data, loading, refetch, networkStatus } = useQuery(GET_RAMP_ORDER_STATUS, {
@@ -205,7 +208,7 @@ export const RampInstructionsScreen = () => {
 
   const copyInstructionValue = (label: string, value: string) => {
     Clipboard.setString(value);
-    Alert.alert('Copiado', `${label} copiado.`);
+    setBanner({ variant: 'success', message: `${label} copiado.` });
   };
 
   const handleRefresh = async () => {
@@ -245,7 +248,7 @@ export const RampInstructionsScreen = () => {
       await CameraRoll.save(captureUri, { type: 'photo', album: 'Confio' });
       Alert.alert('Guardado', 'QR guardado en tu galería.');
     } catch (error: any) {
-      Alert.alert('Error', error?.message || 'No se pudo guardar la imagen del QR.');
+      setBanner({ variant: 'error', message: error?.message || 'No se pudo guardar la imagen del QR.' });
     }
   };
 
@@ -265,7 +268,7 @@ export const RampInstructionsScreen = () => {
       if (error?.message?.includes('User did not share')) {
         return;
       }
-      Alert.alert('Error', error?.message || 'No se pudo compartir el QR.');
+      setBanner({ variant: 'error', message: error?.message || 'No se pudo compartir el QR.' });
     }
   };
 
@@ -277,6 +280,14 @@ export const RampInstructionsScreen = () => {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
+        {banner && (
+          <InlineBanner
+            message={banner.message}
+            variant={banner.variant}
+            onDismiss={dismissBanner}
+            autoHideMs={banner.variant === 'success' ? 2500 : undefined}
+          />
+        )}
         <RampReveal delay={0}>
         <RampHero
           eyebrow={direction === 'ON_RAMP' ? 'Pago' : 'Retiro'}
