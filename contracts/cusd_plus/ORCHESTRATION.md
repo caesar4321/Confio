@@ -159,7 +159,41 @@ per-asset; the unified EVM event log is a structural win for the stocks
 product. If public-node array limits ever bind, chunk the arrays or move
 to a keyed provider — no architecture change.
 
-## 6. Build inventory — new vs reused
+## 6. Leg-AB prepare protocol (server spec — implement next)
+
+Extends the existing conversion ws (consumer delegates to a mutation; the
+burn group builder lives in blockchain/cusd_transaction_builder.py).
+Message: `{type:"prepare_savings", amount, tail:[5 base64 unsigned txns]}`.
+The CLIENT builds the bridge tail (allbridgeAlgorand.ts, resources already
+simulate-populated); the SERVER builds the sponsored burn prefix, composes
+[prefix + tail], assigns ONE gid, signs ONLY its sponsor txn, returns the
+pack (same shape as today's prepare_ready).
+
+SPONSOR-SIGNING VERIFICATION CHECKLIST — every rule mandatory; the sponsor
+must never sign a group it hasn't fully parsed (decode each tail txn with
+py-algosdk and check):
+1. Group shape exactly 8: [pay(sponsor→user), axfer(cUSD user→app),
+   appl(burn), pay(user→bridge), axfer(USDC user→bridge), appl(swapAndBridge),
+   appl(padding), appl(padding)].
+2. Tail senders ALL == the JWT account's algorand_address; rekey/close
+   fields zero on every txn (mirror cusd.py hardening).
+3. Bridge wiring from a server-side /token-info fetch (cached ≤5 min):
+   appl.appId == bridgeId, pay/axfer receiver == bridgeAddress, padding
+   appId == paddingUtilId. Never trust client-supplied ids.
+4. swapAndBridge args: selector matches; destinationChainId == BSC;
+   receiveToken == USDT-BSC (from token-info); **recipient bytes32 ==
+   account.bsc_address (the REGISTERED one)** — the critical check.
+5. Amounts: USDC axfer == burn output == requested cUSD amount; bridge fee
+   pay ≤ CUSD_PLUS_MAX_BRIDGE_FEE_MICROALGO (settings, default 8_000_000);
+   sponsor prefix payment == bridge fee + fee-pool budget, capped.
+6. Rate limit per account (e.g. 3 prepares/min) + amount ≤ per-tx cap.
+7. On success: create CusdPlusConversion (CREATED) server-side and return
+   conversion_id in the pack so client Advance calls bind to it.
+
+Client then: sign user txns → submit group → advanceCusdPlusConversion
+(SRC_COMMITTED, group txid) → resume machinery (§2) takes over.
+
+## 7. Build inventory — new vs reused
 
 **New builds** (the bulk is BSC-side client infrastructure):
 - EVM key derivation from the Web3Auth seed + BSC tx signing in the app
@@ -178,7 +212,7 @@ to a keyed provider — no architecture change.
 - The USDC→cUSD auto-swap — Retirar leg C' ONLY; the rest of Retirar is new
 - Push notification + websocket plumbing, Koywe ramps (separate direct flows)
 
-## 7. Reconciliation & monitoring
+## 8. Reconciliation & monitoring
 
 - Per-conversion ledger (server, observational): leg tx ids keyed by
   `conversion_id` (UUIDv7, stamped in tx notes/metadata) — powers the
@@ -191,7 +225,7 @@ to a keyed provider — no architecture change.
 - Sponsorship accounting: BNB dust + Algorand fee pooling are Confío's only
   costs in the flow, tracked like existing sponsored-tx accounting.
 
-## 8. UX honesty contract
+## 9. UX honesty contract
 
 - Processing screens map to real leg states via websocket; a stuck bridge
   shows "tardando más de lo normal", never a fake spinner.
@@ -201,7 +235,7 @@ to a keyed provider — no architecture change.
   user signs the affected leg. We don't cover anything — and we don't hide
   anything either.
 
-## 9. Resolved (formerly "open") decisions
+## 10. Resolved (formerly "open") decisions
 
 1. ~~Treasury float sizing~~ — **dead: there is no treasury in the flow.**
    (A user-visible "instant mode" would require custody; rejected.)
