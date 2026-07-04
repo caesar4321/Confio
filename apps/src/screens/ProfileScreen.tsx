@@ -531,7 +531,7 @@ export const ProfileScreen = () => {
               <Text style={styles.referralCriteriaTitle}>¿Cómo funciona?</Text>
               <Text style={styles.referralCriteriaItem}>1. Comparte tu link por WhatsApp con la historia del fundador.</Text>
               <Text style={styles.referralCriteriaItem}>2. Tu amigo se crea la cuenta y descubre Confío.</Text>
-              <Text style={styles.referralCriteriaItem}>3. Carga al menos 20 cUSD y se activan los US$5 para los dos.</Text>
+              <Text style={styles.referralCriteriaItem}>3. Carga al menos US$20 — a su cUSD o directo a su ahorro (cUSD+) — y se activan los US$5 para los dos.</Text>
             </View>
 
             {/* Status tier explainer — visual preview with user's own name */}
