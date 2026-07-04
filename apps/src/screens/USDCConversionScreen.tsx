@@ -31,6 +31,7 @@ import { cusdAppOptInService } from '../services/cusdAppOptInService';
 import { biometricAuthService } from '../services/biometricAuthService';
 import { migrationService } from '../services/migrationService';
 import { colors } from '../config/theme';
+import { InlineBanner } from '../components/common/InlineBanner';
 
 // GraphQL mutation for USDC opt-in (reused from DepositScreen)
 const OPT_IN_TO_USDC = gql`
@@ -67,6 +68,8 @@ export const USDCConversionScreen = () => {
   const route = useRoute<ConversionRouteProp>();
   const { activeAccount } = useAccount();
   const [amount, setAmount] = useState('');
+  const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
+  const dismissBanner = React.useCallback(() => setBanner(null), []);
   // Use route param if provided, otherwise default to usdc_to_cusd (original behavior)
   const routeDirection = (route.params as any)?.direction;
   const rampProvider = (route.params as any)?.rampProvider;
@@ -167,11 +170,11 @@ export const USDCConversionScreen = () => {
   const validateAmount = () => {
     const numAmount = parseFloat(amount);
     if (isNaN(numAmount) || numAmount <= 0) {
-      Alert.alert('Monto inválido', 'Por favor ingresa un monto válido', [{ text: 'Entendido' }]);
+      setBanner({ variant: 'error', message: 'Por favor ingresa un monto válido' });
       return false;
     }
     if (numAmount > sourceBalance) {
-      Alert.alert('Saldo insuficiente', `No tienes suficiente ${sourceCurrency} para esta conversión`, [{ text: 'Entendido' }]);
+      setBanner({ variant: 'error', message: `No tienes suficiente ${sourceCurrency} para esta conversión` });
       return false;
     }
     return true;
@@ -322,14 +325,14 @@ export const USDCConversionScreen = () => {
               const optInResult = await cusdAppOptInService.handleAppOptIn(activeAccount);
               if (!optInResult.success) {
                 setLoadingMessage('');
-                Alert.alert('Error', optInResult.error || 'No se pudo completar la configuración inicial', [{ text: 'Entendido' }]);
-                return;
+                setBanner({ variant: 'error', message: optInResult.error || 'No se pudo completar la configuración inicial' });                return;
               }
               retryCount++;
               setLoadingMessage('Preparando conversión...');
               continue; // Retry the prepare call
             } catch (err) {
-              setLoadingMessage('');              Alert.alert('Error', 'No se pudo completar la configuración inicial', [{ text: 'Entendido' }]);
+              setLoadingMessage('');
+              setBanner({ variant: 'error', message: 'No se pudo completar la configuración inicial' });
               return;
             }
           } else if (errorMessage.includes('not opted') || errorMessage.includes('USDC') || errorMessage.includes('asset') || errorMessage.includes('Please opt-in to USDC and cUSD assets first')) {
@@ -352,16 +355,14 @@ export const USDCConversionScreen = () => {
           } else {
             // Other errors - show the original error
             setLoadingMessage('');
-            Alert.alert('Error', String(e?.message || 'No se pudo preparar la conversión'), [{ text: 'Entendido' }]);
-            return;
+            setBanner({ variant: 'error', message: String(e?.message || 'No se pudo preparar la conversión') });            return;
           }
         }
       }
 
       if (!pack) {
         setLoadingMessage('');
-        Alert.alert('Error', 'No se pudo preparar la conversión después de varios intentos', [{ text: 'Entendido' }]);
-        return;
+        setBanner({ variant: 'error', message: 'No se pudo preparar la conversión después de varios intentos' });        return;
       }
 
       // Ensure wallet is ready for signing
@@ -394,8 +395,7 @@ export const USDCConversionScreen = () => {
         // Don't show error alert for opt-in issues - they should be handled automatically
       } else {
         // Show error only for non-opt-in related issues
-        Alert.alert('Error', 'No se pudo completar la conversión. Por favor intenta de nuevo.', [{ text: 'Entendido' }]);
-      }
+        setBanner({ variant: 'error', message: 'No se pudo completar la conversión. Por favor intenta de nuevo.' });      }
     } finally {
       try { ws.close(); } catch { }
       setIsProcessing(false);
@@ -423,6 +423,13 @@ export const USDCConversionScreen = () => {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
+          {banner && (
+            <InlineBanner
+              message={banner.message}
+              variant={banner.variant}
+              onDismiss={dismissBanner}
+            />
+          )}
           {/* Conversion Card */}
           <View style={styles.conversionCard}>
             {/* From Section */}
