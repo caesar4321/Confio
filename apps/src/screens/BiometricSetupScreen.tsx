@@ -182,7 +182,10 @@ export const BiometricSetupScreen = () => {
       {/* Brand field: same grammar as the Auth screen — emerald gradient,
           one cropped coin ring, hero mark. */}
       <View style={[styles.brandField, { paddingTop: insets.top }]}>
-        <Svg style={StyleSheet.absoluteFill} width="100%" height="100%">
+        {/* absoluteFill only — width/height="100%" would resolve against the
+            content box and stop 48px short of the padded bottom, exposing the
+            flat container color as a hard seam. */}
+        <Svg style={StyleSheet.absoluteFill}>
           <Defs>
             <SvgLinearGradient id="bioField" x1="0" y1="0" x2="1" y2="1">
               <Stop offset="0" stopColor={colors.primary} />
