@@ -253,6 +253,33 @@ export const ProtectedSavingsScreen = () => {
           </Text>
         </View>
 
+        {/* The backing assets themselves — completes the trust chain:
+            cUSD → USDC → Circle/dollars · cUSD+ → USDY → Ondo/Treasuries */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Icon name="layers" size={20} color={colors.primary} />
+            <Text style={styles.sectionTitle}>¿Y qué son USDC y USDY?</Text>
+          </View>
+          <Text style={styles.sectionBody}>
+            <Text style={styles.inlineEmphasis}>USDC</Text> es el dólar digital
+            más usado del mundo, emitido por{' '}
+            <Text style={styles.inlineEmphasis}>Circle</Text>, una empresa
+            regulada en EE.UU. Cada USDC está respaldado 1:1 por efectivo y
+            bonos del Tesoro en custodios estadounidenses, con auditorías
+            públicas mensuales.
+          </Text>
+          <Text style={styles.sectionBody}>
+            <Text style={styles.inlineEmphasis}>USDY</Text> es un token de{' '}
+            <Text style={styles.inlineEmphasis}>Ondo Finance</Text> respaldado
+            por bonos del Tesoro de EE.UU. Esos bonos pagan interés todos los
+            días — ese interés es el rendimiento que recibe tu cUSD+.
+          </Text>
+          <View style={styles.chainCard}>
+            <Text style={styles.chainLine}>cUSD → USDC → dólares reales</Text>
+            <Text style={styles.chainLine}>cUSD+ → USDY → bonos del Tesoro de EE.UU.</Text>
+          </View>
+        </View>
+
         {/* CTA */}
         <View style={styles.ctaSection}>
           <TouchableOpacity
@@ -516,6 +543,21 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   ahorrosLinkText: { fontSize: 14, fontWeight: '700', color: colors.primary },
+  chainCard: {
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 4,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    gap: 6,
+  },
+  chainLine: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#374151',
+    textAlign: 'center',
+  },
   ctaSection: {
     marginHorizontal: 16,
     marginBottom: 24,
