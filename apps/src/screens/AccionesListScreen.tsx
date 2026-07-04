@@ -27,6 +27,7 @@ import { useGmMarket, GmStock } from '../hooks/useGmMarket';
 import { TickerLogo } from '../components/TickerLogo';
 import { useAhorrosPortfolio } from '../hooks/useAhorrosPortfolio';
 import OndoLogo from '../assets/png/Ondo.png';
+import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 
@@ -124,10 +125,14 @@ export const AccionesListScreen = () => {
                     : 'Sesión extendida'}
               </Text>
             </View>
-            <Text style={styles.buyingPower}>
-              Para invertir: ${formatNumber(savings.balanceUsd, { maximumFractionDigits: 2 })} en
-              cUSD+
-            </Text>
+            {/* Buying power as an instrument pill — the sweep model at a
+                glance: you invest with your savings (cUSD+). */}
+            <View style={styles.buyingPowerPill}>
+              <Image source={cUSDPlusLogo} style={styles.buyingPowerLogo} />
+              <Text style={styles.buyingPower}>
+                Para invertir: ${formatNumber(savings.balanceUsd, { maximumFractionDigits: 2 })}
+              </Text>
+            </View>
           </View>
         </View>
       </SafeAreaView>
@@ -211,7 +216,17 @@ const styles = StyleSheet.create({
   },
   marketDot: { width: 7, height: 7, borderRadius: 4 },
   marketChipText: { fontSize: 11, fontWeight: '600', color: '#fff' },
-  buyingPower: { fontSize: 11, color: '#fff', opacity: 0.9 },
+  buyingPowerPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  buyingPowerLogo: { width: 14, height: 14, borderRadius: 7 },
+  buyingPower: { fontSize: 11, color: '#fff', fontWeight: '600' },
 
   listContent: { padding: 16, paddingBottom: 40 },
 

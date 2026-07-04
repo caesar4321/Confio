@@ -13,6 +13,7 @@ import {
   TouchableOpacity,
   ScrollView,
   StatusBar,
+  Image,
 } from 'react-native';
 import Svg, { Polyline } from 'react-native-svg';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -24,6 +25,7 @@ import { colors } from '../config/theme';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useGmMarket, sparklineFor } from '../hooks/useGmMarket';
 import { TickerLogo } from '../components/TickerLogo';
+import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 import { useAhorrosPortfolio } from '../hooks/useAhorrosPortfolio';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
@@ -166,10 +168,18 @@ export const StockDetailScreen = () => {
             <Text style={[styles.ctaSellText, !position && styles.ctaDisabledText]}>Vender</Text>
           </TouchableOpacity>
         </View>
-        <Text style={styles.fundingLine}>
-          Se compra con tu ahorro: ${formatNumber(savings.balanceUsd, { maximumFractionDigits: 2 })}{' '}
-          disponibles en cUSD+ — tu dinero gana rendimiento hasta el momento de la compra.
-        </Text>
+        {/* Funding instrument, payment-method style (sweep model at a
+            glance): stocks trade against your savings, amounts stay in $. */}
+        <View style={styles.fundingSource}>
+          <Image source={cUSDPlusLogo} style={styles.fundingLogo} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.fundingTitle}>Se compra y se vende con tu ahorro</Text>
+            <Text style={styles.fundingSub}>
+              Confío Dollar+ · ${formatNumber(savings.balanceUsd, { maximumFractionDigits: 2 })}{' '}
+              disponibles · gana rendimiento hasta el momento de la compra
+            </Text>
+          </View>
+        </View>
 
         {/* How it works */}
         <View style={styles.card}>
@@ -261,13 +271,18 @@ const styles = StyleSheet.create({
   ctaSellText: { color: colors.primaryDark, fontSize: 15, fontWeight: '700' },
   ctaDisabled: { opacity: 0.45, borderColor: colors.text.light },
   ctaDisabledText: { color: colors.text.light },
-  fundingLine: {
-    fontSize: 12,
-    color: colors.text.secondary,
-    lineHeight: 17,
-    marginBottom: 14,
-    paddingHorizontal: 4,
+  fundingSource: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
   },
+  fundingLogo: { width: 30, height: 30, borderRadius: 15 },
+  fundingTitle: { fontSize: 13, fontWeight: '700', color: colors.text.primary },
+  fundingSub: { fontSize: 12, color: colors.text.secondary, marginTop: 1 },
 
   howRow: { flexDirection: 'row', gap: 10, alignItems: 'flex-start', marginBottom: 10 },
   howText: { flex: 1, fontSize: 13, color: colors.text.secondary, lineHeight: 18 },

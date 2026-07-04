@@ -25,6 +25,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
@@ -36,6 +37,7 @@ import { useNumberFormat } from '../utils/numberFormatting';
 import { useAhorrosPortfolio } from '../hooks/useAhorrosPortfolio';
 import { useGmMarket } from '../hooks/useGmMarket';
 import { TickerLogo } from '../components/TickerLogo';
+import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 type BuyRoute = RouteProp<MainStackParamList, 'BuyStock'>;
@@ -178,7 +180,7 @@ export const BuyStockScreen = () => {
             </View>
             <View style={styles.balanceRow}>
               <Text style={[styles.balanceText, overBalance && styles.balanceTextError]}>
-                En tu ahorro: {fmtUsd(available)} cUSD+
+                Disponible en tu ahorro: {fmtUsd(available)}
               </Text>
               <TouchableOpacity
                 onPress={() => setRaw(available > 0 ? String(available) : '')}
@@ -187,6 +189,20 @@ export const BuyStockScreen = () => {
                 <Text style={styles.maxBtn}>MAX</Text>
               </TouchableOpacity>
             </View>
+          </View>
+
+          {/* Funding instrument, payment-method style: the sweep model must
+              be visible at a glance — you pay with your savings (cUSD+).
+              Amounts stay in $ (decision A: never show share counts). */}
+          <View style={styles.fundingSource}>
+            <Image source={cUSDPlusLogo} style={styles.fundingLogo} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.fundingTitle}>Pagas con tu ahorro</Text>
+              <Text style={styles.fundingSub}>
+                Confío Dollar+ · {fmtUsd(available)} disponibles
+              </Text>
+            </View>
+            <Icon name="check-circle" size={16} color={colors.primaryDark} />
           </View>
 
           {tradability === 'reduced' && (
@@ -280,6 +296,18 @@ const styles = StyleSheet.create({
 
   scrollContent: { padding: 16, paddingBottom: 32, flexGrow: 1 },
 
+  fundingSource: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  fundingLogo: { width: 30, height: 30, borderRadius: 15 },
+  fundingTitle: { fontSize: 13, fontWeight: '700', color: colors.text.primary },
+  fundingSub: { fontSize: 12, color: colors.text.secondary, marginTop: 1 },
   amountCard: {
     backgroundColor: '#fff',
     borderRadius: 16,
