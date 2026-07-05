@@ -827,21 +827,21 @@ export const HomeScreen = () => {
       id: 'send',
       label: 'Enviar',
       icon: 'send',
-      color: '#34D399',
+      color: colors.primary,
       route: () => navigation.navigate('BottomTabs', { screen: 'Contacts' }),
     },
     {
       id: 'receive',
       label: 'Recibir',
       icon: 'download',
-      color: '#34D399',
+      color: colors.primary,
       route: () => navigation.navigate('USDCDeposit', { tokenType: 'cusd' }),
     },
     {
       id: 'pay',
       label: 'Pagar',
       icon: 'shopping-bag',
-      color: '#8b5cf6',
+      color: colors.secondary,
       route: () => {
         // For business accounts, navigate to Charge screen instead of Scan
         const isBusinessAccount = activeAccount?.type?.toLowerCase() === 'business';
@@ -854,7 +854,7 @@ export const HomeScreen = () => {
       id: 'exchange',
       label: 'Recargar',
       icon: 'dollar-sign',
-      color: '#3b82f6',
+      color: colors.accent,
       route: () => navigateToRampOrEfectivo('TopUp'),
     },
   ];
@@ -879,14 +879,14 @@ export const HomeScreen = () => {
           id: 'send',
           label: 'Enviar',
           icon: 'send',
-          color: '#34D399',
+          color: colors.primary,
           route: () => navigation.navigate('BottomTabs', { screen: 'Contacts' }),
         },
         {
           id: 'pay',
           label: 'Pagar',
           icon: 'shopping-bag',
-          color: '#8b5cf6',
+          color: colors.secondary,
           route: () => {
             const isBusinessAccount = activeAccount?.type?.toLowerCase() === 'business';
             navigation.navigate('BottomTabs', {
@@ -898,21 +898,21 @@ export const HomeScreen = () => {
           id: 'exchange',
           label: 'Recargar',
           icon: 'dollar-sign',
-          color: '#3b82f6',
+          color: colors.accent,
           route: () => navigateToRampOrEfectivo('TopUp'),
         },
         {
           id: 'withdraw',
           label: 'Retirar',
           icon: 'bank',
-          color: '#F59E0B',
+          color: colors.offRampIcon,
           route: () => navigateToRampOrEfectivo('Sell'),
         },
         {
           id: 'efectivo',
           label: 'Efectivo',
           icon: 'cash',
-          color: '#10B981',
+          color: colors.primaryDark,
           route: () => navigation.navigate('Financieras'),
         },
       ].filter(action => {
@@ -940,14 +940,14 @@ export const HomeScreen = () => {
         id: 'send',
         label: 'Enviar',
         icon: 'send',
-        color: '#34D399',
+        color: colors.primary,
         route: () => navigation.navigate('BottomTabs', { screen: 'Contacts' }),
       },
       {
         id: 'pay',
         label: 'Pagar',
         icon: 'shopping-bag',
-        color: '#8b5cf6',
+        color: colors.secondary,
         route: () => {
           const isBusinessAccount = activeAccount?.type?.toLowerCase() === 'business';
           navigation.navigate('BottomTabs', {
@@ -959,21 +959,21 @@ export const HomeScreen = () => {
         id: 'exchange',
         label: 'Recargar',
         icon: 'dollar-sign',
-        color: '#3b82f6',
+        color: colors.accent,
         route: () => setRechargeSheetVisible(true),
       },
       {
         id: 'withdraw',
         label: 'Retirar',
         icon: 'bank',
-        color: '#F59E0B',
+        color: colors.offRampIcon,
         route: () => setWithdrawSheetVisible(true),
       },
       {
         id: 'efectivo',
         label: 'Efectivo',
         icon: 'cash',
-        color: '#10B981',
+        color: colors.primaryDark,
         route: () => navigation.navigate('Financieras'),
       }
     ];
@@ -1324,7 +1324,7 @@ export const HomeScreen = () => {
                   accessibilityRole="button"
                   accessibilityLabel={showBalance ? 'Ocultar saldo' : 'Mostrar saldo'}
                 >
-                  <Icon name={showBalance ? 'eye' : 'eye-off'} size={18} color="#fff" />
+                  <Icon name={showBalance ? 'eye' : 'eye-off'} size={18} color={colors.white} />
                 </TouchableOpacity>
               )}
               {canShowLocalCurrency && (
@@ -1339,7 +1339,7 @@ export const HomeScreen = () => {
                   <Text style={styles.currencyToggleText}>
                     {showLocalCurrency ? currency.code : 'USD'}
                   </Text>
-                  <Icon name="chevron-down" size={14} color="#fff" />
+                  <Icon name="chevron-down" size={14} color={colors.white} />
                 </TouchableOpacity>
               )}
             </View>
@@ -1384,7 +1384,7 @@ export const HomeScreen = () => {
               disabled={claimingInvite}
             >
               <Text style={styles.inviteClaimButtonText}>{claimingInvite ? 'Reclamando...' : 'Reclamar ahora'}</Text>
-              <Icon name="arrow-right" size={16} color="#fff" />
+              <Icon name="arrow-right" size={16} color={colors.white} />
             </TouchableOpacity>
           </View>
         )}
@@ -1397,7 +1397,7 @@ export const HomeScreen = () => {
             activeOpacity={0.9}
           >
             <View style={styles.payrollIconWrap}>
-              <Icon name="briefcase" size={20} color="#fff" />
+              <Icon name="briefcase" size={20} color={colors.white} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.payrollTitle}>Pagos de nómina</Text>
@@ -1407,7 +1407,7 @@ export const HomeScreen = () => {
                   : 'Revisa y ejecuta tus pagos de nómina'}
               </Text>
             </View>
-            <Icon name="chevron-right" size={18} color="#9CA3AF" />
+            <Icon name="chevron-right" size={18} color={colors.text.light} />
           </TouchableOpacity>
         )}
 
@@ -1436,7 +1436,7 @@ export const HomeScreen = () => {
           >
             <View style={styles.presaleBannerContent}>
               <View style={styles.presaleBannerLeft}>
-                <View style={[styles.presaleBadge, { backgroundColor: '#10b981' }]}>
+                <View style={[styles.presaleBadge, { backgroundColor: colors.primaryDark }]}>
                   <Text style={styles.presaleBadgeText}>RECLAMO</Text>
                 </View>
                 <Text style={styles.presaleBannerTitle}>¡Reclama tus $CONFIO!</Text>
@@ -1460,16 +1460,16 @@ export const HomeScreen = () => {
                   activeOpacity={0.7}
                   style={{ marginTop: 8 }}
                 >
-                  <Text style={[styles.presaleDetailsLink, { color: '#10b981' }]}>Ir a reclamar</Text>
+                  <Text style={[styles.presaleDetailsLink, { color: colors.primaryDark }]}>Ir a reclamar</Text>
                 </TouchableOpacity>
               </View>
               <View style={styles.presaleBannerRight}>
                 <TouchableOpacity onPress={() => setPresaleDismissed(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={{ position: 'absolute', top: -6, right: -6 }}>
-                  <Icon name="x" size={18} color="#10b981" />
+                  <Icon name="x" size={18} color={colors.primaryDark} />
                 </TouchableOpacity>
                 <TouchableOpacity onPress={() => navigation.navigate('ConfioPresale')} activeOpacity={0.9} style={{ alignItems: 'center' }}>
                   <Image source={CONFIOLogo} style={styles.presaleBannerLogo} />
-                  <Icon name="chevron-right" size={20} color="#10b981" />
+                  <Icon name="chevron-right" size={20} color={colors.primaryDark} />
                 </TouchableOpacity>
               </View>
             </View>
@@ -1493,7 +1493,7 @@ export const HomeScreen = () => {
           {activeAccount?.isEmployee && quickActions.length <= 1 ? (
             <View style={styles.employeeWelcomeContainer}>
               <View style={styles.employeeWelcomeIcon}>
-                <Icon name="briefcase" size={32} color="#7c3aed" />
+                <Icon name="briefcase" size={32} color={colors.secondaryDark} />
               </View>
               <Text style={styles.employeeWelcomeTitle}>
                 ¡Hola, equipo {activeAccount?.business?.name}!
@@ -1523,9 +1523,9 @@ export const HomeScreen = () => {
                 >
                   {/* @ts-ignore */}
                   {action.icon === 'bank' || action.icon === 'cash' ? (
-                    <MCIcon name={action.icon} size={action.icon === 'cash' ? 22 : 20} color="#fff" />
+                    <MCIcon name={action.icon} size={action.icon === 'cash' ? 22 : 20} color={colors.white} />
                   ) : (
-                    <Icon name={action.icon} size={22} color="#fff" />
+                    <Icon name={action.icon} size={22} color={colors.white} />
                   )}
                 </View>
                 <Text style={styles.actionLabel}>{action.label}</Text>
@@ -1566,7 +1566,7 @@ export const HomeScreen = () => {
                 onPress={navigateToCUSDAccount}
               >
                 <View style={styles.walletCardContent}>
-                  <View style={[styles.walletLogoContainer, { backgroundColor: '#ffffff' }]}>
+                  <View style={[styles.walletLogoContainer, { backgroundColor: colors.white }]}>
                     <Image source={cUSDLogo} style={styles.walletLogo} />
                   </View>
                   <View style={styles.walletInfo}>
@@ -1580,7 +1580,7 @@ export const HomeScreen = () => {
                         ? '••••'
                         : showBalance ? `$${formatFixedFloor(cUSDBalance, 2)}` : '••••'}
                     </Text>
-                    <Icon name="chevron-right" size={20} color="#9ca3af" />
+                    <Icon name="chevron-right" size={20} color={colors.text.light} />
                   </View>
                 </View>
               </Pressable>
@@ -1594,7 +1594,7 @@ export const HomeScreen = () => {
                 onPress={navigateToConfioAccount}
               >
                 <View style={styles.walletCardContent}>
-                  <View style={[styles.walletLogoContainer, { backgroundColor: '#8b5cf6' }]}>
+                  <View style={[styles.walletLogoContainer, { backgroundColor: colors.secondary }]}>
                     <Image source={CONFIOLogo} style={styles.walletLogo} />
                   </View>
                   <View style={styles.walletInfo}>
@@ -1608,7 +1608,7 @@ export const HomeScreen = () => {
                         ? '••••'
                         : showBalance ? formatFixedFloor(confioTotal, 2) : '••••'}
                     </Text>
-                    <Icon name="chevron-right" size={20} color="#9ca3af" />
+                    <Icon name="chevron-right" size={20} color={colors.text.light} />
                   </View>
                 </View>
               </Pressable>
@@ -1634,7 +1634,7 @@ export const HomeScreen = () => {
                   onPress={() => navigation.navigate('Ahorros')}
                 >
                   <View style={styles.walletCardContent}>
-                    <View style={[styles.walletLogoContainer, { backgroundColor: '#ffffff' }]}>
+                    <View style={[styles.walletLogoContainer, { backgroundColor: colors.white }]}>
                       <Image source={cUSDPlusLogo} style={styles.walletLogo} />
                     </View>
                     <View style={styles.walletInfo}>
@@ -1649,7 +1649,7 @@ export const HomeScreen = () => {
                       <Text style={styles.walletBalanceText}>
                         {showBalance ? `$${formatFixedFloor(ahorrosPortfolio.totalUsd, 2)}` : '••••'}
                       </Text>
-                      <Icon name="chevron-right" size={20} color="#9ca3af" />
+                      <Icon name="chevron-right" size={20} color={colors.text.light} />
                     </View>
                   </View>
                 </Pressable>
@@ -1734,7 +1734,7 @@ export const HomeScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f9fafb',
+    backgroundColor: colors.neutral,
   },
   scrollView: {
     flex: 1,
@@ -1794,7 +1794,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   currencyToggleText: {
-    color: '#fff',
+    color: colors.white,
     fontSize: 14,
     fontWeight: '600',
     marginRight: 4,
@@ -1806,14 +1806,14 @@ const styles = StyleSheet.create({
   },
   currencySymbol: {
     fontSize: 24,
-    color: '#fff',
+    color: colors.white,
     marginRight: 6,
     fontWeight: '500',
   },
   balanceAmount: {
     fontSize: 42,
     fontWeight: 'bold',
-    color: '#fff',
+    color: colors.white,
     letterSpacing: -1,
   },
   // Quick actions styles
@@ -1822,7 +1822,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-evenly',
     paddingVertical: 24,
     paddingHorizontal: 16,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     marginHorizontal: 20,
     marginTop: -20,
     borderRadius: 20,
@@ -1851,7 +1851,7 @@ const styles = StyleSheet.create({
   },
   actionLabel: {
     fontSize: 13,
-    color: '#374151',
+    color: colors.text.primary,
     fontWeight: '600',
   },
   // Wallets section styles
@@ -1862,11 +1862,11 @@ const styles = StyleSheet.create({
   walletsTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#111827',
+    color: colors.text.primary,
     marginBottom: 16,
   },
   walletCard: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 16,
     marginBottom: 12,
     shadowColor: '#000',
@@ -1884,7 +1884,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#10b981',
+    backgroundColor: colors.primaryDark,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 16,
@@ -1898,7 +1898,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   ghostButtonText: {
-    color: '#34d399', // Brand green
+    color: colors.primary, // Brand green
     fontWeight: '600',
   },
 
@@ -1914,11 +1914,11 @@ const styles = StyleSheet.create({
   walletName: {
     fontSize: 17,
     fontWeight: '600',
-    color: '#111827',
+    color: colors.text.primary,
   },
   walletSymbol: {
     fontSize: 14,
-    color: '#6b7280',
+    color: colors.text.secondary,
     marginTop: 2,
   },
   walletBalanceContainer: {
@@ -1928,7 +1928,7 @@ const styles = StyleSheet.create({
   walletBalanceText: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text.primary,
     marginRight: 8,
   },
   inviteClaimCard: {
@@ -1954,11 +1954,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
-    backgroundColor: '#22c55e',
+    backgroundColor: colors.primary,
     marginBottom: 8,
   },
   inviteClaimBadgeText: {
-    color: '#fff',
+    color: colors.white,
     fontWeight: 'bold',
     fontSize: 12,
     letterSpacing: 0.3,
@@ -1966,12 +1966,12 @@ const styles = StyleSheet.create({
   inviteClaimTitle: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#1e293b',
+    color: colors.text.primary,
     marginBottom: 4,
   },
   inviteClaimSubtitle: {
     fontSize: 13,
-    color: '#64748b',
+    color: colors.text.secondary,
     lineHeight: 18,
   },
   inviteClaimButton: {
@@ -1980,30 +1980,30 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    backgroundColor: '#22c55e',
+    backgroundColor: colors.primary,
     paddingHorizontal: 20,
     paddingVertical: 12,
     borderRadius: 12,
-    shadowColor: '#22c55e',
+    shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 4,
     elevation: 3,
   },
   inviteClaimButtonText: {
-    color: '#fff',
+    color: colors.white,
     fontWeight: 'bold',
     fontSize: 14,
     letterSpacing: 0.3,
   },
   inviteClaimError: {
-    color: '#dc2626',
+    color: colors.error.icon,
     marginTop: 8,
     fontSize: 13,
     textAlign: 'center',
   },
   inviteClaimSuccess: {
-    color: '#10B981',
+    color: colors.primaryDark,
     marginTop: 8,
     fontSize: 13,
     textAlign: 'center',
@@ -2016,7 +2016,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 12,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
     shadowColor: '#0F172A',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.05,
@@ -2027,16 +2027,16 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 14,
-    backgroundColor: '#8B5CF6',
+    backgroundColor: colors.secondary,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
   },
-  payrollTitle: { fontSize: 15, fontWeight: '700', color: '#111827' },
-  payrollSubtitle: { fontSize: 13, color: '#6b7280', marginTop: 2 },
+  payrollTitle: { fontSize: 15, fontWeight: '700', color: colors.text.primary },
+  payrollSubtitle: { fontSize: 13, color: colors.text.secondary, marginTop: 2 },
   // Loading state
   loadingText: {
-    color: '#fff',
+    color: colors.white,
     fontSize: 18,
     textAlign: 'center',
     marginTop: 40,
@@ -2059,13 +2059,13 @@ const styles = StyleSheet.create({
   employeeWelcomeTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#111827',
+    color: colors.text.primary,
     marginBottom: 8,
     textAlign: 'center',
   },
   employeeWelcomeText: {
     fontSize: 14,
-    color: '#6b7280',
+    color: colors.text.secondary,
     textAlign: 'center',
     paddingHorizontal: 20,
     lineHeight: 20,
@@ -2077,14 +2077,14 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   presaleBannerContent: {
-    backgroundColor: '#f8fafc',
+    backgroundColor: colors.neutral,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#e2e8f0',
+    borderColor: colors.border,
     padding: 16,
     flexDirection: 'row',
     alignItems: 'center',
-    shadowColor: '#8b5cf6',
+    shadowColor: colors.secondary,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 8,
@@ -2095,7 +2095,7 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   presaleBadge: {
-    backgroundColor: '#8b5cf6',
+    backgroundColor: colors.secondary,
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
@@ -2103,19 +2103,19 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   presaleBadgeText: {
-    color: '#fff',
+    color: colors.white,
     fontSize: 12,
     fontWeight: 'bold',
   },
   presaleBannerTitle: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#1e293b',
+    color: colors.text.primary,
     marginBottom: 4,
   },
   presaleBannerSubtitle: {
     fontSize: 13,
-    color: '#64748b',
+    color: colors.text.secondary,
     lineHeight: 18,
   },
   presaleBannerRight: {
@@ -2129,7 +2129,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
   },
   presaleDetailsLink: {
-    color: '#8b5cf6',
+    color: colors.secondary,
     fontWeight: '600',
     fontSize: 13,
   },

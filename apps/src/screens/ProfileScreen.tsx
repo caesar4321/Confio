@@ -432,7 +432,7 @@ export const ProfileScreen = () => {
                 {activeAccount?.avatar || (userProfile?.firstName?.charAt(0) || userProfile?.username?.charAt(0) || 'U')}
               </Text>
               <View style={styles.editIconContainer}>
-                <Icon name="edit-2" size={12} color="#fff" />
+                <Icon name="edit-2" size={12} color={colors.white} />
               </View>
             </TouchableOpacity>
             <View style={styles.profileNameRow}>
@@ -453,7 +453,7 @@ export const ProfileScreen = () => {
                     <View key={i} style={styles.profileLastWordBadgeGroup}>
                       <Text style={styles.name}>{word}</Text>
                       <View style={styles.profileInlineVerifiedBadge}>
-                        <Icon name="check" size={12} color="#fff" />
+                        <Icon name="check" size={12} color={colors.white} />
                       </View>
                     </View>
                   );
@@ -499,7 +499,7 @@ export const ProfileScreen = () => {
               style={[
                 styles.referralClaimButton,
                 // Change style if claimable
-                referralStats.claimable > 0 && { backgroundColor: '#ECFDF5', borderColor: '#10B981', borderLeftWidth: 4 }
+                referralStats.claimable > 0 && { backgroundColor: colors.primarySoft, borderColor: colors.primaryDark, borderLeftWidth: 4 }
               ]}
               onPress={() => navigation.navigate('ReferralRewardClaim')}
             >
@@ -525,7 +525,7 @@ export const ProfileScreen = () => {
                       : 'Ver mis recompensas ($CONFIO)'}
                 </Text>
               </View>
-              <Icon name="chevron-right" size={16} color={referralStats.claimable > 0 ? '#047857' : '#10b981'} />
+              <Icon name="chevron-right" size={16} color={referralStats.claimable > 0 ? colors.primaryDark : colors.primaryDark} />
             </TouchableOpacity>
 
             {/* Tier progress indicator */}
@@ -541,9 +541,9 @@ export const ProfileScreen = () => {
 
             {needsFriendlyUsername && (
               <TouchableOpacity style={styles.referralUpdateUsername} onPress={() => navigation.navigate('UpdateUsername')}>
-                <Icon name="edit-3" size={16} color="#047857" />
+                <Icon name="edit-3" size={16} color={colors.primaryDark} />
                 <Text style={styles.referralUpdateUsernameText}>Personalizar mi código</Text>
-                <Icon name="chevron-right" size={16} color="#047857" />
+                <Icon name="chevron-right" size={16} color={colors.primaryDark} />
               </TouchableOpacity>
             )}
 
@@ -552,9 +552,9 @@ export const ProfileScreen = () => {
                 style={styles.referralUpdateUsername}
                 onPress={() => navigation.navigate('Achievements')}
               >
-                <Icon name="user-plus" size={16} color="#047857" />
+                <Icon name="user-plus" size={16} color={colors.primaryDark} />
                 <Text style={styles.referralUpdateUsernameText}>¿Te invitó alguien? Pon su código</Text>
-                <Icon name="chevron-right" size={16} color="#047857" />
+                <Icon name="chevron-right" size={16} color={colors.primaryDark} />
               </TouchableOpacity>
             )}
 
@@ -571,46 +571,46 @@ export const ProfileScreen = () => {
               <Text style={styles.referralCriteriaNote}>
                 Desbloquea niveles invitando amigos que completen su primer depósito. La insignia de verificado (✓) la obtienes verificando tu cuenta.
               </Text>
-              <View style={{ gap: 8, marginTop: 10, backgroundColor: '#f9fafb', borderRadius: 10, padding: 12 }}>
+              <View style={{ gap: 8, marginTop: 10, backgroundColor: colors.neutral, borderRadius: 10, padding: 12 }}>
                 {(() => {
                   const name = userProfile?.firstName || 'Tu nombre';
                   const isVerified = userProfile?.isReferralVerified;
                   
                   const VerifiedBadge = () => isVerified ? (
-                    <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: '#3B82F6', alignItems: 'center', justifyContent: 'center' }}>
-                      <Icon name="check" size={10} color="#fff" />
+                    <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' }}>
+                      <Icon name="check" size={10} color={colors.white} />
                     </View>
                   ) : null;
 
                   return (
                     <>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                        <Text style={{ fontSize: 15, color: '#6B7280', flexShrink: 1 }} numberOfLines={1}>{name}</Text>
-                        <Text style={{ fontSize: 12, color: '#9CA3AF' }}>← Nivel inicial</Text>
+                        <Text style={{ fontSize: 15, color: colors.text.secondary, flexShrink: 1 }} numberOfLines={1}>{name}</Text>
+                        <Text style={{ fontSize: 12, color: colors.text.light }}>← Nivel inicial</Text>
                       </View>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                        <Text style={{ fontSize: 15, fontWeight: '600', color: '#3B82F6', flexShrink: 1 }} numberOfLines={1}>{name}</Text>
-                        <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: '#3B82F6', alignItems: 'center', justifyContent: 'center' }}>
-                          <Icon name="check" size={10} color="#fff" />
+                        <Text style={{ fontSize: 15, fontWeight: '600', color: colors.accent, flexShrink: 1 }} numberOfLines={1}>{name}</Text>
+                        <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' }}>
+                          <Icon name="check" size={10} color={colors.white} />
                         </View>
                         <Text style={{ fontSize: 14 }}>⭐</Text>
-                        <Text style={{ fontSize: 12, color: '#3B82F6' }}>← 1 amigo con depósito</Text>
+                        <Text style={{ fontSize: 12, color: colors.accent }}>← 1 amigo con depósito</Text>
                       </View>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                        <Text style={{ fontSize: 15, fontWeight: '600', color: '#F59E0B', flexShrink: 1 }} numberOfLines={1}>{name}</Text>
-                        <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: '#3B82F6', alignItems: 'center', justifyContent: 'center' }}>
-                          <Icon name="check" size={10} color="#fff" />
+                        <Text style={{ fontSize: 15, fontWeight: '600', color: colors.offRampIcon, flexShrink: 1 }} numberOfLines={1}>{name}</Text>
+                        <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' }}>
+                          <Icon name="check" size={10} color={colors.white} />
                         </View>
                         <Text style={{ fontSize: 14 }}>💎</Text>
-                        <Text style={{ fontSize: 12, color: '#F59E0B' }}>← 3 amigos con depósito</Text>
+                        <Text style={{ fontSize: 12, color: colors.offRampIcon }}>← 3 amigos con depósito</Text>
                       </View>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                        <Text style={{ fontSize: 15, fontWeight: '600', color: '#8B5CF6', flexShrink: 1 }} numberOfLines={1}>{name}</Text>
-                        <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: '#3B82F6', alignItems: 'center', justifyContent: 'center' }}>
-                          <Icon name="check" size={10} color="#fff" />
+                        <Text style={{ fontSize: 15, fontWeight: '600', color: colors.secondary, flexShrink: 1 }} numberOfLines={1}>{name}</Text>
+                        <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' }}>
+                          <Icon name="check" size={10} color={colors.white} />
                         </View>
                         <Text style={{ fontSize: 14 }}>🏆</Text>
-                        <Text style={{ fontSize: 12, color: '#8B5CF6' }}>← 10 amigos con depósito</Text>
+                        <Text style={{ fontSize: 12, color: colors.secondary }}>← 10 amigos con depósito</Text>
                       </View>
                     </>
                   );
@@ -620,7 +620,7 @@ export const ProfileScreen = () => {
 
             <View style={styles.referralCriteria}>
               <TouchableOpacity onPress={() => navigation.navigate('Achievements')}>
-                <Text style={[styles.referralCriteriaItem, { color: '#3B82F6', marginTop: 4, fontWeight: '600' }]}>
+                <Text style={[styles.referralCriteriaItem, { color: colors.accent, marginTop: 4, fontWeight: '600' }]}>
                   Ver instrucciones completas
                 </Text>
               </TouchableOpacity>
@@ -632,7 +632,7 @@ export const ProfileScreen = () => {
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <View style={styles.cardTitleRow}>
-              <Icon name="user" size={20} color="#6B7280" />
+              <Icon name="user" size={20} color={colors.text.secondary} />
               <Text style={styles.cardTitle}>Cuenta</Text>
             </View>
           </View>
@@ -641,18 +641,18 @@ export const ProfileScreen = () => {
               style={styles.cardOption}
               onPress={() => navigation.navigate('Verification')}
             >
-              <Icon name="user-check" size={18} color="#6B7280" />
+              <Icon name="user-check" size={18} color={colors.text.secondary} />
               <Text style={styles.cardOptionText}>Verificación</Text>
-              <Icon name="chevron-right" size={16} color="#9CA3AF" />
+              <Icon name="chevron-right" size={16} color={colors.text.light} />
             </TouchableOpacity>
             {activeAccount?.type.toLowerCase() === 'personal' && (
               <TouchableOpacity
                 style={styles.cardOption}
                 onPress={() => navigation.navigate('UpdateUsername')}
               >
-                <Icon name="edit-3" size={18} color="#6B7280" />
+                <Icon name="edit-3" size={18} color={colors.text.secondary} />
                 <Text style={styles.cardOptionText}>Editar usuario Confío</Text>
-                <Icon name="chevron-right" size={16} color="#9CA3AF" />
+                <Icon name="chevron-right" size={16} color={colors.text.light} />
               </TouchableOpacity>
             )}
 
@@ -662,9 +662,9 @@ export const ProfileScreen = () => {
                 style={styles.cardOption}
                 onPress={() => navigation.navigate('ConfioAddress')}
               >
-                <Icon name="at-sign" size={18} color="#6B7280" />
+                <Icon name="at-sign" size={18} color={colors.text.secondary} />
                 <Text style={styles.cardOptionText}>Compartir mi usuario</Text>
-                <Icon name="chevron-right" size={16} color="#9CA3AF" />
+                <Icon name="chevron-right" size={16} color={colors.text.light} />
               </TouchableOpacity>
             )}
 
@@ -675,9 +675,9 @@ export const ProfileScreen = () => {
                   style={styles.cardOption}
                   onPress={() => navigation.navigate('RampAddress')}
                 >
-                  <Icon name="map-pin" size={18} color="#6B7280" />
+                  <Icon name="map-pin" size={18} color={colors.text.secondary} />
                   <Text style={styles.cardOptionText}>Dirección para recargas y retiros</Text>
-                  <Icon name="chevron-right" size={16} color="#9CA3AF" />
+                  <Icon name="chevron-right" size={16} color={colors.text.light} />
                 </TouchableOpacity>
               )}
 
@@ -687,9 +687,9 @@ export const ProfileScreen = () => {
                   style={styles.cardOption}
                   onPress={() => navigation.navigate('PayoutMethods')}
                 >
-                  <Icon name="credit-card" size={18} color="#6B7280" />
+                  <Icon name="credit-card" size={18} color={colors.text.secondary} />
                   <Text style={styles.cardOptionText}>Formas de cobro</Text>
-                  <Icon name="chevron-right" size={16} color="#9CA3AF" />
+                  <Icon name="chevron-right" size={16} color={colors.text.light} />
                 </TouchableOpacity>
               )}
 
@@ -698,9 +698,9 @@ export const ProfileScreen = () => {
             style={styles.cardOption}
             onPress={() => navigation.navigate('NotificationSettings')}
           >
-            <Icon name="bell" size={18} color="#6B7280" />
+            <Icon name="bell" size={18} color={colors.text.secondary} />
             <Text style={styles.cardOptionText}>Notificaciones</Text>
-            <Icon name="chevron-right" size={16} color="#9CA3AF" />
+            <Icon name="chevron-right" size={16} color={colors.text.light} />
           </TouchableOpacity>
           */}
           </View>
@@ -710,7 +710,7 @@ export const ProfileScreen = () => {
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <View style={styles.cardTitleRow}>
-              <Icon name="shield" size={20} color="#6B7280" />
+              <Icon name="shield" size={20} color={colors.text.secondary} />
               <Text style={styles.cardTitle}>Seguridad</Text>
             </View>
           </View>
@@ -723,7 +723,7 @@ export const ProfileScreen = () => {
               onPress={handleBiometricUpdate}
               disabled={!biometricAvailable || biometricLoading || biometricActionLoading}
             >
-              <Icon name="smartphone" size={18} color={biometricAvailable ? "#10B981" : "#9CA3AF"} />
+              <Icon name="smartphone" size={18} color={biometricAvailable ? colors.primaryDark : colors.text.light} />
               <View style={styles.biometricTextContainer}>
                 <Text style={styles.biometricTitle}>Biometría / PIN</Text>
                 {biometricLoading ? (
@@ -737,7 +737,7 @@ export const ProfileScreen = () => {
                 )}
               </View>
               {biometricAvailable && !biometricLoading && (
-                <Icon name="chevron-right" size={16} color="#9CA3AF" />
+                <Icon name="chevron-right" size={16} color={colors.text.light} />
               )}
             </TouchableOpacity>
 
@@ -746,7 +746,7 @@ export const ProfileScreen = () => {
               style={styles.cardOption}
               onPress={handleBackupPress}
             >
-              <Icon name="cloud" size={18} color={driveBackupEnabled ? "#10B981" : "#6B7280"} />
+              <Icon name="cloud" size={18} color={driveBackupEnabled ? colors.primaryDark : colors.text.secondary} />
               <View style={styles.biometricTextContainer}>
                 <Text style={styles.biometricTitle}>Respaldo en la Nube</Text>
                 {driveBackupEnabled ? (
@@ -755,7 +755,7 @@ export const ProfileScreen = () => {
                   <Text style={styles.biometricStatusText}>Toca para activar</Text>
                 )}
               </View>
-              <Icon name="chevron-right" size={16} color="#9CA3AF" />
+              <Icon name="chevron-right" size={16} color={colors.text.light} />
             </TouchableOpacity>
           </View>
         </View>
@@ -764,7 +764,7 @@ export const ProfileScreen = () => {
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <View style={styles.cardTitleRow}>
-              <Icon name="message-circle" size={20} color="#6B7280" />
+              <Icon name="message-circle" size={20} color={colors.text.secondary} />
               <Text style={styles.cardTitle}>Comunidad y soporte</Text>
             </View>
           </View>
@@ -775,12 +775,12 @@ export const ProfileScreen = () => {
               accessibilityRole="link"
               accessibilityLabel="Abrir el grupo de Telegram de Confío"
             >
-              <Icon name="send" size={18} color="#6B7280" />
+              <Icon name="send" size={18} color={colors.text.secondary} />
               <View style={styles.biometricTextContainer}>
                 <Text style={styles.biometricTitle}>Grupo de Telegram</Text>
                 <Text style={styles.biometricStatusText}>Comunidad oficial · t.me/confio4world</Text>
               </View>
-              <Icon name="chevron-right" size={16} color="#9CA3AF" />
+              <Icon name="chevron-right" size={16} color={colors.text.light} />
             </TouchableOpacity>
           </View>
         </View>
@@ -899,7 +899,7 @@ export const ProfileScreen = () => {
           onPress={signOut}
           accessibilityLabel="Cerrar sesión"
           style={{ marginTop: 16, marginBottom: 32 }}
-          textStyle={{ color: '#EF4444', fontWeight: '500' }}
+          textStyle={{ color: colors.danger, fontWeight: '500' }}
         />
       </ScrollView>
       <ReferralInputModal
@@ -936,7 +936,7 @@ export const ProfileScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
   },
   scrollContent: {
     flexGrow: 1,
@@ -958,7 +958,7 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 12,
@@ -966,7 +966,7 @@ const styles = StyleSheet.create({
   },
   avatarEmbajador: {
     borderWidth: 3,
-    borderColor: '#8B5CF6',
+    borderColor: colors.secondary,
   },
   avatarText: {
     fontSize: 32,
@@ -984,12 +984,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: '#fff',
+    borderColor: colors.white,
   },
   name: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#fff',
+    color: colors.white,
   },
   profileNameRow: {
     flexDirection: 'row',
@@ -1006,7 +1006,7 @@ const styles = StyleSheet.create({
     width: 18,
     height: 18,
     borderRadius: 9,
-    backgroundColor: '#3B82F6',
+    backgroundColor: colors.accent,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1020,7 +1020,7 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.8)',
   },
   card: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 16,
     marginHorizontal: 16,
     marginBottom: 12,
@@ -1051,7 +1051,7 @@ const styles = StyleSheet.create({
   cardTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#1F2937',
+    color: colors.text.primary,
   },
   cardOptions: {
     gap: 12,
@@ -1064,7 +1064,7 @@ const styles = StyleSheet.create({
   cardOptionText: {
     flex: 1,
     fontSize: 15,
-    color: '#374151',
+    color: colors.text.primary,
     marginLeft: 12,
   },
   cardOptionDisabled: {
@@ -1077,26 +1077,26 @@ const styles = StyleSheet.create({
   },
   biometricTitle: {
     fontSize: 15,
-    color: '#374151',
+    color: colors.text.primary,
   },
   biometricStatusText: {
     fontSize: 13,
-    color: '#6B7280',
+    color: colors.text.secondary,
     marginTop: 4,
   },
   biometricStatusActive: {
     fontSize: 13,
-    color: '#10B981',
+    color: colors.primaryDark,
     marginTop: 4,
     fontWeight: '500',
   },
   biometricStatusUnavailable: {
     fontSize: 13,
-    color: '#EF4444',
+    color: colors.danger,
     marginTop: 4,
   },
   referralCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.white,
     borderRadius: 20,
     marginHorizontal: 16,
     marginBottom: 16,
@@ -1134,15 +1134,15 @@ const styles = StyleSheet.create({
   referralTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text.primary,
   },
   referralSubtitle: {
     fontSize: 13,
-    color: '#6B7280',
+    color: colors.text.secondary,
     lineHeight: 18,
   },
   referralUsername: {
-    backgroundColor: '#ECFDF5',
+    backgroundColor: colors.primarySoft,
     borderRadius: 16,
     paddingVertical: 12,
     paddingHorizontal: 16,
@@ -1151,7 +1151,7 @@ const styles = StyleSheet.create({
   referralUsernameLabel: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#047857',
+    color: colors.primaryDark,
     textTransform: 'uppercase',
     letterSpacing: 0.8,
     marginBottom: 4,
@@ -1159,12 +1159,12 @@ const styles = StyleSheet.create({
   referralUsernameValue: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#047857',
+    color: colors.primaryDark,
   },
   referralUsernameHint: {
     marginTop: 8,
     fontSize: 12,
-    color: '#047857',
+    color: colors.primaryDark,
     lineHeight: 18,
   },
   referralActions: {
@@ -1179,11 +1179,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 12,
     borderRadius: 12,
-    backgroundColor: '#ECFDF5',
+    backgroundColor: colors.primarySoft,
     gap: 8,
   },
   referralCopyText: {
-    color: '#047857',
+    color: colors.primaryDark,
     fontWeight: '600',
     fontSize: 14,
   },
@@ -1194,11 +1194,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 12,
     borderRadius: 12,
-    backgroundColor: '#047857',
+    backgroundColor: colors.primaryDark,
     gap: 8,
   },
   referralShareText: {
-    color: '#FFFFFF',
+    color: colors.white,
     fontWeight: '600',
     fontSize: 14,
   },
@@ -1212,7 +1212,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(16,185,129,0.3)',
     paddingVertical: 12,
     paddingHorizontal: 16,
-    backgroundColor: '#ecfdf5',
+    backgroundColor: colors.primarySoft,
     gap: 8,
   },
   referralStatusDot: {
@@ -1224,7 +1224,7 @@ const styles = StyleSheet.create({
   referralClaimText: {
     flex: 1,
     marginHorizontal: 12,
-    color: '#047857',
+    color: colors.primaryDark,
     fontWeight: '600',
     fontSize: 14,
   },
@@ -1235,14 +1235,14 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 12,
     borderRadius: 12,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.neutralDark,
     marginBottom: 18,
   },
   referralUpdateUsernameText: {
     flex: 1,
     fontSize: 14,
     fontWeight: '600',
-    color: '#047857',
+    color: colors.primaryDark,
   },
   referralSteps: {
     gap: 12,
@@ -1257,17 +1257,17 @@ const styles = StyleSheet.create({
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: '#ECFDF5',
+    backgroundColor: colors.primarySoft,
     textAlign: 'center',
     lineHeight: 24,
     fontWeight: '700',
     fontSize: 13,
-    color: '#047857',
+    color: colors.primaryDark,
   },
   referralStepText: {
     flex: 1,
     fontSize: 13,
-    color: '#6B7280',
+    color: colors.text.secondary,
     lineHeight: 19,
   },
   referralCriteria: {
@@ -1275,24 +1275,24 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     padding: 14,
     borderRadius: 12,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: colors.neutral,
     gap: 4,
   },
   referralCriteriaTitle: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#374151',
+    color: colors.text.primary,
     marginBottom: 4,
   },
   referralCriteriaItem: {
     fontSize: 13,
-    color: '#6B7280',
+    color: colors.text.secondary,
     lineHeight: 18,
   },
   referralCriteriaNote: {
     marginTop: 8,
     fontSize: 12,
-    color: '#047857',
+    color: colors.primaryDark,
   },
   referralRegisterButton: {
     flexDirection: 'row',
@@ -1301,14 +1301,14 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 12,
     borderRadius: 12,
-    backgroundColor: '#ECFDF5',
+    backgroundColor: colors.primarySoft,
     marginBottom: 12,
   },
   referralRegisterButtonText: {
     flex: 1,
     fontSize: 14,
     fontWeight: '600',
-    color: '#047857',
+    color: colors.primaryDark,
   },
   referralLink: {
     flexDirection: 'row',
@@ -1318,7 +1318,7 @@ const styles = StyleSheet.create({
   referralLinkText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#047857',
+    color: colors.primaryDark,
   },
   founderSection: {
     paddingHorizontal: 16,
@@ -1327,7 +1327,7 @@ const styles = StyleSheet.create({
   },
   separator: {
     height: 1,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: colors.border,
     marginHorizontal: 16,
     marginVertical: 8,
   },
@@ -1341,7 +1341,7 @@ const styles = StyleSheet.create({
   founderTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#1F2937',
+    color: colors.text.primary,
   },
   socialButtonsContainer: {
     flexDirection: 'row',
@@ -1374,13 +1374,13 @@ const styles = StyleSheet.create({
   },
   founderTagline: {
     fontSize: 15,
-    color: '#1F2937',
+    color: colors.text.primary,
     fontWeight: '600',
     textAlign: 'center',
   },
   founderDescription: {
     fontSize: 13,
-    color: '#6B7280',
+    color: colors.text.secondary,
     textAlign: 'center',
     fontStyle: 'italic',
   },
@@ -1398,10 +1398,10 @@ const styles = StyleSheet.create({
   },
   legalLinkText: {
     fontSize: 13,
-    color: '#6B7280',
+    color: colors.text.secondary,
   },
   legalSeparator: {
-    color: '#E5E7EB',
+    color: colors.border,
     fontSize: 13,
   },
 }); 
