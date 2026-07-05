@@ -1546,7 +1546,7 @@ export const ContactsScreen = () => {
               icon: 'dollar-sign',
               image: USDCLogo,
               title: 'USD Coin · USDC',
-              subtitle: 'Red Algorand · stablecoin',
+              subtitle: 'Red Algorand · desde tu saldo cUSD',
               onPress: () => handleSendTokenSelection('usdc'),
             },
             {
