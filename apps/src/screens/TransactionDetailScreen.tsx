@@ -20,6 +20,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MainStackParamList } from '../types/navigation';
 import Icon from 'react-native-vector-icons/Feather';
+import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
 import USDCLogo from '../assets/png/USDC.png';
 import cUSDLogo from '../assets/png/cUSD.png';
 import WhatsAppLogo from '../assets/svg/WhatsApp.svg';
@@ -231,6 +232,9 @@ export const TransactionDetailScreen = () => {
   const [showBlockchainDetails, setShowBlockchainDetails] = useState(false);
   const [reclaimingInvite, setReclaimingInvite] = useState(false);
   const [reclaimedInviteTxid, setReclaimedInviteTxid] = useState('');
+  // Measured hero size: explicit Svg dimensions force a gradient repaint
+  // whenever the header's height changes (see AccountDetailScreen).
+  const [fieldSize, setFieldSize] = useState({ width: 0, height: 0 });
   const { userProfile } = useAuth();
   const supportCopy = getSupportCopy(userProfile?.phoneCountry);
   const styles = StyleSheet.create({
@@ -249,7 +253,7 @@ export const TransactionDetailScreen = () => {
     },
     errorText: {
       fontSize: 16,
-      color: '#ef4444',
+      color: colors.danger,
       textAlign: 'center',
       padding: 20,
     },
@@ -257,10 +261,12 @@ export const TransactionDetailScreen = () => {
       flex: 1,
     },
     header: {
-      paddingTop: 0,
+      backgroundColor: colors.primary,
+      overflow: 'hidden',
+    },
+    headerInner: {
       paddingHorizontal: 20,
       paddingBottom: 30,
-      backgroundColor: colors.primary,
     },
     headerRow: {
       flexDirection: 'row',
@@ -279,41 +285,22 @@ export const TransactionDetailScreen = () => {
     headerTitle: {
       fontSize: 20,
       fontWeight: '600',
-      color: '#fff',
-    },
-    statusContainer: {
-      alignItems: 'center',
-      marginBottom: 16,
-    },
-    statusIcon: {
-      width: 64,
-      height: 64,
-      borderRadius: 32,
-      backgroundColor: 'rgba(255, 255, 255, 0.2)',
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginBottom: 12,
-    },
-    statusText: {
-      fontSize: 16,
-      fontWeight: '500',
-      color: '#fff',
-      marginBottom: 4,
+      color: colors.white,
     },
     amountText: {
       fontSize: 36,
       fontWeight: 'bold',
-      color: '#fff',
+      color: colors.white,
       marginBottom: 4,
     },
     currencyText: {
       fontSize: 20,
-      color: '#fff',
+      color: colors.white,
       opacity: 0.8,
     },
     content: {
       flex: 1,
-      backgroundColor: '#fff',
+      backgroundColor: colors.white,
       borderTopLeftRadius: 24,
       borderTopRightRadius: 24,
       paddingTop: 24,
@@ -333,11 +320,6 @@ export const TransactionDetailScreen = () => {
       justifyContent: 'center',
       marginBottom: 12,
     },
-    avatarText: {
-      fontSize: 24,
-      fontWeight: 'bold',
-      color: '#fff',
-    },
     receiverName: {
       fontSize: 20,
       fontWeight: 'bold',
@@ -350,7 +332,7 @@ export const TransactionDetailScreen = () => {
     },
     addressText: {
       fontSize: 14,
-      color: '#6b7280',
+      color: colors.text.secondary,
     },
     dateTimeRow: {
       flexDirection: 'row',
@@ -365,7 +347,7 @@ export const TransactionDetailScreen = () => {
     },
     dateTimeText: {
       fontSize: 14,
-      color: '#6b7280',
+      color: colors.text.secondary,
       marginLeft: 6,
     },
     section: {
@@ -403,7 +385,7 @@ export const TransactionDetailScreen = () => {
     },
     label: {
       fontSize: 14,
-      color: '#6b7280',
+      color: colors.text.secondary,
     },
     value: {
       fontSize: 14,
@@ -432,17 +414,14 @@ export const TransactionDetailScreen = () => {
     actionButtonText: {
       fontSize: 16,
       fontWeight: '600',
-      color: '#fff',
+      color: colors.white,
     },
     // Missing card styles
-    cardContent: {
-      flex: 1,
-    },
     summaryContainer: {
       gap: 16,
     },
     feeBreakdown: {
-      backgroundColor: '#f9fafb',
+      backgroundColor: colors.neutral,
       borderRadius: 8,
       padding: 12,
     },
@@ -454,26 +433,16 @@ export const TransactionDetailScreen = () => {
     },
     feeLabel: {
       fontSize: 14,
-      color: '#6b7280',
+      color: colors.text.secondary,
     },
     feeAmount: {
       fontSize: 14,
       fontWeight: '600',
       color: colors.dark,
     },
-    feeValueFree: {
-      fontSize: 14,
-      fontWeight: '600',
-      color: '#10b981',
-    },
-    feeValueNote: {
-      fontSize: 12,
-      color: '#6b7280',
-      marginLeft: 4,
-    },
     divider: {
       height: 1,
-      backgroundColor: '#e5e7eb',
+      backgroundColor: colors.border,
       marginVertical: 8,
     },
     totalLabel: {
@@ -493,7 +462,7 @@ export const TransactionDetailScreen = () => {
     },
     summaryLabel: {
       fontSize: 14,
-      color: '#6b7280',
+      color: colors.text.secondary,
     },
     summaryValue: {
       fontSize: 14,
@@ -510,61 +479,7 @@ export const TransactionDetailScreen = () => {
     statusValue: {
       fontSize: 14,
       fontWeight: '500',
-      color: '#10b981',
-    },
-    invitationCard: {
-      backgroundColor: '#fef2f2',
-      borderColor: '#ef4444',
-      borderWidth: 1,
-    },
-    invitationHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      marginBottom: 12,
-    },
-    invitationCardTitle: {
-      fontSize: 18,
-      fontWeight: 'bold',
-      marginLeft: 8,
-    },
-    invitationCardText: {
-      fontSize: 14,
-      color: '#1f2937',
-      marginBottom: 12,
-      lineHeight: 20,
-    },
-    invitationInfoBox: {
-      borderRadius: 8,
-      borderWidth: 1,
-      padding: 12,
-      marginBottom: 16,
-    },
-    invitationInfoTitle: {
-      fontSize: 14,
-      fontWeight: 'bold',
-      marginBottom: 8,
-    },
-    invitationInfoRow: {
-      flexDirection: 'row',
-      marginBottom: 4,
-    },
-    invitationInfoText: {
-      fontSize: 13,
-      color: '#374151',
-      lineHeight: 18,
-    },
-    shareButton: {
-      backgroundColor: '#ef4444',
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      paddingVertical: 12,
-      borderRadius: 8,
-    },
-    shareButtonText: {
-      color: '#fff',
-      fontSize: 14,
-      fontWeight: '600',
+      color: colors.primaryDark,
     },
     valuePropositionOuter: {
       backgroundColor: '#A7F3D0',
@@ -586,12 +501,12 @@ export const TransactionDetailScreen = () => {
     },
     valueDescription: {
       fontSize: 14,
-      color: '#374151',
+      color: colors.text.primary,
       marginBottom: 12,
       lineHeight: 20,
     },
     valueHighlightBox: {
-      backgroundColor: '#fff',
+      backgroundColor: colors.white,
       borderRadius: 12,
       padding: 12,
       borderWidth: 1,
@@ -601,28 +516,6 @@ export const TransactionDetailScreen = () => {
       fontSize: 13,
       color: '#065f46',
       lineHeight: 20,
-    },
-    bold: {
-      fontWeight: 'bold',
-    },
-    actionsContainer: {
-      gap: 12,
-    },
-    primaryAction: {
-      backgroundColor: colors.primary,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      paddingVertical: 14,
-      borderRadius: 12,
-    },
-    primaryActionText: {
-      color: '#fff',
-      fontSize: 16,
-      fontWeight: '600',
-    },
-    actionIcon: {
-      marginRight: 8,
     },
     secondaryButton: {
       backgroundColor: colors.neutral,
@@ -643,11 +536,11 @@ export const TransactionDetailScreen = () => {
       paddingHorizontal: 20,
       borderRadius: 8,
       borderWidth: 1,
-      borderColor: '#e5e7eb',
+      borderColor: colors.border,
     },
     blockchainButtonText: {
       fontSize: 14,
-      color: '#374151',
+      color: colors.text.primary,
       marginLeft: 8,
     },
     blockchainIcon: {
@@ -671,7 +564,7 @@ export const TransactionDetailScreen = () => {
     avatarText: {
       fontSize: 20,
       fontWeight: 'bold',
-      color: '#fff',
+      color: colors.white,
     },
     participantDetails: {
       flex: 1,
@@ -696,19 +589,16 @@ export const TransactionDetailScreen = () => {
       width: 16,
       height: 16,
       borderRadius: 8,
-      backgroundColor: '#3B82F6',
+      backgroundColor: colors.accent,
       alignItems: 'center',
       justifyContent: 'center',
     },
     transactionTitle: {
       fontSize: 16,
-      color: '#fff',
+      color: colors.white,
       textAlign: 'center',
       marginTop: 8,
       marginBottom: 12, // Restored margin to fix spacing issues
-    },
-    negativeAmount: {
-      color: '#fee2e2',
     },
     blockchainDetails: {
       marginTop: 16,
@@ -716,7 +606,7 @@ export const TransactionDetailScreen = () => {
     blockchainTitle: {
       fontSize: 14,
       fontWeight: '600',
-      color: '#374151',
+      color: colors.text.primary,
       marginBottom: 8,
     },
     hashContainer: {
@@ -728,7 +618,7 @@ export const TransactionDetailScreen = () => {
     },
     hashText: {
       fontSize: 12,
-      color: '#6b7280',
+      color: colors.text.secondary,
       fontFamily: technicalFontFamily,
       flex: 1,
     },
@@ -740,7 +630,7 @@ export const TransactionDetailScreen = () => {
     },
     technicalLabel: {
       fontSize: 14,
-      color: '#6b7280',
+      color: colors.text.secondary,
     },
     technicalValue: {
       fontSize: 14,
@@ -762,7 +652,7 @@ export const TransactionDetailScreen = () => {
     explorerButtonText: {
       fontSize: 14,
       fontWeight: '500',
-      color: '#fff',
+      color: colors.white,
     },
     infoNote: {
       backgroundColor: '#eff6ff',
@@ -781,27 +671,28 @@ export const TransactionDetailScreen = () => {
       marginRight: 4,
     },
     feeValueNote: {
-      color: '#6B7280',
+      color: colors.text.secondary,
       fontSize: 14,
     },
+    // Pending invitation is a warning, not an error — amber pill.
     invitationNotice: {
       flexDirection: 'row',
       alignItems: 'center',
       marginTop: 12,
-      backgroundColor: '#ef4444',
+      backgroundColor: colors.offRampIcon,
       paddingHorizontal: 16,
       paddingVertical: 8,
       borderRadius: 20,
     },
     invitationText: {
-      color: '#fff',
+      color: colors.white,
       fontSize: 14,
       fontWeight: '500',
     },
     invitationCard: {
-      backgroundColor: '#fef2f2',
-      borderColor: '#ef4444',
-      borderWidth: 2,
+      backgroundColor: colors.warning.background,
+      borderColor: colors.warning.border,
+      borderWidth: 1,
     },
     invitationHeader: {
       flexDirection: 'row',
@@ -816,12 +707,12 @@ export const TransactionDetailScreen = () => {
     },
     invitationCardText: {
       fontSize: 16,
-      color: '#1f2937',
+      color: colors.text.primary,
       marginBottom: 16,
       lineHeight: 24,
     },
     invitationInfoBox: {
-      backgroundColor: '#fff',
+      backgroundColor: colors.white,
       borderRadius: 12,
       padding: 16,
       borderWidth: 1,
@@ -840,7 +731,7 @@ export const TransactionDetailScreen = () => {
     },
     invitationInfoText: {
       fontSize: 14,
-      color: '#4b5563',
+      color: colors.text.secondary,
       flex: 1,
     },
     shareButton: {
@@ -854,7 +745,7 @@ export const TransactionDetailScreen = () => {
       marginTop: 16,
     },
     shareButtonText: {
-      color: '#fff',
+      color: colors.white,
       fontSize: 16,
       fontWeight: '600',
     },
@@ -892,7 +783,7 @@ export const TransactionDetailScreen = () => {
     iconContainer: {
       width: 72,
       height: 72,
-      backgroundColor: '#ffffff',
+      backgroundColor: colors.white,
       borderRadius: 24,
       justifyContent: 'center',
       alignItems: 'center',
@@ -938,7 +829,7 @@ export const TransactionDetailScreen = () => {
       alignItems: 'center',
     },
     exchangeIconText: {
-      color: '#fff',
+      color: colors.white,
       fontWeight: 'bold',
       fontSize: 14,
     },
@@ -969,7 +860,7 @@ export const TransactionDetailScreen = () => {
     },
     infoSubtitle: {
       fontSize: 14,
-      color: '#6b7280',
+      color: colors.text.secondary,
     },
 
 
@@ -1008,7 +899,7 @@ export const TransactionDetailScreen = () => {
     primaryActionText: {
       fontSize: 16,
       fontWeight: '500',
-      color: '#fff',
+      color: colors.white,
     },
     secondaryAction: {
       flexDirection: 'row',
@@ -1021,7 +912,7 @@ export const TransactionDetailScreen = () => {
     secondaryActionText: {
       fontSize: 16,
       fontWeight: '500',
-      color: '#6b7280',
+      color: colors.text.secondary,
     },
     actionIcon: {
       marginRight: 8,
@@ -1034,7 +925,7 @@ export const TransactionDetailScreen = () => {
       padding: 20,
     },
     modalContent: {
-      backgroundColor: '#fff',
+      backgroundColor: colors.white,
       borderRadius: 20,
       width: '100%',
       maxWidth: 400,
@@ -1046,7 +937,7 @@ export const TransactionDetailScreen = () => {
       justifyContent: 'space-between',
       padding: 24,
       borderBottomWidth: 1,
-      borderBottomColor: '#e5e7eb',
+      borderBottomColor: colors.border,
     },
     modalTitle: {
       fontSize: 20,
@@ -1062,7 +953,7 @@ export const TransactionDetailScreen = () => {
     modalSectionTitle: {
       fontSize: 14,
       fontWeight: '500',
-      color: '#374151',
+      color: colors.text.primary,
       marginBottom: 8,
     },
   })
@@ -1816,26 +1707,26 @@ export const TransactionDetailScreen = () => {
   const getTransactionIcon = (type: string) => {
     switch (type) {
       case 'received':
-        return <Icon name="arrow-down" size={24} color="#10b981" />;
+        return <Icon name="arrow-down" size={24} color={colors.primaryDark} />;
       case 'sent':
-        return <Icon name="arrow-up" size={24} color="#ef4444" />;
+        return <Icon name="arrow-up" size={24} color={colors.text.primary} />;
       case 'exchange':
       case 'conversion':
-        return <Icon name="refresh-cw" size={24} color="#3b82f6" />;
+        return <Icon name="refresh-cw" size={24} color={colors.accent} />;
       case 'payment':
-        return <Icon name="shopping-bag" size={24} color="#8b5cf6" />;
+        return <Icon name="shopping-bag" size={24} color={colors.secondary} />;
       case 'ramp':
-        return <Icon name="repeat" size={24} color="#0ea5e9" />;
+        return <Icon name="repeat" size={24} color="#0EA5E9" />;
       case 'payroll':
-        return <Icon name="briefcase" size={24} color="#10B981" />;
+        return <Icon name="briefcase" size={24} color={colors.primaryDark} />;
       case 'humanitarian':
         return <Icon name="heart" size={24} color="#E11D48" />;
       case 'deposit':
-        return <Icon name="arrow-down-circle" size={24} color="#10b981" />;
+        return <Icon name="arrow-down-circle" size={24} color={colors.primaryDark} />;
       case 'withdrawal':
-        return <Icon name="arrow-up-circle" size={24} color="#ef4444" />;
+        return <Icon name="arrow-up-circle" size={24} color={colors.danger} />;
       default:
-        return <Icon name="arrow-up" size={24} color="#6b7280" />;
+        return <Icon name="arrow-up" size={24} color={colors.text.secondary} />;
     }
   };
 
@@ -1897,7 +1788,7 @@ export const TransactionDetailScreen = () => {
   const getStatusColor = (status: string) => {
     switch (normalizeStatusForDisplay(status)) {
       case 'completed':
-        return { text: '#10B981', bg: '#d1fae5' };
+        return { text: colors.primaryDark, bg: '#d1fae5' };
       case 'pending':
         return { text: '#d97706', bg: '#fef3c7' };
       case 'processing':
@@ -1905,9 +1796,9 @@ export const TransactionDetailScreen = () => {
       case 'aml_review':
         return { text: '#92400e', bg: '#fde68a' };
       case 'failed':
-        return { text: '#dc2626', bg: '#fee2e2' };
+        return { text: colors.error.icon, bg: '#fee2e2' };
       default:
-        return { text: '#6b7280', bg: '#f3f4f6' };
+        return { text: colors.text.secondary, bg: colors.neutralDark };
     }
   };
 
@@ -1937,11 +1828,37 @@ export const TransactionDetailScreen = () => {
             style={{ marginHorizontal: 16, marginTop: 8 }}
           />
         )}
-        {/* Header */}
-        <View style={[styles.header, { paddingTop: headerPaddingTop }]}>
+        {/* Header — brand field: vertical emerald gradient + cropped coin
+            ring, same grammar as Home/Profile/AccountDetail. Padding lives on
+            headerInner (Yoga insets absolute children by parent padding). */}
+        <View
+          style={styles.header}
+          onLayout={(e) => {
+            const { width, height } = e.nativeEvent.layout;
+            setFieldSize((prev) =>
+              prev.width === width && prev.height === height ? prev : { width, height }
+            );
+          }}
+        >
+          <Svg
+            key={`txField-${fieldSize.width}x${fieldSize.height}`}
+            width={fieldSize.width || '100%'}
+            height={fieldSize.height || '100%'}
+            style={StyleSheet.absoluteFill}
+          >
+            <Defs>
+              <SvgLinearGradient id="txDetailField" x1="0" y1="0" x2="0" y2="1">
+                <Stop offset="0" stopColor={colors.primary} />
+                <Stop offset="1" stopColor={colors.primaryDark} />
+              </SvgLinearGradient>
+            </Defs>
+            <Rect width="100%" height="100%" fill="url(#txDetailField)" />
+            <Circle cx="105%" cy="22%" r="90" stroke={colors.white} strokeWidth="22" strokeOpacity="0.10" fill="none" />
+          </Svg>
+          <View style={[styles.headerInner, { paddingTop: headerPaddingTop }]}>
           <View style={styles.headerTop}>
             <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerButton} accessibilityRole="button" accessibilityLabel="Volver">
-              <Icon name="arrow-left" size={24} color="#fff" />
+              <Icon name="arrow-left" size={24} color={colors.white} />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Detalle de Transacción</Text>
             <TouchableOpacity
@@ -1973,7 +1890,7 @@ export const TransactionDetailScreen = () => {
                 });
               }}
             >
-              <Icon name="share" size={24} color="#fff" />
+              <Icon name="share" size={24} color={colors.white} />
             </TouchableOpacity>
           </View>
 
@@ -1987,13 +1904,10 @@ export const TransactionDetailScreen = () => {
               const isNeg = typeof raw === 'string' ? raw.startsWith('-') : Number(raw) < 0;
               const sign = isNeg ? '-' : (typeof raw === 'string' && raw.startsWith('+') ? '+' : '');
               const abs = formatAmount(raw);
+              // Amount stays white either direction — the sign carries the
+              // direction; tinting outgoing pink read as an alert.
               return (
-                <Text style={[
-                  styles.amountText,
-                    (isNeg || currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'payment' || currentTx.type === 'withdrawal' ||
-                    (currentTx.type === 'conversion' && currentTx.amount?.startsWith('-')) ||
-                    (currentTx.type === 'ramp' && normalizeRampDirection(currentTx.rampDirection || currentTx.ramp_direction || currentTx.direction, currentTx.amount, currentTx.formattedTitle || currentTx.title) === 'off_ramp')) && styles.negativeAmount
-                ]}>
+                <Text style={styles.amountText}>
                   {sign ? `${sign} ` : ''}{abs} {currentTx.currency || 'cUSD'}
                 </Text>
               );
@@ -2033,16 +1947,17 @@ export const TransactionDetailScreen = () => {
 
             {showInvitationWarning && (
               <View style={styles.invitationNotice}>
-                <Icon name="alert-triangle" size={16} color="#fff" style={{ marginRight: 6 }} />
+                <Icon name="alert-triangle" size={16} color={colors.white} style={{ marginRight: 6 }} />
                 <Text style={styles.invitationText}>Tu amigo tiene 7 días para reclamar</Text>
               </View>
             )}
             {!showInvitationWarning && isInvitedFriend && invitationClaimed && (currentTx.type === 'send' || currentTx.type === 'sent') && (
-              <View style={[styles.invitationNotice, { backgroundColor: '#10b981' }]}>
-                <Icon name="check-circle" size={16} color="#fff" style={{ marginRight: 6 }} />
+              <View style={[styles.invitationNotice, { backgroundColor: colors.primaryDark }]}>
+                <Icon name="check-circle" size={16} color={colors.white} style={{ marginRight: 6 }} />
                 <Text style={styles.invitationText}>Invitación reclamada</Text>
               </View>
             )}
+          </View>
           </View>
         </View>
 
@@ -2081,7 +1996,7 @@ export const TransactionDetailScreen = () => {
               {currentTx.type === 'withdrawal' && (
                 <View style={styles.participantInfo}>
                   <View style={styles.avatarContainer}>
-                    <Icon name="arrow-up-circle" size={24} color="#ef4444" />
+                    <Icon name="arrow-up-circle" size={24} color={colors.danger} />
                   </View>
                   <View style={styles.participantDetails}>
                     <Text style={styles.participantName}>Retiro hacia wallet externa</Text>
@@ -2107,15 +2022,15 @@ export const TransactionDetailScreen = () => {
               {currentTx.type === 'conversion' && (
                 <View style={styles.exchangeInfo}>
                   <View style={styles.exchangeIcons}>
-                    <View style={[styles.exchangeIcon, { backgroundColor: '#fff' }]}>
+                    <View style={[styles.exchangeIcon, { backgroundColor: colors.white }]}>
                       {conversionFromCurrencyLabel.toUpperCase() === 'USDC' ? (
                         <Image source={USDCLogo} style={{ width: 24, height: 24, resizeMode: 'contain' }} />
                       ) : (
                         <Image source={cUSDLogo} style={{ width: 24, height: 24, resizeMode: 'contain' }} />
                       )}
                     </View>
-                    <Icon name="arrow-right" size={16} color="#6b7280" style={styles.exchangeArrow} />
-                    <View style={[styles.exchangeIcon, { backgroundColor: '#fff' }]}>
+                    <Icon name="arrow-right" size={16} color={colors.text.secondary} style={styles.exchangeArrow} />
+                    <View style={[styles.exchangeIcon, { backgroundColor: colors.white }]}>
                       {conversionToCurrencyLabel.toUpperCase() === 'USDC' ? (
                         <Image source={USDCLogo} style={{ width: 24, height: 24, resizeMode: 'contain' }} />
                       ) : (
@@ -2173,7 +2088,7 @@ export const TransactionDetailScreen = () => {
                             <View key={i} style={styles.participantLastWordBadgeGroup}>
                               <Text style={styles.participantName}>{word}</Text>
                               <View style={styles.participantInlineVerifiedBadge}>
-                                <Icon name="check" size={11} color="#fff" />
+                                <Icon name="check" size={11} color={colors.white} />
                               </View>
                             </View>
                           );
@@ -2244,7 +2159,7 @@ export const TransactionDetailScreen = () => {
                             <View key={i} style={styles.participantLastWordBadgeGroup}>
                               <Text style={styles.participantName}>{word}</Text>
                               <View style={styles.participantInlineVerifiedBadge}>
-                                <Icon name="check" size={11} color="#fff" />
+                                <Icon name="check" size={11} color={colors.white} />
                               </View>
                             </View>
                           );
@@ -2318,7 +2233,7 @@ export const TransactionDetailScreen = () => {
                             <View key={i} style={styles.participantLastWordBadgeGroup}>
                               <Text style={styles.participantName}>{word}</Text>
                               <View style={styles.participantInlineVerifiedBadge}>
-                                <Icon name="check" size={11} color="#fff" />
+                                <Icon name="check" size={11} color={colors.white} />
                               </View>
                             </View>
                           );
@@ -2345,11 +2260,11 @@ export const TransactionDetailScreen = () => {
               {currentTx.type === 'exchange' && (
                 <View style={styles.exchangeInfo}>
                   <View style={styles.exchangeIcons}>
-                    <View style={[styles.exchangeIcon, { backgroundColor: '#fff' }]}>
+                    <View style={[styles.exchangeIcon, { backgroundColor: colors.white }]}>
                       <Image source={USDCLogo} style={{ width: 24, height: 24, resizeMode: 'contain' }} />
                     </View>
-                    <Icon name="arrow-down" size={16} color="#6b7280" style={styles.exchangeArrow} />
-                    <View style={[styles.exchangeIcon, { backgroundColor: '#fff' }]}>
+                    <Icon name="arrow-down" size={16} color={colors.text.secondary} style={styles.exchangeArrow} />
+                    <View style={[styles.exchangeIcon, { backgroundColor: colors.white }]}>
                       <Image source={cUSDLogo} style={{ width: 24, height: 24, resizeMode: 'contain' }} />
                     </View>
                   </View>
@@ -2359,7 +2274,7 @@ export const TransactionDetailScreen = () => {
 
               {/* Date & Time */}
               <View style={styles.infoRow}>
-                <Icon name="clock" size={20} color="#9ca3af" style={styles.infoIcon} />
+                <Icon name="clock" size={20} color={colors.text.light} style={styles.infoIcon} />
                 <View style={styles.infoContent}>
                   <Text style={styles.infoTitle}>
                     {(() => {
@@ -2420,7 +2335,7 @@ export const TransactionDetailScreen = () => {
               {/* Location for payments - only show when user is paying a business */}
               {currentTx.type === 'payment' && currentTx.amount?.startsWith('-') && currentTx.location && (
                 <View style={styles.infoRow}>
-                  <Icon name="map-pin" size={20} color="#9ca3af" style={styles.infoIcon} />
+                  <Icon name="map-pin" size={20} color={colors.text.light} style={styles.infoIcon} />
                   <View style={styles.infoContent}>
                     <Text style={styles.infoTitle}>{currentTx.location}</Text>
                     <Text style={styles.infoSubtitle}>ID: {currentTx.merchantId}</Text>
@@ -2432,7 +2347,7 @@ export const TransactionDetailScreen = () => {
               {currentTx.note && (
                 <View style={styles.noteContainer}>
                   <View style={styles.noteHeader}>
-                    <Icon name="file-text" size={20} color="#9ca3af" style={styles.infoIcon} />
+                    <Icon name="file-text" size={20} color={colors.text.light} style={styles.infoIcon} />
                     <Text style={styles.noteTitle}>Nota</Text>
                   </View>
                   <Text style={styles.noteText}>{currentTx.note}</Text>
@@ -2550,8 +2465,8 @@ export const TransactionDetailScreen = () => {
                       const isProcessing = rs === 'PROCESSING';
                       return (
                         <View style={styles.statusContainer}>
-                          <Icon name="loader" size={16} color={isProcessing ? '#3b82f6' : '#f59e0b'} style={styles.statusIcon} />
-                          <Text style={[styles.statusValue, { color: isProcessing ? '#3b82f6' : '#f59e0b' }]}>
+                          <Icon name="loader" size={16} color={isProcessing ? colors.accent : colors.offRampIcon} style={styles.statusIcon} />
+                          <Text style={[styles.statusValue, { color: isProcessing ? colors.accent : colors.offRampIcon }]}>
                             {isProcessing ? 'En proceso' : 'Pendiente'}
                           </Text>
                         </View>
@@ -2560,7 +2475,7 @@ export const TransactionDetailScreen = () => {
                     if (rs === 'COMPLETED' || rs === 'DELIVERED' || rs === 'completed') {
                       return (
                         <View style={styles.statusContainer}>
-                          <Icon name="check-circle" size={16} color="#10b981" style={styles.statusIcon} />
+                          <Icon name="check-circle" size={16} color={colors.primaryDark} style={styles.statusIcon} />
                           <Text style={styles.statusValue}>Completado</Text>
                         </View>
                       );
@@ -2568,8 +2483,8 @@ export const TransactionDetailScreen = () => {
                     if (rs === 'FAILED' || rs === 'REJECTED' || rs === 'failed') {
                       return (
                         <View style={styles.statusContainer}>
-                          <Icon name="x-circle" size={16} color="#ef4444" style={styles.statusIcon} />
-                          <Text style={[styles.statusValue, { color: '#ef4444' }]}>Fallido</Text>
+                          <Icon name="x-circle" size={16} color={colors.danger} style={styles.statusIcon} />
+                          <Text style={[styles.statusValue, { color: colors.danger }]}>Fallido</Text>
                         </View>
                       );
                     }
@@ -2579,14 +2494,14 @@ export const TransactionDetailScreen = () => {
                   if (isConfirming) {
                     return (
                       <View style={styles.statusContainer}>
-                        <Icon name="clock" size={16} color="#f59e0b" style={styles.statusIcon} />
-                        <Text style={[styles.statusValue, { color: '#f59e0b' }]}>Confirmando…</Text>
+                        <Icon name="clock" size={16} color={colors.offRampIcon} style={styles.statusIcon} />
+                        <Text style={[styles.statusValue, { color: colors.offRampIcon }]}>Confirmando…</Text>
                       </View>
                     );
                   }
                   return (
                     <View style={styles.statusContainer}>
-                      <Icon name="check-circle" size={16} color="#10b981" style={styles.statusIcon} />
+                      <Icon name="check-circle" size={16} color={colors.primaryDark} style={styles.statusIcon} />
                       <Text style={styles.statusValue}>Confirmado</Text>
                     </View>
                   );
@@ -2607,16 +2522,16 @@ export const TransactionDetailScreen = () => {
           {showInvitationWarning && (
             <View style={[styles.card, styles.invitationCard]}>
               <View style={styles.invitationHeader}>
-                <Icon name="alert-circle" size={24} color="#ef4444" />
-                <Text style={[styles.invitationCardTitle, { color: '#ef4444' }]}>¡Acción Requerida!</Text>
+                <Icon name="alert-circle" size={24} color={colors.warning.icon} />
+                <Text style={[styles.invitationCardTitle, { color: colors.warning.text }]}>¡Acción requerida!</Text>
               </View>
 
-              <Text style={[styles.invitationCardText, { fontWeight: 'bold', color: '#dc2626' }]}>
-                ⏰ Tu amigo tiene solo 7 días para reclamar el dinero o se perderá
+              <Text style={[styles.invitationCardText, { fontWeight: 'bold', color: colors.warning.text }]}>
+                Tu amigo tiene solo 7 días para reclamar el dinero o se perderá
               </Text>
 
-              <View style={[styles.invitationInfoBox, { backgroundColor: '#fef2f2', borderColor: '#ef4444' }]}>
-                <Text style={[styles.invitationInfoTitle, { color: '#dc2626' }]}>¡Avísale ahora mismo!</Text>
+              <View style={[styles.invitationInfoBox, { backgroundColor: colors.white, borderColor: colors.warning.border }]}>
+                <Text style={[styles.invitationInfoTitle, { color: colors.warning.text }]}>Avísale ahora mismo</Text>
                 <View style={styles.invitationInfoRow}>
                   <Text style={styles.invitationInfoText}>1. Envíale un mensaje con el link de invitación</Text>
                 </View>
@@ -2768,9 +2683,9 @@ export const TransactionDetailScreen = () => {
                 onPress={handleReclaimInvite}
               >
                 {reclaimingInvite ? (
-                  <ActivityIndicator size="small" color="#fff" style={{ marginRight: 8 }} />
+                  <ActivityIndicator size="small" color={colors.white} style={{ marginRight: 8 }} />
                 ) : (
-                  <Icon name="corner-down-left" size={18} color="#fff" style={{ marginRight: 8 }} />
+                  <Icon name="corner-down-left" size={18} color={colors.white} style={{ marginRight: 8 }} />
                 )}
                 <Text style={styles.shareButtonText}>
                   {reclaimingInvite ? 'Devolviendo...' : 'Devolver fondos'}
@@ -2834,7 +2749,7 @@ export const TransactionDetailScreen = () => {
               onPress={() => setShowBlockchainDetails(true)}
               style={styles.blockchainButton}
             >
-              <Icon name="external-link" size={16} color="#6b7280" style={styles.blockchainIcon} />
+              <Icon name="external-link" size={16} color={colors.text.secondary} style={styles.blockchainIcon} />
               <Text style={styles.blockchainButtonText}>Ver detalles técnicos</Text>
             </TouchableOpacity>
           </View>
@@ -2870,8 +2785,8 @@ export const TransactionDetailScreen = () => {
                 }}
                 style={[styles.blockchainButton, { backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0' }]}
               >
-                <Icon name="file-text" size={16} color="#10B981" style={styles.blockchainIcon} />
-                <Text style={[styles.blockchainButtonText, { color: '#10B981' }]}>Ver comprobante oficial</Text>
+                <Icon name="file-text" size={16} color={colors.primaryDark} style={styles.blockchainIcon} />
+                <Text style={[styles.blockchainButtonText, { color: colors.primaryDark }]}>Ver comprobante oficial</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -2920,7 +2835,7 @@ export const TransactionDetailScreen = () => {
                     }
                   }}
                 >
-                  <Icon name="user" size={16} color="#fff" style={styles.actionIcon} />
+                  <Icon name="user" size={16} color={colors.white} style={styles.actionIcon} />
                   <Text style={styles.primaryActionText}>
                     {currentTx.type === 'received' ? `Enviar a ${displayFromName}` : `Enviar de nuevo a ${displayToName}`}
                   </Text>
@@ -3004,7 +2919,7 @@ export const TransactionDetailScreen = () => {
                   }
                 }}
               >
-                <Icon name="external-link" size={16} color="#fff" style={styles.explorerIcon} />
+                <Icon name="external-link" size={16} color={colors.white} style={styles.explorerIcon} />
                 <Text style={styles.explorerButtonText}>Abrir en Pera Explorer</Text>
               </TouchableOpacity>
             </ScrollView>
