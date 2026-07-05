@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { Buffer } from 'buffer';
 import Icon from 'react-native-vector-icons/Feather';
-import Svg, { Defs, LinearGradient as SvgLinearGradient, Stop, Rect } from 'react-native-svg';
+import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -126,7 +126,6 @@ export const HumanitarianAidScreen = () => {
   const [donating, setDonating] = useState(false);
   const [donationLoadingMessage, setDonationLoadingMessage] = useState('');
   const [showProofSection, setShowProofSection] = useState(false);
-  const [heroSize, setHeroSize] = useState({ width: 0, height: 0 });
   const { data, loading, error, refetch } = useQuery(GET_HUMANITARIAN_CAMPAIGN, {
     variables: { slug: campaignSlug },
     fetchPolicy: 'cache-and-network',
@@ -334,7 +333,7 @@ export const HumanitarianAidScreen = () => {
       accessibilityRole="button"
       accessibilityLabel="Volver"
     >
-      <Icon name="arrow-left" size={20} color={light ? '#FFFFFF' : colors.textFlat} />
+      <Icon name="arrow-left" size={20} color={light ? colors.white : colors.textFlat} />
     </TouchableOpacity>
   );
 
@@ -385,26 +384,12 @@ export const HumanitarianAidScreen = () => {
         scrollEventThrottle={200}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={onRefresh} tintColor={colors.primary} />}
       >
-      {/* Hero with warm emerald gradient */}
-      <View
-        style={styles.hero}
-        onLayout={(e) => {
-          const { width, height } = e.nativeEvent.layout;
-          setHeroSize((prev) => (prev.width === width && prev.height === height ? prev : { width, height }));
-        }}
-      >
-        {heroSize.width > 0 && heroSize.height > 0 && (
-          <Svg style={StyleSheet.absoluteFill} width={heroSize.width} height={heroSize.height}>
-            <Defs>
-              <SvgLinearGradient id="heroGrad" x1="0" y1="0" x2="0" y2="1">
-                <Stop offset="0%" stopColor="#34D399" stopOpacity="1" />
-                <Stop offset="100%" stopColor="#059669" stopOpacity="1" />
-              </SvgLinearGradient>
-            </Defs>
-            <Rect x="0" y="0" width={heroSize.width} height={heroSize.height} fill="url(#heroGrad)" />
-          </Svg>
-        )}
+      {/* Hero — brand field (gradient + coin ring); the shared backdrop
+          self-measures, so the progress block appearing on load repaints it. */}
+      <View style={styles.hero}>
+        <BrandFieldBackground id="humanitarianField" ringCy="20%" ringR={80} ringWidth={20} />
 
+        <View style={styles.heroInner}>
         <View style={styles.heroTopBar}>{renderBackButton(true)}</View>
 
         <View style={styles.heroBody}>
@@ -446,6 +431,7 @@ export const HumanitarianAidScreen = () => {
             </View>
           )}
         </View>
+        </View>
       </View>
 
       <View style={styles.body}>
@@ -480,7 +466,7 @@ export const HumanitarianAidScreen = () => {
             placeholder="Otro monto"
             keyboardType="numeric"
             style={styles.customAmountInput}
-            placeholderTextColor="#94A3B8"
+            placeholderTextColor={colors.text.light}
           />
           <Text style={styles.customAmountSuffix}>cUSD</Text>
         </View>
@@ -495,7 +481,7 @@ export const HumanitarianAidScreen = () => {
                 : 'No te alcanza para este monto. Recarga cUSD para completar tu donación.'}
             </Text>
             <TouchableOpacity style={styles.topUpButton} onPress={onTopUp} activeOpacity={0.9}>
-              <Icon name="plus-circle" size={17} color="#FFFFFF" />
+              <Icon name="plus-circle" size={17} color={colors.white} />
               <Text style={styles.donateButtonText}>Recargar cUSD</Text>
             </TouchableOpacity>
           </>
@@ -506,7 +492,7 @@ export const HumanitarianAidScreen = () => {
             activeOpacity={0.9}
             disabled={!canDonate}
           >
-            <Icon name="heart" size={17} color="#FFFFFF" />
+            <Icon name="heart" size={17} color={colors.white} />
             <Text style={styles.donateButtonText}>{donateLabel}</Text>
           </TouchableOpacity>
         )}
@@ -560,7 +546,7 @@ export const HumanitarianAidScreen = () => {
               onChangeText={setServiceArea}
               placeholder={volunteerServiceAreaPlaceholder}
               style={styles.input}
-              placeholderTextColor="#94A3B8"
+              placeholderTextColor={colors.text.light}
             />
             <TextInput
               value={notes}
@@ -568,7 +554,7 @@ export const HumanitarianAidScreen = () => {
               placeholder={volunteerNotesPlaceholder}
               style={[styles.input, styles.textArea]}
               multiline
-              placeholderTextColor="#94A3B8"
+              placeholderTextColor={colors.text.light}
             />
             <Button
               title={volunteerCtaLabel}
@@ -725,17 +711,15 @@ export const HumanitarianAidScreen = () => {
   );
 };
 
+// House card chrome: hairline border, no floating shadow.
 const softShadow = {
-  shadowColor: '#0F172A',
-  shadowOffset: { width: 0, height: 4 },
-  shadowOpacity: 0.08,
-  shadowRadius: 12,
-  elevation: 3,
+  borderWidth: 1,
+  borderColor: colors.border,
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.neutral },
-  safeTop: { backgroundColor: '#34D399' },
+  safeTop: { backgroundColor: colors.primary },
   scroll: { flex: 1, backgroundColor: colors.neutral },
   content: { paddingBottom: 36 },
   body: { paddingHorizontal: 16 },
@@ -747,26 +731,27 @@ const styles = StyleSheet.create({
   backButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
   backButtonLight: { backgroundColor: 'rgba(255,255,255,0.18)', borderColor: 'rgba(255,255,255,0.28)' },
 
-  hero: { backgroundColor: '#34D399', borderBottomLeftRadius: 28, borderBottomRightRadius: 28, overflow: 'hidden', paddingHorizontal: 20, paddingTop: 8, paddingBottom: 30 },
+  hero: { backgroundColor: colors.primary, borderBottomLeftRadius: 28, borderBottomRightRadius: 28, overflow: 'hidden' },
+  heroInner: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 30 },
   heroTopBar: { alignItems: 'flex-start', marginBottom: 12 },
   heroBody: {},
   kickerRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
   heroFlag: { fontSize: 22 },
   kicker: { fontSize: 12, fontWeight: '700', letterSpacing: 0.4, color: 'rgba(255,255,255,0.9)' },
-  title: { fontSize: 26, lineHeight: 32, fontWeight: '800', color: '#FFFFFF', marginBottom: 8 },
+  title: { fontSize: 26, lineHeight: 32, fontWeight: '800', color: colors.white, marginBottom: 8 },
   description: { fontSize: 14, lineHeight: 21, color: 'rgba(255,255,255,0.9)' },
 
   progressBlock: { marginTop: 20 },
   progressTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 },
-  progressDonated: { fontSize: 22, fontWeight: '800', color: '#FFFFFF' },
+  progressDonated: { fontSize: 22, fontWeight: '800', color: colors.white },
   progressGoal: { fontSize: 13, color: 'rgba(255,255,255,0.85)' },
   progressTrack: { height: 10, borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.25)', overflow: 'hidden' },
-  progressFill: { height: '100%', borderRadius: 6, backgroundColor: '#FFFFFF' },
+  progressFill: { height: '100%', borderRadius: 6, backgroundColor: colors.white },
   progressFillDone: { backgroundColor: '#FCD34D' },
   progressBottomRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 },
   progressMeta: { fontSize: 12, color: 'rgba(255,255,255,0.85)' },
   metaBadge: { backgroundColor: 'rgba(255,255,255,0.22)', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 },
-  metaBadgeText: { fontSize: 12, fontWeight: '800', color: '#FFFFFF' },
+  metaBadgeText: { fontSize: 12, fontWeight: '800', color: colors.white },
   progressOver: { marginTop: 8, fontSize: 12, lineHeight: 17, color: 'rgba(255,255,255,0.9)' },
 
   donateCard: { backgroundColor: colors.background, borderRadius: 16, padding: 16, marginTop: -16, marginBottom: 18, ...softShadow },
@@ -801,11 +786,9 @@ const styles = StyleSheet.create({
   sectionSubtitle: { fontSize: 14, lineHeight: 20, color: colors.textSecondary, marginTop: 6, marginBottom: 12 },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
   sectionHint: { fontSize: 13, lineHeight: 18, color: colors.textSecondary, marginTop: 2, marginBottom: 12 },
-  foldHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, backgroundColor: colors.background, borderRadius: 12, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 12, paddingVertical: 12, ...softShadow },
+  foldHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, backgroundColor: colors.background, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 12, ...softShadow },
   foldTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
   foldTitle: { flexShrink: 1 },
-  foldAction: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  foldActionText: { fontSize: 13, fontWeight: '800', color: colors.primaryDark },
   countPill: { backgroundColor: colors.primarySoft, borderRadius: 12, paddingHorizontal: 8, paddingVertical: 2, minWidth: 24, alignItems: 'center' },
   countPillText: { fontSize: 12, fontWeight: '800', color: colors.primaryDark },
 
@@ -825,13 +808,7 @@ const styles = StyleSheet.create({
   emptyCardText: { fontSize: 14, lineHeight: 20, color: colors.textSecondary, textAlign: 'center' },
   listFooterSpinner: { marginTop: 12, marginBottom: 4 },
 
-  row: { backgroundColor: colors.background, borderRadius: 12, padding: 14, marginBottom: 10, ...softShadow },
-  rowTop: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, marginBottom: 6 },
-  rowTitle: { flex: 1, fontSize: 15, fontWeight: '700', color: colors.textFlat },
-  rowText: { fontSize: 14, lineHeight: 20, color: colors.textSecondary },
   note: { fontSize: 13, lineHeight: 19, color: colors.textSecondary, marginTop: 6 },
-  amount: { fontSize: 14, fontWeight: '800', color: colors.primaryDark },
-  metaRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, gap: 10 },
   statusBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 20 },
   statusBadgeDone: { backgroundColor: colors.successLight },
   statusBadgePending: { backgroundColor: colors.neutralDark },
@@ -839,10 +816,6 @@ const styles = StyleSheet.create({
   statusTextDone: { color: colors.successText },
   statusTextPending: { color: colors.textSecondary },
   timeText: { fontSize: 12, color: colors.textSecondary },
-  txLink: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 10 },
-  txLinkText: { fontSize: 12, fontWeight: '700', color: colors.primaryDark },
-  proofButton: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10 },
-  proofText: { fontSize: 13, fontWeight: '700', color: colors.primaryDark },
 
   donorRow: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: colors.background, borderRadius: 12, padding: 12, marginBottom: 8, ...softShadow },
   avatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primaryLight, alignItems: 'center', justifyContent: 'center' },
@@ -851,7 +824,6 @@ const styles = StyleSheet.create({
   donorNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   donorName: { flexShrink: 1, fontSize: 14, fontWeight: '700', color: colors.textFlat },
   donorFlag: { fontSize: 14 },
-  donorTxLink: { marginTop: 3, alignSelf: 'flex-start' },
   donorTxText: { fontSize: 12, fontWeight: '700', color: colors.primaryDark },
 
   applicationCard: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.primarySoft, borderRadius: 12, borderWidth: 1, borderColor: colors.primaryMuted, padding: 14 },
