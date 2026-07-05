@@ -19,7 +19,8 @@ export type ClientFunnelEvent =
     | 'invite_share_dismissed'
     | 'claim_entry_viewed'
     | 'signup_completed'
-    | 'financiera_whatsapp_tapped';
+    | 'financiera_whatsapp_tapped'
+    | 'receive_rail_interest';
 
 export const AnalyticsService = {
     /**

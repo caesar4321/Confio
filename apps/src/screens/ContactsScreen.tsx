@@ -116,7 +116,7 @@ const EmployeeCard = memo(({ contact, onPress, onRemove, onCancelInvitation }: E
             accessibilityRole="button"
             accessibilityLabel={`Cancelar invitación para ${contact.name}`}
           >
-            <Icon name="x" size={20} color="#ef4444" />
+            <Icon name="x" size={20} color={colors.danger} />
           </TouchableOpacity>
         ) : (
           <TouchableOpacity
@@ -128,7 +128,7 @@ const EmployeeCard = memo(({ contact, onPress, onRemove, onCancelInvitation }: E
             accessibilityRole="button"
             accessibilityLabel={`Ver opciones de ${contact.name}`}
           >
-            <Icon name="more-vertical" size={20} color="#6b7280" />
+            <Icon name="more-vertical" size={20} color={colors.text.secondary} />
           </TouchableOpacity>
         )}
       </View>
@@ -146,11 +146,11 @@ const ContactCard = memo(({ contact, isOnConfio = false, onPress, onSendPress, o
   >
     <View style={[
       styles.avatarContainer,
-      { backgroundColor: isOnConfio ? colors.primaryLight : '#e5e7eb' }
+      { backgroundColor: isOnConfio ? colors.primaryLight : colors.border }
     ]}>
       <Text style={[
         styles.avatarText,
-        { color: isOnConfio ? colors.primaryDark : '#6b7280' }
+        { color: isOnConfio ? colors.primaryDark : colors.text.secondary }
       ]}>
         {contact.avatar}
       </Text>
@@ -168,8 +168,8 @@ const ContactCard = memo(({ contact, isOnConfio = false, onPress, onSendPress, o
           numberOfLines={1}
         >{contact.name}</Text>
         {isOnConfio && contact.isReferralVerified && (
-          <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: '#3B82F6', justifyContent: 'center', alignItems: 'center' }}>
-            <Icon name="check" size={10} color="#fff" />
+          <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: colors.accent, justifyContent: 'center', alignItems: 'center' }}>
+            <Icon name="check" size={10} color={colors.white} />
           </View>
         )}
         {isOnConfio && contact.statusTier && contact.statusTier !== 'member' && (
@@ -250,7 +250,7 @@ const SearchInput = React.memo(({
     <TextInput
       style={styles.searchInput}
       placeholder={isBusinessAccount ? "Buscar empleados..." : "Buscar contactos..."}
-      placeholderTextColor="#6b7280"
+      placeholderTextColor={colors.text.secondary}
       value={localValue}
       onChangeText={handleLocalChange}
       autoCorrect={false}
@@ -628,7 +628,8 @@ export const ContactsScreen = () => {
   // support. Zero backend, real numbers on which rail to build next.
   const handleReceiveRailInterest = (rail: string, label: string) => {
     setShowReceiveSelection(false);
-    AnalyticsService.logEvent('receive_rail_interest', { rail });
+    // House funnel (FunnelEvent table, admin-visible) + Firebase dual-emit.
+    AnalyticsService.logFunnelEvent('receive_rail_interest', { rail });
     Alert.alert(
       label,
       'Aún no está disponible. Anotamos tu interés — y si lo necesitas pronto, ' +
@@ -983,7 +984,7 @@ export const ContactsScreen = () => {
         <View style={styles.infoCard}>
           <View style={styles.infoCardContent}>
             <View style={styles.infoIconContainer}>
-              <Icon name="clock" size={16} color="#fff" />
+              <Icon name="clock" size={16} color={colors.white} />
             </View>
             <View style={styles.infoTextContainer}>
               <Text style={styles.infoTitle}>Envío con invitación</Text>
@@ -1000,7 +1001,7 @@ export const ContactsScreen = () => {
         <View style={styles.employeeInfoCard}>
           <View style={styles.infoCardContent}>
             <View style={[styles.infoIconContainer, { backgroundColor: colors.primary }]}>
-              <Icon name="user-plus" size={16} color="#fff" />
+              <Icon name="user-plus" size={16} color={colors.white} />
             </View>
             <View style={styles.infoTextContainer}>
               <Text style={styles.infoTitle}>Añade tu primer empleado</Text>
@@ -1018,7 +1019,7 @@ export const ContactsScreen = () => {
             accessibilityRole="button"
             accessibilityLabel="Añadir empleado"
           >
-            <Icon name="user-plus" size={16} color="#fff" style={{ marginRight: 8 }} />
+            <Icon name="user-plus" size={16} color={colors.white} style={{ marginRight: 8 }} />
             <Text style={styles.addEmployeeFromInfoButtonText}>Añadir empleado</Text>
           </TouchableOpacity>
         </View>
@@ -1072,14 +1073,14 @@ export const ContactsScreen = () => {
             >
               <View style={styles.actionButtonContent}>
                 <View style={[styles.actionIconContainer, { backgroundColor: colors.violet }]}>
-                  <Icon name="user-plus" size={20} color="#fff" />
+                  <Icon name="user-plus" size={20} color={colors.white} />
                 </View>
                 <View style={styles.actionTextContainer}>
                   <Text style={styles.actionButtonTitle}>Añadir empleado</Text>
                   <Text style={styles.actionButtonSubtitle}>Gestiona tu equipo de trabajo</Text>
                 </View>
               </View>
-              <Icon name="chevron-right" size={20} color="#9ca3af" />
+              <Icon name="chevron-right" size={20} color={colors.text.light} />
             </TouchableOpacity>
           )}
 
@@ -1091,15 +1092,15 @@ export const ContactsScreen = () => {
               accessibilityLabel="Abrir nómina"
             >
               <View style={styles.actionButtonContent}>
-                <View style={[styles.actionIconContainer, { backgroundColor: '#8B5CF6' }]}>
-                  <Icon name="dollar-sign" size={20} color="#fff" />
+                <View style={[styles.actionIconContainer, { backgroundColor: colors.secondary }]}>
+                  <Icon name="dollar-sign" size={20} color={colors.white} />
                 </View>
                 <View style={styles.actionTextContainer}>
                   <Text style={styles.actionButtonTitle}>Nómina</Text>
                   <Text style={styles.actionButtonSubtitle}>Paga a tu equipo automáticamente</Text>
                 </View>
               </View>
-              <Icon name="chevron-right" size={20} color="#9ca3af" />
+              <Icon name="chevron-right" size={20} color={colors.text.light} />
             </TouchableOpacity>
           )}
 
@@ -1147,7 +1148,7 @@ export const ContactsScreen = () => {
                   Permite el acceso para ver los nombres de tus amigos
                 </Text>
               </View>
-              <Icon name="chevron-right" size={20} color="#9ca3af" />
+              <Icon name="chevron-right" size={20} color={colors.text.light} />
             </TouchableOpacity>
           )}
 
@@ -1155,7 +1156,7 @@ export const ContactsScreen = () => {
             // Employee welcome message
             <View style={styles.employeeWelcomeContainer}>
               <View style={styles.employeeWelcomeIcon}>
-                <Icon name="users" size={40} color="#7c3aed" />
+                <Icon name="users" size={40} color={colors.secondaryDark} />
               </View>
               <Text style={styles.employeeWelcomeTitle}>
                 Equipo {activeAccount?.business?.name}
@@ -1178,14 +1179,14 @@ export const ContactsScreen = () => {
               >
                 <View style={styles.actionButtonContent}>
                   <View style={styles.actionIconContainer}>
-                    <Icon name="send" size={20} color="#fff" />
+                    <Icon name="send" size={20} color={colors.white} />
                   </View>
                   <View style={styles.actionTextContainer}>
                     <Text style={styles.actionButtonTitle}>Enviar con dirección</Text>
                     <Text style={styles.actionButtonSubtitle}>Envía a cualquier wallet</Text>
                   </View>
                 </View>
-                <Icon name="chevron-right" size={20} color="#9ca3af" />
+                <Icon name="chevron-right" size={20} color={colors.text.light} />
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -1196,14 +1197,14 @@ export const ContactsScreen = () => {
               >
                 <View style={styles.actionButtonContent}>
                   <View style={styles.actionIconContainer}>
-                    <Icon name="download" size={20} color="#fff" />
+                    <Icon name="download" size={20} color={colors.white} />
                   </View>
                   <View style={styles.actionTextContainer}>
                     <Text style={styles.actionButtonTitle}>Recibir con dirección</Text>
                     <Text style={styles.actionButtonSubtitle}>Comparte tu dirección</Text>
                   </View>
                 </View>
-                <Icon name="chevron-right" size={20} color="#9ca3af" />
+                <Icon name="chevron-right" size={20} color={colors.text.light} />
               </TouchableOpacity>
             </View>
           )}
@@ -1222,7 +1223,7 @@ export const ContactsScreen = () => {
         return (
           <View style={styles.emptyState}>
             <View style={styles.emptyIconContainer}>
-              <Icon name="alert-circle" size={32} color="#ef4444" />
+              <Icon name="alert-circle" size={32} color={colors.danger} />
             </View>
             <Text style={styles.emptyTitle}>Error al cargar empleados</Text>
             <Text style={styles.emptyDescription}>
@@ -1238,7 +1239,7 @@ export const ContactsScreen = () => {
               accessibilityRole="button"
               accessibilityLabel="Reintentar carga de empleados"
             >
-              <Icon name="refresh-cw" size={20} color="#fff" style={{ marginRight: 8 }} />
+              <Icon name="refresh-cw" size={20} color={colors.white} style={{ marginRight: 8 }} />
               <Text style={styles.retryButtonText}>Reintentar</Text>
             </TouchableOpacity>
           </View>
@@ -1254,7 +1255,7 @@ export const ContactsScreen = () => {
       return (
         <View style={styles.emptyState}>
           <View style={styles.emptyIconContainer}>
-            <Icon name="users" size={32} color="#9ca3af" />
+            <Icon name="users" size={32} color={colors.text.light} />
           </View>
           <Text style={styles.emptyTitle}>Añade tu primer empleado</Text>
           <Text style={styles.emptyDescription}>
@@ -1269,7 +1270,7 @@ export const ContactsScreen = () => {
             accessibilityRole="button"
             accessibilityLabel="Añadir empleado"
           >
-            <Icon name="user-plus" size={20} color="#fff" style={{ marginRight: 8 }} />
+            <Icon name="user-plus" size={20} color={colors.white} style={{ marginRight: 8 }} />
             <Text style={styles.addEmployeeButtonText}>Añadir empleado</Text>
           </TouchableOpacity>
         </View>
@@ -1280,7 +1281,7 @@ export const ContactsScreen = () => {
       return (
         <View style={styles.emptyState}>
           <View style={styles.emptyIconContainer}>
-            <Icon name="users" size={32} color="#9ca3af" />
+            <Icon name="users" size={32} color={colors.text.light} />
           </View>
           <Text style={styles.emptyTitle}>No se encontraron contactos</Text>
           <Text style={styles.emptyDescription}>
@@ -1294,7 +1295,7 @@ export const ContactsScreen = () => {
       return (
         <View style={styles.emptyState}>
           <View style={styles.emptyIconContainer}>
-            <Icon name="users" size={32} color="#9ca3af" />
+            <Icon name="users" size={32} color={colors.text.light} />
           </View>
           <Text style={styles.emptyTitle}>
             {hasContactPermission === false ? 'Acceso a contactos denegado' : 'No hay contactos'}
@@ -1338,7 +1339,7 @@ export const ContactsScreen = () => {
                 accessibilityRole="button"
                 accessibilityLabel="Permitir acceso a contactos"
               >
-                <Icon name="shield" size={20} color="#fff" style={{ marginRight: 8 }} />
+                <Icon name="shield" size={20} color={colors.white} style={{ marginRight: 8 }} />
                 <Text style={styles.permissionButtonText}>Permitir acceso a contactos</Text>
               </TouchableOpacity>
             ) : (
@@ -1348,7 +1349,7 @@ export const ContactsScreen = () => {
                 accessibilityRole="button"
                 accessibilityLabel="Sincronizar contactos"
               >
-                <Icon name="refresh-cw" size={20} color="#fff" style={{ marginRight: 8 }} />
+                <Icon name="refresh-cw" size={20} color={colors.white} style={{ marginRight: 8 }} />
                 <Text style={styles.permissionButtonText}>Sincronizar contactos</Text>
               </TouchableOpacity>
             )}
@@ -1388,7 +1389,7 @@ export const ContactsScreen = () => {
         <View style={styles.searchSection}>
           <View style={styles.searchBarContainer}>
             <View style={styles.searchBar}>
-              <Icon name="search" size={20} color="#9ca3af" style={styles.searchIcon} />
+              <Icon name="search" size={20} color={colors.text.light} style={styles.searchIcon} />
               <SearchInput
                 onSearchChange={handleSearchChange}
                 isBusinessAccount={isBusinessAccount}
@@ -1437,7 +1438,7 @@ export const ContactsScreen = () => {
               <Icon
                 name={isBusinessAccount || hasContactPermission ? "refresh-cw" : "shield"}
                 size={20}
-                color={isLoadingContacts || refreshing ? "#9ca3af" : colors.primary}
+                color={isLoadingContacts || refreshing ? colors.text.light : colors.primary}
               />
             </TouchableOpacity>
           </View>
@@ -1634,7 +1635,7 @@ export const ContactsScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
   },
   payrollBanner: {
     flexDirection: 'row',
@@ -1644,13 +1645,13 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
   },
   payrollBannerIcon: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: '#8B5CF6',
+    backgroundColor: colors.secondary,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 10,
@@ -1658,19 +1659,19 @@ const styles = StyleSheet.create({
   payrollBannerTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text.primary,
   },
   payrollBannerSubtitle: {
     fontSize: 12,
-    color: '#6B7280',
+    color: colors.text.secondary,
   },
   searchSection: {
     paddingHorizontal: 16,
     paddingTop: 24,
     paddingBottom: 12,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
+    borderBottomColor: colors.neutralDark,
   },
   searchBarContainer: {
     flexDirection: 'row',
@@ -1679,7 +1680,7 @@ const styles = StyleSheet.create({
   },
   searchBar: {
     flex: 1,
-    backgroundColor: '#f9fafb',
+    backgroundColor: colors.neutral,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
@@ -1687,14 +1688,14 @@ const styles = StyleSheet.create({
     borderRadius: 16,
   },
   syncButton: {
-    backgroundColor: '#f9fafb',
+    backgroundColor: colors.neutral,
     padding: 12,
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },
   testButton: {
-    backgroundColor: '#8b5cf6',
+    backgroundColor: colors.secondary,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
@@ -1703,7 +1704,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   testButtonText: {
-    color: '#fff',
+    color: colors.white,
     fontSize: 14,
     fontWeight: '600',
   },
@@ -1713,7 +1714,7 @@ const styles = StyleSheet.create({
   searchInput: {
     flex: 1,
     fontSize: 16,
-    color: '#1f2937',
+    color: colors.text.primary,
   },
   actionSection: {
     paddingHorizontal: 16,
@@ -1723,7 +1724,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   employeeWelcomeContainer: {
-    backgroundColor: '#f9fafb',
+    backgroundColor: colors.neutral,
     borderRadius: 16,
     padding: 24,
     alignItems: 'center',
@@ -1732,7 +1733,7 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: '#ede9fe',
+    backgroundColor: colors.violetLight,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16,
@@ -1740,13 +1741,13 @@ const styles = StyleSheet.create({
   employeeWelcomeTitle: {
     fontSize: 20,
     fontWeight: '600',
-    color: '#1f2937',
+    color: colors.text.primary,
     textAlign: 'center',
     marginBottom: 8,
   },
   employeeWelcomeText: {
     fontSize: 14,
-    color: '#6b7280',
+    color: colors.text.secondary,
     textAlign: 'center',
     lineHeight: 20,
   },
@@ -1755,7 +1756,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#f9fafb',
+    backgroundColor: colors.neutral,
     borderRadius: 16,
     paddingVertical: 16,
     paddingHorizontal: 16,
@@ -1775,12 +1776,12 @@ const styles = StyleSheet.create({
   },
   actionButtonTitle: {
     fontWeight: '500',
-    color: '#1f2937',
+    color: colors.text.primary,
     fontSize: 16,
   },
   actionButtonSubtitle: {
     fontSize: 13,
-    color: '#6b7280',
+    color: colors.text.secondary,
   },
   section: {
     paddingHorizontal: 16,
@@ -1805,19 +1806,19 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#6b7280',
+    color: colors.text.secondary,
     letterSpacing: 1,
     textTransform: 'uppercase',
   },
   sectionCount: {
-    backgroundColor: '#f3f4f6',
+    backgroundColor: colors.neutralDark,
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 999,
   },
   sectionCountText: {
     fontSize: 11,
-    color: '#9ca3af',
+    color: colors.text.light,
   },
   contactsList: {
     gap: 2,
@@ -1845,12 +1846,12 @@ const styles = StyleSheet.create({
   },
   contactName: {
     fontWeight: '500',
-    color: '#1f2937',
+    color: colors.text.primary,
     fontSize: 16,
   },
   contactPhone: {
     fontSize: 13,
-    color: '#6b7280',
+    color: colors.text.secondary,
   },
   // Row affordances are soft chips, not filled buttons: a list of dozens of
   // people should read as people, not as a wall of CTAs. Color still carries
@@ -1888,7 +1889,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#fef2f2',
+    backgroundColor: colors.error.background,
     minWidth: 36,
     minHeight: 36,
   },
@@ -1897,7 +1898,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#f9fafb',
+    backgroundColor: colors.neutral,
     minWidth: 36,
     minHeight: 36,
   },
@@ -1925,12 +1926,12 @@ const styles = StyleSheet.create({
   },
   infoTitle: {
     fontWeight: '500',
-    color: '#6d28d9',
+    color: colors.secondaryDark,
     marginBottom: 4,
   },
   infoDescription: {
     fontSize: 13,
-    color: '#7c3aed',
+    color: colors.secondaryDark,
     lineHeight: 18,
   },
   infoBold: {
@@ -1946,7 +1947,7 @@ const styles = StyleSheet.create({
   emptyIconContainer: {
     width: 64,
     height: 64,
-    backgroundColor: '#f3f4f6',
+    backgroundColor: colors.neutralDark,
     borderRadius: 32,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1954,13 +1955,13 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     fontWeight: '500',
-    color: '#1f2937',
+    color: colors.text.primary,
     marginBottom: 8,
     fontSize: 16,
   },
   emptyDescription: {
     fontSize: 13,
-    color: '#6b7280',
+    color: colors.text.secondary,
     textAlign: 'center',
     maxWidth: 240,
   },
@@ -1972,7 +1973,7 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   modalContent: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 20,
     padding: 24,
     width: '100%',
@@ -1998,11 +1999,11 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 20,
     fontWeight: '600',
-    color: '#1F2937',
+    color: colors.text.primary,
   },
   modalSubtitle: {
     fontSize: 14,
-    color: '#6B7280',
+    color: colors.text.secondary,
     marginBottom: 24,
     lineHeight: 20,
   },
@@ -2014,11 +2015,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#F9FAFB',
+    backgroundColor: colors.neutral,
     borderRadius: 12,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
   },
   tokenInfo: {
     flexDirection: 'row',
@@ -2037,22 +2038,22 @@ const styles = StyleSheet.create({
   tokenName: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#1F2937',
+    color: colors.text.primary,
     marginBottom: 2,
   },
   tokenSymbol: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#6B7280',
+    color: colors.text.secondary,
     marginBottom: 4,
   },
   tokenDescription: {
     fontSize: 12,
-    color: '#6B7280',
+    color: colors.text.secondary,
     lineHeight: 16,
   },
   cancelButton: {
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.neutralDark,
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',
@@ -2061,7 +2062,7 @@ const styles = StyleSheet.create({
   cancelButtonText: {
     fontSize: 16,
     fontWeight: '500',
-    color: '#6B7280',
+    color: colors.text.secondary,
   },
   loadingOverlay: {
     position: 'absolute',
@@ -2077,7 +2078,7 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 12,
     fontSize: 16,
-    color: '#6B7280',
+    color: colors.text.secondary,
   },
   permissionButton: {
     flexDirection: 'row',
@@ -2089,7 +2090,7 @@ const styles = StyleSheet.create({
     marginTop: 24,
   },
   permissionButtonText: {
-    color: '#fff',
+    color: colors.white,
     fontWeight: '600',
     fontSize: 16,
   },
@@ -2121,7 +2122,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
@@ -2150,21 +2151,21 @@ const styles = StyleSheet.create({
     marginTop: 24,
   },
   addEmployeeButtonText: {
-    color: '#fff',
+    color: colors.white,
     fontWeight: '600',
     fontSize: 16,
   },
   retryButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#ef4444',
+    backgroundColor: colors.danger,
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 999,
     marginTop: 24,
   },
   retryButtonText: {
-    color: '#fff',
+    color: colors.white,
     fontWeight: '600',
     fontSize: 16,
   },
@@ -2176,7 +2177,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#f9fafb',
+    backgroundColor: colors.neutral,
     borderRadius: 16,
     paddingVertical: 16,
     paddingHorizontal: 16,
@@ -2201,7 +2202,7 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   addEmployeeFromInfoButtonText: {
-    color: '#fff',
+    color: colors.white,
     fontWeight: '600',
     fontSize: 14,
   },
