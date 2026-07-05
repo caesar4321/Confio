@@ -37,6 +37,7 @@ import { getSupportCopy } from '../utils/supportMessaging';
 import { colors } from '../config/theme';
 import { SkeletonLoader, TransactionItemSkeleton } from '../components/SkeletonLoader';
 import { InlineBanner } from '../components/common/InlineBanner';
+import { ReceiptCard, ReceiptItem } from '../components/common/ReceiptCard';
 import { StatusTierBadge } from '../components/StatusTierBadge';
 import { buildInviteLink, buildSendAndInviteShareMessage } from '../utils/inviteLinks';
 import { technicalFontFamily } from '../utils/fontFamily';
@@ -242,15 +243,6 @@ export const TransactionDetailScreen = () => {
       flex: 1,
       backgroundColor: colors.primary,
     },
-    centerContent: {
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    loadingText: {
-      marginTop: 16,
-      fontSize: 16,
-      color: colors.accent,
-    },
     errorText: {
       fontSize: 16,
       color: colors.danger,
@@ -268,20 +260,6 @@ export const TransactionDetailScreen = () => {
       paddingHorizontal: 20,
       paddingBottom: 30,
     },
-    headerRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      marginBottom: 24,
-    },
-    backButton: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      backgroundColor: 'rgba(255, 255, 255, 0.2)',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
     headerTitle: {
       fontSize: 20,
       fontWeight: '600',
@@ -293,11 +271,6 @@ export const TransactionDetailScreen = () => {
       color: colors.white,
       marginBottom: 4,
     },
-    currencyText: {
-      fontSize: 20,
-      color: colors.white,
-      opacity: 0.8,
-    },
     content: {
       flex: 1,
       backgroundColor: colors.white,
@@ -306,25 +279,7 @@ export const TransactionDetailScreen = () => {
       paddingTop: 24,
       paddingHorizontal: 20,
       paddingBottom: 20,
-    },
-    avatarSection: {
-      alignItems: 'center',
-      marginBottom: 24,
-    },
-    avatar: {
-      width: 64,
-      height: 64,
-      borderRadius: 32,
-      backgroundColor: colors.secondary,
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginBottom: 12,
-    },
-    receiverName: {
-      fontSize: 20,
-      fontWeight: 'bold',
-      color: colors.dark,
-      marginBottom: 4,
+      gap: 16,
     },
     addressContainer: {
       flexDirection: 'row',
@@ -334,68 +289,60 @@ export const TransactionDetailScreen = () => {
       fontSize: 14,
       color: colors.text.secondary,
     },
-    dateTimeRow: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      marginBottom: 16,
-      paddingHorizontal: 4,
-    },
-    dateTimeItem: {
-      flexDirection: 'row',
-      alignItems: 'center',
-    },
-    dateTimeText: {
-      fontSize: 14,
-      color: colors.text.secondary,
-      marginLeft: 6,
-    },
-    section: {
-      marginBottom: 20,
-    },
-    sectionHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      marginBottom: 12,
-    },
-    sectionIcon: {
-      marginRight: 8,
-    },
-    sectionTitle: {
-      fontSize: 16,
-      fontWeight: '600',
-      color: colors.dark,
-    },
     card: {
-      backgroundColor: colors.neutral,
-      borderRadius: 12,
+      backgroundColor: colors.white,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
       padding: 16,
     },
-    cardTitle: {
-      fontSize: 18,
-      fontWeight: 'bold',
-      color: colors.dark,
-      marginBottom: 16,
-    },
-    row: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      marginBottom: 12,
-    },
-    label: {
-      fontSize: 14,
+    sectionLabel: {
+      fontSize: 13,
+      fontWeight: '600',
       color: colors.text.secondary,
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+      marginBottom: 10,
     },
-    value: {
-      fontSize: 14,
+    receiptCard: {
+      backgroundColor: colors.white,
+    },
+    supportFootnote: {
+      fontSize: 12,
+      color: colors.text.secondary,
+      textAlign: 'center',
+      lineHeight: 18,
+      paddingHorizontal: 12,
+    },
+    actionRowsCard: {
+      backgroundColor: colors.white,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+      paddingHorizontal: 16,
+    },
+    actionRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 14,
+      gap: 12,
+    },
+    actionRowIcon: {
+      width: 36,
+      height: 36,
+      borderRadius: 10,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    actionRowLabel: {
+      flex: 1,
+      fontSize: 15,
       fontWeight: '500',
-      color: colors.dark,
+      color: colors.text.primary,
     },
-    noteCard: {
-      backgroundColor: colors.primaryLight,
-      borderRadius: 12,
-      padding: 16,
+    rowDivider: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: colors.border,
     },
     noteText: {
       fontSize: 16,
@@ -403,147 +350,8 @@ export const TransactionDetailScreen = () => {
       fontStyle: 'italic',
       lineHeight: 22,
     },
-    actionButton: {
-      flex: 1,
-      backgroundColor: colors.primary,
-      paddingVertical: 14,
-      borderRadius: 12,
-      alignItems: 'center',
-      marginHorizontal: 6,
-    },
-    actionButtonText: {
-      fontSize: 16,
-      fontWeight: '600',
-      color: colors.white,
-    },
     // Missing card styles
-    summaryContainer: {
-      gap: 16,
-    },
-    feeBreakdown: {
-      backgroundColor: colors.neutral,
-      borderRadius: 8,
-      padding: 12,
-    },
-    feeRow: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      marginBottom: 8,
-    },
-    feeLabel: {
-      fontSize: 14,
-      color: colors.text.secondary,
-    },
-    feeAmount: {
-      fontSize: 14,
-      fontWeight: '600',
-      color: colors.dark,
-    },
-    divider: {
-      height: 1,
-      backgroundColor: colors.border,
-      marginVertical: 8,
-    },
-    totalLabel: {
-      fontSize: 14,
-      fontWeight: '600',
-      color: colors.dark,
-    },
-    totalAmount: {
-      fontSize: 16,
-      fontWeight: 'bold',
-      color: colors.dark,
-    },
-    summaryRow: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-    },
-    summaryLabel: {
-      fontSize: 14,
-      color: colors.text.secondary,
-    },
-    summaryValue: {
-      fontSize: 14,
-      fontWeight: '500',
-      color: colors.dark,
-    },
-    statusContainer: {
-      flexDirection: 'row',
-      alignItems: 'center',
-    },
     statusIcon: {
-      marginRight: 4,
-    },
-    statusValue: {
-      fontSize: 14,
-      fontWeight: '500',
-      color: colors.primaryDark,
-    },
-    valuePropositionOuter: {
-      backgroundColor: '#A7F3D0',
-      borderRadius: 16,
-      padding: 16,
-    },
-    valueRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      marginBottom: 8,
-    },
-    valueIcon: {
-      marginRight: 8,
-    },
-    valueTitle: {
-      fontSize: 16,
-      fontWeight: 'bold',
-      color: colors.dark,
-    },
-    valueDescription: {
-      fontSize: 14,
-      color: colors.text.primary,
-      marginBottom: 12,
-      lineHeight: 20,
-    },
-    valueHighlightBox: {
-      backgroundColor: colors.white,
-      borderRadius: 12,
-      padding: 12,
-      borderWidth: 1,
-      borderColor: '#d1fae5',
-    },
-    valueHighlightText: {
-      fontSize: 13,
-      color: '#065f46',
-      lineHeight: 20,
-    },
-    secondaryButton: {
-      backgroundColor: colors.neutral,
-    },
-    secondaryButtonText: {
-      color: colors.dark,
-    },
-    buttonRow: {
-      flexDirection: 'row',
-      marginTop: 24,
-      marginHorizontal: -6,
-    },
-    blockchainButton: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      paddingVertical: 12,
-      paddingHorizontal: 20,
-      borderRadius: 8,
-      borderWidth: 1,
-      borderColor: colors.border,
-    },
-    blockchainButtonText: {
-      fontSize: 14,
-      color: colors.text.primary,
-      marginLeft: 8,
-    },
-    blockchainIcon: {
       marginRight: 4,
     },
     // Missing participant styles
@@ -600,28 +408,6 @@ export const TransactionDetailScreen = () => {
       marginTop: 8,
       marginBottom: 12, // Restored margin to fix spacing issues
     },
-    blockchainDetails: {
-      marginTop: 16,
-    },
-    blockchainTitle: {
-      fontSize: 14,
-      fontWeight: '600',
-      color: colors.text.primary,
-      marginBottom: 8,
-    },
-    hashContainer: {
-      backgroundColor: colors.neutral,
-      padding: 12,
-      borderRadius: 8,
-      flexDirection: 'row',
-      alignItems: 'center',
-    },
-    hashText: {
-      fontSize: 12,
-      color: colors.text.secondary,
-      fontFamily: technicalFontFamily,
-      flex: 1,
-    },
     technicalRow: {
       flexDirection: 'row',
       justifyContent: 'space-between',
@@ -653,26 +439,6 @@ export const TransactionDetailScreen = () => {
       fontSize: 14,
       fontWeight: '500',
       color: colors.white,
-    },
-    infoNote: {
-      backgroundColor: '#eff6ff',
-      padding: 12,
-      borderRadius: 8,
-      marginTop: 16,
-    },
-    infoNoteText: {
-      fontSize: 12,
-      color: '#1d4ed8',
-      lineHeight: 16,
-    },
-    feeValueFree: {
-      color: colors.primary,
-      fontWeight: 'bold',
-      marginRight: 4,
-    },
-    feeValueNote: {
-      color: colors.text.secondary,
-      fontSize: 14,
     },
     // Pending invitation is a warning, not an error — amber pill.
     invitationNotice: {
@@ -828,11 +594,6 @@ export const TransactionDetailScreen = () => {
       justifyContent: 'center',
       alignItems: 'center',
     },
-    exchangeIconText: {
-      color: colors.white,
-      fontWeight: 'bold',
-      fontSize: 14,
-    },
     exchangeArrow: {
       marginHorizontal: 8,
     },
@@ -882,12 +643,6 @@ export const TransactionDetailScreen = () => {
       color: colors.dark,
       marginLeft: 8,
     },
-    bold: {
-      fontWeight: 'bold',
-    },
-    actionsContainer: {
-      gap: 12,
-    },
     primaryAction: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -900,19 +655,6 @@ export const TransactionDetailScreen = () => {
       fontSize: 16,
       fontWeight: '500',
       color: colors.white,
-    },
-    secondaryAction: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: colors.neutralDark,
-      paddingVertical: 16,
-      borderRadius: 12,
-    },
-    secondaryActionText: {
-      fontSize: 16,
-      fontWeight: '500',
-      color: colors.text.secondary,
     },
     actionIcon: {
       marginRight: 8,
@@ -1059,107 +801,6 @@ export const TransactionDetailScreen = () => {
 
   // Sample transaction data - in real app, this would come from props or API
   const transactions: any = {
-    received: {
-      type: 'received',
-      from: 'María González',
-      fromAddress: '0x1a2b3c4d...7890abcd',
-      amount: '+125.50',
-      currency: 'cUSD',
-      date: '2025-06-10',
-      time: '14:30',
-      status: 'completed',
-      hash: '0xabc123def456789012345678901234567890abcdef',
-      blockNumber: '2,847,392',
-      gasUsed: '21,000',
-      gasFee: '0.001',
-      confirmations: 127,
-      note: undefined,
-      avatar: 'M'
-    },
-    sent: {
-      type: 'sent',
-      to: 'Carlos Remolina',
-      toAddress: '0x9876543a...bcdef123',
-      amount: '-89.25',
-      currency: 'cUSD',
-      date: '2025-06-09',
-      time: '16:45',
-      status: 'completed',
-      hash: '0xdef456abc123789012345678901234567890fedcba',
-      blockNumber: '2,846,891',
-      gasUsed: '21,000',
-      gasFee: '0.001',
-      confirmations: 234,
-      note: undefined,
-      avatar: 'C'
-    },
-    exchange: {
-      type: 'exchange',
-      from: 'USDC',
-      to: 'cUSD',
-      amount: '+500.00',
-      currency: 'cUSD',
-      date: '2025-06-08',
-      time: '10:15',
-      status: 'completed',
-      hash: '0xghi789abc456012345678901234567890abcdefgh',
-      blockNumber: '2,846,123',
-      gasUsed: '45,000',
-      gasFee: '0.002',
-      confirmations: 456,
-      exchangeRate: '1 USDC = 1 cUSD',
-      avatar: null
-    },
-    conversion: {
-      type: 'conversion',
-      from: 'USDC',
-      to: 'cUSD',
-      amount: '+100.00',
-      currency: 'USDC',
-      secondaryCurrency: 'cUSD',
-      date: '2025-06-08',
-      time: '10:15',
-      status: 'completed',
-      hash: '0xconv123abc456789012345678901234567890def',
-      formattedTitle: 'Conversión USDC → cUSD',
-      avatar: null
-    },
-    payment: {
-      type: 'payment',
-      to: 'Supermercado Central',
-      toAddress: '0x5555666a...7777888b',
-      amount: '-32.75',
-      currency: 'cUSD',
-      date: '2025-06-07',
-      time: '18:45',
-      status: 'completed',
-      hash: '0xjkl012mno345678901234567890abcdef123456789',
-      blockNumber: '2,845,567',
-      gasUsed: '21,000',
-      gasFee: '0.001',
-      confirmations: 789,
-      location: 'Av. Libertador, Caracas',
-      merchantId: 'SUP001',
-      avatar: 'S'
-    },
-    payroll: {
-      type: 'payroll',
-      from: 'Empresa Demo',
-      fromAddress: '0x123...abc',
-      to: 'Juan Pérez',
-      toAddress: '0x456...def',
-      amount: '+1500.00',
-      currency: 'cUSD',
-      date: '2025-06-15',
-      time: '09:00',
-      status: 'completed',
-      hash: '0xpay123...',
-      blockNumber: '123456',
-      gasUsed: '21000',
-      gasFee: '0.001',
-      confirmations: 10,
-      avatar: 'E'
-    }
   };
 
   // Log what data we received
@@ -1501,7 +1142,6 @@ export const TransactionDetailScreen = () => {
   }, [senderPhone, resolvedRecipientPhone]);
 
   const { data: badgeLookupData } = useQuery(CHECK_USERS_BY_PHONES, {
-    variables: { phoneNumbers: badgeLookupPhones },
     skip: badgeLookupPhones.length === 0,
     fetchPolicy: 'cache-first',
   });
@@ -1813,6 +1453,94 @@ export const TransactionDetailScreen = () => {
   const operationIdDisplay = resolvedInternalId
     ? resolvedInternalId.slice(0, 8).toUpperCase()
     : 'N/A';
+
+  // One formatted date string for the receipt (same source priority the old
+  // date/time card row used).
+  const dateTimeDisplay = (() => {
+    if (currentTx.createdAt) {
+      const date = typeof currentTx.createdAt === 'string'
+        ? (currentTx.createdAt.includes('T') ? new Date(currentTx.createdAt) : moment(currentTx.createdAt).toDate())
+        : new Date(currentTx.createdAt as any);
+      return `${moment(date).format('DD/MM/YYYY')} • ${moment(date).format('HH:mm')}`;
+    }
+    if (currentTx.date && currentTx.time) {
+      return `${moment(currentTx.date, 'YYYY-MM-DD').format('DD/MM/YYYY')} • ${currentTx.time}`;
+    }
+    if (currentTx.date) {
+      return moment(currentTx.date, 'YYYY-MM-DD').format('DD/MM/YYYY');
+    }
+    return 'No disponible';
+  })();
+
+  // Operation summary as shared ReceiptCard rows — the same receipt grammar
+  // as the success screens. Status appears only when it says something the
+  // hero badge doesn't already (confirming, ramp progress, failure).
+  const receiptItems = (() => {
+    const items: ReceiptItem[] = [];
+    const currency = currentTx.currency || 'cUSD';
+    const isPaymentDebit = currentTx.type === 'payment' && !!currentTx.amount?.startsWith('-');
+
+    const amountLabel = currentTx.type === 'payment'
+      ? (isPaymentDebit ? 'Monto pagado' : 'Monto cobrado')
+      : (currentTx.type === 'exchange' || currentTx.type === 'conversion')
+        ? 'Monto intercambiado'
+        : currentTx.type === 'received'
+          ? 'Monto recibido'
+          : 'Monto enviado';
+    items.push({ label: amountLabel, value: `${formatAmount(currentTx.amount)} ${currency}` });
+    items.push({ label: 'Comisión de red', value: 'Gratis · cubre Confío', color: colors.primaryDark });
+
+    if (currentTx.type === 'payment' && !isPaymentDebit) {
+      const fee = computeConfioFee(currentTx.amount);
+      if (fee > 0) {
+        items.push({
+          label: 'Comisión Confío (0.9%)',
+          value: `- ${(fee < 0.01 && fee > 0) ? '< 0.01' : fee.toFixed(2)} ${currency}`,
+        });
+      }
+    }
+
+    if (currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'payment') {
+      const raw = currentTx.amount;
+      const sign = typeof raw === 'string' && raw.startsWith('-') ? '-' : (typeof raw === 'string' && raw.startsWith('+') ? '+' : '');
+      const grossAbs = typeof raw === 'string' ? parseFloat(raw.replace(/[+-]/g, '')) : (Number(raw) || 0);
+      let totalLabel = currentTx.type === 'sent' ? 'Total enviado' : 'Total recibido';
+      let totalAbs = grossAbs;
+      if (currentTx.type === 'payment') {
+        totalLabel = isPaymentDebit ? 'Total pagado' : 'Total recibido';
+        if (!isPaymentDebit) totalAbs = Math.max(0, grossAbs - computeConfioFee(raw));
+      }
+      items.push({
+        label: totalLabel,
+        value: `${sign}${totalAbs.toFixed(2)} ${currency}`,
+        color: colors.text.primary,
+      });
+    }
+
+    items.push({ label: 'Fecha', value: dateTimeDisplay });
+    items.push({ label: 'ID de operación', value: `#${operationIdDisplay}` });
+
+    if ((currentTx.type || '').toLowerCase() === 'ramp') {
+      const rs = ((currentTx.rampStatus || currentTx.status) || '').toString().toUpperCase();
+      if (rs === 'PROCESSING') {
+        items.push({ label: 'Estado', value: 'En proceso', color: colors.accent, icon: 'loader' });
+      } else if (rs === 'PENDING') {
+        items.push({ label: 'Estado', value: 'Pendiente', color: colors.offRampIcon, icon: 'clock' });
+      } else if (rs === 'FAILED' || rs === 'REJECTED') {
+        items.push({ label: 'Estado', value: 'Fallido', color: colors.danger, icon: 'x-circle' });
+      }
+      items.push({ label: 'Tiempo estimado', value: 'Hasta 1 hora' });
+    } else {
+      const statusLc = (currentTx.status || '').toString().toLowerCase();
+      if (statusLc === 'submitted' || statusLc === 'pending' || statusLc === 'pending_blockchain') {
+        items.push({ label: 'Estado', value: 'Confirmando…', color: colors.offRampIcon, icon: 'clock' });
+      } else if (statusLc === 'failed') {
+        items.push({ label: 'Estado', value: 'Fallido', color: colors.danger, icon: 'x-circle' });
+      }
+    }
+
+    return items;
+  })();
 
   return (
     <View style={styles.container}>
@@ -2272,66 +2000,6 @@ export const TransactionDetailScreen = () => {
                 </View>
               )}
 
-              {/* Date & Time */}
-              <View style={styles.infoRow}>
-                <Icon name="clock" size={20} color={colors.text.light} style={styles.infoIcon} />
-                <View style={styles.infoContent}>
-                  <Text style={styles.infoTitle}>
-                    {(() => {
-                      // Prioritize createdAt if it exists (from notifications)
-                      if (currentTx.createdAt) {
-                        if (typeof currentTx.createdAt === 'string') {
-                          const isoLike = currentTx.createdAt.includes('T');
-                          const date = isoLike ? new Date(currentTx.createdAt) : moment(currentTx.createdAt).toDate();
-                          return `${moment(date).format('DD/MM/YYYY')} • ${moment(date).format('HH:mm')}`;
-                        } else if (typeof currentTx.createdAt === 'number' || currentTx.createdAt instanceof Date) {
-                          const date = new Date(currentTx.createdAt as any);
-                          return `${moment(date).format('DD/MM/YYYY')} • ${moment(date).format('HH:mm')}`;
-                        }
-                      } else if (currentTx.date && currentTx.time) {
-                        // Already formatted date and time from AccountDetailScreen
-                        return `${moment(currentTx.date, 'YYYY-MM-DD').format('DD/MM/YYYY')} • ${currentTx.time}`;
-                      }
-                      return 'Fecha no disponible';
-                    })()}
-                  </Text>
-                  <Text style={styles.infoSubtitle}>
-                    {(() => {
-                      // If we have a createdAt timestamp
-                      if (currentTx.createdAt) {
-                        if (typeof currentTx.createdAt === 'string') {
-                          const isoLike = currentTx.createdAt.includes('T');
-                          const date = isoLike ? new Date(currentTx.createdAt) : moment(currentTx.createdAt).toDate();
-                          return moment(date).locale('es').fromNow();
-                        } else if (typeof currentTx.createdAt === 'number' || currentTx.createdAt instanceof Date) {
-                          return moment(new Date(currentTx.createdAt as any)).locale('es').fromNow();
-                        }
-                      }
-                      // If we have a generic timestamp field
-                      else if (currentTx.timestamp) {
-                        if (typeof currentTx.timestamp === 'string') {
-                          if (currentTx.timestamp.includes('T')) {
-                            const date = new Date(currentTx.timestamp);
-                            return moment(date).locale('es').fromNow();
-                          }
-                          return moment(currentTx.timestamp).locale('es').fromNow();
-                        } else if (typeof currentTx.timestamp === 'number' || currentTx.timestamp instanceof Date) {
-                          return moment(new Date(currentTx.timestamp as any)).locale('es').fromNow();
-                        }
-                      }
-                      // If we only have date (already formatted), combine with time if available
-                      else if (currentTx.date) {
-                        const dateTime = currentTx.time
-                          ? moment(`${currentTx.date} ${currentTx.time}`, 'YYYY-MM-DD HH:mm')
-                          : moment(currentTx.date, 'YYYY-MM-DD');
-                        return dateTime.locale('es').fromNow();
-                      }
-                      return '';
-                    })()}
-                  </Text>
-                </View>
-              </View>
-
               {/* Location for payments - only show when user is paying a business */}
               {currentTx.type === 'payment' && currentTx.amount?.startsWith('-') && currentTx.location && (
                 <View style={styles.infoRow}>
@@ -2356,166 +2024,10 @@ export const TransactionDetailScreen = () => {
             </View>
           </View>
 
-          {/* Transaction Summary */}
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Resumen de Operación</Text>
-
-            <View style={styles.summaryContainer}>
-              {/* Amount and Fee Breakdown */}
-              <View style={styles.feeBreakdown}>
-                <View style={styles.feeRow}>
-                  <Text style={styles.feeLabel}>
-                    {(() => {
-                      if (currentTx.type === 'payment') {
-                        return (currentTx.amount?.startsWith('-')) ? 'Monto pagado' : 'Monto cobrado';
-                      }
-                      if (currentTx.type === 'exchange' || currentTx.type === 'conversion') {
-                        return 'Monto intercambiado';
-                      }
-                      if (currentTx.type === 'received') {
-                        return 'Monto recibido';
-                      }
-                      // sent / send
-                      return 'Monto enviado';
-                    })()}
-                  </Text>
-                  <Text style={styles.feeAmount}>
-                    {formatAmount(currentTx.amount)} {currentTx.currency || 'cUSD'}
-                  </Text>
-                </View>
-
-                <View style={styles.feeRow}>
-                  <Text style={styles.feeLabel}>Comisión de red</Text>
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <Text style={styles.feeValueFree}>Gratis</Text>
-                    <Text style={styles.feeValueNote}>• Cubierto por Confío</Text>
-                  </View>
-                </View>
-
-                {currentTx.type === 'payment' && (() => {
-                  // Show merchant fee only for the receiver (credit). Some payloads omit '+', so treat any non-negative as credit.
-                  const amt = currentTx.amount;
-                  const isDebit = typeof amt === 'string' ? amt.trim().startsWith('-') : Number(amt) < 0;
-                  if (isDebit) return null;
-                  const fee = computeConfioFee(amt);
-                  return fee > 0 ? (
-                    <View style={styles.feeRow}>
-                      <Text style={styles.feeLabel}>Comisión Confío (0.9%)</Text>
-                      <Text style={styles.feeAmount}>
-                        - {(fee < 0.01 && fee > 0) ? '< 0.01' : fee.toFixed(2)} {currentTx.currency || 'cUSD'}
-                      </Text>
-                    </View>
-                  ) : null;
-                })()}
-
-                {(currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'payment') && (
-                  <>
-                    <View style={styles.divider} />
-                    <View style={styles.feeRow}>
-                      <Text style={styles.totalLabel}>
-                        {(() => {
-                          if (currentTx.type === 'payment') {
-                            // Buyer (money out) vs Seller (money in)
-                            return currentTx.amount?.startsWith('-') ? 'Total pagado' : 'Total recibido';
-                          }
-                          // For send/sent
-                          return currentTx.type === 'sent' ? 'Total enviado' : 'Total recibido';
-                        })()}
-                      </Text>
-                      <Text style={styles.totalAmount}>
-                        {(() => {
-                          const raw = currentTx.amount;
-                          const sign = typeof raw === 'string' && raw.startsWith('-') ? '-' : (typeof raw === 'string' && raw.startsWith('+') ? '+' : '');
-                          const grossAbs = typeof raw === 'string' ? parseFloat(raw.replace(/[+-]/g, '')) : (Number(raw) || 0);
-                          if (currentTx.type === 'payment') {
-                            if (sign === '-') {
-                              // Buyer: no Confío fee applies, show the gross negative
-                              return `${sign}${grossAbs.toFixed(2)}`;
-                            } else {
-                              // Seller: show net received after Confío fee
-                              const fee = computeConfioFee(raw);
-                              const netAbs = Math.max(0, grossAbs - fee);
-                              return `${sign}${netAbs.toFixed(2)}`;
-                            }
-                          }
-                          // For send/sent: no Confío fee, show original signed amount
-                          return `${sign}${grossAbs.toFixed(2)}`;
-                        })()} {currentTx.currency || 'cUSD'}
-                      </Text>
-                    </View>
-                  </>
-                )}
-              </View>
-
-              {/* Transaction ID */}
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>ID de Operación</Text>
-                <Text style={styles.summaryValue}>
-                  #{operationIdDisplay}
-                </Text>
-              </View>
-
-              {/* Status */}
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Estado</Text>
-                {(() => {
-                  if ((currentTx.type || '').toLowerCase() === 'ramp') {
-                    const rs = ((currentTx.rampStatus || currentTx.status) || '').toString().toUpperCase();
-                    if (rs === 'PROCESSING' || rs === 'PENDING') {
-                      const isProcessing = rs === 'PROCESSING';
-                      return (
-                        <View style={styles.statusContainer}>
-                          <Icon name="loader" size={16} color={isProcessing ? colors.accent : colors.offRampIcon} style={styles.statusIcon} />
-                          <Text style={[styles.statusValue, { color: isProcessing ? colors.accent : colors.offRampIcon }]}>
-                            {isProcessing ? 'En proceso' : 'Pendiente'}
-                          </Text>
-                        </View>
-                      );
-                    }
-                    if (rs === 'COMPLETED' || rs === 'DELIVERED' || rs === 'completed') {
-                      return (
-                        <View style={styles.statusContainer}>
-                          <Icon name="check-circle" size={16} color={colors.primaryDark} style={styles.statusIcon} />
-                          <Text style={styles.statusValue}>Completado</Text>
-                        </View>
-                      );
-                    }
-                    if (rs === 'FAILED' || rs === 'REJECTED' || rs === 'failed') {
-                      return (
-                        <View style={styles.statusContainer}>
-                          <Icon name="x-circle" size={16} color={colors.danger} style={styles.statusIcon} />
-                          <Text style={[styles.statusValue, { color: colors.danger }]}>Fallido</Text>
-                        </View>
-                      );
-                    }
-                  }
-                  const statusLc = (currentTx.status || '').toString().toLowerCase();
-                  const isConfirming = statusLc === 'submitted' || statusLc === 'pending' || statusLc === 'pending_blockchain';
-                  if (isConfirming) {
-                    return (
-                      <View style={styles.statusContainer}>
-                        <Icon name="clock" size={16} color={colors.offRampIcon} style={styles.statusIcon} />
-                        <Text style={[styles.statusValue, { color: colors.offRampIcon }]}>Confirmando…</Text>
-                      </View>
-                    );
-                  }
-                  return (
-                    <View style={styles.statusContainer}>
-                      <Icon name="check-circle" size={16} color={colors.primaryDark} style={styles.statusIcon} />
-                      <Text style={styles.statusValue}>Confirmado</Text>
-                    </View>
-                  );
-                })()}
-              </View>
-
-              {/* Processing Time */}
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Tiempo de procesamiento</Text>
-                <Text style={styles.summaryValue}>
-                  {(currentTx.type || '').toLowerCase() === 'ramp' ? 'Hasta 1 hora' : 'Instantáneo'}
-                </Text>
-              </View>
-            </View>
+          {/* Operation summary — shared receipt grammar */}
+          <View>
+            <Text style={styles.sectionLabel}>Resumen de operación</Text>
+            <ReceiptCard items={receiptItems} style={styles.receiptCard} />
           </View>
 
           {/* Invitation Info Card for non-Confío friends */}
@@ -2694,109 +2206,16 @@ export const TransactionDetailScreen = () => {
             </View>
           )}
 
-          {/* Confío Value Proposition */}
+          {/* Supportive footnote — no fee marketing, just the mission line */}
           {(currentTx.type === 'received' || currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'payroll') && (
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>¿Por qué elegir Confío?</Text>
-              <View style={styles.valuePropositionOuter}>
-                <View style={styles.valueRow}>
-                  <Icon name="check-circle" size={20} color={colors.primary} style={styles.valueIcon} />
-                  <Text style={styles.valueTitle}>Transferencias 100% gratuitas</Text>
-                </View>
-                <Text style={styles.valueDescription}>
-                  {currentTx.type === 'received'
-                    ? 'Recibiste este dinero sin pagar comisiones'
-                    : 'Enviaste este dinero sin pagar comisiones'
-                  }
-                </Text>
-                <View style={styles.valueHighlightBox}>
-                  <Text style={styles.valueHighlightText}>
-                    💡 <Text style={styles.bold}>Confío: 0% comisión</Text>{'\n'}
-                    vs. transferencias internacionales y remesadoras tradicionales <Text style={styles.bold}>(5%-20%)</Text>{'\n'}
-                    {supportCopy.transferLine}
-                  </Text>
-                </View>
-              </View>
-            </View>
+            <Text style={styles.supportFootnote}>{supportCopy.transferLine}</Text>
           )}
-
-          {/* Merchant Support Message for Payments */}
           {currentTx.type === 'payment' && (
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>{supportCopy.merchantTitle}</Text>
-              <View style={styles.valuePropositionOuter}>
-                <View style={styles.valueRow}>
-                  <Icon name="shopping-bag" size={20} color={colors.secondary} style={styles.valueIcon} />
-                  <Text style={styles.valueTitle}>Comisión justa para comercios</Text>
-                </View>
-                <Text style={styles.valueDescription}>
-                  Paga y cobra en segundos con una comisión baja y transparente.
-                </Text>
-                <View style={styles.valueHighlightBox}>
-                  <Text style={styles.valueHighlightText}>
-                    💡 <Text style={styles.bold}>Confío: 0.9% para comerciantes</Text>{'\n'}
-                    vs. tarjetas y POS tradicionales <Text style={styles.bold}>(3%–8%)</Text>{'\n'}
-                    {supportCopy.merchantLine}
-                  </Text>
-                </View>
-              </View>
-            </View>
+            <Text style={styles.supportFootnote}>{supportCopy.merchantLine}</Text>
           )}
 
-          {/* Blockchain Details Button */}
-          <View style={styles.card}>
-            <TouchableOpacity
-              onPress={() => setShowBlockchainDetails(true)}
-              style={styles.blockchainButton}
-            >
-              <Icon name="external-link" size={16} color={colors.text.secondary} style={styles.blockchainIcon} />
-              <Text style={styles.blockchainButtonText}>Ver detalles técnicos</Text>
-            </TouchableOpacity>
-          </View>
-
-
-          {/* Official Receipt Button */}
-          {(currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'received' || currentTx.type === 'payment') && (
-            <View style={styles.card}>
-              <TouchableOpacity
-                onPress={() => {
-                  navigation.navigate('TransactionReceipt', {
-                    transaction: {
-                      ...currentTx,
-                      ...transactionData,
-                      // Explicitly pass name fields for ALL types
-                      senderName: currentTx.payerDisplayName || currentTx.senderDisplayName || currentTx.senderName || currentTx.from || currentTx.sender_name,
-                      recipientName: currentTx.merchantDisplayName || currentTx.recipientDisplayName || currentTx.recipientName || currentTx.to || currentTx.recipient_name,
-                      businessName: currentTx.businessName || currentTx.sender_name || 'Empresa',
-
-                      // Payment specific rich data
-                      payerBusiness: currentTx.payerBusiness || transactionData?.payerBusiness,
-                      payerDisplayName: currentTx.payerDisplayName || transactionData?.payerDisplayName,
-                      merchantBusiness: currentTx.merchantBusiness || transactionData?.merchantBusiness,
-                      merchantDisplayName: currentTx.merchantDisplayName || transactionData?.merchantDisplayName,
-
-                      // Internal ID for verification QR code (User Request)
-                      verificationId: resolvedInternalId || (currentTx as any).itemId || currentTx.id,
-                      // Keep original hash logic for display
-                      transactionHash: currentTx.transactionId || transactionData?.transactionId || currentTx.transactionHash,
-                    },
-                    type: currentTx.type === 'payment' ? 'payment' : 'transfer'
-                  });
-                }}
-                style={[styles.blockchainButton, { backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0' }]}
-              >
-                <Icon name="file-text" size={16} color={colors.primaryDark} style={styles.blockchainIcon} />
-                <Text style={[styles.blockchainButtonText, { color: colors.primaryDark }]}>Ver comprobante oficial</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {/* Actions */}
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Acciones</Text>
-
-            <View style={styles.actionsContainer}>
-              {(currentTx.type === 'received' || currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'payroll') && (
+          {/* Actions — primary CTA + utility rows in one card */}
+          {(currentTx.type === 'received' || currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'payroll') && (
                 <TouchableOpacity
                   style={styles.primaryAction}
                   onPress={() => {
@@ -2841,7 +2260,60 @@ export const TransactionDetailScreen = () => {
                   </Text>
                 </TouchableOpacity>
               )}
-            </View>
+
+          <View style={styles.actionRowsCard}>
+            {(currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'received' || currentTx.type === 'payment') && (
+            <>
+              <TouchableOpacity
+                onPress={() => {
+                  navigation.navigate('TransactionReceipt', {
+                    transaction: {
+                      ...currentTx,
+                      ...transactionData,
+                      // Explicitly pass name fields for ALL types
+                      senderName: currentTx.payerDisplayName || currentTx.senderDisplayName || currentTx.senderName || currentTx.from || currentTx.sender_name,
+                      recipientName: currentTx.merchantDisplayName || currentTx.recipientDisplayName || currentTx.recipientName || currentTx.to || currentTx.recipient_name,
+                      businessName: currentTx.businessName || currentTx.sender_name || 'Empresa',
+
+                      // Payment specific rich data
+                      payerBusiness: currentTx.payerBusiness || transactionData?.payerBusiness,
+                      payerDisplayName: currentTx.payerDisplayName || transactionData?.payerDisplayName,
+                      merchantBusiness: currentTx.merchantBusiness || transactionData?.merchantBusiness,
+                      merchantDisplayName: currentTx.merchantDisplayName || transactionData?.merchantDisplayName,
+
+                      // Internal ID for verification QR code (User Request)
+                      verificationId: resolvedInternalId || (currentTx as any).itemId || currentTx.id,
+                      // Keep original hash logic for display
+                      transactionHash: currentTx.transactionId || transactionData?.transactionId || currentTx.transactionHash,
+                    },
+                    type: currentTx.type === 'payment' ? 'payment' : 'transfer'
+                  });
+                }}
+                style={styles.actionRow}
+                accessibilityRole="button"
+                accessibilityLabel="Ver comprobante oficial"
+              >
+                <View style={[styles.actionRowIcon, { backgroundColor: colors.primarySoft }]}>
+                  <Icon name="file-text" size={18} color={colors.primaryDark} />
+                </View>
+                <Text style={styles.actionRowLabel}>Ver comprobante oficial</Text>
+                <Icon name="chevron-right" size={18} color={colors.text.light} />
+              </TouchableOpacity>
+              <View style={styles.rowDivider} />
+            </>
+          )}
+            <TouchableOpacity
+              onPress={() => setShowBlockchainDetails(true)}
+              style={styles.actionRow}
+              accessibilityRole="button"
+              accessibilityLabel="Ver detalles técnicos"
+            >
+              <View style={[styles.actionRowIcon, { backgroundColor: colors.neutralDark }]}>
+                <Icon name="code" size={18} color={colors.text.secondary} />
+              </View>
+              <Text style={styles.actionRowLabel}>Ver detalles técnicos</Text>
+              <Icon name="chevron-right" size={18} color={colors.text.light} />
+            </TouchableOpacity>
           </View>
         </View>
       </ScrollView>
