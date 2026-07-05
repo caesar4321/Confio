@@ -191,7 +191,7 @@ class UserAdmin(admin.ModelAdmin):
 class AccountAdmin(admin.ModelAdmin):
     list_display = ('display_name', 'user', 'account_type', 'account_index', 'algorand_address_short', 'bank_accounts_count', 'created_at')
     list_filter = ('account_type', 'created_at')
-    search_fields = ('user__username', 'user__email', 'business__name', 'algorand_address')
+    search_fields = ('user__username', 'user__email', 'business__name', 'algorand_address', 'bsc_address')
     readonly_fields = ('account_id', 'created_at', 'updated_at')
     
     fieldsets = (
@@ -199,7 +199,7 @@ class AccountAdmin(admin.ModelAdmin):
             'fields': ('user', 'account_type', 'account_index', 'account_id', 'business')
         }),
         ('Blockchain', {
-            'fields': ('algorand_address',)
+            'fields': ('algorand_address', 'bsc_address')
         }),
         ('Timestamps', {
             'fields': ('created_at', 'updated_at', 'last_login_at'),

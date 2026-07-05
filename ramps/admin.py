@@ -62,6 +62,7 @@ class RampTransactionAdmin(admin.ModelAdmin):
     list_display = (
         'provider',
         'direction',
+        'destination',
         'status',
         'status_detail_short',
         'provider_order_id',
@@ -72,7 +73,7 @@ class RampTransactionAdmin(admin.ModelAdmin):
         'final_amount',
         'created_at',
     )
-    list_filter = (
+    list_filter = ('destination', 
         'provider',
         'direction',
         'status',
