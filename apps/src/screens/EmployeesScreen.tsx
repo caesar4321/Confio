@@ -11,6 +11,8 @@ import { InviteEmployeeModal } from '../components/InviteEmployeeModal';
 import { getCountryByIso } from '../utils/countries';
 import { colors } from '../config/theme';
 import { InlineBanner } from '../components/common/InlineBanner';
+import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
+import { EmptyState } from '../components/EmptyState';
 
 type EmployeesScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
@@ -41,7 +43,7 @@ const getRoleLabel = (role: string) => {
   }
 };
 
-const EmployeeCard = memo(({ employee, onPress, onActions }: any) => {
+const EmployeeCard = memo(({ employee, onPress }: any) => {
   const initialSource = employee?.user?.firstName || employee?.user?.username || 'E';
   const avatarInitial = typeof initialSource === 'string' && initialSource.length > 0
     ? initialSource.charAt(0).toUpperCase()
@@ -52,7 +54,12 @@ const EmployeeCard = memo(({ employee, onPress, onActions }: any) => {
     'Empleado';
 
   return (
-    <TouchableOpacity style={styles.employeeCard} onPress={() => onPress(employee)}>
+    <TouchableOpacity
+      style={styles.employeeCard}
+      onPress={() => onPress(employee)}
+      accessibilityRole="button"
+      accessibilityLabel={`Ver detalles de ${displayName}`}
+    >
       <View style={styles.avatarContainer}>
         <Text style={styles.avatarText}>{avatarInitial}</Text>
       </View>
@@ -61,9 +68,7 @@ const EmployeeCard = memo(({ employee, onPress, onActions }: any) => {
         <Text style={styles.employeeRole}>{getRoleLabel(employee?.role)}</Text>
         <Text style={styles.employeePhone}>{formatPhoneNumber(employee?.user?.phoneNumber, employee?.user?.phoneCountry)}</Text>
       </View>
-      <TouchableOpacity style={styles.moreButton} onPress={() => onActions(employee)} accessibilityRole="button" accessibilityLabel="Acciones del empleado">
-        <Icon name="more-vertical" size={20} color="#6b7280" />
-      </TouchableOpacity>
+      <Icon name="chevron-right" size={18} color={colors.text.light} />
     </TouchableOpacity>
   );
 });
@@ -127,17 +132,6 @@ export const EmployeesScreen = () => {
     );
   }, [employees, searchTerm]);
 
-  const handleEmployeeActions = useCallback((emp: any) => {
-    Alert.alert(
-      'Acciones del empleado',
-      `${emp.user?.firstName || ''} ${emp.user?.lastName || ''}`.trim() || emp.user?.username || 'Empleado',
-      [
-        { text: 'Ver detalles', onPress: () => navigation.navigate('EmployeeDetail', { employeeId: emp.id, employeeData: emp } as any) },
-        { text: 'Cerrar', style: 'cancel' },
-      ]
-    );
-  }, [navigation]);
-
   const handleInvite = () => setShowInviteModal(true);
 
   const handleCancelInvitation = async (invitationId: string) => {
@@ -158,40 +152,45 @@ export const EmployeesScreen = () => {
 
   const renderHeader = () => (
     <View style={styles.headerWrap}>
-      <View style={styles.heroCard}>
-        <View style={styles.heroIcon}>
-          <Icon name="users" size={20} color="#fff" />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.heroTitle}>Empleados</Text>
-          <Text style={styles.heroSubtitle}>Agrega tu equipo y conéctalos con la nómina.</Text>
+      {/* Emerald brand field (shared backdrop) bleeding through the list
+          padding — same strip grammar as PayoutMethods/Guardarian. */}
+      <View style={styles.brandField}>
+        <BrandFieldBackground id="employeesField" ringCy="20%" ringR={80} ringWidth={20} />
+        <View style={styles.fieldInner}>
+          <Text style={styles.fieldEyebrow}>TU EQUIPO</Text>
+          <Text style={styles.fieldTitle}>Empleados</Text>
+          <Text style={styles.fieldSubtitle}>
+            {employees.length > 0
+              ? `${employees.length} ${employees.length === 1 ? 'persona' : 'personas'} en tu equipo · conéctalas con la nómina`
+              : 'Agrega tu equipo y conéctalo con la nómina.'}
+          </Text>
         </View>
       </View>
 
       <View style={styles.actionRow}>
         <TouchableOpacity style={styles.actionButton} onPress={handleInvite}>
           <View style={styles.actionIconContainer}>
-            <Icon name="user-plus" size={18} color="#fff" />
+            <Icon name="user-plus" size={18} color={colors.white} />
           </View>
           <View style={styles.actionTextContainer}>
             <Text style={styles.actionButtonTitle}>Añadir empleado</Text>
             <Text style={styles.actionButtonSubtitle}>Gestiona tu equipo de trabajo</Text>
           </View>
-          <Icon name="chevron-right" size={18} color="#9ca3af" />
+          <Icon name="chevron-right" size={18} color={colors.text.light} />
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.actionButton, { borderColor: '#ebe9fe', backgroundColor: '#f5f3ff' }]}
+          style={[styles.actionButton, { borderColor: colors.violetLight, backgroundColor: colors.violetLight }]}
           onPress={() => navigation.navigate('PayrollHome')}
         >
-          <View style={[styles.actionIconContainer, { backgroundColor: '#8B5CF6' }]}>
-            <Icon name="dollar-sign" size={18} color="#fff" />
+          <View style={[styles.actionIconContainer, { backgroundColor: colors.secondary }]}>
+            <Icon name="dollar-sign" size={18} color={colors.white} />
           </View>
           <View style={styles.actionTextContainer}>
             <Text style={styles.actionButtonTitle}>Nómina</Text>
             <Text style={styles.actionButtonSubtitle}>Paga a tu equipo automáticamente</Text>
           </View>
-          <Icon name="chevron-right" size={18} color="#9ca3af" />
+          <Icon name="chevron-right" size={18} color={colors.text.light} />
         </TouchableOpacity>
 
       </View>
@@ -200,8 +199,12 @@ export const EmployeesScreen = () => {
 
   if (!isBusinessAccount) {
     return (
-      <View style={[styles.container, { alignItems: 'center', justifyContent: 'center' }]}>
-        <Text>Esta vista es solo para cuentas de negocio.</Text>
+      <View style={styles.container}>
+        <EmptyState
+          icon="briefcase"
+          title="Solo para negocios"
+          subtitle="Cambia a tu cuenta de negocio para gestionar empleados."
+        />
       </View>
     );
   }
@@ -209,13 +212,21 @@ export const EmployeesScreen = () => {
   return (
     <View style={styles.container}>
       <View style={styles.searchContainer}>
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Buscar empleados..."
-          placeholderTextColor="#6b7280"
-          value={searchTerm}
-          onChangeText={setSearchTerm}
-        />
+        <View style={styles.searchBox}>
+          <Icon name="search" size={18} color={colors.text.light} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Buscar empleados..."
+            placeholderTextColor={colors.text.light}
+            value={searchTerm}
+            onChangeText={setSearchTerm}
+          />
+          {searchTerm.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchTerm('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} accessibilityRole="button" accessibilityLabel="Borrar búsqueda">
+              <Icon name="x-circle" size={18} color={colors.text.light} />
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
       {banner && (
@@ -231,7 +242,9 @@ export const EmployeesScreen = () => {
       <SectionList
         sections={[
           { key: 'employees', title: `Empleados (${filteredEmployees.length})`, data: filteredEmployees },
-          { key: 'invites', title: 'Invitaciones pendientes', data: invitations },
+          ...(invitations.length > 0
+            ? [{ key: 'invites', title: 'Invitaciones pendientes', data: invitations }]
+            : []),
         ]}
         keyExtractor={(item: any, index) => item.id || item.invitationCode || index.toString()}
         renderItem={({ item, section }) => {
@@ -245,7 +258,6 @@ export const EmployeesScreen = () => {
               <EmployeeCard
                 employee={item}
                 onPress={() => navigation.navigate('EmployeeDetail', { employeeId: item.id, employeeName: displayName, employeePhone: displayPhone, employeeRole: item.role, isActive: item.isActive, employeeData: item } as any)}
-                onActions={handleEmployeeActions}
               />
             );
           }
@@ -257,7 +269,7 @@ export const EmployeesScreen = () => {
                 <Text style={styles.inviteSubtitle}>Rol: {getRoleLabel(item.role)}</Text>
               </View>
               <TouchableOpacity onPress={() => handleCancelInvitation(item.id)}>
-                <Text style={{ color: '#ef4444' }}>Cancelar</Text>
+                <Text style={{ color: colors.danger }}>Cancelar</Text>
               </TouchableOpacity>
             </View>
           );
@@ -265,6 +277,19 @@ export const EmployeesScreen = () => {
         renderSectionHeader={({ section }) => (
           <Text style={styles.sectionTitle}>{section.title}</Text>
         )}
+        renderSectionFooter={({ section }) =>
+          section.key === 'employees' && filteredEmployees.length === 0 ? (
+            <EmptyState
+              icon={searchTerm ? 'search' : 'users'}
+              title={searchTerm ? 'Sin resultados' : 'Aún no tienes empleados'}
+              subtitle={searchTerm
+                ? `No encontramos empleados para "${searchTerm}".`
+                : 'Invita a tu equipo para que puedan cobrar y ayudarte a operar.'}
+              actionLabel={searchTerm ? undefined : 'Añadir empleado'}
+              onAction={searchTerm ? undefined : handleInvite}
+            />
+          ) : null
+        }
         ListHeaderComponent={renderHeader}
         refreshControl={
           <RefreshControl
@@ -293,55 +318,69 @@ export const EmployeesScreen = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
+  container: { flex: 1, backgroundColor: colors.white },
   headerWrap: { gap: 12, marginBottom: 8 },
-  heroCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#ECFDF3',
-    borderRadius: 14,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#DCFCE7',
+  brandField: {
+    backgroundColor: colors.primary,
+    overflow: 'hidden',
+    marginHorizontal: -16,
+    marginTop: -16,
+    marginBottom: 4,
   },
-  heroIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: '#10B981',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
+  fieldInner: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 22,
   },
-  heroTitle: { fontSize: 16, fontWeight: '700', color: '#065F46' },
-  heroSubtitle: { fontSize: 13, color: '#065F46' },
+  fieldEyebrow: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 2,
+    color: colors.primaryLight,
+    marginBottom: 6,
+  },
+  fieldTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: colors.white,
+  },
+  fieldSubtitle: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: 'rgba(255,255,255,0.85)',
+    marginTop: 6,
+  },
   searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
-    gap: 10,
+    borderBottomColor: colors.neutralDark,
+  },
+  searchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: colors.neutral,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   searchInput: {
     flex: 1,
-    backgroundColor: '#f9fafb',
-    paddingHorizontal: 14,
     paddingVertical: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
+    fontSize: 15,
+    color: colors.text.primary,
   },
   actionRow: { gap: 10 },
   actionButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 12,
     padding: 12,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: colors.border,
     justifyContent: 'space-between',
     gap: 12,
   },
@@ -351,15 +390,17 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#34d399',
+    backgroundColor: colors.primary,
   },
   actionTextContainer: { flex: 1 },
-  actionButtonTitle: { fontSize: 16, fontWeight: '700', color: '#111827' },
-  actionButtonSubtitle: { fontSize: 12, color: '#6b7280' },
+  actionButtonTitle: { fontSize: 16, fontWeight: '700', color: colors.text.primary },
+  actionButtonSubtitle: { fontSize: 12, color: colors.text.secondary },
   sectionTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#6b7280',
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.text.secondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
     marginTop: 12,
     marginBottom: 8,
   },
@@ -367,22 +408,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     padding: 12,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: colors.border,
     marginBottom: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.03,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 1,
   },
   avatarContainer: {
     width: 44,
     height: 44,
     borderRadius: 12,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: colors.violetLight,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
@@ -390,42 +426,39 @@ const styles = StyleSheet.create({
   avatarText: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.secondary,
   },
   employeeName: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text.primary,
   },
   employeeRole: {
     fontSize: 12,
-    color: '#6b7280',
+    color: colors.text.secondary,
   },
   employeePhone: {
     fontSize: 12,
-    color: '#6b7280',
-  },
-  moreButton: {
-    padding: 4,
+    color: colors.text.secondary,
   },
   inviteCard: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 12,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: colors.border,
     marginBottom: 8,
   },
   inviteTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text.primary,
   },
   inviteSubtitle: {
     fontSize: 12,
-    color: '#6b7280',
+    color: colors.text.secondary,
   },
 });
 
