@@ -7,6 +7,7 @@ import { MessageInboxContent } from '../components/MessageInboxContent';
 import { MainStackParamList } from '../types/navigation';
 import { Header } from '../navigation/Header';
 import { describeTypes, logBreadcrumb } from '../services/crashLog';
+import { colors } from '../config/theme';
 
 
 export const MessageScreen = () => {
@@ -35,7 +36,7 @@ export const MessageScreen = () => {
           title="Mensajes"
           navigation={navigation as any}
           onBackPress={() => navigation.goBack()}
-          backgroundColor="#34d399"
+          backgroundColor={colors.primary}
           isLight
         />
       )}
@@ -49,6 +50,6 @@ export default MessageScreen;
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: colors.neutral,
   },
 });

@@ -14,6 +14,7 @@ import {
 } from '../apollo/mutations';
 import { useAuth } from '../contexts/AuthContext';
 import { useAccount } from '../contexts/AccountContext';
+import { colors } from '../config/theme';
 
 type MessageInboxContentProps = {
   onScreenStateChange?: (state: ScreenState) => void;
@@ -467,7 +468,7 @@ export function MessageInboxContent({ onScreenStateChange, initialChannelId }: M
   if (loading && !data?.messageInbox?.channels?.length) {
     return (
       <View style={styles.stateWrap}>
-        <ActivityIndicator size="small" color="#34d399" />
+        <ActivityIndicator size="small" color={colors.primary} />
         <Text style={styles.stateText}>Cargando mensajes...</Text>
       </View>
     );
@@ -506,14 +507,14 @@ const styles = StyleSheet.create({
   stateTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text.primary,
     marginBottom: 6,
   },
   stateText: {
     marginTop: 8,
     fontSize: 13,
     lineHeight: 19,
-    color: '#6B7280',
+    color: colors.text.secondary,
     textAlign: 'center',
   },
 });

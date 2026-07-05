@@ -1,6 +1,7 @@
 import React from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
+import { colors } from '../config/theme';
 
 import { Channel, channelMeta, ChannelAvatar, tealGreen } from './MessageInboxShared';
 
@@ -82,7 +83,7 @@ export function MessageInboxList({
                       <Text style={styles.channelUnreadText}>{unread}</Text>
                     </View>
                   ) : null}
-                  <Icon name="chevron-right" size={16} color="#C7CDD4" />
+                  <Icon name="chevron-right" size={16} color={colors.text.light} />
                 </View>
               </Pressable>
             );
@@ -111,13 +112,13 @@ const styles = StyleSheet.create({
   sectionIntroTitle: {
     fontSize: 13,
     fontWeight: '700',
-    color: '#475467',
+    color: colors.text.secondary,
     textTransform: 'uppercase',
     letterSpacing: 0.4,
   },
   sectionIntroMeta: {
     fontSize: 12,
-    color: '#98A2B3',
+    color: colors.text.light,
     fontWeight: '600',
   },
   channelList: {
@@ -125,24 +126,19 @@ const styles = StyleSheet.create({
     paddingTop: 10,
   },
   channelCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.white,
     borderRadius: 18,
     paddingHorizontal: 16,
     paddingVertical: 14,
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 10,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 1,
     borderWidth: 1,
-    borderColor: '#EEF2F6',
+    borderColor: colors.border,
   },
   channelCardUnread: {
-    borderColor: '#E1E7EF',
-    backgroundColor: '#FCFEFD',
+    borderColor: colors.primaryLight,
+    backgroundColor: colors.primarySoft,
   },
   channelBody: {
     flex: 1,
@@ -155,10 +151,10 @@ const styles = StyleSheet.create({
   channelName: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#111111',
+    color: colors.text.primary,
   },
   channelNameUnread: {
-    color: '#0F172A',
+    color: colors.text.primary,
   },
   channelMetaRow: {
     flexDirection: 'row',
@@ -177,23 +173,23 @@ const styles = StyleSheet.create({
   },
   channelSubtitle: {
     fontSize: 11,
-    color: '#8A94A6',
+    color: colors.text.light,
     flex: 1,
   },
   channelTime: {
     fontSize: 11,
-    color: '#AAAAAA',
+    color: colors.text.light,
   },
   channelTimeUnread: {
-    color: '#667085',
+    color: colors.text.secondary,
     fontWeight: '500',
   },
   channelPreview: {
     fontSize: 12,
-    color: '#667085',
+    color: colors.text.secondary,
   },
   channelPreviewUnread: {
-    color: '#344054',
+    color: colors.text.primary,
     fontWeight: '400',
   },
   channelTrailing: {
@@ -214,6 +210,6 @@ const styles = StyleSheet.create({
   channelUnreadText: {
     fontSize: 10,
     fontWeight: '700',
-    color: '#FFFFFF',
+    color: colors.white,
   },
 });

@@ -16,6 +16,7 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
+import { colors } from '../config/theme';
 
 
 import founderImage from '../assets/png/JulianMoon_Founder.jpeg';
@@ -26,9 +27,9 @@ import { trackContentPlatformClick } from '../services/contentClickTrackingServi
 import { describeTypes, logBreadcrumb, recordCrashError } from '../services/crashLog';
 
 const platformButtonStyles: Record<'TikTok' | 'Instagram' | 'YouTube', { bg: string; fg: string }> = {
-  TikTok: { bg: '#111111', fg: '#FFFFFF' },
-  Instagram: { bg: '#C13584', fg: '#FFFFFF' },
-  YouTube: { bg: '#DC2626', fg: '#FFFFFF' },
+  TikTok: { bg: colors.text.primary, fg: colors.white },
+  Instagram: { bg: '#C13584', fg: colors.white },
+  YouTube: { bg: colors.error.icon, fg: colors.white },
 };
 const platformOrder: Array<'TikTok' | 'Instagram' | 'YouTube'> = ['TikTok', 'Instagram', 'YouTube'];
 
@@ -374,7 +375,7 @@ function renderMessageContent(
     <View style={styles.supportMessageWrap}>
       <View style={styles.supportRow}>
         <View style={styles.supportAvatar}>
-          <Icon name="headphones" size={15} color="#0F9F74" />
+          <Icon name="headphones" size={15} color={colors.primaryDark} />
         </View>
         <View style={styles.supportBubble}>
           <Text style={styles.supportSenderLabel}>{message.senderName || 'Soporte de Confío'}</Text>
@@ -505,7 +506,7 @@ export function MessageChannelThread({
       <SafeAreaView edges={['top']} style={styles.channelHeaderSafeArea}>
         <View style={styles.channelHeaderRow}>
           <Pressable onPress={onBack} style={styles.backButton}>
-            <Icon name="arrow-left" size={22} color="#1F2937" />
+            <Icon name="arrow-left" size={22} color={colors.text.primary} />
           </Pressable>
           <ChannelAvatar channel={channel} large />
           <View style={styles.channelHeaderCopy}>
@@ -519,7 +520,7 @@ export function MessageChannelThread({
               }}
               style={[styles.muteButton, channel.isMuted && styles.muteButtonActive]}
             >
-              <Icon name={channel.isMuted ? 'volume-x' : 'bell-off'} size={16} color={channel.isMuted ? '#FFFFFF' : '#667085'} />
+              <Icon name={channel.isMuted ? 'volume-x' : 'bell-off'} size={16} color={channel.isMuted ? colors.white : colors.text.secondary} />
             </Pressable>
           )}
         </View>
@@ -651,7 +652,7 @@ export function MessageChannelThread({
             value={draftMessage}
             onChangeText={setDraftMessage}
             placeholder="Escribe tu mensaje..."
-            placeholderTextColor="#98A2B3"
+            placeholderTextColor={colors.text.light}
             multiline
             style={styles.composerInput}
           />
@@ -665,7 +666,7 @@ export function MessageChannelThread({
               (!draftMessage.trim() || isSending) && styles.composerSendButtonDisabled,
             ]}
           >
-            <Icon name="send" size={16} color="#FFFFFF" />
+            <Icon name="send" size={16} color={colors.white} />
           </Pressable>
         </View>
       )}
@@ -678,9 +679,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   channelHeaderSafeArea: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.white,
     borderBottomWidth: 1,
-    borderBottomColor: '#EAEAEA',
+    borderBottomColor: colors.border,
   },
   channelHeaderRow: {
     flexDirection: 'row',
@@ -697,7 +698,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F9FAFB',
+    backgroundColor: colors.neutral,
   },
   channelHeaderCopy: {
     flex: 1,
@@ -705,23 +706,23 @@ const styles = StyleSheet.create({
   muteButton: {
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F4F6F8',
+    backgroundColor: colors.neutralDark,
     borderRadius: 18,
     width: 36,
     height: 36,
   },
   muteButtonActive: {
-    backgroundColor: '#111827',
+    backgroundColor: colors.text.primary,
   },
   channelHeaderName: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#111111',
+    color: colors.text.primary,
   },
   channelHeaderSubtitle: {
     marginTop: 2,
     fontSize: 12,
-    color: '#98A2B3',
+    color: colors.text.light,
   },
   channelContent: {
     paddingBottom: 28,
@@ -736,7 +737,7 @@ const styles = StyleSheet.create({
   channelContextText: {
     fontSize: 12,
     lineHeight: 17,
-    color: '#98A2B3',
+    color: colors.text.light,
   },
   messagesWrap: {
     paddingHorizontal: 14,
@@ -749,7 +750,7 @@ const styles = StyleSheet.create({
   },
   loadMoreText: {
     fontSize: 12,
-    color: '#98A2B3',
+    color: colors.text.light,
     fontWeight: '600',
   },
   pinnedSection: {
@@ -764,17 +765,17 @@ const styles = StyleSheet.create({
   dateGroupLine: {
     flex: 1,
     height: 1,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: colors.border,
   },
   dateGroupLabel: {
     fontSize: 11,
     fontWeight: '700',
-    color: '#98A2B3',
+    color: colors.text.light,
     textTransform: 'uppercase',
     letterSpacing: 0.4,
   },
   messageCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.white,
     borderRadius: 16,
     padding: 14,
     marginBottom: 10,
@@ -784,7 +785,7 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 1,
     borderWidth: 1,
-    borderColor: '#EDF2F7',
+    borderColor: colors.border,
   },
   pinnedMessageCard: {
     backgroundColor: '#FFFDF7',
@@ -795,10 +796,10 @@ const styles = StyleSheet.create({
     borderColor: '#F2E7E7',
   },
   newsMessageCard: {
-    borderColor: '#DDF4EB',
+    borderColor: colors.primarySoft,
   },
   founderMessageCard: {
-    borderColor: '#E6EAF2',
+    borderColor: colors.border,
   },
   messageContentPressable: {
     width: '100%',
@@ -820,12 +821,12 @@ const styles = StyleSheet.create({
   founderAuthorName: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text.primary,
   },
   founderAuthorRole: {
     marginTop: 1,
     fontSize: 11,
-    color: '#98A2B3',
+    color: colors.text.light,
   },
   messageMetaRow: {
     flexDirection: 'row',
@@ -872,7 +873,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FF444418',
   },
   videoTagText: {
-    color: '#FF4444',
+    color: colors.danger,
   },
   newsTag: {
     backgroundColor: tealLight,
@@ -882,14 +883,14 @@ const styles = StyleSheet.create({
   },
   messageTime: {
     fontSize: 11,
-    color: '#AAAAAA',
+    color: colors.text.light,
   },
   videoTitle: {
     marginBottom: 10,
     fontSize: 13,
     fontWeight: '600',
     lineHeight: 18,
-    color: '#111111',
+    color: colors.text.primary,
   },
   videoPlatformsRow: {
     flexDirection: 'row',
@@ -901,7 +902,7 @@ const styles = StyleSheet.create({
     width: '100%',
     borderRadius: 12,
     marginBottom: 10,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: colors.border,
   },
   videoPlatformButton: {
     borderRadius: 20,
@@ -928,7 +929,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: '#F4F6F8',
+    backgroundColor: colors.neutralDark,
     borderRadius: 20,
     paddingHorizontal: 10,
     paddingVertical: 5,
@@ -936,7 +937,7 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   reactionButtonActive: {
-    backgroundColor: '#E8F8F2',
+    backgroundColor: colors.primarySoft,
     borderColor: tealGreen,
   },
   reactionEmoji: {
@@ -944,18 +945,18 @@ const styles = StyleSheet.create({
   },
   reactionCount: {
     fontSize: 11,
-    color: '#667085',
+    color: colors.text.secondary,
     fontWeight: '600',
   },
   addReactionButton: {
-    backgroundColor: '#F4F6F8',
+    backgroundColor: colors.neutralDark,
     borderRadius: 20,
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
   addReactionText: {
     fontSize: 12,
-    color: '#667085',
+    color: colors.text.secondary,
     fontWeight: '600',
   },
   emojiPicker: {
@@ -963,10 +964,10 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 6,
     marginTop: 8,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.white,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#EAEAEA',
+    borderColor: colors.border,
     padding: 8,
   },
   emojiOption: {
@@ -977,7 +978,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   emojiOptionActive: {
-    backgroundColor: '#E8F8F2',
+    backgroundColor: colors.primarySoft,
   },
   emojiOptionText: {
     fontSize: 17,
@@ -991,25 +992,25 @@ const styles = StyleSheet.create({
   founderTextLabel: {
     fontSize: 11,
     fontWeight: '700',
-    color: '#475467',
+    color: colors.text.secondary,
     letterSpacing: 0.1,
   },
   textMessageBody: {
     flex: 1,
     fontSize: 13,
     lineHeight: 20,
-    color: '#333333',
+    color: colors.text.primary,
   },
   newsTitle: {
     marginBottom: 5,
     fontSize: 14,
     fontWeight: '700',
-    color: '#111111',
+    color: colors.text.primary,
   },
   newsBody: {
     fontSize: 13,
     lineHeight: 20,
-    color: '#555555',
+    color: colors.text.secondary,
   },
   supportRow: {
     flexDirection: 'row',
@@ -1022,34 +1023,34 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: '#ECFDF3',
+    backgroundColor: colors.primarySoft,
     borderWidth: 1,
-    borderColor: '#D1FADF',
+    borderColor: colors.primaryLight,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 10,
   },
   supportBubble: {
     flex: 1,
-    backgroundColor: '#F7F9FC',
+    backgroundColor: colors.neutral,
     borderTopLeftRadius: 6,
     borderTopRightRadius: 16,
     borderBottomLeftRadius: 16,
     borderBottomRightRadius: 16,
     borderWidth: 1,
-    borderColor: '#E5EAF1',
+    borderColor: colors.border,
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
   supportBubbleOwn: {
     flex: 0,
     maxWidth: '88%',
-    backgroundColor: '#0F9F74',
+    backgroundColor: colors.primaryDark,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     borderBottomLeftRadius: 16,
     borderBottomRightRadius: 6,
-    borderColor: '#0F9F74',
+    borderColor: colors.primaryDark,
   },
   supportMessageWrap: {
     marginBottom: 12,
@@ -1063,26 +1064,26 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     fontSize: 11,
     fontWeight: '700',
-    color: '#475467',
+    color: colors.text.secondary,
   },
   supportSenderLabelOwn: {
-    color: '#D1FAE5',
+    color: colors.primaryLight,
   },
   supportText: {
     fontSize: 13,
     lineHeight: 20,
-    color: '#333333',
+    color: colors.text.primary,
   },
   supportTextOwn: {
-    color: '#FFFFFF',
+    color: colors.white,
   },
   supportTime: {
     marginTop: 8,
     fontSize: 11,
-    color: '#98A2B3',
+    color: colors.text.light,
   },
   supportTimeOwn: {
-    color: '#A7F3D0',
+    color: colors.primaryLight,
     textAlign: 'right',
   },
   composerWrap: {
@@ -1093,22 +1094,22 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     paddingBottom: 14,
     borderTopWidth: 1,
-    borderTopColor: '#EAEAEA',
-    backgroundColor: '#FFFFFF',
+    borderTopColor: colors.border,
+    backgroundColor: colors.white,
   },
   composerInput: {
     flex: 1,
     minHeight: 42,
     maxHeight: 120,
-    backgroundColor: '#F7F9FC',
+    backgroundColor: colors.neutral,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#E5EAF1',
+    borderColor: colors.border,
     paddingHorizontal: 14,
     paddingTop: 11,
     paddingBottom: 11,
     fontSize: 14,
-    color: '#111827',
+    color: colors.text.primary,
   },
   composerSendButton: {
     width: 42,
@@ -1116,7 +1117,7 @@ const styles = StyleSheet.create({
     borderRadius: 21,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#0F9F74',
+    backgroundColor: colors.primaryDark,
   },
   composerSendButtonDisabled: {
     backgroundColor: '#A8DCC8',

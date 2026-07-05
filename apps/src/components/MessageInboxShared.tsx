@@ -1,12 +1,13 @@
 import React from 'react';
 import { Image, StyleSheet, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
+import { colors } from '../config/theme';
 
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import founderImage from '../assets/png/JulianMoon_Founder.jpeg';
 
-export const tealGreen = '#34d399';
-export const tealLight = '#E8F8F2';
+export const tealGreen = colors.primary;
+export const tealLight = colors.primarySoft;
 export const messageReactionOptions = ['🔥', '🙌', '😍', '🤯', '💡', '😎', '💪', '👀', '😢', '❤️'] as const;
 
 export type MessageReactionSummary = {
@@ -110,16 +111,16 @@ export const channelMeta: Record<
   },
   confio: {
     badge: 'Novedades',
-    badgeBackground: '#E8F8F2',
-    badgeColor: '#0F9F74',
+    badgeBackground: colors.primarySoft,
+    badgeColor: colors.primaryDark,
     avatarBackground: tealLight,
     description: 'Lanzamientos y cambios del producto',
   },
   soporte: {
     badge: 'Oficial',
-    badgeBackground: '#FFF4E5',
-    badgeColor: '#C26B00',
-    avatarBackground: '#FFF7ED',
+    badgeBackground: colors.warningLight,
+    badgeColor: colors.warning.text,
+    avatarBackground: colors.warningLight,
     description: 'Ayuda y respuestas del equipo',
   },
 };
@@ -262,7 +263,7 @@ export function ChannelAvatar({ channel, large = false }: ChannelAvatarProps) {
 
   return (
     <View style={[containerStyle, styles.supportAvatarBadge]}>
-      <Icon name="headphones" size={large ? 16 : 18} color="#0F9F74" />
+      <Icon name="headphones" size={large ? 16 : 18} color={colors.primaryDark} />
     </View>
   );
 }
@@ -285,7 +286,7 @@ const styles = StyleSheet.create({
   },
   avatarImageContainer: {
     overflow: 'hidden',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.white,
   },
   channelAvatarImage: {
     width: 48,
@@ -298,14 +299,14 @@ const styles = StyleSheet.create({
     borderRadius: 18,
   },
   confioAvatarContainer: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.white,
     borderWidth: 1,
-    borderColor: '#E8EEF2',
+    borderColor: colors.border,
     overflow: 'hidden',
   },
   supportAvatarBadge: {
-    backgroundColor: '#ECFDF3',
+    backgroundColor: colors.primarySoft,
     borderWidth: 1,
-    borderColor: '#D1FADF',
+    borderColor: colors.primaryLight,
   },
 });
