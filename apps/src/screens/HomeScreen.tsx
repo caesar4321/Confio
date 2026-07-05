@@ -26,6 +26,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import MCIcon from 'react-native-vector-icons/MaterialCommunityIcons';
 import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
 import { colors } from '../config/theme';
+import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
 import InviteClaimBanner from '../components/InviteClaimBanner';
 import { HomeStatsSection } from '../components/HomeStatsSection';
 import * as Keychain from 'react-native-keychain';
@@ -1303,16 +1304,7 @@ export const HomeScreen = () => {
             }
           ]}
         >
-          <Svg style={StyleSheet.absoluteFill}>
-            <Defs>
-              <SvgLinearGradient id="homeField" x1="0" y1="0" x2="0" y2="1">
-                <Stop offset="0" stopColor={colors.primary} />
-                <Stop offset="1" stopColor={colors.primaryDark} />
-              </SvgLinearGradient>
-            </Defs>
-            <Rect width="100%" height="100%" fill="url(#homeField)" />
-            <Circle cx="102%" cy="46%" r="80" stroke={colors.white} strokeWidth="20" strokeOpacity="0.10" fill="none" />
-          </Svg>
+          <BrandFieldBackground id="homeField" ringCx="102%" ringCy="46%" ringR={80} ringWidth={20} />
           <View style={styles.balanceCardInner}>
           <View style={styles.portfolioHeader}>
             <View style={styles.portfolioTitleContainer}>

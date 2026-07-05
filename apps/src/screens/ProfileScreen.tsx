@@ -63,6 +63,11 @@ export const ProfileScreen = () => {
     return false;
   }, [rawUsername]);
   const [showReferralModal, setShowReferralModal] = React.useState(false);
+  // Measured size of the header field. Its height changes after mount (name,
+  // tier badge, phone load async) and an absoluteFill Svg with percentage
+  // sizes doesn't repaint on parent growth — the stale gradient leaves a flat
+  // light band at the bottom. Explicit dimensions force a redraw.
+  const [fieldSize, setFieldSize] = React.useState({ width: 0, height: 0 });
   const [showBackupModal, setShowBackupModal] = React.useState(false);
   const [driveBackupEnabled, setDriveBackupEnabled] = React.useState(false);
   const [biometricAvailable, setBiometricAvailable] = React.useState(false);
@@ -383,8 +388,21 @@ export const ProfileScreen = () => {
             family as Home; top edge is exactly colors.primary so it meets the
             flat nav header without a seam. Padding lives on headerInner (Yoga
             insets absolute children by the parent's padding). */}
-        <View style={styles.header}>
-          <Svg style={StyleSheet.absoluteFill}>
+        <View
+          style={styles.header}
+          onLayout={(e) => {
+            const { width, height } = e.nativeEvent.layout;
+            setFieldSize((prev) =>
+              prev.width === width && prev.height === height ? prev : { width, height }
+            );
+          }}
+        >
+          <Svg
+            key={`profileField-${fieldSize.width}x${fieldSize.height}`}
+            width={fieldSize.width || '100%'}
+            height={fieldSize.height || '100%'}
+            style={StyleSheet.absoluteFill}
+          >
             <Defs>
               <SvgLinearGradient id="profileField" x1="0" y1="0" x2="0" y2="1">
                 <Stop offset="0" stopColor={colors.primary} />

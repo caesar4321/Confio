@@ -27,12 +27,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
-import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQuery } from '@apollo/client';
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
+import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { GET_MY_BALANCES } from '../apollo/queries';
 import { useAhorrosPortfolio } from '../hooks/useAhorrosPortfolio';
@@ -169,16 +169,7 @@ export const AhorrosScreen = () => {
         {/* Brand field: emerald gradient + coin ring, padding on headerInner
             (Yoga insets absolute children by parent padding). */}
         <View style={styles.header}>
-          <Svg style={StyleSheet.absoluteFill}>
-            <Defs>
-              <SvgLinearGradient id="ahorrosField" x1="0" y1="0" x2="0" y2="1">
-                <Stop offset="0" stopColor={colors.primary} />
-                <Stop offset="1" stopColor={colors.primaryDark} />
-              </SvgLinearGradient>
-            </Defs>
-            <Rect width="100%" height="100%" fill="url(#ahorrosField)" />
-            <Circle cx="105%" cy="28%" r="90" stroke={colors.white} strokeWidth="22" strokeOpacity="0.10" fill="none" />
-          </Svg>
+          <BrandFieldBackground id="ahorrosField" ringCy="28%" />
           <View style={styles.headerInner}>
           <View style={styles.headerTopRow}>
             <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerIconBtn}>
