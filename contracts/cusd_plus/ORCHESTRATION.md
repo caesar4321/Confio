@@ -135,8 +135,11 @@ USDT arriving at user.bsc has three producers, all watched by the same
 batched scanner (one eth_getLogs per 30s over the whole watch set):
 
 1. **Conversion** (leg B delivery) — matches an in-flight row; advances it.
-2. **Koywe ramp** with destination=cusd_plus — matches a pending ramp
-   order once the destination param ships.
+2. **Ramp deliveries** — provider-agnostic by design: Koywe
+   (destination=cusd_plus, live) and Guardarian (proxy injects the
+   registered bsc_address whenever to_currency=USDT on a BSC network;
+   client payout addresses are refused on this rail). Any future provider
+   follows the same rule: the server injects the registered address.
 3. **External deposit** (Julian, 2026-07-04): crypto-native users and
    no-Koywe countries onramp by sending USDT (BEP-20) straight to their
    address — WITHOUT this rail they would be forced through USDC-ALG and

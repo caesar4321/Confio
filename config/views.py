@@ -619,19 +619,40 @@ def guardarian_transaction_proxy(request):
     # 1. Address Lookup - ONLY for Buy transactions (Crypto destination)
     # For Sell transactions (Fiat destination), we do NOT want to inject a crypto address as payout_address
     db_payout_address = None
+    # Savings rail (Guardarian sibling of Koywe destination=cusd_plus):
+    # USDT on BNB Smart Chain goes to the account's REGISTERED bsc_address,
+    # server-injected, never client-supplied — same trust posture as
+    # CreateRampOrder's savings_rail. Guardarian's BSC network codes vary
+    # (BSC / BEP20 / BNB), so match loosely.
+    _to_net_early = (body.get('to_network') or body.get('toNetwork') or '').strip().upper()
+    is_savings_rail = (
+        not is_sell_transaction
+        and to_currency_clean == 'USDT'
+        and _to_net_early in ('BSC', 'BEP20', 'BEP-20', 'BNB', 'BSC_BNB')
+    )
     if not is_sell_transaction:
         try:
             account_type = payload.get('account_type', 'personal')
             account_index = payload.get('account_index', 0)
             account = user.accounts.filter(account_type=account_type, account_index=account_index).first()
-            if account and account.algorand_address:
-                db_payout_address = account.algorand_address
-                logger.info(f"Using DB address (Server Priority) for user {user_id}")
+            if account:
+                if is_savings_rail:
+                    if not account.bsc_address:
+                        return JsonResponse({'error': 'Tu cuenta de ahorro aún no está activada en este dispositivo. Actualiza la app e inicia sesión de nuevo.'}, status=400)
+                    db_payout_address = account.bsc_address
+                    logger.info(f"Using DB BSC address (savings rail) for user {user_id}")
+                elif account.algorand_address:
+                    db_payout_address = account.algorand_address
+                    logger.info(f"Using DB address (Server Priority) for user {user_id}")
         except Exception as e:
             logger.warning(f"DB address lookup error: {e}")
 
     client_payout_address = body.get('payout_address') or body.get('payoutAddress')
-    payout_address = db_payout_address or client_payout_address
+    if is_savings_rail:
+        # Never accept a client-supplied destination for the savings rail.
+        payout_address = db_payout_address
+    else:
+        payout_address = db_payout_address or client_payout_address
 
     # 2. Email Lookup
     client_email = body.get('email') or body.get('customer_email') or body.get('customerEmail')
