@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
+import { colors } from '../config/theme';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { MainStackParamList } from '../types/navigation';
 import { Button } from '../components/common/Button';
@@ -91,7 +92,7 @@ export const ReferralEventDetailScreen: React.FC = () => {
       <Header
         navigation={navigation as any}
         title="Progreso de referidos"
-        backgroundColor="#F3F4F6"
+        backgroundColor={colors.neutralDark}
         showBackButton
       />
       <ScrollView contentContainerStyle={styles.content}>
@@ -100,11 +101,11 @@ export const ReferralEventDetailScreen: React.FC = () => {
           <Text style={styles.title}>{roleCopy.title}</Text>
           <Text style={styles.subtitle}>{roleCopy.description}</Text>
           <View style={styles.friendPill}>
-            <Icon name="user" size={16} color="#047857" />
+            <Icon name="user" size={16} color={colors.primaryDark} />
             <Text style={styles.friendText}>{friendName}</Text>
           </View>
           <View style={styles.tipCard}>
-            <Icon name="zap" size={18} color="#0F766E" />
+            <Icon name="zap" size={18} color={colors.primaryDark} />
             <View style={styles.tipTextWrapper}>
               <Text style={styles.tipTitle}>Siguiente movimiento</Text>
               <Text style={styles.tipText}>{roleCopy.tip}</Text>
@@ -114,7 +115,7 @@ export const ReferralEventDetailScreen: React.FC = () => {
             <Button
               title="Compartir mi invitación"
               onPress={() => navigation.navigate('Achievements')}
-              icon={<Icon name="share-2" size={18} color="#fff" />}
+              icon={<Icon name="share-2" size={18} color={colors.white} />}
             />
             <Button
               title="Ver pasos sugeridos"
@@ -124,9 +125,9 @@ export const ReferralEventDetailScreen: React.FC = () => {
                   event: route.params?.event,
                 })
               }
-              icon={<Icon name="chevron-right" size={18} color="#10B981" />}
-              style={{ backgroundColor: '#ECFDF5', borderWidth: 0 }}
-              textStyle={{ color: '#047857' }}
+              icon={<Icon name="chevron-right" size={18} color={colors.primaryDark} />}
+              style={{ backgroundColor: colors.primarySoft, borderWidth: 0 }}
+              textStyle={{ color: colors.primaryDark }}
             />
           </View>
         </View>
@@ -136,10 +137,10 @@ export const ReferralEventDetailScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F3F4F6' },
+  container: { flex: 1, backgroundColor: colors.neutralDark },
   content: { padding: 20, paddingTop: 12 },
   card: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 24,
     padding: 24,
     shadowColor: '#0F172A',
@@ -152,18 +153,18 @@ const styles = StyleSheet.create({
   eyebrow: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#10B981',
+    color: colors.primaryDark,
     textTransform: 'uppercase',
     letterSpacing: 1,
   },
   title: {
     fontSize: 24,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text.primary,
   },
   subtitle: {
     fontSize: 15,
-    color: '#4B5563',
+    color: colors.text.secondary,
     lineHeight: 22,
   },
   friendPill: {
@@ -173,10 +174,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 20,
-    backgroundColor: '#ECFDF5',
+    backgroundColor: colors.primarySoft,
     gap: 8,
   },
-  friendText: { color: '#047857', fontWeight: '600' },
+  friendText: { color: colors.primaryDark, fontWeight: '600' },
   tipCard: {
     flexDirection: 'row',
     gap: 12,

@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
+import { colors } from '../config/theme';
 import { useNavigation, NavigationProp, RouteProp, useRoute } from '@react-navigation/native';
 import { MainStackParamList } from '../types/navigation';
 import { Button } from '../components/common/Button';
@@ -68,7 +69,7 @@ export const ReferralActionPromptScreen: React.FC = () => {
                 btn.icon === 'download' && styles.secondaryOptionButton,
               ]}
               onPress={btn.onPress}>
-              <Icon name={btn.icon} size={18} color="#fff" />
+              <Icon name={btn.icon} size={18} color={colors.white} />
               <Text style={styles.optionButtonText}>{btn.label}</Text>
             </TouchableOpacity>
           ))}
@@ -79,7 +80,7 @@ export const ReferralActionPromptScreen: React.FC = () => {
       <Button
         title={nextSteps.ctaLabel}
         onPress={nextSteps.action}
-        icon={<Icon name="chevron-right" size={18} color="#fff" />}
+        icon={<Icon name="chevron-right" size={18} color={colors.white} />}
         style={{ marginTop: 24 }}
       />
     );
@@ -90,7 +91,7 @@ export const ReferralActionPromptScreen: React.FC = () => {
       <Header
         navigation={navigation as any}
         title="Acción requerida"
-        backgroundColor="#F3F4F6"
+        backgroundColor={colors.neutralDark}
         showBackButton
       />
       <ScrollView contentContainerStyle={styles.content}>
@@ -102,7 +103,7 @@ export const ReferralActionPromptScreen: React.FC = () => {
           </Text>
 
           <View style={styles.noteCard}>
-            <Icon name="info" size={18} color="#0F766E" />
+            <Icon name="info" size={18} color={colors.primaryDark} />
             <View style={styles.noteTextWrapper}>
               <Text style={styles.noteTitle}>Requisito único</Text>
               <Text style={styles.noteText}>{nextSteps.requirement}</Text>
@@ -128,12 +129,12 @@ export const ReferralActionPromptScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F3F4F6' },
+  container: { flex: 1, backgroundColor: colors.neutralDark },
   content: { padding: 20, paddingTop: 12 },
-  card: { backgroundColor: '#fff', borderRadius: 24, padding: 24, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.08, shadowRadius: 20 },
-  eyebrow: { fontSize: 12, fontWeight: '600', color: '#10B981', textTransform: 'uppercase', marginBottom: 8 },
-  title: { fontSize: 24, fontWeight: '700', color: '#111827', marginBottom: 12 },
-  subtitle: { fontSize: 15, color: '#6B7280', lineHeight: 22 },
+  card: { backgroundColor: colors.white, borderRadius: 24, padding: 24, borderWidth: 1, borderColor: colors.border },
+  eyebrow: { fontSize: 12, fontWeight: '600', color: colors.primaryDark, textTransform: 'uppercase', marginBottom: 8 },
+  title: { fontSize: 24, fontWeight: '700', color: colors.text.primary, marginBottom: 12 },
+  subtitle: { fontSize: 15, color: colors.text.secondary, lineHeight: 22 },
   noteCard: {
     marginTop: 18,
     flexDirection: 'row',
@@ -156,9 +157,9 @@ const styles = StyleSheet.create({
   },
   stepList: { marginTop: 20 },
   stepRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 10 },
-  stepNumberWrap: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#ECFDF5', justifyContent: 'center', alignItems: 'center' },
-  stepNumber: { fontWeight: '600', color: '#047857' },
-  stepText: { flex: 1, fontSize: 14, color: '#374151' },
+  stepNumberWrap: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.primarySoft, justifyContent: 'center', alignItems: 'center' },
+  stepNumber: { fontWeight: '600', color: colors.primaryDark },
+  stepText: { flex: 1, fontSize: 14, color: colors.text.primary },
   actionButtons: {
     marginTop: 24,
     flexDirection: 'column',
@@ -171,13 +172,13 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 14,
     borderRadius: 14,
-    backgroundColor: '#10B981',
+    backgroundColor: colors.primaryDark,
   },
   secondaryOptionButton: {
-    backgroundColor: '#0F766E',
+    backgroundColor: colors.primaryDark,
   },
   optionButtonText: {
-    color: '#fff',
+    color: colors.white,
     fontWeight: '600',
     fontSize: 15,
   },

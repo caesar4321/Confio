@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
+import { colors } from '../config/theme';
 import { useNavigation, RouteProp, useRoute } from '@react-navigation/native';
 import { MainStackParamList } from '../types/navigation';
 import { Button } from '../components/common/Button';
@@ -19,7 +20,7 @@ export const ReferralFriendJoinedScreen: React.FC = () => {
       <Header
         navigation={navigation as any}
         title="Referidos"
-        backgroundColor="#F3F4F6"
+        backgroundColor={colors.neutralDark}
         showBackButton
       />
       <ScrollView contentContainerStyle={styles.content}>
@@ -33,19 +34,19 @@ export const ReferralFriendJoinedScreen: React.FC = () => {
           <View style={styles.stepCard}>
             <Text style={styles.stepTitle}>¿Cómo desbloquear el bono?</Text>
             <View style={styles.stepRow}>
-              <Icon name="lock" size={18} color="#10B981" />
+              <Icon name="lock" size={18} color={colors.primaryDark} />
               <Text style={styles.stepText}>
                 El bono ya está en su cuenta, pero necesita una recarga para activarse.
               </Text>
             </View>
             <View style={styles.stepRow}>
-              <Icon name="credit-card" size={18} color="#10B981" />
+              <Icon name="credit-card" size={18} color={colors.primaryDark} />
               <Text style={styles.stepText}>
                 Guíalo para que recargue 20 cUSD o más.
               </Text>
             </View>
             <View style={styles.stepRow}>
-              <Icon name="check-circle" size={18} color="#10B981" />
+              <Icon name="check-circle" size={18} color={colors.primaryDark} />
               <Text style={styles.stepText}>¡Listo! El bono se desbloquea automáticamente para ambos.</Text>
             </View>
           </View>
@@ -58,15 +59,15 @@ export const ReferralFriendJoinedScreen: React.FC = () => {
                   event: suggestedEvent,
                 })
               }
-              icon={<Icon name="zap" size={18} color="#fff" />}
+              icon={<Icon name="zap" size={18} color={colors.white} />}
             />
             <Button
               title="Ver requisitos del bono"
               variant="secondary"
               onPress={() => navigation.navigate('Achievements')}
-              icon={<Icon name="chevron-right" size={18} color="#10B981" />}
-              style={{ backgroundColor: '#ECFDF5', borderWidth: 0 }}
-              textStyle={{ color: '#10B981' }}
+              icon={<Icon name="chevron-right" size={18} color={colors.primaryDark} />}
+              style={{ backgroundColor: colors.primarySoft, borderWidth: 0 }}
+              textStyle={{ color: colors.primaryDark }}
             />
           </View>
         </View>
@@ -76,10 +77,10 @@ export const ReferralFriendJoinedScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F3F4F6' },
+  container: { flex: 1, backgroundColor: colors.neutralDark },
   content: { padding: 20, paddingTop: 12 },
   card: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 24,
     padding: 24,
     shadowColor: '#0F172A',
@@ -91,26 +92,26 @@ const styles = StyleSheet.create({
   eyebrow: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#10B981',
+    color: colors.primaryDark,
     textTransform: 'uppercase',
     marginBottom: 8,
   },
   title: {
     fontSize: 24,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text.primary,
     marginBottom: 12,
   },
   subtitle: {
     fontSize: 15,
-    color: '#6B7280',
+    color: colors.text.secondary,
     lineHeight: 22,
   },
   stepCard: {
     marginTop: 24,
     padding: 16,
     borderRadius: 16,
-    backgroundColor: '#ECFDF5',
+    backgroundColor: colors.primarySoft,
   },
   stepTitle: {
     fontSize: 16,
@@ -127,7 +128,7 @@ const styles = StyleSheet.create({
   stepText: {
     flex: 1,
     fontSize: 14,
-    color: '#047857',
+    color: colors.primaryDark,
     lineHeight: 20,
   },
   actions: {
