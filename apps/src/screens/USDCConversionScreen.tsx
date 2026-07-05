@@ -452,7 +452,7 @@ export const USDCConversionScreen = () => {
                     value={amount}
                     onChangeText={handleAmountChange}
                     placeholder="0.00"
-                    placeholderTextColor="#9CA3AF"
+                    placeholderTextColor={colors.text.light}
                     keyboardType="decimal-pad"
                     editable={!isProcessing}
                   />
@@ -536,7 +536,7 @@ export const USDCConversionScreen = () => {
           >
             {isProcessing ? (
               <View style={styles.buttonContent}>
-                <Icon name="loader" size={20} color="#fff" />
+                <Icon name="loader" size={20} color={colors.white} />
                 <Text style={styles.convertButtonText}>Procesando...</Text>
               </View>
             ) : (
@@ -594,7 +594,7 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
   },
   conversionCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.white,
     borderRadius: 20,
     padding: 20,
     marginBottom: 16,
@@ -640,11 +640,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: colors.neutral,
   },
   amountInput: {
     flex: 1,
@@ -668,23 +668,23 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.neutralDark,
     justifyContent: 'center',
     alignItems: 'center',
     marginVertical: -22,
     zIndex: 1,
     borderWidth: 4,
-    borderColor: '#FFFFFF',
+    borderColor: colors.white,
   },
   receiveContainer: {
     flexDirection: 'row',
     alignItems: 'baseline',
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 16,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: colors.neutral,
   },
   receiveAmount: {
     fontSize: 24,
@@ -697,7 +697,7 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
   },
   infoCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.white,
     borderRadius: 16,
     padding: 16,
     marginBottom: 16,
@@ -761,12 +761,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   convertButtonDisabled: {
-    backgroundColor: '#D1D5DB',
+    backgroundColor: colors.borderMedium,
   },
   convertButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#FFFFFF',
+    color: colors.white,
   },
   buttonContent: {
     flexDirection: 'row',
@@ -781,7 +781,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   loadingCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.white,
     borderRadius: 20,
     padding: 32,
     alignItems: 'center',

@@ -169,7 +169,7 @@ export const ConfioTokenInfoScreen = () => {
                       <Icon
                         name="trending-up"
                         size={12}
-                        color={stat.growthHighlight === false ? '#6B7280' : colors.primary}
+                        color={stat.growthHighlight === false ? colors.text.secondary : colors.primary}
                       />
                       <Text
                         style={[
@@ -184,7 +184,7 @@ export const ConfioTokenInfoScreen = () => {
                   <Icon
                     name="chevron-right"
                     size={18}
-                    color="#9CA3AF"
+                    color={colors.text.light}
                     style={styles.statChevron}
                   />
                 </View>
@@ -267,7 +267,7 @@ export const ConfioTokenInfoScreen = () => {
           <Button
             title="Ver programa de referidos"
             onPress={() => navigation.navigate('Achievements')}
-            icon={<Icon name="arrow-right" size={20} color="#fff" />}
+            icon={<Icon name="arrow-right" size={20} color={colors.white} />}
             style={{ backgroundColor: colors.primary, borderRadius: 24, paddingHorizontal: 24 }}
           />
         </View>
@@ -281,7 +281,7 @@ export const ConfioTokenInfoScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
   },
   scrollView: {
     flex: 1,
@@ -305,7 +305,7 @@ const styles = StyleSheet.create({
   tokenSymbol: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: '#fff',
+    color: colors.white,
   },
   heroTitle: {
     fontSize: 24,
@@ -316,7 +316,7 @@ const styles = StyleSheet.create({
   },
   heroSubtitle: {
     fontSize: 16,
-    color: '#6B7280',
+    color: colors.text.secondary,
     textAlign: 'center',
   },
   visionCard: {
@@ -345,7 +345,7 @@ const styles = StyleSheet.create({
   },
   visionAuthor: {
     fontSize: 14,
-    color: '#6B7280',
+    color: colors.text.secondary,
     marginTop: 12,
     fontWeight: '600',
   },
@@ -386,7 +386,7 @@ const styles = StyleSheet.create({
   },
   statDescription: {
     fontSize: 12,
-    color: '#6B7280',
+    color: colors.text.secondary,
     lineHeight: 17,
     marginTop: 4,
   },
@@ -415,7 +415,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   growthTextMuted: {
-    color: '#6B7280',
+    color: colors.text.secondary,
     fontWeight: '500',
   },
   statChevron: {
@@ -441,7 +441,7 @@ const styles = StyleSheet.create({
   },
   sectionContent: {
     fontSize: 14,
-    color: '#4B5563',
+    color: colors.text.secondary,
     lineHeight: 20,
   },
   bulletList: {
@@ -460,7 +460,7 @@ const styles = StyleSheet.create({
   bulletText: {
     flex: 1,
     fontSize: 14,
-    color: '#4B5563',
+    color: colors.text.secondary,
   },
   timelineSection: {
     marginHorizontal: 16,
@@ -485,7 +485,7 @@ const styles = StyleSheet.create({
     width: 16,
     height: 16,
     borderRadius: 8,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: colors.border,
     marginRight: 16,
     marginTop: 2,
   },
@@ -500,7 +500,7 @@ const styles = StyleSheet.create({
   },
   timelineDate: {
     fontSize: 12,
-    color: '#6B7280',
+    color: colors.text.secondary,
     marginBottom: 4,
     fontWeight: '600',
   },
@@ -525,7 +525,7 @@ const styles = StyleSheet.create({
   },
   ctaSubtitle: {
     fontSize: 14,
-    color: '#4B5563',
+    color: colors.text.secondary,
     marginBottom: 20,
     textAlign: 'center',
   },

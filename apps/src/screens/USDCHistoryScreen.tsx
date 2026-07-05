@@ -158,9 +158,9 @@ export const USDCHistoryScreen = () => {
       case 'PENDING':
       case 'SUBMITTED':
       case 'PROCESSING':
-        return '#f59e0b';
+        return colors.offRampIcon;
       case 'FAILED':
-        return '#ef4444';
+        return colors.danger;
       default:
         return colors.text.secondary;
     }
@@ -318,7 +318,7 @@ export const USDCHistoryScreen = () => {
 
   const EmptyState = () => (
     <View style={styles.emptyContainer}>
-      <Icon name="clock" size={48} color="#E5E7EB" />
+      <Icon name="clock" size={48} color={colors.border} />
       <Text style={styles.emptyTitle}>Sin transacciones aún</Text>
       <Text style={styles.emptyText}>
         Tu historial de depósitos, retiros y conversiones de USDC aparecerá aquí
@@ -401,7 +401,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   historyItem: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.white,
     borderRadius: 16,
     padding: 16,
     ...Platform.select({
@@ -458,7 +458,7 @@ const styles = StyleSheet.create({
   itemDetails: {
     paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: '#F3F4F6',
+    borderTopColor: colors.neutralDark,
   },
   detailRow: {
     flexDirection: 'row',

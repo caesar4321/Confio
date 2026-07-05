@@ -112,7 +112,7 @@ export const ReceiveSavingsScreen = () => {
       <SafeAreaView edges={['top']} style={{ backgroundColor: colors.primary }}>
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerIconBtn}>
-            <Icon name="arrow-left" size={24} color="#fff" />
+            <Icon name="arrow-left" size={24} color={colors.white} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Recibir USDT</Text>
           <View style={styles.headerIconBtn} />
@@ -134,7 +134,7 @@ export const ReceiveSavingsScreen = () => {
               <Text style={styles.address}>{address}</Text>
               <View style={styles.btnRow}>
                 <TouchableOpacity style={styles.copyBtn} onPress={onCopy} activeOpacity={0.85}>
-                  <Icon name={copied ? 'check' : 'copy'} size={16} color="#fff" />
+                  <Icon name={copied ? 'check' : 'copy'} size={16} color={colors.white} />
                   <Text style={styles.copyBtnText}>
                     {copied ? 'Copiada' : 'Copiar'}
                   </Text>
@@ -217,26 +217,26 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
   },
   headerIconBtn: { padding: 6, width: 40, alignItems: 'center' },
-  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#fff' },
+  headerTitle: { fontSize: 18, fontWeight: 'bold', color: colors.white },
 
   scrollContent: { padding: 16, paddingBottom: 40 },
 
   qrCard: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 16,
     padding: 20,
     alignItems: 'center',
     marginBottom: 12,
   },
   networkPill: {
-    backgroundColor: '#FEF3C7',
+    backgroundColor: colors.warningLight,
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 5,
     marginBottom: 14,
   },
-  networkPillText: { fontSize: 12, fontWeight: '700', color: '#92400E' },
-  qrWrap: { padding: 12, backgroundColor: '#fff', borderRadius: 12 },
+  networkPillText: { fontSize: 12, fontWeight: '700', color: colors.warning.text },
+  qrWrap: { padding: 12, backgroundColor: colors.white, borderRadius: 12 },
   address: {
     fontSize: 12,
     color: colors.text.secondary,
@@ -272,26 +272,26 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 11,
   },
-  copyBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  copyBtnText: { color: colors.white, fontSize: 14, fontWeight: '700' },
   scanLink: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 12 },
   scanLinkText: { fontSize: 12, color: colors.text.secondary },
 
   warnCard: {
     flexDirection: 'row',
     gap: 10,
-    backgroundColor: '#FEF3C7',
+    backgroundColor: colors.warningLight,
     borderRadius: 12,
     padding: 14,
     marginBottom: 12,
   },
-  warnText: { flex: 1, fontSize: 13, color: '#92400E', lineHeight: 18 },
+  warnText: { flex: 1, fontSize: 13, color: colors.warning.text, lineHeight: 18 },
   warnStrong: { fontWeight: '800' },
 
   becomesCard: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 12,
     padding: 14,
     marginBottom: 16,
@@ -308,7 +308,7 @@ const styles = StyleSheet.create({
   stepRow: {
     flexDirection: 'row',
     gap: 12,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 12,
     padding: 14,
     marginBottom: 8,

@@ -143,7 +143,7 @@ export const ProtectedSavingsScreen = () => {
               <Icon
                 name="external-link"
                 size={13}
-                color={s?.cusdAssetPeraUrl ? colors.primary : '#9CA3AF'}
+                color={s?.cusdAssetPeraUrl ? colors.primary : colors.text.light}
               />
               <Text
                 style={[
@@ -164,11 +164,11 @@ export const ProtectedSavingsScreen = () => {
             {/* TODO(cusd+): BscScan URLs at deploy — cUSD+ token page and the
                 USDY reserve address holdings */}
             <TouchableOpacity style={[styles.linkButton, styles.linkButtonDisabled]} disabled>
-              <Icon name="external-link" size={13} color="#9CA3AF" />
+              <Icon name="external-link" size={13} color={colors.text.light} />
               <Text style={[styles.linkText, styles.linkTextDisabled]}>Ver cUSD+ en circulación</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.linkButton, styles.linkButtonDisabled]} disabled>
-              <Icon name="external-link" size={13} color="#9CA3AF" />
+              <Icon name="external-link" size={13} color={colors.text.light} />
               <Text style={[styles.linkText, styles.linkTextDisabled]}>Ver respaldo USDY</Text>
             </TouchableOpacity>
           </View>
@@ -192,7 +192,7 @@ export const ProtectedSavingsScreen = () => {
               <Text style={styles.yieldBadgeLabel}>PARA USAR</Text>
               <Text style={styles.yieldBadgeSub}>siempre $1</Text>
             </View>
-            <Icon name="plus" size={20} color="#9CA3AF" />
+            <Icon name="plus" size={20} color={colors.text.light} />
             <View style={[styles.yieldBadge, styles.yieldBadgeNext]}>
               <Text style={styles.yieldBadgeNext1}>cUSD+</Text>
               <Text style={styles.yieldBadgeLabel}>PARA AHORRAR</Text>
@@ -213,7 +213,7 @@ export const ProtectedSavingsScreen = () => {
           <View style={styles.splitCard}>
             <Text style={styles.splitTitle}>Cómo funciona cUSD+ (ejemplo)</Text>
             <View style={styles.splitRow}>
-              <View style={[styles.splitDot, { backgroundColor: '#9CA3AF' }]} />
+              <View style={[styles.splitDot, { backgroundColor: colors.text.light }]} />
               <Text style={styles.splitLabel}>Rendimiento de los bonos del Tesoro</Text>
               <Text style={styles.splitValue}>~3.5%</Text>
             </View>
@@ -288,7 +288,7 @@ export const ProtectedSavingsScreen = () => {
             onPress={() => navigation.navigate('TopUp')}
             activeOpacity={0.9}
           >
-            <Icon name="dollar-sign" size={20} color="#fff" />
+            <Icon name="dollar-sign" size={20} color={colors.white} />
             <Text style={styles.ctaText}>Recargar</Text>
           </TouchableOpacity>
           <Text style={styles.ctaHint}>
@@ -305,7 +305,7 @@ export const ProtectedSavingsScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
   },
   scroll: { flex: 1 },
   hero: {
@@ -325,7 +325,7 @@ const styles = StyleSheet.create({
   },
   heroSubtitle: {
     fontSize: 14,
-    color: '#6B7280',
+    color: colors.text.secondary,
     textAlign: 'center',
     marginTop: 6,
     paddingHorizontal: 16,
@@ -345,7 +345,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 999,
-    backgroundColor: '#E8F7F0',
+    backgroundColor: colors.primarySoft,
   },
   heroStatText: {
     fontSize: 12,
@@ -355,7 +355,7 @@ const styles = StyleSheet.create({
   heroFootnote: {
     marginTop: 6,
     fontSize: 11,
-    color: '#9CA3AF',
+    color: colors.text.light,
     fontWeight: '500',
   },
   section: {
@@ -378,7 +378,7 @@ const styles = StyleSheet.create({
   },
   sectionBody: {
     fontSize: 14,
-    color: '#374151',
+    color: colors.text.primary,
     lineHeight: 21,
     marginBottom: 8,
   },
@@ -399,10 +399,10 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 10,
     borderRadius: 8,
-    backgroundColor: '#E8F7F0',
+    backgroundColor: colors.primarySoft,
   },
   linkButtonDisabled: {
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.neutralDark,
   },
   linkText: {
     fontSize: 12,
@@ -410,11 +410,11 @@ const styles = StyleSheet.create({
     color: colors.primary,
   },
   linkTextDisabled: {
-    color: '#9CA3AF',
+    color: colors.text.light,
   },
   tipText: {
     fontSize: 12,
-    color: '#6B7280',
+    color: colors.text.secondary,
     marginTop: 10,
     fontStyle: 'italic',
     lineHeight: 17,
@@ -432,15 +432,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 10,
     borderRadius: 10,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.neutralDark,
   },
   yieldBadgeNext: {
-    backgroundColor: '#E8F7F0',
+    backgroundColor: colors.primarySoft,
   },
   yieldBadgeNow: {
     fontSize: 20,
     fontWeight: '800',
-    color: '#6B7280',
+    color: colors.text.secondary,
   },
   yieldBadgeNext1: {
     fontSize: 20,
@@ -449,29 +449,29 @@ const styles = StyleSheet.create({
   },
   yieldBadgeSub: {
     fontSize: 10,
-    color: '#6B7280',
+    color: colors.text.secondary,
     marginTop: 1,
   },
   yieldBadgeLabel: {
     fontSize: 9,
     fontWeight: '700',
-    color: '#6B7280',
+    color: colors.text.secondary,
     marginTop: 2,
     letterSpacing: 0.4,
   },
   splitCard: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 10,
     padding: 12,
     marginTop: 4,
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
   },
   splitTitle: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#6B7280',
+    color: colors.text.secondary,
     marginBottom: 8,
     textTransform: 'uppercase',
     letterSpacing: 0.4,
@@ -490,7 +490,7 @@ const styles = StyleSheet.create({
   splitLabel: {
     flex: 1,
     fontSize: 13,
-    color: '#374151',
+    color: colors.text.primary,
   },
   splitLabelStrong: {
     fontWeight: '700',
@@ -498,7 +498,7 @@ const styles = StyleSheet.create({
   },
   splitValue: {
     fontSize: 13,
-    color: '#374151',
+    color: colors.text.primary,
     fontWeight: '600',
   },
   splitValueStrong: {
@@ -507,7 +507,7 @@ const styles = StyleSheet.create({
   },
   disclaimer: {
     fontSize: 11,
-    color: '#6B7280',
+    color: colors.text.secondary,
     lineHeight: 16,
     marginTop: 4,
   },
@@ -518,33 +518,33 @@ const styles = StyleSheet.create({
     gap: 6,
     marginBottom: 10,
   },
-  partnerInlineText: { fontSize: 12, color: '#9CA3AF' },
+  partnerInlineText: { fontSize: 12, color: colors.text.light },
   partnerInlineLogo: { width: 15, height: 15, borderRadius: 4 },
-  partnerInlineBrand: { fontSize: 12, fontWeight: '700', color: '#6B7280' },
+  partnerInlineBrand: { fontSize: 12, fontWeight: '700', color: colors.text.secondary },
   ahorrosLink: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    backgroundColor: '#E8F7F0',
+    backgroundColor: colors.primarySoft,
     borderRadius: 10,
     paddingVertical: 11,
     marginBottom: 10,
   },
   ahorrosLinkText: { fontSize: 14, fontWeight: '700', color: colors.primary },
   chainCard: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 10,
     padding: 12,
     marginTop: 4,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
     gap: 6,
   },
   chainLine: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#374151',
+    color: colors.text.primary,
     textAlign: 'center',
   },
   ctaSection: {
@@ -556,20 +556,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#3b82f6',
+    backgroundColor: colors.accent,
     paddingHorizontal: 24,
     paddingVertical: 14,
     borderRadius: 999,
   },
   ctaText: {
-    color: '#fff',
+    color: colors.white,
     fontSize: 15,
     fontWeight: '700',
   },
   ctaHint: {
     marginTop: 10,
     fontSize: 12,
-    color: '#6B7280',
+    color: colors.text.secondary,
     textAlign: 'center',
   },
   bottomPadding: { height: 32 },

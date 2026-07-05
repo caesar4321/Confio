@@ -129,7 +129,7 @@ const NotificationSettingsScreen: React.FC = () => {
         android: {
           channelId: 'default',
           smallIcon: 'ic_stat_ic_notification',
-          color: '#8b5cf6',  // Confío violet accent color
+          color: colors.secondary,  // Confío violet accent color
           pressAction: {
             id: 'default',
           },
@@ -180,7 +180,7 @@ const NotificationSettingsScreen: React.FC = () => {
         {/* System Notifications */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Icon name="bell" size={24} color="#333" />
+            <Icon name="bell" size={24} color={colors.text.primary} />
             <Text style={styles.sectionTitle}>Notificaciones del sistema</Text>
           </View>
           
@@ -194,8 +194,8 @@ const NotificationSettingsScreen: React.FC = () => {
             <Switch
               value={systemNotificationsEnabled}
               onValueChange={handleSystemToggle}
-              trackColor={{ false: '#E0E0E0', true: colors.violetLight }}
-              thumbColor={systemNotificationsEnabled ? colors.secondary : '#f4f3f4'}
+              trackColor={{ false: colors.border, true: colors.violetLight }}
+              thumbColor={systemNotificationsEnabled ? colors.secondary : colors.neutralDark}
             />
           </View>
         </View>
@@ -204,7 +204,7 @@ const NotificationSettingsScreen: React.FC = () => {
         {systemNotificationsEnabled && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Icon name="sliders" size={24} color="#333" />
+              <Icon name="sliders" size={24} color={colors.text.primary} />
               <Text style={styles.sectionTitle}>Categorías de notificaciones</Text>
             </View>
             
@@ -218,8 +218,8 @@ const NotificationSettingsScreen: React.FC = () => {
               <Switch
                 value={preferences.pushEnabled}
                 onValueChange={(value) => handlePreferenceToggle('pushEnabled', value)}
-                trackColor={{ false: '#E0E0E0', true: colors.violetLight }}
-                thumbColor={preferences.pushEnabled ? colors.secondary : '#f4f3f4'}
+                trackColor={{ false: colors.border, true: colors.violetLight }}
+                thumbColor={preferences.pushEnabled ? colors.secondary : colors.neutralDark}
               />
             </View>
 
@@ -235,8 +235,8 @@ const NotificationSettingsScreen: React.FC = () => {
                   <Switch
                     value={preferences.pushTransactions}
                     onValueChange={(value) => handlePreferenceToggle('pushTransactions', value)}
-                    trackColor={{ false: '#E0E0E0', true: colors.violetLight }}
-                    thumbColor={preferences.pushTransactions ? colors.secondary : '#f4f3f4'}
+                    trackColor={{ false: colors.border, true: colors.violetLight }}
+                    thumbColor={preferences.pushTransactions ? colors.secondary : colors.neutralDark}
                   />
                 </View>
 
@@ -250,8 +250,8 @@ const NotificationSettingsScreen: React.FC = () => {
                   <Switch
                     value={preferences.pushP2p}
                     onValueChange={(value) => handlePreferenceToggle('pushP2p', value)}
-                    trackColor={{ false: '#E0E0E0', true: colors.violetLight }}
-                    thumbColor={preferences.pushP2p ? colors.secondary : '#f4f3f4'}
+                    trackColor={{ false: colors.border, true: colors.violetLight }}
+                    thumbColor={preferences.pushP2p ? colors.secondary : colors.neutralDark}
                   />
                 </View>
 
@@ -265,8 +265,8 @@ const NotificationSettingsScreen: React.FC = () => {
                   <Switch
                     value={preferences.pushSecurity}
                     onValueChange={(value) => handlePreferenceToggle('pushSecurity', value)}
-                    trackColor={{ false: '#E0E0E0', true: colors.violetLight }}
-                    thumbColor={preferences.pushSecurity ? colors.secondary : '#f4f3f4'}
+                    trackColor={{ false: colors.border, true: colors.violetLight }}
+                    thumbColor={preferences.pushSecurity ? colors.secondary : colors.neutralDark}
                   />
                 </View>
 
@@ -280,8 +280,8 @@ const NotificationSettingsScreen: React.FC = () => {
                   <Switch
                     value={preferences.pushPromotions}
                     onValueChange={(value) => handlePreferenceToggle('pushPromotions', value)}
-                    trackColor={{ false: '#E0E0E0', true: colors.violetLight }}
-                    thumbColor={preferences.pushPromotions ? colors.secondary : '#f4f3f4'}
+                    trackColor={{ false: colors.border, true: colors.violetLight }}
+                    thumbColor={preferences.pushPromotions ? colors.secondary : colors.neutralDark}
                   />
                 </View>
 
@@ -295,8 +295,8 @@ const NotificationSettingsScreen: React.FC = () => {
                   <Switch
                     value={preferences.pushAnnouncements}
                     onValueChange={(value) => handlePreferenceToggle('pushAnnouncements', value)}
-                    trackColor={{ false: '#E0E0E0', true: colors.violetLight }}
-                    thumbColor={preferences.pushAnnouncements ? colors.secondary : '#f4f3f4'}
+                    trackColor={{ false: colors.border, true: colors.violetLight }}
+                    thumbColor={preferences.pushAnnouncements ? colors.secondary : colors.neutralDark}
                   />
                 </View>
               </>
@@ -307,7 +307,7 @@ const NotificationSettingsScreen: React.FC = () => {
         {/* In-App Notifications */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Icon name="smartphone" size={24} color="#333" />
+            <Icon name="smartphone" size={24} color={colors.text.primary} />
             <Text style={styles.sectionTitle}>Notificaciones en la app</Text>
           </View>
           
@@ -321,8 +321,8 @@ const NotificationSettingsScreen: React.FC = () => {
             <Switch
               value={preferences.inAppEnabled}
               onValueChange={(value) => handlePreferenceToggle('inAppEnabled', value)}
-              trackColor={{ false: '#E0E0E0', true: colors.violetLight }}
-              thumbColor={preferences.inAppEnabled ? colors.secondary : '#f4f3f4'}
+              trackColor={{ false: colors.border, true: colors.violetLight }}
+              thumbColor={preferences.inAppEnabled ? colors.secondary : colors.neutralDark}
             />
           </View>
         </View>
@@ -335,7 +335,7 @@ const NotificationSettingsScreen: React.FC = () => {
                 style={styles.testButton}
                 onPress={handleSendTestNotification}
               >
-                <Icon name="send" size={20} color="#FFF" />
+                <Icon name="send" size={20} color={colors.white} />
                 <Text style={styles.testButtonText}>Enviar notificación de prueba</Text>
               </TouchableOpacity>
             )}
@@ -357,7 +357,7 @@ const NotificationSettingsScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: colors.neutral,
   },
   loadingContainer: {
     flex: 1,
@@ -369,23 +369,23 @@ const styles = StyleSheet.create({
   },
   header: {
     padding: 20,
-    backgroundColor: '#FFF',
+    backgroundColor: colors.white,
     borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
+    borderBottomColor: colors.border,
   },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#333',
+    color: colors.text.primary,
     marginBottom: 5,
   },
   subtitle: {
     fontSize: 14,
-    color: '#666',
+    color: colors.text.secondary,
   },
   section: {
     marginTop: 20,
-    backgroundColor: '#FFF',
+    backgroundColor: colors.white,
     paddingVertical: 10,
   },
   sectionHeader: {
@@ -394,12 +394,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
+    borderBottomColor: colors.neutralDark,
   },
   sectionTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#333',
+    color: colors.text.primary,
     marginLeft: 10,
   },
   settingRow: {
@@ -409,7 +409,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 15,
     borderBottomWidth: 1,
-    borderBottomColor: '#F8F8F8',
+    borderBottomColor: colors.neutral,
   },
   settingInfo: {
     flex: 1,
@@ -417,25 +417,25 @@ const styles = StyleSheet.create({
   },
   settingLabel: {
     fontSize: 16,
-    color: '#333',
+    color: colors.text.primary,
     marginBottom: 3,
   },
   settingDescription: {
     fontSize: 13,
-    color: '#666',
+    color: colors.text.secondary,
   },
   testButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#8b5cf6',
+    backgroundColor: colors.secondary,
     marginHorizontal: 20,
     marginTop: 30,
     paddingVertical: 15,
     borderRadius: 10,
   },
   testButtonText: {
-    color: '#FFF',
+    color: colors.white,
     fontSize: 16,
     fontWeight: '600',
     marginLeft: 8,
