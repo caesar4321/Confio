@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
+import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
@@ -101,10 +102,23 @@ export const AccionesListScreen = () => {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
       <SafeAreaView edges={['top']} style={{ backgroundColor: colors.primary }}>
+        {/* Brand field: emerald gradient + coin ring, padding on headerInner
+            (Yoga insets absolute children by parent padding). */}
         <View style={styles.header}>
+          <Svg style={StyleSheet.absoluteFill}>
+            <Defs>
+              <SvgLinearGradient id="accionesField" x1="0" y1="0" x2="0" y2="1">
+                <Stop offset="0" stopColor={colors.primary} />
+                <Stop offset="1" stopColor={colors.primaryDark} />
+              </SvgLinearGradient>
+            </Defs>
+            <Rect width="100%" height="100%" fill="url(#accionesField)" />
+            <Circle cx="105%" cy="35%" r="90" stroke={colors.white} strokeWidth="22" strokeOpacity="0.10" fill="none" />
+          </Svg>
+          <View style={styles.headerInner}>
           <View style={styles.headerTopRow}>
             <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerIconBtn} accessibilityRole="button" accessibilityLabel="Volver">
-              <Icon name="arrow-left" size={24} color="#fff" />
+              <Icon name="arrow-left" size={24} color={colors.white} />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Acciones de EE.UU.</Text>
             <View style={styles.headerIconBtn} />
@@ -114,7 +128,7 @@ export const AccionesListScreen = () => {
               <View
                 style={[
                   styles.marketDot,
-                  { backgroundColor: session === 'closed' ? '#9CA3AF' : '#34D399' },
+                  { backgroundColor: session === 'closed' ? colors.text.light : colors.primary },
                 ]}
               />
               <Text style={styles.marketChipText}>
@@ -133,6 +147,7 @@ export const AccionesListScreen = () => {
                 Para invertir: ${formatNumber(savings.balanceUsd, { maximumFractionDigits: 2 })}
               </Text>
             </View>
+          </View>
           </View>
         </View>
       </SafeAreaView>
@@ -195,10 +210,11 @@ export const AccionesListScreen = () => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.neutral },
 
-  header: { backgroundColor: colors.primary, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 16 },
+  header: { backgroundColor: colors.primary, overflow: 'hidden' },
+  headerInner: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 16 },
   headerTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   headerIconBtn: { padding: 6, width: 40, alignItems: 'center' },
-  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#fff' },
+  headerTitle: { fontSize: 18, fontWeight: 'bold', color: colors.white },
   headerMetaRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -215,7 +231,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   marketDot: { width: 7, height: 7, borderRadius: 4 },
-  marketChipText: { fontSize: 11, fontWeight: '600', color: '#fff' },
+  marketChipText: { fontSize: 11, fontWeight: '600', color: colors.white },
   buyingPowerPill: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -226,7 +242,7 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
   },
   buyingPowerLogo: { width: 14, height: 14, borderRadius: 7 },
-  buyingPower: { fontSize: 11, color: '#fff', fontWeight: '600' },
+  buyingPower: { fontSize: 11, color: colors.white, fontWeight: '600' },
 
   listContent: { padding: 16, paddingBottom: 40 },
 
@@ -234,7 +250,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.border,
     borderRadius: 12,
     paddingHorizontal: 12,
     height: 46,
@@ -246,26 +264,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.border,
     borderRadius: 14,
     padding: 14,
     marginBottom: 8,
   },
-  tickerCircle: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  tickerCircleText: { color: '#fff', fontSize: 11, fontWeight: '800' },
   rowTicker: { fontSize: 15, fontWeight: '700', color: colors.text.primary },
   rowName: { fontSize: 12, color: colors.text.secondary, marginTop: 1 },
   rowHolding: { fontSize: 15, fontWeight: '700', color: colors.text.primary },
   rowHoldingZero: { color: colors.text.light, fontWeight: '500' },
   rowMarketPrice: { fontSize: 12, color: colors.text.secondary },
   rowChange: { fontSize: 12, fontWeight: '700', color: colors.primaryDark, marginTop: 1 },
-  rowChangeDown: { color: '#DC2626' },
+  rowChangeDown: { color: colors.error.icon },
 
   empty: { alignItems: 'center', paddingVertical: 48, gap: 10 },
   emptyText: { fontSize: 14, color: colors.text.secondary },
