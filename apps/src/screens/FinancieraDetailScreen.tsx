@@ -39,7 +39,7 @@ type NavProp = NativeStackNavigationProp<MainStackParamList>;
 type DetailRoute = RouteProp<MainStackParamList, 'FinancieraDetail'>;
 
 const WHATSAPP_GREEN = '#25D366';
-const STAR_GOLD = '#F59E0B';
+const STAR_GOLD = colors.offRampIcon;
 
 const Stars = ({ rating, size = 16 }: { rating: number; size?: number }) => (
   <View style={{ flexDirection: 'row' }}>
@@ -48,7 +48,7 @@ const Stars = ({ rating, size = 16 }: { rating: number; size?: number }) => (
         key={s}
         name="star"
         size={size}
-        color={rating >= s - 0.25 ? STAR_GOLD : '#E5E7EB'}
+        color={rating >= s - 0.25 ? STAR_GOLD : colors.border}
         style={{ marginRight: 1 }}
       />
     ))}
@@ -204,7 +204,7 @@ export const FinancieraDetailScreen = () => {
             accessibilityRole="button"
             accessibilityLabel="Reportar financiera"
           >
-            <Icon name="flag" size={20} color="#fff" />
+            <Icon name="flag" size={20} color={colors.white} />
           </TouchableOpacity>
         )}
       />
@@ -281,7 +281,7 @@ export const FinancieraDetailScreen = () => {
           <Text style={styles.sectionLabel}>Qué ofrece</Text>
           <View style={styles.serviceLine}>
             <View style={styles.railChip}>
-              <Icon name="check" size={12} color="#fff" />
+              <Icon name="check" size={12} color={colors.white} />
               <Text style={styles.railChipText}>{USDC_ALGORAND_TAG}</Text>
             </View>
           </View>
@@ -353,7 +353,7 @@ export const FinancieraDetailScreen = () => {
       {/* Sticky WhatsApp CTA */}
       <SafeAreaView edges={['bottom']} style={styles.footer}>
         <TouchableOpacity style={styles.whatsappBtn} onPress={confirmWhatsApp}>
-          <Icon name="message-circle" size={18} color="#fff" />
+          <Icon name="message-circle" size={18} color={colors.white} />
           <Text style={styles.whatsappText}>Contactar por WhatsApp</Text>
         </TouchableOpacity>
       </SafeAreaView>
@@ -425,7 +425,7 @@ const styles = StyleSheet.create({
   scrollContent: { padding: 16, paddingBottom: 24 },
 
   card: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 16,
     padding: 16,
     marginBottom: 12,
@@ -479,7 +479,7 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     borderRadius: 8,
   },
-  railChipText: { fontSize: 12, fontWeight: '700', color: '#fff' },
+  railChipText: { fontSize: 12, fontWeight: '700', color: colors.white },
   serviceRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 },
   serviceRowText: { fontSize: 14, color: colors.text.primary },
 
@@ -526,7 +526,7 @@ const styles = StyleSheet.create({
   reportLinkText: { fontSize: 12, color: colors.text.light, textDecorationLine: 'underline' },
 
   footer: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderTopWidth: 1,
     borderTopColor: colors.border,
     paddingHorizontal: 16,
@@ -541,12 +541,12 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     height: 52,
   },
-  whatsappText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  whatsappText: { color: colors.white, fontSize: 16, fontWeight: '700' },
 
   // Report modal
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
   modalSheet: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingHorizontal: 16,
@@ -592,7 +592,7 @@ const styles = StyleSheet.create({
     marginTop: 14,
   },
   reportBtnDisabled: { backgroundColor: colors.borderMedium },
-  reportBtnText: { fontSize: 15, fontWeight: '700', color: '#fff' },
+  reportBtnText: { fontSize: 15, fontWeight: '700', color: colors.white },
 });
 
 export default FinancieraDetailScreen;

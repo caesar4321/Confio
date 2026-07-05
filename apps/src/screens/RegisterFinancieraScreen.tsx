@@ -524,7 +524,7 @@ export const RegisterFinancieraScreen = () => {
                 activeOpacity={0.8}
               >
                 <View style={[styles.checkbox, active && styles.checkboxActive]}>
-                  {active && <Icon name="check" size={14} color="#fff" />}
+                  {active && <Icon name="check" size={14} color={colors.white} />}
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.serviceLabel}>{financieraServiceLabel(service, countryIso)}</Text>
@@ -654,7 +654,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     fontSize: 15,
     color: colors.text.primary,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
   },
   selectInput: {
     height: 48,
@@ -665,7 +665,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
   },
   selectText: { fontSize: 15, color: colors.text.primary },
 
@@ -679,7 +679,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
   },
   phoneCodeText: { fontSize: 15, fontWeight: '600', color: colors.text.primary },
 
@@ -697,7 +697,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 12,
@@ -748,7 +748,7 @@ const styles = StyleSheet.create({
   infoNoteText: { flex: 1, fontSize: 12, color: colors.text.secondary, lineHeight: 17 },
 
   footer: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderTopWidth: 1,
     borderTopColor: colors.border,
     paddingHorizontal: 16,
@@ -762,12 +762,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   submitBtnDisabled: { backgroundColor: colors.borderMedium },
-  submitText: { fontSize: 16, fontWeight: '700', color: '#fff' },
+  submitText: { fontSize: 16, fontWeight: '700', color: colors.white },
 
   // Modal
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
   modalSheet: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingHorizontal: 16,
@@ -822,7 +822,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignSelf: 'stretch',
   },
-  gatePrimaryText: { fontSize: 16, fontWeight: '700', color: '#fff' },
+  gatePrimaryText: { fontSize: 16, fontWeight: '700', color: colors.white },
   gateSecondary: { fontSize: 15, color: colors.text.secondary, marginTop: 16, fontWeight: '600' },
 });
 

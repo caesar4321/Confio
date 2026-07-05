@@ -31,7 +31,7 @@ import {
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 type ReviewRoute = RouteProp<MainStackParamList, 'FinancieraReview'>;
 
-const STAR_GOLD = '#F59E0B';
+const STAR_GOLD = colors.offRampIcon;
 
 interface ReviewableSend {
   id: string;
@@ -246,7 +246,7 @@ export const FinancieraReviewScreen = () => {
                   activeOpacity={0.8}
                 >
                   <View style={[styles.txRadio, active && styles.txRadioActive]}>
-                    {active && <Icon name="check" size={12} color="#fff" />}
+                    {active && <Icon name="check" size={12} color={colors.white} />}
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.txAmount}>
@@ -279,7 +279,7 @@ export const FinancieraReviewScreen = () => {
                   accessibilityLabel={`Calificar con ${s} ${s === 1 ? 'estrella' : 'estrellas'}`}
                   accessibilityState={{ selected: rating >= s }}
                 >
-                  <Icon name="star" size={36} color={rating >= s ? STAR_GOLD : '#E5E7EB'} />
+                  <Icon name="star" size={36} color={rating >= s ? STAR_GOLD : colors.border} />
                 </TouchableOpacity>
               ))}
             </View>
@@ -372,7 +372,7 @@ const Header = ({ title, onBack }: { title: string; onBack: () => void }) => (
   <SafeAreaView edges={['top']} style={{ backgroundColor: colors.primary }}>
     <View style={styles.header}>
       <TouchableOpacity onPress={onBack} style={styles.headerIconBtn} accessibilityRole="button" accessibilityLabel="Volver">
-        <Icon name="arrow-left" size={24} color="#fff" />
+        <Icon name="arrow-left" size={24} color={colors.white} />
       </TouchableOpacity>
       <Text style={styles.headerTitle}>{title}</Text>
       <View style={styles.headerIconBtn} />
@@ -393,13 +393,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   headerIconBtn: { padding: 6, width: 40, alignItems: 'center' },
-  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#fff' },
+  headerTitle: { fontSize: 18, fontWeight: 'bold', color: colors.white },
 
   scrollContent: { padding: 16, paddingBottom: 24 },
   forName: { fontSize: 14, color: colors.text.secondary, marginBottom: 12 },
 
   card: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 16,
     padding: 16,
     marginBottom: 12,
@@ -488,7 +488,7 @@ const styles = StyleSheet.create({
   anonText: { flex: 1, fontSize: 12, color: colors.text.secondary, lineHeight: 17 },
 
   footer: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderTopWidth: 1,
     borderTopColor: colors.border,
     paddingHorizontal: 16,
@@ -502,7 +502,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   submitBtnDisabled: { backgroundColor: colors.borderMedium },
-  submitText: { fontSize: 16, fontWeight: '700', color: '#fff' },
+  submitText: { fontSize: 16, fontWeight: '700', color: colors.white },
 
   // Gates
   gate: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
@@ -526,7 +526,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignSelf: 'stretch',
   },
-  gatePrimaryText: { fontSize: 16, fontWeight: '700', color: '#fff' },
+  gatePrimaryText: { fontSize: 16, fontWeight: '700', color: colors.white },
   gateSecondary: { fontSize: 15, color: colors.text.secondary, marginTop: 16, fontWeight: '600' },
 });
 

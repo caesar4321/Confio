@@ -29,7 +29,7 @@ import {
 
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 
-const STAR_GOLD = '#F59E0B';
+const STAR_GOLD = colors.offRampIcon;
 
 const refetchAfterChange = [
   { query: GET_MY_FINANCIERAS },
@@ -200,7 +200,7 @@ export const MyFinancierasScreen = () => {
             accessibilityRole="button"
             accessibilityLabel="Registrar financiera"
           >
-            <Icon name="plus" size={24} color="#fff" />
+            <Icon name="plus" size={24} color={colors.white} />
           </TouchableOpacity>
         )}
       />
@@ -276,7 +276,7 @@ const styles = StyleSheet.create({
   hint: { fontSize: 12, color: colors.text.secondary, marginBottom: 4, lineHeight: 17 },
 
   card: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 14,
     marginTop: 12,
     borderWidth: 1,
@@ -321,7 +321,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginTop: 20,
   },
-  emptyBtnText: { fontSize: 14, fontWeight: '700', color: '#fff' },
+  emptyBtnText: { fontSize: 14, fontWeight: '700', color: colors.white },
 });
 
 export default MyFinancierasScreen;

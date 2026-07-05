@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
+import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQuery } from '@apollo/client';
@@ -45,7 +46,7 @@ import {
 type NavProp = NativeStackNavigationProp<MainStackParamList>;
 
 const WHATSAPP_GREEN = '#25D366';
-const STAR_GOLD = '#F59E0B';
+const STAR_GOLD = colors.offRampIcon;
 
 type LocationFilter = {
   state?: string;
@@ -67,7 +68,7 @@ const Stars = ({ rating, size = 14 }: { rating: number; size?: number }) => (
         key={s}
         name="star"
         size={size}
-        color={rating >= s - 0.25 ? STAR_GOLD : '#E5E7EB'}
+        color={rating >= s - 0.25 ? STAR_GOLD : colors.border}
         style={{ marginRight: 1 }}
       />
     ))}
@@ -374,7 +375,7 @@ const FinancieraCard = ({
           ))}
         </View>
         <TouchableOpacity style={styles.whatsappPill} onPress={onWhatsApp}>
-          <Icon name="message-circle" size={14} color="#fff" />
+          <Icon name="message-circle" size={14} color={colors.white} />
           <Text style={styles.whatsappPillText}>WhatsApp</Text>
         </TouchableOpacity>
       </View>
@@ -517,10 +518,23 @@ export const FinancierasScreen = () => {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
       <SafeAreaView edges={['top']} style={{ backgroundColor: colors.primary }}>
+        {/* Brand field: emerald gradient + coin ring; padding on headerInner
+            (Yoga insets absolute children by parent padding). */}
         <View style={styles.header}>
+          <Svg style={StyleSheet.absoluteFill}>
+            <Defs>
+              <SvgLinearGradient id="financierasField" x1="0" y1="0" x2="0" y2="1">
+                <Stop offset="0" stopColor={colors.primary} />
+                <Stop offset="1" stopColor={colors.primaryDark} />
+              </SvgLinearGradient>
+            </Defs>
+            <Rect width="100%" height="100%" fill="url(#financierasField)" />
+            <Circle cx="105%" cy="30%" r="90" stroke={colors.white} strokeWidth="22" strokeOpacity="0.10" fill="none" />
+          </Svg>
+          <View style={styles.headerInner}>
           <View style={styles.headerTopRow}>
             <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerIconBtn} accessibilityRole="button" accessibilityLabel="Volver">
-              <Icon name="arrow-left" size={24} color="#fff" />
+              <Icon name="arrow-left" size={24} color={colors.white} />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Financieras</Text>
             <TouchableOpacity
@@ -529,7 +543,7 @@ export const FinancierasScreen = () => {
               accessibilityRole="button"
               accessibilityLabel="Registrar financiera"
             >
-              <Icon name="plus" size={24} color="#fff" />
+              <Icon name="plus" size={24} color={colors.white} />
             </TouchableOpacity>
           </View>
           <Text style={styles.headerSubtitle}>
@@ -537,6 +551,7 @@ export const FinancierasScreen = () => {
             Financieras verificadas
             {selectedCountryIso ? ` de ${countryNameFor(selectedCountryIso)}` : ''}
           </Text>
+          </View>
         </View>
       </SafeAreaView>
 
@@ -753,7 +768,7 @@ export const FinancierasScreen = () => {
                 clientes ya están en Confío.
               </Text>
               <TouchableOpacity style={styles.emptyInviteBtn} onPress={inviteFinanciera}>
-                <Icon name="share-2" size={16} color="#fff" />
+                <Icon name="share-2" size={16} color={colors.white} />
                 <Text style={styles.emptyInviteText}>Invitar a una financiera</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={() => navigation.navigate('RegisterFinanciera')}>
@@ -794,11 +809,12 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.neutral },
 
   // Header
-  header: { backgroundColor: colors.primary, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 20 },
+  header: { backgroundColor: colors.primary, overflow: 'hidden' },
+  headerInner: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 20 },
   headerTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   headerIconBtn: { padding: 6, width: 40, alignItems: 'center' },
-  headerTitle: { fontSize: 18, fontWeight: 'bold', color: '#fff' },
-  headerSubtitle: { fontSize: 13, color: '#fff', opacity: 0.9, marginTop: 8, lineHeight: 18 },
+  headerTitle: { fontSize: 18, fontWeight: 'bold', color: colors.white },
+  headerSubtitle: { fontSize: 13, color: colors.white, opacity: 0.9, marginTop: 8, lineHeight: 18 },
 
   listContent: { padding: 16, paddingBottom: 40 },
 
@@ -829,7 +845,7 @@ const styles = StyleSheet.create({
   searchBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: colors.border,
@@ -844,7 +860,7 @@ const styles = StyleSheet.create({
   locationPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: colors.border,
@@ -873,7 +889,7 @@ const styles = StyleSheet.create({
   },
   sortChipActive: { backgroundColor: colors.primary },
   sortChipText: { fontSize: 12, fontWeight: '600', color: colors.text.secondary },
-  sortChipTextActive: { color: '#fff' },
+  sortChipTextActive: { color: colors.white },
 
   facetRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
   facetChip: {
@@ -894,7 +910,7 @@ const styles = StyleSheet.create({
 
   // Card (compact comparison row)
   card: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 14,
     paddingVertical: 12,
     paddingHorizontal: 14,
@@ -944,7 +960,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     height: 32,
   },
-  whatsappPillText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  whatsappPillText: { color: colors.white, fontSize: 12, fontWeight: '700' },
 
   // Register footer card
   registerCard: {
@@ -972,7 +988,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 9,
   },
-  registerBtnText: { fontSize: 13, fontWeight: '700', color: '#fff' },
+  registerBtnText: { fontSize: 13, fontWeight: '700', color: colors.white },
 
   // Empty
   empty: { alignItems: 'center', paddingVertical: 48, paddingHorizontal: 24 },
@@ -988,13 +1004,13 @@ const styles = StyleSheet.create({
     height: 46,
     marginTop: 20,
   },
-  emptyInviteText: { fontSize: 14, fontWeight: '700', color: '#fff' },
+  emptyInviteText: { fontSize: 14, fontWeight: '700', color: colors.white },
   emptyRegisterLink: { fontSize: 13, fontWeight: '600', color: colors.primaryDark, marginTop: 14 },
 
   // Modal
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
   modalSheet: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     paddingHorizontal: 16,
@@ -1062,7 +1078,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  modalApplyText: { fontSize: 15, fontWeight: '700', color: '#fff' },
+  modalApplyText: { fontSize: 15, fontWeight: '700', color: colors.white },
 });
 
 export default FinancierasScreen;
