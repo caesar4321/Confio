@@ -158,11 +158,13 @@ export const EmployeesScreen = () => {
         <BrandFieldBackground id="employeesField" ringCy="20%" ringR={80} ringWidth={20} />
         <View style={styles.fieldInner}>
           <Text style={styles.fieldEyebrow}>TU EQUIPO</Text>
-          <Text style={styles.fieldTitle}>Empleados</Text>
-          <Text style={styles.fieldSubtitle}>
+          <Text style={styles.fieldTitle}>
             {employees.length > 0
-              ? `${employees.length} ${employees.length === 1 ? 'persona' : 'personas'} en tu equipo · conéctalas con la nómina`
-              : 'Agrega tu equipo y conéctalo con la nómina.'}
+              ? `${employees.length} ${employees.length === 1 ? 'persona contigo' : 'personas contigo'}`
+              : 'Arma tu equipo'}
+          </Text>
+          <Text style={styles.fieldSubtitle}>
+            Invítalos, gestiona sus permisos y conéctalos con la nómina.
           </Text>
         </View>
       </View>
