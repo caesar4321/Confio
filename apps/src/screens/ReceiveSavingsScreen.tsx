@@ -72,7 +72,16 @@ export const ReceiveSavingsScreen = () => {
       businessId: activeAccount.business?.id,
     });
     getEvmAddressForDisplay(key)
-      .then((a) => setAddress(a))
+      .then((a) => {
+        setAddress(a);
+        // Self-heal server registration (idempotent, marker-gated): covers
+        // devices whose sign-in predated the backend deploy.
+        if (a) {
+          import('../services/authService').then(({ ensureBscAddressRegistered }) =>
+            ensureBscAddressRegistered(a),
+          ).catch(() => {});
+        }
+      })
       .finally(() => setResolving(false));
   }, [activeAccount]);
 

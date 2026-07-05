@@ -21,24 +21,40 @@ import { AccountManager, AccountContext } from '../utils/accountManager';
 import { DeviceFingerprint } from '../utils/deviceFingerprint';
 import algorandService from './algorandService';
 
-// Best-effort registration of the BSC (savings chain) address derived
-// alongside the Algorand key. Tolerated to fail against servers that
-// predate the cUSD+ deploy — never blocks sign-in.
-async function registerBscAddressBestEffort() {
+// Best-effort, SELF-HEALING registration of the BSC (savings chain)
+// address. Sign-in fires it, but a one-shot attempt can be lost (e.g. the
+// sign-in predated the server deploy), so savings surfaces call
+// ensureBscAddressRegistered() on mount too. A success marker (keyed by
+// address) makes retries free; failures leave no marker and retry later.
+// Never blocks sign-in or rendering.
+export async function ensureBscAddressRegistered(addressOverride?: string) {
   try {
+    const Keychain = await import('react-native-keychain');
     const { getDerivedEvmWallet } = await import('./secureDeterministicWallet');
-    const evm = getDerivedEvmWallet();
-    if (!evm) return;
+    const address = addressOverride ?? getDerivedEvmWallet()?.address;
+    if (!address) return;
+    const markerService = `confio_bsc_registered_v1_${address.toLowerCase()}`;
+    const marker = await Keychain.getGenericPassword({ service: markerService }).catch(() => null);
+    if (marker) return; // already registered from this device
     const { UPDATE_ACCOUNT_BSC_ADDRESS } = await import('../apollo/queries');
     const { apolloClient } = await import('../apollo/client');
-    await apolloClient.mutate({
+    const res = await apolloClient.mutate({
       mutation: UPDATE_ACCOUNT_BSC_ADDRESS,
-      variables: { bscAddress: evm.address },
+      variables: { bscAddress: address },
     });
-    console.log('Registered BSC (savings) address');
+    if (res?.data?.updateAccountBscAddress?.success) {
+      await Keychain.setGenericPassword('ok', '1', { service: markerService }).catch(() => {});
+      console.log('Registered BSC (savings) address');
+    } else {
+      console.log('BSC registration not accepted:', res?.data?.updateAccountBscAddress?.error);
+    }
   } catch (e) {
-    console.log('BSC address registration skipped (non-fatal):', e);
+    console.log('BSC address registration skipped (non-fatal, will retry):', e);
   }
+}
+
+async function registerBscAddressBestEffort() {
+  return ensureBscAddressRegistered();
 }
 
 

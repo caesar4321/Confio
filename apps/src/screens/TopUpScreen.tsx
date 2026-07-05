@@ -135,6 +135,13 @@ const TopUpScreen = () => {
   // flow stays compatible with pre-cUSD+ servers.
   const route = useRoute<any>();
   const isSavingsRail = route.params?.destination === 'cusd_plus';
+  useEffect(() => {
+    if (!isSavingsRail) return;
+    // Self-heal the bsc_address registration before the order can need it.
+    import('../services/authService').then(({ ensureBscAddressRegistered }) =>
+      ensureBscAddressRegistered(),
+    ).catch(() => {});
+  }, [isSavingsRail]);
   const [createRampOrder] = useMutation(
     isSavingsRail ? CREATE_RAMP_ORDER_SAVINGS : CREATE_RAMP_ORDER,
   );
