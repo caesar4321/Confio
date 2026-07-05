@@ -322,7 +322,7 @@ export const RampHistoryScreen = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.primaryDark} />
+      <StatusBar barStyle="light-content" backgroundColor={colors.primary} />
       <FlatList
         data={listRows}
         keyExtractor={(row) => row.key}
@@ -383,7 +383,7 @@ export default RampHistoryScreen;
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.primaryDark,
+    backgroundColor: colors.primary,
   },
   list: {
     flex: 1,
@@ -413,7 +413,7 @@ const styles = StyleSheet.create({
   },
   filterChipSelected: {
     backgroundColor: colors.primaryLight,
-    borderColor: '#a7f3d0',
+    borderColor: colors.primaryLight,
   },
   filterChipText: {
     fontSize: 13,
@@ -475,12 +475,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: '#e8f5ee',
-    shadowColor: colors.primaryDark,
-    shadowOpacity: 0.07,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 2,
+    borderColor: colors.border,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
@@ -559,7 +554,7 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: '#e8f5ee',
+    borderColor: colors.border,
     alignItems: 'center',
     gap: 12,
   },
