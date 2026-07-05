@@ -112,10 +112,10 @@ const getStatusMeta = (
 };
 
 const statusPillIconColor: Record<string, string> = {
-  neutral: '#374151',
-  info: '#3b82f6',
+  neutral: colors.text.primary,
+  info: colors.accent,
   success: '#047857',
-  error: '#b91c1c',
+  error: colors.error.icon,
 };
 
 const QR_RENDER_MAX_BYTES = 2048;
@@ -246,7 +246,7 @@ export const RampInstructionsScreen = () => {
     try {
       const captureUri = await captureQrImage();
       await CameraRoll.save(captureUri, { type: 'photo', album: 'Confio' });
-      Alert.alert('Guardado', 'QR guardado en tu galería.');
+      setBanner({ variant: 'success', message: 'QR guardado en tu galería.' });
     } catch (error: any) {
       setBanner({ variant: 'error', message: error?.message || 'No se pudo guardar la imagen del QR.' });
     }
@@ -454,7 +454,7 @@ export const RampInstructionsScreen = () => {
                     onPress={handleSaveQr}
                     activeOpacity={0.7}
                   >
-                    <Icon name="download" size={14} color="#ffffff" />
+                    <Icon name="download" size={14} color={colors.white} />
                     <Text style={styles.primaryQrButtonText}>Guardar imagen QR</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
@@ -584,7 +584,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   variantCard_bank_transfer: {
-    backgroundColor: '#ecfdf5',
+    backgroundColor: colors.primarySoft,
     borderColor: '#a7f3d0',
   },
   variantCard_redirect: {
@@ -597,7 +597,7 @@ const styles = StyleSheet.create({
   },
   variantCard_payout_pending: {
     backgroundColor: '#fffbeb',
-    borderColor: '#fde68a',
+    borderColor: colors.warning.border,
   },
   variantCard_generic: {
     backgroundColor: colors.surface,
@@ -679,16 +679,16 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   statusPill_neutral: {
-    backgroundColor: '#f3f4f6',
+    backgroundColor: colors.neutralDark,
   },
   statusPill_info: {
     backgroundColor: '#dbeafe',
   },
   statusPill_success: {
-    backgroundColor: '#d1fae5',
+    backgroundColor: colors.primaryLight,
   },
   statusPill_error: {
-    backgroundColor: '#fee2e2',
+    backgroundColor: colors.error.background,
   },
   statusPillText: {
     fontSize: 12,
@@ -704,14 +704,14 @@ const styles = StyleSheet.create({
     color: colors.primaryDark,
   },
   statusPillText_error: {
-    color: '#b91c1c',
+    color: colors.error.icon,
   },
   instructionRow: {
     gap: 4,
     paddingBottom: 12,
     marginBottom: 2,
     borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
+    borderBottomColor: colors.neutralDark,
   },
   instructionValueRow: {
     flexDirection: 'row',
@@ -783,13 +783,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   qrCaptureSurface: {
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.white,
     borderRadius: 20,
     paddingVertical: 14,
     paddingHorizontal: 14,
   },
   qrFrame: {
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.white,
     borderRadius: 16,
     padding: 16,
     shadowColor: '#111827',
@@ -798,7 +798,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     elevation: 3,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: colors.border,
   },
   qrImageFrame: {
     padding: 10,
@@ -884,13 +884,13 @@ const styles = StyleSheet.create({
   primaryQrButtonText: {
     fontSize: 13,
     fontWeight: '800',
-    color: '#ffffff',
+    color: colors.white,
   },
   secondaryQrButton: {
     flex: 1,
     minHeight: 44,
     borderRadius: 14,
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.white,
     borderWidth: 1,
     borderColor: '#bfdbfe',
     flexDirection: 'row',
@@ -916,7 +916,7 @@ const styles = StyleSheet.create({
     gap: 8,
     padding: 12,
     borderRadius: 14,
-    backgroundColor: '#ecfdf5',
+    backgroundColor: colors.primarySoft,
     borderWidth: 1,
     borderColor: '#a7f3d0',
     marginBottom: 6,
@@ -932,7 +932,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#ecfdf5',
+    backgroundColor: colors.primarySoft,
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 6,
@@ -944,7 +944,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#ecfdf5',
+    backgroundColor: colors.primarySoft,
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 6,

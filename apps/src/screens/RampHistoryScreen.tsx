@@ -262,7 +262,7 @@ export const RampHistoryScreen = () => {
       info: { bg: '#dbeafe', text: '#1d4ed8' },
       warning: { bg: colors.warningLight, text: colors.warning.text },
       error: { bg: colors.dangerLight, text: colors.danger },
-      neutral: { bg: '#f3f4f6', text: colors.textSecondary },
+      neutral: { bg: colors.neutralDark, text: colors.textSecondary },
     }[statusTone];
 
     return (
@@ -427,13 +427,13 @@ const styles = StyleSheet.create({
     minWidth: 18,
     height: 18,
     borderRadius: 9,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 4,
   },
   filterBadgeSelected: {
-    backgroundColor: '#6ee7b7',
+    backgroundColor: colors.primary,
   },
   filterBadgeText: {
     fontSize: 10,
@@ -463,7 +463,7 @@ const styles = StyleSheet.create({
   sectionLine: {
     flex: 1,
     height: 1,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: colors.border,
   },
 
   /* ── Item card ── */
@@ -476,7 +476,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: '#e8f5ee',
-    shadowColor: '#10b981',
+    shadowColor: colors.primaryDark,
     shadowOpacity: 0.07,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
