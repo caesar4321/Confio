@@ -20,6 +20,9 @@ import { prepareViaWs } from '../services/payWs';
 import { useAccount } from '../contexts/AccountContext';
 import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
+import { InlineBanner } from '../components/common/InlineBanner';
+import { ReceiptCard } from '../components/common/ReceiptCard';
+import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
 import { formatNumber } from '../utils/numberFormatting';
 import { useMutation } from '@apollo/client';
 import { GET_INVOICE } from '../apollo/queries';
@@ -261,7 +264,7 @@ export const PaymentConfirmationScreen = () => {
     return (
       <SafeAreaView style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
         <View style={{ padding: 20, alignItems: 'center' }}>
-          <Text style={{ marginTop: 10, color: '#666' }}>Cargando detalles del pago...</Text>
+          <Text style={{ marginTop: 10, color: colors.text.secondary }}>Cargando detalles del pago...</Text>
         </View>
       </SafeAreaView>
     );
@@ -289,22 +292,13 @@ export const PaymentConfirmationScreen = () => {
     avatar: (invoiceData.merchantAccount.business?.name ||
       invoiceData.merchantUser.firstName ||
       invoiceData.merchantUser.username).charAt(0).toUpperCase(),
-    verification: 'Verificado ✓'
+    verification: 'Verificado'
   };
 
   // Use snapshot balance; no immediate network dependency
   const realBalance = balanceSnapshot || '0';
 
-  // Fallback to mock values only if explicit error (dev/test)
-  const mockBalances: { [key: string]: string } = {
-    'cUSD': '2850.35',
-    'CUSD': '2850.35', // Handle both cases
-    'CONFIO': '234.18',
-    'USDC': '458.22'
-  };
-
-  const fallbackBalance = balanceError ? mockBalances[invoiceData.tokenType] || '0' : realBalance;
-  const hasEnoughBalance = balanceSnapshot != null && parseFloat(fallbackBalance) >= parseFloat(currentPayment.amount);
+  const hasEnoughBalance = balanceSnapshot != null && parseFloat(realBalance) >= parseFloat(currentPayment.amount);
 
   // Prevent overstatement: floor-based formatting with tiny-balance label
   const floorToDecimals = (value: number, decimals: number) => {
@@ -331,7 +325,7 @@ export const PaymentConfirmationScreen = () => {
     name: currentPayment.currency === 'cUSD' ? 'Confío Dollar' :
       currentPayment.currency === 'CONFIO' ? 'Confío' :
         currentPayment.currency === 'USDC' ? 'USD Coin' : currentPayment.currency,
-    balance: formatBalanceDisplay(fallbackBalance),
+    balance: formatBalanceDisplay(realBalance),
     color: currentPayment.currency === 'cUSD' ? colors.primary :
       currentPayment.currency === 'CONFIO' ? colors.secondary :
         currentPayment.currency === 'USDC' ? colors.accent : colors.primary,
@@ -428,11 +422,23 @@ export const PaymentConfirmationScreen = () => {
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        {/* Header */}
-        <View style={[styles.header, { backgroundColor: colors.primary }]}>
+        {/* Header — brand field: emerald gradient + coin ring; padding on
+            headerInner (Yoga insets absolute children by parent padding). */}
+        <View style={styles.header}>
+          <Svg style={StyleSheet.absoluteFill}>
+            <Defs>
+              <SvgLinearGradient id="payConfirmField" x1="0" y1="0" x2="0" y2="1">
+                <Stop offset="0" stopColor={colors.primary} />
+                <Stop offset="1" stopColor={colors.primaryDark} />
+              </SvgLinearGradient>
+            </Defs>
+            <Rect width="100%" height="100%" fill="url(#payConfirmField)" />
+            <Circle cx="105%" cy="25%" r="90" stroke={colors.white} strokeWidth="22" strokeOpacity="0.10" fill="none" />
+          </Svg>
+          <View style={styles.headerInner}>
           <View style={styles.headerContent}>
             <TouchableOpacity onPress={handleCancel} style={styles.backButton} accessibilityRole="button" accessibilityLabel="Volver">
-              <Icon name="arrow-left" size={24} color="white" />
+              <Icon name="arrow-left" size={24} color={colors.white} />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Confirmar Pago</Text>
             <View style={styles.placeholder} />
@@ -455,6 +461,7 @@ export const PaymentConfirmationScreen = () => {
               {currentPayment.recipientType}
             </Text>
           </View>
+          </View>
         </View>
 
         {/* Content */}
@@ -472,7 +479,7 @@ export const PaymentConfirmationScreen = () => {
                 <View style={styles.recipientMeta}>
                   <Text style={styles.recipientCategory}>{currentPayment.recipientType}</Text>
                   <View style={styles.verificationBadge}>
-                    <Icon name="check-circle" size={12} color="#10B981" />
+                    <Icon name="check-circle" size={12} color={colors.primaryDark} />
                     <Text style={styles.verificationText}>{currentPayment.verification}</Text>
                   </View>
                 </View>
@@ -483,13 +490,13 @@ export const PaymentConfirmationScreen = () => {
             <View style={styles.detailsList}>
               {currentPayment.description && (
                 <View style={styles.detailRow}>
-                  <Icon name="file-text" size={16} color="#9CA3AF" />
+                  <Icon name="file-text" size={16} color={colors.text.light} />
                   <Text style={styles.detailText}>{currentPayment.description}</Text>
                 </View>
               )}
 
               <View style={styles.detailRow}>
-                <Icon name="map-pin" size={16} color="#9CA3AF" />
+                <Icon name="map-pin" size={16} color={colors.text.light} />
                 <View>
                   <Text style={styles.detailText}>{currentPayment.location}</Text>
                   <Text style={styles.detailSubtext}>ID: {currentPayment.merchantId}</Text>
@@ -497,7 +504,7 @@ export const PaymentConfirmationScreen = () => {
               </View>
 
               <View style={styles.detailRow}>
-                <Icon name="clock" size={16} color="#9CA3AF" />
+                <Icon name="clock" size={16} color={colors.text.light} />
                 <View>
                   <Text style={styles.detailText}>ID: {currentPayment.paymentId}</Text>
                   <Text style={styles.detailSubtext}>Solicitud válida por 24 horas</Text>
@@ -528,7 +535,7 @@ export const PaymentConfirmationScreen = () => {
                   </Text>
                   <Text style={[
                     styles.balanceStatus,
-                    { color: hasEnoughBalance ? '#10B981' : '#EF4444' }
+                    { color: hasEnoughBalance ? colors.primaryDark : colors.danger }
                   ]}>
                     {balanceSnapshot == null || balanceLoading ? 'Verificando...' :
                       balanceError ? 'Error al cargar saldo' :
@@ -539,35 +546,17 @@ export const PaymentConfirmationScreen = () => {
             </View>
           </View>
 
-          {/* Payment Summary */}
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Resumen del pago</Text>
-
-            <View style={styles.summaryList}>
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Monto</Text>
-                <Text style={styles.summaryAmount}>
-                  ${formatAmount(currentPayment.amount)} {currentPayment.currency}
-                </Text>
-              </View>
-
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Comisión para ti</Text>
-                <View style={styles.commissionInfo}>
-                  <Text style={styles.commissionText}>Gratis</Text>
-                  <Text style={styles.commissionSubtext}>Cubierto por Confío</Text>
-                </View>
-              </View>
-
-              <View style={styles.divider} />
-
-              <View style={styles.summaryRow}>
-                <Text style={styles.totalLabel}>Total a pagar</Text>
-                <Text style={styles.totalAmount}>
-                  ${formatAmount(currentPayment.amount)} {currentPayment.currency}
-                </Text>
-              </View>
-            </View>
+          {/* Payment summary — shared receipt grammar */}
+          <View style={styles.summarySection}>
+            <Text style={styles.sectionLabel}>Resumen del pago</Text>
+            <ReceiptCard
+              items={[
+                { label: 'Monto', value: `$${formatAmount(currentPayment.amount)} ${currentPayment.currency}` },
+                { label: 'Comisión para ti', value: 'Gratis · cubre Confío', color: colors.primaryDark },
+                { label: 'Total a pagar', value: `$${formatAmount(currentPayment.amount)} ${currentPayment.currency}`, color: colors.text.primary },
+              ]}
+              style={styles.receiptCard}
+            />
           </View>
 
           {/* Security Info */}
@@ -583,17 +572,13 @@ export const PaymentConfirmationScreen = () => {
             </View>
           </View>
 
-          {/* Warning if insufficient balance */}
-          {!hasEnoughBalance && (
-            <View style={styles.warningCard}>
-              <Icon name="alert-triangle" size={20} color="#EF4444" />
-              <View style={styles.warningContent}>
-                <Text style={styles.warningTitle}>Saldo insuficiente</Text>
-                <Text style={styles.warningText}>
-                  Necesitas ${formatAmount(currentPayment.amount)} pero solo tienes ${formatAmount(walletData.balance)} en {walletData.name}
-                </Text>
-              </View>
-            </View>
+          {/* Insufficient balance — only claim it once we actually know */}
+          {balanceSnapshot != null && !balanceError && !hasEnoughBalance && (
+            <InlineBanner
+              variant="error"
+              message={`Necesitas $${formatAmount(currentPayment.amount)} pero tienes $${walletData.balance} en ${walletData.name}.`}
+              style={{ marginBottom: 16 }}
+            />
           )}
 
           {/* Action Buttons */}
@@ -604,40 +589,19 @@ export const PaymentConfirmationScreen = () => {
               loading={isProcessing}
               disabled={!hasEnoughBalance}
               accessibilityLabel="Confirmar pago"
-              style={{ backgroundColor: hasEnoughBalance && !isProcessing ? colors.primary : '#D1D5DB' }}
+              style={{ backgroundColor: hasEnoughBalance && !isProcessing ? colors.primary : colors.borderMedium }}
             />
 
             <Button
               title="Cancelar"
               variant="secondary"
               onPress={handleCancel}
-              style={{ backgroundColor: '#F3F4F6', borderWidth: 0 }}
+              style={{ backgroundColor: colors.neutralDark, borderWidth: 0 }}
             />
           </View>
 
-          {/* Value Proposition */}
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>¿Por qué elegir Confío?</Text>
-
-            <View style={[styles.valueCard, { backgroundColor: colors.primaryLight }]}>
-              <View style={styles.valueRow}>
-                <Icon name="check-circle" size={20} color={colors.primaryDark} />
-                <Text style={[styles.valueTitle, { color: colors.primaryDark }]}>
-                  Pagos 100% gratuitos para clientes
-                </Text>
-              </View>
-              <Text style={[styles.valueText, { color: colors.primaryDark }]}>
-                Pagas sin comisiones adicionales
-              </Text>
-              <View style={[styles.valueHighlight, { backgroundColor: colors.primary }]}>
-                <Text style={styles.valueHighlightText}>
-                  💡 Confío: 0% para clientes, solo 0.9% para comerciantes{'\n'}
-                  vs. tarjetas tradicionales (2.5-3.5% para comerciantes){'\n'}
-                  {supportCopy.ecosystemLine}
-                </Text>
-              </View>
-            </View>
-          </View>
+          {/* Supportive footnote — the mission line, no fee marketing */}
+          <Text style={styles.supportFootnote}>{supportCopy.ecosystemLine}</Text>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -649,12 +613,16 @@ const { width } = Dimensions.get('window');
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F9FAFB',
+    backgroundColor: colors.neutral,
   },
   scrollView: {
     flex: 1,
   },
   header: {
+    backgroundColor: colors.primary,
+    overflow: 'hidden',
+  },
+  headerInner: {
     paddingTop: Platform.OS === 'ios' ? APP_LAYOUT.topSafeArea : APP_LAYOUT.topSafeArea + 8,
     paddingBottom: 32,
     paddingHorizontal: 16,
@@ -676,7 +644,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: 'white',
+    color: colors.white,
   },
   placeholder: {
     width: 40,
@@ -687,7 +655,7 @@ const styles = StyleSheet.create({
   merchantIcon: {
     width: 64,
     height: 64,
-    backgroundColor: 'white',
+    backgroundColor: colors.white,
     borderRadius: 32,
     justifyContent: 'center',
     alignItems: 'center',
@@ -696,13 +664,13 @@ const styles = StyleSheet.create({
   amountText: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: 'white',
+    color: colors.white,
     marginBottom: 8,
   },
   recipientText: {
     fontSize: 18,
     fontWeight: '600',
-    color: 'white',
+    color: colors.white,
     marginBottom: 4,
   },
   recipientTypeText: {
@@ -711,24 +679,43 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingHorizontal: 16,
-    paddingTop: -16,
+    paddingTop: 16,
     paddingBottom: 24,
   },
   card: {
-    backgroundColor: 'white',
+    backgroundColor: colors.white,
     borderRadius: 16,
-    padding: 24,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 20,
     marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 2,
+  },
+  summarySection: {
+    marginBottom: 16,
+  },
+  sectionLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.text.secondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 10,
+  },
+  receiptCard: {
+    backgroundColor: colors.white,
+  },
+  supportFootnote: {
+    fontSize: 12,
+    color: colors.text.secondary,
+    textAlign: 'center',
+    lineHeight: 18,
+    paddingHorizontal: 24,
+    marginBottom: 8,
   },
   cardTitle: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#1F2937',
+    color: colors.text.primary,
     marginBottom: 16,
   },
   recipientRow: {
@@ -739,7 +726,7 @@ const styles = StyleSheet.create({
   avatar: {
     width: 48,
     height: 48,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: colors.violetLight,
     borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
@@ -748,7 +735,7 @@ const styles = StyleSheet.create({
   avatarText: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#4B5563',
+    color: colors.secondary,
   },
   recipientInfo: {
     flex: 1,
@@ -756,7 +743,7 @@ const styles = StyleSheet.create({
   recipientName: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#1F2937',
+    color: colors.text.primary,
     marginBottom: 4,
   },
   recipientMeta: {
@@ -765,7 +752,7 @@ const styles = StyleSheet.create({
   },
   recipientCategory: {
     fontSize: 14,
-    color: '#6B7280',
+    color: colors.text.secondary,
     marginRight: 8,
   },
   verificationBadge: {
@@ -774,7 +761,7 @@ const styles = StyleSheet.create({
   },
   verificationText: {
     fontSize: 12,
-    color: '#10B981',
+    color: colors.primaryDark,
     marginLeft: 4,
   },
   detailsList: {
@@ -787,13 +774,13 @@ const styles = StyleSheet.create({
   detailText: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#1F2937',
+    color: colors.text.primary,
     marginLeft: 12,
     flex: 1,
   },
   detailSubtext: {
     fontSize: 12,
-    color: '#6B7280',
+    color: colors.text.secondary,
     marginLeft: 12,
   },
   balanceCard: {
@@ -814,7 +801,7 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   balanceIconText: {
-    color: 'white',
+    color: colors.white,
     fontWeight: 'bold',
     fontSize: 16,
   },
@@ -824,11 +811,11 @@ const styles = StyleSheet.create({
   balanceName: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#1F2937',
+    color: colors.text.primary,
   },
   balanceLabel: {
     fontSize: 14,
-    color: '#6B7280',
+    color: colors.text.secondary,
   },
   balanceAmount: {
     alignItems: 'flex-end',
@@ -836,54 +823,10 @@ const styles = StyleSheet.create({
   balanceValue: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#1F2937',
+    color: colors.text.primary,
   },
   balanceStatus: {
     fontSize: 12,
-  },
-  summaryList: {
-    gap: 12,
-  },
-  summaryRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  summaryLabel: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  summaryAmount: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#1F2937',
-  },
-  commissionInfo: {
-    alignItems: 'flex-end',
-  },
-  commissionText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#10B981',
-  },
-  commissionSubtext: {
-    fontSize: 12,
-    color: '#6B7280',
-  },
-  divider: {
-    height: 1,
-    backgroundColor: '#E5E7EB',
-    marginVertical: 8,
-  },
-  totalLabel: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#1F2937',
-  },
-  totalAmount: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#1F2937',
   },
   securityCard: {
     flexDirection: 'row',
@@ -903,59 +846,9 @@ const styles = StyleSheet.create({
   securityText: {
     fontSize: 12,
   },
-  warningCard: {
-    flexDirection: 'row',
-    backgroundColor: '#FEF2F2',
-    borderWidth: 1,
-    borderColor: '#FECACA',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 16,
-  },
-  warningContent: {
-    marginLeft: 12,
-    flex: 1,
-  },
-  warningTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#DC2626',
-    marginBottom: 4,
-  },
-  warningText: {
-    fontSize: 12,
-    color: '#B91C1C',
-  },
   actionButtons: {
     gap: 12,
     marginBottom: 16,
-  },
-  valueCard: {
-    padding: 16,
-    borderRadius: 12,
-  },
-  valueRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  valueTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    marginLeft: 8,
-  },
-  valueText: {
-    fontSize: 12,
-    marginBottom: 12,
-  },
-  valueHighlight: {
-    padding: 12,
-    borderRadius: 8,
-  },
-  valueHighlightText: {
-    fontSize: 12,
-    color: 'white',
-    lineHeight: 18,
   },
 
 });
