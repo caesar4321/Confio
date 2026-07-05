@@ -352,7 +352,7 @@ const TopUpScreen = () => {
     <View style={styles.container}>
       <Header
         navigation={navigation as any}
-        title="Recargar con Guardarian"
+        title="Recargar"
         backgroundColor={colors.primary}
         isLight
         showBackButton
@@ -391,8 +391,8 @@ const TopUpScreen = () => {
         </View>
 
         <Text style={styles.regulatoryNote}>
-          Guardarian es un socio regulado. En algunos países solo está disponible la recarga (no el
-          retiro) por regulación local. Retiros disponibles en EUR {getFlagForCurrency('EUR')} MXN{' '}
+          Guardarian es un socio regulado. En algunos países solo está disponible la recarga (no la
+          venta) por regulación local. Ventas disponibles en EUR {getFlagForCurrency('EUR')} MXN{' '}
           {getFlagForCurrency('MXN')} CLP {getFlagForCurrency('CLP')} COP {getFlagForCurrency('COP')} ARS{' '}
           {getFlagForCurrency('ARS')} BRL {getFlagForCurrency('BRL')}.
         </Text>

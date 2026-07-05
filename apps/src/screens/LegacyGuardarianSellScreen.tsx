@@ -137,11 +137,11 @@ export const SellScreen = () => {
                 setCurrencyCode(code);
                 setPayoutFiats(SELL_SUPPORTED);
                 if (fallback) {
-                    setFiatError('Guardarian no soporta retiros en tu moneda. Usaremos EUR como predeterminado.');
+                    setFiatError('Guardarian no soporta ventas en tu moneda. Usaremos EUR como predeterminado.');
                 }
 
             } catch (err: any) {
-                setFiatError('No pudimos cargar monedas con retiro. Usaremos EUR.');
+                setFiatError('No pudimos cargar monedas disponibles para la venta. Usaremos EUR.');
                 setCurrencyCode('EUR');
                 setPayoutFiats(SELL_SUPPORTED);
             } finally {
@@ -199,17 +199,17 @@ export const SellScreen = () => {
                 await Linking.openURL(tx.redirect_url);
                 return;
             } else {
-                throw new Error('Guardarian no devolvió métodos de retiro. Prueba otra moneda o intenta más tarde.');
+                throw new Error('Guardarian no devolvió métodos de pago para la venta. Prueba otra moneda o intenta más tarde.');
             }
 
         } catch (err: any) {
             const msg = String(err?.message || '').toLowerCase();
             if (msg.includes('payout')) {
-                setFiatError('Guardarian no ofrece métodos de retiro para esta moneda/país. Prueba otra moneda o cambia de país.');
+                setFiatError('Guardarian no ofrece métodos de pago para esta moneda/país. Prueba otra moneda o cambia de país.');
                 setCurrencyCode('');
                 Alert.alert(
-                    'Sin métodos de retiro',
-                    'Guardarian no tiene retiros para esta moneda en tu país. Cambia de moneda y vuelve a intentar.'
+                    'Sin métodos de pago',
+                    'Guardarian no puede pagarte en esta moneda en tu país. Cambia de moneda y vuelve a intentar.'
                 );
             } else {
                 Alert.alert('Error', err.message || 'No se pudo crear la orden.');
@@ -297,7 +297,7 @@ export const SellScreen = () => {
         <View style={styles.container}>
             <Header
                 navigation={navigation as any}
-                title="Retirar USDC a banco"
+                title="Vender USDC"
                 backgroundColor={colors.primary}
                 isLight
                 showBackButton
@@ -306,7 +306,7 @@ export const SellScreen = () => {
                         style={styles.historyButton}
                         onPress={() => navigation.navigate('RampHistory', { initialFilter: 'off_ramp' })}
                         accessibilityRole="button"
-                        accessibilityLabel="Ver historial de retiros"
+                        accessibilityLabel="Ver historial de ventas"
                     >
                         <Text style={styles.historyButtonText}>Historial</Text>
                     </TouchableOpacity>
@@ -328,8 +328,8 @@ export const SellScreen = () => {
                         <Circle cx="105%" cy="18%" r="80" stroke={colors.white} strokeWidth="20" strokeOpacity="0.10" fill="none" />
                     </Svg>
                     <View style={styles.fieldInner}>
-                        <Text style={styles.fieldEyebrow}>RETIRAR CON GUARDARIAN</Text>
-                        <Text style={styles.fieldTitle}>Retira a tu banco</Text>
+                        <Text style={styles.fieldEyebrow}>VENDER CON GUARDARIAN</Text>
+                        <Text style={styles.fieldTitle}>Vende tus USDC</Text>
                         <Text style={styles.fieldSubtitle}>
                             Convierte tus USDC a moneda local y recíbelos directamente en tu cuenta bancaria.
                         </Text>
@@ -350,7 +350,7 @@ export const SellScreen = () => {
                         </Text>
                         {!isCountrySupportedForSell && (
                             <Text style={styles.infoCardTextSecondary}>
-                                Retiros disponibles en EUR {getFlagForCurrency('EUR')} MXN {getFlagForCurrency('MXN')} CLP {getFlagForCurrency('CLP')} COP {getFlagForCurrency('COP')} ARS {getFlagForCurrency('ARS')} BRL {getFlagForCurrency('BRL')}. Tu país actual permite recargar, pero el retiro puede no estar disponible hasta que Guardarian habilite ese mercado.
+                                Ventas disponibles en EUR {getFlagForCurrency('EUR')} MXN {getFlagForCurrency('MXN')} CLP {getFlagForCurrency('CLP')} COP {getFlagForCurrency('COP')} ARS {getFlagForCurrency('ARS')} BRL {getFlagForCurrency('BRL')}. Tu país actual permite recargar, pero la venta puede no estar disponible hasta que Guardarian habilite ese mercado.
                             </Text>
                         )}
                     </View>
@@ -359,7 +359,7 @@ export const SellScreen = () => {
                 {/* Payout currency selection */}
                 {/* Amount Input Card */}
                 <View style={styles.inputCard}>
-                    <Text style={styles.inputLabel}>¿Cuánto quieres retirar?</Text>
+                    <Text style={styles.inputLabel}>¿Cuánto quieres vender?</Text>
 
                     <View style={styles.amountInputContainer}>
                         <Image source={USDCLogo} style={styles.usdcLogo} />
