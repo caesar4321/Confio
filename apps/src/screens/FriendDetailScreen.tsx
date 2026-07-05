@@ -18,6 +18,7 @@ import { RouteProp } from '@react-navigation/native';
 import { MainStackParamList } from '../types/navigation';
 import { RouteSheet } from '../components/RouteSheet';
 import { Header } from '../navigation/Header';
+import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import { useNumberFormat } from '../utils/numberFormatting';
@@ -368,15 +369,15 @@ export function FriendDetailScreen() {
   const getTransactionIcon = useCallback((transaction: Transaction) => {
     switch(transaction.type) {
       case 'received':
-        return <Icon name="arrow-down" size={20} color="#10B981" />;
+        return <Icon name="arrow-down" size={20} color={colors.primaryDark} />;
       case 'sent':
-        return <Icon name="arrow-up" size={20} color="#EF4444" />;
+        return <Icon name="arrow-up" size={20} color={colors.text.primary} />;
       case 'payment':
-        return <Icon name="shopping-bag" size={20} color="#8B5CF6" />;
+        return <Icon name="shopping-bag" size={20} color={colors.secondary} />;
       case 'exchange':
-        return <Icon name="repeat" size={20} color="#8B5CF6" />;
+        return <Icon name="repeat" size={20} color={colors.secondary} />;
       default:
-        return <Icon name="arrow-up" size={20} color="#6B7280" />;
+        return <Icon name="arrow-up" size={20} color={colors.text.secondary} />;
     }
   }, []);
 
@@ -399,9 +400,7 @@ export function FriendDetailScreen() {
           <Text style={styles.transactionDate}>{transaction.date} • {transaction.time}</Text>
           {isInvitationTransaction && transaction.type === 'sent' && (
             <Text style={styles.invitedNote}>
-              {transaction.invitationClaimed ? '✅ Invitación reclamada' :
-               transaction.invitationReverted ? '❌ Expiró - Fondos devueltos' :
-               '⚠️ Tu amigo tiene 7 días para reclamar • Avísale ya'}
+              Tu amigo tiene 7 días para reclamar • Avísale ya
             </Text>
           )}
         </View>
@@ -412,12 +411,12 @@ export function FriendDetailScreen() {
           ]}>
             {transaction.amount} {transaction.currency}
           </Text>
-          <View style={styles.transactionStatus}>
-            <Text style={styles.statusText}>
-              {transaction.status === 'completed' ? 'Completado' : 'Pendiente'}
-            </Text>
-            <View style={[styles.statusDot, { backgroundColor: transaction.status === 'completed' ? '#10b981' : '#f59e0b' }]} />
-          </View>
+          {transaction.status !== 'completed' && (
+            <View style={styles.transactionStatus}>
+              <Text style={styles.pendingText}>Pendiente</Text>
+              <View style={[styles.statusDot, { backgroundColor: colors.offRampIcon }]} />
+            </View>
+          )}
         </View>
       </TouchableOpacity>
     );
@@ -520,8 +519,10 @@ export function FriendDetailScreen() {
           />
         }
       >
-        {/* Friend Info Section with Emerald Background */}
-        <View style={[styles.friendSection, { backgroundColor: colors.primary }]}>
+        {/* Friend hero — brand field, seamless with the emerald nav header */}
+        <View style={styles.friendSection}>
+          <BrandFieldBackground id="friendDetailField" ringCy="25%" ringR={80} ringWidth={20} />
+          <View style={styles.friendSectionInner}>
           <View style={styles.friendAvatarContainer}>
             <Text style={styles.friendAvatarText}>{friend.avatar}</Text>
           </View>
@@ -529,8 +530,8 @@ export function FriendDetailScreen() {
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
               <Text style={styles.friendName}>{friend.name}</Text>
               {friendIsReferralVerified && (
-                <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: '#3B82F6', alignItems: 'center', justifyContent: 'center' }}>
-                  <Icon name="check" size={12} color="#fff" />
+                <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: colors.accent, alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name="check" size={12} color={colors.white} />
                 </View>
               )}
             </View>
@@ -542,13 +543,14 @@ export function FriendDetailScreen() {
             <Text style={styles.friendPhone}>{friend.phone}</Text>
           )}
           <View style={[
-            styles.friendStatus, 
-            { backgroundColor: friend.isOnConfio ? 'rgba(255, 255, 255, 0.2)' : 'rgba(239, 68, 68, 0.2)' }
+            styles.friendStatus,
+            { backgroundColor: friend.isOnConfio ? 'rgba(255, 255, 255, 0.2)' : colors.warningLight }
           ]}>
-            <View style={[styles.statusIndicator, { backgroundColor: friend.isOnConfio ? '#ffffff' : '#ef4444' }]} />
-            <Text style={[styles.statusText, { color: friend.isOnConfio ? '#ffffff' : '#ef4444' }]}>
+            <View style={[styles.statusIndicator, { backgroundColor: friend.isOnConfio ? colors.white : colors.warning.icon }]} />
+            <Text style={[styles.statusText, { color: friend.isOnConfio ? colors.white : colors.warning.text }]}>
               {friend.isOnConfio ? 'En Confío' : 'No está en Confío'}
             </Text>
+          </View>
           </View>
         </View>
 
@@ -558,7 +560,7 @@ export function FriendDetailScreen() {
             style={[styles.sendButton, !friend.isOnConfio && styles.inviteButton]}
             onPress={handleSendMoney}
           >
-            <Icon name="send" size={20} color="#ffffff" style={{ marginRight: 8 }} />
+            <Icon name="send" size={20} color={colors.white} style={{ marginRight: 8 }} />
             <Text style={styles.sendButtonText}>
               {friend.isOnConfio ? 'Enviar' : 'Enviar & Invitar'}
             </Text>
@@ -584,7 +586,7 @@ export function FriendDetailScreen() {
                 ]}
                 onPress={() => setShowSearch(!showSearch)}
               >
-                <Icon name="search" size={16} color={showSearch ? colors.primary : "#6b7280"} />
+                <Icon name="search" size={16} color={showSearch ? colors.primary : colors.text.secondary} />
               </TouchableOpacity>
               <TouchableOpacity 
                 style={[
@@ -596,7 +598,7 @@ export function FriendDetailScreen() {
                 <Icon 
                   name="filter" 
                   size={16} 
-                  color={hasActiveFilters() ? colors.primary : "#6b7280"} 
+                  color={hasActiveFilters() ? colors.primary : colors.text.secondary} 
                 />
                 {hasActiveFilters() && (
                   <View style={styles.filterDot} />
@@ -608,11 +610,11 @@ export function FriendDetailScreen() {
           {/* Search Bar */}
           {showSearch && (
             <View style={styles.searchContainer}>
-              <Icon name="search" size={18} color="#9ca3af" style={styles.searchIcon} />
+              <Icon name="search" size={18} color={colors.text.light} style={styles.searchIcon} />
               <TextInput
                 style={styles.searchInput}
                 placeholder="Buscar transacciones..."
-                placeholderTextColor="#9ca3af"
+                placeholderTextColor={colors.text.light}
                 value={searchQuery}
                 onChangeText={setSearchQuery}
                 autoCapitalize="none"
@@ -620,7 +622,7 @@ export function FriendDetailScreen() {
               />
               {searchQuery.length > 0 && (
                 <TouchableOpacity onPress={() => setSearchQuery('')}>
-                  <Icon name="x" size={18} color="#9ca3af" />
+                  <Icon name="x" size={18} color={colors.text.light} />
                 </TouchableOpacity>
               )}
             </View>
@@ -633,7 +635,7 @@ export function FriendDetailScreen() {
               </View>
             ) : filteredTransactions.length === 0 ? (
               <View style={styles.emptyTransactionsContainer}>
-                <Icon name="inbox" size={32} color="#9ca3af" />
+                <Icon name="inbox" size={32} color={colors.text.light} />
                 <Text style={styles.emptyTransactionsText}>
                   {searchQuery || hasActiveFilters() 
                     ? 'No se encontraron transacciones'
@@ -766,7 +768,7 @@ export function FriendDetailScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.white,
   },
   scrollView: {
     flex: 1,
@@ -783,16 +785,19 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   friendSection: {
+    backgroundColor: colors.primary,
+    overflow: 'hidden',
+  },
+  friendSectionInner: {
     alignItems: 'center',
-    paddingTop: 12,
-    paddingBottom: 24,
+    paddingVertical: 24,
     paddingHorizontal: 20,
   },
   friendAvatarContainer: {
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.white,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16,
@@ -806,7 +811,7 @@ const styles = StyleSheet.create({
   friendName: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#ffffff',
+    color: colors.white,
     marginBottom: 4,
     textAlign: 'center',
   },
@@ -835,9 +840,9 @@ const styles = StyleSheet.create({
   },
   sendButtonContainer: {
     padding: 24,
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.white,
     borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
+    borderBottomColor: colors.neutralDark,
   },
   sendButton: {
     flexDirection: 'row',
@@ -853,7 +858,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary, // Use same emerald color as regular send button
   },
   sendButtonText: {
-    color: '#ffffff',
+    color: colors.white,
     fontSize: 16,
     fontWeight: '600',
   },
@@ -865,7 +870,7 @@ const styles = StyleSheet.create({
   },
   transactionsSection: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.white,
   },
   transactionsHeader: {
     flexDirection: 'row',
@@ -874,7 +879,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
+    borderBottomColor: colors.neutralDark,
   },
   transactionsTitle: {
     fontSize: 18,
@@ -889,7 +894,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: '#f9fafb',
+    backgroundColor: colors.neutral,
     justifyContent: 'center',
     alignItems: 'center',
     position: 'relative',
@@ -913,10 +918,10 @@ const styles = StyleSheet.create({
     marginVertical: 12,
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#f9fafb',
+    backgroundColor: colors.neutral,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: colors.border,
   },
   searchIcon: {
     marginRight: 12,
@@ -963,11 +968,11 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     paddingHorizontal: 0,
     borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
+    borderBottomColor: colors.neutralDark,
   },
   invitedTransactionItem: {
-    backgroundColor: '#fef2f2',
-    borderColor: '#ef4444',
+    backgroundColor: colors.warning.background,
+    borderColor: colors.warning.border,
     borderWidth: 1,
     borderRadius: 12,
     marginVertical: 4,
@@ -978,13 +983,13 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#f9fafb',
+    backgroundColor: colors.neutral,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
   },
   invitedIconContainer: {
-    backgroundColor: '#fef2f2',
+    backgroundColor: colors.error.background,
   },
   transactionInfo: {
     flex: 1,
@@ -1001,9 +1006,9 @@ const styles = StyleSheet.create({
   },
   invitedNote: {
     fontSize: 12,
-    color: '#dc2626',
+    color: colors.warning.text,
     marginTop: 2,
-    fontWeight: 'bold',
+    fontWeight: '600',
   },
   transactionAmount: {
     alignItems: 'flex-end',
@@ -1014,14 +1019,19 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   positiveAmount: {
-    color: '#10b981',
+    color: colors.primaryDark,
   },
   negativeAmount: {
-    color: '#ef4444',
+    color: colors.text.primary,
   },
   transactionStatus: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  pendingText: {
+    fontSize: 12,
+    color: colors.warning.text,
+    marginRight: 4,
   },
   statusDot: {
     width: 6,
@@ -1039,66 +1049,5 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: colors.primary,
     fontWeight: '500',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalContent: {
-    backgroundColor: '#ffffff',
-    borderRadius: 16,
-    padding: 24,
-    margin: 24,
-    maxWidth: 400,
-    width: '100%',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: colors.text.primary,
-  },
-  tokenOption: {
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-  },
-  tokenInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  tokenLogo: {
-    width: 40,
-    height: 40,
-    marginRight: 16,
-  },
-  tokenDetails: {
-    flex: 1,
-  },
-  tokenName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.text.primary,
-    marginBottom: 4,
-  },
-  tokenSymbol: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: colors.primary,
-    marginBottom: 4,
-  },
-  tokenDescription: {
-    fontSize: 12,
-    color: colors.text.secondary,
-    lineHeight: 16,
   },
 });

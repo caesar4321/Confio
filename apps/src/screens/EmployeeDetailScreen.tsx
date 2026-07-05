@@ -18,6 +18,7 @@ import { useMutation } from '@apollo/client';
 import { REMOVE_BUSINESS_EMPLOYEE, GET_CURRENT_BUSINESS_EMPLOYEES } from '../apollo/queries';
 import { colors } from '../config/theme';
 import { InlineBanner } from '../components/common/InlineBanner';
+import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
 
 // Color palette
 type EmployeeDetailScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
@@ -35,9 +36,9 @@ const getRoleLabel = (role: string) => {
 
 const getRoleColor = (role: string) => {
   switch ((role || '').toLowerCase()) {
-    case 'owner': return '#10b981'; // primary green
-    case 'admin': return '#ef4444'; // red
-    case 'manager': return '#f59e0b'; // amber
+    case 'owner': return colors.primaryDark;
+    case 'admin': return colors.secondary;
+    case 'manager': return colors.offRampIcon;
     case 'cashier': return colors.primary;
     default: return colors.text.secondary;
   }
@@ -73,7 +74,6 @@ export const EmployeeDetailScreen = () => {
     employeeData 
   } = route.params;
 
-  const [showActions, setShowActions] = useState(false);
   const [banner, setBanner] = useState<{ message: string; variant: 'error' | 'success' } | null>(null);
   const dismissBanner = React.useCallback(() => setBanner(null), []);
   const [removeEmployee, { loading: removing }] = useMutation(REMOVE_BUSINESS_EMPLOYEE, {
@@ -128,25 +128,6 @@ export const EmployeeDetailScreen = () => {
     create_invoices: 'Crear facturas',
     manage_invoices: 'Gestionar facturas',
     export_data: 'Exportar datos',
-  };
-
-  const handleToggleStatus = () => {
-    const action = isActive ? 'desactivar' : 'activar';
-    Alert.alert(
-      `Confirmar ${action}`,
-      `¿Estás seguro de que quieres ${action} a ${employeeName}?`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        { 
-          text: action === 'desactivar' ? 'Desactivar' : 'Activar',
-          style: action === 'desactivar' ? 'destructive' : 'default',
-          onPress: () => {
-            // TODO: Implement employee status toggle
-            Alert.alert('Funcionalidad Pendiente', `La ${action}ción de empleados estará disponible pronto.`);
-          }
-        }
-      ]
-    );
   };
 
   const handleRemoveEmployee = () => {
@@ -209,31 +190,25 @@ export const EmployeeDetailScreen = () => {
             style={{ marginTop: 12 }}
           />
         )}
-        {/* Employee Header */}
+        {/* Hero — brand field, seamless with the emerald nav header */}
         <View style={styles.employeeHeader}>
-          <View style={styles.avatarContainer}>
-            <Text style={styles.avatarText}>
-              {avatarInitial}
-            </Text>
-          </View>
-          
-          <View style={styles.employeeInfo}>
-            <Text style={styles.employeeName}>{resolvedName}</Text>
-            <Text style={styles.employeePhone}>{formatPhoneNumber(resolvedPhone, resolvedPhoneCountry)}</Text>
-            <View style={styles.roleContainer}>
-              <Text style={[styles.employeeRole, { color: getRoleColor(resolvedRole) }]}>
-                {getRoleLabel(resolvedRole)}
-              </Text>
-              <View style={[
-                styles.statusBadge,
-                { backgroundColor: resolvedActive ? colors.primaryLight : '#fee2e2' }
-              ]}>
-                <Text style={[
-                  styles.statusText,
-                  { color: resolvedActive ? colors.primaryDark : '#dc2626' }
-                ]}>
-                  {resolvedActive ? 'Activo' : 'Inactivo'}
-                </Text>
+          <BrandFieldBackground id="employeeDetailField" ringCy="30%" ringR={80} ringWidth={20} />
+          <View style={styles.employeeHeaderInner}>
+            <View style={styles.avatarContainer}>
+              <Text style={styles.avatarText}>{avatarInitial}</Text>
+            </View>
+            <View style={styles.employeeInfo}>
+              <Text style={styles.employeeName}>{resolvedName}</Text>
+              <Text style={styles.employeePhone}>{formatPhoneNumber(resolvedPhone, resolvedPhoneCountry)}</Text>
+              <View style={styles.roleContainer}>
+                <View style={styles.rolePill}>
+                  <Text style={styles.rolePillText}>{getRoleLabel(resolvedRole)}</Text>
+                </View>
+                <View style={[styles.statusBadge, !resolvedActive && styles.statusBadgeInactive]}>
+                  <Text style={[styles.statusText, !resolvedActive && styles.statusTextInactive]}>
+                    {resolvedActive ? 'Activo' : 'Inactivo'}
+                  </Text>
+                </View>
               </View>
             </View>
           </View>
@@ -243,22 +218,6 @@ export const EmployeeDetailScreen = () => {
         <View style={styles.detailsSection}>
           <Text style={styles.sectionTitle}>Información del Empleado</Text>
           
-          <View style={styles.detailItem}>
-            <Icon name="user" size={16} color={colors.text.secondary} />
-            <View style={styles.detailContent}>
-              <Text style={styles.detailLabel}>Nombre</Text>
-              <Text style={styles.detailValue}>{resolvedName}</Text>
-            </View>
-          </View>
-
-          <View style={styles.detailItem}>
-            <Icon name="phone" size={16} color={colors.text.secondary} />
-            <View style={styles.detailContent}>
-              <Text style={styles.detailLabel}>Teléfono</Text>
-              <Text style={styles.detailValue}>{formatPhoneNumber(resolvedPhone, resolvedPhoneCountry)}</Text>
-            </View>
-          </View>
-
           <View style={styles.detailItem}>
             <Icon name="briefcase" size={16} color={colors.text.secondary} />
             <View style={styles.detailContent}>
@@ -270,12 +229,12 @@ export const EmployeeDetailScreen = () => {
           </View>
 
           <View style={styles.detailItem}>
-            <Icon name={resolvedActive ? "check-circle" : "x-circle"} size={16} color={resolvedActive ? colors.primary : '#dc2626'} />
+            <Icon name={resolvedActive ? "check-circle" : "x-circle"} size={16} color={resolvedActive ? colors.primaryDark : colors.error.icon} />
             <View style={styles.detailContent}>
               <Text style={styles.detailLabel}>Estado</Text>
               <Text style={[
                 styles.detailValue,
-                { color: resolvedActive ? colors.primary : '#dc2626' }
+                { color: resolvedActive ? colors.primary : colors.error.icon }
               ]}>
                 {resolvedActive ? 'Activo' : 'Inactivo'}
               </Text>
@@ -319,7 +278,11 @@ export const EmployeeDetailScreen = () => {
                   return (
                     <View key={key} style={styles.permRow}>
                       <Text style={styles.permKey}>{label}</Text>
-                      <Text style={[styles.permValue, { color: val ? '#10b981' : '#ef4444' }]}>{val ? 'Sí' : 'No'}</Text>
+                      <Icon
+                        name={val ? 'check-circle' : 'x-circle'}
+                        size={16}
+                        color={val ? colors.primaryDark : colors.text.light}
+                      />
                     </View>
                   );
                 })}
@@ -338,8 +301,8 @@ export const EmployeeDetailScreen = () => {
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.actionButton} onPress={handleRemoveEmployee}>
-            <Icon name="user-minus" size={20} color="#dc2626" />
-            <Text style={[styles.actionButtonText, { color: '#dc2626' }]}>
+            <Icon name="user-minus" size={20} color={colors.error.icon} />
+            <Text style={[styles.actionButtonText, { color: colors.error.icon }]}>
               {removing ? 'Removiendo...' : 'Remover Empleado'}
             </Text>
             <Icon name="chevron-right" size={16} color={colors.text.light} />
@@ -353,64 +316,82 @@ export const EmployeeDetailScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
   },
   content: {
     flex: 1,
   },
   employeeHeader: {
+    backgroundColor: colors.primary,
+    overflow: 'hidden',
+  },
+  employeeHeaderInner: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 24,
-    backgroundColor: colors.neutral,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.neutralDark,
   },
   avatarContainer: {
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: colors.primaryLight,
+    backgroundColor: colors.white,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 16,
   },
   avatarText: {
     fontSize: 24,
-    fontWeight: '600',
-    color: colors.primaryDark,
+    fontWeight: '700',
+    color: colors.secondary,
   },
   employeeInfo: {
     flex: 1,
   },
   employeeName: {
     fontSize: 20,
-    fontWeight: '600',
-    color: colors.text.primary,
+    fontWeight: '700',
+    color: colors.white,
     marginBottom: 4,
   },
   employeePhone: {
     fontSize: 14,
-    color: colors.text.secondary,
-    marginBottom: 8,
+    color: 'rgba(255,255,255,0.85)',
+    marginBottom: 10,
   },
   roleContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
   },
-  employeeRole: {
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  statusBadge: {
-    paddingHorizontal: 8,
+  rolePill: {
+    paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
+  },
+  rolePillText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.white,
+  },
+  statusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+  },
+  statusBadgeInactive: {
+    backgroundColor: colors.error.background,
   },
   statusText: {
     fontSize: 12,
-    fontWeight: '500',
+    fontWeight: '700',
+    color: colors.primaryDark,
+  },
+  statusTextInactive: {
+    color: colors.error.icon,
   },
   detailsSection: {
     padding: 24,
@@ -445,7 +426,7 @@ const styles = StyleSheet.create({
   permsBox: {
     marginTop: 8,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: colors.border,
     borderRadius: 10,
     overflow: 'hidden',
   },
@@ -455,10 +436,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
+    borderBottomColor: colors.neutralDark,
   },
-  permKey: { fontSize: 13, color: '#374151', flex: 1, paddingRight: 12 },
-  permValue: { fontSize: 13, fontWeight: '700', minWidth: 30, textAlign: 'right' },
+  permKey: { fontSize: 13, color: colors.text.primary, flex: 1, paddingRight: 12 },
   actionsSection: {
     padding: 24,
   },
