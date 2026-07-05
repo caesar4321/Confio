@@ -189,20 +189,10 @@ const PhoneVerificationScreen = () => {
             });
 
             if (updateData?.updatePhoneNumber?.success) {
-              Alert.alert(
-                'Éxito',
-                'Número de teléfono actualizado correctamente',
-                [
-                  {
-                    text: 'Entendido',
-                    onPress: () => {
-                      // Refresh user profile and go back
-                      refreshProfile('personal');
-                      navigation.goBack();
-                    }
-                  }
-                ]
-              );
+              // Frictionless save: the updated number on the previous screen
+              // is the confirmation.
+              refreshProfile('personal');
+              navigation.goBack();
             } else {
               setBanner({ variant: 'error', message: updateData?.updatePhoneNumber?.error || 'No se pudo actualizar el número de teléfono' });
             }
@@ -216,7 +206,6 @@ const PhoneVerificationScreen = () => {
             // user pinned on PhoneVerification. If they retry the verify
             // they hit "phone already in use" because the first verify
             // succeeded server-side.
-            Alert.alert('Success', 'Phone number verified!');
             await completePhoneVerification();
           }
         } else {
@@ -259,16 +248,14 @@ const PhoneVerificationScreen = () => {
               },
             });
             if (updateData?.updatePhoneNumber?.success) {
-              Alert.alert('Éxito', 'Número de teléfono actualizado correctamente', [
-                { text: 'Entendido', onPress: () => { refreshProfile('personal'); navigation.goBack(); } },
-              ]);
+              refreshProfile('personal');
+              navigation.goBack();
             } else {
               setBanner({ variant: 'error', message: updateData?.updatePhoneNumber?.error || 'No se pudo actualizar el número de teléfono' });
             }
           } else {
             // See sibling Telegram branch above for why we don't also
             // call safeNavigateToMain here.
-            Alert.alert('Success', 'Phone number verified!');
             await completePhoneVerification();
           }
         } else {
@@ -387,7 +374,7 @@ const PhoneVerificationScreen = () => {
           title="Continuar"
           onPress={handleContinue}
           disabled={!phoneNumber}
-          style={{ backgroundColor: !phoneNumber ? '#D1D5DB' : colors.primary, marginBottom: 24 }}
+          style={{ backgroundColor: !phoneNumber ? colors.borderMedium : colors.primary, marginBottom: 24 }}
         />
 
         <Text style={styles.supportingText}>
@@ -463,7 +450,7 @@ const PhoneVerificationScreen = () => {
             }}
           >
             <View style={[styles.methodIconContainer, styles.smsMethodIconContainer]}>
-              <Feather name="message-square" size={20} color="#4B5563" />
+              <Feather name="message-square" size={20} color={colors.text.secondary} />
             </View>
             <View style={styles.methodContent}>
               <Text style={styles.methodTitle}>Recibir código por SMS</Text>
@@ -472,7 +459,7 @@ const PhoneVerificationScreen = () => {
                 <Text style={[styles.smsMethodButtonText, codeRequestBlocked && styles.methodButtonTextDisabled]}>
                   {codeRequestBlocked ? methodCtaText : 'Enviar SMS'}
                 </Text>
-                <Feather name="arrow-right" size={16} color="#4B5563" />
+                <Feather name="arrow-right" size={16} color={colors.text.secondary} />
               </View>
             </View>
           </TouchableOpacity>
@@ -537,7 +524,7 @@ const PhoneVerificationScreen = () => {
           title="Verificar"
           onPress={handleContinue}
           disabled={verificationCode.join('').length !== 6}
-          style={{ backgroundColor: verificationCode.join('').length !== 6 ? '#D1D5DB' : colors.primary, marginBottom: 24 }}
+          style={{ backgroundColor: verificationCode.join('').length !== 6 ? colors.borderMedium : colors.primary, marginBottom: 24 }}
         />
 
         <TouchableOpacity
@@ -612,7 +599,7 @@ const PhoneVerificationScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
   },
   keyboardAvoidingView: {
     flex: 1,
@@ -631,12 +618,12 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#1F2937',
+    color: colors.text.primary,
     marginBottom: 8,
   },
   subtitle: {
     fontSize: 16,
-    color: '#1F2937',
+    color: colors.text.primary,
     marginBottom: 32,
     lineHeight: 24,
   },
@@ -645,7 +632,7 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 15,
-    color: '#1F2937',
+    color: colors.text.primary,
     marginBottom: 8,
     fontWeight: '500',
   },
@@ -653,8 +640,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#FFFFFF',
-    borderColor: '#E5E7EB',
+    backgroundColor: colors.white,
+    borderColor: colors.border,
     borderWidth: 1,
     borderRadius: 16,
     paddingVertical: 14,
@@ -671,19 +658,19 @@ const styles = StyleSheet.create({
   },
   countryName: {
     fontSize: 16,
-    color: '#1F2937',
+    color: colors.text.primary,
     fontWeight: '500',
   },
   countryCode: {
     fontSize: 15,
-    color: '#6B7280',
+    color: colors.text.secondary,
     marginLeft: 'auto',
   },
   phoneInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderColor: '#E5E7EB',
+    backgroundColor: colors.white,
+    borderColor: colors.border,
     borderWidth: 1,
     borderRadius: 16,
     marginBottom: 24,
@@ -691,15 +678,15 @@ const styles = StyleSheet.create({
   countryCodeBox: {
     paddingVertical: 14,
     paddingHorizontal: 16,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.white,
     borderTopLeftRadius: 16,
     borderBottomLeftRadius: 16,
     borderRightWidth: 1,
-    borderRightColor: '#E5E7EB',
+    borderRightColor: colors.border,
   },
   countryCodeText: {
     fontSize: 16,
-    color: '#1F2937',
+    color: colors.text.primary,
     fontWeight: '500',
   },
   phoneInput: {
@@ -707,13 +694,13 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 16,
     fontSize: 16,
-    color: '#6B7280',
+    color: colors.text.secondary,
     borderTopRightRadius: 16,
     borderBottomRightRadius: 16,
   },
   supportingText: {
     fontSize: 14,
-    color: '#6B7280',
+    color: colors.text.secondary,
     textAlign: 'center',
   },
   methodContainer: {
@@ -727,19 +714,19 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   primaryMethodCard: {
-    backgroundColor: '#F3F4F6',
-    borderColor: '#D1FAE5',
+    backgroundColor: colors.neutralDark,
+    borderColor: colors.primaryLight,
     marginBottom: 12,
   },
   secondaryMethodCard: {
-    backgroundColor: '#F9FAFB',
-    borderColor: '#D1D5DB',
+    backgroundColor: colors.neutral,
+    borderColor: colors.borderMedium,
   },
   methodCardDisabled: {
     opacity: 0.6,
   },
   methodIconContainer: {
-    backgroundColor: '#34D399',
+    backgroundColor: colors.primary,
     width: 40,
     height: 40,
     borderRadius: 20,
@@ -748,7 +735,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   smsMethodIconContainer: {
-    backgroundColor: '#E5E7EB',
+    backgroundColor: colors.border,
   },
   methodContent: {
     flex: 1,
@@ -756,13 +743,13 @@ const styles = StyleSheet.create({
   methodTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#1F2937',
+    color: colors.text.primary,
     marginBottom: 4,
   },
   methodBadge: {
     alignSelf: 'flex-start',
-    color: '#047857',
-    backgroundColor: '#D1FAE5',
+    color: colors.primaryDark,
+    backgroundColor: colors.primaryLight,
     fontSize: 12,
     fontWeight: '600',
     paddingHorizontal: 8,
@@ -772,11 +759,11 @@ const styles = StyleSheet.create({
   },
   methodDescription: {
     fontSize: 14,
-    color: '#1F2937',
+    color: colors.text.primary,
     marginBottom: 8,
   },
   smsMethodButtonText: {
-    color: '#4B5563',
+    color: colors.text.secondary,
     fontSize: 14,
     fontWeight: '600',
     marginRight: 4,
@@ -790,16 +777,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   methodButtonText: {
-    color: '#34D399',
+    color: colors.primary,
     fontSize: 14,
     fontWeight: '600',
     marginRight: 4,
   },
   methodButtonTextDisabled: {
-    color: '#9CA3AF',
+    color: colors.text.light,
   },
   methodHelperText: {
-    color: '#6B7280',
+    color: colors.text.secondary,
     fontSize: 14,
     textAlign: 'center',
     marginTop: 8,
@@ -813,12 +800,12 @@ const styles = StyleSheet.create({
     width: 48,
     height: 56,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
     borderRadius: 8,
     textAlign: 'center',
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#1F2937',
+    color: colors.text.primary,
   },
   resendButton: {
     flexDirection: 'row',
@@ -827,12 +814,12 @@ const styles = StyleSheet.create({
   },
   resendButtonText: {
     fontSize: 14,
-    color: '#6B7280',
+    color: colors.text.secondary,
   },
   cooldownHelper: {
     marginTop: 12,
     textAlign: 'center',
-    color: '#6B7280',
+    color: colors.text.secondary,
   },
   modalContainer: {
     flex: 1,
@@ -840,7 +827,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     maxHeight: '80%',
@@ -851,12 +838,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
+    borderBottomColor: colors.border,
   },
   modalTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#1F2937',
+    color: colors.text.primary,
   },
   countryList: {
     maxHeight: 400,
@@ -866,7 +853,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
+    borderBottomColor: colors.border,
   },
   safeArea: {
     flex: 1,

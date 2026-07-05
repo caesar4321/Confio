@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
+import { colors } from '../config/theme';
 import Svg, { Defs, LinearGradient, Stop, Circle as SvgCircle } from 'react-native-svg';
 import { useApolloClient } from '@apollo/client';
 import { useAuth } from '../contexts/AuthContext';
@@ -60,12 +61,12 @@ export const BackupCompletionScreen = () => {
         <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
           <Defs>
             <LinearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
-              <Stop offset="0" stopColor="#34D399" stopOpacity="0.06" />
-              <Stop offset="1" stopColor="#8B5CF6" stopOpacity="0.04" />
+              <Stop offset="0" stopColor={colors.primary} stopOpacity="0.06" />
+              <Stop offset="1" stopColor={colors.secondary} stopOpacity="0.04" />
             </LinearGradient>
           </Defs>
-          <SvgCircle cx="85%" cy="10%" r="120" fill="#34D399" fillOpacity={0.05} />
-          <SvgCircle cx="10%" cy="90%" r="80" fill="#8B5CF6" fillOpacity={0.04} />
+          <SvgCircle cx="85%" cy="10%" r="120" fill={colors.primary} fillOpacity={0.05} />
+          <SvgCircle cx="10%" cy="90%" r="80" fill={colors.secondary} fillOpacity={0.04} />
         </Svg>
       </View>
 
@@ -73,7 +74,7 @@ export const BackupCompletionScreen = () => {
         {/* Icon badge with gradient ring */}
         <View style={styles.badgeOuter}>
           <View style={styles.badge}>
-            <Icon name="shield" size={30} color="#10B981" />
+            <Icon name="shield" size={30} color={colors.primaryDark} />
           </View>
         </View>
 
@@ -95,7 +96,7 @@ export const BackupCompletionScreen = () => {
         <View style={styles.card}>
           <View style={styles.row}>
             <View style={[styles.iconCircle, styles.iconCircleSuccess]}>
-              <Icon name="check" size={14} color="#10B981" />
+              <Icon name="check" size={14} color={colors.primaryDark} />
             </View>
             <View style={styles.rowContent}>
               <Text style={styles.rowTitle}>Cuenta vinculada</Text>
@@ -105,7 +106,7 @@ export const BackupCompletionScreen = () => {
           <View style={styles.divider} />
           <View style={styles.row}>
             <View style={[styles.iconCircle, styles.iconCircleWarning]}>
-              <Icon name="cloud-off" size={14} color="#F59E0B" />
+              <Icon name="cloud-off" size={14} color={colors.offRampIcon} />
             </View>
             <View style={styles.rowContent}>
               <Text style={styles.rowTitle}>Respaldo pendiente</Text>
@@ -116,7 +117,7 @@ export const BackupCompletionScreen = () => {
 
         {error ? (
           <View style={styles.errorBox}>
-            <Icon name="alert-circle" size={18} color="#DC2626" />
+            <Icon name="alert-circle" size={18} color={colors.error.icon} />
             <Text style={styles.errorText}>{error}</Text>
           </View>
         ) : null}
@@ -128,10 +129,10 @@ export const BackupCompletionScreen = () => {
           activeOpacity={0.8}
         >
           {isRetrying ? (
-            <ActivityIndicator color="#FFFFFF" />
+            <ActivityIndicator color={colors.white} />
           ) : (
             <View style={styles.buttonInner}>
-              <Icon name="refresh-cw" size={18} color="#FFFFFF" style={styles.buttonIcon} />
+              <Icon name="refresh-cw" size={18} color={colors.white} style={styles.buttonIcon} />
               <Text style={styles.primaryText}>Reintentar respaldo</Text>
             </View>
           )}
@@ -162,7 +163,7 @@ export const BackupCompletionScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.white,
   },
   bgDecoration: {
     ...StyleSheet.absoluteFillObject,
@@ -177,7 +178,7 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: '#D1FAE5',
+    backgroundColor: colors.primaryLight,
     alignItems: 'center',
     justifyContent: 'center',
     alignSelf: 'center',
@@ -187,7 +188,7 @@ const styles = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: 30,
-    backgroundColor: '#ECFDF5',
+    backgroundColor: colors.primarySoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -203,37 +204,37 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   progressDotDone: {
-    backgroundColor: '#10B981',
+    backgroundColor: colors.primaryDark,
   },
   progressDotPending: {
-    backgroundColor: '#E2E8F0',
+    backgroundColor: colors.border,
     borderWidth: 2,
-    borderColor: '#F59E0B',
+    borderColor: colors.offRampIcon,
   },
   progressBar: {
     width: 48,
     height: 3,
-    backgroundColor: '#E2E8F0',
+    backgroundColor: colors.border,
     marginHorizontal: 8,
     borderRadius: 2,
   },
   progressBarFill: {
     width: '50%',
     height: '100%',
-    backgroundColor: '#10B981',
+    backgroundColor: colors.primaryDark,
     borderRadius: 2,
   },
   progressLabel: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#10B981',
+    color: colors.primaryDark,
     textAlign: 'center',
     marginBottom: 20,
   },
   title: {
     fontSize: 26,
     fontWeight: '800',
-    color: '#111827',
+    color: colors.text.primary,
     textAlign: 'center',
     marginBottom: 10,
     letterSpacing: -0.3,
@@ -241,13 +242,13 @@ const styles = StyleSheet.create({
   body: {
     fontSize: 15,
     lineHeight: 23,
-    color: '#6B7280',
+    color: colors.text.secondary,
     textAlign: 'center',
     marginBottom: 28,
     paddingHorizontal: 8,
   },
   card: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.white,
     borderRadius: 20,
     padding: 20,
     marginBottom: 24,
@@ -272,10 +273,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   iconCircleSuccess: {
-    backgroundColor: '#ECFDF5',
+    backgroundColor: colors.primarySoft,
   },
   iconCircleWarning: {
-    backgroundColor: '#FFFBEB',
+    backgroundColor: colors.warningLight,
   },
   rowContent: {
     flex: 1,
@@ -284,12 +285,12 @@ const styles = StyleSheet.create({
   rowTitle: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text.primary,
     marginBottom: 2,
   },
   rowSubtitle: {
     fontSize: 13,
-    color: '#6B7280',
+    color: colors.text.secondary,
     lineHeight: 18,
   },
   divider: {
@@ -301,12 +302,12 @@ const styles = StyleSheet.create({
   errorBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FEF2F2',
+    backgroundColor: colors.error.background,
     borderRadius: 14,
     padding: 14,
     marginBottom: 20,
     borderWidth: 1,
-    borderColor: '#FECACA',
+    borderColor: colors.error.border,
   },
   errorText: {
     flex: 1,
@@ -318,11 +319,11 @@ const styles = StyleSheet.create({
   primaryButton: {
     height: 56,
     borderRadius: 16,
-    backgroundColor: '#10B981',
+    backgroundColor: colors.primaryDark,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 12,
-    shadowColor: '#10B981',
+    shadowColor: colors.primaryDark,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
     shadowRadius: 8,
@@ -331,9 +332,9 @@ const styles = StyleSheet.create({
   secondaryButton: {
     height: 56,
     borderRadius: 16,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.white,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -348,12 +349,12 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   primaryText: {
-    color: '#FFFFFF',
+    color: colors.white,
     fontSize: 16,
     fontWeight: '700',
   },
   secondaryText: {
-    color: '#6B7280',
+    color: colors.text.secondary,
     fontSize: 16,
     fontWeight: '600',
   },
