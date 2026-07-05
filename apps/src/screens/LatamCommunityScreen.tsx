@@ -18,6 +18,8 @@ import { useCurrency } from '../hooks/useCurrency';
 import { useAuth } from '../contexts/AuthContext';
 import { MainStackParamList } from '../types/navigation';
 import { GET_STATS_SUMMARY } from '../apollo/queries';
+import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
+import { EmptyState } from '../components/EmptyState';
 
 type CountryStat = {
   countryIso: string;
@@ -112,34 +114,42 @@ export const LatamCommunityScreen = () => {
         showBackButton
       />
 
-      <View style={styles.intro}>
-        <Text style={styles.introTitle}>Usuarios por país</Text>
-        <Text style={styles.introSubtitle}>
-          Confío crece en toda Latinoamérica. Aquí están las comunidades que ya forman parte.
-        </Text>
-        <View style={styles.verifiedPill}>
-          <Icon name="check-circle" size={14} color={colors.primary} />
-          <Text style={styles.verifiedPillText}>
-            {formatVerifiedCount(diditVerified)} identidades verificadas con Didit
+      {/* Brand field — the verified count IS the community's headline stat.
+          Self-measuring backdrop: the number arrives async. */}
+      <View style={styles.field}>
+        <BrandFieldBackground id="communityField" ringCy="25%" ringR={80} ringWidth={20} />
+        <View style={styles.fieldInner}>
+          <Text style={styles.fieldEyebrow}>IDENTIDADES VERIFICADAS</Text>
+          <View style={styles.fieldStatRow}>
+            <Icon name="check-circle" size={20} color={colors.primaryLight} />
+            <Text style={styles.fieldStat}>{formatVerifiedCount(diditVerified)}</Text>
+          </View>
+          <Text style={styles.fieldSubtitle}>
+            Personas reales verificadas con Didit. Confío crece en toda Latinoamérica.
           </Text>
         </View>
       </View>
+
+      <Text style={styles.sectionLabel}>Usuarios por país</Text>
 
       {loading && rows.length === 0 ? (
         <View style={styles.center}>
           <ActivityIndicator size="large" color={colors.primary} />
         </View>
       ) : error && rows.length === 0 ? (
-        <View style={styles.center}>
-          <Text style={styles.errorText}>No pudimos cargar tu comunidad.</Text>
-          <TouchableOpacity onPress={() => refetch()} style={styles.retryButton}>
-            <Text style={styles.retryText}>Reintentar</Text>
-          </TouchableOpacity>
-        </View>
+        <EmptyState
+          icon="wifi-off"
+          title="No pudimos cargar tu comunidad"
+          subtitle="Revisa tu conexión e inténtalo de nuevo."
+          actionLabel="Reintentar"
+          onAction={() => refetch()}
+        />
       ) : rows.length === 0 ? (
-        <View style={styles.center}>
-          <Text style={styles.emptyText}>Pronto verás tu comunidad aquí.</Text>
-        </View>
+        <EmptyState
+          icon="globe"
+          title="Pronto verás tu comunidad aquí"
+          subtitle="Las comunidades por país aparecerán a medida que crezcan."
+        />
       ) : (
         <FlatList
           data={rows}
@@ -159,66 +169,55 @@ export const LatamCommunityScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
   },
-  intro: {
+  field: {
+    backgroundColor: colors.primary,
+    overflow: 'hidden',
+  },
+  fieldInner: {
     paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 12,
+    paddingTop: 16,
+    paddingBottom: 22,
   },
-  introTitle: {
-    fontSize: 18,
+  fieldEyebrow: {
+    fontSize: 11,
     fontWeight: '700',
-    color: colors.dark,
+    letterSpacing: 2,
+    color: colors.primaryLight,
+    marginBottom: 6,
   },
-  introSubtitle: {
-    fontSize: 14,
-    color: '#6B7280',
-    marginTop: 4,
-    lineHeight: 20,
-  },
-  verifiedPill: {
-    alignSelf: 'flex-start',
-    marginTop: 10,
+  fieldStatRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: '#E8F7F0',
+    gap: 8,
   },
-  verifiedPillText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.primary,
+  fieldStat: {
+    fontSize: 30,
+    fontWeight: '800',
+    color: colors.white,
+  },
+  fieldSubtitle: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: 'rgba(255,255,255,0.85)',
+    marginTop: 8,
+  },
+  sectionLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.text.secondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 8,
   },
   center: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 32,
-  },
-  errorText: {
-    color: '#6B7280',
-    fontSize: 14,
-    textAlign: 'center',
-    marginBottom: 12,
-  },
-  retryButton: {
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 20,
-    backgroundColor: colors.primary,
-  },
-  retryText: {
-    color: '#fff',
-    fontWeight: '600',
-  },
-  emptyText: {
-    color: '#6B7280',
-    fontSize: 14,
-    textAlign: 'center',
   },
   listContent: {
     paddingHorizontal: 16,
@@ -232,9 +231,9 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   rowHighlight: {
-    backgroundColor: '#E8F7F0',
+    backgroundColor: colors.primarySoft,
     borderWidth: 1,
-    borderColor: colors.primary,
+    borderColor: colors.primaryLight,
   },
   rowHeader: {
     flexDirection: 'row',
@@ -246,7 +245,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 12,
     fontWeight: '700',
-    color: '#9CA3AF',
+    color: colors.text.light,
   },
   flag: {
     fontSize: 22,
@@ -275,7 +274,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: colors.border,
     overflow: 'hidden',
   },
   barFill: {
