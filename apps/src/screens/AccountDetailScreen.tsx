@@ -28,6 +28,8 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { MainStackParamList } from '../types/navigation';
 import { Header } from '../navigation/Header';
+import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
+import { InlineBanner } from '../components/common/InlineBanner';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import USDCLogo from '../assets/png/USDC.png';
@@ -172,6 +174,7 @@ export const AccountDetailScreen = () => {
   // Check if employee has permission to view balance
   const canViewBalance = !activeAccount?.isEmployee || activeAccount?.employeePermissions?.viewBalance;
   const [showBalance, setShowBalance] = useState(canViewBalance);
+  const [copyBanner, setCopyBanner] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [transactionLimit, setTransactionLimit] = useState(20);
   const [transactionOffset, setTransactionOffset] = useState(0);
@@ -291,6 +294,7 @@ export const AccountDetailScreen = () => {
     balance: currentBalance,
     balanceHidden: "•••••••",
     color: route.params.accountType === 'cusd' ? colors.primary : colors.secondary,
+    colorDark: route.params.accountType === 'cusd' ? colors.primaryDark : colors.secondaryDark,
     textColor: route.params.accountType === 'cusd' ? colors.primaryText : colors.secondaryText,
     address: accountAddress,
     addressShort: accountAddress ? `${accountAddress.slice(0, 6)}...${accountAddress.slice(-6)}` : '',
@@ -1821,8 +1825,22 @@ export const AccountDetailScreen = () => {
         showBackButton={true}
       />
 
-      {/* Balance Section */}
+      {/* Balance Section — instrument brand field: same gradient + coin-ring
+          grammar as Home/Profile (emerald for cUSD, violet for CONFIO).
+          Vertical gradient meets the flat nav header without a seam; padding
+          lives on balanceInner (Yoga insets absolute children by padding). */}
       <View style={[styles.balanceSection, { backgroundColor: account.color }]}>
+        <Svg style={StyleSheet.absoluteFill}>
+          <Defs>
+            <SvgLinearGradient id="accountField" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor={account.color} />
+              <Stop offset="1" stopColor={account.colorDark} />
+            </SvgLinearGradient>
+          </Defs>
+          <Rect width="100%" height="100%" fill="url(#accountField)" />
+          <Circle cx="105%" cy="20%" r="90" stroke={colors.white} strokeWidth="22" strokeOpacity="0.10" fill="none" />
+        </Svg>
+        <View style={styles.balanceInner}>
         <View style={styles.balanceIconContainer}>
           <Image
             source={route.params.accountType === 'cusd' ? cUSDLogo : CONFIOLogo}
@@ -1879,14 +1897,25 @@ export const AccountDetailScreen = () => {
             <TouchableOpacity onPress={() => {
               if (account.address) {
                 Clipboard.setString(account.address);
-                Alert.alert('Copiado', 'Dirección copiada al portapapeles');
+                setCopyBanner(true);
               }
             }} accessibilityRole="button" accessibilityLabel="Copiar dirección">
               <Icon name="copy" size={16} color="#ffffff" style={styles.copyIcon} />
             </TouchableOpacity>
           </View>
         )}
+        </View>
       </View>
+
+      {copyBanner && (
+        <InlineBanner
+          message="Dirección copiada al portapapeles"
+          variant="success"
+          onDismiss={() => setCopyBanner(false)}
+          autoHideMs={2000}
+          style={{ marginHorizontal: 16, marginTop: 10, marginBottom: 0 }}
+        />
+      )}
 
       {/* Action Buttons */}
       <View style={styles.actionButtonsContainer}>
@@ -2507,6 +2536,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.neutralDark,
   },
   balanceSection: {
+    overflow: 'hidden',
+  },
+  balanceInner: {
     paddingTop: 12,
     paddingBottom: 24,
     paddingHorizontal: 20,
