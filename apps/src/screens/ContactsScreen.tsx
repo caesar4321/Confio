@@ -1500,7 +1500,7 @@ export const ContactsScreen = () => {
             },
             {
               icon: 'download',
-              image: cUSDPlusLogo,
+              image: USDTLogo,
               title: 'Tether · USDT',
               subtitle: 'Red BNB Smart Chain (BEP-20) · directo a tu ahorro (Confío Dollar+)',
               onPress: () => {
