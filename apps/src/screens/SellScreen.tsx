@@ -445,7 +445,7 @@ export const SellScreen = () => {
         <RampReveal delay={0}>
         <RampHero
           eyebrow="Retirar saldo"
-          title="Vende tus Confío Dollar"
+          title="Retira a tu banco"
           subtitle="Elige cómo quieres recibir tu dinero, revisa el estimado y confirma al final."
           onBack={() => navigation.goBack()}
           compact={isCompact}

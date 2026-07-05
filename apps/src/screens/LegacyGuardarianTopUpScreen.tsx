@@ -246,7 +246,7 @@ const TopUpScreen = () => {
   // Helper function to handle USDC asset opt-in
   const handleUSDCOptIn = async (): Promise<boolean> => {
     try {
-      setLoadingMessage('Configurando acceso a USDC...');
+      setLoadingMessage('Preparando tu cuenta...');
 
       const { data, errors } = await optInToUsdc({
         variables: { assetType: 'USDC' }
@@ -400,8 +400,8 @@ const TopUpScreen = () => {
             <Text style={styles.fieldTitle}>{isSavingsRail ? 'Recarga tu ahorro' : 'Recarga tu cuenta'}</Text>
             <Text style={styles.fieldSubtitle}>
               {isSavingsRail
-                ? 'Dinero nuevo llega directo a tu ahorro (Confío Dollar+). En el checkout verás USDT — se acredita automáticamente al llegar.'
-                : 'Pagas con tarjeta o transferencia y recibes cUSD. En el checkout verás USDC — se convierte automáticamente al llegar.'}
+                ? 'Dinero nuevo llega directo a tu ahorro (Confío Dollar+), sin pasos extra.'
+                : 'Pagas con tarjeta o transferencia y recibes cUSD directo en tu cuenta.'}
             </Text>
           </View>
         </View>
