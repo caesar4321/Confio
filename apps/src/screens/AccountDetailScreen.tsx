@@ -30,6 +30,7 @@ import { MainStackParamList } from '../types/navigation';
 import { Header } from '../navigation/Header';
 import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
 import { InlineBanner } from '../components/common/InlineBanner';
+import { EmptyState } from '../components/EmptyState';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import USDCLogo from '../assets/png/USDC.png';
@@ -979,7 +980,7 @@ export const AccountDetailScreen = () => {
       case 'exchange':
         return <Icon name="refresh-cw" size={20} color={colors.accent} />;
       case 'conversion':
-        return <Icon name="repeat" size={20} color="#34D399" />;
+        return <Icon name="repeat" size={20} color={colors.primary} />;
       case 'ramp':
         return <Icon name="repeat" size={20} color="#0EA5E9" />;
       case 'payment':
@@ -1472,7 +1473,7 @@ export const AccountDetailScreen = () => {
                     <Text style={styles.transactionTitle}>{word}</Text>
                     {titleIsReferralVerified && (
                       <View style={styles.inlineVerifiedBadge}>
-                        <Icon name="check" size={10} color="#fff" />
+                        <Icon name="check" size={10} color={colors.white} />
                       </View>
                     )}
                     {titleStatusTier && titleStatusTier !== 'member' && (
@@ -2078,28 +2079,17 @@ export const AccountDetailScreen = () => {
           }
 
           return (
-            <View style={styles.emptyTransactionsContainer}>
-              <Icon name={searchQuery ? "search" : "inbox"} size={48} color="#e5e7eb" />
-              <Text style={styles.emptyTransactionsText}>
-                {searchQuery ? "No se encontraron transacciones" : "No hay transacciones aún"}
-              </Text>
-              <Text style={styles.emptyTransactionsSubtext}>
-                {searchQuery
-                  ? "Intenta con otros términos de búsqueda"
-                  : "Tus transacciones aparecerán aquí cuando realices envíos o pagos"}
-              </Text>
-              {!searchQuery && (
-                <TouchableOpacity
-                  style={styles.emptyActionButton}
-                  onPress={handleSend}
-                  accessibilityRole="button"
-                  accessibilityLabel="Hacer mi primera transacción"
-                >
-                  <Icon name="send" size={16} color="#fff" />
-                  <Text style={styles.emptyActionButtonText}>Hacer mi primera transacción</Text>
-                </TouchableOpacity>
-              )}
-            </View>
+            <EmptyState
+              icon={searchQuery ? 'search' : 'inbox'}
+              title={searchQuery ? 'No se encontraron transacciones' : 'No hay transacciones aún'}
+              subtitle={
+                searchQuery
+                  ? 'Intenta con otros términos de búsqueda'
+                  : 'Tus transacciones aparecerán aquí cuando realices envíos o pagos'
+              }
+              actionLabel={searchQuery ? undefined : 'Hacer mi primera transacción'}
+              onAction={searchQuery ? undefined : handleSend}
+            />
           );
         }}
         ListFooterComponent={() => {
@@ -2195,7 +2185,7 @@ export const AccountDetailScreen = () => {
                       style={[styles.usdcActionButton, { backgroundColor: colors.warningLight, borderWidth: 1, borderColor: colors.offRampIcon }]}
                       onPress={() => navigation.navigate('Sell')}
                     >
-                      <MCIcon name="bank" size={14} color="#92400E" style={{ marginRight: 8 }} />
+                      <MCIcon name="bank" size={14} color={colors.warning.text} style={{ marginRight: 8 }} />
                       <View style={styles.actionTextContainer}>
                         <Text style={[styles.usdcActionButtonText, { color: colors.warning.text }]}>Retirar</Text>
                         <Text style={[styles.usdcActionSubtext, { color: '#B45309' }]}>A tu banco</Text>
@@ -2209,7 +2199,7 @@ export const AccountDetailScreen = () => {
                           navigation.navigate('USDCConversion');
                         }}
                       >
-                        <Icon name="refresh-cw" size={16} color="#fff" style={{ marginRight: 8 }} />
+                        <Icon name="refresh-cw" size={16} color={colors.white} style={{ marginRight: 8 }} />
                         <View style={styles.actionTextContainer}>
                           <Text style={[styles.usdcActionButtonText, { color: colors.white }]}>
                             Convertir
@@ -2262,7 +2252,7 @@ export const AccountDetailScreen = () => {
                     style={styles.confioPresaleButton}
                     onPress={() => navigation.navigate('ConfioPresale')}
                   >
-                    <Icon name="info" size={16} color="#fff" style={{ marginRight: 8 }} />
+                    <Icon name="info" size={16} color={colors.white} style={{ marginRight: 8 }} />
                     <View style={styles.actionTextContainer}>
                       <Text style={[styles.confioPresaleButtonText, { color: colors.white }]}>
                         Ver Detalles
@@ -2287,7 +2277,7 @@ export const AccountDetailScreen = () => {
                     accessibilityRole="button"
                     accessibilityLabel={showSearch ? 'Ocultar búsqueda' : 'Mostrar búsqueda'}
                   >
-                    <Icon name="search" size={16} color={showSearch ? account.textColor : "#6b7280"} />
+                    <Icon name="search" size={16} color={showSearch ? account.textColor : colors.text.secondary} />
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[
@@ -2301,7 +2291,7 @@ export const AccountDetailScreen = () => {
                     <Icon
                       name="filter"
                       size={16}
-                      color={hasActiveFilters() ? account.textColor : "#6b7280"}
+                      color={hasActiveFilters() ? account.textColor : colors.text.secondary}
                     />
                     {hasActiveFilters() && (
                       <View style={[styles.filterDot, { backgroundColor: account.color }]} />
@@ -3213,26 +3203,6 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
     textAlign: 'center',
   },
-  emptyTransactionsContainer: {
-    padding: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emptyTransactionsText: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: colors.text.primary,
-    marginTop: 16,
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  emptyTransactionsSubtext: {
-    fontSize: 14,
-    color: colors.text.secondary,
-    textAlign: 'center',
-    lineHeight: 20,
-    maxWidth: 280,
-  },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -3262,26 +3232,6 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
-  },
-  emptyActionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.primary,
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 24,
-    marginTop: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  emptyActionButtonText: {
-    color: colors.white,
-    fontSize: 14,
-    fontWeight: '600',
-    marginLeft: 8,
   },
   filterButtonActive: {
     backgroundColor: colors.neutralDark,
