@@ -10,6 +10,7 @@ import { useCountry } from '../contexts/CountryContext';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import { colors } from '../config/theme';
 import { Header } from '../navigation/Header';
+import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
 
 type ConfioTokenomicsScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
@@ -67,7 +68,7 @@ export const ConfioTokenomicsScreen = () => {
       percentage: pct(culturalTokens),
       description:
         '1.5% (hasta 2.5% opcional) para agradecer apoyos reales 2023–2026. Bloqueo total hasta el final de fase 3 y el lanzamiento en DEX; luego liberado de forma gradual en 3 meses.',
-      color: '#f59e0b',
+      color: colors.offRampIcon,
       icon: 'heart',
     },
   ];
@@ -84,7 +85,7 @@ export const ConfioTokenomicsScreen = () => {
         'Proceso complejo y excluyente'
       ],
       icon: 'briefcase',
-      color: '#ef4444'
+      color: colors.danger
     },
     {
       title: 'Proyectos Cripto',
@@ -97,7 +98,7 @@ export const ConfioTokenomicsScreen = () => {
         'Hablan en inglés con palabras raras'
       ],
       icon: 'trending-down',
-      color: '#f59e0b'
+      color: colors.offRampIcon
     },
     {
       title: 'Confío es Diferente',
@@ -127,6 +128,8 @@ export const ConfioTokenomicsScreen = () => {
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         {/* Hero Section */}
         <View style={styles.heroSection}>
+          <BrandFieldBackground id="tokenomicsField" fromColor={colors.secondary} toColor={colors.secondaryDark} ringCy="22%" ringR={80} ringWidth={20} />
+          <View style={styles.heroInner}>
           <View style={styles.tokenIcon}>
             <Image
               source={CONFIOLogo}
@@ -138,6 +141,7 @@ export const ConfioTokenomicsScreen = () => {
           <Text style={styles.heroSubtitle}>
             Así se distribuyen las {formatWithLocale(totalSupply)} monedas de $CONFIO
           </Text>
+          </View>
         </View>
 
         {/* Total Supply */}
@@ -251,7 +255,7 @@ export const ConfioTokenomicsScreen = () => {
               }
             >
               <Text style={styles.linkButtonText}>Ver tokenomics detallado</Text>
-              <Icon name="external-link" size={16} color="#fff" style={{ marginLeft: 6 }} />
+              <Icon name="external-link" size={16} color={colors.white} style={{ marginLeft: 6 }} />
             </TouchableOpacity>
           </View>
         </View>
@@ -265,16 +269,19 @@ export const ConfioTokenomicsScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
   },
   scrollView: {
     flex: 1,
   },
   heroSection: {
+    backgroundColor: colors.secondary,
+    overflow: 'hidden',
+  },
+  heroInner: {
     alignItems: 'center',
     paddingVertical: 32,
     paddingHorizontal: 20,
-    backgroundColor: colors.violetLight,
   },
   tokenIcon: {
     width: 80,
@@ -290,13 +297,13 @@ const styles = StyleSheet.create({
   heroTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: colors.dark,
+    color: colors.white,
     marginBottom: 8,
     textAlign: 'center',
   },
   heroSubtitle: {
     fontSize: 16,
-    color: '#6B7280',
+    color: 'rgba(255,255,255,0.85)',
     textAlign: 'center',
     lineHeight: 24,
   },
@@ -305,7 +312,7 @@ const styles = StyleSheet.create({
     paddingVertical: 24,
   },
   supplyCard: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 16,
     padding: 24,
     alignItems: 'center',
@@ -319,7 +326,7 @@ const styles = StyleSheet.create({
   },
   supplyLabel: {
     fontSize: 14,
-    color: '#6B7280',
+    color: colors.text.secondary,
     marginBottom: 8,
   },
   supplyValue: {
@@ -330,7 +337,7 @@ const styles = StyleSheet.create({
   },
   supplyUnit: {
     fontSize: 16,
-    color: '#6B7280',
+    color: colors.text.secondary,
     fontWeight: '600',
   },
   distributionSection: {
@@ -345,11 +352,11 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   distributionCard: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 16,
     padding: 20,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
@@ -373,7 +380,7 @@ const styles = StyleSheet.create({
   },
   distributionDescription: {
     fontSize: 14,
-    color: '#6B7280',
+    color: colors.text.secondary,
     lineHeight: 20,
   },
   distributionStats: {
@@ -381,7 +388,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginTop: 16,
     borderTopWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
     paddingTop: 12,
   },
   statBlock: {
@@ -390,7 +397,7 @@ const styles = StyleSheet.create({
   },
   statLabel: {
     fontSize: 12,
-    color: '#94A3B8',
+    color: colors.text.light,
     textTransform: 'uppercase',
     marginBottom: 4,
   },
@@ -422,7 +429,7 @@ const styles = StyleSheet.create({
   },
   philosophyDescription: {
     fontSize: 14,
-    color: '#6B7280',
+    color: colors.text.secondary,
     textAlign: 'center',
     lineHeight: 22,
   },
@@ -431,12 +438,12 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
   },
   comparisonCard: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 16,
     padding: 20,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
@@ -459,7 +466,7 @@ const styles = StyleSheet.create({
   },
   comparisonSubtitle: {
     fontSize: 12,
-    color: '#6B7280',
+    color: colors.text.secondary,
     fontStyle: 'italic',
   },
   comparisonList: {
@@ -471,7 +478,7 @@ const styles = StyleSheet.create({
   },
   comparisonText: {
     fontSize: 14,
-    color: '#6B7280',
+    color: colors.text.secondary,
     marginLeft: 12,
     flex: 1,
     lineHeight: 20,
@@ -495,7 +502,7 @@ const styles = StyleSheet.create({
   },
   futureDescription: {
     fontSize: 14,
-    color: '#6B7280',
+    color: colors.text.secondary,
     textAlign: 'center',
     lineHeight: 22,
   },
@@ -510,7 +517,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
   },
   linkButtonText: {
-    color: '#fff',
+    color: colors.white,
     fontSize: 16,
     fontWeight: '600',
   },

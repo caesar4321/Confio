@@ -17,6 +17,7 @@ import algorandService from '../services/algorandService';
 import { biometricAuthService } from '../services/biometricAuthService';
 import { colors } from '../config/theme';
 import { Header } from '../navigation/Header';
+import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
 import { useBackupEnforcement } from '../hooks/useBackupEnforcement';
 
 type ConfioPresaleParticipateScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
@@ -325,7 +326,7 @@ export const ConfioPresaleParticipateScreen = () => {
       <LoadingOverlay visible={initializing || busy} message={loadingMessage || (busy ? 'Procesando intercambio...' : 'Preparando preventa...')} />
       {busy && (
         <View style={styles.overlay}>
-          <ActivityIndicator size="large" color="#fff" />
+          <ActivityIndicator size="large" color={colors.white} />
         </View>
       )}
       <Header
@@ -339,6 +340,8 @@ export const ConfioPresaleParticipateScreen = () => {
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         {/* Hero Section */}
         <View style={styles.heroSection}>
+          <BrandFieldBackground id="presaleParticipateField" fromColor={colors.secondary} toColor={colors.secondaryDark} ringCy="22%" ringR={80} ringWidth={20} />
+          <View style={styles.heroInner}>
           <View style={styles.tokenIcon}>
             <Image
               source={CONFIOLogo}
@@ -353,6 +356,7 @@ export const ConfioPresaleParticipateScreen = () => {
 
           <View style={styles.priceBadge}>
             <Text style={styles.priceText}>{presalePrice.toFixed(2)} cUSD por $CONFIO</Text>
+          </View>
           </View>
         </View>
 
@@ -380,7 +384,7 @@ export const ConfioPresaleParticipateScreen = () => {
                     Meta original: {formatWithLocale(presaleData.goal, { minimumFractionDigits: 0, maximumFractionDigits: 0 })} cUSD
                   </Text>
                   <View style={styles.exceededBadge}>
-                    <Icon name="trending-up" size={14} color="#fff" />
+                    <Icon name="trending-up" size={14} color={colors.white} />
                     <Text style={styles.exceededText}>
                       {Math.round(((presaleData.raised - presaleData.goal) / presaleData.goal) * 100)}% sobre la meta
                     </Text>
@@ -431,7 +435,7 @@ export const ConfioPresaleParticipateScreen = () => {
                   onChangeText={setAmount}
                   placeholder="Ej: 100"
                   keyboardType="numeric"
-                  placeholderTextColor="#9CA3AF"
+                  placeholderTextColor={colors.text.light}
                 />
                 <Text style={styles.inputSuffix}>cUSD</Text>
               </View>
@@ -483,7 +487,7 @@ export const ConfioPresaleParticipateScreen = () => {
               <Icon
                 name={hasAcceptedTerms ? 'check-square' : 'square'}
                 size={20}
-                color={hasAcceptedTerms ? colors.primary : '#9CA3AF'}
+                color={hasAcceptedTerms ? colors.primary : colors.text.light}
               />
               <Text style={styles.checkboxText}>
                 He leído y acepto los{' '}
@@ -511,14 +515,14 @@ export const ConfioPresaleParticipateScreen = () => {
           >
             {busy ? null : (
               <>
-                <Icon name="refresh-cw" size={20} color="#fff" />
+                <Icon name="refresh-cw" size={20} color={colors.white} />
                 <Text style={styles.swapButtonText}>Comprar Ahora</Text>
               </>
             )}
           </TouchableOpacity>
 
           <View style={styles.lockingNotice}>
-            <Icon name="lock" size={16} color="#f59e0b" />
+            <Icon name="lock" size={16} color={colors.offRampIcon} />
             <Text style={styles.lockingText}>
               <Text style={styles.lockingBold}>Importante:</Text> Las monedas $CONFIO pueden permanecer bloqueadas hasta la habilitación del reclamo o de funciones futuras definidas por Confío.
               La disponibilidad depende del despliegue técnico y operativo del ecosistema.
@@ -526,7 +530,7 @@ export const ConfioPresaleParticipateScreen = () => {
           </View>
 
           <View style={styles.riskDisclosure}>
-            <Icon name="alert-triangle" size={14} color="#ef4444" />
+            <Icon name="alert-triangle" size={14} color={colors.danger} />
             <Text style={styles.riskText}>
               <Text style={styles.riskBold}>Riesgo:</Text> El valor, utilidad y liquidez de $CONFIO no están garantizados.
               Participa solo si entiendes estos riesgos.
@@ -587,7 +591,7 @@ export const ConfioPresaleParticipateScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
   },
   overlay: {
     position: 'absolute',
@@ -604,10 +608,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   heroSection: {
+    backgroundColor: colors.secondary,
+    overflow: 'hidden',
+  },
+  heroInner: {
     alignItems: 'center',
     paddingVertical: 32,
     paddingHorizontal: 20,
-    backgroundColor: colors.violetLight,
   },
   tokenIcon: {
     width: 80,
@@ -623,90 +630,40 @@ const styles = StyleSheet.create({
   heroTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: colors.dark,
+    color: colors.white,
     marginBottom: 8,
     textAlign: 'center',
   },
   heroSubtitle: {
     fontSize: 16,
-    color: '#6B7280',
+    color: 'rgba(255,255,255,0.85)',
     textAlign: 'center',
     marginBottom: 16,
     lineHeight: 24,
   },
   priceBadge: {
-    backgroundColor: colors.secondary,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
     paddingHorizontal: 20,
     paddingVertical: 10,
     borderRadius: 25,
   },
   priceText: {
-    color: '#fff',
+    color: colors.white,
     fontSize: 16,
     fontWeight: 'bold',
-  },
-  priceComparison: {
-    marginTop: 20,
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 16,
-    width: '100%',
-    borderWidth: 2,
-    borderColor: colors.primary,
-  },
-  priceComparisonTitle: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: colors.dark,
-    textAlign: 'center',
-    marginBottom: 12,
-  },
-  priceComparisonRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  priceComparisonItem: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  priceComparisonLabel: {
-    fontSize: 12,
-    color: '#6B7280',
-    marginBottom: 4,
-  },
-  priceComparisonValue: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: colors.dark,
-  },
-  priceComparisonValueHighlight: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: colors.primary,
-  },
-  priceComparisonSubtext: {
-    fontSize: 11,
-    color: '#6B7280',
-  },
-  priceComparisonNote: {
-    fontSize: 12,
-    color: colors.primary,
-    textAlign: 'center',
-    marginTop: 12,
-    fontWeight: '600',
   },
   statusSection: {
     paddingHorizontal: 20,
     paddingVertical: 24,
   },
   statusCard: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 16,
     padding: 20,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
@@ -721,7 +678,7 @@ const styles = StyleSheet.create({
   },
   statusDescription: {
     fontSize: 14,
-    color: '#6B7280',
+    color: colors.text.secondary,
     lineHeight: 22,
     marginBottom: 20,
   },
@@ -730,7 +687,7 @@ const styles = StyleSheet.create({
   },
   progressLabel: {
     fontSize: 14,
-    color: '#6B7280',
+    color: colors.text.secondary,
     marginBottom: 4,
   },
   progressAmount: {
@@ -741,7 +698,7 @@ const styles = StyleSheet.create({
   },
   progressGoal: {
     fontSize: 14,
-    color: '#6B7280',
+    color: colors.text.secondary,
     marginBottom: 16,
   },
   progressBarContainer: {
@@ -751,7 +708,7 @@ const styles = StyleSheet.create({
   progressBar: {
     width: '100%',
     height: 12,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: colors.border,
     borderRadius: 6,
     marginBottom: 8,
     overflow: 'hidden',
@@ -774,7 +731,7 @@ const styles = StyleSheet.create({
   },
   participantText: {
     fontSize: 13,
-    color: '#6B7280',
+    color: colors.text.secondary,
   },
   participantCount: {
     fontWeight: 'bold',
@@ -798,7 +755,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   exceededText: {
-    color: '#fff',
+    color: colors.white,
     fontSize: 12,
     fontWeight: 'bold',
   },
@@ -823,11 +780,11 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   swapCard: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 16,
     padding: 20,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
@@ -847,10 +804,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#D1D5DB',
+    borderColor: colors.borderMedium,
     borderRadius: 12,
     paddingHorizontal: 16,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
   },
   textInput: {
     flex: 1,
@@ -860,13 +817,13 @@ const styles = StyleSheet.create({
   },
   inputSuffix: {
     fontSize: 16,
-    color: '#6B7280',
+    color: colors.text.secondary,
     fontWeight: '600',
     marginLeft: 8,
   },
   inputHelper: {
     fontSize: 12,
-    color: '#6B7280',
+    color: colors.text.secondary,
     marginTop: 4,
   },
   resultContainer: {
@@ -883,7 +840,7 @@ const styles = StyleSheet.create({
   },
   resultLabel: {
     fontSize: 14,
-    color: '#6B7280',
+    color: colors.text.secondary,
   },
   resultValue: {
     fontSize: 16,
@@ -892,7 +849,7 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontSize: 12,
-    color: '#ef4444',
+    color: colors.danger,
     marginTop: 8,
     textAlign: 'center',
   },
@@ -913,18 +870,18 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   swapButtonDisabled: {
-    backgroundColor: '#D1D5DB',
+    backgroundColor: colors.borderMedium,
     shadowOpacity: 0,
     elevation: 0,
   },
   swapButtonText: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#fff',
+    color: colors.white,
   },
   disclosureCard: {
-    backgroundColor: '#F8FAFC',
-    borderColor: '#E2E8F0',
+    backgroundColor: colors.neutral,
+    borderColor: colors.border,
     borderWidth: 1,
     borderRadius: 12,
     padding: 14,
@@ -939,7 +896,7 @@ const styles = StyleSheet.create({
   disclosureText: {
     fontSize: 13,
     lineHeight: 19,
-    color: '#475569',
+    color: colors.text.secondary,
     marginBottom: 6,
   },
   checkboxRow: {
@@ -951,7 +908,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 13,
     lineHeight: 19,
-    color: '#475569',
+    color: colors.text.secondary,
   },
   checkboxLink: {
     color: colors.secondary,
@@ -961,8 +918,8 @@ const styles = StyleSheet.create({
   lockingNotice: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    backgroundColor: '#fef3c7',
-    borderColor: '#f59e0b',
+    backgroundColor: colors.warningLight,
+    borderColor: colors.offRampIcon,
     borderWidth: 1,
     borderRadius: 12,
     padding: 16,
@@ -972,7 +929,7 @@ const styles = StyleSheet.create({
   lockingText: {
     flex: 1,
     fontSize: 13,
-    color: '#92400e',
+    color: colors.warning.text,
     lineHeight: 18,
   },
   lockingBold: {
@@ -982,8 +939,8 @@ const styles = StyleSheet.create({
   riskDisclosure: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    backgroundColor: '#fef2f2',
-    borderColor: '#ef4444',
+    backgroundColor: colors.error.background,
+    borderColor: colors.danger,
     borderWidth: 1,
     borderRadius: 12,
     padding: 12,
@@ -1016,7 +973,7 @@ const styles = StyleSheet.create({
   benefitText: {
     flex: 1,
     fontSize: 14,
-    color: '#6B7280',
+    color: colors.text.secondary,
     lineHeight: 20,
   },
   benefitBold: {
@@ -1035,7 +992,7 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 16,
     fontSize: 16,
-    color: '#6B7280',
+    color: colors.text.secondary,
   },
   errorContainer: {
     flex: 1,
@@ -1050,7 +1007,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   retryButtonText: {
-    color: '#fff',
+    color: colors.white,
     fontSize: 14,
     fontWeight: '600',
   },

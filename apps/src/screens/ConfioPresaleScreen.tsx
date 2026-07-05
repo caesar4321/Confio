@@ -16,6 +16,7 @@ import { LoadingOverlay } from '../components/LoadingOverlay';
 import { colors } from '../config/theme';
 import { Button } from '../components/common/Button';
 import { Header } from '../navigation/Header';
+import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
 
 type ConfioPresaleScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 type PresalePhaseCard = {
@@ -70,9 +71,9 @@ export const ConfioPresaleScreen = () => {
       case 'coming_soon': return colors.secondary;
       case 'active': return colors.primary;
       case 'upcoming': return colors.accent;
-      case 'completed': return '#17a2b8';
-      case 'paused': return '#dc3545';
-      default: return '#9CA3AF';
+      case 'completed': return colors.accent;
+      case 'paused': return colors.danger;
+      default: return colors.text.light;
     }
   };
 
@@ -221,8 +222,10 @@ export const ConfioPresaleScreen = () => {
 
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         <LoadingOverlay visible={busy} message="Procesando reclamo..." />
-        {/* Hero Section */}
+        {/* Hero — violet brand field (referral-suite grammar) */}
         <View style={styles.heroSection}>
+          <BrandFieldBackground id="presaleField" fromColor={colors.secondary} toColor={colors.secondaryDark} ringCy="22%" ringR={80} ringWidth={20} />
+          <View style={styles.heroInner}>
           <View style={styles.tokenIcon}>
             <Image
               source={CONFIOLogo}
@@ -236,7 +239,7 @@ export const ConfioPresaleScreen = () => {
               <Text style={styles.heroSubtitle}>
                 Hemos desbloqueado los tokens de la preventa. Si participaste, ya puedes reclamarlos sin pagar comisiones.
               </Text>
-              <View style={[styles.comingSoonBadge, { backgroundColor: '#10b981' }]}>
+              <View style={[styles.comingSoonBadge, { backgroundColor: 'rgba(255,255,255,0.18)' }]}>
                 <Text style={styles.comingSoonText}>🔓 Tokens desbloqueados</Text>
               </View>
               <View style={styles.claimInfoCard}>
@@ -251,10 +254,11 @@ export const ConfioPresaleScreen = () => {
                 Acceso temprano al ecosistema que estamos construyendo para nuestra gente
               </Text>
               <View style={styles.comingSoonBadge}>
-                <Text style={styles.comingSoonText}>🚀 Lanzamiento Q1 2026</Text>
+                <Text style={styles.comingSoonText}>🚀 Acceso anticipado</Text>
               </View>
             </>
           )}
+          </View>
         </View>
 
         {/* Vision & Claiming */}
@@ -394,7 +398,7 @@ export const ConfioPresaleScreen = () => {
                   Alert.alert('No disponible', errorMessage);
                 }
               }}
-              icon={<Icon name="star" size={20} color="#fff" />}
+              icon={<Icon name="star" size={20} color={colors.white} />}
               style={{ backgroundColor: colors.secondary, borderRadius: 24, paddingHorizontal: 32, marginBottom: 16 }}
               textStyle={{ fontWeight: 'bold' }}
             />
@@ -402,7 +406,7 @@ export const ConfioPresaleScreen = () => {
             <Button
               title="Notificar"
               onPress={handleJoinWaitlist}
-              icon={<Icon name="bell" size={20} color="#fff" />}
+              icon={<Icon name="bell" size={20} color={colors.white} />}
               style={{ backgroundColor: colors.secondary, borderRadius: 24, paddingHorizontal: 32, marginBottom: 16 }}
               textStyle={{ fontWeight: 'bold' }}
             />
@@ -414,7 +418,7 @@ export const ConfioPresaleScreen = () => {
               onPress={async () => { await handleClaim(); refetchOnchainInfo && refetchOnchainInfo(); }}
               loading={busy}
               disabled={(claimable ?? 0) <= 0}
-              icon={<Icon name="unlock" size={20} color="#fff" />}
+              icon={<Icon name="unlock" size={20} color={colors.white} />}
               style={{ borderRadius: 24, paddingHorizontal: 32, marginTop: 12, marginBottom: 16 }}
               textStyle={{ fontWeight: 'bold' }}
             />
@@ -453,23 +457,12 @@ export const ConfioPresaleScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
-  },
-  overlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.35)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 5,
+    backgroundColor: colors.white,
   },
   claimInfoCard: {
     marginTop: 16,
-    backgroundColor: '#ECFDF5',
-    borderColor: '#A7F3D0',
+    backgroundColor: colors.primarySoft,
+    borderColor: colors.primaryLight,
     borderWidth: 1,
     padding: 12,
     borderRadius: 12,
@@ -489,10 +482,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   heroSection: {
+    backgroundColor: colors.secondary,
+    overflow: 'hidden',
+  },
+  heroInner: {
     alignItems: 'center',
     paddingVertical: 32,
     paddingHorizontal: 20,
-    backgroundColor: colors.violetLight,
   },
   tokenIcon: {
     width: 80,
@@ -508,25 +504,27 @@ const styles = StyleSheet.create({
   heroTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: colors.dark,
+    color: colors.white,
     marginBottom: 8,
     textAlign: 'center',
   },
   heroSubtitle: {
     fontSize: 16,
-    color: '#6B7280',
+    color: 'rgba(255,255,255,0.85)',
     textAlign: 'center',
     marginBottom: 16,
     lineHeight: 24,
   },
   comingSoonBadge: {
-    backgroundColor: colors.secondary,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
   },
   comingSoonText: {
-    color: '#fff',
+    color: colors.white,
     fontSize: 14,
     fontWeight: 'bold',
   },
@@ -560,7 +558,7 @@ const styles = StyleSheet.create({
   },
   benefitDescription: {
     fontSize: 14,
-    color: '#6B7280',
+    color: colors.text.secondary,
     lineHeight: 20,
   },
   phasesSection: {
@@ -568,12 +566,12 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
   },
   phaseCard: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 16,
     padding: 20,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
@@ -606,13 +604,13 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   statusText: {
-    color: '#fff',
+    color: colors.white,
     fontSize: 12,
     fontWeight: 'bold',
   },
   phaseDescription: {
     fontSize: 14,
-    color: '#6B7280',
+    color: colors.text.secondary,
     marginBottom: 16,
     lineHeight: 20,
   },
@@ -626,7 +624,7 @@ const styles = StyleSheet.create({
   },
   priceLabel: {
     fontSize: 12,
-    color: '#9CA3AF',
+    color: colors.text.light,
     marginBottom: 4,
   },
   priceValue: {
@@ -636,7 +634,7 @@ const styles = StyleSheet.create({
   },
   priceUnit: {
     fontSize: 12,
-    color: '#6B7280',
+    color: colors.text.secondary,
     marginTop: 2,
   },
   goalInfo: {
@@ -644,7 +642,7 @@ const styles = StyleSheet.create({
   },
   goalLabel: {
     fontSize: 12,
-    color: '#9CA3AF',
+    color: colors.text.light,
     marginBottom: 4,
   },
   goalValue: {
@@ -657,7 +655,7 @@ const styles = StyleSheet.create({
   },
   targetLabel: {
     fontSize: 12,
-    color: '#9CA3AF',
+    color: colors.text.light,
     marginBottom: 4,
   },
   targetValue: {
@@ -711,14 +709,14 @@ const styles = StyleSheet.create({
   },
   ctaSubtitle: {
     fontSize: 16,
-    color: '#6B7280',
+    color: colors.text.secondary,
     marginBottom: 24,
     textAlign: 'center',
     lineHeight: 24,
   },
   claimNoticeText: {
     marginTop: 8,
-    color: '#DC2626',
+    color: colors.error.icon,
     fontSize: 14,
     textAlign: 'center',
   },
@@ -762,7 +760,7 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 16,
     fontSize: 16,
-    color: '#6B7280',
+    color: colors.text.secondary,
   },
   errorContainer: {
     flex: 1,
@@ -773,7 +771,7 @@ const styles = StyleSheet.create({
   errorText: {
     marginTop: 16,
     fontSize: 16,
-    color: '#6B7280',
+    color: colors.text.secondary,
     textAlign: 'center',
     marginBottom: 24,
   },
@@ -784,7 +782,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   errorButtonText: {
-    color: '#fff',
+    color: colors.white,
     fontSize: 16,
     fontWeight: 'bold',
   },
