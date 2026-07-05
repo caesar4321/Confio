@@ -513,7 +513,15 @@ def upsert_koywe_ramp_transaction(
         'crypto_currency': getattr(settings, 'KOYWE_CRYPTO_SYMBOL', 'USDC Polygon'),
         'crypto_amount_estimated': crypto_estimated,
         'crypto_amount_actual': None,
-        'final_currency': 'CUSD' if normalized_direction == 'on_ramp' else getattr(settings, 'KOYWE_CRYPTO_SYMBOL', 'USDC Polygon'),
+        # Final product depends on the rail: the savings rail ends in cUSD+
+        # (delivered as USDT-BSC, minted on confirmation), the default rail
+        # in cUSD.
+        'final_currency': (
+            ('CUSD+' if destination == 'cusd_plus' else 'CUSD')
+            if normalized_direction == 'on_ramp'
+            else ('USDT BSC' if destination == 'cusd_plus'
+                  else getattr(settings, 'KOYWE_CRYPTO_SYMBOL', 'USDC Polygon'))
+        ),
         'final_amount': final_amount,
         'status_detail': status_detail,
         'metadata': _merge_koywe_metadata(
@@ -552,16 +560,18 @@ def sync_koywe_ramp_transaction_from_order(
         or order_payload.get('type')
     )
 
+    is_savings_rail = getattr(ramp_tx, 'destination', 'cusd') == 'cusd_plus'
     if direction == 'on_ramp':
         ramp_tx.fiat_amount = amount_in or ramp_tx.fiat_amount
         ramp_tx.crypto_amount_estimated = amount_out or ramp_tx.crypto_amount_estimated
-        ramp_tx.final_currency = 'CUSD'
+        ramp_tx.final_currency = 'CUSD+' if is_savings_rail else 'CUSD'
         ramp_tx.final_amount = amount_out or ramp_tx.final_amount
     else:
         ramp_tx.fiat_amount = amount_out or ramp_tx.fiat_amount
         ramp_tx.crypto_amount_estimated = amount_in or ramp_tx.crypto_amount_estimated
         ramp_tx.crypto_amount_actual = amount_in or ramp_tx.crypto_amount_actual
-        ramp_tx.final_currency = getattr(settings, 'KOYWE_CRYPTO_SYMBOL', 'USDC Polygon')
+        ramp_tx.final_currency = ('USDT BSC' if is_savings_rail
+                                  else getattr(settings, 'KOYWE_CRYPTO_SYMBOL', 'USDC Polygon'))
         ramp_tx.final_amount = amount_in or ramp_tx.final_amount
 
     # Never downgrade status (e.g. Koywe WAITING shouldn't revert a PROCESSING order).
