@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform, StatusBar, Image, FlatList, ActivityIndicator, RefreshControl } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
+import { colors } from '../config/theme';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
@@ -963,68 +964,68 @@ export const NotificationScreen = () => {
   const getNotificationIcon = (type: string) => {
     const iconMap: { [key: string]: { icon: string; color: string } } = {
       // Send transactions
-      SEND_RECEIVED: { icon: 'download', color: '#10B981' },
-      SEND_SENT: { icon: 'send', color: '#3B82F6' },
-      SEND_INVITATION_SENT: { icon: 'user-plus', color: '#8B5CF6' },
-      SEND_INVITATION_CLAIMED: { icon: 'user-check', color: '#10B981' },
-      INVITE_RECEIVED: { icon: 'gift', color: '#10B981' },
-      SEND_INVITATION_EXPIRED: { icon: 'user-x', color: '#EF4444' },
+      SEND_RECEIVED: { icon: 'download', color: colors.primaryDark },
+      SEND_SENT: { icon: 'send', color: colors.accent },
+      SEND_INVITATION_SENT: { icon: 'user-plus', color: colors.secondary },
+      SEND_INVITATION_CLAIMED: { icon: 'user-check', color: colors.primaryDark },
+      INVITE_RECEIVED: { icon: 'gift', color: colors.primaryDark },
+      SEND_INVITATION_EXPIRED: { icon: 'user-x', color: colors.danger },
       SEND_FROM_EXTERNAL: { icon: 'download', color: '#06B6D4' },
 
       // Payment transactions
-      PAYMENT_RECEIVED: { icon: 'credit-card', color: '#10B981' },
-      PAYMENT_SENT: { icon: 'credit-card', color: '#3B82F6' },
-      INVOICE_PAID: { icon: 'file-text', color: '#10B981' },
-      PAYROLL_RECEIVED: { icon: 'briefcase', color: '#10B981' },
-      PAYROLL_SENT: { icon: 'briefcase', color: '#3B82F6' },
+      PAYMENT_RECEIVED: { icon: 'credit-card', color: colors.primaryDark },
+      PAYMENT_SENT: { icon: 'credit-card', color: colors.accent },
+      INVOICE_PAID: { icon: 'file-text', color: colors.primaryDark },
+      PAYROLL_RECEIVED: { icon: 'briefcase', color: colors.primaryDark },
+      PAYROLL_SENT: { icon: 'briefcase', color: colors.accent },
 
       // P2P Trade
-      P2P_OFFER_RECEIVED: { icon: 'bell', color: '#F59E0B' },
-      P2P_OFFER_ACCEPTED: { icon: 'check-circle', color: '#10B981' },
-      P2P_TRADE_STARTED: { icon: 'refresh-cw', color: '#8B5CF6' },
-      P2P_PAYMENT_CONFIRMED: { icon: 'check', color: '#10B981' },
-      P2P_CRYPTO_RELEASED: { icon: 'unlock', color: '#10B981' },
-      P2P_TRADE_COMPLETED: { icon: 'check-circle', color: '#10B981' },
-      P2P_TRADE_CANCELLED: { icon: 'x-circle', color: '#EF4444' },
-      P2P_TRADE_DISPUTED: { icon: 'alert-triangle', color: '#F59E0B' },
+      P2P_OFFER_RECEIVED: { icon: 'bell', color: colors.offRampIcon },
+      P2P_OFFER_ACCEPTED: { icon: 'check-circle', color: colors.primaryDark },
+      P2P_TRADE_STARTED: { icon: 'refresh-cw', color: colors.secondary },
+      P2P_PAYMENT_CONFIRMED: { icon: 'check', color: colors.primaryDark },
+      P2P_CRYPTO_RELEASED: { icon: 'unlock', color: colors.primaryDark },
+      P2P_TRADE_COMPLETED: { icon: 'check-circle', color: colors.primaryDark },
+      P2P_TRADE_CANCELLED: { icon: 'x-circle', color: colors.danger },
+      P2P_TRADE_DISPUTED: { icon: 'alert-triangle', color: colors.offRampIcon },
 
       // Conversion
-      CONVERSION_COMPLETED: { icon: 'refresh-cw', color: '#8B5CF6' },
-      CONVERSION_FAILED: { icon: 'x-circle', color: '#EF4444' },
+      CONVERSION_COMPLETED: { icon: 'refresh-cw', color: colors.secondary },
+      CONVERSION_FAILED: { icon: 'x-circle', color: colors.danger },
 
       // USDC
-      USDC_DEPOSIT_PENDING: { icon: 'clock', color: '#F59E0B' },
+      USDC_DEPOSIT_PENDING: { icon: 'clock', color: colors.offRampIcon },
       USDC_DEPOSIT_COMPLETED: { icon: 'download', color: '#06B6D4' },
       USDC_WITHDRAWAL_COMPLETED: { icon: 'upload', color: '#06B6D4' },
-      RAMP_PENDING: { icon: 'repeat', color: '#F59E0B' },
-      RAMP_PROCESSING: { icon: 'download', color: '#3B82F6' },
+      RAMP_PENDING: { icon: 'repeat', color: colors.offRampIcon },
+      RAMP_PROCESSING: { icon: 'download', color: colors.accent },
       RAMP_COMPLETED: { icon: 'repeat', color: '#06B6D4' },
-      RAMP_FAILED: { icon: 'x-circle', color: '#EF4444' },
+      RAMP_FAILED: { icon: 'x-circle', color: colors.danger },
 
       // Account & Security
-      ACCOUNT_VERIFIED: { icon: 'user-check', color: '#10B981' },
-      SECURITY_ALERT: { icon: 'shield', color: '#EF4444' },
-      NEW_LOGIN: { icon: 'log-in', color: '#F59E0B' },
+      ACCOUNT_VERIFIED: { icon: 'user-check', color: colors.primaryDark },
+      SECURITY_ALERT: { icon: 'shield', color: colors.danger },
+      NEW_LOGIN: { icon: 'log-in', color: colors.offRampIcon },
 
       // Business
-      BUSINESS_EMPLOYEE_ADDED: { icon: 'users', color: '#8B5CF6' },
-      BUSINESS_PERMISSION_CHANGED: { icon: 'settings', color: '#F59E0B' },
+      BUSINESS_EMPLOYEE_ADDED: { icon: 'users', color: colors.secondary },
+      BUSINESS_PERMISSION_CHANGED: { icon: 'settings', color: colors.offRampIcon },
 
       // General
       PROMOTION: { icon: 'gift', color: '#EC4899' },
-      SYSTEM: { icon: 'info', color: '#6B7280' },
-      ANNOUNCEMENT: { icon: 'bell', color: '#3B82F6' },
+      SYSTEM: { icon: 'info', color: colors.text.secondary },
+      ANNOUNCEMENT: { icon: 'bell', color: colors.accent },
 
       // Achievements
       ACHIEVEMENT_EARNED: { icon: 'award', color: '#FFD700' },
 
       // Referrals
       REFERRAL_FRIEND_JOINED: { icon: 'users', color: '#F97316' },
-      REFERRAL_FIRST_TRANSACTION: { icon: 'trending-up', color: '#10B981' },
+      REFERRAL_FIRST_TRANSACTION: { icon: 'trending-up', color: colors.primaryDark },
       REFERRAL_ACTION_REMINDER: { icon: 'target', color: '#F97316' },
     };
 
-    return iconMap[type] || { icon: 'bell', color: '#6B7280' };
+    return iconMap[type] || { icon: 'bell', color: colors.text.secondary };
   };
 
   const formatTime = (dateString: string) => {
@@ -1168,7 +1169,7 @@ export const NotificationScreen = () => {
             activeOpacity={0.9}
           >
             <View style={styles.presaleBannerLeft}>
-              <View style={[styles.presaleBadge, { backgroundColor: '#10b981' }]}>
+              <View style={[styles.presaleBadge, { backgroundColor: colors.primaryDark }]}>
                 <Text style={styles.presaleBadgeText}>🔓 RECLAMO</Text>
               </View>
               <Text style={styles.presaleBannerTitle}>¡Reclama tus $CONFIO!</Text>
@@ -1178,7 +1179,7 @@ export const NotificationScreen = () => {
             </View>
             <View style={styles.presaleBannerRight}>
               <Image source={CONFIOLogo} style={styles.presaleBannerLogo} />
-              <Icon name="chevron-right" size={20} color="#10b981" />
+              <Icon name="chevron-right" size={20} color={colors.primaryDark} />
             </View>
           </TouchableOpacity>
         </View>
@@ -1200,7 +1201,7 @@ export const NotificationScreen = () => {
             </View>
             <View style={styles.presaleBannerRight}>
               <Image source={CONFIOLogo} style={styles.presaleBannerLogo} />
-              <Icon name="chevron-right" size={20} color="#8b5cf6" />
+              <Icon name="chevron-right" size={20} color={colors.secondary} />
             </View>
           </TouchableOpacity>
         </View>
@@ -1211,7 +1212,7 @@ export const NotificationScreen = () => {
   const EmptyState = () => (
     <View style={styles.emptyState}>
       <View style={styles.emptyIconWrapper}>
-        <Text style={styles.emptyEmoji}>📬</Text>
+        <Icon name="bell" size={40} color={colors.text.light} />
       </View>
       <Text style={styles.emptyTitle}>No tienes notificaciones</Text>
       <Text style={styles.emptySubtitle}>
@@ -1224,7 +1225,7 @@ export const NotificationScreen = () => {
     if (loading && notifications.length > 0) {
       return (
         <View style={styles.loadingFooter}>
-          <ActivityIndicator size="small" color="#34d399" />
+          <ActivityIndicator size="small" color={colors.primary} />
         </View>
       );
     }
@@ -1237,7 +1238,7 @@ export const NotificationScreen = () => {
         <Header
           navigation={navigation as any}
           title="Notificaciones"
-          backgroundColor="#34d399"
+          backgroundColor={colors.primary}
           isLight
           showBackButton
         />
@@ -1256,12 +1257,12 @@ export const NotificationScreen = () => {
         <Header
           navigation={navigation as any}
           title="Notificaciones"
-          backgroundColor="#34d399"
+          backgroundColor={colors.primary}
           isLight
           showBackButton
         />
         <View style={styles.errorContainer}>
-          <Icon name="alert-circle" size={48} color="#EF4444" />
+          <Icon name="alert-circle" size={48} color={colors.danger} />
           <Text style={styles.errorText}>Error al cargar notificaciones</Text>
           <TouchableOpacity style={styles.retryButton} onPress={() => refetch()}>
             <Text style={styles.retryText}>Reintentar</Text>
@@ -1276,7 +1277,7 @@ export const NotificationScreen = () => {
       <Header
         navigation={navigation as any}
         title="Notificaciones"
-        backgroundColor="#34d399"
+        backgroundColor={colors.primary}
         isLight
         showBackButton
       />
@@ -1305,7 +1306,7 @@ export const NotificationScreen = () => {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={handleRefresh}
-            tintColor="#34d399"
+            tintColor={colors.primary}
           />
         }
         contentContainerStyle={notifications.length === 0 ? styles.emptyContainer : undefined}
@@ -1331,12 +1332,7 @@ export const NotificationScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: colors.white,
   },
   errorContainer: {
     flex: 1,
@@ -1346,18 +1342,18 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontSize: 16,
-    color: '#6B7280',
+    color: colors.text.secondary,
     marginTop: 16,
     marginBottom: 24,
   },
   retryButton: {
-    backgroundColor: '#34d399',
+    backgroundColor: colors.primary,
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 8,
   },
   retryText: {
-    color: '#fff',
+    color: colors.white,
     fontSize: 14,
     fontWeight: '600',
   },
@@ -1375,23 +1371,20 @@ const styles = StyleSheet.create({
     width: 96,
     height: 96,
     borderRadius: 48,
-    backgroundColor: '#EEF2FF',
+    backgroundColor: colors.neutralDark,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  emptyEmoji: {
-    fontSize: 40,
   },
   emptyTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#6B7280',
+    color: colors.text.secondary,
     marginTop: 16,
     marginBottom: 8,
   },
   emptySubtitle: {
     fontSize: 14,
-    color: '#9CA3AF',
+    color: colors.text.light,
     textAlign: 'center',
     lineHeight: 20,
   },
@@ -1400,10 +1393,10 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     paddingHorizontal: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
+    borderBottomColor: colors.neutralDark,
   },
   unreadNotification: {
-    backgroundColor: '#EFF6FF',
+    backgroundColor: colors.primarySoft,
   },
   notificationIcon: {
     width: 40,
@@ -1425,45 +1418,45 @@ const styles = StyleSheet.create({
   notificationTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#6B7280',
+    color: colors.text.secondary,
     flex: 1,
   },
   unreadTitle: {
-    color: '#1F2937',
+    color: colors.text.primary,
   },
   unreadDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#3B82F6',
+    backgroundColor: colors.primary,
     marginLeft: 8,
     marginTop: 2,
   },
   notificationMessage: {
     fontSize: 13,
-    color: '#6B7280',
+    color: colors.text.secondary,
     lineHeight: 18,
     marginBottom: 4,
   },
   notificationTime: {
     fontSize: 12,
-    color: '#9CA3AF',
+    color: colors.text.light,
   },
   markAllContainer: {
     paddingHorizontal: 20,
     paddingVertical: 16,
     borderTopWidth: 1,
-    borderTopColor: '#E5E7EB',
-    backgroundColor: '#F9FAFB',
+    borderTopColor: colors.border,
+    backgroundColor: colors.neutral,
   },
   markAllButton: {
-    backgroundColor: '#34d399',
+    backgroundColor: colors.primary,
     paddingVertical: 12,
     borderRadius: 12,
     alignItems: 'center',
   },
   markAllText: {
-    color: '#fff',
+    color: colors.white,
     fontSize: 14,
     fontWeight: '600',
   },
@@ -1477,25 +1470,20 @@ const styles = StyleSheet.create({
     marginVertical: 12,
   },
   presaleBannerContent: {
-    backgroundColor: '#f8fafc',
+    backgroundColor: colors.white,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#e2e8f0',
+    borderColor: colors.violetLight,
     padding: 16,
     flexDirection: 'row',
     alignItems: 'center',
-    shadowColor: '#8b5cf6',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 3,
   },
   presaleBannerLeft: {
     flex: 1,
     marginRight: 12,
   },
   presaleBadge: {
-    backgroundColor: '#8b5cf6',
+    backgroundColor: colors.secondary,
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
@@ -1503,19 +1491,19 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   presaleBadgeText: {
-    color: '#fff',
+    color: colors.white,
     fontSize: 12,
     fontWeight: 'bold',
   },
   presaleBannerTitle: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#1e293b',
+    color: colors.text.primary,
     marginBottom: 4,
   },
   presaleBannerSubtitle: {
     fontSize: 13,
-    color: '#64748b',
+    color: colors.text.secondary,
     lineHeight: 18,
   },
   presaleBannerRight: {
