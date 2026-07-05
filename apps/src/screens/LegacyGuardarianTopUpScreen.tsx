@@ -20,7 +20,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
 import { colors } from '../config/theme';
 import { Linking } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
 import GuardarianLogo from '../assets/svg/guardarian.svg';
@@ -99,6 +99,13 @@ const TopUpScreen = () => {
 
   // USDC opt-in mutation
   const [optInToUsdc] = useMutation(OPT_IN_TO_USDC);
+
+  // Savings rail: entered from Ahorros with destination 'cusd_plus'. The
+  // money buys USDT on BSC and the SERVER injects the account's registered
+  // bsc_address (client-supplied payout is refused on this rail) — the same
+  // contract as the Koywe savings rail.
+  const route = useRoute();
+  const isSavingsRail = (route.params as any)?.destination === 'cusd_plus';
 
   // Animation for loading spinner
   const spinValue = useRef(new Animated.Value(0)).current;
@@ -285,7 +292,7 @@ const TopUpScreen = () => {
       return;
     }
 
-    if (!email || !algorandAddress) {
+    if (!email || (!isSavingsRail && !algorandAddress)) {
       Alert.alert('Faltan datos', 'Necesitamos tu correo y dirección de Algorand para continuar.');
       return;
     }
@@ -299,10 +306,13 @@ const TopUpScreen = () => {
     // Ensure wallet is initialized before opting in (Critical for cold starts)
 
 
-    // Check and opt-in to USDC before proceeding
-    const usdcOptInSuccess = await handleUSDCOptIn();
-    if (!usdcOptInSuccess) {
-      return;
+    // Check and opt-in to USDC before proceeding (cUSD rail only — the
+    // savings rail settles on BSC, no Algorand asset involved)
+    if (!isSavingsRail) {
+      const usdcOptInSuccess = await handleUSDCOptIn();
+      if (!usdcOptInSuccess) {
+        return;
+      }
     }
 
     // Show PreFlightModal instead of proceeding directly
@@ -322,10 +332,12 @@ const TopUpScreen = () => {
       const tx = await createGuardarianTransaction({
         amount: parsedAmount,
         fromCurrency: currencyCode || 'USD',
-        toCurrency: 'USDC',
-        toNetwork: 'ALGO',
+        toCurrency: isSavingsRail ? 'USDT' : 'USDC',
+        toNetwork: isSavingsRail ? 'BSC' : 'ALGO',
         email,
-        payoutAddress: algorandAddress,
+        // Savings rail: NO payout address — the server injects the
+        // registered bsc_address and refuses a client-supplied one.
+        payoutAddress: isSavingsRail ? undefined : algorandAddress,
         customerCountry: userProfile?.phoneCountry,
         externalId: `confio-topup-${Date.now()}`,
       });
@@ -385,8 +397,12 @@ const TopUpScreen = () => {
           </Svg>
           <View style={styles.fieldInner}>
             <Text style={styles.fieldEyebrow}>RECARGAR CON GUARDARIAN</Text>
-            <Text style={styles.fieldTitle}>Recarga tu cuenta</Text>
-            <Text style={styles.fieldSubtitle}>Compra USDC con tu tarjeta o transferencia bancaria. Rápido, seguro y sin complicaciones.</Text>
+            <Text style={styles.fieldTitle}>{isSavingsRail ? 'Recarga tu ahorro' : 'Recarga tu cuenta'}</Text>
+            <Text style={styles.fieldSubtitle}>
+              {isSavingsRail
+                ? 'Dinero nuevo llega directo a tu ahorro (Confío Dollar+). En el checkout verás USDT — se acredita automáticamente al llegar.'
+                : 'Pagas con tarjeta o transferencia y recibes cUSD. En el checkout verás USDC — se convierte automáticamente al llegar.'}
+            </Text>
           </View>
         </View>
 
@@ -445,7 +461,7 @@ const TopUpScreen = () => {
 
           <View style={styles.conversionHint}>
             <Icon name="arrow-down" size={14} color={colors.primary} />
-            <Text style={styles.conversionText}>Recibirás USDC en tu cuenta</Text>
+            <Text style={styles.conversionText}>{isSavingsRail ? 'Llega directo a tu ahorro (Confío Dollar+)' : 'Recibes cUSD en tu cuenta'}</Text>
           </View>
         </View>
 

@@ -180,8 +180,8 @@ const TopUpScreen = () => {
     minAmount: selectedMethodMin,
     maxAmount: selectedMethodMax,
   });
-  const quoteHeadline = quote ? `Recibes aprox. ${formatRampMoney(quote.amountOut, 'cUSD')}` : '';
-  const quoteRateLine = quote ? `1 cUSD = ${formatRampRate(quote.exchangeRate, fiatCurrency)}` : '';
+  const quoteHeadline = quote ? `Recibes aprox. ${formatRampMoney(quote.amountOut, isSavingsRail ? 'US$' : 'cUSD')}${isSavingsRail ? ' en tu ahorro' : ''}` : '';
+  const quoteRateLine = quote ? `1 ${isSavingsRail ? 'US$' : 'cUSD'} = ${formatRampRate(quote.exchangeRate, fiatCurrency)}` : '';
   const isCompact = width < 380;
   const accountEmail = String(meData?.me?.email || userProfile?.email || '').trim();
   const storedRampAuthEmail = String(rampAddressData?.myRampAddress?.authEmail || '').trim().toLowerCase();
@@ -360,7 +360,7 @@ const TopUpScreen = () => {
     if (countryCode === 'CO' && ['PSE', 'NEQUI', 'BANCOLOMBIA'].includes(normalizedSelectedMethodCode) && hasStoredDeliverableRampEmail) {
       const authenticated = await requestRampCriticalAuth({
         amount: parsedAmount,
-        assetLabel: 'cUSD',
+        assetLabel: isSavingsRail ? 'US$ (ahorro)' : 'cUSD',
         actionLabel: 'compra',
       });
       if (!authenticated) {
@@ -377,7 +377,7 @@ const TopUpScreen = () => {
     }
     const authenticated = await requestRampCriticalAuth({
       amount: parsedAmount,
-      assetLabel: 'cUSD',
+      assetLabel: isSavingsRail ? 'US$ (ahorro)' : 'cUSD',
       actionLabel: 'compra',
     });
     if (!authenticated) {
@@ -426,9 +426,11 @@ const TopUpScreen = () => {
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <RampReveal delay={0}>
         <RampHero
-          eyebrow="Ingresar saldo"
-          title="Compra Confío Dollar"
-          subtitle="Elige tu medio de pago, revisa la cotización y confirma cuando estés listo."
+          eyebrow={isSavingsRail ? 'Ahorrar' : 'Ingresar saldo'}
+          title={isSavingsRail ? 'Recarga tu ahorro' : 'Compra Confío Dollar'}
+          subtitle={isSavingsRail
+            ? 'Dinero nuevo llega directo a tu ahorro (Confío Dollar+). Elige tu medio de pago y confirma.'
+            : 'Elige tu medio de pago, revisa la cotización y confirma cuando estés listo.'}
           onBack={() => navigation.goBack()}
           compact={isCompact}
         />
@@ -550,11 +552,11 @@ const TopUpScreen = () => {
                     </View>
                     <View style={styles.quoteRow}>
                       <Text style={styles.quoteLabel}>Recibes aprox.</Text>
-                      <Text style={styles.quoteValue}>{formatRampMoney(quote.amountOut, 'cUSD')}</Text>
+                      <Text style={styles.quoteValue}>{formatRampMoney(quote.amountOut, isSavingsRail ? 'US$' : 'cUSD')}</Text>
                     </View>
                     <View style={styles.quoteRow}>
                       <Text style={styles.quoteLabel}>Tipo de cambio</Text>
-                      <Text style={styles.quoteValue}>{`${formatRampRate(quote.exchangeRate)} ${fiatCurrency}/cUSD`}</Text>
+                      <Text style={styles.quoteValue}>{`${formatRampRate(quote.exchangeRate)} ${fiatCurrency}/${isSavingsRail ? 'US$' : 'cUSD'}`}</Text>
                     </View>
                     <View style={styles.quoteRow}>
                       <Text style={styles.quoteLabel}>{'Comisión del\nprocesador de pagos'}</Text>
@@ -686,7 +688,7 @@ const TopUpScreen = () => {
                   setShowAuthEmailModal(false);
                   const authenticated = await requestRampCriticalAuth({
                     amount: parsedAmount,
-                    assetLabel: 'cUSD',
+                    assetLabel: isSavingsRail ? 'US$ (ahorro)' : 'cUSD',
                     actionLabel: 'compra',
                   });
                   if (!authenticated) {
