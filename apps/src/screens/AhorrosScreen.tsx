@@ -122,8 +122,8 @@ export const AhorrosScreen = () => {
     },
     {
       icon: 'download',
-      title: 'Recibir USDT (BEP-20)',
-      subtitle: 'Desde un exchange u otra billetera · directo a tu ahorro',
+      title: 'Recibir USDT',
+      subtitle: 'Red BNB Smart Chain (BEP-20) · desde un exchange u otra billetera',
       onPress: () => navigation.navigate('ReceiveSavings'),
     },
     {

@@ -1501,8 +1501,8 @@ export const ContactsScreen = () => {
             {
               icon: 'download',
               image: cUSDPlusLogo,
-              title: 'USDT · BNB Smart Chain (BEP-20)',
-              subtitle: 'Directo a tu ahorro (Confío Dollar+)',
+              title: 'Tether · USDT',
+              subtitle: 'Red BNB Smart Chain (BEP-20) · directo a tu ahorro (Confío Dollar+)',
               onPress: () => {
                 setShowReceiveSelection(false);
                 navigation.navigate('ReceiveSavings');
@@ -1510,15 +1510,15 @@ export const ContactsScreen = () => {
             },
             {
               icon: 'clock',
-              title: 'USDC · USDT · Ethereum (ERC-20)',
-              subtitle: 'Aún no disponible · tócalo y te avisamos',
+              title: 'USDC · USDT (Ethereum)',
+              subtitle: 'Red Ethereum (ERC-20) · aún no disponible · tócalo y te avisamos',
               onPress: () =>
                 handleReceiveRailInterest('eth_erc20', 'USDC / USDT (Ethereum)'),
             },
             {
               icon: 'clock',
-              title: 'USDT · Tron (TRC-20)',
-              subtitle: 'Aún no disponible · tócalo y te avisamos',
+              title: 'USDT (Tron)',
+              subtitle: 'Red Tron (TRC-20) · aún no disponible · tócalo y te avisamos',
               onPress: () => handleReceiveRailInterest('usdt_tron', 'USDT (Tron)'),
             },
           ]}
@@ -1532,28 +1532,28 @@ export const ContactsScreen = () => {
               icon: 'dollar-sign',
               image: cUSDLogo,
               title: 'Confío Dollar · $cUSD',
-              subtitle: 'Moneda estable para pagos diarios',
+              subtitle: 'Red Algorand · moneda estable para pagos diarios',
               onPress: () => handleSendTokenSelection('cusd'),
-            },
-            {
-              icon: 'dollar-sign',
-              image: USDCLogo,
-              title: 'USD Coin · USDC',
-              subtitle: 'Stablecoin en la red de Algorand',
-              onPress: () => handleSendTokenSelection('usdc'),
             },
             {
               icon: 'zap',
               image: CONFIOLogo,
               title: 'Confío · $CONFIO',
-              subtitle: 'Moneda de gobernanza y utilidad',
+              subtitle: 'Red Algorand · moneda de gobernanza y utilidad',
               onPress: () => handleSendTokenSelection('confio'),
+            },
+            {
+              icon: 'dollar-sign',
+              image: USDCLogo,
+              title: 'USD Coin · USDC',
+              subtitle: 'Red Algorand · stablecoin',
+              onPress: () => handleSendTokenSelection('usdc'),
             },
             {
               icon: 'send',
               image: USDTLogo,
-              title: 'USDT · BNB Smart Chain (BEP-20)',
-              subtitle: 'Desde tu ahorro (Confío Dollar+) · se convierte al enviar',
+              title: 'Tether · USDT',
+              subtitle: 'Red BNB Smart Chain (BEP-20) · desde tu ahorro (Confío Dollar+)',
               onPress: () => {
                 setShowSendTokenSelection(false);
                 navigation.navigate('SendUsdt');
