@@ -140,14 +140,24 @@ batched scanner (one eth_getLogs per 30s over the whole watch set):
    registered bsc_address whenever to_currency=USDT on a BSC network;
    client payout addresses are refused on this rail). Any future provider
    follows the same rule: the server injects the registered address.
-2b. **Future ETH/Tron rails** (Julian, 2026-07-05): when they ship, the
-   deposit flow offers the TWO-WORLD destination choice mirroring
-   Recargar — "para usar" lands USDC-Algorand → auto-swap → cUSD,
-   "para ahorrar" lands USDT-BSC → auto-mint → cUSD+ (one Allbridge
-   destination parameter switches them; both landings reuse existing
-   machinery). Only the savings destination is geo-gated. The demand
-   probes are therefore destination-neutral and visible in ALL regions —
-   a Venezuelan user's Tron→cUSD demand signal counts too.
+2b. **Future ETH/Tron rails** (Julian, 2026-07-05, corrected): a standing
+   address cannot ask the sender anything, so the two-world choice CANNOT
+   be pre-determined per deposit (ramps can — they are order-first).
+   Model: **choice on arrival** — one derived address per chain
+   (user.tron/user.eth), funds land and WAIT at the user's own address,
+   and the next foreground presents the choice: "¿Usar (→cUSD) o Ahorrar
+   (→cUSD+)?" → user-signed bridging to the chosen destination (the
+   auto-swap prompt generalized from a default into a choice; the earlier
+   TRON energy-delegation + client-signed-sweep design is this model's
+   infrastructure). Both destinations cost the same single bridge leg
+   from ETH/Tron, so the choice is genuinely free — unlike BSC, where
+   reaching cUSD would add a bridge leg, which is why user.bsc stays
+   savings-dedicated. Only the savings CHOICE is geo-gated (restricted
+   regions see cUSD as the sole destination). Alternative rejected:
+   Allbridge Deposit Addresses (destination fixed at generation) — two
+   addresses per chain per user confuses, and the product still lacks
+   slippage protection. Demand probes stay destination-neutral and
+   visible in ALL regions.
 
 3. **External deposit** (Julian, 2026-07-04): crypto-native users and
    no-Koywe countries onramp by sending USDT (BEP-20) straight to their
