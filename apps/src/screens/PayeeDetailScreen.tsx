@@ -1,6 +1,7 @@
 import React, { useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, ScrollView, TextInput, Image } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
+import { colors } from '../config/theme';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
@@ -188,7 +189,7 @@ export const PayeeDetailScreen = () => {
       <Header
         navigation={navigation as any}
         title="Detalle del destinatario"
-        backgroundColor="#34d399"
+        backgroundColor={colors.primary}
         isLight
         showBackButton
       />
@@ -214,23 +215,23 @@ export const PayeeDetailScreen = () => {
         <View style={styles.infoBox}>
           <Text style={styles.sectionTitle}>Información</Text>
           <View style={styles.infoRow}>
-            <Icon name="user" size={16} color="#6b7280" />
+            <Icon name="user" size={16} color={colors.text.secondary} />
             <Text style={styles.infoText}>{displayName || username || 'Destinatario'}</Text>
           </View>
           {username ? (
             <View style={styles.infoRow}>
-              <Icon name="at-sign" size={16} color="#6b7280" />
+              <Icon name="at-sign" size={16} color={colors.text.secondary} />
               <Text style={styles.infoText}>@{username}</Text>
             </View>
           ) : null}
           <View style={styles.infoRow}>
-            <Icon name="briefcase" size={16} color="#6b7280" />
+            <Icon name="briefcase" size={16} color={colors.text.secondary} />
             <Text style={styles.infoText}>
               {employeeRole ? `Empleado (${getRoleLabel(employeeRole)})` : 'Solo destinatario de nómina'}
             </Text>
           </View>
           <View style={styles.infoRow}>
-            <Icon name="shield" size={16} color="#6b7280" />
+            <Icon name="shield" size={16} color={colors.text.secondary} />
             <Text style={styles.infoText}>
               {employeeRole ? 'Cuenta de empleado; sin permisos de nómina aquí.' : 'Solo recibe pagos de nómina.'}
             </Text>
@@ -271,7 +272,7 @@ export const PayeeDetailScreen = () => {
             }}
           >
             <View style={styles.immediateRow}>
-              <Icon name="zap" size={18} color="#fff" />
+              <Icon name="zap" size={18} color={colors.white} />
               <Text style={styles.immediateText}>{isSubmitting ? 'Creando...' : 'Pagar ahora'}</Text>
             </View>
           </TouchableOpacity>
@@ -360,7 +361,7 @@ export const PayeeDetailScreen = () => {
               onPress={() => navigation.navigate('PayrollHistory', { accountId, displayName, username } as any)}
             >
               <Text style={styles.fullHistoryText}>Ver historial de pagos</Text>
-              <Icon name="chevron-right" size={16} color="#047857" />
+              <Icon name="chevron-right" size={16} color={colors.primaryDark} />
             </TouchableOpacity>
           </View>
         </View>
@@ -371,9 +372,9 @@ export const PayeeDetailScreen = () => {
             variant="secondary"
             onPress={handleRemove}
             loading={loading}
-            icon={<Icon name="trash-2" size={18} color="#b91c1c" />}
-            style={{ alignSelf: 'flex-start', backgroundColor: '#fef2f2', borderColor: '#fecdd3' }}
-            textStyle={{ color: '#b91c1c', fontWeight: '700' }}
+            icon={<Icon name="trash-2" size={18} color={colors.error.icon} />}
+            style={{ alignSelf: 'flex-start', backgroundColor: colors.error.background, borderColor: colors.error.border }}
+            textStyle={{ color: colors.error.icon, fontWeight: '700' }}
           />
         </View>
       </ScrollView>
@@ -382,16 +383,16 @@ export const PayeeDetailScreen = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
+  container: { flex: 1, backgroundColor: colors.white },
   content: { padding: 20, gap: 20, paddingTop: 12 },
   card: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 12,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: colors.border,
     shadowColor: '#000',
     shadowOpacity: 0.05,
     shadowRadius: 8,
@@ -402,30 +403,30 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 16,
-    backgroundColor: '#ecfdf3',
+    backgroundColor: colors.primarySoft,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
   },
-  avatarText: { fontSize: 20, fontWeight: '700', color: '#065f46' },
-  title: { fontSize: 18, fontWeight: '700', color: '#111827' },
-  subtitle: { fontSize: 14, color: '#6b7280', marginTop: 2 },
-  meta: { fontSize: 12, color: '#9ca3af', marginTop: 4 },
+  avatarText: { fontSize: 20, fontWeight: '700', color: colors.primaryDark },
+  title: { fontSize: 18, fontWeight: '700', color: colors.text.primary },
+  subtitle: { fontSize: 14, color: colors.text.secondary, marginTop: 2 },
+  meta: { fontSize: 12, color: colors.text.light, marginTop: 4 },
   infoBox: {
-    backgroundColor: '#f9fafb',
+    backgroundColor: colors.neutral,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: colors.border,
     padding: 14,
     gap: 8,
   },
-  sectionTitle: { fontSize: 14, fontWeight: '700', color: '#111827' },
+  sectionTitle: { fontSize: 14, fontWeight: '700', color: colors.text.primary },
   infoRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  infoText: { fontSize: 14, color: '#111827', flex: 1 },
+  infoText: { fontSize: 14, color: colors.text.primary, flex: 1 },
   permsBox: {
     marginTop: 8,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: colors.border,
     borderRadius: 10,
     overflow: 'hidden',
   },
@@ -435,15 +436,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
+    borderBottomColor: colors.neutralDark,
   },
-  permKey: { fontSize: 13, color: '#374151', flex: 1 },
+  permKey: { fontSize: 13, color: colors.text.primary, flex: 1 },
   permValue: { fontSize: 13, fontWeight: '700', minWidth: 30, textAlign: 'right' },
   payrollBox: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: colors.border,
     padding: 14,
     gap: 10,
     shadowColor: '#000',
@@ -454,61 +455,61 @@ const styles = StyleSheet.create({
   },
   tokenRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   tokenLogo: { width: 24, height: 24, resizeMode: 'contain' },
-  tokenLabel: { fontSize: 14, fontWeight: '700', color: '#111827' },
-  label: { fontSize: 13, color: '#6b7280', fontWeight: '600', letterSpacing: 0.4 },
+  tokenLabel: { fontSize: 14, fontWeight: '700', color: colors.text.primary },
+  label: { fontSize: 13, color: colors.text.secondary, fontWeight: '600', letterSpacing: 0.4 },
   amountRow: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1.5,
-    borderColor: '#e5e7eb',
+    borderColor: colors.border,
     borderRadius: 12,
     paddingHorizontal: 10,
     paddingVertical: 10,
     gap: 8,
   },
-  amountPrefix: { fontSize: 14, fontWeight: '700', color: '#6b7280' },
-  amountInput: { flex: 1, fontSize: 16, fontWeight: '700', color: '#111827' },
+  amountPrefix: { fontSize: 14, fontWeight: '700', color: colors.text.secondary },
+  amountInput: { flex: 1, fontSize: 16, fontWeight: '700', color: colors.text.primary },
   intervalRow: { flexDirection: 'row', gap: 8, marginTop: 6 },
   intervalChip: {
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 12,
     borderWidth: 1.5,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#f9fafb',
+    borderColor: colors.border,
+    backgroundColor: colors.neutral,
   },
-  intervalChipSelected: { borderColor: '#34d399', backgroundColor: '#ecfdf3' },
-  intervalText: { fontSize: 14, fontWeight: '600', color: '#111827' },
-  intervalTextSelected: { color: '#065f46' },
+  intervalChipSelected: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  intervalText: { fontSize: 14, fontWeight: '600', color: colors.text.primary },
+  intervalTextSelected: { color: colors.primaryDark },
   dateInput: {
     marginTop: 6,
     borderWidth: 1.5,
-    borderColor: '#e5e7eb',
+    borderColor: colors.border,
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 15,
     fontWeight: '600',
-    color: '#111827',
+    color: colors.text.primary,
   },
   immediateButton: {
     marginTop: 6,
-    backgroundColor: '#10b981',
+    backgroundColor: colors.primaryDark,
     borderRadius: 12,
     paddingVertical: 12,
     paddingHorizontal: 12,
     alignItems: 'center',
   },
   immediateRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  immediateText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  immediateText: { color: colors.white, fontSize: 15, fontWeight: '700' },
   scheduleButton: {
     marginTop: 10,
-    backgroundColor: '#10b981',
+    backgroundColor: colors.primaryDark,
     borderRadius: 12,
     paddingVertical: 12,
     alignItems: 'center',
   },
-  scheduleText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  scheduleText: { color: colors.white, fontSize: 15, fontWeight: '700' },
   actions: { gap: 12 },
   historyBox: {
     marginTop: 12,
@@ -516,38 +517,38 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   historyHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  historyCount: { fontSize: 12, color: '#6b7280' },
-  historyEmpty: { fontSize: 13, color: '#9ca3af' },
+  historyCount: { fontSize: 12, color: colors.text.secondary },
+  historyEmpty: { fontSize: 13, color: colors.text.light },
   historyRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
   historyCard: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: colors.border,
     padding: 12,
     marginTop: 6,
   },
-  historyAmount: { fontSize: 14, fontWeight: '700', color: '#111827' },
-  historyDate: { fontSize: 12, color: '#6b7280', marginTop: 2 },
+  historyAmount: { fontSize: 14, fontWeight: '700', color: colors.text.primary },
+  historyDate: { fontSize: 12, color: colors.text.secondary, marginTop: 2 },
   historyBadges: { flexDirection: 'row', gap: 6 },
   historyMetaRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginTop: 8,
   },
-  historyMeta: { fontSize: 12, color: '#6b7280' },
+  historyMeta: { fontSize: 12, color: colors.text.secondary },
   badge: {
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 10,
   },
-  badgeText: { fontSize: 11, fontWeight: '700', color: '#111827' },
+  badgeText: { fontSize: 11, fontWeight: '700', color: colors.text.primary },
   badgeSecondary: { backgroundColor: '#e0f2fe' },
-  badgeMuted: { backgroundColor: '#f3f4f6' },
+  badgeMuted: { backgroundColor: colors.neutralDark },
   fullHistoryButton: {
     marginTop: 6,
     flexDirection: 'row',
@@ -555,7 +556,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 8,
   },
-  fullHistoryText: { color: '#047857', fontWeight: '700' },
+  fullHistoryText: { color: colors.primaryDark, fontWeight: '700' },
 });
 
 export default PayeeDetailScreen;

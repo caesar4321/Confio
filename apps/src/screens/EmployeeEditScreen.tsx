@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
+import { colors } from '../config/theme';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
@@ -64,9 +65,9 @@ export const EmployeeEditScreen = () => {
         },
       });
       if (data?.updateBusinessEmployee?.success) {
-        Alert.alert('Éxito', 'Empleado actualizado correctamente.', [
-          { text: 'Entendido', onPress: () => navigation.goBack() },
-        ]);
+        // Frictionless save: the updated data on the detail screen is the
+        // confirmation.
+        navigation.goBack();
       } else {
         setBanner({ variant: 'error', message: data?.updateBusinessEmployee?.errors?.[0] || 'No se pudo actualizar al empleado' });
       }
@@ -80,7 +81,7 @@ export const EmployeeEditScreen = () => {
       <Header
         navigation={navigation as any}
         title="Editar Empleado"
-        backgroundColor="#34d399"
+        backgroundColor={colors.primary}
         isLight
         showBackButton
       />
@@ -131,7 +132,7 @@ export const EmployeeEditScreen = () => {
         </TouchableOpacity>
         <TouchableOpacity style={[styles.button, styles.saveButton]} onPress={handleSave} disabled={loading}>
           <Text style={styles.saveText}>{loading ? 'Guardando...' : 'Guardar cambios'}</Text>
-          <Icon name="check" size={16} color="#fff" />
+          <Icon name="check" size={16} color={colors.white} />
         </TouchableOpacity>
       </View>
     </View>
@@ -139,27 +140,27 @@ export const EmployeeEditScreen = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
+  container: { flex: 1, backgroundColor: colors.white },
   content: { padding: 20 },
-  label: { fontSize: 13, color: '#6b7280', fontWeight: '600', letterSpacing: 0.5, textTransform: 'uppercase' },
-  value: { fontSize: 18, fontWeight: '700', color: '#111827', marginTop: 6 },
+  label: { fontSize: 13, color: colors.text.secondary, fontWeight: '600', letterSpacing: 0.5, textTransform: 'uppercase' },
+  value: { fontSize: 18, fontWeight: '700', color: colors.text.primary, marginTop: 6 },
   roleRow: { flexDirection: 'row', gap: 10, marginTop: 10 },
-  chip: { paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12, borderWidth: 1.5, borderColor: '#e5e7eb', backgroundColor: '#f9fafb' },
-  chipSelected: { borderColor: '#34d399', backgroundColor: '#ecfdf3' },
-  chipText: { fontSize: 15, color: '#111827', fontWeight: '600' },
-  chipTextSelected: { color: '#065f46' },
+  chip: { paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12, borderWidth: 1.5, borderColor: colors.border, backgroundColor: colors.neutral },
+  chipSelected: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  chipText: { fontSize: 15, color: colors.text.primary, fontWeight: '600' },
+  chipTextSelected: { color: colors.primaryDark },
   chipDisabled: { opacity: 0.5 },
   toggleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 12, padding: 12, marginTop: 10 },
-  toggleOn: { backgroundColor: '#ecfdf3', borderWidth: 1.5, borderColor: '#34d399' },
-  toggleOff: { backgroundColor: '#fef2f2', borderWidth: 1.5, borderColor: '#fecdd3' },
+  toggleOn: { backgroundColor: colors.primarySoft, borderWidth: 1.5, borderColor: colors.primary },
+  toggleOff: { backgroundColor: colors.error.background, borderWidth: 1.5, borderColor: colors.error.border },
   toggleDot: { width: 20, height: 20, borderRadius: 10 },
-  toggleDotOn: { backgroundColor: '#10b981' },
-  toggleDotOff: { backgroundColor: '#f87171' },
-  toggleText: { fontSize: 15, fontWeight: '600', color: '#111827' },
+  toggleDotOn: { backgroundColor: colors.primaryDark },
+  toggleDotOff: { backgroundColor: colors.danger },
+  toggleText: { fontSize: 15, fontWeight: '600', color: colors.text.primary },
   footer: { flexDirection: 'row', padding: 20, gap: 12 },
   button: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderRadius: 12, paddingVertical: 14, gap: 8 },
-  cancelButton: { backgroundColor: '#f3f4f6' },
-  cancelText: { color: '#374151', fontSize: 15, fontWeight: '700' },
-  saveButton: { backgroundColor: '#10b981', shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 3 },
-  saveText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  cancelButton: { backgroundColor: colors.neutralDark },
+  cancelText: { color: colors.text.primary, fontSize: 15, fontWeight: '700' },
+  saveButton: { backgroundColor: colors.primary },
+  saveText: { color: colors.white, fontSize: 15, fontWeight: '700' },
 });

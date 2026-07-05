@@ -160,16 +160,9 @@ export const CreateBusinessScreen = () => {
           await syncWithServer(accountsData.userAccounts);
         }
         
-        Alert.alert(
-          'Éxito',
-          'Cuenta de negocio creada exitosamente!',
-          [
-            {
-              text: 'Entendido',
-              onPress: () => navigation.goBack()
-            }
-          ]
-        );
+        // Frictionless: the new business account appearing in the switcher
+        // is the confirmation.
+        navigation.goBack();
       } else {
         const error = result.data?.createBusiness?.error || 'Error desconocido';
         Alert.alert('Error', error);
@@ -207,7 +200,7 @@ export const CreateBusinessScreen = () => {
       <View style={styles.stepContent}>
         <View style={styles.stepHeader}>
           <View style={styles.stepIconContainer}>
-            <Icon name="shopping-bag" size={32} color="#10b981" />
+            <Icon name="shopping-bag" size={32} color={colors.primaryDark} />
           </View>
           <Text style={styles.stepTitle}>Tipo de Negocio</Text>
           <Text style={styles.stepSubtitle}>
@@ -233,7 +226,7 @@ export const CreateBusinessScreen = () => {
                   <Icon 
                     name={type.icon as any} 
                     size={24} 
-                    color={formData.businessType === type.id ? '#fff' : '#6b7280'} 
+                    color={formData.businessType === type.id ? colors.white : colors.text.secondary} 
                   />
                 </View>
                 <View style={styles.businessTypeInfo}>
@@ -241,7 +234,7 @@ export const CreateBusinessScreen = () => {
                   <Text style={styles.businessTypeDescription}>{type.description}</Text>
                 </View>
                 {formData.businessType === type.id && (
-                  <Icon name="check" size={24} color="#10b981" />
+                  <Icon name="check" size={24} color={colors.primaryDark} />
                 )}
               </View>
             </TouchableOpacity>
@@ -254,8 +247,8 @@ export const CreateBusinessScreen = () => {
           title="Continuar"
           onPress={handleNext}
           disabled={!formData.businessType}
-          style={{ backgroundColor: !formData.businessType ? '#f3f4f6' : colors.primaryDark, borderRadius: 16 }}
-          textStyle={{ fontSize: 18, color: !formData.businessType ? '#9ca3af' : '#fff' }}
+          style={{ backgroundColor: !formData.businessType ? colors.neutralDark : colors.primaryDark, borderRadius: 16 }}
+          textStyle={{ fontSize: 18, color: !formData.businessType ? colors.text.light : colors.white }}
         />
       </View>
     </View>
@@ -266,7 +259,7 @@ export const CreateBusinessScreen = () => {
       <View style={styles.stepContent}>
         <View style={styles.stepHeader}>
           <View style={styles.stepIconContainer}>
-            <Icon name="shopping-bag" size={32} color="#10b981" />
+            <Icon name="shopping-bag" size={32} color={colors.primaryDark} />
           </View>
           <Text style={styles.stepTitle}>Información del Negocio</Text>
           <Text style={styles.stepSubtitle}>
@@ -349,8 +342,8 @@ export const CreateBusinessScreen = () => {
             loading={isCreating}
             disabled={!formData.businessName}
             accessibilityLabel="Crear negocio"
-            style={{ flex: 1, backgroundColor: !formData.businessName ? '#f3f4f6' : colors.primaryDark, borderRadius: 16 }}
-            textStyle={{ fontSize: 18, color: !formData.businessName ? '#9ca3af' : '#fff' }}
+            style={{ flex: 1, backgroundColor: !formData.businessName ? colors.neutralDark : colors.primaryDark, borderRadius: 16 }}
+            textStyle={{ fontSize: 18, color: !formData.businessName ? colors.text.light : colors.white }}
           />
         </View>
       </View>
@@ -362,7 +355,7 @@ export const CreateBusinessScreen = () => {
       <Header
         navigation={navigation as any}
         title="Crear Cuenta de Negocio"
-        backgroundColor="#10b981"
+        backgroundColor={colors.primaryDark}
         isLight={true}
         showBackButton={true}
       />
@@ -382,14 +375,14 @@ export const CreateBusinessScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
   },
   progressContainer: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     paddingHorizontal: 20,
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
+    borderBottomColor: colors.border,
   },
   progressHeader: {
     flexDirection: 'row',
@@ -400,21 +393,21 @@ const styles = StyleSheet.create({
   progressText: {
     fontSize: 15,
     fontWeight: '500',
-    color: '#6b7280',
+    color: colors.text.secondary,
   },
   progressPercentage: {
     fontSize: 15,
-    color: '#9ca3af',
+    color: colors.text.light,
   },
   progressBar: {
     height: 8,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: colors.border,
     borderRadius: 4,
     overflow: 'hidden',
   },
   progressFill: {
     height: '100%',
-    backgroundColor: '#10b981',
+    backgroundColor: colors.primaryDark,
     borderRadius: 4,
   },
   content: {
@@ -437,7 +430,7 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: '#d1fae5',
+    backgroundColor: colors.primaryLight,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 20,
@@ -445,13 +438,13 @@ const styles = StyleSheet.create({
   stepTitle: {
     fontSize: 26,
     fontWeight: 'bold',
-    color: '#1f2937',
+    color: colors.text.primary,
     marginBottom: 12,
     textAlign: 'center',
   },
   stepSubtitle: {
     fontSize: 16,
-    color: '#6b7280',
+    color: colors.text.secondary,
     textAlign: 'center',
     lineHeight: 24,
     paddingHorizontal: 20,
@@ -461,15 +454,15 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
   },
   businessTypeCard: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 16,
     borderWidth: 2,
-    borderColor: '#e5e7eb',
+    borderColor: colors.border,
     marginBottom: 16,
     padding: 20,
   },
   selectedBusinessType: {
-    borderColor: '#10b981',
+    borderColor: colors.primaryDark,
     backgroundColor: '#f0fdf4',
   },
   businessTypeContent: {
@@ -480,13 +473,13 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: '#f3f4f6',
+    backgroundColor: colors.neutralDark,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 20,
   },
   selectedBusinessTypeIcon: {
-    backgroundColor: '#10b981',
+    backgroundColor: colors.primaryDark,
   },
   businessTypeInfo: {
     flex: 1,
@@ -494,20 +487,20 @@ const styles = StyleSheet.create({
   businessTypeName: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#1f2937',
+    color: colors.text.primary,
     marginBottom: 6,
   },
   businessTypeDescription: {
     fontSize: 15,
-    color: '#6b7280',
+    color: colors.text.secondary,
     lineHeight: 20,
   },
   stepFooter: {
     paddingHorizontal: 20,
     paddingVertical: 20,
     borderTopWidth: 1,
-    borderTopColor: '#e5e7eb',
-    backgroundColor: '#fff',
+    borderTopColor: colors.border,
+    backgroundColor: colors.white,
   },
   formContainer: {
     paddingHorizontal: 20,
@@ -519,17 +512,17 @@ const styles = StyleSheet.create({
   inputLabel: {
     fontSize: 16,
     fontWeight: '500',
-    color: '#374151',
+    color: colors.text.primary,
     marginBottom: 10,
   },
   textInput: {
     borderWidth: 1,
-    borderColor: '#d1d5db',
+    borderColor: colors.borderMedium,
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 16,
     fontSize: 16,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
   },
   textArea: {
     height: 100,
@@ -537,7 +530,7 @@ const styles = StyleSheet.create({
   },
   inputHelp: {
     fontSize: 13,
-    color: '#9ca3af',
+    color: colors.text.light,
     marginTop: 6,
   },
   infoCard: {
@@ -566,7 +559,7 @@ const styles = StyleSheet.create({
   backButton: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#d1d5db',
+    borderColor: colors.borderMedium,
     borderRadius: 16,
     paddingVertical: 18,
     alignItems: 'center',
@@ -574,6 +567,6 @@ const styles = StyleSheet.create({
   backButtonText: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#374151',
+    color: colors.text.primary,
   },
 });
