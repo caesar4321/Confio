@@ -163,6 +163,7 @@ export type MainStackParamList = {
   RetirarAhorro: undefined;
   AhorrosMovimientos: undefined;
   ReceiveSavings: undefined;
+  SendUsdt: undefined;
   AccionesList: undefined;
   StockDetail: { ticker: string };
   BuyStock: { ticker: string };

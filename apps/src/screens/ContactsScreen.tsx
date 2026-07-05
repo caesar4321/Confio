@@ -1548,6 +1548,16 @@ export const ContactsScreen = () => {
               subtitle: 'Moneda de gobernanza y utilidad',
               onPress: () => handleSendTokenSelection('confio'),
             },
+            {
+              icon: 'send',
+              image: cUSDPlusLogo,
+              title: 'USDT · BNB Smart Chain (BEP-20)',
+              subtitle: 'Desde tu ahorro (Confío Dollar+) · se convierte al enviar',
+              onPress: () => {
+                setShowSendTokenSelection(false);
+                navigation.navigate('SendUsdt');
+              },
+            },
           ]}
         />
         <RouteSheet
