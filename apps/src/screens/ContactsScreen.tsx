@@ -7,6 +7,7 @@ import { MainStackParamList } from '../types/navigation';
 import { RouteSheet } from '../components/RouteSheet';
 import { AnalyticsService } from '../services/analyticsService';
 import cUSDPlusLogo from '../assets/png/cUSDPlus.png';
+import USDTLogo from '../assets/png/USDT.png';
 import Icon from 'react-native-vector-icons/Feather';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
@@ -1550,7 +1551,7 @@ export const ContactsScreen = () => {
             },
             {
               icon: 'send',
-              image: cUSDPlusLogo,
+              image: USDTLogo,
               title: 'USDT · BNB Smart Chain (BEP-20)',
               subtitle: 'Desde tu ahorro (Confío Dollar+) · se convierte al enviar',
               onPress: () => {
