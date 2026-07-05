@@ -176,6 +176,11 @@ export const AccountDetailScreen = () => {
   const canViewBalance = !activeAccount?.isEmployee || activeAccount?.employeePermissions?.viewBalance;
   const [showBalance, setShowBalance] = useState(canViewBalance);
   const [copyBanner, setCopyBanner] = useState(false);
+  // Measured size of the balance field. The field's height changes after
+  // mount (locked-balance card appears when data loads, eye toggle), and an
+  // absoluteFill Svg with percentage sizes doesn't repaint on parent growth —
+  // the stale gradient leaves a flat band. Explicit dimensions force redraw.
+  const [fieldSize, setFieldSize] = useState({ width: 0, height: 0 });
   const [refreshing, setRefreshing] = useState(false);
   const [transactionLimit, setTransactionLimit] = useState(20);
   const [transactionOffset, setTransactionOffset] = useState(0);
@@ -1830,8 +1835,20 @@ export const AccountDetailScreen = () => {
           grammar as Home/Profile (emerald for cUSD, violet for CONFIO).
           Vertical gradient meets the flat nav header without a seam; padding
           lives on balanceInner (Yoga insets absolute children by padding). */}
-      <View style={[styles.balanceSection, { backgroundColor: account.color }]}>
-        <Svg style={StyleSheet.absoluteFill}>
+      <View
+        style={[styles.balanceSection, { backgroundColor: account.color }]}
+        onLayout={(e) => {
+          const { width, height } = e.nativeEvent.layout;
+          setFieldSize((prev) =>
+            prev.width === width && prev.height === height ? prev : { width, height }
+          );
+        }}
+      >
+        <Svg
+          width={fieldSize.width || '100%'}
+          height={fieldSize.height || '100%'}
+          style={StyleSheet.absoluteFill}
+        >
           <Defs>
             <SvgLinearGradient id="accountField" x1="0" y1="0" x2="0" y2="1">
               <Stop offset="0" stopColor={account.color} />
