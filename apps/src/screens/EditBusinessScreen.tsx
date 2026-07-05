@@ -24,6 +24,9 @@ import { colors } from '../config/theme';
 import { InlineBanner } from '../components/common/InlineBanner';
 import { Header } from '../navigation/Header';
 import { APP_LAYOUT } from '../config/layout';
+import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
+import { Button } from '../components/common/Button';
+import { EmptyState } from '../components/EmptyState';
 
 type EditBusinessScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
@@ -131,7 +134,7 @@ export const EditBusinessScreen = () => {
 
   const handleSave = async () => {
     if (isBusinessVerified) {
-      Alert.alert('No se puede editar', 'Este negocio ya ha sido verificado. No puedes cambiar la información verificada.');
+      setBanner({ variant: 'error', message: 'Este negocio ya fue verificado; su información no puede cambiarse.' });
       return;
     }
     if (!businessName.trim()) {
@@ -163,19 +166,10 @@ export const EditBusinessScreen = () => {
       });
 
       if (result.data?.updateBusiness?.success) {
-        // Refresh accounts to get updated data
+        // Frictionless save: refresh and return — the updated data on the
+        // previous screen IS the confirmation.
         await refetchAccounts();
-
-        Alert.alert(
-          'Éxito',
-          'Información del negocio actualizada correctamente',
-          [
-            {
-              text: 'Entendido',
-              onPress: () => navigation.goBack(),
-            },
-          ]
-        );
+        navigation.goBack();
       } else {
         const error = result.data?.updateBusiness?.error || 'Error desconocido';
         setBanner({ variant: 'error', message: error });
@@ -190,7 +184,11 @@ export const EditBusinessScreen = () => {
   if (!activeAccount || activeAccount.type.toLowerCase() !== 'business') {
     return (
       <View style={styles.container}>
-        <Text style={styles.errorText}>Esta pantalla solo está disponible para cuentas de negocio</Text>
+        <EmptyState
+          icon="briefcase"
+          title="Solo para negocios"
+          subtitle="Cambia a tu cuenta de negocio para editar su información."
+        />
       </View>
     );
   }
@@ -215,15 +213,21 @@ export const EditBusinessScreen = () => {
           showBackButton
         />
 
-        <View style={{ padding: 16, alignItems: 'center' }}>
-          <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: colors.success, justifyContent: 'center', alignItems: 'center', marginBottom: 12 }}>
-            <Text style={{ color: 'white', fontSize: 28, fontWeight: 'bold' }}>✓</Text>
+        <View style={styles.verifiedHero}>
+          <BrandFieldBackground id="editBusinessVerifiedField" ringCy="30%" ringR={70} ringWidth={18} />
+          <View style={styles.verifiedHeroInner}>
+            <View style={styles.verifiedBadge}>
+              <Icon name="check" size={28} color={colors.primaryDark} />
+            </View>
+            <Text style={styles.verifiedTitle}>Negocio verificado</Text>
+            <Text style={styles.verifiedSubtitle}>
+              La información verificada no puede modificarse.
+            </Text>
           </View>
-          <Text style={{ fontSize: 18, fontWeight: '700', color: '#111827', marginBottom: 6 }}>Negocio Verificado</Text>
-          <Text style={{ fontSize: 14, color: '#374151', textAlign: 'center' }}>
-            La información verificada del negocio no puede ser modificada.
-          </Text>
-          <View style={{ marginTop: 16, backgroundColor: colors.neutral, borderRadius: 8, padding: 12, alignSelf: 'stretch' }}>
+        </View>
+
+        <View style={{ padding: 16 }}>
+          <View style={styles.verifiedCard}>
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Nombre:</Text>
               <Text style={styles.infoValue}>{activeAccount?.business?.name || '-'}</Text>
@@ -272,12 +276,15 @@ export const EditBusinessScreen = () => {
           style={{ marginHorizontal: 16, marginTop: 12 }}
         />
       )}
-      {/* Avatar Section */}
+      {/* Avatar hero — brand field, seamless with the emerald nav header */}
       <View style={styles.avatarSection}>
-        <View style={styles.avatarContainer}>
-          <Text style={styles.avatarText}>{avatarLetter}</Text>
+        <BrandFieldBackground id="editBusinessField" ringCy="30%" ringR={70} ringWidth={18} />
+        <View style={styles.avatarSectionInner}>
+          <View style={styles.avatarContainer}>
+            <Text style={styles.avatarText}>{avatarLetter}</Text>
+          </View>
+          <Text style={styles.avatarLabel}>Avatar del negocio</Text>
         </View>
-        <Text style={styles.avatarLabel}>Avatar del negocio</Text>
       </View>
 
       {/* Form */}
@@ -290,7 +297,7 @@ export const EditBusinessScreen = () => {
             value={businessName}
             onChangeText={setBusinessName}
             placeholder="Ingresa el nombre de tu negocio"
-            placeholderTextColor="#9CA3AF"
+            placeholderTextColor={colors.text.light}
             maxLength={50}
           />
         </View>
@@ -306,7 +313,7 @@ export const EditBusinessScreen = () => {
             <Text style={styles.pickerText}>
               {businessCategory ? getCategoryDisplayName(businessCategory) : 'Selecciona una categoría'}
             </Text>
-            <Icon name="chevron-down" size={20} color="#6B7280" />
+            <Icon name="chevron-down" size={20} color={colors.text.secondary} />
           </TouchableOpacity>
         </View>
 
@@ -314,12 +321,14 @@ export const EditBusinessScreen = () => {
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Descripción</Text>
           <TextInput
-            style={styles.input}
+            style={[styles.input, styles.inputMultiline]}
             value={businessDescription}
             onChangeText={setBusinessDescription}
             placeholder="Ingresa la descripción del negocio"
-            placeholderTextColor="#9CA3AF"
+            placeholderTextColor={colors.text.light}
             maxLength={200}
+            multiline
+            numberOfLines={3}
           />
         </View>
 
@@ -331,7 +340,7 @@ export const EditBusinessScreen = () => {
             value={businessRegistrationNumber}
             onChangeText={setBusinessRegistrationNumber}
             placeholder="Ingresa el número de registro del negocio"
-            placeholderTextColor="#9CA3AF"
+            placeholderTextColor={colors.text.light}
             maxLength={20}
           />
         </View>
@@ -344,7 +353,7 @@ export const EditBusinessScreen = () => {
             value={businessAddress}
             onChangeText={setBusinessAddress}
             placeholder="Ingresa la dirección del negocio"
-            placeholderTextColor="#9CA3AF"
+            placeholderTextColor={colors.text.light}
             maxLength={200}
           />
         </View>
@@ -352,15 +361,12 @@ export const EditBusinessScreen = () => {
 
       {/* Action Buttons */}
       <View style={styles.actions}>
-        <TouchableOpacity
-          style={[styles.saveButton, isLoading && styles.disabledButton]}
+        <Button
+          title="Guardar cambios"
           onPress={handleSave}
-          disabled={isLoading}
-        >
-          <Text style={styles.saveButtonText}>
-            {isLoading ? 'Guardando...' : 'Guardar Cambios'}
-          </Text>
-        </TouchableOpacity>
+          loading={isLoading}
+          accessibilityLabel="Guardar cambios del negocio"
+        />
       </View>
 
       {/* Category Picker Modal */}
@@ -378,7 +384,7 @@ export const EditBusinessScreen = () => {
                 onPress={() => setShowCategoryPicker(false)}
                 style={styles.modalCloseButton}
                accessibilityRole="button" accessibilityLabel="Cerrar">
-                <Icon name="x" size={24} color="#6B7280" />
+                <Icon name="x" size={24} color={colors.text.secondary} />
               </TouchableOpacity>
             </View>
             <FlatList
@@ -416,21 +422,24 @@ export const EditBusinessScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
   },
   scrollContent: {
     flexGrow: 1,
   },
   avatarSection: {
+    backgroundColor: colors.primary,
+    overflow: 'hidden',
+  },
+  avatarSectionInner: {
     alignItems: 'center',
     paddingVertical: 24,
-    backgroundColor: colors.neutral,
   },
   avatarContainer: {
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: colors.primary,
+    backgroundColor: colors.white,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 8,
@@ -438,11 +447,48 @@ const styles = StyleSheet.create({
   avatarText: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: '#fff',
+    color: colors.primaryDark,
   },
   avatarLabel: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.85)',
+  },
+  verifiedHero: {
+    backgroundColor: colors.primary,
+    overflow: 'hidden',
+  },
+  verifiedHeroInner: {
+    alignItems: 'center',
+    paddingVertical: 28,
+    paddingHorizontal: 24,
+  },
+  verifiedBadge: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: colors.white,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  verifiedTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.white,
+    marginBottom: 6,
+  },
+  verifiedSubtitle: {
     fontSize: 14,
-    color: '#6B7280',
+    color: 'rgba(255,255,255,0.85)',
+    textAlign: 'center',
+  },
+  verifiedCard: {
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 6,
   },
   form: {
     padding: 16,
@@ -453,59 +499,51 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 16,
     fontWeight: '500',
-    color: '#374151',
+    color: colors.text.primary,
     marginBottom: 8,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#D1D5DB',
+    borderColor: colors.borderMedium,
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 12,
     fontSize: 16,
-    color: '#1F2937',
-    backgroundColor: '#fff',
+    color: colors.text.primary,
+    backgroundColor: colors.white,
+  },
+  inputMultiline: {
+    minHeight: 80,
+    textAlignVertical: 'top',
   },
   pickerContainer: {
     borderWidth: 1,
-    borderColor: '#D1D5DB',
+    borderColor: colors.borderMedium,
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 12,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
   pickerText: {
     fontSize: 16,
-    color: '#1F2937',
-  },
-  infoSection: {
-    backgroundColor: colors.neutral,
-    borderRadius: 8,
-    padding: 16,
-    marginTop: 16,
-  },
-  infoTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#374151',
-    marginBottom: 12,
+    color: colors.text.primary,
   },
   infoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 4,
+    paddingVertical: 10,
   },
   infoLabel: {
     fontSize: 14,
-    color: '#6B7280',
+    color: colors.text.secondary,
   },
   infoValue: {
     fontSize: 14,
-    color: '#374151',
+    color: colors.text.primary,
     fontWeight: '500',
     flex: 1,
     textAlign: 'right',
@@ -515,38 +553,6 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingBottom: 32,
   },
-  saveButton: {
-    backgroundColor: colors.primary,
-    borderRadius: 8,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  saveButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  disabledButton: {
-    opacity: 0.6,
-  },
-  errorText: {
-    fontSize: 16,
-    color: colors.error,
-    textAlign: 'center',
-    padding: 20,
-  },
-  readOnlyContainer: {
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    borderRadius: 8,
-    padding: 12,
-    backgroundColor: '#fff',
-  },
-  readOnlyText: {
-    fontSize: 16,
-    color: '#374151',
-  },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
@@ -554,7 +560,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalContent: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 16,
     padding: 24,
     width: '80%',
@@ -569,13 +575,13 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#374151',
+    color: colors.text.primary,
   },
   modalCloseButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.neutralDark,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -585,7 +591,7 @@ const styles = StyleSheet.create({
   categoryItem: {
     padding: 16,
     borderWidth: 1,
-    borderColor: '#D1D5DB',
+    borderColor: colors.borderMedium,
     borderRadius: 8,
     marginBottom: 8,
     flexDirection: 'row',
@@ -598,7 +604,7 @@ const styles = StyleSheet.create({
   },
   categoryItemText: {
     fontSize: 16,
-    color: '#374151',
+    color: colors.text.primary,
   },
   categoryItemTextSelected: {
     fontWeight: '600',
