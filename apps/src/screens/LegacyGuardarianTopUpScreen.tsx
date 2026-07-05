@@ -391,10 +391,7 @@ const TopUpScreen = () => {
         </View>
 
         <Text style={styles.regulatoryNote}>
-          Guardarian es un socio regulado. En algunos países solo está disponible la recarga (no la
-          venta) por regulación local. Ventas disponibles en EUR {getFlagForCurrency('EUR')} MXN{' '}
-          {getFlagForCurrency('MXN')} CLP {getFlagForCurrency('CLP')} COP {getFlagForCurrency('COP')} ARS{' '}
-          {getFlagForCurrency('ARS')} BRL {getFlagForCurrency('BRL')}.
+          Guardarian es un socio regulado. Lo que esté disponible en tu país aparece aquí.
         </Text>
 
         {/* Info card */}

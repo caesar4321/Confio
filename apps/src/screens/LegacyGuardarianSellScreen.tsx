@@ -31,7 +31,6 @@ import { getCurrencyForCountry } from '../utils/currencyMapping';
 import { getCountryByIso } from '../utils/countries';
 import { createGuardarianTransaction, fetchGuardarianFiatCurrencies, GuardarianFiatCurrency } from '../services/guardarianService';
 import { GET_PENDING_RAMP_TRANSACTION } from '../apollo/queries';
-import { getFlagForCurrency } from '../utils/currencyFlags';
 import USDCLogo from '../assets/png/USDC.png';
 import PreFlightModal from '../components/PreFlightModal';
 import GuardarianReturnModal from '../components/GuardarianReturnModal';
@@ -350,7 +349,7 @@ export const SellScreen = () => {
                         </Text>
                         {!isCountrySupportedForSell && (
                             <Text style={styles.infoCardTextSecondary}>
-                                Ventas disponibles en EUR {getFlagForCurrency('EUR')} MXN {getFlagForCurrency('MXN')} CLP {getFlagForCurrency('CLP')} COP {getFlagForCurrency('COP')} ARS {getFlagForCurrency('ARS')} BRL {getFlagForCurrency('BRL')}. Tu país actual permite recargar, pero la venta puede no estar disponible hasta que Guardarian habilite ese mercado.
+                                La venta puede no estar disponible en tu país todavía; si Guardarian no ofrece tu moneda, usaremos EUR.
                             </Text>
                         )}
                     </View>
