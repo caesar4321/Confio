@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import Share from 'react-native-share';
 import Icon from 'react-native-vector-icons/Feather';
+import { colors } from '../config/theme';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import ViewShot from 'react-native-view-shot';
@@ -54,19 +55,19 @@ const statusLabel = (status: string) => {
   switch (key) {
     case 'completed':
     case 'confirmed':
-      return { label: 'Completada', color: '#10B981', bg: '#D1FAE5', icon: 'check-circle' };
+      return { label: 'Completada', color: colors.primaryDark, bg: colors.primaryLight, icon: 'check-circle' };
     case 'prepared':
     case 'ready':
       return { label: 'Lista', color: '#4F46E5', bg: '#E0E7FF', icon: 'clock' };
     case 'submitted':
-      return { label: 'Procesando', color: '#2563EB', bg: '#DBEAFE', icon: 'loader' };
+      return { label: 'Procesando', color: colors.accent, bg: '#DBEAFE', icon: 'loader' };
     case 'pending':
-      return { label: 'Pendiente', color: '#D97706', bg: '#FEF3C7', icon: 'alert-circle' };
+      return { label: 'Pendiente', color: colors.warning.icon, bg: colors.warningLight, icon: 'alert-circle' };
     case 'failed':
     case 'cancelled':
-      return { label: 'Fallida', color: '#DC2626', bg: '#FEE2E2', icon: 'x-circle' };
+      return { label: 'Fallida', color: colors.error.icon, bg: '#FEE2E2', icon: 'x-circle' };
     default:
-      return { label: status || '—', color: '#6B7280', bg: '#F3F4F6', icon: 'help-circle' };
+      return { label: status || '—', color: colors.text.secondary, bg: colors.neutralDark, icon: 'help-circle' };
   }
 };
 
@@ -229,7 +230,7 @@ export const PayrollRunDetailScreen = () => {
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton} accessibilityRole="button" accessibilityLabel="Volver">
-            <Icon name="arrow-left" size={22} color="#111827" />
+            <Icon name="arrow-left" size={22} color={colors.text.primary} />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
             <Text style={styles.title}>Corrida #{run?.runId || run?.id?.slice(0, 6)}</Text>
@@ -244,13 +245,13 @@ export const PayrollRunDetailScreen = () => {
         {/* Summary Card */}
         <View style={styles.summaryCard}>
           <View style={styles.summaryHeader}>
-            <Icon name="info" size={20} color="#10B981" />
+            <Icon name="info" size={20} color={colors.primaryDark} />
             <Text style={styles.summaryTitle}>Resumen de la corrida</Text>
           </View>
 
           <View style={styles.summaryGrid}>
             <View style={styles.summaryItem}>
-              <Icon name="calendar" size={16} color="#6B7280" />
+              <Icon name="calendar" size={16} color={colors.text.secondary} />
               <Text style={styles.summaryLabel}>Fecha programada</Text>
               <Text style={styles.summaryValue}>{formatShortDate(run?.scheduledAt || run?.createdAt)}</Text>
             </View>
@@ -258,7 +259,7 @@ export const PayrollRunDetailScreen = () => {
             <View style={styles.summaryDivider} />
 
             <View style={styles.summaryItem}>
-              <Icon name="users" size={16} color="#6B7280" />
+              <Icon name="users" size={16} color={colors.text.secondary} />
               <Text style={styles.summaryLabel}>Empleados</Text>
               <Text style={styles.summaryValue}>{items.length}</Text>
             </View>
@@ -278,7 +279,7 @@ export const PayrollRunDetailScreen = () => {
         {/* Employee List Section */}
         <View style={styles.sectionHeader}>
           <View style={styles.sectionTitleRow}>
-            <Icon name="briefcase" size={18} color="#111827" />
+            <Icon name="briefcase" size={18} color={colors.text.primary} />
             <Text style={styles.sectionTitle}>Pagos individuales ({items.length})</Text>
           </View>
           <Text style={styles.sectionSubtitle}>Toca "Recibo" para descargar el comprobante individual</Text>
@@ -313,14 +314,14 @@ export const PayrollRunDetailScreen = () => {
 
               <View style={styles.employeeDetails}>
                 <View style={styles.employeeDetailRow}>
-                  <Icon name="dollar-sign" size={16} color="#6B7280" />
+                  <Icon name="dollar-sign" size={16} color={colors.text.secondary} />
                   <Text style={styles.employeeDetailLabel}>Monto</Text>
                   <Text style={styles.employeeDetailValue}>{formatCurrency(Number(it.netAmount || 0))} cUSD</Text>
                 </View>
 
                 {it.recipientAccount && (
                   <View style={styles.employeeDetailRow}>
-                    <Icon name="credit-card" size={16} color="#6B7280" />
+                    <Icon name="credit-card" size={16} color={colors.text.secondary} />
                     <Text style={styles.employeeDetailLabel}>Cuenta</Text>
                     <Text style={styles.employeeDetailValue} numberOfLines={1}>
                       {it.recipientAccount?.id?.slice(0, 12) || it.recipientAccount?.accountId?.slice(0, 12) || 'N/A'}...
@@ -334,7 +335,7 @@ export const PayrollRunDetailScreen = () => {
                 onPress={() => handleShareItemPdf(it, idx)}
                 activeOpacity={0.7}
               >
-                <Icon name="download" size={16} color="#10B981" />
+                <Icon name="download" size={16} color={colors.primaryDark} />
                 <Text style={styles.receiptButtonText}>Descargar recibo individual</Text>
               </TouchableOpacity>
             </View>
@@ -346,9 +347,9 @@ export const PayrollRunDetailScreen = () => {
           <Button
             title="Descargar comprobante completo"
             onPress={handleSharePdf}
-            icon={<Icon name="file-text" size={20} color="#fff" />}
+            icon={<Icon name="file-text" size={20} color={colors.white} />}
             style={{
-              shadowColor: '#10B981',
+              shadowColor: colors.primaryDark,
               shadowOpacity: 0.3,
               shadowRadius: 12,
               shadowOffset: { width: 0, height: 4 },
@@ -435,7 +436,7 @@ export const PayrollRunDetailScreen = () => {
 };
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#F9FAFB' },
+  safeArea: { flex: 1, backgroundColor: colors.neutral },
   content: { padding: 16, gap: 16, paddingBottom: 40 },
   header: {
     flexDirection: 'row',
@@ -447,8 +448,8 @@ const styles = StyleSheet.create({
   backButton: {
     padding: 8,
   },
-  title: { fontSize: 20, fontWeight: '700', color: '#111827' },
-  subtitle: { fontSize: 13, color: '#6B7280', marginTop: 2 },
+  title: { fontSize: 20, fontWeight: '700', color: colors.text.primary },
+  subtitle: { fontSize: 13, color: colors.text.secondary, marginTop: 2 },
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -460,11 +461,11 @@ const styles = StyleSheet.create({
   statusText: { fontSize: 12, fontWeight: '700' },
 
   summaryCard: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 16,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
     shadowColor: '#000',
     shadowOpacity: 0.05,
     shadowRadius: 8,
@@ -477,7 +478,7 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 16,
   },
-  summaryTitle: { fontSize: 15, fontWeight: '700', color: '#111827' },
+  summaryTitle: { fontSize: 15, fontWeight: '700', color: colors.text.primary },
   summaryGrid: {
     flexDirection: 'row',
     gap: 16,
@@ -490,20 +491,20 @@ const styles = StyleSheet.create({
   },
   summaryDivider: {
     width: 1,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: colors.border,
   },
-  summaryLabel: { fontSize: 12, color: '#6B7280' },
-  summaryValue: { fontSize: 16, fontWeight: '700', color: '#111827' },
+  summaryLabel: { fontSize: 12, color: colors.text.secondary },
+  summaryValue: { fontSize: 16, fontWeight: '700', color: colors.text.primary },
 
   totalAmountCard: {
-    backgroundColor: '#ECFDF5',
+    backgroundColor: colors.primarySoft,
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',
   },
-  totalAmountLabel: { fontSize: 13, color: '#065F46', marginBottom: 4 },
-  totalAmountValue: { fontSize: 32, fontWeight: '700', color: '#10B981' },
-  totalAmountSubtext: { fontSize: 12, color: '#10B981', marginTop: 4 },
+  totalAmountLabel: { fontSize: 13, color: colors.primaryDark, marginBottom: 4 },
+  totalAmountValue: { fontSize: 32, fontWeight: '700', color: colors.primaryDark },
+  totalAmountSubtext: { fontSize: 12, color: colors.primaryDark, marginTop: 4 },
 
   sectionHeader: {
     marginTop: 8,
@@ -515,15 +516,15 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 4,
   },
-  sectionTitle: { fontSize: 16, fontWeight: '700', color: '#111827' },
-  sectionSubtitle: { fontSize: 12, color: '#6B7280', marginTop: 4 },
+  sectionTitle: { fontSize: 16, fontWeight: '700', color: colors.text.primary },
+  sectionSubtitle: { fontSize: 12, color: colors.text.secondary, marginTop: 4 },
 
   employeeCard: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 12,
     padding: 14,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
     marginBottom: 12,
   },
   employeeHeader: {
@@ -537,8 +538,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  employeeName: { fontSize: 15, fontWeight: '700', color: '#111827' },
-  employeeUsername: { fontSize: 12, color: '#6B7280', marginTop: 2 },
+  employeeName: { fontSize: 15, fontWeight: '700', color: colors.text.primary },
+  employeeUsername: { fontSize: 12, color: colors.text.secondary, marginTop: 2 },
   employeeStatusBadge: {
     paddingHorizontal: 10,
     paddingVertical: 4,
@@ -548,7 +549,7 @@ const styles = StyleSheet.create({
 
   employeeDivider: {
     height: 1,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.neutralDark,
     marginVertical: 12,
   },
 
@@ -560,8 +561,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
-  employeeDetailLabel: { fontSize: 13, color: '#6B7280', flex: 1 },
-  employeeDetailValue: { fontSize: 13, fontWeight: '600', color: '#111827' },
+  employeeDetailLabel: { fontSize: 13, color: colors.text.secondary, flex: 1 },
+  employeeDetailValue: { fontSize: 13, fontWeight: '600', color: colors.text.primary },
 
   receiptButton: {
     marginTop: 12,
@@ -573,10 +574,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderRadius: 10,
     borderWidth: 1.5,
-    borderColor: '#A7F3D0',
-    backgroundColor: '#ECFDF5',
+    borderColor: colors.primaryLight,
+    backgroundColor: colors.primarySoft,
   },
-  receiptButtonText: { fontSize: 13, fontWeight: '600', color: '#10B981' },
+  receiptButtonText: { fontSize: 13, fontWeight: '600', color: colors.primaryDark },
 
   actionsContainer: {
     marginTop: 8,
@@ -584,7 +585,7 @@ const styles = StyleSheet.create({
   },
   actionsHint: {
     fontSize: 12,
-    color: '#9CA3AF',
+    color: colors.text.light,
     textAlign: 'center',
     fontStyle: 'italic',
   },

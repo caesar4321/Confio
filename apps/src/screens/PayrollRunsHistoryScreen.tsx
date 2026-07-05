@@ -2,6 +2,7 @@ import React, { useMemo, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, FlatList, RefreshControl, ScrollView, Platform, StatusBar } from 'react-native';
 import { Header } from '../navigation/Header';
 import Icon from 'react-native-vector-icons/Feather';
+import { colors } from '../config/theme';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQuery } from '@apollo/client';
@@ -26,19 +27,19 @@ const statusStyles = (status: string) => {
   switch (key) {
     case 'completed':
     case 'confirmed':
-      return { bg: '#D1FAE5', fg: '#10B981', label: 'Completada', icon: 'check-circle' };
+      return { bg: colors.primaryLight, fg: colors.primaryDark, label: 'Completada', icon: 'check-circle' };
     case 'prepared':
     case 'ready':
       return { bg: '#E0E7FF', fg: '#4F46E5', label: 'Lista', icon: 'clock' };
     case 'submitted':
-      return { bg: '#DBEAFE', fg: '#2563EB', label: 'Procesando', icon: 'loader' };
+      return { bg: '#DBEAFE', fg: colors.accent, label: 'Procesando', icon: 'loader' };
     case 'pending':
-      return { bg: '#FEF3C7', fg: '#D97706', label: 'Pendiente', icon: 'alert-circle' };
+      return { bg: colors.warningLight, fg: colors.warning.icon, label: 'Pendiente', icon: 'alert-circle' };
     case 'failed':
     case 'cancelled':
-      return { bg: '#FEE2E2', fg: '#DC2626', label: 'Fallida', icon: 'x-circle' };
+      return { bg: '#FEE2E2', fg: colors.error.icon, label: 'Fallida', icon: 'x-circle' };
     default:
-      return { bg: '#F3F4F6', fg: '#6B7280', label: status || '—', icon: 'help-circle' };
+      return { bg: colors.neutralDark, fg: colors.text.secondary, label: status || '—', icon: 'help-circle' };
   }
 };
 
@@ -158,7 +159,7 @@ const PayrollRunsHistoryScreen = () => {
           <View style={{ flex: 1, marginLeft: 12 }}>
             <Text style={styles.runTitle}>Corrida #{item.runId || item.id?.slice(0, 6)}</Text>
             <Text style={styles.runDate}>
-              <Icon name="calendar" size={12} color="#9CA3AF" /> {formatDate(displayDate)}
+              <Icon name="calendar" size={12} color={colors.text.light} /> {formatDate(displayDate)}
             </Text>
           </View>
           <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
@@ -170,7 +171,7 @@ const PayrollRunsHistoryScreen = () => {
 
         <View style={styles.statsGrid}>
           <View style={styles.statItem}>
-            <Icon name="users" size={16} color="#6B7280" />
+            <Icon name="users" size={16} color={colors.text.secondary} />
             <Text style={styles.statLabel}>Empleados</Text>
             <Text style={styles.statValue}>{item.itemCount}</Text>
             {item.completedItemCount < item.itemCount && (
@@ -183,7 +184,7 @@ const PayrollRunsHistoryScreen = () => {
           <View style={styles.statDivider} />
 
           <View style={styles.statItem}>
-            <Icon name="dollar-sign" size={16} color="#6B7280" />
+            <Icon name="dollar-sign" size={16} color={colors.text.secondary} />
             <Text style={styles.statLabel}>Total</Text>
             <Text style={styles.statValue}>{formatCurrency(item.totalAmount)}</Text>
             <Text style={styles.statSubtext}>cUSD</Text>
@@ -191,9 +192,9 @@ const PayrollRunsHistoryScreen = () => {
         </View>
 
         <View style={styles.cardFooter}>
-          <Icon name="file-text" size={14} color="#10B981" />
+          <Icon name="file-text" size={14} color={colors.primaryDark} />
           <Text style={styles.footerText}>Toca para ver detalle y descargar PDF</Text>
-          <Icon name="chevron-right" size={16} color="#9CA3AF" />
+          <Icon name="chevron-right" size={16} color={colors.text.light} />
         </View>
       </TouchableOpacity>
     );
@@ -206,7 +207,7 @@ const PayrollRunsHistoryScreen = () => {
           navigation={navigation as any}
           title="Corridas de Nómina"
           subtitle="Historial de pagos programados"
-          backgroundColor="#fff"
+          backgroundColor={colors.white}
           showBackButton
         />
 
@@ -239,7 +240,7 @@ const PayrollRunsHistoryScreen = () => {
         <View style={styles.statsContainer}>
           <View style={styles.statsRow}>
             <View style={[styles.statCard, { flex: 1 }]}>
-              <Icon name="briefcase" size={20} color="#10B981" />
+              <Icon name="briefcase" size={20} color={colors.primaryDark} />
               <Text style={styles.statCardValue}>{statistics.totalRuns}</Text>
               <Text style={styles.statCardLabel}>Corridas</Text>
               {statistics.completedRuns < statistics.totalRuns && (
@@ -259,7 +260,7 @@ const PayrollRunsHistoryScreen = () => {
 
           <View style={styles.totalPaidCard}>
             <View style={styles.totalPaidHeader}>
-              <Icon name="trending-up" size={20} color="#10B981" />
+              <Icon name="trending-up" size={20} color={colors.primaryDark} />
               <Text style={styles.totalPaidLabel}>Total pagado</Text>
             </View>
             <Text style={styles.totalPaidValue}>{formatCurrency(statistics.totalPaid)} cUSD</Text>
@@ -283,14 +284,14 @@ const PayrollRunsHistoryScreen = () => {
             <RefreshControl
               refreshing={loading}
               onRefresh={() => refetch()}
-              tintColor="#10B981"
-              colors={['#10B981']}
+              tintColor={colors.primaryDark}
+              colors={[colors.primaryDark]}
             />
           }
           ListEmptyComponent={
             <View style={styles.empty}>
               <View style={styles.emptyIcon}>
-                <Icon name="inbox" size={48} color="#9CA3AF" />
+                <Icon name="inbox" size={48} color={colors.text.light} />
               </View>
               <Text style={styles.emptyTitle}>No hay corridas</Text>
               <Text style={styles.emptySubtitle}>
@@ -307,17 +308,17 @@ const PayrollRunsHistoryScreen = () => {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#F9FAFB'
+    backgroundColor: colors.neutral
   },
   container: {
     flex: 1,
-    backgroundColor: '#F9FAFB'
+    backgroundColor: colors.neutral
   },
   filtersWrapper: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
+    borderBottomColor: colors.neutralDark,
   },
   filtersContent: {
     paddingHorizontal: 16,
@@ -328,20 +329,20 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 20,
     borderWidth: 1.5,
-    borderColor: '#E5E7EB',
-    backgroundColor: '#fff',
+    borderColor: colors.border,
+    backgroundColor: colors.white,
   },
   filterChipSelected: {
-    borderColor: '#10B981',
-    backgroundColor: '#D1FAE5'
+    borderColor: colors.primaryDark,
+    backgroundColor: colors.primaryLight
   },
   filterText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#6B7280'
+    color: colors.text.secondary
   },
   filterTextSelected: {
-    color: '#10B981'
+    color: colors.primaryDark
   },
   statsContainer: {
     padding: 16,
@@ -352,12 +353,12 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   statCard: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 16,
     padding: 16,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
     shadowColor: '#000',
     shadowOpacity: 0.05,
     shadowRadius: 8,
@@ -367,25 +368,25 @@ const styles = StyleSheet.create({
   statCardValue: {
     fontSize: 28,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text.primary,
     marginTop: 8,
   },
   statCardLabel: {
     fontSize: 13,
-    color: '#6B7280',
+    color: colors.text.secondary,
     marginTop: 4,
   },
   statCardSubtext: {
     fontSize: 11,
-    color: '#9CA3AF',
+    color: colors.text.light,
     marginTop: 2,
   },
   totalPaidCard: {
-    backgroundColor: '#ECFDF5',
+    backgroundColor: colors.primarySoft,
     borderRadius: 16,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#A7F3D0',
+    borderColor: colors.primaryLight,
   },
   totalPaidHeader: {
     flexDirection: 'row',
@@ -396,28 +397,28 @@ const styles = StyleSheet.create({
   totalPaidLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#065F46',
+    color: colors.primaryDark,
   },
   totalPaidValue: {
     fontSize: 32,
     fontWeight: '700',
-    color: '#10B981',
+    color: colors.primaryDark,
     marginBottom: 4,
   },
   totalPaidSubtext: {
     fontSize: 12,
-    color: '#10B981',
+    color: colors.primaryDark,
   },
   listContent: {
     padding: 16,
     paddingTop: 8,
   },
   card: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 16,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: colors.border,
     shadowColor: '#000',
     shadowOpacity: 0.05,
     shadowRadius: 8,
@@ -438,12 +439,12 @@ const styles = StyleSheet.create({
   runTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text.primary,
     marginBottom: 4,
   },
   runDate: {
     fontSize: 13,
-    color: '#6B7280',
+    color: colors.text.secondary,
     flexDirection: 'row',
     alignItems: 'center',
   },
@@ -458,7 +459,7 @@ const styles = StyleSheet.create({
   },
   divider: {
     height: 1,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.neutralDark,
     marginVertical: 16,
   },
   statsGrid: {
@@ -472,21 +473,21 @@ const styles = StyleSheet.create({
   },
   statDivider: {
     width: 1,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: colors.border,
   },
   statLabel: {
     fontSize: 12,
-    color: '#6B7280',
+    color: colors.text.secondary,
     marginTop: 4,
   },
   statValue: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text.primary,
   },
   statSubtext: {
     fontSize: 11,
-    color: '#9CA3AF',
+    color: colors.text.light,
   },
   cardFooter: {
     flexDirection: 'row',
@@ -495,12 +496,12 @@ const styles = StyleSheet.create({
     marginTop: 16,
     paddingTop: 12,
     borderTopWidth: 1,
-    borderTopColor: '#F3F4F6',
+    borderTopColor: colors.neutralDark,
   },
   footerText: {
     flex: 1,
     fontSize: 12,
-    color: '#10B981',
+    color: colors.primaryDark,
     fontWeight: '500',
   },
   empty: {
@@ -513,7 +514,7 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.neutralDark,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 16,
@@ -521,12 +522,12 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#111827',
+    color: colors.text.primary,
     marginBottom: 8,
   },
   emptySubtitle: {
     fontSize: 14,
-    color: '#6B7280',
+    color: colors.text.secondary,
     textAlign: 'center',
     lineHeight: 20,
   },

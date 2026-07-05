@@ -30,11 +30,11 @@ const statusStyles = (status: string) => {
       return { bg: { backgroundColor: '#e0f2fe' }, fg: { color: '#075985' }, label: 'Enviado' };
     case 'confirmed':
     case 'completed':
-      return { bg: { backgroundColor: '#ecfdf3' }, fg: { color: '#166534' }, label: 'Completado' };
+      return { bg: { backgroundColor: colors.primarySoft }, fg: { color: '#166534' }, label: 'Completado' };
     case 'failed':
-      return { bg: { backgroundColor: '#fef2f2' }, fg: { color: '#b91c1c' }, label: 'Fallido' };
+      return { bg: { backgroundColor: colors.error.background }, fg: { color: colors.error.icon }, label: 'Fallido' };
     default:
-      return { bg: { backgroundColor: '#f3f4f6' }, fg: { color: '#374151' }, label: status || '—' };
+      return { bg: { backgroundColor: colors.neutralDark }, fg: { color: colors.text.primary }, label: status || '—' };
   }
 };
 
@@ -172,7 +172,7 @@ export const PayrollPendingScreen = () => {
       <Header
         navigation={navigation as any}
         title="Nómina pendiente"
-        backgroundColor="#fff"
+        backgroundColor={colors.white}
         showBackButton
         rightAccessory={(
           <TouchableOpacity
@@ -247,12 +247,12 @@ export const PayrollPendingScreen = () => {
               <View style={styles.ctaRow}>
                 {payingItemId === item.internalId ? (
                   <View style={styles.payButtonDisabled}>
-                    <ActivityIndicator size="small" color="#fff" />
+                    <ActivityIndicator size="small" color={colors.white} />
                     <Text style={styles.payText}>Enviando...</Text>
                   </View>
                 ) : (
                   <View style={styles.payButton}>
-                    <Icon name="send" size={14} color="#fff" />
+                    <Icon name="send" size={14} color={colors.white} />
                     <Text style={styles.payText}>Pagar ahora</Text>
                   </View>
                 )}
@@ -268,12 +268,12 @@ export const PayrollPendingScreen = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
+  container: { flex: 1, backgroundColor: colors.white },
   historyButton: {
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 10,
-    backgroundColor: '#f3f4f6',
+    backgroundColor: colors.neutralDark,
   },
   historyText: {
     fontSize: 12,
@@ -287,8 +287,8 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#f9fafb',
+    borderColor: colors.border,
+    backgroundColor: colors.neutral,
     flexDirection: 'column',
     alignItems: 'flex-start',
     gap: 10,
@@ -296,12 +296,12 @@ const styles = StyleSheet.create({
   balanceLabel: { fontSize: 12, color: colors.muted, marginBottom: 4 },
   balanceValue: { fontSize: 18, fontWeight: '700', color: colors.textFlat },
   balanceHint: { fontSize: 12, color: colors.muted, marginTop: 2 },
-  balanceError: { fontSize: 12, color: '#b91c1c', marginTop: 2 },
+  balanceError: { fontSize: 12, color: colors.error.icon, marginTop: 2 },
   topUpButton: {
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 10,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderWidth: 1,
     borderColor: colors.border,
     flexDirection: 'row',
@@ -318,12 +318,12 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   card: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 14,
     padding: 14,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: '#e2e8f0',
+    borderColor: colors.border,
     borderLeftWidth: 4,
     borderLeftColor: colors.primary,
     shadowColor: '#000',
@@ -376,12 +376,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#6ee7b7',
+    backgroundColor: colors.primary,
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 10,
   },
-  payText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  payText: { color: colors.white, fontWeight: '700', fontSize: 13 },
   statusBadge: {
     borderRadius: 10,
     paddingHorizontal: 10,

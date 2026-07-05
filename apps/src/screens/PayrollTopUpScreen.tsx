@@ -309,7 +309,7 @@ const PayrollTopUpScreen = () => {
       <Header
         navigation={navigation as any}
         title="Fondear nómina"
-        backgroundColor="#fff"
+        backgroundColor={colors.white}
         showBackButton
       />
       <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
@@ -366,14 +366,14 @@ const PayrollTopUpScreen = () => {
             onPress={handleSubmit}
             loading={processing}
             disabled={!isBusinessAccount}
-            icon={<Icon name="arrow-up-right" size={16} color="#fff" />}
+            icon={<Icon name="arrow-up-right" size={16} color={colors.white} />}
             style={{ marginHorizontal: 16, marginTop: 18, backgroundColor: colors.primary }}
             textStyle={{ fontWeight: '700' }}
           />
 
           {!isBusinessAccount ? (
             <View style={styles.infoBox}>
-              <Icon name="alert-triangle" size={16} color="#92400e" />
+              <Icon name="alert-triangle" size={16} color={colors.warning.text} />
               <Text style={styles.infoText}>Cambia a tu cuenta de negocio para fondear la bóveda de nómina.</Text>
             </View>
           ) : null}
@@ -400,8 +400,8 @@ const PayrollTopUpScreen = () => {
               loading={processing}
               disabled={!isBusinessAccount}
               icon={<Icon name="arrow-down-left" size={16} color="#111" />}
-              style={{ marginTop: 12, backgroundColor: '#e5e7eb', borderWidth: 0 }}
-              textStyle={{ color: '#111827', fontWeight: '700' }}
+              style={{ marginTop: 12, backgroundColor: colors.border, borderWidth: 0 }}
+              textStyle={{ color: colors.text.primary, fontWeight: '700' }}
             />
           </View>
         </ScrollView>
@@ -413,7 +413,7 @@ const PayrollTopUpScreen = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
+  container: { flex: 1, backgroundColor: colors.white },
   card: {
     marginHorizontal: 16,
     marginTop: 12,
@@ -456,7 +456,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
   },
   tokenIcon: { width: 22, height: 22, resizeMode: 'contain', marginRight: 8 },
   currency: {
@@ -483,7 +483,7 @@ const styles = StyleSheet.create({
   },
   infoText: {
     flex: 1,
-    color: '#92400e',
+    color: colors.warning.text,
     fontSize: 13,
   },
 });

@@ -11,6 +11,7 @@ import { useAccount } from '../contexts/AccountContext';
 import { colors } from '../config/theme';
 import { Header } from '../navigation/Header';
 import { APP_LAYOUT } from '../config/layout';
+import { BrandFieldBackground } from '../components/common/BrandFieldBackground';
 
 type NavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
@@ -99,7 +100,7 @@ export const PayrollHomeScreen = () => {
         <Header
           navigation={navigation as any}
           title="Nómina"
-          backgroundColor="#fff"
+          backgroundColor={colors.white}
           showBackButton
         />
         <View style={styles.centerContent}>
@@ -117,7 +118,7 @@ export const PayrollHomeScreen = () => {
         <Header
           navigation={navigation as any}
           title="Nómina"
-          backgroundColor="#fff"
+          backgroundColor={colors.white}
           showBackButton
         />
         <ScrollView
@@ -128,7 +129,7 @@ export const PayrollHomeScreen = () => {
         >
           <View style={styles.heroCard}>
             <View style={styles.heroIcon}>
-              <Icon name="dollar-sign" size={32} color="#fff" />
+              <Icon name="dollar-sign" size={32} color={colors.white} />
             </View>
             <Text style={styles.heroTitle}>Nómina para tu negocio</Text>
             <Text style={styles.heroSubtitle}>
@@ -157,7 +158,7 @@ export const PayrollHomeScreen = () => {
               onPress={() => navigation.navigate('PayrollSetupWizard')}
             >
               <Text style={styles.primaryButtonText}>Activar nómina</Text>
-              <Icon name="arrow-right" size={18} color="#fff" />
+              <Icon name="arrow-right" size={18} color={colors.white} />
             </TouchableOpacity>
           </View>
         </ScrollView>
@@ -171,7 +172,7 @@ export const PayrollHomeScreen = () => {
       <Header
         navigation={navigation as any}
         title="Nómina"
-        backgroundColor="#fff"
+        backgroundColor={colors.white}
         showBackButton
       />
       <ScrollView
@@ -180,28 +181,33 @@ export const PayrollHomeScreen = () => {
           <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.primary} />
         }
       >
-        {/* Vault Balance Card */}
+        {/* Vault balance — the hub's money hero sits on the brand field */}
         <View style={styles.vaultCard}>
-          <View style={styles.vaultHeader}>
-            <Icon name="lock" size={20} color={colors.primary} />
-            <Text style={styles.vaultLabel}>Bóveda de nómina</Text>
-          </View>
-          {vaultLoading ? (
-            <ActivityIndicator size="small" color={colors.primary} />
-          ) : (
-            <View style={styles.balanceRow}>
-              <Image source={require('../assets/png/cUSD.png')} style={styles.tokenLogo} />
-              <Text style={styles.vaultBalance}>{vaultBalance.toFixed(2)}</Text>
-              <Text style={styles.currencyLabel}>cUSD</Text>
+          <BrandFieldBackground id="payrollVaultField" ringCy="25%" ringR={70} ringWidth={18} />
+          <View style={styles.vaultInner}>
+            <View style={styles.vaultHeader}>
+              <Icon name="lock" size={16} color={colors.primaryLight} />
+              <Text style={styles.vaultLabel}>BÓVEDA DE NÓMINA</Text>
             </View>
-          )}
-          <TouchableOpacity
-            style={styles.vaultButton}
-            onPress={() => navigation.navigate('PayrollTopUp')}
-          >
-            <Icon name="plus" size={16} color={colors.primary} />
-            <Text style={styles.vaultButtonText}>Agregar fondos</Text>
-          </TouchableOpacity>
+            {vaultLoading ? (
+              <ActivityIndicator size="small" color={colors.white} />
+            ) : (
+              <View style={styles.balanceRow}>
+                <Image source={require('../assets/png/cUSD.png')} style={styles.tokenLogo} />
+                <Text style={styles.vaultBalance}>{vaultBalance.toFixed(2)}</Text>
+                <Text style={styles.currencyLabel}>cUSD</Text>
+              </View>
+            )}
+            <TouchableOpacity
+              style={styles.vaultButton}
+              onPress={() => navigation.navigate('PayrollTopUp')}
+              accessibilityRole="button"
+              accessibilityLabel="Agregar fondos a la bóveda"
+            >
+              <Icon name="plus" size={16} color={colors.white} />
+              <Text style={styles.vaultButtonText}>Agregar fondos</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Main Action */}
@@ -210,7 +216,7 @@ export const PayrollHomeScreen = () => {
           onPress={() => navigation.navigate('PayrollRun')}
         >
           <View style={styles.mainActionIcon}>
-            <Icon name="send" size={24} color="#fff" />
+            <Icon name="send" size={24} color={colors.white} />
           </View>
           <View style={{ flex: 1 }}>
             <Text style={styles.mainActionTitle}>Crear nómina</Text>
@@ -235,7 +241,7 @@ export const PayrollHomeScreen = () => {
             <Text style={styles.statSubtext}>Empleados, contratistas...</Text>
             <View style={styles.statAction}>
               <Text style={styles.statActionText}>Gestionar</Text>
-              <Icon name="chevron-right" size={14} color="#2563eb" />
+              <Icon name="chevron-right" size={14} color={colors.accent} />
             </View>
           </TouchableOpacity>
 
@@ -253,7 +259,7 @@ export const PayrollHomeScreen = () => {
             <Text style={styles.statSubtext}>Pueden aprobar pagos</Text>
             <View style={styles.statAction}>
               <Text style={styles.statActionText}>Gestionar</Text>
-              <Icon name="chevron-right" size={14} color="#2563eb" />
+              <Icon name="chevron-right" size={14} color={colors.accent} />
             </View>
           </TouchableOpacity>
         </View>
@@ -273,7 +279,7 @@ export const PayrollHomeScreen = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
+  container: { flex: 1, backgroundColor: colors.white },
   scrollContent: {
     padding: 16,
     gap: 16,
@@ -297,12 +303,12 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   heroCard: {
-    backgroundColor: '#ecfdf3',
+    backgroundColor: colors.primarySoft,
     borderRadius: 16,
     padding: 24,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#a7f3d0',
+    borderColor: colors.primaryLight,
   },
   heroIcon: {
     width: 64,
@@ -346,7 +352,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#065f46',
+    backgroundColor: colors.primaryDark,
     paddingVertical: 14,
     paddingHorizontal: 24,
     borderRadius: 12,
@@ -356,14 +362,15 @@ const styles = StyleSheet.create({
   primaryButtonText: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#fff',
+    color: colors.white,
   },
   vaultCard: {
-    backgroundColor: colors.bg,
-    borderRadius: 14,
+    backgroundColor: colors.primary,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  vaultInner: {
     padding: 16,
-    borderWidth: 1,
-    borderColor: colors.border,
   },
   vaultHeader: {
     flexDirection: 'row',
@@ -372,9 +379,10 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   vaultLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.muted,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    color: colors.primaryLight,
   },
   balanceRow: {
     flexDirection: 'row',
@@ -385,7 +393,7 @@ const styles = StyleSheet.create({
   vaultBalance: {
     fontSize: 28,
     fontWeight: '700',
-    color: colors.textFlat,
+    color: colors.white,
   },
   tokenLogo: {
     width: 28,
@@ -395,24 +403,24 @@ const styles = StyleSheet.create({
   currencyLabel: {
     fontSize: 18,
     fontWeight: '600',
-    color: colors.muted,
+    color: 'rgba(255,255,255,0.85)',
   },
   vaultButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
     paddingVertical: 10,
     paddingHorizontal: 16,
     borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.border,
   },
   vaultButtonText: {
     fontSize: 14,
     fontWeight: '700',
-    color: colors.primary,
+    color: colors.white,
   },
   mainActionButton: {
     flexDirection: 'row',
@@ -422,11 +430,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderRadius: 14,
     gap: 12,
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
   },
   mainActionIcon: {
     width: 48,
@@ -439,7 +442,7 @@ const styles = StyleSheet.create({
   mainActionTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#fff',
+    color: colors.white,
   },
   mainActionSubtitle: {
     fontSize: 13,
@@ -452,15 +455,11 @@ const styles = StyleSheet.create({
   },
   statCard: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 14,
     padding: 14,
     borderWidth: 1,
     borderColor: colors.border,
-    shadowColor: '#000',
-    shadowOpacity: 0.03,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
   },
   statHeader: {
     flexDirection: 'row',
@@ -492,7 +491,7 @@ const styles = StyleSheet.create({
   statActionText: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#2563eb',
+    color: colors.accent,
   },
   historyButton: {
     flexDirection: 'row',

@@ -193,7 +193,7 @@ export const PayrollDelegatesManageScreen = () => {
       <Header
         navigation={navigation as any}
         title="Delegados"
-        backgroundColor="#fff"
+        backgroundColor={colors.white}
         showBackButton
       />
 
@@ -215,7 +215,7 @@ export const PayrollDelegatesManageScreen = () => {
       </View>
 
       <View style={styles.warningCard}>
-        <Icon name="alert-triangle" size={18} color="#f59e0b" />
+        <Icon name="alert-triangle" size={18} color={colors.offRampIcon} />
         <Text style={styles.warningText}>
           Los delegados tendrán poder para ejecutar pagos desde la bóveda de nómina.
         </Text>
@@ -280,7 +280,7 @@ export const PayrollDelegatesManageScreen = () => {
                 activeOpacity={0.7}
               >
                 {mutating ? (
-                  <ActivityIndicator size="small" color={isDelegate ? '#065f46' : '#6b7280'} />
+                  <ActivityIndicator size="small" color={isDelegate ? colors.primaryDark : colors.text.secondary} />
                 ) : (
                   <Text style={[styles.toggleButtonText, isDelegate ? styles.toggleButtonTextOn : styles.toggleButtonTextOff]}>
                     {isDelegate ? 'Delegado' : 'Delegar'}
@@ -302,7 +302,7 @@ export const PayrollDelegatesManageScreen = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
+  container: { flex: 1, backgroundColor: colors.white },
   infoCard: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -336,14 +336,14 @@ const styles = StyleSheet.create({
   warningText: {
     flex: 1,
     fontSize: 13,
-    color: '#92400e',
+    color: colors.warning.text,
     lineHeight: 18,
   },
   listContent: {
     padding: 16,
   },
   employeeCard: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: colors.border,
@@ -364,14 +364,14 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 12,
-    backgroundColor: '#ecfdf3',
+    backgroundColor: colors.primarySoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
   employeeAvatarText: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#065f46',
+    color: colors.primaryDark,
   },
   employeeName: {
     fontSize: 16,
@@ -405,7 +405,7 @@ const styles = StyleSheet.create({
   },
   toggleButtonOn: {
     borderColor: colors.primary,
-    backgroundColor: '#ecfdf3',
+    backgroundColor: colors.primarySoft,
   },
   toggleButtonOff: {
     borderColor: colors.border,
@@ -416,7 +416,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   toggleButtonTextOn: {
-    color: '#065f46',
+    color: colors.primaryDark,
   },
   toggleButtonTextOff: {
     color: colors.muted,
@@ -450,7 +450,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 24,
     borderRadius: 16,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     shadowColor: '#000',
     shadowOpacity: 0.2,
     shadowRadius: 12,

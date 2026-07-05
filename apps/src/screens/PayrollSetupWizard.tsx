@@ -223,7 +223,7 @@ export const PayrollSetupWizard = () => {
                 activeOpacity={0.7}
               >
                 <View style={[styles.checkbox, isSelected && { backgroundColor: colors.primary, borderColor: colors.primary }]}>
-                  {isSelected && <Icon name="check" size={16} color="#fff" />}
+                  {isSelected && <Icon name="check" size={16} color={colors.white} />}
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.listItemName}>{name}</Text>
@@ -258,7 +258,7 @@ export const PayrollSetupWizard = () => {
         </View>
 
         <View style={styles.warningCard}>
-          <Icon name="alert-triangle" size={18} color="#f59e0b" />
+          <Icon name="alert-triangle" size={18} color={colors.offRampIcon} />
           <Text style={styles.warningCardText}>
             Los delegados tendrán poder para ejecutar pagos desde la bóveda de nómina.
           </Text>
@@ -279,7 +279,7 @@ export const PayrollSetupWizard = () => {
                 activeOpacity={0.7}
               >
                 <View style={[styles.checkbox, isSelected && { backgroundColor: colors.primary, borderColor: colors.primary }]}>
-                  {isSelected && <Icon name="check" size={16} color="#fff" />}
+                  {isSelected && <Icon name="check" size={16} color={colors.white} />}
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.listItemName}>{name}</Text>
@@ -346,11 +346,11 @@ export const PayrollSetupWizard = () => {
         disabled={activating}
       >
         {activating ? (
-          <ActivityIndicator color="#fff" />
+          <ActivityIndicator color={colors.white} />
         ) : (
           <>
             <Text style={styles.activateButtonText}>Activar nómina</Text>
-            <Icon name="check" size={18} color="#fff" />
+            <Icon name="check" size={18} color={colors.white} />
           </>
         )}
       </TouchableOpacity>
@@ -394,7 +394,7 @@ export const PayrollSetupWizard = () => {
             style={[
               styles.nextButton,
               ((step === 1 && selectedRecipients.size === 0) ||
-                (step === 2 && selectedDelegates.size === 0)) && { opacity: 0.5, backgroundColor: '#9ca3af' }
+                (step === 2 && selectedDelegates.size === 0)) && { opacity: 0.5, backgroundColor: colors.text.light }
             ]}
             onPress={handleNext}
             disabled={
@@ -403,7 +403,7 @@ export const PayrollSetupWizard = () => {
             }
           >
             <Text style={styles.nextButtonText}>Continuar</Text>
-            <Icon name="arrow-right" size={18} color="#fff" />
+            <Icon name="arrow-right" size={18} color={colors.white} />
           </TouchableOpacity>
         </View>
       )}
@@ -412,7 +412,7 @@ export const PayrollSetupWizard = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
+  container: { flex: 1, backgroundColor: colors.white },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -480,7 +480,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     paddingHorizontal: 12,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 12,
     borderWidth: 1.5,
     borderColor: colors.border,
@@ -489,7 +489,7 @@ const styles = StyleSheet.create({
   },
   listItemSelected: {
     borderColor: colors.primary,
-    backgroundColor: '#ecfdf3',
+    backgroundColor: colors.primarySoft,
   },
   checkbox: {
     width: 24,
@@ -499,7 +499,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
   },
   listItemName: {
     fontSize: 15,
@@ -513,7 +513,7 @@ const styles = StyleSheet.create({
   },
   warningText: {
     fontSize: 12,
-    color: '#f59e0b',
+    color: colors.offRampIcon,
     fontWeight: '600',
   },
   selectionCount: {
@@ -521,7 +521,7 @@ const styles = StyleSheet.create({
     bottom: 16,
     left: 16,
     right: 16,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 12,
@@ -553,7 +553,7 @@ const styles = StyleSheet.create({
   warningCardText: {
     flex: 1,
     fontSize: 13,
-    color: '#92400e',
+    color: colors.warning.text,
     lineHeight: 18,
   },
   summaryCard: {
@@ -601,7 +601,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#065f46',
+    backgroundColor: colors.primaryDark,
     paddingVertical: 14,
     borderRadius: 12,
     gap: 8,
@@ -613,14 +613,14 @@ const styles = StyleSheet.create({
   activateButtonText: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#fff',
+    color: colors.white,
   },
   footer: {
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderTopWidth: 1,
     borderTopColor: colors.border,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
   },
   nextButton: {
     flexDirection: 'row',
@@ -634,7 +634,7 @@ const styles = StyleSheet.create({
   nextButtonText: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#fff',
+    color: colors.white,
   },
 });
 

@@ -39,7 +39,7 @@ export const PayrollRecipientsManageScreen = () => {
       <Header
         navigation={navigation as any}
         title="Destinatarios"
-        backgroundColor="#fff"
+        backgroundColor={colors.white}
         showBackButton
         rightAccessory={(
           <TouchableOpacity
@@ -82,7 +82,7 @@ export const PayrollRecipientsManageScreen = () => {
               style={styles.emptyButton}
               onPress={() => setShowAddModal(true)}
             >
-              <Icon name="plus" size={18} color="#fff" />
+              <Icon name="plus" size={18} color={colors.white} />
               <Text style={styles.emptyButtonText}>Agregar destinatario</Text>
             </TouchableOpacity>
           </View>
@@ -143,7 +143,7 @@ export const PayrollRecipientsManageScreen = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
+  container: { flex: 1, backgroundColor: colors.white },
   addButton: {
     width: 32,
     height: 32,
@@ -173,7 +173,7 @@ const styles = StyleSheet.create({
   recipientCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     paddingVertical: 12,
     paddingHorizontal: 12,
     borderRadius: 12,
@@ -190,14 +190,14 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 12,
-    backgroundColor: '#ecfdf3',
+    backgroundColor: colors.primarySoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
   recipientAvatarText: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#065f46',
+    color: colors.primaryDark,
   },
   recipientName: {
     fontSize: 16,
@@ -224,10 +224,10 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
   },
-  badgeGreen: { backgroundColor: '#ecfdf3' },
-  badgeTextGreen: { color: '#065f46' },
-  badgeGray: { backgroundColor: '#f3f4f6' },
-  badgeTextGray: { color: '#6b7280' },
+  badgeGreen: { backgroundColor: colors.primarySoft },
+  badgeTextGreen: { color: colors.primaryDark },
+  badgeGray: { backgroundColor: colors.neutralDark },
+  badgeTextGray: { color: colors.text.secondary },
   emptyState: {
     alignItems: 'center',
     paddingVertical: 60,
@@ -259,7 +259,7 @@ const styles = StyleSheet.create({
   emptyButtonText: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#fff',
+    color: colors.white,
   },
   footerAddButton: {
     flexDirection: 'row',
@@ -268,9 +268,9 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     marginTop: 8,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: colors.border,
     borderRadius: 12,
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     gap: 8,
     borderStyle: 'dashed',
   },

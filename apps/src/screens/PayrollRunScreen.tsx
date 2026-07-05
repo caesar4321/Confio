@@ -6,6 +6,7 @@ import { useMutation, useQuery } from '@apollo/client';
 import { MainStackParamList } from '../types/navigation';
 import { GET_PAYROLL_RECIPIENTS, CREATE_PAYROLL_RUN } from '../apollo/queries';
 import Icon from 'react-native-vector-icons/Feather';
+import { colors } from '../config/theme';
 import { biometricAuthService } from '../services/biometricAuthService';
 import LoadingOverlay from '../components/LoadingOverlay';
 import { APP_LAYOUT } from '../config/layout';
@@ -143,7 +144,7 @@ export const PayrollRunScreen = () => {
     <Header
       navigation={navigation as any}
       title="Nueva nómina"
-      backgroundColor="#fff"
+      backgroundColor={colors.white}
       showBackButton
     />
     <ScrollView contentContainerStyle={styles.content}>
@@ -176,14 +177,14 @@ export const PayrollRunScreen = () => {
               <Icon
                 name={option.icon as any}
                 size={20}
-                color={isSelected ? '#065f46' : '#6b7280'}
+                color={isSelected ? colors.primaryDark : colors.text.secondary}
               />
               <Text style={[styles.scheduleText, isSelected && styles.scheduleTextSelected]}>
                 {option.label}
               </Text>
               {isSelected && (
                 <View style={styles.checkMark}>
-                  <Icon name="check" size={12} color="#fff" />
+                  <Icon name="check" size={12} color={colors.white} />
                 </View>
               )}
             </TouchableOpacity>
@@ -230,7 +231,7 @@ export const PayrollRunScreen = () => {
         title={schedule === 'now' ? 'Crear nómina' : 'Programar nómina'}
         onPress={handleSubmit}
         loading={creating || isProcessing}
-        icon={<Icon name={schedule === 'now' ? 'send' : 'repeat'} size={16} color="#fff" />}
+        icon={<Icon name={schedule === 'now' ? 'send' : 'repeat'} size={16} color={colors.white} />}
         style={{ marginTop: 20 }}
         textStyle={{ fontWeight: '700' }}
       />
@@ -242,7 +243,7 @@ export const PayrollRunScreen = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
+  container: { flex: 1, backgroundColor: colors.white },
   content: { padding: 16, paddingBottom: 32 },
   tokenBadge: {
     flexDirection: 'row',
@@ -250,10 +251,10 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    backgroundColor: '#ecfdf3',
+    backgroundColor: colors.primarySoft,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#a7f3d0',
+    borderColor: colors.primaryLight,
     alignSelf: 'flex-start',
   },
   tokenLogo: {
@@ -264,11 +265,11 @@ const styles = StyleSheet.create({
   tokenText: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#065f46',
+    color: colors.primaryDark,
   },
   label: {
     fontSize: 13,
-    color: '#6b7280',
+    color: colors.text.secondary,
     fontWeight: '600',
     letterSpacing: 0.5,
     textTransform: 'uppercase',
@@ -288,28 +289,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 12,
     borderWidth: 1.5,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#fff',
+    borderColor: colors.border,
+    backgroundColor: colors.white,
     position: 'relative',
   },
   scheduleCardSelected: {
-    borderColor: '#34d399',
-    backgroundColor: '#ecfdf3',
+    borderColor: colors.primary,
+    backgroundColor: colors.primarySoft,
   },
   scheduleText: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#6b7280',
+    color: colors.text.secondary,
     flex: 1,
   },
   scheduleTextSelected: {
-    color: '#065f46',
+    color: colors.primaryDark,
   },
   checkMark: {
     width: 18,
     height: 18,
     borderRadius: 9,
-    backgroundColor: '#34d399',
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -319,23 +320,23 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
+    borderBottomColor: colors.border,
   },
   recipientInfo: { flex: 1, marginRight: 10 },
-  recipientName: { fontSize: 15, fontWeight: '700', color: '#111827' },
-  recipientMeta: { fontSize: 12, color: '#6b7280', marginTop: 2 },
+  recipientName: { fontSize: 15, fontWeight: '700', color: colors.text.primary },
+  recipientMeta: { fontSize: 12, color: colors.text.secondary, marginTop: 2 },
   amountInputWrap: {
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1.5,
-    borderColor: '#e5e7eb',
+    borderColor: colors.border,
     borderRadius: 12,
     paddingHorizontal: 10,
     paddingVertical: 6,
     minWidth: 140,
   },
-  amountPrefix: { fontSize: 13, fontWeight: '700', color: '#6b7280', marginRight: 6 },
-  amountInput: { flex: 1, fontSize: 15, fontWeight: '600', color: '#111827' },
+  amountPrefix: { fontSize: 13, fontWeight: '700', color: colors.text.secondary, marginRight: 6 },
+  amountInput: { flex: 1, fontSize: 15, fontWeight: '600', color: colors.text.primary },
 });
 
 export default PayrollRunScreen;

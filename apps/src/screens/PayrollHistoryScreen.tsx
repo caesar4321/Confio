@@ -1,6 +1,7 @@
 import React, { useMemo, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, FlatList, RefreshControl } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
+import { colors } from '../config/theme';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -80,7 +81,7 @@ const PayrollHistoryScreen = () => {
           navigation={navigation as any}
           title="Historial de nómina"
           subtitle={displayName || username ? `${displayName || ''} @${username || ''}` : undefined}
-          backgroundColor="#fff"
+          backgroundColor={colors.white}
           showBackButton
         />
 
@@ -92,7 +93,7 @@ const PayrollHistoryScreen = () => {
           ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
           ListEmptyComponent={
             <View style={styles.empty}>
-              <Icon name="clipboard" size={32} color="#9ca3af" />
+              <Icon name="clipboard" size={32} color={colors.text.light} />
               <Text style={styles.emptyText}>Sin pagos para este destinatario.</Text>
             </View>
           }
@@ -106,38 +107,38 @@ const PayrollHistoryScreen = () => {
 };
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#f8fafc' },
-  container: { flex: 1, backgroundColor: '#f8fafc' },
+  safeArea: { flex: 1, backgroundColor: colors.neutral },
+  container: { flex: 1, backgroundColor: colors.neutral },
   listContent: { padding: 16, gap: 12 },
   row: {
-    backgroundColor: '#fff',
+    backgroundColor: colors.white,
     borderRadius: 14,
     padding: 14,
     borderWidth: 1,
     borderColor: '#e0e7ff',
     borderLeftWidth: 4,
-    borderLeftColor: '#10b981',
+    borderLeftColor: colors.primaryDark,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    shadowColor: '#0f172a',
+    shadowColor: colors.text.primary,
     shadowOpacity: 0.05,
     shadowRadius: 6,
     shadowOffset: { width: 0, height: 3 },
   },
-  amount: { fontSize: 15, fontWeight: '700', color: '#111827' },
-  date: { fontSize: 12, color: '#6b7280', marginTop: 2 },
+  amount: { fontSize: 15, fontWeight: '700', color: colors.text.primary },
+  date: { fontSize: 12, color: colors.text.secondary, marginTop: 2 },
   badges: { flexDirection: 'row', gap: 6 },
   badge: {
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 10,
   },
-  badgeText: { fontSize: 11, fontWeight: '700', color: '#111827' },
+  badgeText: { fontSize: 11, fontWeight: '700', color: colors.text.primary },
   badgeSecondary: { backgroundColor: '#e0f2fe' },
-  badgeMuted: { backgroundColor: '#f8fafc' },
+  badgeMuted: { backgroundColor: colors.neutral },
   empty: { alignItems: 'center', padding: 32, gap: 8 },
-  emptyText: { fontSize: 14, color: '#6b7280' },
+  emptyText: { fontSize: 14, color: colors.text.secondary },
 });
 
 export default PayrollHistoryScreen;
