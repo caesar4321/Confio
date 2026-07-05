@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView, TextInput, Image, Modal, ActivityIndicator } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
+import Svg, { Defs, Stop, LinearGradient as SvgLinearGradient, Rect, Circle } from 'react-native-svg';
+import { InlineBanner } from '../components/common/InlineBanner';
 import { GET_ACCOUNT_BALANCE } from '../apollo/queries';
 import { apolloClient } from '../apollo/client';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -22,6 +24,9 @@ const tokenConfig = {
     fullName: 'Confío Dollar',
     logo: cUSDLogo,
     color: colors.primary,
+    colorDark: colors.primaryDark,
+    chipBg: colors.primarySoft,
+    chipText: colors.primaryDark,
     minSend: 1,
     fee: 0,  // Sponsored transactions
     description: 'Envía cUSD a cualquier dirección Algorand',
@@ -32,6 +37,9 @@ const tokenConfig = {
     fullName: 'Confío',
     logo: CONFIOLogo,
     color: colors.secondary,
+    colorDark: colors.secondaryDark,
+    chipBg: colors.violetLight,
+    chipText: colors.secondaryDark,
     minSend: 1,
     fee: 0,  // Sponsored transactions
     description: 'Envía CONFIO a cualquier dirección Algorand',
@@ -65,7 +73,6 @@ export const SendToFriendScreen = () => {
   const config = tokenConfig[tokenType];
 
   const [amount, setAmount] = useState('');
-  const [showSuccess, setShowSuccess] = useState(false);
   const [showError, setShowError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -222,25 +229,38 @@ export const SendToFriendScreen = () => {
   return (
     <View style={styles.container}>
       <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
-        {/* Header */}
+        {/* Header — instrument brand field (emerald cUSD / violet CONFIO):
+            gradient + coin ring, padding on headerInner (Yoga insets
+            absolute children by parent padding). */}
         <SafeAreaView edges={['top']} style={{ backgroundColor: config.color }}>
-          <View style={[styles.header, { backgroundColor: config.color, paddingTop: 8 }]}>
-            <View style={styles.headerContent}>
-              <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton} accessibilityRole="button" accessibilityLabel="Volver">
-                <Icon name="arrow-left" size={24} color="#ffffff" />
-              </TouchableOpacity>
-              <Text style={styles.headerTitle}>Enviar a {friend.name}</Text>
-              <View style={styles.placeholder} />
-            </View>
-            <View style={styles.headerInfo}>
-              <View style={styles.friendAvatarContainer}>
-                <Text style={styles.friendAvatarText}>{friend.avatar}</Text>
+          <View style={styles.header}>
+            <Svg style={StyleSheet.absoluteFill}>
+              <Defs>
+                <SvgLinearGradient id={`sendField-${tokenType}`} x1="0" y1="0" x2="0" y2="1">
+                  <Stop offset="0" stopColor={config.color} />
+                  <Stop offset="1" stopColor={config.colorDark} />
+                </SvgLinearGradient>
+              </Defs>
+              <Rect width="100%" height="100%" fill={`url(#sendField-${tokenType})`} />
+              <Circle cx="105%" cy="24%" r="90" stroke={colors.white} strokeWidth="22" strokeOpacity="0.10" fill="none" />
+            </Svg>
+            <View style={styles.headerInner}>
+              <View style={styles.headerContent}>
+                <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton} accessibilityRole="button" accessibilityLabel="Volver">
+                  <Icon name="arrow-left" size={24} color={colors.white} />
+                </TouchableOpacity>
+                <Text style={styles.headerTitle}>Enviar</Text>
+                <View style={styles.placeholder} />
               </View>
-              <Text style={styles.headerSubtitle}>{friend.name}</Text>
-              {friend.phone && friend.phone !== friend.name && friend.phone.trim() !== '' && (
-                <Text style={styles.headerPhone}>{friend.phone}</Text>
-              )}
-              <Text style={styles.headerDescription}>Enviar {config.name} a tu amigo</Text>
+              <View style={styles.headerInfo}>
+                <View style={styles.friendAvatarContainer}>
+                  <Text style={[styles.friendAvatarText, { color: config.color }]}>{friend.avatar}</Text>
+                </View>
+                <Text style={styles.headerSubtitle}>{friend.name}</Text>
+                {friend.phone && friend.phone !== friend.name && friend.phone.trim() !== '' && (
+                  <Text style={styles.headerPhone}>{friend.phone}</Text>
+                )}
+              </View>
             </View>
           </View>
         </SafeAreaView>
@@ -281,9 +301,14 @@ export const SendToFriendScreen = () => {
                 <TouchableOpacity
                   key={val}
                   onPress={() => handleQuickAmount(val)}
-                  style={styles.quickAmountButton}
+                  style={[styles.quickAmountButton, { backgroundColor: config.chipBg }]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Enviar ${val} ${config.name}`}
                 >
-                  <Text style={styles.quickAmountText}>${val}</Text>
+                  {/* $ prefix only for the dollar token — CONFIO isn't dollars */}
+                  <Text style={[styles.quickAmountText, { color: config.chipText }]}>
+                    {tokenType === 'cusd' ? `$${val}` : val}
+                  </Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -314,24 +339,6 @@ export const SendToFriendScreen = () => {
             </View>
           </View>
 
-          {/* Confío Value Proposition */}
-          <View style={styles.valuePropositionOuter}>
-            <View style={styles.valueRow}>
-              <Icon name="check-circle" size={20} color={colors.primary} style={styles.valueIcon} />
-              <Text style={styles.valueTitle}>Transferencias 100% gratuitas</Text>
-            </View>
-            <Text style={styles.valueDescription}>
-              Enviarás este dinero sin pagar comisiones
-            </Text>
-            <View style={styles.valueHighlightBox}>
-              <Text style={styles.valueHighlightText}>
-                💡 <Text style={styles.bold}>Confío: 0% comisión</Text>{'\n'}
-                vs. transferencias internacionales y remesadoras tradicionales <Text style={styles.bold}>(5%-20%)</Text>{'\n'}
-                {supportCopy.transferLine}
-              </Text>
-            </View>
-          </View>
-
           <Button
             title={balanceSnapshot == null ? 'Cargando saldo…' :
               parseFloat(amount || '0') > availableBalance ? 'Saldo insuficiente' :
@@ -340,25 +347,21 @@ export const SendToFriendScreen = () => {
             loading={isProcessing}
             disabled={!amount || parseFloat(amount) < config.minSend || parseFloat(amount || '0') > availableBalance}
             accessibilityLabel={`Enviar ${amount || ''} a ${friend.name}`}
-            style={{ backgroundColor: colors.accent }}
+            style={{ backgroundColor: config.color }}
           />
 
-          {showSuccess && (
-            <View style={styles.successBox}>
-              <Icon name="check-circle" size={32} color={config.color} />
-              <Text style={styles.successText}>¡Envío realizado!</Text>
-            </View>
-          )}
           {showError && (
-            <View style={styles.errorBox}>
-              <Icon name="alert-triangle" size={28} color={colors.warning.icon} />
-              <Text style={styles.errorText}>{errorMessage}</Text>
-              <TouchableOpacity onPress={() => setShowError(false)}>
-                <Text style={styles.errorDismiss}>Cerrar</Text>
-              </TouchableOpacity>
-            </View>
+            <InlineBanner
+              message={errorMessage}
+              variant="error"
+              onDismiss={() => setShowError(false)}
+              style={{ marginTop: 16, marginBottom: 0 }}
+            />
           )}
         </View>
+
+        {/* Supportive footnote — the mission line, no fee marketing */}
+        <Text style={styles.supportFootnote}>{supportCopy.transferLine}</Text>
       </ScrollView>
     </View>
   );
@@ -377,9 +380,13 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
   },
   header: {
+    overflow: 'hidden',
+    marginBottom: 16,
+  },
+  headerInner: {
+    paddingTop: 8,
     paddingBottom: 32,
     paddingHorizontal: 16,
-    marginBottom: 16,
   },
   headerContent: {
     flexDirection: 'row',
@@ -393,7 +400,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#ffffff',
+    color: colors.white,
   },
   placeholder: {
     width: 40,
@@ -405,7 +412,7 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.white,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16,
@@ -418,69 +425,46 @@ const styles = StyleSheet.create({
   headerSubtitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#ffffff',
+    color: colors.white,
     marginBottom: 8,
   },
   headerPhone: {
     fontSize: 14,
-    color: '#ffffff',
-    opacity: 0.8,
-  },
-  headerDescription: {
-    fontSize: 14,
-    color: '#ffffff',
+    color: colors.white,
     opacity: 0.8,
   },
   balanceCard: {
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.white,
     borderRadius: 16,
     padding: 16,
     marginHorizontal: 16,
     marginBottom: 16,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 2,
-      },
-    }),
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   balanceLabel: {
     flex: 1,
     fontSize: 16,
     fontWeight: '500',
-    color: '#1F2937',
+    color: colors.text.primary,
   },
   balanceAmount: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#1F2937',
+    color: colors.text.primary,
   },
   balanceMin: {
     fontSize: 14,
-    color: '#6B7280',
+    color: colors.text.secondary,
   },
   formCard: {
-    backgroundColor: '#ffffff',
+    backgroundColor: colors.white,
     borderRadius: 16,
     padding: 24,
     marginHorizontal: 16,
     marginBottom: 16,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 2,
-      },
-    }),
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   inputContainer: {
     marginBottom: 24,
@@ -488,13 +472,15 @@ const styles = StyleSheet.create({
   inputLabel: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#374151',
+    color: colors.text.primary,
     marginBottom: 8,
   },
   amountContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F0F6FF',
+    backgroundColor: colors.neutral,
+    borderWidth: 1,
+    borderColor: colors.border,
     borderRadius: 16,
     paddingHorizontal: 16,
     paddingVertical: 12,
@@ -503,7 +489,7 @@ const styles = StyleSheet.create({
   amountField: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#1F2937',
+    color: colors.text.primary,
     backgroundColor: 'transparent',
     borderWidth: 0,
   },
@@ -521,7 +507,15 @@ const styles = StyleSheet.create({
   currencyBadgeText: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#2563eb',
+    color: colors.text.primary,
+  },
+  supportFootnote: {
+    fontSize: 12,
+    color: colors.text.secondary,
+    textAlign: 'center',
+    lineHeight: 18,
+    marginHorizontal: 32,
+    marginBottom: 8,
   },
   quickAmounts: {
     flexDirection: 'row',
@@ -529,14 +523,13 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   quickAmountButton: {
-    backgroundColor: colors.accent + '20',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
     borderRadius: 16,
   },
   quickAmountText: {
-    fontSize: 12,
-    color: colors.accent,
+    fontSize: 13,
+    fontWeight: '600',
   },
   feeBreakdown: {
     marginBottom: 24,
@@ -549,16 +542,16 @@ const styles = StyleSheet.create({
   },
   feeLabel: {
     fontSize: 14,
-    color: '#6B7280',
+    color: colors.text.secondary,
   },
   feeValueFree: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#10b981',
+    color: colors.primaryDark,
   },
   feeValueNote: {
     fontSize: 12,
-    color: '#6B7280',
+    color: colors.text.secondary,
   },
   timeContainer: {
     flexDirection: 'row',
@@ -570,92 +563,21 @@ const styles = StyleSheet.create({
   timeText: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#1F2937',
+    color: colors.text.primary,
   },
   feeDivider: {
     height: 1,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: colors.border,
     marginVertical: 12,
   },
   feeTotalLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#1F2937',
+    color: colors.text.primary,
   },
   feeTotalValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.accent,
-  },
-  successBox: {
-    alignItems: 'center',
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  successText: {
-    color: colors.primary,
-    fontSize: 16,
-    fontWeight: '600',
-    marginTop: 8,
-  },
-  errorBox: {
-    alignItems: 'center',
-    marginTop: 16,
-    marginBottom: 8,
-    backgroundColor: colors.warning.background,
-    borderRadius: 8,
-    padding: 12,
-  },
-  errorText: {
-    color: colors.warning.text,
     fontSize: 15,
-    fontWeight: '500',
-    marginTop: 8,
-    marginBottom: 4,
-    textAlign: 'center',
-  },
-  errorDismiss: {
-    color: colors.warning.icon,
-    fontWeight: 'bold',
-    marginTop: 8,
-    fontSize: 14,
-  },
-  valuePropositionOuter: {
-    backgroundColor: '#A7F3D0', // emerald-200
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 24,
-    marginHorizontal: 0,
-  },
-  valueRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  valueIcon: {
-    marginRight: 8,
-  },
-  valueTitle: {
-    fontWeight: 'bold',
-    fontSize: 16,
-    color: '#10B981',
-  },
-  valueDescription: {
-    fontSize: 14,
-    color: '#10B981',
-    marginBottom: 12,
-  },
-  valueHighlightBox: {
-    backgroundColor: '#D1FAE5', // emerald-100
-    borderRadius: 12,
-    padding: 14,
-  },
-  valueHighlightText: {
-    fontSize: 14,
-    color: '#065F46',
-    lineHeight: 20,
-  },
-  bold: {
-    fontWeight: 'bold',
+    fontWeight: '700',
+    color: colors.text.primary,
   },
 }); 
